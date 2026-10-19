@@ -2,7 +2,7 @@
 
 Rows go into the transactional ``db_session`` (rolled back after each test), and
 ``judge`` runs the real pipeline (``HarnessService._run_recorded``: COLLECT,
-DIAGNOSE, PRESCRIBE, APPLY, REPORT) for one ISO week on its own harness_runs row.
+DIAGNOSE, PRESCRIBE, REPORT) for one ISO week on its own harness_runs row.
 The platform actions must be faked first (``helpers_harness_runs.fake_platform``).
 Weeks are named by their offset from 2026-W42 (Monday 12 Oct 2026), so nothing
 depends on today's date. Shared by test_prd263_harness_diagnose_realdb.py and

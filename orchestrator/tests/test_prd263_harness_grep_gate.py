@@ -1,0 +1,98 @@
+"""PRD-263 FR-12 (first version, US-016) — HARNESS's reading and judging modules act on nothing.
+
+The read model (services.harness_metrics), the mode vocabulary (services.harness_mode)
+and the statistics (core.stats.harness_verdicts) only read and compute. None of them
+may name a tool executor, or import an LLM client, so no change and no model call can
+start from them. Later stories add the modules they create to GATED.
+
+US-016 also deletes the auto-apply loop, the card-to-Done path and escalation, with the
+settings that tuned them: no source outside the tests names them again, and the
+weekly run files no card and sends no channel notice.
+"""
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+from typing import List
+
+_ORCH = Path(__file__).resolve().parents[1]
+GATED = (
+    "services/harness_metrics.py",
+    "services/harness_mode.py",
+    "core/stats/harness_verdicts.py",
+)
+EXECUTORS = re.compile(r"\b(PlatformActionExecutor|UnifiedToolExecutor|execute_tool)\b")
+# An import of any of these modules, or of these names, is an LLM client import.
+LLM_MODULES = ("core.llm", "anthropic", "openai", "litellm")
+LLM_NAMES = frozenset({"LLMManager", "create_llm_manager", "get_decision_engine"})
+# What US-016 deleted (grep across orchestrator/, tests excluded, returns 0).
+DELETED = (
+    "_phase_apply", "_apply_approved_board_tasks", "_note_needs_an_approve", "_workspace_allows_auto_apply",
+    "_auto_apply_max_risk", "_get_harness_config", "_maybe_escalate", "_build_escalation_message",
+    "_workspace_has_channel", "HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "HARNESS_AUTO_APPLY_MAX_RISK_FULL",
+    "HARNESS_HIGH_PRIORITY_RISK",
+)
+# Skipped by that grep: the tests, and caches and tool state (__pycache__, dot directories).
+SKIPPED_PARTS = ("tests", "__pycache__")
+CONFIG_SURFACE = "reports/config-surface.json"
+# How the weekly run filed a [HARNESS] card, found done ones, and sent an escalation notice.
+RUN_SENDS = ("platform_create_task", "platform_list_tasks", "send_workspace_notification")
+
+
+def violations(source: str) -> List[str]:
+    """Every executor name and LLM client import in ``source``."""
+    found = [f"names {match.group(1)}" for match in EXECUTORS.finditer(source)]
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules, names = [alias.name for alias in node.names], []
+        elif isinstance(node, ast.ImportFrom):
+            modules, names = [node.module or ""], [alias.name for alias in node.names]
+        else:
+            continue
+        found += [f"imports {m}" for m in modules if any(m == p or m.startswith(p + ".") for p in LLM_MODULES)]
+        found += [f"imports {n}" for n in names if n in LLM_NAMES]
+    return found
+
+
+def test_the_gated_modules_name_no_executor_and_import_no_llm_client():
+    for rel in GATED:
+        source = (_ORCH / rel).read_text(encoding="utf-8")
+        assert violations(source) == [], rel
+
+
+def test_the_gate_reports_each_kind_of_violation():
+    source = (
+        "from core.llm.manager import LLMManager\n"
+        "import openai\n"
+        "from modules.tools.discovery.platform_executor import PlatformActionExecutor\n"
+        "result = execute_tool('platform_update_agent', {})\n"
+    )
+    assert violations(source) == [
+        "names PlatformActionExecutor", "names execute_tool",
+        "imports core.llm.manager", "imports LLMManager", "imports openai",
+    ]
+
+
+def _sources() -> List[Path]:
+    """Every Python file under orchestrator/ outside the tests, and the config surface."""
+    paths = [
+        path for path in _ORCH.rglob("*.py")
+        if not any(part in SKIPPED_PARTS or part.startswith(".") for part in path.relative_to(_ORCH).parts)
+    ]
+    return paths + [_ORCH / CONFIG_SURFACE]
+
+
+def test_no_source_names_the_deleted_auto_apply_loop_or_escalation():
+    offenders = [
+        f"{path.relative_to(_ORCH)}: {name}"
+        for path in _sources()
+        for name in DELETED
+        if name in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert offenders == []
+
+
+def test_the_weekly_run_files_no_card_and_sends_no_notice():
+    source = (_ORCH / "services/harness_service.py").read_text(encoding="utf-8")
+    assert [name for name in RUN_SENDS if name in source] == []

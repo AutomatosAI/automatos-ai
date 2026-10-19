@@ -19,6 +19,7 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
 from services.onboarding_state import public_snapshot
+from services.harness_mode import harness_settings_view, merge_harness_update, validate_harness_update
 from services.orchestrator_auto_agent import (
     AUTO_CONFIG_FIELDS,
     auto_llm_view,
@@ -571,15 +572,9 @@ _ORCHESTRATOR_DEFAULTS = {
         "checklist": "- Check agent health status\n- Review pending webhook failures\n- Summarize today's activity",
         "notification_channel": "in_app",
     },
-    "harness": {
-        "enabled": False,
-        "schedule": "weekly",
-        "mode": "full_auto",
-    },
+    # PRD-263 US-016: the one schedule and the mode a workspace with nothing stored reads.
+    "harness": harness_settings_view(None),
 }
-
-_VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
-_VALID_HARNESS_MODES = ["full_auto", "manual"]
 
 # Each top-level orchestrator field a save validates, and its vocabulary.
 _ORCHESTRATOR_VOCABULARIES = {
@@ -674,11 +669,11 @@ def _get_or_seed_auto_agent(db: Session, workspace_id) -> Agent:
 
 
 @router.get("/current/orchestrator")
-async def get_orchestrator_settings(
+def get_orchestrator_settings(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Return orchestrator soul, personality, and heartbeat configuration."""
+    """Return orchestrator soul, personality, heartbeat and HARNESS configuration."""
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -722,13 +717,13 @@ async def get_orchestrator_settings(
 
 
 @router.put("/current/orchestrator", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_orchestrator_settings(
+def save_orchestrator_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Save orchestrator soul, personality, and heartbeat configuration.
+    Save orchestrator soul, personality, heartbeat and HARNESS configuration.
 
     Body: {
         "personality_mode": "friendly",
@@ -744,7 +739,8 @@ async def save_orchestrator_settings(
             "timezone": "America/New_York",
             "checklist": "- Check agent health...",
             "notification_channel": "in_app"
-        }
+        },
+        "harness": {"mode": "report_only"}
     }
     """
     workspace = db.query(Workspace).get(ctx.workspace_id)
@@ -794,13 +790,13 @@ async def save_orchestrator_settings(
 
 def _orchestrator_view(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The orchestrator block GET and PUT return: the stored fields over the defaults,
-    with heartbeat and HARNESS each merged key by key over their defaults."""
+    heartbeat merged key by key, and HARNESS as services.harness_mode returns it (PRD-263 US-016)."""
     orchestrator = (settings or {}).get("orchestrator", {})
     return {
         **_ORCHESTRATOR_DEFAULTS,
         **orchestrator,
         "heartbeat": {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})},
-        "harness": {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})},
+        "harness": harness_settings_view(settings),
     }
 
 
@@ -817,7 +813,8 @@ def _saved_llm(db: Session, workspace_id) -> Dict[str, Any]:
 
 
 def _validate_orchestrator_payload(payload: Dict[str, Any]) -> None:
-    """400 on any value outside its field's vocabulary, in the order the save checked them."""
+    """400 on any value outside its field's vocabulary, in the order the save checked them.
+    Only the payload is validated: a stored legacy value never blocks a save (PRD-263 US-016)."""
     for key, valid in _ORCHESTRATOR_VOCABULARIES.items():
         if key in payload and payload[key] not in valid:
             raise HTTPException(400, f"{key} must be one of {valid}")
@@ -827,12 +824,10 @@ def _validate_orchestrator_payload(payload: Dict[str, Any]) -> None:
     hb = payload.get("heartbeat")
     if hb and isinstance(hb, dict):
         _validate_heartbeat(hb)
-    harness = payload.get("harness")
-    if harness and isinstance(harness, dict):
-        if "schedule" in harness and harness["schedule"] not in _VALID_HARNESS_SCHEDULES:
-            raise HTTPException(400, f"harness.schedule must be one of {_VALID_HARNESS_SCHEDULES}")
-        if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
-            raise HTTPException(400, f"harness.mode must be one of {_VALID_HARNESS_MODES}")
+    try:
+        validate_harness_update(payload.get("harness"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 def _validate_heartbeat(hb: Dict[str, Any]) -> None:
@@ -885,15 +880,15 @@ def _validate_orchestrator_model(db: Session, workspace_id, llm_payload: Any) ->
 
 
 def _merge_orchestrator(existing: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
-    """The stored orchestrator block with the payload's fields over it. Heartbeat and
-    HARNESS merge key by key rather than replace."""
+    """The stored orchestrator block with the payload's fields over it. Heartbeat and HARNESS
+    merge key by key rather than replace (HARNESS through services.harness_mode, PRD-263 US-016)."""
     merged = {**existing, **{key: payload[key] for key in _ORCHESTRATOR_FIELDS if key in payload}}
     hb = payload.get("heartbeat")
     if hb and isinstance(hb, dict):
         merged["heartbeat"] = {**existing.get("heartbeat", {}), **hb}
     harness = payload.get("harness")
     if harness and isinstance(harness, dict):
-        merged["harness"] = {**existing.get("harness", {}), **harness}
+        merged["harness"] = merge_harness_update(existing.get("harness", {}), harness)
     return merged
 
 

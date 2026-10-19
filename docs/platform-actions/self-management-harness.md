@@ -162,9 +162,9 @@ Sources:
 
 ## Self-Management Flag and Execution
 
-The HARNESS self-management capabilities are controlled by the `HARNESS_SELF_MANAGEMENT_ENABLED` configuration flag [orchestrator/tests/test_harness_self_management.py:14,124](). When this flag is `False`, no HARNESS tasks are listed or applied [orchestrator/tests/test_harness_self_management.py:165-177](). When enabled, approved board tasks are parsed, their targets resolved, and the prescribed changes are executed.
+The HARNESS self-management capabilities are controlled by the `HARNESS_SELF_MANAGEMENT_ENABLED` configuration flag [orchestrator/tests/test_harness_self_management.py:14,124](). When this flag is `False`, an owner's `/approve` applies nothing. When enabled, `/approve` parses the approved board task, resolves its target and applies the prescribed change.
 
-The `HarnessService` includes a method `_apply_approved_board_tasks` which is responsible for processing approved tasks. It uses an executor to perform actions like `platform_list_tasks` and `platform_list_agents` to gather necessary information, and then applies the changes [orchestrator/tests/test_harness_self_management.py:168-173]().
+The weekly run is `report_only` for every workspace ([orchestrator/services/harness_mode.py]()): its suggestions are lines of the audit report, and it files no board task and applies nothing, whatever this flag says [orchestrator/tests/test_prd263_harness_report_only.py](). Only an owner's `/approve` ([orchestrator/api/harness_commands.py]()) applies a change.
 
 The `_parse_harness_task` method extracts structured information from a board task's title and description, such as `change_type`, `target_name`, `current_value`, `proposed_value`, `risk_score`, `rationale`, and `expected_improvement` [orchestrator/tests/test_harness_self_management.py:81-96](). It also attempts to resolve the `target_name` to a `target_id` (e.g., an agent ID) [orchestrator/tests/test_harness_self_management.py:83,88](). If a target name cannot be resolved, `target_id` will be `None`, and the system will not attempt to apply the change to an unknown target [orchestrator/tests/test_harness_self_management.py:111-121]().
 

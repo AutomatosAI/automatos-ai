@@ -2,8 +2,9 @@
 
 DIAGNOSE reads the tool-routing fails_for_intent affinities (Role-1 learning,
 PRD-138/139) and surfaces a SUSTAINED failure as an inefficiency issue; PRESCRIBE
-turns it into a QUEUED (risk 3, human-reviewed) tool_assignment_remove — but ONLY
-when the failing action cleanly maps to a removable Composio app. The tool hot path
+turns it into a risk-3 tool_assignment_remove suggestion, a line of the audit report
+that nothing applies (PRD-263 US-016) — but ONLY when the failing action cleanly maps
+to a removable Composio app. The tool hot path
 often records the `composio_execute` meta-tool rather than the specific app action,
 so a fuzzy signal must never auto-yank a tool: no clean app mapping -> surfaced as a
 diagnosis, no removal proposed. Learning-only: reads ONLY tool_routing_affinities.
@@ -130,17 +131,20 @@ def test_diagnose_is_best_effort_never_raises():
     assert svc._diagnose_tool_failures(_WS, _BoomDB(), {}) == []
 
 
-# --- the prescribe side (queued, guarded) -----------------------------------
+# --- the prescribe side (reported only) -------------------------------------
 
 def test_prescribe_queues_removal_for_clean_app():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [_tool_failure_issue("GMAIL_SEND_EMAIL", "GMAIL")], "2026-06-09", 0
+        [_tool_failure_issue("GMAIL_SEND_EMAIL", "GMAIL")], 41, 0
     )
     assert len(rxs) == 1
     rx = rxs[0]
+    # Pins the id format only: that the number is the harness_runs id (rx-<run_id>-<seq>)
+    # is proven end to end by test_prd263_harness_report_only._assert_reported_only.
+    assert rx["prescription_id"] == "rx-41-001"
     assert rx["change_type"] == "tool_assignment_remove"
-    assert rx["risk_score"] == 3            # QUEUED for human review, never auto-applied
+    assert rx["risk_score"] == 3            # reported in the audit report only (PRD-263 US-016)
     assert rx["target_id"] == 7
     assert rx["proposed_value"] == {"app_name": "GMAIL"}
     assert seq == 1
@@ -149,7 +153,7 @@ def test_prescribe_queues_removal_for_clean_app():
 def test_prescribe_skips_when_no_clean_app_mapping():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [_tool_failure_issue("composio_execute", None)], "2026-06-09", 0
+        [_tool_failure_issue("composio_execute", None)], 41, 0
     )
     assert rxs == []   # surfaced as a diagnosis, but never an auto-removal on a fuzzy signal
     assert seq == 0
@@ -158,7 +162,7 @@ def test_prescribe_skips_when_no_clean_app_mapping():
 def test_prescribe_ignores_non_tool_failure_issues():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [{"root_cause": "auto_applied_regression"}], "2026-06-09", 5
+        [{"root_cause": "auto_applied_regression"}], 41, 5
     )
     assert rxs == []
     assert seq == 5

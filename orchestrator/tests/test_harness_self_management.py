@@ -60,7 +60,8 @@ def _harness_task(
     task_id="task-1",
     tags=None,
 ):
-    """Build a board task exactly as _phase_apply() produces it."""
+    """Build a board task exactly as the weekly tick filed one before PRD-263 US-016
+    (an owner's /approve still parses one)."""
     current = {"interval_minutes": 30} if current is None else current
     proposed = {"interval_minutes": 90} if proposed is None else proposed
     return {
@@ -125,16 +126,14 @@ def test_flag_defaults_false():
 
 
 # ---------------------------------------------------------------------------
-# US-021: execute approved board tasks (flag-gated) + snapshot
+# The apply helpers an owner's /approve uses (api/harness_commands.py). The
+# weekly tick's card-to-Done path that also used them went in PRD-263 US-016,
+# and its cases with it; these pin the guards that path shared with /approve.
 # ---------------------------------------------------------------------------
-
-_WS_ID = "00000000-0000-0000-0000-000000000001"
-
 
 class _FakeExecutor:
     """Records every execute() call and returns canned results for the actions
-    _apply_approved_board_tasks invokes (list tasks/agents, apply). The task
-    ledger is the harness_ledger fixture (F156: the real one is in the database)."""
+    _auto_apply_prescription invokes."""
 
     def __init__(self, tasks, agents):
         self._tasks = tasks
@@ -155,187 +154,29 @@ class _FakeExecutor:
         return [action for action, _ in self.calls]
 
 
-def test_approved_tasks_noop_when_flag_off(monkeypatch):
-    """Flag off -> pure no-op: nothing is listed, nothing is applied."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", False)
+def test_snapshot_is_the_parsed_current_value():
+    """The pre-change value an applied change records as current_value_before."""
     svc = HarnessService()
-    ex = _FakeExecutor(
-        tasks=[_harness_task(task_id=7)],
-        agents=[{"id": 42, "name": "ScribeAgent"}],
-    )
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+    rx = svc._parse_harness_task(_harness_task(current={"interval_minutes": 30}), agents_by_name={"ScribeAgent": 42})
+    assert svc._snapshot_current_value(rx) == {"interval_minutes": 30}
+    assert svc._snapshot_current_value({"prescription_id": "rx-1", "current_value": "30"}) == {}
 
+
+def test_placeholder_proposed_value_is_refused():
+    """A proposed_value that is the 'review_needed' placeholder is never applied —
+    applying it literally would corrupt the agent."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = svc._parse_harness_task(
+        _harness_task(change_type="description_update", current={"description": "old"},
+                      proposed={"description": "review_needed"}, task_id=11),
+        agents_by_name={"ScribeAgent": 42},
+    )
+    result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert result["success"] is False
+    assert "placeholder" in result["error"]
     assert ex.calls == []
-    assert changelog == {}
-
-
-def test_approved_tasks_are_executed(monkeypatch, harness_ledger):
-    """Flag on -> a done [HARNESS] task is parsed, its target resolved, and the
-    change applied via _auto_apply_prescription, then recorded in the task
-    ledger, so the next tick is idempotent."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    task = _harness_task(
-        change_type="heartbeat_tune",
-        target_name="ScribeAgent",
-        current={"interval_minutes": 30},
-        proposed={"interval_minutes": 90},
-        task_id=7,
-    )
-    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    # The heartbeat change was actually applied to the resolved agent id.
-    assert (
-        "platform_configure_agent_heartbeat",
-        {"agent_id": 42, "interval_minutes": 90},
-    ) in ex.calls
-    applied = changelog.get("applied_from_approved", [])
-    assert len(applied) == 1
-    assert applied[0]["task_id"] == "7"
-    assert applied[0]["target_id"] == 42
-    assert applied[0]["change_type"] == "heartbeat_tune"
-    # The task ledger records task 7 as applied.
-    assert svc._read_applied_tasks(None, _WS_ID)["applied_task_ids"] == ["7"]
-
-
-def test_snapshot_recorded_before_apply(monkeypatch, harness_ledger):
-    """The pre-change value is captured as current_value_before so US-022 has a
-    rollback target."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    task = _harness_task(
-        change_type="heartbeat_tune",
-        target_name="ScribeAgent",
-        current={"interval_minutes": 30},
-        proposed={"interval_minutes": 90},
-        task_id=7,
-    )
-    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    entry = changelog["applied_from_approved"][0]
-    assert entry["current_value_before"] == {"interval_minutes": 30}
-    assert entry["proposed_value"] == {"interval_minutes": 90}
-
-
-def test_already_applied_task_is_skipped(monkeypatch, harness_ledger):
-    """A task whose id is in the ledger is never re-applied (idempotency)."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    harness_ledger.applied.add("7")
-    task = _harness_task(change_type="heartbeat_tune", target_name="ScribeAgent", task_id=7)
-    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    assert "platform_configure_agent_heartbeat" not in ex.actions()
-    assert changelog.get("applied_from_approved", []) == []
-    # Nothing applied -> nothing new in the ledger.
-    assert harness_ledger.entries == []
-
-
-class _RowDB:
-    """One board-task row, for the note HARNESS writes on a held task."""
-
-    def __init__(self, row):
-        self.row, self.commits = row, 0
-
-    def query(self, model):
-        return self
-
-    def filter(self, *conditions):
-        return self
-
-    def first(self):
-        return self.row
-
-    def commit(self):
-        self.commits += 1
-
-
-class _AdminGateExecutor(_FakeExecutor):
-    """The executor's admin gate refuses the power mode: HARNESS acts for nobody."""
-
-    def __init__(self, tasks, agents, row):
-        super().__init__(tasks, agents)
-        self.db = _RowDB(row)
-
-    async def execute(self, action, params, caller_context=None):
-        if action == "platform_set_power_mode":
-            self.calls.append((action, params))
-            return {"success": False, "permission_denied": True, "required_role": "owner_or_admin",
-                    "error": "Action 'platform_set_power_mode' requires workspace admin or owner role."}
-        return await super().execute(action, params, caller_context)
-
-
-def test_a_done_task_the_admin_gate_refuses_waits_for_an_approve(monkeypatch, harness_ledger):
-    """F151: completing a [HARNESS] task is not an owner's or admin's approval of an
-    admin_only change. The refusal is written on the task once, and later ticks
-    stop retrying it; an owner's or admin's /approve applies it as them."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    task = _harness_task(change_type="power_mode_upgrade", current={"power_mode": "standard"},
-                         proposed={"power_mode": "max"}, task_id=7,
-                         tags=["harness", "org-review", "risk-2", "rx:rx-power-1"])
-    row = types.SimpleNamespace(result=None)
-    ex = _AdminGateExecutor([task], [{"id": 42, "name": "ScribeAgent"}], row)
-
-    ticks = [{}, {}]
-    for changelog in ticks:
-        asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    assert ex.actions().count("platform_set_power_mode") == 1
-    assert ticks[0] == {"needs_approve": [{"task_id": "7", "title": task["title"],
-                                           "change_type": "power_mode_upgrade"}]}
-    assert ticks[1] == {}
-    assert svc._read_applied_tasks(None, _WS_ID)["needs_approve_task_ids"] == ["7"]
-    note = json.loads(row.result)
-    assert note["actuated"] is False
-    assert note["message"].endswith("An owner or admin applies it with /approve rx-power-1.")
-
-
-def test_unresolved_target_is_skipped_not_applied(monkeypatch, harness_ledger):
-    """A task whose target_name is not in the agents map is skipped, never
-    applied against a guessed/null target."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    task = _harness_task(change_type="heartbeat_tune", target_name="GhostAgent", task_id=9)
-    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    assert "platform_configure_agent_heartbeat" not in ex.actions()
-    assert changelog.get("applied_from_approved", []) == []
-    assert len(changelog.get("skipped", [])) == 1
-    assert changelog["skipped"][0]["task_id"] == "9"
-
-
-def test_placeholder_proposed_value_is_refused(monkeypatch, harness_ledger):
-    """An approved task whose proposed_value is the 'review_needed' placeholder
-    is never applied — applying it literally would corrupt the agent."""
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    svc = HarnessService()
-    task = _harness_task(
-        change_type="description_update",
-        target_name="ScribeAgent",
-        current={"description": "old"},
-        proposed={"description": "review_needed"},
-        task_id=11,
-    )
-    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
-    changelog = {}
-    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
-
-    assert "platform_update_agent" not in ex.actions()
-    assert changelog.get("applied_from_approved", []) == []
-    assert len(changelog.get("failed", [])) == 1
-    assert "placeholder" in changelog["failed"][0]["error"]
-    # Not applied -> nothing in the ledger.
-    assert harness_ledger.entries == []
 
 
 # ---------------------------------------------------------------------------
@@ -457,98 +298,3 @@ def test_model_change_uses_model_id_param():
         "platform_update_agent",
         {"agent_id": 42, "model_id": "claude-sonnet-4-6"},
     ) in ex.calls
-
-
-# ---------------------------------------------------------------------------
-# US-024: high-risk escalation
-# ---------------------------------------------------------------------------
-
-
-def _high_risk_rx(rx_id="rx-esc", risk=4):
-    return {
-        "prescription_id": rx_id,
-        "change_type": "model_change_same_tier",
-        "target_name": "ScribeAgent",
-        "current_value": {"model": "haiku"},
-        "proposed_value": {"model": "opus"},
-        "risk_score": risk,
-    }
-
-
-def test_escalation_sends_telegram(monkeypatch):
-    """risk>=4 with a connected channel -> notification sent + escalated entry."""
-    import core.services.notification_service as notif_mod
-    sent = []
-
-    async def _fake_send(workspace_id, message, channel=None):
-        sent.append((workspace_id, message, channel))
-        return True
-
-    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
-
-    svc = HarnessService()
-    svc._workspace_has_channel = lambda db, ws: True
-    changelog = {"escalated": []}
-    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
-
-    assert len(sent) == 1
-    _, message, _ = sent[0]
-    # Approval moved to the authenticated Command Center (W4-S1); the channel
-    # notice points there and carries the prescription id, not a /approve command.
-    assert "Command Center" in message and "rx-esc" in message
-    assert len(changelog["escalated"]) == 1
-    assert changelog["escalated"][0]["notified"] is True
-    assert changelog["escalated"][0]["prescription_id"] == "rx-esc"
-
-
-def test_escalation_skipped_no_channel(monkeypatch):
-    """No connected channel -> no send, no phantom escalated entry."""
-    import core.services.notification_service as notif_mod
-    sent = []
-
-    async def _fake_send(workspace_id, message, channel=None):
-        sent.append((workspace_id, message, channel))
-        return True
-
-    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
-
-    svc = HarnessService()
-    svc._workspace_has_channel = lambda db, ws: False
-    changelog = {"escalated": []}
-    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
-
-    assert sent == []
-    assert changelog["escalated"] == []
-
-
-def test_low_risk_is_not_escalated(monkeypatch):
-    """A channel exists but risk < 4 -> not escalated (only high-risk nags)."""
-    import core.services.notification_service as notif_mod
-    sent = []
-
-    async def _fake_send(workspace_id, message, channel=None):
-        sent.append(1)
-        return True
-
-    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
-
-    svc = HarnessService()
-    svc._workspace_has_channel = lambda db, ws: True
-    changelog = {"escalated": []}
-    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(risk=2), changelog))
-
-    assert sent == []
-    assert changelog["escalated"] == []
-
-
-def test_escalation_message_points_to_command_center():
-    """Approval moved to the authenticated Command Center (PRD-142 W4-S1) — the
-    escalation message points there and no longer carries a channel /approve
-    command, while still carrying the prescription id, risk, and change_type."""
-    svc = HarnessService()
-    msg = svc._build_escalation_message(_high_risk_rx(rx_id="rx-99", risk=5), 5)
-    assert "Command Center" in msg
-    assert "rx-99" in msg
-    assert "risk 5/5" in msg
-    assert "model_change_same_tier" in msg
-    assert "/approve" not in msg  # approval is no longer a channel command

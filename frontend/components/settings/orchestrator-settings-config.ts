@@ -31,9 +31,9 @@ export interface HeartbeatConfig {
   channel_id?: string
 }
 
+/** HARNESS settings (PRD-263 US-017): the mode is the only control; the one schedule is weekly. */
 export interface HarnessConfig {
-  enabled: boolean
-  schedule: string
+  schedule?: string
   mode: string
 }
 
@@ -82,6 +82,30 @@ export const THINKING_LEVELS: Record<string, string> = {
   high: 'High',
 }
 
+export const DEFAULT_HARNESS_MODE = 'report_only'
+
+/** The HARNESS modes P1 offers (PRD-263 US-017, section 8 copy). US-054 adds Propose. */
+export const HARNESS_MODE_OPTIONS = [
+  {
+    value: DEFAULT_HARNESS_MODE,
+    label: 'Report only',
+    description: 'HARNESS writes a weekly report on your agents and changes nothing.',
+  },
+  {
+    value: 'disabled',
+    label: 'Disabled',
+    description: 'HARNESS does not run for this workspace.',
+  },
+] as const
+
+export const HARNESS_HELP_TEXT =
+  'HARNESS runs once a week, on a weekday, and judges only agents with enough Tasks.'
+
+/** The option a stored mode shows as: itself when offered, else Report only. */
+export function harnessModeOption(mode?: string) {
+  return HARNESS_MODE_OPTIONS.find((option) => option.value === mode) ?? HARNESS_MODE_OPTIONS[0]
+}
+
 /** The LLM block an edit starts from when the config has none yet. */
 export const EMPTY_LLM_CONFIG: LLMConfig = {
   provider: '', model_id: '', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0,
@@ -113,9 +137,8 @@ export function fallbackOrchestratorConfig(): OrchestratorConfig {
       timeout: null,
     },
     harness: {
-      enabled: false,
       schedule: 'weekly',
-      mode: 'full_auto',
+      mode: DEFAULT_HARNESS_MODE,
     },
   }
 }
