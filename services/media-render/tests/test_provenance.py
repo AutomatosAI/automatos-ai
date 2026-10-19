@@ -22,7 +22,7 @@ from typing import Optional
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN, bundle
+from helpers import TOKEN, VOICES, bundle
 from media_render import provenance
 from media_render.bundle import AudioPlan, MusicCue, SfxCue, VoiceLine, VoicePlan, parse_bundle
 from media_render.jpeg import to_jpeg
@@ -286,9 +286,9 @@ def test_a_job_without_ai_inputs_marks_only_the_kokoro_voice_and_says_so(caplog)
 
 
 def test_the_bundle_takes_ai_inputs_and_an_older_bundle_without_them(settings):
-    parsed = parse_bundle(bundle(ai_inputs=DECLARED), settings, {})
+    parsed = parse_bundle(bundle(ai_inputs=DECLARED), settings, {}, VOICES)
     assert parsed.ai_inputs == AiInputs(footage=True, stills=False, voice=True, uploads=False, template=True, declared=True)
-    assert parse_bundle(bundle(), settings, {}).ai_inputs == provenance.UNDECLARED
+    assert parse_bundle(bundle(), settings, {}, VOICES).ai_inputs == provenance.UNDECLARED
 
 
 @pytest.mark.parametrize(
@@ -302,4 +302,4 @@ def test_the_bundle_takes_ai_inputs_and_an_older_bundle_without_them(settings):
 )
 def test_malformed_ai_inputs_are_refused(settings, raw, message):
     with pytest.raises(BundleError, match=message):
-        parse_bundle(bundle(ai_inputs=raw), settings, {})
+        parse_bundle(bundle(ai_inputs=raw), settings, {}, VOICES)

@@ -19,7 +19,7 @@ from typing import Any, Dict, Tuple
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN
+from helpers import TOKEN, VOICES
 from media_render.bundle import parse_bundle
 from media_render.composition import MIX_PATH
 from media_render.fixture import fixture_bundle
@@ -56,7 +56,7 @@ def _absent(settings, job: Job) -> Tuple[str, ...]:
 def _run(settings, body: Dict[str, Any], inspect=None) -> Tuple[Job, RenderResult]:
     """Prepare, check and render ``body`` with the real pipeline; ``inspect(job)`` runs between
     the check and the render, while the staged composition and the spoken lines are still there."""
-    job = JobStore(Path(settings.work_dir)).create(parse_bundle(body, settings, {}))
+    job = JobStore(Path(settings.work_dir)).create(parse_bundle(body, settings, {}, VOICES))
     pipeline = RenderPipeline(settings, Speaker(settings))
 
     async def go() -> RenderResult:
