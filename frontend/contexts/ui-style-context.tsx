@@ -8,10 +8,16 @@
  * already the right design system. Switching writes the cookie (for the next request), the html classes (for this
  * document) and localStorage (a mirror), and never touches the tone. A switch to an installed
  * theme writes the cookie and reloads instead (PA-13): its first paint comes from the server.
+ *
+ * PRD-261 A-02c (PA-12): the server holds the choice. `setStyle` is the local half (cookie, html,
+ * reload); lib/theme-host/choice-sync.ts stores a pick on the server and checks the server's
+ * choice once per workspace and tab. It also fills `installedThemes`, which the theme menu and
+ * ⌘K list; this provider sits above the workspace and query providers, so it cannot read them.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
 import { writeCookie } from '@/lib/cookies'
+import type { InstalledTheme } from '@/lib/api-client'
 import { findThemeEntry, isInstalledThemeStyle } from '@/lib/theme-host/registry'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import {
@@ -35,12 +41,20 @@ export interface UiStyleContextValue {
   isStudio: boolean
   /** The active theme's registry entry: null for Classic and Studio, and for a theme the registry doesn't know. */
   activeTheme: ThemeEntry | null
+  /** PRD-261 A-02c: the workspace's installed themes, for the menu and ⌘K; [] until ThemeChoiceSync reads them. */
+  installedThemes: readonly InstalledTheme[]
+  setInstalledThemes: (rows: readonly InstalledTheme[]) => void
 }
+
+const NO_INSTALLED_THEMES: readonly InstalledTheme[] = []
 
 const UiStyleContext = createContext<UiStyleContextValue | null>(null)
 
-/** The cookie the next request reads, and the localStorage mirror. */
-function persistUiStyle(style: UiStyle): void {
+/**
+ * The cookie the next request reads, and the localStorage mirror. Nothing else: no html class, no
+ * reload (choice-sync.ts writes an installed server choice with it when the tab may not reload).
+ */
+export function persistUiStyle(style: UiStyle): void {
   writeCookie(UI_STYLE_COOKIE, style, UI_STYLE_COOKIE_MAX_AGE_S)
   try {
     window.localStorage.setItem(UI_STYLE_STORAGE_KEY, style)
@@ -81,6 +95,7 @@ interface UiStyleProviderProps {
 
 export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = reloadDocument, children }: UiStyleProviderProps) {
   const [style, setStyleState] = useState<UiStyle>(initialStyle)
+  const [installedThemes, setInstalledThemes] = useState<readonly InstalledTheme[]>(NO_INSTALLED_THEMES)
   const { setTheme } = useTheme()
 
   // PRD-261 PA-13: an installed theme's boot data and import map come with the page, so a
@@ -103,6 +118,9 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = 
   // setTheme whenever forcedTheme changes (a theme's look forcing its tone), and a browser whose
   // storage can't be read never records the defaults version, so a re-run moved it straight
   // back to Studio the moment it chose a theme.
+  // PRD-261 A-02c: this step runs once, at mount, before any workspace is known; the server's
+  // choice is checked after it (choice-sync.ts), so the defaults never override a server choice.
+  // It is local only: it never stores a choice on the server.
   const defaultsChecked = useRef(false)
   useEffect(() => {
     if (defaultsChecked.current) return
@@ -118,8 +136,15 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = 
   }, [setTheme, setStyle])
 
   const value = useMemo<UiStyleContextValue>(
-    () => ({ style, setStyle, isStudio: rendersStudio(style), activeTheme: findThemeEntry(style) }),
-    [style, setStyle],
+    () => ({
+      style,
+      setStyle,
+      isStudio: rendersStudio(style),
+      activeTheme: findThemeEntry(style),
+      installedThemes,
+      setInstalledThemes,
+    }),
+    [style, setStyle, installedThemes],
   )
   return <UiStyleContext.Provider value={value}>{children}</UiStyleContext.Provider>
 }
