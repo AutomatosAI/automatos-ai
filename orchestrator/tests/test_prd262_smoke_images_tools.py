@@ -180,6 +180,22 @@ def test_the_production_command_runs_four_workers_without_reload():
     assert found["command"].endswith("uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4")
 
 
+def test_the_us029_production_command_takes_its_workers_from_web_concurrency():
+    """PRD-262 US-029: no --workers on the command line; WEB_CONCURRENCY=2 spawns two workers."""
+    top = "\n".join([
+        "PID                 PPID                COMMAND",
+        "4101                4080                /bin/bash /usr/local/bin/docker-entrypoint.sh /bin/sh -c exec "
+        "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}",
+        "4250                4101                /usr/local/bin/python3.11 /usr/local/bin/uvicorn main:app "
+        "--host 0.0.0.0 --port 8000",
+    ] + [f"{pid}                4250                {SPAWN.format(pid)}" for pid in (4252, 4253)])
+    found = tool.backend_processes(tool.parse_top(top), expected_workers=2)
+    assert found["failures"] == []
+    assert found["command"].endswith("uvicorn main:app --host 0.0.0.0 --port 8000")
+    assert tool.backend_processes(tool.parse_top(top), expected_workers=1)["failures"] == [
+        "2 uvicorn worker(s) serve, expected 1"]
+
+
 def test_the_development_stage_fails_on_reload():
     found = tool.backend_processes(tool.parse_top(DEVELOPMENT_TOP), expected_workers=4)
     assert found["reload"] is True and found["workers"] == 1

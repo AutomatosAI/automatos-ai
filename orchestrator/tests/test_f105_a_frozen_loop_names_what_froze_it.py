@@ -7,6 +7,7 @@ loop thread's stack at the time (code lines only), at most so many a minute.
 
 The tests freeze their own loop with a sync sleep and read the log. No app.
 """
+import ast
 import asyncio
 import logging
 import re
@@ -140,9 +141,28 @@ def test_the_watchdog_ends_quietly_when_its_loop_closes(caplog):
     assert _stall_warnings(caplog) == []  # a closed loop is no stall
 
 
-def test_the_app_watches_its_loop_once_ready_and_stops_at_shutdown():
-    source = MAIN_PY.read_text()
-    ready, started = source.index("app.state.ready = True"), source.index("start_loop_watchdog()")
-    shutdown, stopped = source.index("Shutting down Automatos AI API Server"), source.index("_watchdog.stop()")
+def _function(tree, name):
+    return next(node for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name)
 
-    assert ready < started < shutdown < stopped
+
+def test_the_app_watches_its_loop_from_the_moment_it_serves_and_stops_at_shutdown():
+    """PRD-262 US-034: uvicorn serves as soon as the lifespan yields, before the
+    background boot sets app.state.ready, so the watchdog starts there (in
+    _start_serving, which the lifespan calls before its yield) and a stall during
+    the background boot is named too."""
+    tree = ast.parse(MAIN_PY.read_text())
+    assert "start_loop_watchdog()" in ast.unparse(_function(tree, "_start_serving"))
+    lifespan = _function(tree, "lifespan")
+
+    def line(matches):
+        return min(node.lineno for node in ast.walk(lifespan) if matches(node))
+
+    serving = line(lambda node: isinstance(node, ast.Call) and ast.unparse(node.func) == "_start_serving")
+    served = line(lambda node: isinstance(node, ast.Yield))
+    shutdown = line(lambda node: isinstance(node, ast.Constant)
+                    and node.value == "Shutting down Automatos AI API Server...")
+    stopped = line(lambda node: isinstance(node, ast.Call) and ast.unparse(node.func) == "_watchdog.stop")
+
+    assert serving < served < shutdown < stopped
+    assert "start_loop_watchdog" not in ast.unparse(_function(tree, "_mark_ready"))

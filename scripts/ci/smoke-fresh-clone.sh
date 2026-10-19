@@ -56,8 +56,8 @@
 #             tagged them with the GHCR names and AUTOMATOS_IMAGE_TAG, so compose
 #             neither pulls nor builds them.
 # Either way the stack starts with `up --no-build`, and scripts/ci/smoke_images.py
-# asserts what booted: the backend runs the production command (no --reload,
-# SMOKE_BACKEND_WORKERS workers), and each app container runs its
+# asserts what booted: the backend runs the production command (no --reload, and the
+# worker count compose's WEB_CONCURRENCY sets), and each app container runs its
 # ghcr.io/automatosai/automatos-* image carrying the commit's revision label
 # (SMOKE_EXPECT_REVISION). With `pull`, each image's RepoDigests must also hold the
 # index digest its tag resolves to on GHCR, so nothing was built locally; no image may
@@ -68,6 +68,36 @@
 # checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
 # production-stage backend and needs uvicorn to start a replacement within 30 s, with
 # /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
+# envs/api.defaults sets WEB_CONCURRENCY=1 (PRD-262 US-029), and a single uvicorn
+# process has no manager to restart a worker, so this variant's backend runs
+# RESTART_WORKERS through a compose override the script writes outside the checkout.
+#
+# PRD-262 US-029, in every mode: the entrypoint is the only owner of migrations. After
+# the warm restarts, the database is stamped one revision behind head
+# (scripts/ci/smoke_alembic_behind.py, run inside the backend) and the backend restarts
+# once more. scripts/ci/smoke_alembic.py then reads the backend's log of every boot: the
+# entrypoint's banner is there, no alembic line follows it (the CMD runs none), no boot
+# runs alembic twice, and the behind-head boot runs it exactly once.
+#
+# PRD-262 US-030: a boot whose alembic_version already holds the code's head runs no
+# alembic at all. The fresh boot (init_fresh_db stamps the head) and the warm restarts
+# must each log `schema at head — alembic skipped` and run none: no `Context impl` line
+# after `init_fresh_db: done`, and none at all on a warm restart.
+#
+# PRD-262 US-031: a warm restart redoes no seed work. The fresh boot runs the seed loader
+# and stores each seed stage's fingerprint; each warm restart must log `seeds unchanged
+# (fingerprint …) — skipped` for both stages (the entrypoint's loader and the lifespan
+# leader's seeds) and start no seed loader, and credential_types (its rows' updated_at,
+# read in the postgres container) must be the same after the warm restarts as before
+# them (scripts/ci/smoke_seeds.py).
+#
+# PRD-262 US-034: the API answers once its core is up and boots the rest in the
+# background, off the event loop. After the last boot has run its first 60 s,
+# scripts/ci/smoke_ready.py reads every backend boot: the stages of its
+# /health/bootstrap report up to and including trust_gate (what the server waits for
+# before it listens) sum to 3 s or less, and its log holds no APScheduler `Run time of
+# job … was missed` warning in its first 60 s. /health 200 and /health/ready 200 are
+# timed separately, as above.
 #
 # PRD-262 US-017, when it builds from this checkout: the build log is kept, and
 # scripts/ci/build_context.py reads what the backend's build sent as its context off it.
@@ -81,9 +111,14 @@
 # presigned URL the Documents page's download call answers with.
 #
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, and the document came back. Exit 1 = a boot failed, a port listens beyond
-# this machine, the backend's build context is over its budget, or the document did not
-# come back from object storage.
+# loopback, the document came back, every boot ran alembic at most once (and only
+# the behind-head boot ran it at all), and the warm restarts redid no seed work. Exit 1
+# = a boot failed, a port listens beyond this machine, the backend's build context is
+# over its budget, the document did not come back from object storage, a boot ran
+# alembic twice (or the CMD ran it), or ran it at head, or the behind-head boot did
+# not, or a warm restart ran a seed stage, started the seed loader or rewrote
+# credential_types, or a boot's core stages took over 3 s or APScheduler missed a job
+# in a boot's first 60 s.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -99,13 +134,12 @@ if [ -n "$SMOKE_IMAGES" ]; then
 fi
 API_BASE="http://localhost:${API_PORT:-8000}"
 HEALTH_URL="${API_BASE}/health"
-# Readiness probe (main.py:/health/ready) — 200 only once the boot lifespan has
-# finished (migrations applied, trust gate, Phase-2 extensions, READY stage); 503
-# before. This is what Railway healthchecks: /health/ready is true only when the
-# local edition booted far enough to serve, /health whenever the process answers.
-# Under uvicorn 0.24 the lifespan runs before the socket listens, so today both
-# first answer at the same moment; they are timed separately so the gap shows
-# once the boot moves work off the critical path.
+# Readiness probe (main.py:/health/ready), PRD-262 US-034. uvicorn listens, and
+# /health answers, once the lifespan's core is up (tables, the leader's seeds, the
+# trust gate). The rest of the boot (the starters, the Composio catalogue, Phase-2
+# extensions, board dispatch, the READY stage) runs in the background; /health/ready
+# answers 503 until it has finished, then 200. The two are timed separately, so the
+# report shows the gap.
 READY_URL="${API_BASE}/health/ready"
 BOOTSTRAP_URL="${API_BASE}/health/bootstrap"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT:-3000}/"
@@ -120,6 +154,9 @@ IMAGES_TOOL="scripts/ci/smoke_images.py"
 RESTART_TOOL="scripts/ci/smoke_worker_restart.py"
 CONTEXT_TOOL="scripts/ci/build_context.py"
 DOCUMENT_TOOL="scripts/ci/smoke_document_presign.py"
+# PRD-262 US-029: the alembic runs per boot, and the in-container stamp behind head.
+ALEMBIC_TOOL="scripts/ci/smoke_alembic.py"
+BEHIND_TOOL="scripts/ci/smoke_alembic_behind.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
@@ -132,13 +169,31 @@ WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
 BUILD_LOG="${OUT_DIR}/build.log"
 # smoke_document_presign.py's record (PRD-262 US-021).
 DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
+# smoke_alembic.py's record (PRD-262 US-029).
+ALEMBIC_FILE="${OUT_DIR}/alembic-runs.json"
+BEHIND_HEAD_LABEL="behind-head"
+# PRD-262 US-031: smoke_seeds.py's record, and credential_types before and after the
+# warm restarts: the row count and a digest of every row's updated_at.
+SEEDS_TOOL="scripts/ci/smoke_seeds.py"
+SEEDS_FILE="${OUT_DIR}/seed-stages.json"
+CREDENTIAL_TYPES_BEFORE="${OUT_DIR}/credential-types-before.txt"
+CREDENTIAL_TYPES_AFTER="${OUT_DIR}/credential-types-after.txt"
+# PRD-262 US-034: smoke_ready.py's record.
+READY_TOOL="scripts/ci/smoke_ready.py"
+READY_FILE="${OUT_DIR}/ready-after-core.json"
+CREDENTIAL_TYPES_SQL="SELECT count(*) || ' ' || coalesce(md5(string_agg(name || '=' || coalesce(updated_at::text, 'null'), ',' ORDER BY name)), '') FROM credential_types"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
-# The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
-BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-4}"
+# The production stage's worker count under compose: envs/api.defaults'
+# WEB_CONCURRENCY (PRD-262 US-029; the image's own 4 is Railway's).
+BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-1}"
+# The pull-request variant's count (US-008 kills one of them), set through an override
+# written outside the checkout.
+RESTART_WORKERS=2
+WORKERS_OVERRIDE_FILE="${RUNNER_TEMP:-/tmp}/smoke-backend-workers.yml"
 # docker-compose.yml's container_name values and named volumes all start with this.
 STACK_NAME_PATTERN='^automatos_'
 
@@ -184,6 +239,17 @@ check_mode() {
       [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
     *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
   esac
+}
+
+# PRD-262 US-029 and US-008: the pull-request variant's backend runs RESTART_WORKERS
+# uvicorn workers, so check_worker_restart has a manager to watch. The main runs keep
+# compose's count, the one a self-hoster gets.
+use_restart_workers() {
+  [ "$SMOKE_IMAGES" = "prebuilt" ] || return 0
+  printf 'services:\n  backend:\n    environment:\n      WEB_CONCURRENCY: "%s"\n' "$RESTART_WORKERS" \
+    > "$WORKERS_OVERRIDE_FILE" || fail "could not write the backend's worker-count override"
+  COMPOSE_ARGS+=(-f "$WORKERS_OVERRIDE_FILE")
+  BACKEND_WORKERS="$RESTART_WORKERS"
 }
 
 # Runs before the exit trap is set, like refuse_existing_stack, so a refusal deletes nothing.
@@ -362,6 +428,76 @@ warm_restarts() {
   done
 }
 
+# PRD-262 US-029: a database one revision behind head, then one more backend boot,
+# whose entrypoint must run alembic exactly once.
+boot_behind_head() {
+  echo "Behind-head boot: stamping the database one revision behind head, then restarting the backend..."
+  compose exec -T backend python - < "$BEHIND_TOOL" \
+    || fail "could not stamp the database one revision behind head"
+  compose restart backend || fail "docker compose restart backend failed (behind-head boot)"
+  wait_backend "$BEHIND_HEAD_LABEL" \
+    || fail "behind-head boot: readiness not reached within ${MAX_WAIT_SECONDS}s"
+}
+
+# PRD-262 US-029: every boot shows the entrypoint's banner and no alembic after it, none
+# runs alembic twice, and the behind-head boot runs it exactly once. US-030: the fresh
+# boot and the warm restarts, at head, run none and log `schema at head — alembic skipped`.
+check_alembic_runs() {
+  local i
+  # The labels boot_fresh and warm_restarts give wait_backend.
+  local expects=(--expect "fresh=0" --expect "${BEHIND_HEAD_LABEL}=1")
+  for i in $(seq 1 "$WARM_RESTARTS"); do
+    expects+=(--expect "warm-${i}=0")
+  done
+  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
+  python3 "$ALEMBIC_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
+    --backend-container "$BACKEND_CONTAINER" "${expects[@]}" \
+    --out "$ALEMBIC_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a backend boot ran alembic more than once or at head, the CMD ran it, or the behind-head boot did not run it once"
+}
+
+# PRD-262 US-031: credential_types' rows, read in the postgres container (its local socket
+# needs no password). $1 = the file the snapshot goes to.
+snapshot_credential_types() {
+  compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-orchestrator_db}" \
+    -tAc "$CREDENTIAL_TYPES_SQL" > "$1" || fail "could not read credential_types into ${1##*/}"
+}
+
+# PRD-262 US-031: the fresh boot runs the seed loader; each warm restart skips both seed
+# stages, starts no seed loader and leaves credential_types as it was.
+check_seed_stages() {
+  local i
+  # The labels boot_fresh and warm_restarts give wait_backend.
+  local expects=(--expect-loaded "fresh")
+  for i in $(seq 1 "$WARM_RESTARTS"); do
+    expects+=(--expect-skipped "warm-${i}")
+  done
+  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
+  python3 "$SEEDS_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
+    --backend-container "$BACKEND_CONTAINER" "${expects[@]}" \
+    --credential-types "$CREDENTIAL_TYPES_BEFORE" "$CREDENTIAL_TYPES_AFTER" \
+    --out "$SEEDS_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a warm restart ran a seed stage again, started the seed loader or rewrote credential_types"
+}
+
+# PRD-262 US-034: every backend boot's core stages (to trust_gate) took 3 s or less, and
+# APScheduler missed no job in its first 60 s. The last boot's 60 s must be in the log
+# before it is read, so this waits for them first.
+check_ready_after_core() {
+  local left
+  left="$(python3 "$READY_TOOL" --results "$BOOTS_FILE" --backend-container "$BACKEND_CONTAINER" --window-left)" \
+    || fail "could not work out when the last backend boot's first 60 s end"
+  if [ "$left" -gt 0 ]; then
+    echo "Waiting ${left}s for the last backend boot's first 60 s to be in its log..."
+    sleep "$left"
+  fi
+  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
+  python3 "$READY_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
+    --backend-container "$BACKEND_CONTAINER" \
+    --out "$READY_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a backend boot's core stages (to trust_gate) took over 3s, or APScheduler missed a job in a boot's first 60s"
+}
+
 dump_failure_logs() {
   echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
   compose logs --tail 200 postgres >&2 || true
@@ -413,6 +549,7 @@ main() {
   mkdir -p "$OUT_DIR" || exit 1
   : > "$BOOTS_FILE"
   check_mode
+  use_restart_workers
   print_banner
   refuse_existing_stack
   refuse_emptying_a_kept_image_cache
@@ -426,12 +563,20 @@ main() {
   check_loopback_ports
   check_images
   check_document_storage
+  snapshot_credential_types "$CREDENTIAL_TYPES_BEFORE"
   warm_restarts
+  snapshot_credential_types "$CREDENTIAL_TYPES_AFTER"
+  boot_behind_head
+  check_alembic_runs
+  check_seed_stages
+  check_ready_after_core
   outcome="pass"
   failure=""
-  echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot and" \
-    "${WARM_RESTARTS} warm restarts, :3000 answered 200 and a document came back from" \
-    "object storage — the local edition serves with NO external credentials"
+  echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot," \
+    "${WARM_RESTARTS} warm restarts and a behind-head boot; only the behind-head boot ran alembic, once;" \
+    "the warm restarts redid no seed work; every boot's core took 3s or less and no job was missed;" \
+    ":3000 answered 200 and a document came back from object storage — the local" \
+    "edition serves with NO external credentials"
 }
 
 main "$@"

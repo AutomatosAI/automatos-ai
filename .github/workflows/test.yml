@@ -90,13 +90,14 @@ jobs:
           # manifests and locks (with the splitter the API's pybuild runs, PRD-262
           # US-022), the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
-          # test image, site-packages' native libraries, botocore's services), the one
-          # that reads the API's build context off its log, and the tests the test
+          # test image, site-packages' native libraries, botocore's services, the app's
+          # bytecode), the one that reads the API's build context off its log, the list
+          # of boot modules the API's compile stage compiles, and the tests the test
           # image runs: the clone tests, and the code-graph parser's language tests
           # with the parser and their fixtures (PRD-262 US-028); and the Leiden
           # adapter, which the backend step clusters with inside the image (US-027).
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_(clone|languages)\.py$|^orchestrator/tests/fixtures/codegraph_languages/|^orchestrator/modules/codegraph/parsers/|^orchestrator/modules/knowledge/leiden_partition\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore|image_app_bytecode)\.py$|^orchestrator/scripts/boot_modules\.py$|^orchestrator/tests/test_prd262_codegraph_(clone|languages)\.py$|^orchestrator/tests/fixtures/codegraph_languages/|^orchestrator/modules/codegraph/parsers/|^orchestrator/modules/knowledge/leiden_partition\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -260,6 +261,7 @@ jobs:
       # API image installs. One command: a hashed lock puts pip in hash-checking mode for
       # the whole command, and a dev install of its own could move a locked version.
       - name: Install Python dependencies
+        id: deps
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock -r requirements-dev.lock
@@ -346,6 +348,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      # PRD-262 US-032 (FR-6): `import main`, which every API process runs before it
+      # serves, loads none of camelot, cv2, matplotlib, pandas, nltk,
+      # google.generativeai or googleapiclient; a failure names the import chain that
+      # loaded one. Its 25 slowest imports (cumulative, from `python -X importtime`) and
+      # its wall time go to the step summary (scripts/ci/import_main_report.py). Once
+      # per run, on the first shard, after the tests and their coverage, so a failure
+      # here never hides theirs. IMPORT_MAIN_BUDGET_SECONDS is empty until the first
+      # week of main runs sets it; while empty, the time is reported, not judged.
+      - name: import main loads no FR-6 module, and its import time
+        if: ${{ !cancelled() && matrix.shard == 0 && steps.deps.outcome == 'success' }}
+        env:
+          IMPORT_MAIN_BUDGET_SECONDS: ""
+        run: python ../scripts/ci/import_main_report.py --budget-seconds "$IMPORT_MAIN_BUDGET_SECONDS" --summary "$GITHUB_STEP_SUMMARY"
 
   # The required check (the Protect-Main ruleset names `orchestrator-tests`). It
   # always reports: green when every shard passed, or when no backend test reads
@@ -881,6 +897,33 @@ jobs:
           echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
+      # PRD-262 US-030: the entrypoint runs no alembic when alembic_version already holds
+      # the code's head(s), which scripts/alembic_heads.py reads from the migration
+      # scripts with no import. Its heads must be the ones `alembic heads` prints, the
+      # database init_fresh_db just stamped must read as at head through the same
+      # `psql -tA` the entrypoint pipes in, and a version this code does not know (a
+      # database ahead of it) must not.
+      - name: The entrypoint's static head check agrees with alembic
+        env:
+          PGPASSWORD: test
+        run: |
+          STATIC="$(python scripts/alembic_heads.py --print | sort)"
+          ALEMBIC="$(alembic heads 2>/dev/null | awk '{print $1}' | sort)"
+          echo "static heads: [${STATIC}] alembic heads: [${ALEMBIC}]"
+          if [ -z "${STATIC}" ] || [ "${STATIC}" != "${ALEMBIC}" ]; then
+            echo "::error::scripts/alembic_heads.py reads the heads [${STATIC}], alembic heads prints [${ALEMBIC}]"
+            exit 1
+          fi
+          STAMPED="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version')"
+          if ! printf '%s\n' "${STAMPED}" | python scripts/alembic_heads.py; then
+            echo "::error::the database init_fresh_db stamped at heads does not read as at head"
+            exit 1
+          fi
+          if printf 'a_revision_this_code_does_not_know\n' | python scripts/alembic_heads.py; then
+            echo "::error::a database ahead of the code read as at head, so alembic would not run and fail loudly"
+            exit 1
+          fi
+
       # A first boot whose build dies partway (Postgres restarting, the host
       # stopping) leaves alembic_version behind. The next boot must finish the
       # build, not serve it: before the incomplete-build marker it skipped the
@@ -1020,8 +1063,9 @@ jobs:
             echo "::error::the production backend image imports graspologic (PRD-262 US-027)"; exit 1
           fi
           echo "import graspologic fails in the image, as it should"
-      # The production stage copies the whole context, so what the build sent is what
-      # orchestrator/.dockerignore let in (scripts/ci/build_context.py reads it off the log).
+      # The compile stage copies the whole context (the production stage copies /app from
+      # it, PRD-262 US-032), so what the build sent is what orchestrator/.dockerignore let
+      # in (scripts/ci/build_context.py reads it off the log).
       - name: Backend — the build context left the uploads and caches out
         run: python3 scripts/ci/build_context.py check "$RUNNER_TEMP/parity-be-build.log"
       # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
@@ -1071,6 +1115,14 @@ jobs:
       # botocore and fetches it back by its presigned URL.
       - name: Backend — botocore keeps the services we call, and builds a client for each
         run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_botocore.py
+      # PRD-262 US-032: the compile stage compiles the boot modules (the image's own
+      # scripts/boot_modules.py lists them), and the production stage copies them in with
+      # the code. Every .pyc under /app is this Python's unchecked-hash bytecode of the
+      # source beside it, the compiled set is exactly that list, and `import main` rewrites
+      # none of it; the modules it compiles at start-up anyway are reported
+      # (scripts/ci/image_app_bytecode.py). Runs as the image's own user.
+      - name: Backend — the boot modules ship as bytecode of their own source
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_app_bytecode.py
       # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
       # gid 1000) instead of through a `chown -R /app` layer, and /app and the
       # directories the named volumes mount on are the user's own, so the app writes

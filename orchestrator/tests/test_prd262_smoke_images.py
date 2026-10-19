@@ -12,7 +12,8 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
 * images.yml's merge job no longer pushes ``edge``; ``promote-edge`` moves it after
   both arches pass, for the images the merge job publishes;
 * the script empties the Docker cache before the pull, never builds in an image mode,
-  and asserts the production command's worker count (orchestrator/Dockerfile's CMD);
+  and asserts the backend's worker count: envs/api.defaults' WEB_CONCURRENCY, or the
+  pull-request variant's 2 (PRD-262 US-029: the production CMD names no --workers);
 * outside CI, the pull refuses to empty the host's image cache unless told it may.
 """
 from __future__ import annotations
@@ -354,8 +355,26 @@ def test_in_ci_or_when_allowed_the_pull_empties_the_cache_and_never_builds(tmp_p
     assert "### Images: pull, first run, and what each container runs" in summary
 
 
-def test_the_expected_worker_count_is_the_production_commands():
+def test_the_expected_worker_count_is_the_one_compose_sets():
+    """PRD-262 US-029: the production CMD names no --workers, so compose's WEB_CONCURRENCY sets the count."""
     cmd = [line for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines() if line.startswith("CMD ")][-1]
-    workers = re.search(r"--workers (\d+)", cmd)
-    assert workers, f"the production CMD names no --workers: {cmd}"
+    assert "--workers" not in cmd, f"the production CMD names --workers, which WEB_CONCURRENCY cannot change: {cmd}"
+    defaults = (_REPO / "envs" / "api.defaults").read_text(encoding="utf-8")
+    workers = re.search(r"^WEB_CONCURRENCY=(\d+)$", defaults, re.M)
+    assert workers, "envs/api.defaults sets no WEB_CONCURRENCY"
     assert f'BACKEND_WORKERS="${{SMOKE_BACKEND_WORKERS:-{workers.group(1)}}}"' in _script()
+
+
+def test_the_pull_request_variant_runs_enough_workers_to_kill_one():
+    """US-008's kill-a-worker step needs a uvicorn manager: WEB_CONCURRENCY=2 or more, through an override."""
+    text = _script()
+    restart = re.search(r"^RESTART_WORKERS=(\d+)$", text, re.M)
+    assert restart and int(restart.group(1)) >= 2
+    override = _function(text, "use_restart_workers")
+    assert override.lstrip().startswith('[ "$SMOKE_IMAGES" = "prebuilt" ] || return 0'), "the main runs keep compose's count"
+    assert "WEB_CONCURRENCY" in override and '"$RESTART_WORKERS"' in override
+    assert 'COMPOSE_ARGS+=(-f "$WORKERS_OVERRIDE_FILE")' in override
+    assert 'BACKEND_WORKERS="$RESTART_WORKERS"' in override
+    assert re.search(r'^WORKERS_OVERRIDE_FILE="\$\{RUNNER_TEMP:-/tmp\}/', text, re.M), "written outside the checkout"
+    main = _function(text, "main")
+    assert main.index("use_restart_workers") < main.index("boot_fresh")

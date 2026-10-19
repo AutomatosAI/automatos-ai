@@ -33,10 +33,26 @@ REDIS_PORT=6379
 ENVIRONMENT=development
 LOG_LEVEL=INFO
 
-# Run the wait-migrate-seed lifecycle (orchestrator/docker-entrypoint.sh)
-# before the app starts. The image default is off, so Railway and Kubernetes
-# app pods start the app directly; Kubernetes migrates in a separate Job.
+# Run the whole wait-migrate-seed lifecycle (orchestrator/docker-entrypoint.sh)
+# before the server starts: migrations, then the seed loader and the local
+# workspace and operator. Without it (Railway) the entrypoint only migrates;
+# AUTOMATOS_SKIP_MIGRATIONS=true (the Helm api pods, where a Job migrates) runs
+# none of it. One-off commands (`docker compose run backend <cmd>`) run neither.
 AUTOMATOS_MIGRATE_ON_BOOT=true
+
+# uvicorn's worker processes (PRD-262 US-029). uvicorn reads WEB_CONCURRENCY when
+# the command names no --workers; the production image defaults to 4 (Railway's).
+# One worker locally: one app import, one process's memory. A single process has
+# no manager, so a worker that dies ends the container, and restart:
+# unless-stopped brings it back. The development stage's --reload ignores it.
+WEB_CONCURRENCY=1
+
+# uvicorn reads every CLI option from UVICORN_<OPTION> (--timeout-graceful-shutdown
+# here). The browser's SSE streams (notifications, board events) never close, so
+# without a limit a stop or restart of the production stage waits for Docker's
+# 10 s kill. The development stage's CMD passes the same 5 s as a flag; the image
+# sets no limit, so Railway's shutdown is unchanged.
+UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=5
 
 # Stop a backend that has stopped serving (orchestrator/docker-entrypoint.sh,
 # F416): after 3 failed /health probes 30 s apart the server is stopped and the

@@ -14,7 +14,8 @@ name: smoke-images
 #   tag resolves to on GHCR, no tag is local-*, and no compose-built image exists. The
 #   images must carry their commit's org.opencontainers.image.revision, and the backend,
 #   booted from the production stage for the first time in CI, must run without
-#   --reload and with the production command's worker count. PRD-262 US-036 and US-037
+#   --reload and with the worker count compose's WEB_CONCURRENCY sets (envs/api.defaults'
+#   1; PRD-262 US-029). PRD-262 US-036 and US-037
 #   switch this job to `make up` on a clean checkout, and PRD-262 US-056 (W9) adds a
 #   rollback step: the previous main run's API image, with AUTOMATOS_SKIP_MIGRATIONS=true,
 #   against the schema the new image migrated, must answer /health/ready 200.
@@ -33,14 +34,28 @@ name: smoke-images
 #   GHCR names and `pr-<7>`, and boots them the same way. It measures the boot; the pull
 #   numbers (bytes, seconds, nothing built) come from the main runs alone. Before the
 #   boot, it checks that the api image installs no package the code never imports
-#   (PRD-262 US-015).
+#   (PRD-262 US-015). Its backend runs WEB_CONCURRENCY=2 (a compose override the
+#   script writes), because a single uvicorn process has no manager to replace the
+#   worker the PRD-262 US-008 step kills.
 # - Both jobs, before the warm restarts: a document uploaded to the backend goes into
 #   MinIO through the image's pruned botocore, and the host fetches it back by its
 #   presigned URL (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
+# - Both jobs, after the warm restarts (PRD-262 US-029): the database is stamped one
+#   revision behind head and the backend boots once more; every boot must show the
+#   entrypoint's banner, no alembic after it, at most one alembic run, and the
+#   behind-head boot exactly one (scripts/ci/smoke_alembic.py). PRD-262 US-030: the
+#   fresh boot and the warm restarts, at head, log `schema at head — alembic skipped`
+#   and run none (the entrypoint's static check, orchestrator/scripts/alembic_heads.py).
+#   PRD-262 US-031: the warm restarts skip both seed stages, start no seed loader and
+#   leave credential_types' rows as they were (scripts/ci/smoke_seeds.py). PRD-262
+#   US-034: every boot's /health/bootstrap stages up to and including trust_gate sum to
+#   3 s or less, and APScheduler misses no job in a boot's first 60 s
+#   (scripts/ci/smoke_ready.py).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
 # that never answers 200, an image built instead of pulled, a missing or wrong revision
-# label, or a backend with --reload or the wrong worker count fails it from day one.
+# label, a backend with --reload or the wrong worker count, or a boot that runs alembic
+# twice fails it from day one.
 #
 # workflow_run and workflow_dispatch work only once this file is on main. Actions are
 # pinned to a commit; the comment names the release. NON-REQUIRED at introduction.
@@ -79,6 +94,10 @@ on:
       - "scripts/ci/smoke_images_report.py"
       - "scripts/ci/smoke_worker_restart.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_alembic.py"
+      - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
+      - "scripts/ci/smoke_ready.py"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"
@@ -91,6 +110,7 @@ on:
       - "orchestrator/scripts/split_lock.py"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/scripts/alembic_heads.py"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"

@@ -11,8 +11,8 @@ since US-027), and the dev file into requirements-dev.lock. This suite checks:
   locks, and the two inputs name no package twice;
 - the Dockerfile copies the image locks alone (never a dev file), has no `pip uninstall`,
   and its production stage compiles the stdlib once, as root, excluding site-packages,
-  before the app code is copied in; the only other compile is pybuild's, of
-  site-packages;
+  before the app code is copied in; the only other compiles are pybuild's, of
+  site-packages, and the compile stage's, of the app's boot modules (PRD-262 US-032);
 - every CI install of the API's lock installs the dev lock in the same pip command, hashes
   required, and every pip cache key on the lock lists the dev lock too, each path a file;
 - the image workflows watch the dev file and its lock;
@@ -123,12 +123,16 @@ def test_the_production_stage_compiles_the_stdlib_once_as_root_before_the_app():
     production = _stage(DOCKERFILE, "production")
     compiles = [line for line in production if "compileall" in line]
     assert compiles == [STDLIB_COMPILE], "one stdlib compile, site-packages excluded, unchecked-hash"
-    pybuild = _stage(DOCKERFILE, "pybuild")
+    # The only other compiles: pybuild's, of site-packages (PRD-262 US-022), and the
+    # compile stage's, of the app's boot modules, which the app layer comes from (PRD-262
+    # US-032) and which compiles nothing under /usr/local.
+    pybuild, compile_stage = _stage(DOCKERFILE, "pybuild"), _stage(DOCKERFILE, "compile")
     elsewhere = [line for line in _instructions(DOCKERFILE) if "compileall" in line and line not in production]
-    assert len(elsewhere) == 1 and elsewhere[0] in pybuild, (
-        "site-packages' bytecode comes only from pybuild (PRD-262 US-022)")
+    assert len(elsewhere) == 2, elsewhere
+    assert elsewhere[0] in pybuild, "site-packages' bytecode comes only from pybuild (PRD-262 US-022)"
+    assert elsewhere[1] in compile_stage and "/usr/local" not in elsewhere[1], elsewhere
     at = production.index(STDLIB_COMPILE)
-    app = next(i for i, line in enumerate(production) if re.fullmatch(r"COPY (--\S+ )*\. \.", line))
+    app = next(i for i, line in enumerate(production) if re.fullmatch(r"COPY (--\S+ )*(\. \.|/app /app)", line))
     assert at < app, "before the app code, so a code change reuses the layer"
     users = [i for i, line in enumerate(production) if line.startswith("USER ")]
     assert users and at < users[0], "as root: the automatos user can't write to /usr/local"

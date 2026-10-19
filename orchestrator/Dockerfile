@@ -6,6 +6,7 @@
 #   - pybuild: installs the locked dependencies; never ships
 #   - base: Common dependencies
 #   - development: Hot reload; no code (compose mounts the source over /app)
+#   - compile: the code, with its boot modules compiled; never ships itself
 #   - production: Optimized, minimal image
 # =============================================================================
 
@@ -171,6 +172,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=pybuild /install/stable /usr/local
 COPY --from=pybuild /install/rest /usr/local
 
+# tiktoken's encodings, fetched here so the API counts tokens with no internet
+# (PRD-262 US-033). tiktoken downloads an encoding it has no cached copy of, through
+# requests.get with no timeout, into a temp directory no new container keeps; on a
+# host whose egress drops packets that hangs for minutes. TIKTOKEN_CACHE_DIR is read
+# by tiktoken itself, not by config.py (FR-12), and holds one hash-checked file per
+# encoding, readable by the runtime user. `encodings` lists every encoding the code
+# requests: core/context_guard.py's TOKENIZER_ENCODING, the only one today
+# (orchestrator/tests/test_prd262_offline_boot.py fails when the code asks for one
+# that is not here). The second load goes through a proxy that refuses every
+# connection, so a cache that cannot serve them offline fails the build. -B: the layer
+# holds the cache and nothing else (the stdlib's bytecode is the production stage's).
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken
+RUN encodings="cl100k_base" && \
+    load='import sys, tiktoken; [tiktoken.get_encoding(name) for name in sys.argv[1:]]' && \
+    python -B -c "$load" $encodings && \
+    HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 python -B -c "$load" $encodings
+
 # =============================================================================
 # Development Stage - Hot Reload & Debugging
 # =============================================================================
@@ -189,9 +207,10 @@ RUN useradd -m -u 1000 automatos && \
     mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
     chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
 
-# The wait-migrate-seed entrypoint. It runs the lifecycle only for `migrate` or
-# AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
-# directly. Compose also bind-mounts it, so edits apply without a rebuild.
+# The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029):
+# before the server it runs the migration step, plus the seeds where
+# AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it) asks. Compose also bind-mounts
+# it, so edits apply without a rebuild.
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
@@ -207,19 +226,37 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Default command — apply pending alembic migrations before starting,
-# so the deployed code and the live schema can never drift. ``heads``
-# (plural) upgrades the repository's single migration head. The
-# single-head invariant is enforced by the migration guard tests. If any
-# migration fails the container fails to boot — loud is better than
-# silent UndefinedColumn errors at request time.
-# --timeout-graceful-shutdown (dev stage only; prod runs --workers below): a
-# --reload first waits for open HTTP connections to close and the browser's SSE
-# streams (notifications, board events) never do, so every code edit wedged the
-# server in "Waiting for connections to close" until a restart (PRD-233 finding).
+# Default command — the hot-reload server. It runs no alembic: the entrypoint
+# migrates, once, before it starts (PRD-262 US-029).
+# --timeout-graceful-shutdown: a --reload first waits for open HTTP connections to
+# close and the browser's SSE streams (notifications, board events) never do, so
+# every code edit wedged the server in "Waiting for connections to close" until a
+# restart (PRD-233 finding).
 # `exec` (F416): uvicorn replaces the shell, so the entrypoint's watchdog and a
 # `docker stop` signal uvicorn itself, not a shell that would die without it.
-CMD sh -c "alembic upgrade heads && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5"
+CMD exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5
+
+# =============================================================================
+# Compile Stage - the code, and its boot modules' bytecode (PRD-262 US-032)
+# =============================================================================
+# The production image's only source of app bytecode: .dockerignore keeps a
+# checkout's .pyc out of the context (PRD-262 US-017), and nothing else writes any
+# under /app. FROM base, so the bytecode is the runtime interpreter's. It compiles
+# the modules every API process imports at boot (scripts/boot_modules.py: main's
+# static import closure, the routers router_manifest.py mounts and the entrypoint's
+# seed check), not all of /app: bytecode changes with every code edit, so it rides
+# in every code-only update. unchecked-hash: Python never compares a .pyc with its
+# source, so the build's file times can't make one stale, and a new container
+# imports the boot set instead of compiling it first. PYTHONHASHSEED=0 fixes the
+# string hashes, the one input of a .pyc that changes from run to run. The list
+# goes to /tmp, which the production stage does not copy. §9-Q7: the bytecode stays
+# only if .github/workflows/bytecode-experiment.yml shows a new container reaching
+# /health 200 at least 2 s sooner with it, within US-016's update bar.
+FROM base as compile
+
+COPY . .
+RUN python scripts/boot_modules.py > /tmp/boot-modules.txt && \
+    PYTHONHASHSEED=0 python -m compileall -q --invalidation-mode unchecked-hash -i /tmp/boot-modules.txt
 
 # =============================================================================
 # Production Stage - Optimized & Minimal
@@ -244,21 +281,24 @@ RUN useradd -m -u 1000 automatos && \
 # code change nor an entrypoint edit rebuilds this layer.
 RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
 
-# The wait-migrate-seed entrypoint. By default it runs the CMD directly, so
-# Railway boots exactly as before (the CMD migrates). `docker-entrypoint.sh
-# migrate` runs the full lifecycle and exits (the Kubernetes migration Job);
-# AUTOMATOS_MIGRATE_ON_BOOT=true runs it before the CMD.
+# The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029).
+# Before the server it runs the migration step, so Railway (no flag set) migrates
+# there; AUTOMATOS_MIGRATE_ON_BOOT=true adds the seeds (compose), and
+# AUTOMATOS_SKIP_MIGRATIONS=true runs nothing (the Helm api pods).
+# `docker-entrypoint.sh migrate` runs the full lifecycle and exits (the Kubernetes
+# migration Job).
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
-# The application code: the stage's last filesystem layer, so a code-only update
-# downloads this one layer (PRD-262 US-016; images.yml judges it against
-# .github/image-budgets.json's update bar). Owned by the user created above, by
-# its numeric id. Everything after it only sets image metadata. The test tools
-# are in requirements-dev.txt (locked in requirements-dev.lock), which only CI
-# installs; .dockerignore keeps the rest of the context out.
-COPY --chown=1000:1000 . .
+# The application code, with its boot modules' bytecode from the compile stage
+# (PRD-262 US-032): the stage's last filesystem layer, code and bytecode together,
+# so a code-only update downloads this one layer (PRD-262 US-016; images.yml
+# judges it against .github/image-budgets.json's update bar). Owned by the user
+# created above, by its numeric id. Everything after it only sets image metadata.
+# The test tools are in requirements-dev.txt (locked in requirements-dev.lock),
+# which only CI installs; .dockerignore keeps the rest of the context out.
+COPY --from=compile --chown=1000:1000 /app /app
 USER automatos
 
 # Expose port
@@ -271,12 +311,16 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Production command — apply pending alembic migrations before starting,
-# so deploys can't ship a model change ahead of the schema. ``heads``
-# (plural) upgrades the repository's single migration head. The
-# single-head invariant is enforced by the migration guard tests.
-# ``&&`` ensures uvicorn never starts if a
-# migration fails (visible deploy failure beats silent UndefinedColumn
-# errors at request time). Concurrent replicas serialise via alembic's
-# row lock — second runner sees no pending migrations and continues.
-CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
+# The worker count, which uvicorn reads from WEB_CONCURRENCY when the command
+# names no --workers (PRD-262 US-029). 4 is Railway's, which sets none;
+# envs/api.defaults sets 1 for compose. Set it on a service to change it there.
+ENV WEB_CONCURRENCY=4
+
+# Production command — uvicorn, and no alembic: the entrypoint migrates, once,
+# before it starts, and a failed migration exits before uvicorn runs (PRD-262
+# US-029). Shell form, so the shell expands Railway's PORT. `exec` (F416):
+# uvicorn replaces the shell, so `docker stop` and the entrypoint's watchdog
+# signal uvicorn itself. No --timeout-graceful-shutdown here, so Railway's
+# shutdown is unchanged; compose sets UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN
+# (envs/api.defaults).
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -10,6 +10,11 @@ seconds to its first 200 and last status, any ``--fetch``ed JSON (the backend's
 ``/health/bootstrap``) and the ``--meta`` values the caller recorded. Exit 1 when a
 URL never answered 200 within ``--timeout``.
 
+``--within SECONDS`` makes the boot a bar (PRD-262 US-033's egress smoke): it also
+exits 1 when a URL first answered 200 later than SECONDS after the container started.
+``--timeout`` counts from the first poll, so it can run past the bar and the record
+shows how late a slow boot was.
+
     smoke_boot.py --label fresh --container automatos_backend \\
         --url health=http://localhost:8000/health --url ready=http://localhost:8000/health/ready \\
         --fetch bootstrap=http://localhost:8000/health/bootstrap --out boots.jsonl
@@ -30,7 +35,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 POLL_INTERVAL_SECONDS = 1
 REQUEST_TIMEOUT_SECONDS = 5
@@ -145,6 +150,27 @@ def _started_at_or_none(container: str) -> Optional[str]:
         return None
 
 
+def late_probes(probes: Dict[str, dict], within_s: Optional[float]) -> List[str]:
+    """The probes that answered 200, but more than ``within_s`` after the start; none without a bar."""
+    if within_s is None:
+        return []
+    return sorted(name for name, result in probes.items()
+                  if result["seconds"] is not None and result["seconds"] > within_s)
+
+
+def check_bar(args: argparse.Namespace) -> int:
+    """``--within``: 1 when the boot ``wait`` just recorded answered a URL later than the bar."""
+    if args.within is None:
+        return 0
+    record = json.loads(args.out.read_text(encoding="utf-8").splitlines()[-1])
+    late = late_probes(record["probes"], args.within)
+    for name in late:
+        print(f"FAIL: {name} ({record['probes'][name]['url']}) answered 200 "
+              f"{record['probes'][name]['seconds']:.1f}s after {record['container']} started, "
+              f"over the {args.within:g}s bar [{record['label']}]")
+    return 1 if late else 0
+
+
 def _say(record: dict) -> None:
     for name, result in record["probes"].items():
         if result["seconds"] is None:
@@ -192,12 +218,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fetch", type=_pair, action="append", help="name=url, JSON fetched once all are 200")
     parser.add_argument("--meta", type=_pair, action="append", help="name=value, recorded as given")
     parser.add_argument("--timeout", type=float, default=300, help="seconds before giving up")
+    parser.add_argument("--within", type=float, default=None,
+                        help="a bar: fail when a URL answered 200 later than this after the container started")
     parser.add_argument("--out", type=Path, required=True, help="JSON-lines file the record is appended to")
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    return wait(build_parser().parse_args(argv))
+    args = build_parser().parse_args(argv)
+    return wait(args) or check_bar(args)
 
 
 if __name__ == "__main__":

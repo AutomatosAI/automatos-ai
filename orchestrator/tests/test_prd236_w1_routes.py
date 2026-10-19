@@ -267,7 +267,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the voice-measure wave (voice_turns timings, voice_calls.vendor_latency); the guard follows it.
     timings = (versions / "prd258_voice_timings.py").read_text()
     assert 'down_revision = "user_api_keys_provider_workspace_id"' in timings
-    assert 'EXPECTED_HEAD = "prd258_voice_timings"' in guard
+    # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto it — main.py's per-boot
+    # ALTERs (futureagi_eval_enabled, skills.content_hash) become a revision; the guard follows it.
+    boot_columns = (versions / "prd262_boot_columns.py").read_text()
+    assert 'down_revision = "prd258_voice_timings"' in boot_columns
+    assert 'EXPECTED_HEAD = "prd262_boot_columns"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
