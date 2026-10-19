@@ -105,7 +105,7 @@ def test_the_user_and_node_are_in_place_before_the_app_layers():
     production = _stage("production")
     first_app = production.index(APP_LAYERS[0])
     user = next(i for i, line in enumerate(production) if line.startswith("RUN") and "adduser" in line)
-    node = production.index("COPY --from=base /usr/local/bin/node /usr/local/bin/node")
+    node = production.index("COPY --from=node-strip /usr/local/bin/node /usr/local/bin/node")
     assert max(user, node) < first_app
 
 

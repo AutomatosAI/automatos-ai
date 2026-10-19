@@ -5,6 +5,9 @@
 #   check-standalone-image.sh <image> <page path> [docker run options...]
 #
 # - None of the paths next.config.js keeps out of the standalone trace is in /app.
+# - node runs, and its binary has no symbol table or debug section (strip --strip-all in
+#   the Dockerfile's node-strip stage, PRD-262 #24). The image has no readelf, so its own
+#   node reads its section headers.
 # - Started with no network at all (--network none), the server answers <page path>
 #   with 200 (a signed-out request needs no network) and /_next/image with 404 (image
 #   optimisation is off, so nothing asks for sharp).
@@ -38,6 +41,20 @@ READY_PATH=/favicon.ico
 OPTIMISER_PATH='/_next/image?url=%2Fbrand%2Fautomatos-mark.png&w=96&q=75'
 STATUS_JS='fetch(`http://127.0.0.1:${process.env.PORT || 3000}${process.argv[1]}`, { redirect: "manual" }).then((r) => console.log(r.status), () => console.log(0))'
 CONTAINER="standalone-check-$$"
+# The names of the ELF sections strip --strip-all removes that the image's node binary still
+# has: .symtab, .strtab and .debug_*. Prints nothing for a stripped binary.
+ELF_SECTIONS_JS='const fs = require("fs"); const file = process.argv[1] || process.execPath; const fd = fs.openSync(file, "r");
+const read = (at, length) => { const b = Buffer.alloc(length); fs.readSync(fd, b, 0, length, at); return b };
+const head = read(0, 64);
+if (head.readUInt32BE(0) !== 0x7f454c46 || head[4] !== 2 || head[5] !== 1) throw new Error(`${file}: not a 64-bit little-endian ELF file`);
+const size = head.readUInt16LE(58); const count = head.readUInt16LE(60);
+const table = read(Number(head.readBigUInt64LE(40)), size * count);
+const field = (i, offset) => Number(table.readBigUInt64LE(i * size + offset));
+const shstrndx = head.readUInt16LE(62); const names = read(field(shstrndx, 24), field(shstrndx, 32));
+for (let i = 0; i < count; i++) {
+  const start = table.readUInt32LE(i * size); const name = names.toString("latin1", start, names.indexOf(0, start));
+  if (/^\.(symtab|strtab|debug_)/.test(name)) console.log(name);
+}'
 
 bad=0
 fail() {
@@ -62,6 +79,20 @@ check_trace() {
   if [ -z "$present" ]; then echo "absent from /app: ${TRACE_EXCLUDED[*]}"; fi
 }
 
+check_node() {
+  local version sections
+  if ! version=$(docker run --rm "$IMAGE" node -v); then fail "node does not run"; return; fi
+  if ! sections=$(docker run --rm "$IMAGE" node -e "$ELF_SECTIONS_JS"); then
+    fail "node could not read its own section headers"
+    return
+  fi
+  if [ -n "$sections" ]; then
+    fail "node ${version} keeps sections strip --strip-all removes: ${sections//$'\n'/ }"
+  else
+    echo "node ${version}: no symbol table or debug section"
+  fi
+}
+
 wait_until_ready() {
   local waited=0
   until [ "$(status_of "$READY_PATH")" = 200 ]; do
@@ -84,6 +115,7 @@ expect_status() {
 }
 
 check_trace
+check_node
 docker run -d --name "$CONTAINER" --network none "$@" "$IMAGE" > /dev/null
 trap 'docker rm -f "$CONTAINER" > /dev/null 2>&1 || true' EXIT
 wait_until_ready

@@ -5,7 +5,8 @@
 #   - base: Node 24 on Alpine, with the locked dependencies installed (npm ci)
 #   - development: Hot-reload development server
 #   - builder: Production build
-#   - production: Alpine, the node binary and the standalone build
+#   - node-strip: base's node binary without its symbol table and debug sections
+#   - production: Alpine, the stripped node binary and the standalone build
 # =============================================================================
 
 # =============================================================================
@@ -107,10 +108,25 @@ ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules .next/standalone-node_modules
 
 # =============================================================================
+# Node Strip Stage - the runtime's node binary, stripped
+# =============================================================================
+# PRD-262 #24: the official binary carries a symbol table and debug sections (18.8 MB on
+# arm64) that nothing loads. strip --strip-all keeps .dynsym, so JS stack traces, the V8
+# snapshot and the exported symbols stay; native frames in a crash report lose their names.
+# -p keeps the file's dates, so a rerun makes the same layer. binutils stays in this stage,
+# and the build fails if readelf still lists a symbol table or a debug section.
+FROM base AS node-strip
+RUN apk add --no-cache binutils && \
+    strip --strip-all -p /usr/local/bin/node && \
+    if readelf -S --wide /usr/local/bin/node | grep -E '] \.(symtab|strtab|debug_)'; then exit 1; fi && \
+    node -v
+
+# =============================================================================
 # Production Stage - Optimized (Next.js standalone)
 # =============================================================================
 # PRD-262 US-007: plain Alpine plus the one file the standalone server needs from
-# Node, /usr/local/bin/node. No npm, yarn, corepack, C headers or curl.
+# Node, /usr/local/bin/node (stripped by node-strip, PRD-262 #24). No npm, yarn,
+# corepack, C headers or curl.
 # libstdc++ (which brings libgcc) is the binary's only library beyond musl.
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS production
 
@@ -121,7 +137,7 @@ WORKDIR /app
 RUN apk upgrade --no-cache && \
     apk add --no-cache libstdc++
 
-COPY --from=base /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-strip /usr/local/bin/node /usr/local/bin/node
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
