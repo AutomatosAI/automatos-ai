@@ -1,4 +1,4 @@
-"""Clerk production cutover: a returning person signs in with a NEW Clerk user ID.
+"""Clerk production cutover: sign-in never moves a ``users`` row, and never 500s.
 
 Moving Clerk from its development instance to production gives every returning
 person a new Clerk user ID and the same email ("Automatos billing options", 19 Oct
@@ -7,10 +7,14 @@ provisioning's insert (``ON CONFLICT (clerk_user_id) DO NOTHING``) raised on the
 email, was rolled back, the read-back by the new Clerk ID found nothing and
 ``uid_row[0]`` crashed: a 500 for every returning user.
 
-These tests pin the fix in ``core/auth/user_link.py`` (find by Clerk ID, else
-relink by email, else insert) and its wiring into the workspace resolver. The
-real-Postgres version of the same journey is
-``test_clerk_cutover_returning_user_realdb.py``.
+The first fix relinked the row by email at sign-in. That was held on PR #1198: a
+login-time email match can rebind an existing account to a new Clerk user. Sign-in
+now finds a row by Clerk ID or inserts one; an email already held by another row is
+a clear 409 and nothing moves. Returning users are relinked once by the cutover
+step (``core/auth/clerk_cutover.py``, tested in ``test_clerk_cutover_relink.py``).
+
+These tests pin ``core/auth/user_link.py`` and the resolver. The real-Postgres
+journey is ``test_clerk_cutover_returning_user_realdb.py``.
 """
 from __future__ import annotations
 
@@ -28,11 +32,12 @@ from uuid import uuid4  # noqa: E402
 import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
+import core.auth.hybrid as hybrid  # noqa: E402
+import core.auth.user_link as user_link  # noqa: E402
 from core.auth.hybrid import _resolve_workspace_for_clerk_user  # noqa: E402
 from core.auth.user_link import (  # noqa: E402
     LINK_CONFLICT_MESSAGE,
     ensure_user_row,
-    relink_user_by_email,
 )
 
 OLD_CLERK_ID = "user_dev_2xOldDevInstance"
@@ -52,7 +57,8 @@ class _UsersTable:
     """The ``users`` statements user_link sends, answered from a list of dicts.
 
     The unique columns are clerk_user_id, email and username, as in
-    ``core/models/core.py`` ``User``. Any other statement fails the test.
+    ``core/models/core.py`` ``User`` (case-sensitive, as Postgres compares them).
+    Any other statement fails the test.
     """
 
     def __init__(self, *rows):
@@ -69,11 +75,6 @@ class _UsersTable:
         if sql.startswith("SELECT id, clerk_user_id FROM users WHERE LOWER(email) = LOWER(:email)"):
             hits = sorted((r for r in self.rows if r["email"].lower() == params["email"].lower()), key=lambda r: r["id"])
             return _Result([(r["id"], r["clerk_user_id"]) for r in hits])
-        if sql.startswith("UPDATE users SET clerk_user_id = :cid WHERE id = :id"):
-            for row in self.rows:
-                if row["id"] == params["id"]:
-                    row["clerk_user_id"] = params["cid"]
-            return _Result([])
         if sql.startswith("INSERT INTO users"):
             return self._insert(sql, params)
         raise AssertionError(f"unexpected SQL: {sql}")
@@ -99,6 +100,9 @@ class _UsersTable:
     def inserts(self):
         return [s for s in self.statements if s.startswith("INSERT INTO users")]
 
+    def updates(self):
+        return [s for s in self.statements if s.startswith("UPDATE users")]
+
 
 def _returning_user(**overrides):
     row = {"id": 7, "clerk_user_id": OLD_CLERK_ID, "email": EMAIL, "username": EMAIL}
@@ -106,26 +110,36 @@ def _returning_user(**overrides):
     return row
 
 
-# ── ensure_user_row ──────────────────────────────────────────────────────
+def _conflict(call):
+    with pytest.raises(HTTPException) as raised:
+        call()
+    assert raised.value.status_code == 409
+    assert raised.value.detail == LINK_CONFLICT_MESSAGE
+    return raised.value
 
-def test_a_known_clerk_id_resolves_without_relinking_or_inserting():
+
+# ── ensure_user_row: the sign-in path ────────────────────────────────────
+
+def test_a_known_clerk_id_resolves_without_inserting():
     db = _UsersTable(_returning_user(clerk_user_id=NEW_CLERK_ID))
     assert ensure_user_row(db, NEW_CLERK_ID, email=EMAIL) == 7
     assert len(db.statements) == 1
 
 
-def test_a_returning_person_with_a_new_clerk_id_keeps_their_row_relinked():
-    """The 500: a new Clerk ID with an email that already has a row."""
+def test_a_new_clerk_id_with_a_taken_email_is_a_409_and_moves_nothing():
+    """The old 500, and the held relink: the row stays on its Clerk ID."""
     db = _UsersTable(_returning_user())
-    assert ensure_user_row(db, NEW_CLERK_ID, email=EMAIL, name="Returning") == 7
-    assert db.rows == [_returning_user(clerk_user_id=NEW_CLERK_ID)]
-    assert db.inserts() == [], "no second users row is attempted"
+    _conflict(lambda: ensure_user_row(db, NEW_CLERK_ID, email=EMAIL, name="Returning"))
+    assert db.rows == [_returning_user()], "the existing row is not rebound to the new Clerk ID"
+    assert db.inserts() == [] and db.updates() == []
 
 
-def test_the_relink_matches_the_email_case_insensitively():
-    db = _UsersTable(_returning_user(email="Returning@Example.TEST"))
-    assert ensure_user_row(db, NEW_CLERK_ID, email=EMAIL) == 7
-    assert db.rows[0]["clerk_user_id"] == NEW_CLERK_ID
+def test_the_taken_email_is_matched_case_insensitively():
+    """users.email is unique but case-sensitive: without this a second row would be made."""
+    db = _UsersTable(_returning_user(email="Returning@Example.TEST", username="Returning@Example.TEST"))
+    _conflict(lambda: ensure_user_row(db, NEW_CLERK_ID, email=EMAIL))
+    assert len(db.rows) == 1 and db.rows[0]["clerk_user_id"] == OLD_CLERK_ID
+    assert db.inserts() == []
 
 
 def test_a_brand_new_person_still_gets_a_row():
@@ -137,7 +151,7 @@ def test_a_brand_new_person_still_gets_a_row():
     assert len(db.inserts()) == 1
 
 
-def test_a_token_without_an_email_gets_the_pending_placeholder_and_no_relink():
+def test_a_token_without_an_email_gets_the_pending_placeholder():
     db = _UsersTable()
     assert ensure_user_row(db, NEW_CLERK_ID, email=None) == 1
     assert db.rows[0]["email"] == f"{NEW_CLERK_ID}@pending"
@@ -147,55 +161,34 @@ def test_a_token_without_an_email_gets_the_pending_placeholder_and_no_relink():
 
 def test_a_username_held_by_another_row_is_a_clear_409_not_a_500():
     db = _UsersTable(_returning_user(email="other@example.test", username=EMAIL))
-    with pytest.raises(HTTPException) as raised:
-        ensure_user_row(db, NEW_CLERK_ID, email=EMAIL)
-    assert raised.value.status_code == 409
-    assert raised.value.detail == LINK_CONFLICT_MESSAGE
+    _conflict(lambda: ensure_user_row(db, NEW_CLERK_ID, email=EMAIL))
     assert "users" not in LINK_CONFLICT_MESSAGE and "clerk" not in LINK_CONFLICT_MESSAGE.lower()
 
 
-# ── relink_user_by_email ─────────────────────────────────────────────────
+def test_sign_in_has_no_relink_by_email():
+    """The held design is gone, not just unused."""
+    assert not hasattr(user_link, "relink_user_by_email")
+    assert not hasattr(hybrid, "relink_user_by_email")
+    assert not hasattr(hybrid, "_relinked_workspace_for_clerk_user")
 
-def test_relink_does_nothing_without_an_email_or_a_matching_row():
+
+# ── the resolver: a returning person is never rebound at sign-in ─────────
+
+@patch("core.auth.hybrid._has_pending_invitations", return_value=False)
+@patch("core.auth.hybrid._accessible_workspace_for_clerk_user", return_value=None)
+def test_the_resolver_gives_a_returning_person_a_409_not_their_row(accessible, pending):
+    """Before the cutover step relinks them, a new Clerk ID reaches provisioning and stops."""
     db = _UsersTable(_returning_user())
-    assert relink_user_by_email(db, NEW_CLERK_ID, None) is None
-    assert relink_user_by_email(db, NEW_CLERK_ID, "") is None
-    assert relink_user_by_email(db, NEW_CLERK_ID, "nobody@example.test") is None
-    assert db.rows[0]["clerk_user_id"] == OLD_CLERK_ID
-
-
-def test_relink_is_not_committed_by_itself():
-    db = _UsersTable(_returning_user())
-    relink_user_by_email(db, NEW_CLERK_ID, EMAIL)
-    assert db.commits == 0
-
-
-# ── the resolver: a returning person lands in the workspace they had ─────
-
-@patch("core.auth.hybrid._provision_new_user_workspace")
-@patch("core.auth.hybrid._has_pending_invitations", return_value=True)
-@patch("core.auth.hybrid.relink_user_by_email", return_value=7)
-@patch("core.auth.hybrid._accessible_workspace_for_clerk_user")
-def test_the_resolver_relinks_then_returns_the_workspace_they_had(accessible, relink, pending, provision):
-    """Ahead of the pending-invitation gate, as it was on the old Clerk ID."""
-    their_workspace = uuid4()
-    accessible.side_effect = [None, their_workspace]
-    db = MagicMock()
-
-    resolved = _resolve_workspace_for_clerk_user(db, clerk_user_id=NEW_CLERK_ID, org_id=None, email=EMAIL)
-
-    assert resolved == their_workspace
-    relink.assert_called_once_with(db, NEW_CLERK_ID, EMAIL)
-    db.commit.assert_called_once()
-    pending.assert_not_called()
-    provision.assert_not_called()
+    _conflict(lambda: _resolve_workspace_for_clerk_user(db, clerk_user_id=NEW_CLERK_ID, org_id=None, email=EMAIL))
+    accessible.assert_called_once_with(db, NEW_CLERK_ID)
+    assert db.rows == [_returning_user()]
+    assert db.updates() == [] and db.commits == 0
 
 
 @patch("core.auth.hybrid._provision_new_user_workspace")
 @patch("core.auth.hybrid._has_pending_invitations", return_value=False)
-@patch("core.auth.hybrid.relink_user_by_email", return_value=None)
 @patch("core.auth.hybrid._accessible_workspace_for_clerk_user", return_value=None)
-def test_the_resolver_still_provisions_a_genuinely_new_person(accessible, relink, pending, provision):
+def test_the_resolver_still_provisions_a_genuinely_new_person(accessible, pending, provision):
     new_workspace = uuid4()
     provision.return_value = new_workspace
     db = MagicMock()

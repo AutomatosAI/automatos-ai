@@ -107,7 +107,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # run table (harness_runs) that replaces the last_run and trace JSON files.
 # 2026-10-19: auto_haiku_default_20261019 chains onto prd263_harness_runs — a data
 # migration: the platform default for Auto becomes Haiku 5.5 and the Auto rows on it move.
-EXPECTED_HEAD = "auto_haiku_default_20261019"
+# 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto that — a new
+# table only, the audit record of the one-time relink of returning users to production IDs.
+EXPECTED_HEAD = "clerk_user_relinks_20261019"
 
 
 def _literal(node: ast.AST):

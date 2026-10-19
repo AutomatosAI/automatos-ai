@@ -14,7 +14,7 @@ from config import config
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.personal_workspace import insert_personal_workspace, seed_new_workspace
-from core.auth.user_link import ensure_user_row, relink_user_by_email
+from core.auth.user_link import ensure_user_row
 from core.database.database import SessionLocal
 from core.services.api_key_service import ApiKeyService
 
@@ -262,15 +262,16 @@ def _provision_new_user_workspace(
     Auto-provision a personal workspace for a new Clerk user.
 
     Creates:
-    1. A ``users`` row (if missing) linked via clerk_user_id. A person who already
-       has a row under another Clerk ID and the same email (the Clerk production
-       cutover) keeps that row, relinked: ``core.auth.user_link.ensure_user_row``.
+    1. A ``users`` row (if missing) linked via clerk_user_id
+       (``core.auth.user_link.ensure_user_row``). An email or username already held
+       by another row is a 409, never a 500, and never moves that row: returning
+       users are relinked once by the Clerk cutover step, not at sign-in.
     2. A personal ``workspaces`` row owned by that user
     3. A ``workspace_members`` row with role='owner'
 
     Returns the new workspace UUID, or the user's existing personal workspace.
     """
-    # 1) Find, relink or insert the user (idempotent; never a 500 on a taken email)
+    # 1) Find or insert the user (idempotent; a 409, never a 500, on a taken email)
     uid = ensure_user_row(db, clerk_user_id, email=email, name=name)
     logger.info("Resolved user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
 
@@ -367,23 +368,6 @@ def _accessible_workspace_for_clerk_user(db, clerk_user_id: str) -> Optional[UUI
     return ws_row[0] if ws_row and ws_row[0] else None
 
 
-def _relinked_workspace_for_clerk_user(
-    db, clerk_user_id: str, email: Optional[str],
-) -> Optional[UUID]:
-    """A returning person's workspace, once their ``users`` row is relinked to this Clerk ID.
-
-    Moving Clerk to its production instance gives every returning person a new Clerk
-    user ID with the same email. Their row moves to the new ID (committed, so every
-    later request resolves by Clerk ID), and they land in the workspace they had
-    before: owned or joined, ahead of the pending-invitation gate, exactly as on the
-    old ID. None when no row has the email, or the row has no usable workspace.
-    """
-    if relink_user_by_email(db, clerk_user_id, email) is None:
-        return None
-    db.commit()
-    return _accessible_workspace_for_clerk_user(db, clerk_user_id)
-
-
 def _resolve_workspace_for_clerk_user(
     db,
     clerk_user_id: Optional[str],
@@ -396,8 +380,7 @@ def _resolve_workspace_for_clerk_user(
 
     Priority:
     1. Org workspace (workspaces.clerk_org_id == org_id)
-    2. Any workspace the user can access (owned OR active membership), owner-biased;
-       a returning person under a new Clerk ID is relinked by email first
+    2. Any workspace the user can access (owned OR active membership), owner-biased
     3. Auto-provision a new personal workspace (only when no pending invitation)
     """
     # 1) Org workspace
@@ -414,11 +397,9 @@ def _resolve_workspace_for_clerk_user(
         if row and row[0]:
             return row[0]
 
-    # 2) Workspace via ownership OR active membership, then via a relink by email.
+    # 2) Workspace via ownership OR active membership, by Clerk ID only.
     if clerk_user_id:
-        workspace = _accessible_workspace_for_clerk_user(db, clerk_user_id) or (
-            _relinked_workspace_for_clerk_user(db, clerk_user_id, email)
-        )
+        workspace = _accessible_workspace_for_clerk_user(db, clerk_user_id)
         if workspace:
             return workspace
 
