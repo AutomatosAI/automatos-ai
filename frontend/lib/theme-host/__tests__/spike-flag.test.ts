@@ -18,7 +18,6 @@ const SHIPPED_BUILD_FILES = [
   'frontend/Dockerfile',
   'docker-compose.yml',
   'docker-compose.dev.yml',
-  'docker-compose.images.yml',
   'envs/frontend.defaults',
   'railway.json',
   '.github/workflows/images.yml',

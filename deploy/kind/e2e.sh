@@ -34,7 +34,13 @@ TAG="${E2E_IMAGE_TAG:-edge}"
 API_IMAGE=automatos-api:e2e
 FRONTEND_IMAGE="ghcr.io/automatosai/automatos-frontend:$TAG"
 WORKER_IMAGE="ghcr.io/automatosai/automatos-workspace-worker:$TAG"
-DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine otel/opentelemetry-collector-contrib:0.161.0)
+# The exact references datastores.yaml and otel-collector.yaml name, so what this script
+# pulls and loads is what the pods run (test_prd262_kind_pins.py holds them equal).
+DATASTORE_IMAGES=(
+    pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    otel/opentelemetry-collector-contrib:0.161.0
+)
 WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 API_PORT=18000
 FRONTEND_PORT=13000

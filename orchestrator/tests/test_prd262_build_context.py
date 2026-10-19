@@ -19,9 +19,10 @@ This suite checks:
 - scripts/ci/build_context.py: its seeds land where those rules apply, its budget holds
   today's code, and it reads the context transfer off real BuildKit logs;
 - CI seeds before the builds it checks: test.yml's prod-image-parity (the production
-  build) and smoke-fresh-clone (the compose build), whose script fails over the budget.
+  build) and smoke-fresh-clone (make build since PRD-262 US-039), whose script fails over
+  the budget once make build has exited.
 
-File reads and one `git ls-files`; the smoke script runs against a fake docker.
+File reads and one `git ls-files`; the smoke script runs against a fake docker and make.
 """
 from __future__ import annotations
 
@@ -47,7 +48,8 @@ DOCKERFILE = (ORCHESTRATOR / "Dockerfile").read_text(encoding="utf-8")
 API_DEFAULTS = (ROOT / "envs" / "api.defaults").read_text(encoding="utf-8")
 SMOKE_SCRIPT = ROOT / "scripts" / "ci" / "smoke-fresh-clone.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
-COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml", "docker-compose.images.yml")
+# docker-compose.images.yml went with PRD-262 US-036: docker-compose.yml names the published images.
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml")
 WORKDIR = "/app"
 US017_RULES = (
     "**/__pycache__",
@@ -285,7 +287,8 @@ PRODUCTION = _stage("production")
 def test_the_development_stage_copies_no_code_and_stores_nothing_twice():
     copies = [line for line in DEVELOPMENT if line.split()[0].upper() in ("COPY", "ADD")]
     assert [line.split()[-1] for line in copies] == [
-        "/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh"]
+        "/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
+        "/usr/local/bin/docker-secrets-guard.sh"]
     assert not [line for line in DEVELOPMENT if _CHOWN_R.search(line)]
 
 
@@ -464,28 +467,34 @@ def test_the_fresh_clone_smoke_seeds_and_reads_the_backends_build():
     assert re.search(r"^set -uo pipefail$", script, re.M), "tee would hide a failed build"
     assert 'CONTEXT_TOOL="scripts/ci/build_context.py"' in script
     assert 'BUILD_LOG="${OUT_DIR}/build.log"' in script
+    # PRD-262 US-039: the build is make build's, its output the build log; once make build
+    # has exited, the log is whole and the context is read off it.
     build = _function(script, "build_images")
-    assert 'compose build backend workspace-worker frontend 2>&1 | tee "$BUILD_LOG"' in build
-    assert build.rstrip().endswith("check_build_context")
+    assert 'make build 2>&1 | tee "$BUILD_LOG"' in build
+    finish = _function(script, "finish_make")
+    assert finish.rstrip().endswith('[ "$MAKE_TARGET" != "build" ] || check_build_context')
     assert 'python3 "$CONTEXT_TOOL" check --service backend "$BUILD_LOG"' in _function(script, "check_build_context")
 
 
-# A docker whose compose build prints a backend context over the budget.
+# A docker that starts nothing, and a make build whose backend build sent a context over
+# the budget and then exited 0.
 _FAKE_DOCKER = """#!/bin/bash
 echo "docker $*" >> "$CALL_LOG"
-case "$*" in
-  "compose "*" build "*)
-    printf '#19 [backend internal] load build context\\n#19 transferring context: 61.20MB 3.1s done\\n' >&2 ;;
-esac
+exit 0
+"""
+_FAKE_MAKE = """#!/bin/bash
+echo "make $*" >> "$CALL_LOG"
+printf '#19 [backend internal] load build context\\n#19 transferring context: 61.20MB 3.1s done\\n' >&2
 exit 0
 """
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
-def test_the_smoke_stops_before_booting_when_the_context_is_over_budget(tmp_path):
+def test_the_smoke_fails_when_make_builds_context_is_over_budget(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name, body in {"docker": _FAKE_DOCKER, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}.items():
+    stubs = {"docker": _FAKE_DOCKER, "make": _FAKE_MAKE, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
+    for name, body in stubs.items():
         (bin_dir / name).write_text(body, encoding="utf-8")
         (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
     calls = tmp_path / "calls.log"
@@ -499,6 +508,7 @@ def test_the_smoke_stops_before_booting_when_the_context_is_over_budget(tmp_path
     assert proc.returncode == 1, out
     assert "sent 61.20 MB, over the 40.00 MB budget" in out
     assert "61.20MB" in (tmp_path / "out" / "build.log").read_text(encoding="utf-8")
-    assert not any(" up " in call for call in called), "nothing boots after a context over budget"
+    assert "make build" in called
+    assert not any(" up " in call for call in called if call.startswith("docker ")), "the smoke starts nothing"
     assert called[-1] == "docker compose -f docker-compose.yml down -v"
     assert "build context is over its budget" in (tmp_path / "summary.md").read_text(encoding="utf-8")

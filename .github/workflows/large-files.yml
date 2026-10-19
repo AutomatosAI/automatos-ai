@@ -1,0 +1,59 @@
+name: large-files
+
+# PRD-262 US-042: no change starts tracking a file over 5 MB. Every clone downloads
+# the whole tree, the self-host docs' `git clone --depth 1` included, so one large
+# binary costs every installer from then on. Large media belongs in a release asset.
+#
+# scripts/ci/check_large_files.py compares the change's base with its head; a file
+# already over the limit may change, a new one may not come in.
+# orchestrator/tests/test_prd262_large_files.py tests it and holds this lane to it.
+#
+# Every pull request, whatever it touches and whatever its base branch, and every
+# push to main. Seconds: one shallow checkout and a tree diff.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A new push to a pull request supersedes the last; every push to main is checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  large-files:
+    name: No newly tracked file over 5 MB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (the change and its parent)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: The commit the change starts from
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A pull request checks out its merge commit, whose first parent is the base
+          # branch. A push to main starts from the commit main was at before it; a push
+          # with no such commit (a new branch) starts from HEAD's parent.
+          if [ "$EVENT" = "pull_request" ] || [ -z "${BEFORE//0/}" ]; then
+            echo "rev=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+          else
+            git fetch --no-tags --depth=1 origin "$BEFORE"
+            echo "rev=$BEFORE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: No newly tracked file over 5 MB
+        env:
+          BASE: ${{ steps.base.outputs.rev }}
+        run: python3 scripts/ci/check_large_files.py --base "$BASE" --head HEAD

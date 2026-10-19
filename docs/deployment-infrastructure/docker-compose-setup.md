@@ -214,8 +214,8 @@ Sources: [orchestrator/Dockerfile:131](), [frontend/Dockerfile:129](), [docker-c
 The backend uses a multi-stage Dockerfile [orchestrator/Dockerfile:1-8]().
 - **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked and installed in two layers (PRD-262 US-022) [orchestrator/Dockerfile](). Every build installs that one lock, Railway's included: the Knowledge Graph's Leiden clustering runs on `graspologic-native`, which the lock pins, so no build argument adds `graphifyy[leiden]` (PRD-262 US-027) [orchestrator/Dockerfile]().
 - **`base` stage**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:70-107]().
-- **`development` stage**: Includes hot-reload capabilities and debugging tools. The entrypoint `docker-entrypoint.sh` is mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
-- **`production` stage**: Optimized and minimal, copying only necessary application code and running `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
+- **`development` stage**: Includes hot-reload capabilities and debugging tools; `make dev` runs it through `docker-compose.dev.yml`. The source and the entrypoint `docker-entrypoint.sh` are mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
+- **`production` stage**: Optimized and minimal, copying only necessary application code. The default compose stack runs it, with nothing mounted over the code (PRD-262 US-035), and so does Railway. It runs `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
 
 Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.in:1-142]()
 
@@ -250,14 +250,15 @@ Sources: [docker-compose.yml:42,72,102,131,249](), [orchestrator/Dockerfile:108]
 ## Deployment and Setup
 
 ### Prerequisites
-1. Copy `.env.example` to `.env` and set required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`) [docker-compose.yml:14-15]().
-2. Ensure Docker and Docker Compose are installed.
+1. Docker Engine 25 or later with Docker Compose 2.24.4 or later (`make up` checks both).
+2. `.env` with the required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`): `make up` creates it from `.env.example` and generates the three ([self-hosting.md §2](../getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)).
 
 ### Launch Commands
 
-- **Standard (Core Only)**: `docker compose up --build` [docker-compose.yml:9]().
+- **Standard (six containers)**: `make up`, which pulls the images CI published for the commit and starts the stack; plain `docker compose up -d` runs the tag in `.env` ([self-hosting.md §1b](../getting-started/self-hosting.md#1b-the-commands-behind-make)).
+- **Core (five containers, no workspace worker)**: `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`.
 - **With Qdrant (Memory Profile)**: `docker compose --profile memory up -d` [docker-compose.yml:118]().
-- **Development Mode**: Uses the `development` target in the Dockerfile for hot-reloading [orchestrator/Dockerfile:91-131]().
+- **Development Mode**: `make dev` (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`) uses the `development` target in the Dockerfile for hot-reloading, with the source mounted [orchestrator/Dockerfile:91-131]().
 
 ### `docker-entrypoint.sh`
 

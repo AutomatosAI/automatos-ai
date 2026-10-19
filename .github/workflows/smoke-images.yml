@@ -3,20 +3,24 @@ name: smoke-images
 # PRD-262 US-003: a lane that boots what we publish, the way a self-hoster runs it,
 # so the first-run promise is a measured number.
 #
-# - smoke-images: after images.yml publishes on main (workflow_run), and by hand with
-#   a tag, on amd64 and arm64, starting from an empty Docker cache. It runs today's
-#   published path: `docker compose -f docker-compose.yml -f docker-compose.images.yml`
-#   with AUTOMATOS_IMAGE_TAG=sha-<7>, pulled (timed, bytes counted) and then started
-#   with `up -d --no-build`. It records the pull, the fresh boot and two warm restarts
-#   (container start to /health 200), the first run from the pull's start to :3000 200,
-#   and asserts that nothing was built: each app container runs a
+# - smoke-images: after images.yml publishes on main (workflow_run), and by hand with a
+#   tag, on amd64 and arm64, starting from an empty Docker cache. It runs the path a
+#   self-hoster takes (PRD-262 US-036): `make up` on the clean checkout of the published
+#   commit. After a push no tag is exported, so make up picks it (that commit's sha-<7>,
+#   or edge once edge is a build of it) and must build nothing; a weekly or manual run
+#   pins its tag (the `pin` output). make up pulls and starts the stack (timed, bytes
+#   counted, its output searched for Docker Hub 429s, PRD-262 §9), while the fresh boot
+#   and the frontend are timed from their own start; then two warm restarts (container
+#   start to /health 200), and the first run from make up's start to :3000 200. It
+#   asserts that nothing was built: each app container runs a
 #   ghcr.io/automatosai/automatos-* image whose RepoDigests holds the index digest its
-#   tag resolves to on GHCR, no tag is local-*, and no compose-built image exists. The
-#   images must carry their commit's org.opencontainers.image.revision, and the backend,
-#   booted from the production stage for the first time in CI, must run without
-#   --reload and with the worker count compose's WEB_CONCURRENCY sets (envs/api.defaults'
-#   1; PRD-262 US-029). PRD-262 US-036 and US-037
-#   switch this job to `make up` on a clean checkout, and PRD-262 US-056 (W9) adds a
+#   tag resolves to on GHCR, the app images exist only under that tag, no tag is
+#   local-*, and no compose-built image exists. The images must carry their commit's
+#   org.opencontainers.image.revision, and the backend, booted from the production stage,
+#   must run without --reload and with the worker count compose's WEB_CONCURRENCY sets
+#   (envs/api.defaults' 1; PRD-262 US-029). No secret is exported (PRD-262 US-037): make
+#   up's make env writes three to .env, and the smoke finds them there as 48 hex
+#   characters each. PRD-262 US-056 (W9) adds a
 #   rollback step: the previous main run's API image, with AUTOMATOS_SKIP_MIGRATIONS=true,
 #   against the schema the new image migrated, must answer /health/ready 200.
 # - promote-edge: once smoke-images passes on both arches for a main publish, it points
@@ -36,10 +40,32 @@ name: smoke-images
 #   boot, it checks that the api image installs no package the code never imports
 #   (PRD-262 US-015). Its backend runs WEB_CONCURRENCY=2 (a compose override the
 #   script writes), because a single uvicorn process has no manager to replace the
-#   worker the PRD-262 US-008 step kills.
-# - Both jobs, before the warm restarts: a document uploaded to the backend goes into
-#   MinIO through the image's pruned botocore, and the host fetches it back by its
-#   presigned URL (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
+#   worker the PRD-262 US-008 step kills. After it, on the same images (PRD-262 US-040,
+#   scripts/ci/smoke-core-stack.sh): `make up` from an .env written before W5 starts six
+#   containers; `make up CORE=1` on that stack stops the worker and runs five; and a fresh
+#   `make up CORE=1` (docker-compose.core.yml) runs five, answers /health/ready 200 and
+#   "Workspace worker not running" from a workspace endpoint, then starts the worker, which
+#   must leave a file in the deliverables folder with its host owner. Then, on the same
+#   images (PRD-262 US-041, scripts/ci/smoke-minio-upgrade.sh): a minio_data volume that
+#   MinIO wrote as root, as installs before US-041 did, is upgraded once through `make up`
+#   and once through plain `docker compose up -d`. Each time minio-volume-owner must
+#   re-own it and exit 0, MinIO must run healthy as uid 65532, the backend must answer
+#   /health/ready 200, the old object must read back and its bucket must take a new one.
+# - make-up-pr (PRD-262 US-036): on the same pull requests, `make up` on the pull
+#   request's checkout with AUTOMATOS_IMAGE_TAG pinned to sha-<7> of the merge base (or of
+#   its nearest ancestor CI published, when the merge base has none: a [skip ci] merge).
+#   It must build nothing (the three app images exist only under that tag, pulled, with
+#   no local-* tag), and the stack must answer /health/ready 200 and :3000 200
+#   (scripts/ci/smoke-make-up.sh). After the merge, smoke-images repeats it on the new
+#   commit with no tag exported. No secret is exported there either: make up must write
+#   three generated ones to .env (PRD-262 US-037). Then, with the stack gone, make env
+#   must leave a placeholder .env as it is and exit non-zero once the database volume
+#   exists, saying how to rotate (scripts/ci/smoke-make-env.sh).
+# - Both jobs, before the warm restarts: MinIO runs as its image's user, uid 65532, on the
+#   fresh volume, after minio-volume-owner exited 0 (scripts/ci/smoke_minio.py, PRD-262
+#   US-041); then a document uploaded to the backend goes into MinIO through the image's
+#   pruned botocore, and the host fetches it back by its presigned URL
+#   (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
 # - Both jobs, after the warm restarts (PRD-262 US-029): the database is stamped one
 #   revision behind head and the backend boots once more; every boot must show the
 #   entrypoint's banner, no alembic after it, at most one alembic run, and the
@@ -51,11 +77,25 @@ name: smoke-images
 #   US-034: every boot's /health/bootstrap stages up to and including trust_gate sum to
 #   3 s or less, and APScheduler misses no job in a boot's first 60 s
 #   (scripts/ci/smoke_ready.py).
+# - Both jobs, the production backend in compose (PRD-262 US-035): no bind mount over
+#   /app, no --reload, and uvicorn is the process the entrypoint's watchdog signals; after
+#   the warm restarts a key written only to envs/api.local reaches the backend that
+#   `docker compose up -d --no-deps backend` recreates, and `docker compose stop backend`
+#   finishes in under 8 s with an SSE client connected
+#   (scripts/ci/smoke_production_backend.py).
+# - Every job, the health gates (PRD-262 US-038), read off Docker's start and
+#   health_status events (scripts/ci/smoke_health_gates.py): compose probes each service
+#   every second while it starts, so redis and minio must turn healthy within 2 s of
+#   their start (postgres is reported: Gerard sets its bar from this number). Where make
+#   up's compose starts the frontend (the main runs and make-up-pr), it must start within
+#   3 s of the backend turning healthy. make up stops first, naming the floor, on a Docker
+#   older than Engine 25 or Compose 2.24.4 (scripts/stack_docker_floor.sh).
 #
-# Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
-# that never answers 200, an image built instead of pulled, a missing or wrong revision
-# label, a backend with --reload or the wrong worker count, or a boot that runs alembic
-# twice fails it from day one.
+# Report only until PRD-262 US-004 sets the bars: no time or size fails a job, except
+# US-035's stop in under 8 s and US-038's health gates. A boot that never answers 200,
+# an image built instead of pulled, a missing or wrong revision label, a backend with
+# --reload or the wrong worker count, a boot that runs alembic twice, or a failed US-035
+# check fails it from day one.
 #
 # workflow_run and workflow_dispatch work only once this file is on main. Actions are
 # pinned to a commit; the comment names the release. NON-REQUIRED at introduction.
@@ -98,6 +138,17 @@ on:
       - "scripts/ci/smoke_alembic_behind.py"
       - "scripts/ci/smoke_seeds.py"
       - "scripts/ci/smoke_ready.py"
+      - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
+      - "scripts/ci/smoke-make-up.sh"
+      - "scripts/ci/smoke-make-env.sh"
+      - "scripts/ci/smoke-core-stack.sh"
+      - "scripts/ci/smoke-minio-upgrade.sh"
+      - "scripts/ci/smoke_minio.py"
+      - "scripts/stack_images.py"
+      - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
+      - ".env.example"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"
@@ -109,8 +160,12 @@ on:
       - "orchestrator/requirements-dev.lock"
       - "orchestrator/scripts/split_lock.py"
       - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/docker-healthcheck.sh"
       - "orchestrator/scripts/alembic_heads.py"
+      # The worker's absence as the core stack's smoke reads it (PRD-262 US-040).
+      - "orchestrator/core/workspace_client.py"
+      - "orchestrator/api/workspace_files.py"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"
@@ -177,18 +232,17 @@ jobs:
           python3 scripts/ci/smoke_images.py target --event "$EVENT" --sha "$SHA" --tag "$TAG" \
             --trigger "$TRIGGER" --created "$CREATED" --outputs "$GITHUB_OUTPUT"
 
-      # The same throwaway local-only secrets as smoke-fresh-clone.yml; no external
-      # SaaS credential is set.
+      # No secret is exported: make up generates POSTGRES_PASSWORD, REDIS_PASSWORD and
+      # API_KEY into .env, as on a self-hoster's clean checkout (PRD-262 US-037). No
+      # external SaaS credential is set.
       - name: Pull and boot the published images
         env:
-          POSTGRES_PASSWORD: smoke_pg_pw
-          REDIS_PASSWORD: smoke_redis_pw
-          API_KEY: smoke_api_key
           AUTH_EDITION: local
           REQUIRE_AUTH: "false"
           DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
           SMOKE_IMAGES: pull
-          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
+          # Empty after a push: make up picks the tag (the script exports no empty tag).
+          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.pin }}
           SMOKE_EXPECT_REVISION: ${{ steps.target.outputs.revision }}
           SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images
         run: bash scripts/ci/smoke-fresh-clone.sh
@@ -276,7 +330,7 @@ jobs:
       # The three builds repeat images.yml's IMAGES (context, target, build args) and
       # labels, and read its amd64 GHA cache without writing it (PRD-262 §9-Q13).
       # orchestrator/tests/test_prd262_smoke_images.py holds them equal. `load` puts
-      # each image in the runner's Docker under the name docker-compose.images.yml uses.
+      # each image in the runner's Docker under the name docker-compose.yml gives it.
       - name: Metadata (api)
         id: meta-api
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -385,11 +439,87 @@ jobs:
           SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images
         run: bash scripts/ci/smoke-fresh-clone.sh
 
+      # PRD-262 US-040, on the images this job built (the boot above tore its stack down):
+      # an .env written before W5 still starts six containers, and the core override runs
+      # five without the worker (scripts/ci/smoke-core-stack.sh). No secret is exported:
+      # the old .env carries its own, and make env writes the fresh core stack's.
+      - name: The core stack runs five containers, and an .env from before W5 still runs six
+        env:
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images/core-stack
+        run: bash scripts/ci/smoke-core-stack.sh
+
+      # PRD-262 US-041, on the same images: a volume MinIO wrote as root (as every install
+      # before US-041 did) is re-owned by minio-volume-owner, once through make up and once
+      # through plain docker compose up, and MinIO serves its old object as uid 65532
+      # (scripts/ci/smoke-minio-upgrade.sh). No secret is exported: make env writes them.
+      - name: MinIO runs as its own user on a volume root wrote, through make up and docker compose up
+        env:
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images/minio-upgrade
+        run: bash scripts/ci/smoke-minio-upgrade.sh
+
       - name: Upload the measurements
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: smoke-images-pr
           path: ${{ runner.temp }}/smoke-images/
+          if-no-files-found: warn
+          retention-days: 30
+
+  make-up-pr:
+    name: make up (pull request, amd64) — the merge base's published images, nothing built (non-required)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # sha-<7> of the merge base, read from GitHub's compare API (the checkout is
+      # shallow); when CI published no images for it, the nearest of the 20 commits
+      # before it whose three app images are on GHCR.
+      - name: The merge base's published tag
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merge_base=$(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" --jq .merge_base_commit.sha)
+          gh api "repos/$REPO/commits?sha=$merge_base&per_page=20" --jq '.[].sha' > "$RUNNER_TEMP/candidates"
+          python3 scripts/ci/smoke_images.py base --merge-base "$merge_base" \
+            --candidates "$RUNNER_TEMP/candidates" --outputs "$GITHUB_OUTPUT"
+
+      # No secret is exported: make up generates them into .env (PRD-262 US-037).
+      - name: make up with the merge base's images
+        env:
+          AUTH_EDITION: local
+          REQUIRE_AUTH: "false"
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          AUTOMATOS_IMAGE_TAG: ${{ steps.base.outputs.tag }}
+          SMOKE_EXPECT_REVISION: ${{ steps.base.outputs.revision }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-make-up
+        run: bash scripts/ci/smoke-make-up.sh
+
+      # PRD-262 US-037: once the database volume exists, make env leaves a placeholder
+      # .env as it is and exits non-zero, saying how to rotate. It runs after the make up
+      # smoke's teardown removed the stack's volumes, and removes the one it creates.
+      - name: make env changes nothing on an install that started with placeholders
+        run: bash scripts/ci/smoke-make-env.sh
+
+      - name: Upload the records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-make-up-pr
+          path: ${{ runner.temp }}/smoke-make-up/
           if-no-files-found: warn
           retention-days: 30

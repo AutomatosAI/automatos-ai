@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Automatos AI - Frontend Dockerfile (Multi-stage)
 # =============================================================================
@@ -39,8 +40,8 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Health check, every second while the server starts (PRD-262 US-038; see production)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --start-interval=1s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
 
 # Development server with hot-reload
@@ -135,7 +136,10 @@ EXPOSE 3000
 # (its matcher ignores paths with an extension) and server rendering, so a probe
 # never renders a page or calls Clerk. 127.0.0.1, not localhost: the server
 # listens on IPv4 (HOSTNAME=0.0.0.0) and localhost can resolve to ::1.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# While the server starts, Docker probes every second instead of every 30 s
+# (--start-interval, Docker Engine 25 or later; PRD-262 US-038). The syntax line at
+# the top lets a builder older than the flag read it. Railway runs its own health check.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --start-interval=1s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-3000}/favicon.ico" || exit 1
 
 # Standalone server uses server.js directly — no npm needed

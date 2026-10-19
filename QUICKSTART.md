@@ -6,11 +6,20 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+```bash
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git   # the current commit only: under 80 MB, not 700 MB of history
+cd automatos-ai
+```
+
+You need Docker Engine 25 or later with Docker Compose 2.24.4 or later (a
+current Docker Desktop on macOS and Windows); `make up` checks both first and
+stops, naming that floor, on an older Docker.
+
 **On Windows, or setting up with an AI coding agent?** Use [SETUP.md](SETUP.md):
 the step-by-step install for macOS, Linux and Windows (WSL2), with a check
 after each step.
 
-## 1. Set the three required secrets
+## 1. The three required secrets
 
 Compose refuses to start until these three are set (they have no built-in
 defaults, on purpose — a public image must not ship with known passwords):
@@ -19,15 +28,16 @@ defaults, on purpose — a public image must not ship with known passwords):
 - `REDIS_PASSWORD` — the Redis password
 - `API_KEY` — the backend's own API key
 
-Copy the example env file and fill them in (any non-empty values work locally):
+`make up` writes them for you: its first step, `make env`, creates `.env` from
+`.env.example` and gives each one a random value (`openssl rand -hex 24`) while
+it is empty or still the `CHANGE_ME` placeholder, before the first start only.
+`git clone` and `make up` (step 2) are the whole install. To choose your own
+values, run `make env` (or `cp .env.example .env`) and set them in `.env` before
+the first `make up`.
 
-```bash
-cp .env.example .env
-# then edit .env and set:
-#   POSTGRES_PASSWORD=<choose-any-value>
-#   REDIS_PASSWORD=<choose-any-value>
-#   API_KEY=<choose-any-value>
-```
+The stack never runs on the `CHANGE_ME` placeholders: the backend refuses to
+start on one, and `make env` stops on an install that already started with one.
+Both say how to rotate it.
 
 That is the whole requirement — everything else (edition, workspace id, storage,
 ports) already has a working default in the compose file and `envs/*.defaults`.
@@ -94,38 +104,42 @@ for you, once.
 make up
 ```
 
-That builds what changed, starts the stack, and clears the images and build
-cache the rebuild superseded — Docker keeps those forever otherwise, which is
-what quietly turns a 3.7 GB stack into 12 GB of disk. `make status` shows what
-is running and what it costs; `make down` stops it; `make clean` reclaims space
-at any time (it never touches your data). Plain `docker compose up` still works
-if you prefer it.
+`make up` downloads the images CI builds, scans and publishes for your
+checkout's commit (`ghcr.io/automatosai/automatos-api`, `-frontend`,
+`-workspace-worker`; multi-arch and signed) instead of building them, then
+starts the stack. It says which tag it picked and why (`sha-<7>` of your commit,
+or `edge` when that is a rebuild of it), and writes it to `.env` as
+`AUTOMATOS_IMAGE_TAG=…`, so later `docker compose` commands run the same images.
+On a checkout with your own changes it builds only the images whose folder you
+changed and pulls the rest.
 
-### Or: run the published images (no build)
+The first run downloads about 1.3 GB (the whole stack, compressed, amd64;
+1.28 GB on arm64): about a minute at 200 Mbit/s, three to four at 50 Mbit/s,
+plus unpacking and the first boot. CI times `make up` to a working UI on every
+main publish against a 150-second bar. Updates download only the layers that
+changed.
 
-```bash
-make up-images
-```
+**OS security fixes.** Every Monday CI rebuilds the images with fresh OS
+packages and moves `edge` to the rebuild once it boots. A checkout keeps the OS
+packages its `sha-<7>` was built with; `git pull && make up` picks up the
+weekly fixes. `AUTOMATOS_IMAGE_TAG=edge make up` follows `edge` and pulls on
+every call; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up` pins one build.
 
-This pulls the images CI publishes from `main` to GHCR
-(`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
-multi-arch and signed) instead of building them: about a minute instead of ten.
-The default tag is `edge`, the latest `main` build whose published images have
-booted in CI; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images` pins one build.
-Every Monday CI rebuilds them with fresh OS packages (`weekly-<yyyymmdd>`) and
-moves `edge` there once they boot, so OS security fixes arrive on `edge` too.
-Everything else is the same as `make up`: your
-`.env`, the database, the workspace folder and session mode. Your checkout's
-source code isn't used. The published web app calls the API at
-`http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
-8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
+The published web app calls the API at `http://localhost:8000` and MinIO at
+`http://localhost:9000`, fixed when it was built. If `.env` changes those
+(`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`),
+`make up` builds the web app on your machine instead, a few minutes, and says
+why. `make build` builds all three images from your checkout; `make dev` is for
+editing the code with hot reload. `make status` shows what is running and what
+it costs; `make down` stops it; `make clean` reclaims space at any time (it
+never touches your data). Plain `docker compose up` works too, once `.env` has
+the three secrets (`make env`): it runs the tag in `.env`, or `edge`.
 
-First run builds the images, builds the database schema, runs the seeds and
-then serves. `http://localhost:8000/health` answers once the API's core is up
-(the schema, the seeds and the database check); `http://localhost:8000/health/ready`
-returns 503 while the rest of the boot (the starters, the integrations catalogue,
-the scheduler and channels) runs in the background, and 200 once the instance is
-fully up.
+The first boot builds the database schema, runs the seeds and then serves.
+`http://localhost:8000/health` answers once the API's core is up (the schema, the
+seeds and the database check); `http://localhost:8000/health/ready` returns 503
+while the rest of the boot (the starters, the integrations catalogue, the scheduler
+and channels) runs in the background, and 200 once the instance is fully up.
 
 ## 3. Open it
 
@@ -285,6 +299,10 @@ Database migrations run on every backend boot.
 - **"POSTGRES_PASSWORD is required" / "REDIS_PASSWORD is required" /
   "API_KEY is required":** one of the three required secrets is missing from
   `.env` — see step 1.
+- **"Placeholder secrets: … Each still starts with CHANGE_ME":** `.env` still
+  holds an `.env.example` placeholder on an install that has already started.
+  Rotate it as the message shows ([guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)),
+  or, with no data to keep, `docker compose down -v` and `make up` again.
 - **"password authentication failed" after changing `POSTGRES_PASSWORD`:** the
   existing Postgres volume keeps the password it was initialised with — reset
   with `docker compose down -v` or `ALTER USER` it; see the guide.

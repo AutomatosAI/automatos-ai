@@ -68,7 +68,9 @@ updates:
         patterns: ["*"]
 
   # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer and searxng.
-  # The published-images override's own images follow AUTOMATOS_IMAGE_TAG.
+  # This repository's own app images are not third-party pins: docker-compose.yml's
+  # follow AUTOMATOS_IMAGE_TAG, and docker-compose.dev.yml's automatos-*:dev are
+  # local build names that are never pulled (PRD-262 US-036), so both are ignored.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
@@ -82,6 +84,8 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "automatos-*"
+      - dependency-name: "ghcr.io/automatosai/automatos-*"
     groups:
       compose-images:
         patterns: ["*"]

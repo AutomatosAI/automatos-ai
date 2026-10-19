@@ -24,7 +24,7 @@ spec:
       containers:
         - name: api
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.api.image) }}
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.api.image) }}
           # The migration Job is the only thing that may change the schema. The
           # image's entrypoint migrates before a uvicorn command, so the pods set
           # AUTOMATOS_SKIP_MIGRATIONS=true (below): it then runs no boot step.

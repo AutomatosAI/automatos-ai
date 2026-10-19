@@ -2,9 +2,10 @@
 """Upload a document to the running backend and fetch it back by its presigned URL (PRD-262 US-021).
 
 pybuild keeps only botocore's s3, s3vectors, bedrock-runtime, sts, sso and sso-oidc
-models. The fresh-clone smoke builds the development stage, which shares that base, and
-smoke-images boots the production stage; both start MinIO with the backend. This step
-proves, from the host, that the pruned botocore still serves the app's object storage:
+models. The fresh-clone smoke builds the production stage from the checkout (PRD-262
+US-035), and smoke-images boots the images CI builds; both start MinIO with the backend.
+This step proves, from the host, that the pruned botocore still serves the app's object
+storage:
 
 1. it POSTs a short Markdown document to ``/api/missions/upload``, which runs
    ``DocumentManager.upload_document``: it creates the bucket on first use and puts the

@@ -48,21 +48,35 @@
 #
 # PRD-262 US-003 runs the same boot steps on images instead of a source build, for
 # .github/workflows/smoke-images.yml. SMOKE_IMAGES picks where the app images come from:
-#   (unset)   build them from this checkout (the fresh-clone lane, above);
-#   pull      the published path: docker-compose.images.yml with AUTOMATOS_IMAGE_TAG.
-#             The Docker image cache is emptied first, then `docker compose pull` is
-#             timed and the bytes it brought in are counted;
+#   (unset)   `make build` on this checkout, as a contributor runs it (PRD-262 US-039):
+#             tagged local-<sha7> and labelled with HEAD (AUTOMATOS_REVISION), both
+#             exported for it. make build starts postgres, redis and minio, builds the
+#             three images and starts the stack. It runs in the background, like make up
+#             below, so the boots are timed from each container's own start; it must
+#             then exit 0, and its output is the build log;
+#   pull      the published path a self-hoster takes (PRD-262 US-036): the Docker image
+#             cache is emptied, then `make up` runs on this clean checkout. With no
+#             AUTOMATOS_IMAGE_TAG (an empty one counts as none) make up picks the tag
+#             itself; a weekly or manual run pins it. make up pulls and starts the whole
+#             stack; it is timed, the bytes it brought in are counted, and its output is
+#             kept and searched for registry rate limits (Docker Hub's 429). It runs in
+#             the background, so the backend's and the frontend's boots are timed from
+#             their own start while it brings them up, never from when it returns; it
+#             must then exit 0;
 #   prebuilt  the pull-request variant: the workflow built the three amd64 images and
 #             tagged them with the GHCR names and AUTOMATOS_IMAGE_TAG, so compose
 #             neither pulls nor builds them.
-# Either way the stack starts with `up --no-build`, and scripts/ci/smoke_images.py
-# asserts what booted: the backend runs the production command (no --reload, and the
-# worker count compose's WEB_CONCURRENCY sets), and each app container runs its
+# The stack starts with `up --no-build` (make build's or make up's own; the smoke's in
+# `prebuilt`), and scripts/ci/smoke_images.py asserts what booted: in the image modes the
+# backend runs the production command (no --reload, and the worker count compose's
+# WEB_CONCURRENCY sets), and in every mode each app container runs its
 # ghcr.io/automatosai/automatos-* image carrying the commit's revision label
-# (SMOKE_EXPECT_REVISION). With `pull`, each image's RepoDigests must also hold the
-# index digest its tag resolves to on GHCR, so nothing was built locally; no image may
-# carry a local-* tag or compose's own <project>-<service> name. The step summary
-# adds the pull, the first run from its start to :3000 200, and those checks.
+# (SMOKE_EXPECT_REVISION; HEAD for a source build, whose tag must be local-*). With
+# `pull`, each image's RepoDigests must also hold the index digest its tag resolves to on
+# GHCR, so nothing was built locally, and the app images exist only under that tag; no
+# image may carry a local-* tag or compose's own <project>-<service> name. The step
+# summary adds make up's run (or make build's start), the first run from its start to
+# :3000 200, and those checks.
 #
 # PRD-262 US-008, in the pull-request variant (`prebuilt`) only: once the worker count
 # checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
@@ -99,10 +113,11 @@
 # job … was missed` warning in its first 60 s. /health 200 and /health/ready 200 are
 # timed separately, as above.
 #
-# PRD-262 US-017, when it builds from this checkout: the build log is kept, and
-# scripts/ci/build_context.py reads what the backend's build sent as its context off it.
-# The workflow first seeds dummy uploads and caches where a self-hoster's checkout
-# collects them, each as large as the budget, so one that reaches the context fails it.
+# PRD-262 US-017, when it builds from this checkout: make build's output is the build
+# log, and once make build has exited, scripts/ci/build_context.py reads what the
+# backend's build sent as its context off it. The workflow first seeds dummy uploads and
+# caches where a self-hoster's checkout collects them, each as large as the budget, so
+# one that reaches the context fails it.
 #
 # PRD-262 US-021, in every mode: the API image keeps only the botocore models of the
 # services we call. Once the frontend and the images check out, and before the warm
@@ -110,27 +125,81 @@
 # which puts it in MinIO through that botocore, and the host fetches it back by the
 # presigned URL the Documents page's download call answers with.
 #
+# PRD-262 US-037, SMOKE_IMAGES=pull: no secret is exported, as on a self-hoster's clean
+# checkout. make up's first step, make env, creates .env from .env.example and writes
+# POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to it (openssl rand -hex 24); once make
+# up has exited, the smoke finds three 48-hex values there, and every later compose
+# command here reads them from .env. The other modes export throwaway ones (below).
+#
+# PRD-262 US-035, in every mode: compose runs the backend's production stage, and hot
+# reload is `make dev`'s. scripts/ci/smoke_production_backend.py checks, after the fresh
+# boot, that no bind mount lays the checkout over /app, nothing runs --reload, and the
+# process the entrypoint's watchdog signals (SERVER_PID) is uvicorn itself, with no sh in
+# between (docker top). After the warm restarts it writes a key to envs/api.local alone,
+# recreates the backend with `docker compose up -d --no-deps backend` as the night tooling
+# does, and finds the key inside it (a checkout's own envs/api.local is kept and put back).
+# Last, with an SSE client holding the board's event stream open, `docker compose stop
+# backend` must finish in under STOP_MAX_SECONDS. The recreated backend is a new
+# container, so the report reads the earlier one's log from the copy taken before it.
+#
+# PRD-262 US-038, in every mode, once the frontend answers: compose probes each service
+# every second while it starts (start_interval), and scripts/ci/smoke_health_gates.py
+# reads the gates off Docker's start and health_status events. redis and minio must turn
+# healthy within 2 s of their start; postgres is reported (on this fresh volume its TCP
+# probe passes only after initdb's restart). Where make up or make build brings the stack
+# up, compose starts the frontend the moment the backend turns healthy, and it must
+# start within 3 s of that; `prebuilt` starts the frontend here, after its own checks, so
+# its gap is only reported.
+#
+# PRD-262 US-039, make build only: postgres, redis and minio start before the images
+# build, so postgres must turn healthy before the backend's image is built. Docker's
+# events say both: postgres's health_status and the backend image's tag event, which
+# BuildKit sends the moment that build has finished (the stream takes image tag events
+# too). scripts/ci/smoke_build_overlap.py checks it once make build has exited, and
+# reports the image build time from make build's start (report only). Compose's own log
+# cannot show the order: it prints `postgres Healthy` only while a later up waits on it.
+#
+# PRD-262 US-041, in every mode, before the document check: MinIO runs as its image's own
+# user, uid 65532, never root, and the one-shot minio-volume-owner that runs before it
+# exited 0 (scripts/ci/smoke_minio.py server). Docker gives this fresh volume the owner of
+# an image's /data as it creates the containers that mount it, which need not be 65532, so
+# the one-shot may have re-owned it; either way the document below is stored by a MinIO
+# that is not root. scripts/ci/smoke-minio-upgrade.sh covers a volume root wrote before.
+#
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, the document came back, every boot ran alembic at most once (and only
-# the behind-head boot ran it at all), and the warm restarts redid no seed work. Exit 1
-# = a boot failed, a port listens beyond this machine, the backend's build context is
-# over its budget, the document did not come back from object storage, a boot ran
-# alembic twice (or the CMD ran it), or ran it at head, or the behind-head boot did
-# not, or a warm restart ran a seed stage, started the seed loader or rewrote
-# credential_types, or a boot's core stages took over 3 s or APScheduler missed a job
-# in a boot's first 60 s.
+# loopback, MinIO ran as uid 65532, the document came back, the backend ran as the
+# production stage should, the health gates held their bars, every boot ran alembic at
+# most once (and only the behind-head boot ran it at all), and the warm restarts redid
+# no seed work.
+# Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
+# is over its budget, MinIO ran as root or minio-volume-owner failed (US-041), the
+# document did not come back from object storage, a US-035 check failed, make up
+# wrote no generated secrets to .env (US-037), a health gate
+# missed its bar (US-038), make build or make up failed, or postgres was not healthy
+# before make build had built the backend's image (US-039); or a boot ran alembic twice
+# (or the CMD ran it), or ran it at head, or the behind-head boot did not, or a warm
+# restart ran a seed stage, started the seed loader or rewrote credential_types, or a
+# boot's core stages took over 3 s or APScheduler missed a job in a boot's first 60 s.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 COMPOSE_FILE="docker-compose.yml"
-# The published images in place of the source builds (PRD-262 US-003).
-IMAGES_COMPOSE_FILE="docker-compose.images.yml"
 SMOKE_IMAGES="${SMOKE_IMAGES:-}"
+# smoke_images.py's name for where the app images come from; a source build is `build`.
+IMAGES_MODE="${SMOKE_IMAGES:-build}"
 COMPOSE_ARGS=(-f "$COMPOSE_FILE")
-if [ -n "$SMOKE_IMAGES" ]; then
-  COMPOSE_ARGS+=(-f "$IMAGES_COMPOSE_FILE")
+# An empty AUTOMATOS_IMAGE_TAG would make compose run :edge rather than the tag make up
+# wrote to .env, so an empty one is no tag (PRD-262 US-036).
+[ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || unset AUTOMATOS_IMAGE_TAG
+# A source build, as make build does it (PRD-262 US-036): the images carry HEAD as their
+# revision label and a local-<sha7> tag, never an official one.
+if [ -z "$SMOKE_IMAGES" ]; then
+  AUTOMATOS_REVISION="${AUTOMATOS_REVISION:-$(git rev-parse HEAD 2>/dev/null)}"
+  export AUTOMATOS_REVISION
+  export AUTOMATOS_IMAGE_TAG="${AUTOMATOS_IMAGE_TAG:-local-${AUTOMATOS_REVISION:0:7}}"
+  SMOKE_EXPECT_REVISION="${SMOKE_EXPECT_REVISION:-$AUTOMATOS_REVISION}"
 fi
 API_BASE="http://localhost:${API_PORT:-8000}"
 HEALTH_URL="${API_BASE}/health"
@@ -161,12 +230,32 @@ BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
 PULL_FILE="${OUT_DIR}/pull.json"
+# make up's output (SMOKE_IMAGES=pull), kept for the rate-limit search and the artifact.
+MAKE_UP_LOG="${OUT_DIR}/make-up.log"
+# The make target that brings the stack up, which runs in the background: make build for
+# a source build (PRD-262 US-039), make up for SMOKE_IMAGES=pull (US-036); none in
+# `prebuilt`, which starts the stack itself. Its exit code is written here when it ends.
+case "$SMOKE_IMAGES" in
+  "") MAKE_TARGET="build" ;;
+  pull) MAKE_TARGET="up" ;;
+  *) MAKE_TARGET="" ;;
+esac
+MAKE_EXIT="${OUT_DIR}/make.exit"
+# make build builds the three app images before it starts the backend, so the fresh
+# boot waits this long for that start (make up's pull fits in MAX_WAIT_SECONDS).
+BUILD_MAX_WAIT_SECONDS="${SMOKE_BUILD_MAX_WAIT_SECONDS:-1200}"
 PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
 # smoke_worker_restart.py's record (PRD-262 US-008).
 WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
-# The source build's log (PRD-262 US-017: build_context.py reads the context transfer off it).
+# The source build's log, make build's output (PRD-262 US-017: build_context.py reads the
+# context transfer off it).
 BUILD_LOG="${OUT_DIR}/build.log"
+# PRD-262 US-039: postgres healthy before the backend image was built, read off
+# EVENTS_FILE; its record, and the image build's whole seconds for the report.
+OVERLAP_TOOL="scripts/ci/smoke_build_overlap.py"
+OVERLAP_FILE="${OUT_DIR}/build-overlap.json"
+BUILD_SECONDS_FILE="${OUT_DIR}/build-seconds.txt"
 # smoke_document_presign.py's record (PRD-262 US-021).
 DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
 # smoke_alembic.py's record (PRD-262 US-029).
@@ -182,11 +271,40 @@ CREDENTIAL_TYPES_AFTER="${OUT_DIR}/credential-types-after.txt"
 READY_TOOL="scripts/ci/smoke_ready.py"
 READY_FILE="${OUT_DIR}/ready-after-core.json"
 CREDENTIAL_TYPES_SQL="SELECT count(*) || ' ' || coalesce(md5(string_agg(name || '=' || coalesce(updated_at::text, 'null'), ',' ORDER BY name)), '') FROM credential_types"
+# PRD-262 US-041: MinIO's user and the one-shot that hands it its volume, and their record.
+MINIO_TOOL="scripts/ci/smoke_minio.py"
+MINIO_CONTAINER="automatos_minio"
+MINIO_OWNER_CONTAINER="automatos_minio_volume_owner"
+MINIO_FILE="${OUT_DIR}/minio-user.json"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
+# PRD-262 US-037: the .env make up writes, and a secret line as make env writes it.
+ENV_FILE=".env"
+GENERATED_SECRET='^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$'
+# PRD-262 US-035: the production backend's checks, and their records.
+PRODUCTION_TOOL="scripts/ci/smoke_production_backend.py"
+PRODUCTION_FILE="${OUT_DIR}/production-backend.json"
+API_LOCAL_RECORD="${OUT_DIR}/api-local.json"
+STOP_FILE="${OUT_DIR}/stop-backend.json"
+# The SSE stream the browser keeps open (frontend/hooks/use-board-event-stream.ts). It
+# sends its first event at once and then only heartbeats, so it never ends by itself.
+SSE_URL="${API_BASE}/api/v1/tasks/stream"
+STOP_MAX_SECONDS=8
+# The night tooling's override file (docker-compose.yml's env_file), the key the smoke
+# writes to it alone, and where a checkout's own copy waits until finish puts it back.
+# Outside OUT_DIR, which the workflow uploads.
+API_LOCAL="envs/api.local"
+API_LOCAL_KEY="AUTOMATOS_SMOKE_API_LOCAL_PROBE"
+API_LOCAL_SAVED="${RUNNER_TEMP:-/tmp}/smoke-api.local.saved"
+# PRD-262 US-038: the health gates, read off EVENTS_FILE, and their record.
+GATES_TOOL="scripts/ci/smoke_health_gates.py"
+GATES_FILE="${OUT_DIR}/health-gates.json"
+# The backend's log up to its recreate: the new container's log starts empty, so the
+# report reads the earlier boots' lines from this copy.
+EARLIER_BACKEND_LOG="${RUNNER_TEMP:-/tmp}/smoke-backend-before-recreate.log"
 # The production stage's worker count under compose: envs/api.defaults'
 # WEB_CONCURRENCY (PRD-262 US-029; the image's own 4 is Railway's).
 BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-1}"
@@ -201,10 +319,15 @@ STACK_NAME_PATTERN='^automatos_'
 # Local-only secrets. These are throwaway values for an ephemeral local stack —
 # NOT real credentials, and never reused. No external SaaS credential is set:
 # CLERK_*, AWS_*, OPENAI_API_KEY, ANTHROPIC_API_KEY are all intentionally absent.
+# SMOKE_IMAGES=pull exports none of the three: make up generates them (PRD-262 US-037).
 # ---------------------------------------------------------------------------
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-smoke_pg_pw}"
-export REDIS_PASSWORD="${REDIS_PASSWORD:-smoke_redis_pw}"
-export API_KEY="${API_KEY:-smoke_api_key}"
+if [ "$SMOKE_IMAGES" = "pull" ]; then
+  unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY
+else
+  export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-smoke_pg_pw}"
+  export REDIS_PASSWORD="${REDIS_PASSWORD:-smoke_redis_pw}"
+  export API_KEY="${API_KEY:-smoke_api_key}"
+fi
 # W5 flag: run the local no-login edition (auth-optional).
 export AUTH_EDITION="${AUTH_EDITION:-local}"
 export REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
@@ -220,6 +343,10 @@ build_seconds=""
 events_pid=""
 up_started_ns=""
 images_before=0
+api_local_written=""
+earlier_backend_id=""
+make_pid=""
+env_existed=""
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -231,12 +358,13 @@ fail() {
   exit 1
 }
 
-# Image modes need the tag to boot; a typo in the mode must not fall back to a build.
+# The prebuilt mode needs the tag its images carry; `pull` lets make up pick one when
+# none is given. A typo in the mode must not fall back to a build.
 check_mode() {
   case "$SMOKE_IMAGES" in
-    "") ;;
-    pull|prebuilt)
-      [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
+    ""|pull) ;;
+    prebuilt)
+      [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=prebuilt needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
     *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
   esac
 }
@@ -250,6 +378,15 @@ use_restart_workers() {
     > "$WORKERS_OVERRIDE_FILE" || fail "could not write the backend's worker-count override"
   COMPOSE_ARGS+=(-f "$WORKERS_OVERRIDE_FILE")
   BACKEND_WORKERS="$RESTART_WORKERS"
+}
+
+# The tag the stack runs: the one exported, else the one make up wrote to .env.
+image_tag() {
+  if [ -n "${AUTOMATOS_IMAGE_TAG:-}" ]; then
+    printf '%s' "$AUTOMATOS_IMAGE_TAG"
+  else
+    sed -n 's/^AUTOMATOS_IMAGE_TAG=//p' .env 2>/dev/null | tail -1
+  fi
 }
 
 # Runs before the exit trap is set, like refuse_existing_stack, so a refusal deletes nothing.
@@ -270,7 +407,7 @@ refuse_existing_stack() {
 print_banner() {
   echo "========================================="
   echo "PRD-176 fresh-clone smoke test (PRD-262 US-002 boot timings)"
-  echo "  images     : ${SMOKE_IMAGES:-built from this checkout}${SMOKE_IMAGES:+ (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-})}"
+  echo "  images     : ${SMOKE_IMAGES:-make build from this checkout} (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-make up picks it})"
   echo "  health url : ${HEALTH_URL} (liveness), ${READY_URL} (readiness)"
   echo "  frontend   : ${FRONTEND_URL}"
   echo "  max wait   : ${MAX_WAIT_SECONDS}s per boot, polled every second"
@@ -286,9 +423,13 @@ print_banner() {
 # exec events to it, so the start and health_status events are streamed to a file
 # for the whole run instead of being read back at the end. --since replays the
 # moments between this call and the stream attaching, so no early start is missed.
+# Image tag events come too: BuildKit tags an image the moment its build has finished,
+# which is when make build's backend image was built (PRD-262 US-039). The other tools
+# read only the compose services' container events.
 start_event_log() {
   docker events --since "$(date +%s)" \
-    --filter type=container --filter event=start --filter event=health_status \
+    --filter type=container --filter type=image \
+    --filter event=start --filter event=health_status --filter event=tag \
     --format '{{json .}}' > "$EVENTS_FILE" &
   events_pid=$!
 }
@@ -301,19 +442,26 @@ stop_event_log() {
   fi
 }
 
-# The build is timed for the record only: CI build time has no bar (PRD-262 §7).
-# Piped, so BuildKit prints its plain progress, `transferring context` lines included.
+# `make build` on this checkout (PRD-262 US-039): make env, postgres, redis and minio
+# started first, the production stages of the backend, the frontend and the workspace
+# worker built under the exported local-<sha7>, then the whole stack started with
+# --no-build. It runs in the background while the boots are timed; finish_make waits for
+# it. Piped, so BuildKit prints its plain progress, `transferring context` lines
+# included. The image build is timed off Docker's events, for the record only: CI build
+# time has no bar (PRD-262 §7).
 build_images() {
-  echo "Building the backend (development stage), workspace-worker and frontend images..."
-  local started=$SECONDS
-  compose build backend workspace-worker frontend 2>&1 | tee "$BUILD_LOG" || fail "docker compose build failed"
-  build_seconds=$((SECONDS - started))
-  echo "Images built in ${build_seconds}s"
-  check_build_context
+  rm -f "$MAKE_EXIT"
+  echo "make build: postgres, redis and minio first, then the backend (production stage), workspace-worker and frontend images from this checkout (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG})..."
+  up_started_ns="$(date +%s%N)"
+  {
+    make build 2>&1 | tee "$BUILD_LOG"
+    echo "${PIPESTATUS[0]}" > "$MAKE_EXIT"
+  } &
+  make_pid=$!
 }
 
-# PRD-262 US-017: the backend's build sent only code. The development stage copies none
-# (compose mounts the source), and orchestrator/.dockerignore keeps the rest out.
+# PRD-262 US-017: the backend's build sent only code. The production stage copies the
+# context, and orchestrator/.dockerignore keeps the checkout's uploads and caches out of it.
 check_build_context() {
   python3 "$CONTEXT_TOOL" check --service backend "$BUILD_LOG" \
     || fail "the backend's build context is over its budget, or the build log does not show it"
@@ -327,13 +475,47 @@ empty_docker_cache() {
   echo "Docker image cache emptied (${images_before} image(s) were there)"
 }
 
-# Pulls every image of the default stack: the app images under AUTOMATOS_IMAGE_TAG and
-# the datastores. smoke_images.py times it and counts the bytes the runner received.
+# `make up` on this clean checkout (PRD-262 US-036): it picks the app images' tag (unless
+# AUTOMATOS_IMAGE_TAG pins one), pulls them and the datastores, and starts the whole
+# stack with --no-build. smoke_images.py times it, counts the bytes the runner received
+# and keeps its output in MAKE_UP_LOG, where it looks for registry rate limits. It runs
+# in the background while the boots are timed; finish_make waits for it.
 pull_images() {
   empty_docker_cache
-  echo "Pulling the stack's images (app images at ${AUTOMATOS_IMAGE_TAG})..."
-  python3 "$IMAGES_TOOL" pull --out "$PULL_FILE" --images-before "$images_before" -- \
-    docker compose "${COMPOSE_ARGS[@]}" pull --quiet || fail "docker compose pull failed"
+  rm -f "$MAKE_EXIT"
+  echo "make up from an empty Docker cache (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-not set: make up picks it})..."
+  {
+    python3 "$IMAGES_TOOL" pull --out "$PULL_FILE" --images-before "$images_before" --log "$MAKE_UP_LOG" -- \
+      make up
+    echo "$?" > "$MAKE_EXIT"
+  } &
+  make_pid=$!
+}
+
+# Waits for the background make build or make up, which must exit 0. make build's log is
+# then whole, so the backend's build context is checked here (PRD-262 US-017), even when
+# a boot failed first.
+finish_make() {
+  [ -n "$make_pid" ] || return 0
+  wait "$make_pid"
+  make_pid=""
+  [ "$(cat "$MAKE_EXIT" 2>/dev/null)" = "0" ] || fail "make ${MAKE_TARGET} failed"
+  [ "$MAKE_TARGET" != "build" ] || check_build_context
+}
+
+# PRD-262 US-037, SMOKE_IMAGES=pull: make up ran with no secret exported on a checkout
+# with no .env, so make env created .env and wrote the three secrets to it.
+check_generated_secrets() {
+  [ "$SMOKE_IMAGES" = "pull" ] || return 0
+  if [ -n "$env_existed" ]; then
+    echo "::warning title=smoke-fresh-clone::.env existed before make up, so the check that make env generated the three secrets was skipped"
+    return 0
+  fi
+  local found
+  found="$(grep -cE "$GENERATED_SECRET" "$ENV_FILE" 2>/dev/null)"
+  [ "${found:-0}" = "3" ] \
+    || fail "make up did not write POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env as 48 hex characters each (make env): ${found:-0} of 3"
+  echo "make env wrote POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env (48 hex characters each)"
 }
 
 prepare_images() {
@@ -344,16 +526,34 @@ prepare_images() {
   esac
 }
 
-# $1 = the boot's label (fresh, warm-1, ...). Times /health and /health/ready from
-# the backend's StartedAt, then fetches /health/bootstrap.
+# $1 = the boot's label (fresh, warm-1, ...); further arguments go to smoke_boot.py. Times
+# /health and /health/ready from the backend's StartedAt, then fetches /health/bootstrap.
 wait_backend() {
-  python3 "$BOOT_TOOL" --label "$1" --container "$BACKEND_CONTAINER" \
+  local label="$1"
+  shift
+  python3 "$BOOT_TOOL" --label "$label" --container "$BACKEND_CONTAINER" \
     --url "health=${HEALTH_URL}" --url "ready=${READY_URL}" \
     --fetch "bootstrap=${BOOTSTRAP_URL}" \
-    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE"
+    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" "$@"
+}
+
+# make build or make up starts the stack, so the fresh boot is timed from the backend's
+# own start as soon as make has started it. make build first builds the images, so the
+# wait for that start is BUILD_MAX_WAIT_SECONDS. A failed make is the failure to report.
+boot_fresh_from_make() {
+  local start_wait="$MAX_WAIT_SECONDS"
+  [ "$MAKE_TARGET" != "build" ] || start_wait="$BUILD_MAX_WAIT_SECONDS"
+  echo "Timing the fresh boot make ${MAKE_TARGET} starts: liveness (/health), then readiness (/health/ready)..."
+  wait_backend fresh --wait-start --start-timeout "$start_wait" --stop-file "$MAKE_EXIT" && return 0
+  finish_make
+  fail "fresh boot: readiness not reached within ${MAX_WAIT_SECONDS}s (/health and /health/ready must both answer 200)"
 }
 
 boot_fresh() {
+  if [ -n "$MAKE_TARGET" ]; then
+    boot_fresh_from_make
+    return
+  fi
   echo "Starting compose stack (postgres, redis, minio, workspace-worker, backend) on an empty database..."
   up_started_ns="$(date +%s%N)"
   compose up -d --no-build postgres redis minio backend || fail "docker compose up failed"
@@ -362,7 +562,22 @@ boot_fresh() {
     || fail "fresh boot: readiness not reached within ${MAX_WAIT_SECONDS}s (/health and /health/ready must both answer 200)"
 }
 
+# make build or make up starts the frontend once the backend is healthy; it is timed
+# from its own start, and Docker says where it published :3000.
+boot_frontend_from_make() {
+  echo "Timing the frontend make ${MAKE_TARGET} starts once the backend is healthy..."
+  python3 "$BOOT_TOOL" --label frontend --container "$FRONTEND_CONTAINER" \
+    --wait-start --stop-file "$MAKE_EXIT" --published-port 3000 --url "ui=${FRONTEND_URL}" \
+    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" && return 0
+  finish_make
+  fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
+}
+
 boot_frontend() {
+  if [ -n "$MAKE_TARGET" ]; then
+    boot_frontend_from_make
+    return
+  fi
   echo "Starting the frontend (compose holds it until the backend is healthy)..."
   compose up -d --no-build frontend || fail "docker compose up frontend failed"
   local address
@@ -372,6 +587,35 @@ boot_frontend() {
     --url "ui=${FRONTEND_URL}" --meta "address=${address}" \
     --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" \
     || fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
+}
+
+# PRD-262 US-038: redis and minio healthy within 2 s of their start, postgres reported,
+# from Docker's events (EVENTS_FILE, streamed since before the stack started). Where make
+# build or make up brought the stack up, their compose started the frontend once the
+# backend was healthy, so that gap is gated too; in `prebuilt` the smoke starts it
+# itself, so it is reported.
+check_health_gates() {
+  local frontend="report"
+  if [ -n "$MAKE_TARGET" ]; then
+    frontend="gate"
+  fi
+  python3 "$GATES_TOOL" --events "$EVENTS_FILE" --frontend "$frontend" \
+    --out "$GATES_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a health gate missed its bar: redis or minio turned healthy more than 2s after it started, or the frontend started more than 3s after the backend turned healthy (PRD-262 US-038)"
+}
+
+# PRD-262 US-039, make build only: postgres turned healthy before the backend's image was
+# built, from Docker's events; also the image build's seconds from make build's start,
+# which the report shows (no bar).
+check_build_overlap() {
+  [ "$MAKE_TARGET" = "build" ] || return 0
+  local passed="true"
+  python3 "$OVERLAP_TOOL" --events "$EVENTS_FILE" --tag "$(image_tag)" --started-ns "$up_started_ns" \
+    --out "$OVERLAP_FILE" --seconds-out "$BUILD_SECONDS_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || passed=""
+  build_seconds="$(cat "$BUILD_SECONDS_FILE" 2>/dev/null)"
+  [ -n "$passed" ] \
+    || fail "postgres did not turn healthy before the backend image was built: make build must start postgres, redis and minio before it builds (PRD-262 US-039)"
 }
 
 # PRD-262 US-005: the frontend, and every other published port, listens on 127.0.0.1.
@@ -400,14 +644,24 @@ check_worker_restart() {
     || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
 }
 
-# Image modes: every app container runs the image compose names for it, with this
-# commit's revision label; with `pull`, its RepoDigests prove it was pulled.
+# Every mode: every app container runs the image compose names for it, with this
+# commit's revision label. With `pull`, its RepoDigests prove it was pulled and nothing
+# was built; a source build must carry a local-* tag (PRD-262 US-036).
 check_images() {
-  [ -n "$SMOKE_IMAGES" ] || return 0
   compose config --format json > "$COMPOSE_CONFIG_FILE" || fail "docker compose config failed"
-  python3 "$IMAGES_TOOL" images --mode "$SMOKE_IMAGES" --config "$COMPOSE_CONFIG_FILE" \
+  python3 "$IMAGES_TOOL" images --mode "$IMAGES_MODE" --config "$COMPOSE_CONFIG_FILE" \
     --expect-revision "${SMOKE_EXPECT_REVISION:-}" --out "$IMAGES_FILE" \
-    || fail "an app container does not run the image this smoke expects, or an image was built locally"
+    || fail "an app container does not run the image this smoke expects: a wrong tag or revision label, or an image built instead of pulled"
+}
+
+# PRD-262 US-041: MinIO is healthy as its image's user, uid 65532, on the fresh volume, and
+# minio-volume-owner exited 0. Before the one-shot runs, a fresh volume has the owner of an
+# image's /data (Docker copies it in), not necessarily 65532, so whether it re-owned this
+# one is recorded, not required.
+check_minio_user() {
+  python3 "$MINIO_TOOL" server --container "$MINIO_CONTAINER" --owner-container "$MINIO_OWNER_CONTAINER" \
+    --reowned any --out "$MINIO_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "MinIO is not healthy as uid 65532, or minio-volume-owner did not exit 0 (PRD-262 US-041)"
 }
 
 # PRD-262 US-021: a document uploaded to the backend lands in MinIO through the pruned
@@ -498,6 +752,66 @@ check_ready_after_core() {
     || fail "a backend boot's core stages (to trust_gate) took over 3s, or APScheduler missed a job in a boot's first 60s"
 }
 
+# PRD-262 US-035: the backend runs the production stage. No bind mount lays the checkout
+# over /app, nothing runs --reload, and SERVER_PID, the process the entrypoint's watchdog
+# and `docker stop` signal, is uvicorn itself (docker top), with no sh in between.
+check_production_backend() {
+  python3 "$PRODUCTION_TOOL" process --container "$BACKEND_CONTAINER" \
+    --out "$PRODUCTION_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "the backend does not run as the production stage should: a bind mount over /app, --reload, or a shell between the entrypoint and uvicorn"
+}
+
+# $1 = the value. Appends the key to envs/api.local, after any lines a checkout's own copy
+# holds; that copy waits in API_LOCAL_SAVED until finish puts it back.
+write_api_local_probe() {
+  rm -f "$API_LOCAL_SAVED"
+  if [ -e "$API_LOCAL" ]; then
+    cp -p "$API_LOCAL" "$API_LOCAL_SAVED" || fail "could not set this checkout's envs/api.local aside"
+  fi
+  api_local_written="true"
+  printf '\n%s=%s\n' "$API_LOCAL_KEY" "$1" >> "$API_LOCAL" || fail "could not write envs/api.local"
+}
+
+restore_api_local() {
+  [ -n "$api_local_written" ] || return 0
+  if [ -e "$API_LOCAL_SAVED" ]; then
+    mv -f "$API_LOCAL_SAVED" "$API_LOCAL"
+  else
+    rm -f "$API_LOCAL"
+  fi
+}
+
+# PRD-262 US-035 (TESTER): the night tooling edits envs/api.local, then recreates the
+# backend with `docker compose up -d --no-deps backend`. A key only that file sets must
+# reach the new container. The old container's log is copied first, for the report.
+check_api_local_reaches_backend() {
+  local value="us035-$$-${RANDOM}"
+  write_api_local_probe "$value"
+  earlier_backend_id="$(docker inspect -f '{{.Id}}' "$BACKEND_CONTAINER")" \
+    || fail "could not read the backend container's id before recreating it"
+  docker logs -t "$BACKEND_CONTAINER" > "$EARLIER_BACKEND_LOG" 2>&1 \
+    || echo "::warning title=smoke-fresh-clone::could not copy the backend's log before its recreate; the report misses the earlier boots' alembic runs"
+  echo "Recreating the backend with a key only envs/api.local sets (docker compose up -d --no-deps backend)..."
+  compose up -d --no-build --no-deps backend || fail "docker compose up -d --no-deps backend failed"
+  wait_backend recreate \
+    || fail "the recreated backend: readiness not reached within ${MAX_WAIT_SECONDS}s"
+  python3 "$PRODUCTION_TOOL" env --container "$BACKEND_CONTAINER" --key "$API_LOCAL_KEY" --value "$value" \
+    --out "$API_LOCAL_RECORD" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a key set only in envs/api.local did not reach the backend recreated by docker compose up -d --no-deps backend"
+}
+
+# PRD-262 US-035: with an SSE client connected, `docker compose stop backend` finishes in
+# under STOP_MAX_SECONDS: uvicorn gives up on the open stream after
+# UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN (envs/api.defaults) instead of holding the stop until
+# Docker's 10 s kill. It stops the backend, so it runs last.
+check_stop_with_sse_client() {
+  echo "Stopping the backend with an SSE client connected (${SSE_URL})..."
+  python3 "$PRODUCTION_TOOL" stop --url "$SSE_URL" --max-seconds "$STOP_MAX_SECONDS" \
+    --out "$STOP_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    -- docker compose "${COMPOSE_ARGS[@]}" stop backend \
+    || fail "docker compose stop backend did not finish in under ${STOP_MAX_SECONDS}s with an SSE client connected"
+}
+
 dump_failure_logs() {
   echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
   compose logs --tail 200 postgres >&2 || true
@@ -507,9 +821,16 @@ dump_failure_logs() {
   compose logs --tail 80 frontend >&2 || true
 }
 
+# The log of the backend container check_api_local_reaches_backend replaced, if it did.
+replaced_backend_log() {
+  [ -n "$earlier_backend_id" ] || return 0
+  [ "$(docker inspect -f '{{.Id}}' "$BACKEND_CONTAINER" 2>/dev/null)" != "$earlier_backend_id" ] || return 0
+  cat "$EARLIER_BACKEND_LOG" 2>/dev/null || true
+}
+
 # The step summary is written on every exit, pass or fail.
 write_report() {
-  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || true
+  { replaced_backend_log; docker logs -t "$BACKEND_CONTAINER" 2>&1; } > "${OUT_DIR}/backend.log" || true
   compose logs -t --no-color > "${OUT_DIR}/compose.log" 2>&1 || true
   stop_event_log
   python3 "$REPORT_TOOL" \
@@ -518,15 +839,14 @@ write_report() {
     --build-seconds "$build_seconds" --outcome "$outcome" --failure "$failure" \
     --title "$(report_title)" \
     --json "${OUT_DIR}/smoke-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" || return 1
-  [ -n "$SMOKE_IMAGES" ] || return 0
-  python3 "$IMAGES_TOOL" report --mode "$SMOKE_IMAGES" --tag "${AUTOMATOS_IMAGE_TAG:-}" \
+  python3 "$IMAGES_TOOL" report --mode "$IMAGES_MODE" --tag "$(image_tag)" \
     --dir "$OUT_DIR" --results "$BOOTS_FILE" --up-started-ns "$up_started_ns" \
     --json "${OUT_DIR}/smoke-images-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 }
 
 report_title() {
   case "$SMOKE_IMAGES" in
-    pull) echo "smoke-images: the published images, pulled and booted (PRD-262 US-003)" ;;
+    pull) echo "smoke-images: make up pulls the published images and boots them (PRD-262 US-003, US-036)" ;;
     prebuilt) echo "smoke-images: this pull request's images, built in the job and booted (PRD-262 US-003)" ;;
     *) echo "Fresh-clone smoke: boot timings (PRD-262 US-002)" ;;
   esac
@@ -534,6 +854,8 @@ report_title() {
 
 finish() {
   local code=$?
+  # A make build or make up still bringing the stack up ends before the teardown.
+  [ -z "$make_pid" ] || wait "$make_pid" 2>/dev/null
   if [ "$outcome" != "pass" ]; then
     dump_failure_logs
   fi
@@ -542,6 +864,7 @@ finish() {
     code=1
   fi
   compose down -v || true
+  restore_api_local
   exit "$code"
 }
 
@@ -554,14 +877,23 @@ main() {
   refuse_existing_stack
   refuse_emptying_a_kept_image_cache
   trap finish EXIT
-  prepare_images
+  [ ! -e "$ENV_FILE" ] || env_existed="true"
+  # Before the images: make build and make up start the stack themselves, and make build's
+  # image tag events are read too.
   start_event_log
+  prepare_images
   boot_fresh
   check_backend_processes
+  check_production_backend
   check_worker_restart
   boot_frontend
+  finish_make
+  check_generated_secrets
+  check_health_gates
+  check_build_overlap
   check_loopback_ports
   check_images
+  check_minio_user
   check_document_storage
   snapshot_credential_types "$CREDENTIAL_TYPES_BEFORE"
   warm_restarts
@@ -570,13 +902,18 @@ main() {
   check_alembic_runs
   check_seed_stages
   check_ready_after_core
+  # Last: they replace the backend container, then stop it (PRD-262 US-035). The checks
+  # above read every earlier boot from the container's own log.
+  check_api_local_reaches_backend
+  check_stop_with_sse_client
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot," \
     "${WARM_RESTARTS} warm restarts and a behind-head boot; only the behind-head boot ran alembic, once;" \
     "the warm restarts redid no seed work; every boot's core took 3s or less and no job was missed;" \
-    ":3000 answered 200 and a document came back from object storage — the local" \
-    "edition serves with NO external credentials"
+    ":3000 answered 200, MinIO ran as uid 65532, a document came back from object storage," \
+    "the backend ran as the production stage and the health gates held" \
+    "— the local edition serves with NO external credentials"
 }
 
 main "$@"

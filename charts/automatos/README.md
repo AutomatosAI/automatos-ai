@@ -72,11 +72,29 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `existingSecret` | *(required)* | The Secret above. |
 | `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id. |
 | `config` | optional services off | Extra non-secret settings for the API and the Job: any name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. |
-| `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs. |
+| `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
+| `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
+| `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `ingress.*` | off | |
 | `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API, the worker and the web app's server side, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
+
+## Pinning the images
+
+`edge`, the default, moves with every main publish and every weekly OS rebuild, so
+the chart pulls it `Always`: with `IfNotPresent` each node would keep whichever
+`edge` it pulled first, and two pods could run different builds. For a repeatable
+install, pin one build instead, and the chart pulls it `IfNotPresent`:
+
+- **A fixed tag:** `--set api.image.tag=sha-1a2b3c4` (and the same for `frontend`
+  and `worker`). A `sha-<7>` tag is never re-pushed.
+- **A digest:** `--set api.image.digest=sha256:<64 hex>`. The pod runs
+  `repository@digest`; `crane digest` or `docker buildx imagetools inspect` prints
+  a tag's digest.
+- **At package time:** `helm package charts/automatos --app-version sha-1a2b3c4`
+  stamps the chart's `appVersion`, the tag every component uses when its own tag
+  and digest are empty.
 
 ## Tests
 

@@ -54,7 +54,7 @@ graph TB
         PG["automatos-ai-pgvector<br/>pgvector/pgvector:pg16<br/>Port 5432"]
         Redis["Redis<br/>redis:7-alpine<br/>Port 6379"]
         Qdrant["Qdrant<br/>qdrant/qdrant:latest<br/>Port 6333"]
-        MinIO["automatos_minio<br/>minio/minio<br/>Port 9000"]
+        MinIO["automatos_minio<br/>cgr.dev/chainguard/minio<br/>Port 9000"]
     end
     
     subgraph "Monitoring_Group"

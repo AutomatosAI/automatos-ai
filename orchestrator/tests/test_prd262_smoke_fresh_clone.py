@@ -3,13 +3,16 @@
 The lane itself runs only in CI, against a real stack. These tests hold its parts:
 
 * ``scripts/ci/smoke_boot.py`` times each URL from the container's ``StartedAt``, not
-  from its own sleeps, polls once a second, and times liveness and readiness apart;
+  from its own sleeps, polls once a second, and times liveness and readiness apart. For
+  a container another process starts (``make up``, PRD-262 US-036) it first waits for
+  the start, and stops waiting once that process has ended without starting it;
 * ``scripts/ci/smoke_report.py`` turns the boot records, Docker's events and the
   backend log into the step summary: Started → Healthy per service, the warm median,
   the alembic runs counted the §8 way, the /health/bootstrap stages, the frontend's
   address, and a summary on a failed run too;
 * ``scripts/ci/smoke-fresh-clone.sh`` starts the frontend, restarts the backend twice
-  with the database kept, and writes the report on every exit;
+  with the database kept, and writes the report on every exit. Since PRD-262 US-039 the
+  source build is ``make build`` itself, whose failure is the run's failure;
 * ``smoke-fresh-clone.yml`` watches the boot inputs US-002 names, runs nightly, pins
   its Actions by SHA and uploads the records.
 """
@@ -182,6 +185,47 @@ def test_wait_refuses_a_container_that_never_started(tmp_path, monkeypatch):
     monkeypatch.setattr(boot, "container_started_at", lambda container: "0001-01-01T00:00:00Z")
     out = tmp_path / "boots.jsonl"
     assert boot.main(["--label", "fresh", "--container", BACKEND, "--url", "health=http://x", "--out", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_wait_for_start_waits_for_a_container_another_process_starts():
+    clock = FakeClock(_at(0))
+    answers = iter([None, "0001-01-01T00:00:00Z", _started_at(_at(3))])
+    assert boot.wait_for_start(BACKEND, 60, read=lambda name: next(answers), clock=clock, sleep=clock.sleep)
+    assert clock.sleeps == [1, 1], "polled once a second until it started"
+
+
+def test_wait_for_start_stops_when_the_starter_ended_or_time_ran_out(tmp_path):
+    clock = FakeClock(_at(0))
+    ended = tmp_path / "make-up.exit"
+    ended.write_text("2\n")
+    assert not boot.wait_for_start(BACKEND, 60, ended, read=lambda name: None, clock=clock, sleep=clock.sleep)
+    assert clock.sleeps == [], "a start that will never come is not waited for"
+    assert not boot.wait_for_start(BACKEND, 3, read=lambda name: None, clock=clock, sleep=clock.sleep)
+    assert boot.wait_for_start(BACKEND, 60, ended, read=lambda name: _started_at(_at(1)), clock=clock,
+                               sleep=clock.sleep), "started before its starter ended"
+
+
+def test_wait_with_wait_start_times_from_the_start_and_records_the_published_address(tmp_path, monkeypatch):
+    started_at = "2026-10-16T12:44:21.98Z"
+    monkeypatch.setattr(boot, "wait_for_start", lambda container, timeout, stop_file: True)
+    monkeypatch.setattr(boot, "container_started_at", lambda container: started_at)
+    monkeypatch.setattr(boot, "probe", lambda url: (200, url))
+    monkeypatch.setattr(boot, "published_address", lambda container, port: f"127.0.0.1:{port}")
+    out = tmp_path / "boots.jsonl"
+    code = boot.main(["--label", "frontend", "--container", "automatos_frontend", "--url", "ui=http://x/",
+                      "--wait-start", "--stop-file", str(tmp_path / "exit"), "--published-port", "3000",
+                      "--timeout", "5", "--out", str(out)])
+    assert code == 0
+    assert json.loads(out.read_text())["meta"] == {"address": "127.0.0.1:3000"}
+
+
+def test_wait_with_wait_start_fails_when_the_container_never_starts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(boot, "wait_for_start", lambda container, timeout, stop_file: False)
+    out = tmp_path / "boots.jsonl"
+    assert boot.main(["--label", "fresh", "--container", BACKEND, "--url", "health=http://x", "--wait-start",
+                      "--timeout", "5", "--out", str(out)]) == 1
+    assert "did not start within 5s, or the process that starts it ended first" in capsys.readouterr().out
     assert not out.exists()
 
 
@@ -419,11 +463,14 @@ def test_script_restarts_the_backend_twice_with_the_database_kept():
 
 def test_script_starts_the_frontend_and_records_its_address():
     text = _script()
-    assert "compose build backend workspace-worker frontend" in text
     frontend = _function(text, "boot_frontend")
+    # make build and make up start it once the backend is healthy (PRD-262 US-039, US-036);
+    # the prebuilt images' run starts it here.
+    assert 'if [ -n "$MAKE_TARGET" ]; then\n    boot_frontend_from_make' in frontend
     assert "compose up -d --no-build frontend" in frontend
     assert 'address="$(compose port frontend 3000)"' in frontend
     assert f'--url "{boot.UI}=${{FRONTEND_URL}}" --meta "address=${{address}}"' in frontend
+    assert "--published-port 3000" in _function(text, "boot_frontend_from_make")
     assert re.search(r'^FRONTEND_URL="http://localhost:\$\{FRONTEND_PORT:-3000\}/"$', text, re.M)
 
 
@@ -451,16 +498,21 @@ def test_script_checks_the_host_before_it_sets_the_teardown_trap():
     assert re.search(r"^STACK_NAME_PATTERN='\^automatos_'$", _script(), re.M)
 
 
-# A docker that records its calls, lists FAKE_CONTAINERS and FAKE_VOLUMES, and fails
-# every compose build; python3 is the interpreter running these tests.
+# A docker that records its calls and lists FAKE_CONTAINERS and FAKE_VOLUMES, and a make
+# that records its call and fails, as a make build whose build failed would; python3 is
+# the interpreter running these tests.
 _FAKE_DOCKER = """#!/bin/bash
 echo "docker $*" >> "$CALL_LOG"
 case "$*" in
   "ps -a --format"*) [ -z "${FAKE_CONTAINERS:-}" ] || printf '%s\\n' $FAKE_CONTAINERS ;;
   "volume ls --format"*) [ -z "${FAKE_VOLUMES:-}" ] || printf '%s\\n' $FAKE_VOLUMES ;;
-  "compose "*" build "*) exit 1 ;;
 esac
 exit 0
+"""
+_FAKE_MAKE = """#!/bin/bash
+echo "make $*" >> "$CALL_LOG"
+echo "make-tag ${AUTOMATOS_IMAGE_TAG-unset} make-revision ${AUTOMATOS_REVISION-unset}" >> "$CALL_LOG"
+exit 1
 """
 
 
@@ -468,7 +520,7 @@ def _run_script(tmp_path: Path, **fake: str) -> tuple[int, list[str], str]:
     """Run smoke-fresh-clone.sh against the fake docker; (exit code, docker calls, output)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    stubs = {"docker": _FAKE_DOCKER, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
+    stubs = {"docker": _FAKE_DOCKER, "make": _FAKE_MAKE, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
     for name, body in stubs.items():
         (bin_dir / name).write_text(body, encoding="utf-8")
         (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
@@ -503,17 +555,22 @@ def test_script_refuses_a_host_with_its_own_automatos_stack(tmp_path, fake):
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
-def test_script_reports_and_tears_down_when_the_build_fails(tmp_path):
+def test_script_reports_and_tears_down_when_make_build_fails(tmp_path):
+    """The source build is make build itself (PRD-262 US-039): its failure fails the run."""
     code, calls, out = _run_script(tmp_path)
     assert code == 1, out
-    assert "docker compose -f docker-compose.yml build backend workspace-worker frontend" in calls
-    assert not any(" up " in call for call in calls), "nothing boots after a failed build"
+    assert "make build" in calls, "the smoke runs make build, not its own compose build"
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_REPO, capture_output=True, text=True).stdout.strip()
+    if head:  # the build is tagged local-<sha7> and labelled with HEAD, exported for make build
+        assert f"make-tag local-{head[:7]} make-revision {head}" in calls
+    docker = [call for call in calls if call.startswith("docker ")]
+    assert not any(" build" in call or " up " in call for call in docker), "the smoke itself builds and starts nothing"
     assert calls[-1] == "docker compose -f docker-compose.yml down -v"
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
-    assert "**FAIL**: docker compose build failed" in summary
+    assert "**FAIL**: make build failed" in summary
     assert "No backend boot was timed." in summary
     report_json = json.loads((tmp_path / "out" / "smoke-report.json").read_text(encoding="utf-8"))
-    assert (report_json["outcome"], report_json["failure"]) == ("fail", "docker compose build failed")
+    assert (report_json["outcome"], report_json["failure"]) == ("fail", "make build failed")
 
 
 # --------------------------------------------------------------------------- the workflow

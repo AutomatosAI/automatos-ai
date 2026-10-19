@@ -1,7 +1,8 @@
 name: smoke-fresh-clone
 
 # PRD-176 Headline B / PRD-209 S3 — the deployability bar: a fresh clone boots to
-# a green /health with NO external credentials via `docker compose up`.
+# a green /health with NO external credentials, built from source by `make build`
+# (PRD-262 US-039; smoke-images.yml boots the published images through `make up`).
 #
 # HARD (fails red on boot death) as of PRD-209 US-004: W5 (AUTH_EDITION) has landed,
 # US-001 committed the entrypoint exec bit, US-002 stamped the initdb schema, and
@@ -40,6 +41,42 @@ name: smoke-fresh-clone
 # missed` warning appears in a boot's first 60 s (scripts/ci/smoke_ready.py). /health 200
 # and /health/ready 200 are timed separately.
 #
+# PRD-262 US-041 — MinIO runs as its image's own user, uid 65532, not root. Before the
+# document check the smoke needs MinIO healthy as that user on this fresh volume, and the
+# one-shot minio-volume-owner, which re-owns a volume root wrote, exited 0
+# (scripts/ci/smoke_minio.py server).
+#
+# PRD-262 US-035 — compose runs the backend's production stage; hot reload is `make dev`.
+# After the fresh boot the smoke checks that no bind mount lays the checkout over /app,
+# nothing runs --reload, and the entrypoint's watchdog signals uvicorn itself (docker
+# top). After the warm restarts, a key written only to envs/api.local reaches the backend
+# that `docker compose up -d --no-deps backend` recreates, and `docker compose stop
+# backend` finishes in under 8 s with an SSE client connected
+# (scripts/ci/smoke_production_backend.py).
+#
+# PRD-262 US-038 — compose probes each service every second while it starts
+# (start_interval). Once the frontend answers, scripts/ci/smoke_health_gates.py reads
+# Docker's start and health_status events: redis and minio must turn healthy within 2 s
+# of their start, and postgres's time on this fresh volume is reported. make build's
+# compose starts the frontend once the backend is healthy, so the frontend must start
+# within 3 s of that (US-039, below); only smoke-images.yml's pull-request boot, which
+# starts the frontend itself after its own checks, reports the gap instead.
+#
+# PRD-262 US-036 — docker-compose.yml names the published images, so the build here is
+# tagged local-<sha7> and labelled org.opencontainers.image.revision=HEAD, as make build
+# does; the smoke checks that every app container runs such an image
+# (scripts/ci/smoke_images.py images --mode build).
+#
+# PRD-262 US-039 — the smoke runs `make build` itself, which starts postgres, redis and
+# minio before it builds. From Docker's events, postgres must turn healthy before the
+# backend's image is built (scripts/ci/smoke_build_overlap.py), and compose, not the
+# smoke, starts the frontend, so it must start within 3 s of a healthy backend. The
+# source-build-cache job shows whether a rebuild after a one-line change reuses the npm
+# and pip installs: after a plain `docker builder prune -f` it records them, and after
+# `make clean` (a week of build cache kept) it needs both CACHED
+# (scripts/ci/build-cache-experiment.sh). It does not run nightly: only a push or pull
+# request changes what it measures.
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -59,10 +96,10 @@ name: smoke-fresh-clone
 #
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
-# stack builds or boots from: compose, the Makefile, the env defaults, the
-# backend's image, .dockerignore, entrypoint, requirements, boot module and boot
-# stages, seeds and migrations, the worker, the frontend's image and lock file, the
-# scripts and this workflow. Not on every push, since it builds and boots the full stack.
+# stack builds or boots from: compose, the Makefile and the scripts it runs, .env.example,
+# the env defaults, the backend's image, .dockerignore, entrypoint, requirements, boot
+# module and boot stages, seeds and migrations, the worker, the frontend's image and
+# lock file, the scripts and this workflow. Not on every push, since it builds and boots the full stack.
 
 on:
   workflow_dispatch:
@@ -80,6 +117,7 @@ on:
       - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/requirements*.txt"
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
@@ -108,6 +146,18 @@ on:
       - "scripts/ci/smoke_alembic_behind.py"
       - "scripts/ci/smoke_seeds.py"
       - "scripts/ci/smoke_ready.py"
+      - "scripts/ci/smoke_minio.py"
+      - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
+      - "scripts/ci/smoke_build_overlap.py"
+      - "scripts/ci/build-cache-experiment.sh"
+      - "scripts/ci/build_cache.py"
+      - "scripts/stack_images.py"
+      - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
+      - ".env.example"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -121,6 +171,7 @@ on:
       - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/requirements*.txt"
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
@@ -149,6 +200,18 @@ on:
       - "scripts/ci/smoke_alembic_behind.py"
       - "scripts/ci/smoke_seeds.py"
       - "scripts/ci/smoke_ready.py"
+      - "scripts/ci/smoke_minio.py"
+      - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
+      - "scripts/ci/smoke_build_overlap.py"
+      - "scripts/ci/build-cache-experiment.sh"
+      - "scripts/ci/build_cache.py"
+      - "scripts/stack_images.py"
+      - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
+      - ".env.example"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
@@ -163,7 +226,7 @@ permissions:
 
 jobs:
   fresh-clone-boot:
-    name: Fresh-clone docker compose up -> /health 200 (non-required)
+    name: Fresh-clone make build -> /health 200 (non-required)
     # A fixed runner image, so the five-run baselines and later runs compare like with like.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -245,5 +308,38 @@ jobs:
         with:
           name: smoke-egress-${{ matrix.egress }}
           path: ${{ runner.temp }}/smoke-egress/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # PRD-262 US-039: a source rebuild after a one-line change, once after a plain
+  # `docker builder prune -f` (what make clean ran before, recorded) and once after
+  # `make clean` itself (a week of build cache kept), which must leave the frontend's npm
+  # install and the backend's pip install CACHED. The layer cache only: no Railway-built
+  # Dockerfile has a BuildKit cache mount (PRD-262 §10). Not nightly: only a push or a pull
+  # request changes the Makefile or the Dockerfiles it measures.
+  source-build-cache:
+    name: Source rebuild reuses the npm and pip installs after make clean (non-required)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build, prune, change a line, rebuild
+        env:
+          BUILD_CACHE_OUT_DIR: ${{ runner.temp }}/build-cache
+        run: bash scripts/ci/build-cache-experiment.sh
+
+      # The three build logs and the two arms' records, pass or fail.
+      - name: Upload the build logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-build-cache
+          path: ${{ runner.temp }}/build-cache/
           if-no-files-found: warn
           retention-days: 30

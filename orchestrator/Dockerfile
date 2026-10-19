@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Automatos AI - Backend Dockerfile (Multi-stage)
 # =============================================================================
@@ -5,7 +6,8 @@
 #   - uv: the installer pybuild copies (pinned, read by Dependabot)
 #   - pybuild: installs the locked dependencies; never ships
 #   - base: Common dependencies
-#   - development: Hot reload; no code (compose mounts the source over /app)
+#   - development: Hot reload; no code (docker-compose.dev.yml, `make dev`, mounts
+#     the source over /app)
 #   - compile: the code, with its boot modules compiled; never ships itself
 #   - production: Optimized, minimal image
 # =============================================================================
@@ -194,18 +196,22 @@ RUN encodings="cl100k_base" && \
 # =============================================================================
 FROM base as development
 
-# No application code (PRD-262 US-017). Both compose files bind-mount ./orchestrator
-# over /app, which hid a baked copy, while `COPY . .` and a `chown -R /app` stored the
-# whole build context twice on every build, a checkout's uploads and caches included.
-# Run this stage with the source mounted at /app.
+# No application code (PRD-262 US-017). docker-compose.dev.yml (`make dev`) bind-mounts
+# ./orchestrator over /app, which hid a baked copy, while `COPY . .` and a `chown -R /app`
+# stored the whole build context twice on every build, a checkout's uploads and caches
+# included. Run this stage with the source mounted at /app. The default compose stack
+# runs the production stage below (PRD-262 US-035).
 #
 # The user and the directories the app writes, owned by it (no -R: they are empty), so
 # a fresh backend_logs or backend_data named volume mounted on one starts writable
-# (PRD-209: the credential key lives in /app/data). The production stage's first RUN,
-# word for word, so the two stages share the layer.
+# (PRD-209: the credential key lives in /app/data). /workspaces too (PRD-262 US-040): a
+# fresh automatos_workspaces_data volume takes the owner of the directory it is first
+# mounted on, so it is uid 1000 whether the backend or the workspace worker mounts it
+# first. The core stack (docker-compose.core.yml) starts the backend without the worker.
+# The production stage's first RUN, word for word, so the two stages share the layer.
 RUN useradd -m -u 1000 automatos && \
-    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
-    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces
 
 # The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029):
 # before the server it runs the migration step, plus the seeds where
@@ -214,13 +220,19 @@ RUN useradd -m -u 1000 automatos && \
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
+# The placeholder-secret guard the entrypoint runs before a command (PRD-262 US-037).
+COPY --chmod=0755 docker-secrets-guard.sh /usr/local/bin/docker-secrets-guard.sh
 USER automatos
 
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check. While the server starts, Docker probes every second instead of every
+# 30 s (--start-interval, Docker Engine 25 or later; the syntax directive on line 1 lets
+# older builders read it), so the container reports healthy within about a second of
+# /health answering (PRD-262 US-038). Compose sets its own (docker-compose.yml);
+# Railway runs its own health check, not this one.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --start-interval=1s --retries=3 \
     CMD docker-healthcheck.sh
 
 # Set entrypoint
@@ -268,10 +280,12 @@ FROM base as production
 # mounted on one starts writable (PRD-209: the credential key lives in /app/data).
 # The code arrives already owned by the user (the last COPY below), so no
 # `chown -R /app` layer stores every file a second time (PRD-262 US-016).
-# useradd gives the automatos group the user's id, 1000.
+# useradd gives the automatos group the user's id, 1000. /workspaces is the mount point
+# of the workspaces volume: owned by 1000 here, a fresh volume is the user's whichever
+# service mounts it first (PRD-262 US-040, as in the development stage).
 RUN useradd -m -u 1000 automatos && \
-    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
-    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces
 
 # The stdlib's bytecode, compiled once as root (PRD-262 US-014): the python base
 # ships none, and the automatos user can't write to /usr/local, so without it
@@ -290,6 +304,8 @@ RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-h
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
+# The placeholder-secret guard the entrypoint runs before a command (PRD-262 US-037).
+COPY --chmod=0755 docker-secrets-guard.sh /usr/local/bin/docker-secrets-guard.sh
 
 # The application code, with its boot modules' bytecode from the compile stage
 # (PRD-262 US-032): the stage's last filesystem layer, code and bytecode together,
@@ -304,8 +320,12 @@ USER automatos
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check. While the server starts, Docker probes every second instead of every
+# 30 s (--start-interval, Docker Engine 25 or later; the syntax directive on line 1 lets
+# older builders read it), so the container reports healthy within about a second of
+# /health answering (PRD-262 US-038). Compose sets its own (docker-compose.yml);
+# Railway runs its own health check, not this one.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --start-interval=1s --retries=3 \
     CMD docker-healthcheck.sh
 
 # Set entrypoint

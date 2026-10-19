@@ -1140,6 +1140,15 @@ jobs:
             if [ -n "$others" ]; then echo "::error::not owned by 1000:1000 under /app: $others"; exit 1; fi
             echo "every path under /app is owned by 1000:1000, and the writable directories are writable"
           '
+      # PRD-262 US-040: /workspaces, where the workspaces volume mounts, is the automatos
+      # user's in the image, so a fresh automatos_workspaces_data volume is uid 1000 when
+      # the backend mounts it before the worker does (the core stack has no worker).
+      - name: Backend — /workspaces belongs to the automatos user
+        run: |
+          owner=$(docker run --rm --entrypoint stat parity-be -c '%u:%g' /workspaces) \
+            || { echo "::error::the production backend image has no /workspaces"; exit 1; }
+          if [ "$owner" != "1000:1000" ]; then echo "::error::/workspaces is owned by $owner, not 1000:1000"; exit 1; fi
+          echo "/workspaces: owned by 1000:1000"
       # PRD-262 US-019: Debian ghostscript left the image; nothing called gs.
       - name: Backend — no ghostscript
         run: |

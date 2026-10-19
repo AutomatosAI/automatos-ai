@@ -39,7 +39,7 @@ spec:
       containers:
         - name: migrate
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.api.image) }}
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.api.image) }}
           args: ["migrate"]
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}

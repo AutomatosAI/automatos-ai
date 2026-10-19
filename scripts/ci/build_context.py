@@ -23,8 +23,8 @@ on a real build in CI:
         ``BUDGET_BYTES``, or when the log holds no such transfer.
 
 test.yml's prod-image-parity checks the production build, whose last layer copies the
-whole context. scripts/ci/smoke-fresh-clone.sh checks the compose build of the
-development stage, which copies no code since US-017. Stdlib only.
+whole context. scripts/ci/smoke-fresh-clone.sh checks the compose build, which builds the
+production stage too since PRD-262 US-035. Stdlib only.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional, Tuple
 
 # About twice the code the context carries today (19.8 MB in the 18 Oct build logs).
 # BuildKit prints decimal units, so the budget is decimal too.
@@ -63,6 +63,19 @@ def context_step(service: Optional[str]) -> str:
     return f"[{service} internal] load build context" if service else "[internal] load build context"
 
 
+def step_lines(log: str) -> Iterator[Tuple[str, str]]:
+    """``(step id, text)`` for each of a plain-progress log's step lines, in order.
+
+    A text that starts with ``[`` names its step (``[backend internal] load build
+    context``); the others are that step's output and status (``CACHED``, ``DONE 1.2s``).
+    scripts/ci/build_cache.py reads the install steps' status the same way (PRD-262 US-039).
+    """
+    for line in log.splitlines():
+        match = _STEP_LINE.search(line)
+        if match:
+            yield match.group(1), match.group(2)
+
+
 def transfers(log: str, service: Optional[str]) -> dict:
     """Bytes the build sent as its context, per step id of that build's context transfer.
 
@@ -71,11 +84,7 @@ def transfers(log: str, service: Optional[str]) -> dict:
     last named as. A step reports growing totals; the largest is what it sent.
     """
     wanted, named, sent = context_step(service), {}, {}
-    for line in log.splitlines():
-        match = _STEP_LINE.search(line)
-        if not match:
-            continue
-        step, text = match.groups()
+    for step, text in step_lines(log):
         if text.startswith("["):
             named[step] = text
             continue
