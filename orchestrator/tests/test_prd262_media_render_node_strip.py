@@ -20,10 +20,14 @@ from tests.test_prd262_media_render_stages import DOCKERFILE, MEDIA_RENDER, ROOT
 # The stage both Debian images carry byte for byte, so their node layers match.
 NODE_STRIPPED_STAGE = """# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
+# strip renames its output into /usr/local/bin, which stamps the directory with the build
+# time, and COPY --link keeps that time in the layer: the directory takes the binary's
+# upstream time back, or every build makes a different node layer.
 FROM node AS node-stripped
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends binutils \\
  && strip --strip-unneeded --preserve-dates /usr/local/bin/node \\
+ && touch -r /usr/local/bin/node /usr/local/bin \\
  && rm -rf /var/lib/apt/lists/*
 """
 NODE_COPY = "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node"
