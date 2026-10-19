@@ -16,9 +16,19 @@
  * carries a top-level `revoked`) or with another install (the workspace default), and a 404 is a
  * backend without the route or no workspace. The preset fetch below is a same-origin static file
  * under the theme's files folder, not the backend client, so it is a plain fetch.
+ *
+ * A-08b: a refused session is not the theme's failure. A 401 or 403 on the active-theme read, on
+ * the preset or on the entry (the same-origin files proxy answers 401 when signed out, as after
+ * an expired session) fails the load with reason `auth`, which the failure ledger never counts.
+ * import() reports no status, so after a failed entry import one byte of the entry is fetched
+ * again (a same-origin file of the proxy, not the backend client) to read its status.
+ *
+ * A-08c: the digest the active-theme answer names is left in a cookie for the root layout's boot
+ * cache (boot-server.ts), which fetches a boot of any other digest again.
  */
 import { apiClient } from '@/lib/api-client'
-import type { UiStyle } from '@/lib/ui-style'
+import { writeCookie } from '@/lib/cookies'
+import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 
 import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
 import { isRecord } from './css-value'
@@ -29,15 +39,42 @@ import { importThemeModule } from './native-import'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
 import { SDK_VERSION } from './sdk'
+import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 import type { LoaderDeps, SpikeManifest, ThemeLoadAbsent, ThemeLoadOk, ThemeLoadResult, ThemeSource } from './types'
 
 const INSTALL_REF_PREFIX = 'install:'
 /** What GET /api/themes/active answers when the workspace has no active install. */
 const NO_ACTIVE_INSTALL_STATUS = 404
 
+/** The statuses that mean the session was refused, not that the theme is broken (A-08b). */
+const AUTH_REFUSED_STATUSES: readonly number[] = [401, 403]
+/** apiClient's 401 error carries no status; its message starts with this (api-client.ts httpErrorOf). */
+const API_CLIENT_401_PREFIX = 'HTTP 401'
+/** The status probe after a failed import asks for one byte, so it never downloads the entry again. */
+const STATUS_PROBE_RANGE = 'bytes=0-0'
+
 /** The HTTP status apiClient puts on the error it throws, if it has one. */
 function httpStatusOf(error: unknown): unknown {
   return (error as { status?: unknown } | null)?.status
+}
+
+/** Whether a request failed because the session was refused: a 401 or 403 (apiClient's 401 by its message). */
+export function isAuthRefusal(error: unknown): boolean {
+  const status = httpStatusOf(error)
+  if (typeof status === 'number') return AUTH_REFUSED_STATUSES.includes(status)
+  return error instanceof Error && error.message.startsWith(API_CLIENT_401_PREFIX)
+}
+
+/** Runs `run`; a refused session fails as `auth` rather than as the reason of the step around it. */
+export async function refusedAsAuth<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (!isAuthRefusal(error)) throw error
+    return step<T>('auth', () => {
+      throw error
+    })
+  }
 }
 
 /** GET /api/themes/active through apiClient; null when it answers 404 (no route or no workspace). */
@@ -75,18 +112,64 @@ export function absenceOf(answer: unknown, installId: string): string | null {
 
 type ActiveManifest = { readonly manifest: SpikeManifest } | { readonly absent: string }
 
+/** A theme file's JSON, from the files proxy on the page's own origin; a failure carries its status. */
 async function fetchSameOriginJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
-  if (!response.ok) throw new Error(`GET ${url} answered ${response.status}`)
+  if (!response.ok) throw Object.assign(new Error(`GET ${url} answered ${response.status}`), { status: response.status })
   return response.json()
+}
+
+/**
+ * The status a theme file answers with, read with a one-byte same-origin GET of the files proxy;
+ * null when the probe itself fails, so the caller keeps the original error.
+ */
+export async function themeFileStatus(url: string): Promise<number | null> {
+  try {
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { Range: STATUS_PROBE_RANGE } })
+    // Only the status is wanted; a body that will not cancel changes nothing about it.
+    response.body?.cancel().catch(() => undefined)
+    return response.status
+  } catch (error) {
+    console.error('[theme-host]', 'status probe', url, error)
+    return null
+  }
+}
+
+/**
+ * Imports an installed theme's entry. When the import fails and the entry answers 401 or 403,
+ * the load fails as `auth` (the session, not the theme); any other failure is rethrown as it was.
+ */
+export async function importInstalledEntry(
+  url: string,
+  importModule: (url: string) => Promise<unknown> = importThemeModule,
+  probeStatus: (url: string) => Promise<number | null> = themeFileStatus,
+): Promise<unknown> {
+  try {
+    return await importModule(url)
+  } catch (error) {
+    const status = await probeStatus(url)
+    if (status === null || !AUTH_REFUSED_STATUSES.includes(status)) throw error
+    return refusedAsAuth(() => Promise.reject(Object.assign(new Error(`GET ${url} answered ${status}`), { status })))
+  }
+}
+
+/**
+ * A-08c: leaves the digest the active-theme answer named for `installId` in THEME_DIGEST_COOKIE,
+ * so the next request's boot cache refetches a boot of another digest. Writes only on a change.
+ */
+export function rememberActiveDigest(installId: string, digest: string): void {
+  const value = `${installId}${THEME_DIGEST_HINT_SEPARATOR}${digest}`
+  if (document.cookie.split('; ').includes(`${THEME_DIGEST_COOKIE}=${value}`)) return
+  writeCookie(THEME_DIGEST_COOKIE, value, UI_STYLE_COOKIE_MAX_AGE_S)
 }
 
 export function defaultLoaderDeps(): LoaderDeps {
   return {
     exposeHost: exposeHostModules,
     fetchActive: fetchActiveInstall,
-    fetchJson: fetchSameOriginJson,
-    importModule: importThemeModule,
+    fetchJson: (url) => refusedAsAuth(() => fetchSameOriginJson(url)),
+    importModule: (url) => importInstalledEntry(url),
+    rememberDigest: rememberActiveDigest,
     doc: document,
     timeoutMs: THEME_LOAD_TIMEOUT_MS,
   }
@@ -95,11 +178,12 @@ export function defaultLoaderDeps(): LoaderDeps {
 /** The active install's checked manifest, with its files resolved under the package's folder, or why there is none to load. */
 async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<ActiveManifest> {
   const timedOut = `GET ${THEME_ACTIVE_ENDPOINT} did not answer within ${deps.timeoutMs} ms`
-  const answer = await withTimeout(deps.fetchActive(), deps.timeoutMs, timedOut)
+  const answer = await withTimeout(refusedAsAuth(() => deps.fetchActive()), deps.timeoutMs, timedOut)
   const absent = absenceOf(answer, installId)
   if (absent !== null) return { absent }
   const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
+  deps.rememberDigest?.(installId, active.digest)
   const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
   if (!parsed.ok) throw new Error(parsed.detail)
   return { manifest: parsed.manifest }
