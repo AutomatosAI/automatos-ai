@@ -11,7 +11,7 @@ copied, the two hashes differ and the install row and the active theme say
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, List, Mapping
 
 from services.themes.contract import core_page_hashes
 
@@ -32,10 +32,22 @@ def _clone_is_stale(entry: Any, release: Mapping[str, str]) -> bool:
     return release.get(cloned.get("path")) != cloned.get("sha")
 
 
-def needs_update(manifest: Any) -> bool:
-    """True when any cloned page's ``clonedFrom.sha`` differs from this release's file hash."""
+def stale_clones(manifest: Any) -> List[Dict[str, Any]]:
+    """Each cloned page whose ``clonedFrom.sha`` differs from this release's file hash (C-02a's report).
+
+    ``{route, path, sha, releaseSha}``; ``releaseSha`` is None when this release no longer ships the path.
+    """
     pages = manifest.get("pages") if isinstance(manifest, dict) else None
     if not isinstance(pages, dict):
-        return False
+        return []
     release = _release_hashes()
-    return any(_clone_is_stale(entry, release) for entry in pages.values())
+    return [
+        {"route": route, "path": entry["clonedFrom"].get("path"), "sha": entry["clonedFrom"].get("sha"),
+         "releaseSha": release.get(entry["clonedFrom"].get("path"))}
+        for route, entry in pages.items() if _clone_is_stale(entry, release)
+    ]
+
+
+def needs_update(manifest: Any) -> bool:
+    """True when any cloned page's ``clonedFrom.sha`` differs from this release's file hash."""
+    return bool(stale_clones(manifest))

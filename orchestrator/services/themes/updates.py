@@ -38,6 +38,7 @@ from services.themes.choices import (
 )
 from services.themes.defaults import PRIVATE_DEFAULT, WITHDRAWN, can_be_default
 from services.themes.drift import needs_update
+from services.themes.review_stage import member_view
 from services.themes.optin import opt_in_state
 from services.themes.records import version_key
 from services.themes.revocations import disables, revocation_body, revocation_of
@@ -139,8 +140,10 @@ def _changed_files(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, L
 
 
 def _scan_diff(before: ThemePackage, after: ThemePackage) -> Dict[str, Any]:
-    old = before.scan_report if isinstance(before.scan_report, dict) else {}
-    new = after.scan_report if isinstance(after.scan_report, dict) else {}
+    """The verdicts and what changed between the two reports, as a workspace may see them
+    (``member_view``: never the LLM check's score or findings)."""
+    old = member_view(before.scan_report) or {}
+    new = member_view(after.scan_report) or {}
     changed = {
         key: {"from": old.get(key), "to": new.get(key)}
         for key in sorted(set(old) | set(new)) if old.get(key) != new.get(key)
