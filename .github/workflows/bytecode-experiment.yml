@@ -72,16 +72,14 @@ jobs:
         with:
           driver-opts: network=host
 
-      # images.yml's api build (target, args, amd64 cache, read only). The code and
-      # the compile stage are the pull request's.
+      # images.yml's api build (target, amd64 cache, read only; no build args since
+      # PRD-262 US-027). The code and the compile stage are the pull request's.
       - name: Build with the boot modules' bytecode (as committed)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: orchestrator
           target: production
           platforms: linux/amd64
-          build-args: |
-            INSTALL_GRAPH_EXTRAS=false
           tags: ${{ env.REPO }}:with
           push: true
           provenance: false
@@ -99,8 +97,6 @@ jobs:
           context: orchestrator
           target: production
           platforms: linux/amd64
-          build-args: |
-            INSTALL_GRAPH_EXTRAS=false
           tags: ${{ env.REPO }}:with-edit
           push: true
           provenance: false
@@ -119,8 +115,6 @@ jobs:
           context: orchestrator
           target: production
           platforms: linux/amd64
-          build-args: |
-            INSTALL_GRAPH_EXTRAS=false
           tags: ${{ env.REPO }}:without
           push: true
           provenance: false
@@ -137,8 +131,6 @@ jobs:
           context: orchestrator
           target: production
           platforms: linux/amd64
-          build-args: |
-            INSTALL_GRAPH_EXTRAS=false
           tags: ${{ env.REPO }}:without-edit
           push: true
           provenance: false

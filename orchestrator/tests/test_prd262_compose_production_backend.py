@@ -89,7 +89,7 @@ def test_the_default_stack_builds_the_production_stage(base):
     build = base["services"]["backend"]["build"]
     assert build["target"] == "production"
     assert build["context"] == _SOURCE
-    assert build["args"]["INSTALL_GRAPH_EXTRAS"] == "false", "the local edition stays without Leiden"
+    assert "args" not in build, "one API dependency set for every build, Leiden included (PRD-262 US-027)"
 
 
 def test_nothing_of_the_checkout_is_mounted_over_the_image(base):

@@ -7,7 +7,7 @@
 # datastores come from docker-compose.yml unchanged. The backend does too, with an
 # override written outside the checkout: it runs the build under test (BYTECODE_IMAGE),
 # with no source or script mounts, WEB_CONCURRENCY=1 and the volumes a self-hoster's
-# backend has (docker-compose.images.yml's list).
+# backend has (docker-compose.yml's own list since PRD-262 US-035).
 #
 # One boot on the empty database seeds it, and a second settles the warm path: the seed
 # fingerprints are stored (US-031) and the schema is at head (US-030). Then each build

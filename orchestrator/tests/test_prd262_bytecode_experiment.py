@@ -212,7 +212,7 @@ def test_the_four_builds_are_images_yml_api_build_pushed_to_the_jobs_registry():
     for tag in ("with", "with-edit", "without", "without-edit"):
         build = STEPS[_build(tag)]["with"]
         assert (build["context"], build["target"], build["platforms"]) == ("orchestrator", "production", "linux/amd64")
-        assert build["build-args"].split() == ["INSTALL_GRAPH_EXTRAS=false"]
+        assert "build-args" not in build, "images.yml's api build passes none since PRD-262 US-027"
         assert build["push"] is True and build["cache-from"] == "type=gha,scope=api-amd64"
         assert "cache-to" not in build, "a pull request reads the cache and never writes it (§9-Q13)"
 

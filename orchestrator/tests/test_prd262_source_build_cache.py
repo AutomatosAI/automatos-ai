@@ -136,9 +136,7 @@ def test_the_guide_gives_the_week_and_the_datastores_first():
 def _log(npm: str, pip: str, npm_command: str = "npm install --legacy-peer-deps",
          pip_stage: str = "pybuild 5/8") -> str:
     """A piped `docker compose build backend frontend`, its install steps ending in ``npm`` and ``pip``."""
-    pip_run = ('RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then         cp requirements.txt '
-               'requirements.build.txt;     fi &&     pip install --no-cache-dir --prefix=/install '
-               '-r requirements.build.txt')
+    pip_run = 'RUN pip install --no-cache-dir --prefix=/install -r requirements.txt'
     return "\n".join([
         "#1 [internal] load local bake definitions",
         "#1 DONE 0.0s",
