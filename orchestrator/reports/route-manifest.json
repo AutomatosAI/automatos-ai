@@ -1,5 +1,5 @@
 {
-  "route_count": 930,
+  "route_count": 941,
   "routes": [
     {
       "method": "GET",
@@ -136,6 +136,34 @@
     {
       "method": "POST",
       "path": "/api/admin/prompts/{prompt_id}/versions/{version_id}/activate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/pending"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/{package_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/{package_id}/deactivate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/{package_id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/{package_id}/report"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/{package_id}/report-note"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/{package_id}/signature"
     },
     {
       "method": "GET",
@@ -1744,6 +1772,22 @@
     {
       "method": "POST",
       "path": "/api/marketplace/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/themes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/themes/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/themes/{listing_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/themes/{listing_id}/install"
     },
     {
       "method": "GET",

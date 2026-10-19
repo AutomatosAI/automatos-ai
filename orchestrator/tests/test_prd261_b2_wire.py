@@ -289,7 +289,10 @@ def test_the_app_serves_every_w_b2_route_exactly_once(live_app):
 
 
 def test_the_app_carries_step_up_on_exactly_the_planned_routes(live_app):
-    assert {_key(name) for name in live_app["step_up"]} == STEP_UP_ROUTES
+    # The /api/themes routes only: W-C1's submit and listing install are pinned, with the
+    # app-wide set, in test_prd261_c1_wire.py.
+    marked = {_key(name) for name in live_app["step_up"]}
+    assert {key for key in marked if key[1].startswith("/api/themes/")} == STEP_UP_ROUTES
     assert live_app["handler"] is True
 
 
