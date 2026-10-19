@@ -11,7 +11,9 @@ image, with --require-hashes and --no-deps, in three layers: everything except
 claude-agent-sdk and psycopg2, then Playwright in the browser step, then the SDK
 alone, last. psycopg2 is built from its hash-checked sdist in a stage of its own,
 against Debian's libpq, into /install, which the production stage copies (PRD-262,
-row 27 of the 19 Oct size breakdown). Its `locks` stage cuts requirements.lock into
+row 27 of the 19 Oct size breakdown), on a build backend from requirements-build.lock
+(hash-checked, so the build is not isolated: an isolated build would fetch its backend
+unhashed). Its `locks` stage cuts requirements.lock into
 those three parts, and this suite runs that awk on the real lock. SQLAlchemy has left the worker
 (test_prd262_worker_task_executions.py covers its replacement).
 
@@ -38,6 +40,7 @@ REL = "services/workspace-worker"
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
 MAIN_LOCK = "requirements.lock"
 BROWSER_LOCK = "requirements-browser.lock"
+BUILD_LOCK = "requirements-build.lock"
 SDK = "claude-agent-sdk"
 PIN_LINE = re.compile(r"^([a-z0-9][a-z0-9._-]*)==([^\s;\\]+)(?: ; [^\\]+)? \\$")
 HASH_LINE = re.compile(r"^    --hash=sha256:[0-9a-f]{64}(?: \\)?$")
@@ -46,6 +49,7 @@ UV_INSTALL = re.compile(r"\buv pip install ([^;&]*?)-r (\S+\.lock)")
 INSTALL_FLAGS = ("--no-cache", "--compile-bytecode", "--require-hashes", "--no-deps")
 # Where each install goes: the image's own Python, or psycopg2's build stage's prefix.
 PSYCOPG2_LOCK = "/locks/psycopg2.lock"
+BUILD_LOCK_IN_IMAGE = f"/locks/{BUILD_LOCK}"
 TARGET_FLAGS = {PSYCOPG2_LOCK: ("--prefix", "/install")}
 SYSTEM = ("--system",)
 
@@ -104,6 +108,14 @@ def test_the_requirements_are_an_input_and_a_hash_lock():
         assert flag in command, flag
 
 
+def test_the_build_lock_is_compiled_like_the_main_lock():
+    command = _lock(BUILD_LOCK).splitlines()[1]
+    assert f"uv pip compile {REL}/requirements-build.in " in command
+    for flag in ("--universal", "--python-version 3.12", "--generate-hashes", f"-o {REL}/{BUILD_LOCK}"):
+        assert flag in command, flag
+    assert set(_pins(_lock(BUILD_LOCK))) == {"setuptools"}, "psycopg2's build backend, and nothing else"
+
+
 def test_the_browser_lock_is_compiled_against_the_main_lock():
     command = _lock(BROWSER_LOCK).splitlines()[1]
     assert f"uv pip compile {REL}/requirements-browser.in " in command
@@ -116,7 +128,7 @@ def test_the_browser_lock_is_compiled_against_the_main_lock():
     assert {name: (main[name], browser[name]) for name in shared if main[name] != browser[name]} == {}
 
 
-@pytest.mark.parametrize("lock", [MAIN_LOCK, BROWSER_LOCK])
+@pytest.mark.parametrize("lock", [MAIN_LOCK, BROWSER_LOCK, BUILD_LOCK])
 def test_every_line_of_the_lock_is_an_exact_pin_or_its_hash(lock):
     """Every entry is name==version with at least one sha256; every other line a comment."""
     text = _lock(lock)
@@ -132,7 +144,8 @@ def test_every_line_of_the_lock_is_an_exact_pin_or_its_hash(lock):
 
 
 @pytest.mark.parametrize(("source", "lock"), [("requirements.in", MAIN_LOCK),
-                                              ("requirements-browser.in", BROWSER_LOCK)])
+                                              ("requirements-browser.in", BROWSER_LOCK),
+                                              ("requirements-build.in", BUILD_LOCK)])
 def test_each_lock_satisfies_its_input(source, lock):
     pins = _pins(_lock(lock))
     for requirement in _requirements(source):
@@ -173,7 +186,7 @@ def test_uv_comes_from_a_pinned_stage_to_the_path_agents_use():
 def test_every_install_is_a_hash_checked_lock_with_no_resolution():
     installs = [(line, match) for line in INSTRUCTIONS for match in UV_INSTALL.finditer(line)]
     assert [match.group(2) for _, match in installs] == [
-        PSYCOPG2_LOCK, "/opt/worker-locks/stable.lock", BROWSER_LOCK, "/opt/worker-locks/sdk.lock"]
+        BUILD_LOCK_IN_IMAGE, PSYCOPG2_LOCK, "/opt/worker-locks/stable.lock", BROWSER_LOCK, "/opt/worker-locks/sdk.lock"]
     for _, match in installs:
         words = match.group(1).split()
         missing = [flag for flag in INSTALL_FLAGS if flag not in words]

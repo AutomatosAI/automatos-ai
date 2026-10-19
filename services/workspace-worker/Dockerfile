@@ -48,17 +48,23 @@ RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/; pg = /^psycopg2==/ } !sdk
 # wheel carried its own libpq and two OpenSSLs, krb5, LDAP and SASL (16.1 MB), libraries
 # Debian already installs in this image; the production stage installs libpq5 (0.4 MB)
 # instead, so libpq gets the weekly OS rebuild's fixes too. Same project, version and
-# API. The compiler and headers stay in this stage. The lock's psycopg2 entry is the
-# hash-checked sdist, built in uv's isolated build environment and installed into
+# API. The compiler and headers stay in this stage. Every file the build runs is
+# hash-checked: the build backend (setuptools) comes from requirements-build.lock,
+# installed first with --require-hashes, and psycopg2 builds with --no-build-isolation
+# on it, because an isolated build would fetch its backend unpinned and unhashed, past
+# --require-hashes. The lock's psycopg2 entry is the hash-checked sdist, installed into
 # /install, which the production stage copies whole; its extension's debug info and
 # uv's lock file are left behind here.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS psycopg2
 COPY --from=uv /uv /usr/local/bin/uv
+COPY requirements-build.lock /locks/
 COPY --from=locks /locks/psycopg2.lock /locks/
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libpq-dev binutils \
     && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
+        --only-binary :all: -r /locks/requirements-build.lock \
     && uv pip install --python /usr/local/bin/python --prefix /install --no-cache --compile-bytecode \
-        --require-hashes --no-deps --no-binary psycopg2 -r /locks/psycopg2.lock \
+        --require-hashes --no-deps --no-binary psycopg2 --no-build-isolation -r /locks/psycopg2.lock \
     && find /install -type f -name '*.so*' -exec strip --strip-debug {} + \
     && rm -f /install/.lock
 

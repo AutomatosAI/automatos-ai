@@ -11,7 +11,8 @@ runs on the image it built, on both arches:
   byte for byte, copied with --link as the production stage's first instruction, so
   the two images' layers are one blob on the same base;
 - row 27: psycopg2 replaces psycopg2-binary at the same version; a `psycopg2` stage
-  builds it from the lock's hash-checked sdist against libpq-dev, and the production
+  builds it from the lock's hash-checked sdist against libpq-dev, without build
+  isolation, on setuptools from the hashed requirements-build.lock, and the production
   stage installs Debian's libpq5 and copies the build in;
 - row 40: the stable layer's RUN strips the debug sections from every *.so* it
   installed outside the auditwheel *.libs directories, as the API's US-020 does;
@@ -213,21 +214,57 @@ def test_psycopg2_replaces_psycopg2_binary_at_the_same_release():
         assert "psycopg2-binary" not in _lock_pins(name), name
 
 
-def test_the_psycopg2_stage_builds_the_sdist_against_libpq_on_the_production_python():
+def _psycopg2_stage_installs() -> tuple[list[str], list[list[str]]]:
+    """The psycopg2 stage's instructions, and every pip or uv install its RUNs make."""
     stage = _stage_lines("psycopg2")
+    commands = [words for line in stage if line.startswith("RUN ") for words in _commands(line)]
+    installs = [words for words in commands
+                if words[:3] == ["uv", "pip", "install"] or (words[:1] in (["pip"], ["pip3"]) and "install" in words)]
+    return stage, installs
+
+
+def _install_of(installs: list[list[str]], lock: str) -> list[str]:
+    (install,) = [words for words in installs if words[words.index("-r") + 1] == lock]
+    return install
+
+
+def test_the_psycopg2_stage_builds_the_sdist_against_libpq_on_the_production_python():
+    stage, installs = _psycopg2_stage_installs()
     production = _stage_lines("production")
     assert stage[0].split(" AS ")[0] == production[0].split(" AS ")[0], "the same Python, so the same ABI"
     assert "COPY --from=locks /locks/psycopg2.lock /locks/" in stage
     (run,) = [line for line in stage if line.startswith("RUN ")]
     commands = _commands(run)
     assert {"gcc", "libc6-dev", "libpq-dev", "binutils"} <= set(_apt_packages(run))
-    install = next(words for words in commands if words[:3] == ["uv", "pip", "install"])
+    install = _install_of(installs, "/locks/psycopg2.lock")
     for flag in ("--require-hashes", "--no-deps", "--no-cache", "--compile-bytecode"):
         assert flag in install, flag
     assert install[install.index("--no-binary") + 1] == "psycopg2", "always the sdist, built here"
     assert install[install.index("--prefix") + 1] == "/install"
-    assert install[install.index("-r") + 1] == "/locks/psycopg2.lock"
     assert ["find", "/install", "-type", "f", "-name", "*.so*", "-exec", "strip", "--strip-debug", "{}", "+"] in commands
+
+
+def test_the_psycopg2_build_runs_only_on_a_hash_checked_backend():
+    """--require-hashes checks the sdist, but an isolated build fetches its backend
+    (setuptools) unpinned and unhashed. The stage installs the backend from the hashed
+    requirements-build.lock first, as wheels only, and builds without isolation on it."""
+    stage, installs = _psycopg2_stage_installs()
+    assert "COPY requirements-build.lock /locks/" in stage
+    backend = _install_of(installs, "/locks/requirements-build.lock")
+    psycopg2 = _install_of(installs, "/locks/psycopg2.lock")
+    assert installs.index(backend) < installs.index(psycopg2), "the backend is in place before the build"
+    assert "--no-build-isolation" in psycopg2
+    assert backend[backend.index("--only-binary") + 1] == ":all:", "the backend itself is never built"
+    assert [name for name in ("--no-build-isolation", "--no-binary") if name in backend] == []
+    # No other install in the stage, and none that a lock with hashes does not fully pin.
+    assert len(installs) == 2, installs
+    for words in installs:
+        assert words[:3] == ["uv", "pip", "install"], f"an install that bypasses uv: {words}"
+        assert {"--require-hashes", "--no-deps"} <= set(words), words
+        assert words[words.index("-r") + 1].endswith(".lock"), words
+    lock = (WORKER / "requirements-build.lock").read_text()
+    assert re.findall(r"^([a-z0-9][a-z0-9._-]*)==", lock, re.M) == ["setuptools"]
+    assert re.search(r"^    --hash=sha256:[0-9a-f]{64}", lock, re.M), "the build lock carries hashes"
 
 
 def test_production_installs_libpq5_and_copies_the_build_without_the_toolchain_stage():
