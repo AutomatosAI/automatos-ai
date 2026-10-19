@@ -8,7 +8,9 @@ is `fi`). Railway's [leiden] build still gets scikit-learn through graspologic u
 US-027. US-018 removed gotenberg-client with the Gotenberg sidecar and its only client,
 ConversionService, which nothing called. US-023 replaced camelot-py with pdfplumber's
 text strategy, and opencv-python-headless, which only camelot imported, went with it.
-This suite checks:
+US-024 moved Gemini onto the OpenAI-compatible adapter: google-generativeai left, with
+google-ai-generativelanguage and google-api-python-client (Google's API discovery
+documents), which only it brought. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -27,7 +29,7 @@ This suite checks:
 - `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
   comments and code that named it are gone, and this file has to name it to forbid it.
 
-FORBIDDEN_IMPORTS is meant to grow: W3 adds google.generativeai (US-024), pandas
+FORBIDDEN_IMPORTS is meant to grow: W3 adds pandas
 outside pandas_ai_service.py's methods (US-025, which can filter on ImportSite.scope),
 langchain_text_splitters and langchain_core (US-026) and tree_sitter_language_pack
 (US-028). A dotted name forbids that module and everything under it.
@@ -66,6 +68,9 @@ FORBIDDEN_IMPORTS = {
     "gotenberg_client": "gotenberg-client",  # US-018
     "camelot": "camelot-py",  # US-023
     "cv2": "opencv-python-headless",  # US-023: only camelot imported it
+    "google.generativeai": "google-generativeai",  # US-024: Gemini is on the openai client
+    "google.ai.generativelanguage": "google-ai-generativelanguage",  # US-024: only the SDK
+    "googleapiclient": "google-api-python-client",  # US-024: brought these two
 }
 # Distributions no image installs: the ones above plus python-jose's closure.
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
@@ -172,6 +177,29 @@ def test_the_walk_sees_every_import_form_at_any_depth():
     }, "a relative `from . import fi`, `fine` and `sklearnish` are not the removed packages"
     lines = SAMPLE.splitlines()
     assert all(_MENTION.search(lines[line - 1].encode()) for line, _, _ in hits), "the pre-filter keeps them"
+
+
+def test_a_dotted_name_forbids_its_module_and_what_is_under_it_only():
+    """US-024: `google` is a namespace other packages share (protobuf, the API protos)."""
+    source = (
+        "import google.generativeai as genai\n"
+        "from google import generativeai\n"
+        "from google.generativeai.types import Tool\n"
+        "from google.protobuf import struct_pb2\n"
+        "import googleapiclientx\n"
+        "from googleapiclient import discovery\n"
+    )
+    hits = {(site.line, site.module) for site in import_sites(source, "sample.py") if forbidden(site)}
+    assert hits == {
+        (1, "google.generativeai"),
+        (2, "google.generativeai"),
+        (3, "google.generativeai.types"),
+        (3, "google.generativeai.types.Tool"),
+        (6, "googleapiclient"),
+        (6, "googleapiclient.discovery"),
+    }
+    lines = source.splitlines()
+    assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
 
 
 def _offenders(files: list[Path]) -> list[str]:

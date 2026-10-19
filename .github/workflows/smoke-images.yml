@@ -290,7 +290,7 @@ jobs:
       - name: The api image has no package the code never imports
         env:
           IMAGE: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python "$IMAGE" - "${names[@]}" < scripts/ci/image_dists_absent.py

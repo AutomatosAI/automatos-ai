@@ -1025,7 +1025,7 @@ jobs:
       # of them.
       - name: Backend — no package the code never imports
         env:
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector futureagi gotenberg-client camelot-py opencv-python-headless
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
