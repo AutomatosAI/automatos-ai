@@ -21,8 +21,8 @@ theme code and cut to fit:
   least ``review_required``), never a pass and never ``not_run``.
 
 The config names ``THEME_LLM_CHUNK_TOKENS``, ``THEME_LLM_MAX_CHUNKS`` and
-``THEME_LLM_TIMEOUT_SECONDS`` are read with their defaults until C1-wire adds them to
-``config.py`` (as ``package.cap_bytes`` does for the size caps).
+``THEME_LLM_TIMEOUT_SECONDS`` are in ``config.py`` (C1-wire); a missing or non-positive value
+falls back to the default here.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ class ThemeLLMResult(NamedTuple):
 
 
 def _setting(name: str, default: int) -> int:
-    """A positive whole-number setting from config once C1-wire names it, else the default."""
+    """A positive whole-number setting from config, else the default."""
     value = int(getattr(config, name, default) or default)
     return value if value > 0 else default
 

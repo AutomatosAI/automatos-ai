@@ -5,7 +5,7 @@
 listing install sets it at install time (``listings.install_listing``); a version a person
 approves **later** reaches existing installs only through ``offer_listed_update``.
 
-Seam (C1-wire): C-03a's ``review.approve`` calls ``offer_listed_update(db, package)`` once it has
+Wired at C1-wire: C-03a's ``review.approve`` calls ``offer_listed_update(db, package)`` once it has
 set ``status='approved'`` and ``reviewed=True``, in the same transaction. Only installs that run a
 Marketplace version of the theme are offered it (a workspace's own upload is not a listing
 install), and an install that already waits on a version at least as new keeps that one. The

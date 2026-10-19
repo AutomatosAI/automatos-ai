@@ -43,7 +43,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
-from services.themes.scan import build_scan_report
+from services.themes.review_stage import run_review_stage
 from services.themes.storage import theme_prefix, write_theme_files
 from services.themes.submissions import (
     MARKETPLACE_OFF, NO_PERSON, SWITCH_OFF, THEME_SUBMIT_ROUTE, PublisherReserved, ReviewStage, SavedSubmission,
@@ -72,14 +72,19 @@ def require_marketplace() -> None:
         raise HTTPException(status_code=403, detail=MARKETPLACE_OFF)
 
 
-def submission_review_stage() -> ReviewStage:
-    """The automated review stage run inline at submit.
+def marketplace_review(checked: CheckedThemePackage, package_bytes: int) -> Dict[str, Any]:
+    """C-02a's stage on a submission: the LLM check reads ``source/`` when the package ships it,
+    because the isolated job (C-02b) rebuilds ``dist/`` from it and compares the digest."""
+    return run_review_stage(checked, package_bytes, prefer_source=True)
 
-    C-02a's stage (``services/themes/review_stage.py``) replaces this default at the W-C1 seam;
-    until then it is A-07a's report, whose verdict is ``not_run`` (approve refuses that, C-03a).
-    Tests override this dependency to give a verdict.
+
+def submission_review_stage() -> ReviewStage:
+    """The automated review stage run inline at submit (C-02a, wired at C1-wire).
+
+    Its verdict is never ``not_run``: with no LLM key it is ``review_required`` ("LLM stage did
+    not run"), which a person may approve (C-03a). Tests override this dependency to give a verdict.
     """
-    return build_scan_report
+    return marketplace_review
 
 
 def _read_upload(file: UploadFile) -> Tuple[CheckedThemePackage, int]:
@@ -138,7 +143,7 @@ def _save(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage
     prefix = theme_prefix(manifest["id"], manifest["version"])
     try:
         check_submission(db, manifest, checked.digest, submitter)
-        report = stage(checked.files, package_bytes)
+        report = stage(checked, package_bytes)
         return save_submission(db, checked, submitter, prefix, report, store=lambda: _store(prefix, checked))
     except (PublisherReserved, SubmissionConflict) as exc:
         raise _refusal(db, exc) from exc

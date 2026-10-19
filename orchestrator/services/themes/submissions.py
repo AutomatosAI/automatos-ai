@@ -12,8 +12,8 @@ Rules, in the order they are checked:
   marked ``reserved``) takes submissions only from ``caller_is_admin``; any other publisher is
   claimed by its first submitter, and a later submission under it by someone else is a
   :class:`PublisherTaken` (409);
-* Q9, one open submission per author, is the flag ``THEMES_ONE_OPEN_SUBMISSION`` (off until
-  Gerard answers; C1-wire adds the name to ``config.py``): when on, an author with a pending
+* Q9, one open submission per author, is the flag ``THEMES_ONE_OPEN_SUBMISSION`` in
+  ``config.py`` (off until Gerard answers): when on, an author with a pending
   submission of other bytes gets a :class:`SubmissionConflict`;
 * a version the Marketplace already holds with other files, or one not higher than the
   theme's highest submitted version, is a :class:`SubmissionConflict`.
@@ -39,7 +39,6 @@ from sqlalchemy.orm import Session
 from config import config
 from core.models.themes import ThemePackage, ThemePublisher, ThemeReviewEvent
 from services.themes.contract import RESERVED_PUBLISHERS, echo
-from services.themes.package import ThemeFile
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.records import publisher_of, version_key
 
@@ -58,10 +57,10 @@ EVENT_SUBMITTED, EVENT_SCANNED = "submitted", "scanned"
 MARKETPLACE_OFF = "The theme Marketplace is turned off on this platform."
 NO_PERSON = "Sign in as a person to submit a theme to the Marketplace."
 
-# The automated review stage: the package's files and its size in bytes → the scan report,
-# whose "verdict" is one of THEME_SCAN_VERDICTS. C-02a's stage plugs in here (the router's
-# ``submission_review_stage``); until then the A-07a report, verdict "not_run".
-ReviewStage = Callable[[Mapping[str, ThemeFile], int], Dict[str, Any]]
+# The automated review stage: the checked package and its size in bytes → the scan report,
+# whose "verdict" is one of THEME_SCAN_VERDICTS. The router's ``submission_review_stage`` gives
+# C-02a's stage (``services/themes/review_stage.py``), reading ``source/`` when it is shipped.
+ReviewStage = Callable[[CheckedThemePackage, int], Dict[str, Any]]
 
 
 class SubmissionConflict(ValueError):

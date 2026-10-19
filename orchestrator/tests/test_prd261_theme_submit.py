@@ -31,11 +31,11 @@ import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from config import config  # noqa: E402
 from core.auth import workspace_permission  # noqa: E402
 from core.models.themes import (  # noqa: E402
-    ThemeInstallation, ThemePackage, ThemePublisher, ThemeReviewEvent, ThemeWorkspaceSettings,
+    ThemeInstallation, ThemePackage, ThemePublisher, ThemeReviewEvent, ThemeRevocation, ThemeWorkspaceSettings,
 )
 from services.themes import storage, submissions  # noqa: E402
 from services.themes.package import THEME_IMPORT_ROUTE  # noqa: E402
-from services.themes.scan import VERDICT_NOT_RUN  # noqa: E402
+from services.themes.llm_stage import DID_NOT_RUN  # noqa: E402
 from services.themes.submissions import THEME_SUBMIT_ROUTE  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
@@ -47,7 +47,7 @@ MEMBERS_DDL = (
     "joined_at DATETIME, is_active BOOLEAN)"
 )
 WORKSPACES_DDL = "CREATE TABLE workspaces (id CHAR(32) PRIMARY KEY, owner_id INTEGER)"
-TABLES = (ThemePackage, ThemePublisher, ThemeReviewEvent, ThemeInstallation, ThemeWorkspaceSettings)
+TABLES = (ThemePackage, ThemePublisher, ThemeReviewEvent, ThemeInstallation, ThemeWorkspaceSettings, ThemeRevocation)
 
 
 class _FakeS3:
@@ -76,6 +76,7 @@ def _user_pk(db, ctx):
 
 @pytest.fixture
 def env(monkeypatch):
+    import api.admin_themes as admin_api
     import api.marketplace_themes_submit as submit_api
     import api.themes_import as themes_import
 
@@ -89,6 +90,9 @@ def env(monkeypatch):
     monkeypatch.setattr(storage, "ensure_bucket", lambda bucket: None)
     monkeypatch.setattr(submit_api, "resolve_user_pk", _user_pk)
     monkeypatch.setattr(themes_import, "resolve_user_pk", _user_pk)
+    monkeypatch.setattr(admin_api, "resolve_user_pk", _user_pk)
+    # The review stage (C-02a) runs inline by default: no key here, so no test calls the Anthropic API.
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(config, "THEMES_MARKETPLACE", "on", raising=False)
     monkeypatch.setattr(config, "THEMES_PRIVATE_UPLOAD", "on", raising=False)
@@ -123,6 +127,7 @@ def _client(env, ctx, stage=None):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from api.admin_themes import router as admin_router
     from api.marketplace_themes_submit import router, submission_review_stage
     from api.themes_import import router as import_router
     from core.auth.hybrid import get_request_context_hybrid
@@ -132,6 +137,7 @@ def _client(env, ctx, stage=None):
     app = FastAPI()
     app.include_router(router)
     app.include_router(import_router)
+    app.include_router(admin_router)
     install_step_up_handler(app)
 
     def _db():
@@ -169,8 +175,8 @@ def _rows(env, model):
 def _stage(verdict):
     calls = []
 
-    def stage(files, package_bytes):
-        calls.append(sorted(files))
+    def stage(checked, package_bytes):
+        calls.append(sorted(checked.files))
         return {"schema": "automatos-theme-scan/v1", "verdict": verdict, "checks": {}}
 
     stage.calls = calls
@@ -230,11 +236,22 @@ def test_a_submission_is_a_pending_marketplace_row_with_its_stage_verdict(env):
     assert (publisher.publisher, publisher.owner_user_id, publisher.reserved) == ("automatos-e2e", 1, False)
 
 
-def test_without_the_review_stage_wired_the_verdict_is_not_run(env):
-    response = _submit(_client(env, _ctx()), _hello())
+def test_by_default_the_c02a_stage_runs_on_source_and_with_no_llm_key_a_person_may_approve(env):
+    # C1-wire: submit's default stage is C-02a's, never A-07a's "not_run" report (approve refuses that).
+    data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
+    response = _submit(_client(env, _ctx()), data)
     assert response.status_code == 201, response.text
     (row,) = _rows(env, ThemePackage)
-    assert row.scan_verdict == VERDICT_NOT_RUN and row.scan_report["verdict"] == VERDICT_NOT_RUN
+    llm = row.scan_report["checks"]["llm"]
+    assert row.scan_verdict == "review_required" and row.scan_report["schema"] == "automatos-theme-scan/v2"
+    assert llm["reason"].startswith(DID_NOT_RUN) and llm["read"] == "source"
+
+    admin = _client(env, _ctx("admin_1", system_role="admin"))
+    note = {"summary": "isolated job: reproducible build, digests equal", "outcome": "pass"}
+    assert admin.post(f"/api/admin/themes/{row.id}/report-note", json=note).status_code == 200
+    approved = admin.post(f"/api/admin/themes/{row.id}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved" and approved.json()["signatureRequest"]["requestId"]
 
 
 def test_the_same_bytes_again_return_the_existing_submission(env):

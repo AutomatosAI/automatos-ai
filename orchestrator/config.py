@@ -1524,6 +1524,17 @@ class Config:
     THEME_FILE_CACHE_SECONDS: int = int(os.getenv("THEME_FILE_CACHE_SECONDS", "86400"))
     # Step-up on sensitive routes (themes now; role changes with W-A2): a first factor this recent (D1-e: 10).
     STEP_UP_MAX_AGE_MINUTES: int = int(os.getenv("STEP_UP_MAX_AGE_MINUTES", "10"))
+    # PRD-261 W-C1 Marketplace review (D3, 19 Oct: a person reviews every version, auto-publish
+    # is off for themes). Q9: one pending submission per author at a time; off until Gerard answers.
+    THEMES_ONE_OPEN_SUBMISSION: bool = (
+        os.getenv("THEMES_ONE_OPEN_SUBMISSION", "false").strip().lower() in ("true", "1", "yes", "on")
+    )
+    # The automated stage's LLM check (services/themes/llm_stage.py), on PLUGIN_LLM_SCAN_MODEL:
+    # tokens per chunk, chunks per package (more is "LLM stage did not run"), seconds per call.
+    THEME_LLM_CHUNK_TOKENS: int = int(os.getenv("THEME_LLM_CHUNK_TOKENS", "8000"))
+    THEME_LLM_MAX_CHUNKS: int = int(os.getenv("THEME_LLM_MAX_CHUNKS", "48"))
+    THEME_LLM_TIMEOUT_SECONDS: int = int(os.getenv("THEME_LLM_TIMEOUT_SECONDS", "60"))
+    # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)

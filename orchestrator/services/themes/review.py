@@ -14,7 +14,9 @@ never in the queue and answers 404 here, exactly as a missing row does):
   ``disable`` revocation. On the hosted edition it also needs the latest isolated-job note to
   say ``pass`` (the reproducible build is required, D3); the local edition never has the
   isolated stage, so there the person's approval is the review. Approval sets ``approved``
-  and ``reviewed`` and records a signature request (``signing.py``); it never signs;
+  and ``reviewed``, offers the version to the listing installs that run an older one
+  (``listing_updates.py``; an install never switches by itself) and records a signature
+  request (``signing.py``); it never signs;
 * **reject** with a reason, for a pending version;
 * **deactivate** an approved version with a reason: status ``deactivated`` and a ``disable``
   revocation of its digest, so every install falls back to its base on the next load.
@@ -37,6 +39,7 @@ from config import config
 from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signing
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
+from services.themes.listing_updates import offer_listed_update
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
 
 MARKETPLACE_OWNER = "marketplace"
@@ -244,8 +247,9 @@ def approve(db: Session, package_id: UUID, actor_pk: Optional[int]) -> Dict[str,
     package.status, package.reviewed = STATUS_APPROVED, True
     _record(db, package, EVENT_APPROVED, STATUS_PENDING, actor_pk,
             detail={"scanVerdict": package.scan_verdict, "isolatedJob": _note_outcome(note)})
+    offered = offer_listed_update(db, package)
     request = signing.request_signature(db, package, actor_pk)
-    return {**package_summary(package), "signatureRequest": request}
+    return {**package_summary(package), "signatureRequest": request, "updatesOffered": offered}
 
 
 def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:

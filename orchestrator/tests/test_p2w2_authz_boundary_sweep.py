@@ -169,6 +169,14 @@ ADMIN_GATED_IN_HANDLER = {
     # handler body (`_require_admin(ctx)` → 403, super-admin-inclusive) after a
     # feature-flag 404, not via a shared dependency. TEMPORARY, off by default.
     ("POST", "/api/workspaces/current/onboarding/reset"),
+    # PRD-261 C-03a (C1-wire): the theme review queue. Platform-wide, not workspace-scoped:
+    # every handler calls `_require_admin(ctx)` (`caller_is_admin`, super-admin-inclusive)
+    # first. Submit and listing install are workspace-gated (bucket a), not listed here.
+    ("POST", "/api/admin/themes/{package_id}/approve"),
+    ("POST", "/api/admin/themes/{package_id}/deactivate"),
+    ("POST", "/api/admin/themes/{package_id}/reject"),
+    ("POST", "/api/admin/themes/{package_id}/report-note"),
+    ("POST", "/api/admin/themes/{package_id}/signature"),
 }
 
 # (g) Own explicit in-handler gate.
