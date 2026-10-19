@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 
 from tests.test_prd262_media_render_diet import _run_with
-from tests.test_prd262_media_render_stages import MEDIA_RENDER
+from tests.test_prd262_media_render_stages import MEDIA_RENDER, _stage
 
 NOT_ON_THE_APT_LINE = ("libcups2t64", "libxshmfence1")
 UNREAD_DATA = ("shared-mime-info", "xkb-data", "libx11-data")
@@ -39,6 +39,14 @@ def test_the_x_and_mime_data_is_purged_before_the_ffmpeg_check():
     purge = run.index("dpkg --purge --force-depends $unread_data;")
     assert run.index("dpkg --purge --force-depends $mesa_only;") < purge
     assert purge < run.index("if ldd /usr/bin/ffmpeg /usr/bin/ffprobe | grep 'not found'; then") < run.index("fc-cache -f")
+
+
+def test_the_build_checks_the_shell_and_the_libraries_beside_it():
+    # A library the shell or its SwiftShader, ANGLE or Vulkan loader needs, and the
+    # apt step no longer installs, fails the build, not a render.
+    (check,) = [line for line in _stage("runtime").splitlines() if line.startswith("RUN if ldd /opt/chrome/")]
+    assert check.startswith("RUN if ldd /opt/chrome/chrome-headless-shell /opt/chrome/*.so* | grep 'not found'; then")
+    assert "exit 1" in check
 
 
 def test_the_in_image_suite_checks_each_package():

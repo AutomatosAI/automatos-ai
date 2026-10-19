@@ -161,7 +161,8 @@ def test_chrome_is_preinstalled_at_build_not_fetched_per_render():
     assert "COPY --link --from=chrome /opt/chrome /opt/chrome" in runtime
     assert "HYPERFRAMES_BROWSER_PATH=/opt/chrome/chrome-headless-shell" in runtime
     # Its libraries are the runtime's, so the runtime checks them.
-    assert "ldd /opt/chrome/chrome-headless-shell | grep 'not found'" in runtime
+    # PRD-262 #34, #47: with the libraries beside it, which it loads at runtime.
+    assert "ldd /opt/chrome/chrome-headless-shell /opt/chrome/*.so* | grep 'not found'" in runtime
 
 
 def test_the_media_render_job_runs_on_demand_only():

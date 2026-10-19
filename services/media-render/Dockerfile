@@ -325,9 +325,11 @@ ENV PATH=/opt/venv/bin:/opt/media-render/js/node_modules/.bin:$PATH \
     HYPERFRAMES_BROWSER_PATH=/opt/chrome/chrome-headless-shell
 
 # A library chrome-headless-shell needs and the apt step above missed fails the
-# build here, not a render.
-RUN if ldd /opt/chrome/chrome-headless-shell | grep 'not found'; then \
-        echo "chrome-headless-shell is missing the shared libraries listed above" >&2; exit 1; \
+# build here, not a render. PRD-262 #34, #47: the libraries it loads beside it
+# (SwiftShader, ANGLE, the Vulkan loader) are checked too, now that the apt step
+# leaves more out.
+RUN if ldd /opt/chrome/chrome-headless-shell /opt/chrome/*.so* | grep 'not found'; then \
+        echo "chrome-headless-shell or a library beside it is missing the shared libraries listed above" >&2; exit 1; \
     fi
 
 # PRD-262 (code layer last): the versions record, the compile cache and the Chrome
