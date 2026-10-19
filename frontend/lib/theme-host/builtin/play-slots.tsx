@@ -13,7 +13,8 @@
  * download none of Play's screens (P260-FX-23, M17; lib/__tests__/prd260-play-guards.test.ts).
  *
  * The keys are the host's own (THEME_SLOT_IDS, THEME_PAGE_ROUTES, THEME_ROUTE_PATTERN), and
- * play-slots.test.ts runs them through the loader's registerTheme, as an installed theme's are.
+ * ../__tests__/builtin-slots.test.tsx runs them through the loader's registerTheme, as an
+ * installed theme's are.
  * Play's entry (./play-entry.ts) lists the same pages, routes and slots; asleep@1 is drawn by
  * Play's frame itself (AsleepGate), so it is not registered on its own.
  */
