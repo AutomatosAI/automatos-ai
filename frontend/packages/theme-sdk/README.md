@@ -65,12 +65,17 @@ The widget SDK's distribution is reused instead (Gerard, D2-b): its S3 bucket an
 
 - `.github/workflows/theme-sdk-cdn.yml` runs on a push to `main` that touches `frontend/packages/theme-sdk/**` or
   `frontend/lib/theme-sdk/surface/**`, and on a manual run. It calls `scripts/theme-sdk/deploy-cdn.sh`.
-- The script runs `npm pack` here and uploads the tarball twice:
+- The script runs `npm pack` here and uploads the tarball twice, then writes a marker:
 
   | Key | Cache | Rule |
   |---|---|---|
-  | `theme-sdk/v<version>/theme-sdk.tgz` | `public, max-age=31536000, immutable` | never overwritten: a version already there stops the deploy |
+  | `theme-sdk/v<version>/theme-sdk.tgz` | `public, max-age=31536000, immutable` | never overwritten |
   | `theme-sdk/v<major>/theme-sdk.tgz` | `public, max-age=3600` | replaced on every deploy; the only path CloudFront invalidates |
+  | `theme-sdk/v<version>/published.json` | `no-cache` | written last; its presence stops the next deploy of this version |
+
+- The marker goes up only after the CloudFront invalidation has completed and both URLs serve the tarball's exact
+  bytes (sha256). A run that fails part way leaves no marker, so the next run resumes: it downloads the immutable
+  copy and redoes the alias, the invalidation and the checks, never re-packing over a published version.
 
 - `<version>` is this file's `version`, which is `sdkVersion`. **To ship a change, bump both together**; a push
   that does not bump them is a no-op ("already published", the job exits 0 with a notice).

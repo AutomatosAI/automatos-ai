@@ -9,9 +9,13 @@
 #   theme-sdk/v<major>/theme-sdk.tgz     major alias, max-age 3600, the only path invalidated
 # The version is frontend/packages/theme-sdk/package.json's (= sdkVersion).
 #
-# Idempotency: a version already on the CDN makes the script exit 3; this
-# workflow reads that as "nothing to ship" and exits 0 with a notice, so a push
-# that does not bump the version skips the deploy instead of failing.
+# Idempotency: a version counts as published only once the script has written
+# theme-sdk/v<version>/published.json, its last step (after the alias upload, the
+# CloudFront invalidation has completed and both URLs serve the tarball's bytes).
+# With the marker present the script exits 3; this workflow reads that as
+# "nothing to ship" and exits 0 with a notice. A run that failed part way leaves
+# no marker, so the next run (a re-run, or the next push) resumes the alias steps
+# instead of skipping them.
 #
 # Secrets (Settings -> Secrets and variables -> Actions, repo or org level),
 # the widget SDK's five. Until all five exist the job prints a notice and exits 0:
@@ -20,6 +24,9 @@
 #   AWS_SDK_DEPLOY_REGION              e.g. us-east-1
 #   AWS_SDK_DEPLOY_BUCKET              e.g. automatos-widget-sdk
 #   AWS_SDK_DEPLOY_DISTRIBUTION_ID     CloudFront distribution ID
+# The key needs s3:GetObject + s3:PutObject on theme-sdk/* (the resume path reads
+# the immutable copy back), cloudfront:CreateInvalidation and, for the waiter,
+# cloudfront:GetInvalidation.
 #
 # Manual run: Actions -> "Theme SDK types to CDN (main)" -> "Run workflow"
 # (e.g. after the secrets are added, or after a change to the deploy script).
@@ -44,7 +51,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20   # the invalidation waiter alone may take 10
     steps:
       - name: Checkout (the package and the deploy script)
         uses: actions/checkout@v4
