@@ -14,7 +14,8 @@ files the strip touched, and reads each one with the ELF parser below (the image
 binutils):
 
 - one that exports ``PyInit_<name>`` from ``.dynsym`` is an extension module, and is
-  imported by its dotted name;
+  imported by its dotted name, after its parent package and, for the few its package
+  only loads through one of its own modules (``LOADED_THROUGH``), after that module;
 - any other is a plain library that a package opens through ctypes (for example
   ``pypdfium2_raw/libpdfium.so``), and is opened with ``ctypes.CDLL``;
 - none may carry a ``.debug_*`` section or a ``.symtab``.
@@ -58,6 +59,16 @@ EXPECTED_FAILURES: Dict[str, str] = {
         "Pillow's Tk bridge imports tkinter, and python:slim ships _tkinter without the Tcl/Tk "
         "libraries it links. Nothing in the app draws to a Tk window."
     ),
+}
+# Extensions whose init imports back the module of their own package that loads them, so
+# the package only ever loads them through that module. Imported first, on its own, such an
+# extension meets that module half-initialised and fails with a circular ImportError, which
+# is the package's import order, not a broken file; the probe imports the module first, as
+# the package does, and the extension must then load. scipy.linalg's logm imports
+# _matfuncs_sqrtm, which imports _matfuncs_sqrtm_triu, whose init takes SqrtmError from
+# _matfuncs_sqrtm (scipy 1.17).
+LOADED_THROUGH: Dict[str, str] = {
+    "scipy.linalg._matfuncs_sqrtm_triu": "scipy.linalg._matfuncs_sqrtm",
 }
 LIBRARY_GLOB = "*.so*"  # the files orchestrator/Dockerfile's strip names
 AUDITWHEEL_SUFFIX = ".libs"  # auditwheel's vendored libraries: not stripped, not probed
@@ -287,19 +298,24 @@ def _described(error: BaseException) -> str:
     return f"{type(error).__name__}: {' '.join(str(error).split())}"
 
 
+def imported_before(name: str) -> Tuple[str, ...]:
+    """What the package has imported by the time it loads extension ``name``: its parent
+    package, then the module ``LOADED_THROUGH`` names for it, if any. Pure."""
+    return tuple(module for module in (name.rpartition(".")[0], LOADED_THROUGH.get(name, "")) if module)
+
+
 def load_extension(name: str, path: Path) -> Optional[str]:
     """Import ``name``; None when it loads, else the error.
 
-    The parent package comes first. A package that loads its extension under another
-    name (opencv's cv2 loads ``cv2/cv2.abi3.so`` as the top-level ``cv2``) has already
-    run its init once; a second init under the file's own name is not what the package
-    does, so an extension the loader has open, with a live module built from it, counts
-    as loaded.
+    What the package imports before it comes first (``imported_before``). A package that
+    loads its extension under another name (opencv's cv2 loads ``cv2/cv2.abi3.so`` as the
+    top-level ``cv2``) has already run its init once; a second init under the file's own
+    name is not what the package does, so an extension the loader has open, with a live
+    module built from it, counts as loaded.
     """
     try:
-        parent = name.rpartition(".")[0]
-        if parent:
-            importlib.import_module(parent)
+        for module in imported_before(name):
+            importlib.import_module(module)
         if name not in sys.modules and _mapped(path) and _module_built_from(path):
             return None
         importlib.import_module(name)

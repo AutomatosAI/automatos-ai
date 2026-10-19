@@ -332,6 +332,36 @@ def test_a_failed_import_is_reported_on_one_line(tmp_path, monkeypatch):
     assert error == "ImportError: first line second line"
 
 
+def test_an_extension_is_imported_after_its_parent_and_the_module_its_package_loads_it_through():
+    assert site_packages.imported_before("numpy._core._multiarray_umath") == ("numpy._core",)
+    assert site_packages.imported_before("_cffi_backend") == ()
+    assert site_packages.imported_before("scipy.linalg._matfuncs_sqrtm_triu") == (
+        "scipy.linalg", "scipy.linalg._matfuncs_sqrtm")
+    for extension, importer in site_packages.LOADED_THROUGH.items():
+        assert importer.rpartition(".")[0] == extension.rpartition(".")[0], (
+            f"{importer} is not a module of {extension}'s own package")
+
+
+def test_an_extension_that_imports_back_the_module_that_loads_it_loads_through_that_module(
+        tmp_path, monkeypatch):
+    """scipy.linalg._matfuncs_sqrtm_triu's init takes SqrtmError from _matfuncs_sqrtm, which
+    imports it: imported first, on its own, it fails with a circular ImportError."""
+    package = tmp_path / "us020cycle"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "_triu.py").write_text("from us020cycle._sqrtm import SqrtmError\n")
+    (package / "_sqrtm.py").write_text("class SqrtmError(Exception):\n    pass\n\n"
+                                       "from us020cycle._triu import SqrtmError as _same\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(site_packages, "LOADED_THROUGH", {"us020cycle._triu": "us020cycle._sqrtm"})
+    try:
+        assert site_packages.load_extension("us020cycle._triu", package / "_triu.py") is None
+        assert sys.modules["us020cycle._triu"].SqrtmError is sys.modules["us020cycle._sqrtm"].SqrtmError
+    finally:
+        for name in [name for name in sys.modules if name.startswith("us020cycle")]:
+            del sys.modules[name]
+
+
 # --------------------------------------------------------------------------- loading real extensions
 
 
