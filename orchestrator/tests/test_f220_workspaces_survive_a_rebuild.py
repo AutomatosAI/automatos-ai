@@ -82,9 +82,12 @@ def test_the_backend_sees_the_same_files_read_only(base):
 
 def test_the_worker_starts_first_so_a_new_volume_is_its_users(base):
     """A fresh volume takes the ownership of the first image that mounts it. The
-    worker's /workspaces is uid 1000; the backend image has none, and a root-owned
-    volume would make the worker's entrypoint re-own the nested host folder."""
-    assert "workspace-worker" in base["services"]["backend"]["depends_on"]
+    worker's /workspaces is uid 1000, and a root-owned volume would make the worker's
+    entrypoint re-own the nested host folder. Since PRD-262 US-040 the backend image's
+    /workspaces is uid 1000 too, for the core stack, which starts the backend without the
+    worker (test_prd262_core_stack.py); in the default stack the worker still starts first."""
+    worker = base["services"]["backend"]["depends_on"]["workspace-worker"]
+    assert worker["condition"] == "service_started"
 
 
 def test_railway_mounts_the_same_root():

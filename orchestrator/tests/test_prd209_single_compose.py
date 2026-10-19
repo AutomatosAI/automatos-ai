@@ -1,4 +1,4 @@
-"""PRD-209 S9 — exactly one canonical compose file (+ one documented override).
+"""PRD-209 S9 — exactly one canonical compose file (+ two documented overrides).
 
 The root ``docker-compose.yml`` is the local stack. Six ``infrastructure/docker-compose*.yml``
 files (a heavyweight 19-service production-mirror requiring sibling repos; ``.voice``
@@ -19,6 +19,11 @@ narrow way only: a local name for its own development build of a service the
 canonical file builds (``automatos-<name>:dev``), with ``pull_policy: build``, so
 ``make dev`` never tags a build with a published name and never pulls one. It
 cannot add a service or point a service at anything else.
+
+PRD-262 US-040 adds the second override, ``docker-compose.core.yml``: the five-container
+core stack (``make up CORE=1``). It too is read only when passed explicitly, declares no
+service the canonical file lacks, and names no image: it puts the workspace worker behind
+a profile and changes how the backend mounts the workspaces volume.
 
 Pure/static — reads the git index (`git ls-files`); no Docker.
 """
@@ -45,7 +50,8 @@ def _tracked_compose_files() -> list[str]:
 
 
 _DEV_OVERRIDE = "docker-compose.dev.yml"
-_ALLOWED_OVERRIDES = {_DEV_OVERRIDE}
+_CORE_OVERRIDE = "docker-compose.core.yml"  # PRD-262 US-040
+_ALLOWED_OVERRIDES = {_DEV_OVERRIDE, _CORE_OVERRIDE}
 # The only image an override may set: the dev override's local name for its own build.
 _DEV_IMAGE = re.compile(r"^automatos-[a-z0-9-]+:dev$")
 _BUILD_ONLY = "build"
@@ -90,15 +96,14 @@ def test_exactly_one_tracked_stack_file():
 
 def test_the_dev_override_is_only_an_override():
     """Overrides may retarget/mount existing services — never define new ones, and
-    never pin an image except the published-images override's own builds."""
+    never pin an image except the dev override's own builds. Both overrides exist."""
     import yaml
 
     canonical = yaml.safe_load((_REPO_ROOT / "docker-compose.yml").read_text())
     canonical_services = canonical.get("services") or {}
     for name in sorted(_ALLOWED_OVERRIDES):
         path = _REPO_ROOT / name
-        if not path.exists():
-            continue
+        assert path.exists(), f"{name} is gone: drop it from the allowed overrides with what it did"
         override = _load_override(path)
         assert set(override) <= {"services", "volumes", "networks"}, (
             f"{name} may only override services/volumes/networks, found {sorted(override)}"
@@ -119,7 +124,7 @@ def test_the_image_exception_stays_narrow():
     services = {"backend": {"build": {"context": "./orchestrator"}}, "postgres": {"image": "pgvector/pgvector:pg16"}}
     dev = {"image": "automatos-api:dev", "pull_policy": "build"}
     assert _image_allowed(_DEV_OVERRIDE, "backend", dev, services)
-    assert not _image_allowed("docker-compose.core.yml", "backend", dev, services)
+    assert not _image_allowed(_CORE_OVERRIDE, "backend", dev, services)
     assert not _image_allowed(_DEV_OVERRIDE, "postgres", dev, services)
     assert not _image_allowed(_DEV_OVERRIDE, "backend", {"image": "automatos-api:dev"}, services)
     for image in ("ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}", "ghcr.io/someone/else:latest",
