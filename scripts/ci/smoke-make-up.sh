@@ -14,12 +14,15 @@
 #     present (scripts/ci/smoke_images.py images --mode pull), and each carries the merge
 #     base's revision label (SMOKE_EXPECT_REVISION);
 #   - /health/ready answers 200 and :3000 answers 200 (scripts/ci/smoke_boot.py). No time
-#     is recorded as a measurement here: make up has returned before they are polled.
+#     is recorded as a measurement here: make up has returned before they are polled;
+#   - PRD-262 US-037: no secret is exported, so make up's first step, make env, created
+#     .env from .env.example and wrote POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to it
+#     as 48 hex characters each, which the stack then ran on.
 #
 # Built for a throwaway Docker host, such as a CI runner: its teardown removes the stack
 # with its volumes, so it refuses to start on a host that has Automatos containers or
-# volumes. The records and make up's output land in $SMOKE_OUT_DIR, which the workflow
-# uploads; the secrets are the fresh-clone lane's throwaway ones, from the environment.
+# volumes, and it runs on a clean checkout, with no .env yet. The records and make up's
+# output land in $SMOKE_OUT_DIR, which the workflow uploads.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -38,6 +41,9 @@ MAKE_UP_LOG="${OUT_DIR}/make-up.log"
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-make-up-config.json"
 # docker-compose.yml's container_name values and named volumes all start with this.
 STACK_NAME_PATTERN='^automatos_'
+# PRD-262 US-037: the .env make up writes, and a secret line as make env writes it.
+ENV_FILE=".env"
+GENERATED_SECRET='^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$'
 
 outcome="fail"
 
@@ -57,6 +63,18 @@ refuse_existing_stack() {
 wait_for() {
   python3 "$BOOT_TOOL" --label "$1" --container "$2" --url "$3" \
     --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE"
+}
+
+# The checkout is clean: make env creates .env itself, from .env.example.
+refuse_an_existing_env() {
+  [ ! -e "$ENV_FILE" ] || fail "this checkout already has a .env: make env would keep its secrets, so run this on a clean checkout, as CI does"
+}
+
+check_generated_secrets() {
+  local found
+  found="$(grep -cE "$GENERATED_SECRET" "$ENV_FILE" 2>/dev/null)"
+  [ "${found:-0}" = "3" ] \
+    || fail "make up did not write POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env as 48 hex characters each (make env): ${found:-0} of 3"
 }
 
 check_nothing_was_built() {
@@ -81,17 +99,21 @@ main() {
   : > "$BOOTS_FILE"
   [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "AUTOMATOS_IMAGE_TAG must name the published tag make up runs"
   refuse_existing_stack
+  refuse_an_existing_env
+  # PRD-262 US-037: no secret is exported; make env generates them.
+  unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY
   trap finish EXIT
   echo "make up with AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG} on this pull request's checkout..."
   make up 2>&1 | tee "$MAKE_UP_LOG" || fail "make up failed"
+  check_generated_secrets
   wait_for fresh automatos_backend "ready=${API_BASE}/health/ready" \
     || fail "/health/ready did not answer 200 within ${MAX_WAIT_SECONDS}s"
   wait_for frontend automatos_frontend "ui=${FRONTEND_URL}" \
     || fail "the frontend did not answer 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
   check_nothing_was_built
   outcome="pass"
-  echo "OK: make up ran the published ${AUTOMATOS_IMAGE_TAG} images, built nothing, and the stack answered" \
-    "/health/ready 200 and :3000 200"
+  echo "OK: make up wrote three generated secrets to .env, ran the published ${AUTOMATOS_IMAGE_TAG} images," \
+    "built nothing, and the stack answered /health/ready 200 and :3000 200"
 }
 
 main "$@"

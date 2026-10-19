@@ -89,6 +89,12 @@
 # which puts it in MinIO through that botocore, and the host fetches it back by the
 # presigned URL the Documents page's download call answers with.
 #
+# PRD-262 US-037, SMOKE_IMAGES=pull: no secret is exported, as on a self-hoster's clean
+# checkout. make up's first step, make env, creates .env from .env.example and writes
+# POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to it (openssl rand -hex 24); once make
+# up has exited, the smoke finds three 48-hex values there, and every later compose
+# command here reads them from .env. The other modes export throwaway ones (below).
+#
 # PRD-262 US-035, in every mode: compose runs the backend's production stage, and hot
 # reload is `make dev`'s. scripts/ci/smoke_production_backend.py checks, after the fresh
 # boot, that no bind mount lays the checkout over /app, nothing runs --reload, and the
@@ -103,8 +109,8 @@
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
 # loopback, the document came back, and the backend ran as the production stage should.
 # Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
-# is over its budget, the document did not come back from object storage, or a US-035
-# check failed.
+# is over its budget, the document did not come back from object storage, a US-035
+# check failed, or make up wrote no generated secrets to .env (US-037).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -170,6 +176,9 @@ DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
+# PRD-262 US-037: the .env make up writes, and a secret line as make env writes it.
+ENV_FILE=".env"
+GENERATED_SECRET='^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$'
 # PRD-262 US-035: the production backend's checks, and their records.
 PRODUCTION_TOOL="scripts/ci/smoke_production_backend.py"
 PRODUCTION_FILE="${OUT_DIR}/production-backend.json"
@@ -197,10 +206,15 @@ STACK_NAME_PATTERN='^automatos_'
 # Local-only secrets. These are throwaway values for an ephemeral local stack —
 # NOT real credentials, and never reused. No external SaaS credential is set:
 # CLERK_*, AWS_*, OPENAI_API_KEY, ANTHROPIC_API_KEY are all intentionally absent.
+# SMOKE_IMAGES=pull exports none of the three: make up generates them (PRD-262 US-037).
 # ---------------------------------------------------------------------------
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-smoke_pg_pw}"
-export REDIS_PASSWORD="${REDIS_PASSWORD:-smoke_redis_pw}"
-export API_KEY="${API_KEY:-smoke_api_key}"
+if [ "$SMOKE_IMAGES" = "pull" ]; then
+  unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY
+else
+  export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-smoke_pg_pw}"
+  export REDIS_PASSWORD="${REDIS_PASSWORD:-smoke_redis_pw}"
+  export API_KEY="${API_KEY:-smoke_api_key}"
+fi
 # W5 flag: run the local no-login edition (auth-optional).
 export AUTH_EDITION="${AUTH_EDITION:-local}"
 export REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
@@ -219,6 +233,7 @@ images_before=0
 api_local_written=""
 earlier_backend_id=""
 make_up_pid=""
+env_existed=""
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -348,6 +363,21 @@ finish_make_up() {
   wait "$make_up_pid"
   make_up_pid=""
   [ "$(cat "$MAKE_UP_EXIT" 2>/dev/null)" = "0" ] || fail "make up failed"
+}
+
+# PRD-262 US-037, SMOKE_IMAGES=pull: make up ran with no secret exported on a checkout
+# with no .env, so make env created .env and wrote the three secrets to it.
+check_generated_secrets() {
+  [ "$SMOKE_IMAGES" = "pull" ] || return 0
+  if [ -n "$env_existed" ]; then
+    echo "::warning title=smoke-fresh-clone::.env existed before make up, so the check that make env generated the three secrets was skipped"
+    return 0
+  fi
+  local found
+  found="$(grep -cE "$GENERATED_SECRET" "$ENV_FILE" 2>/dev/null)"
+  [ "${found:-0}" = "3" ] \
+    || fail "make up did not write POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env as 48 hex characters each (make env): ${found:-0} of 3"
+  echo "make env wrote POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env (48 hex characters each)"
 }
 
 prepare_images() {
@@ -596,6 +626,7 @@ main() {
   refuse_existing_stack
   refuse_emptying_a_kept_image_cache
   trap finish EXIT
+  [ ! -e "$ENV_FILE" ] || env_existed="true"
   # Before the images: make up (SMOKE_IMAGES=pull) starts the stack itself.
   start_event_log
   prepare_images
@@ -605,6 +636,7 @@ main() {
   check_worker_restart
   boot_frontend
   finish_make_up
+  check_generated_secrets
   check_loopback_ports
   check_images
   check_document_storage

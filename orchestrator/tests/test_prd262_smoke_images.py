@@ -9,6 +9,10 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
   after a push (it must pick the commit's own images), pinned on a weekly or manual run;
 * ``make-up-pr`` runs ``make up`` on a pull request with the merge base's ``sha-<7>``
   pinned and checks that nothing was built (scripts/ci/smoke-make-up.sh);
+* PRD-262 US-037: the main runs and ``make-up-pr`` export no secret, so ``make up`` must
+  write three generated ones to ``.env``; then ``make env`` on a started install (its
+  database volume exists) must leave a placeholder ``.env`` as it was and exit non-zero
+  (scripts/ci/smoke-make-env.sh);
 * the pull-request variant watches compose, the Makefile, ``envs/`` and every
   images.yml input, and builds the three amd64 images with images.yml's context,
   target, build args, labels and GHA cache (read only), tagged as compose expects;
@@ -41,6 +45,11 @@ _SCRIPT = _REPO / "scripts" / "ci" / "smoke-fresh-clone.sh"
 _DOCKERFILE = _REPO / "orchestrator" / "Dockerfile"
 _COMPOSE = _REPO / "docker-compose.yml"
 _MAKE_UP_SCRIPT = _REPO / "scripts" / "ci" / "smoke-make-up.sh"
+_MAKE_ENV_SCRIPT = _REPO / "scripts" / "ci" / "smoke-make-env.sh"
+# The three secrets make env writes (PRD-262 US-037), and the lane's other settings.
+_SECRETS = ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_KEY")
+_SETTINGS = ("AUTH_EDITION", "REQUIRE_AUTH", "DEFAULT_WORKSPACE_ID")
+_GENERATED_SECRET = "GENERATED_SECRET='^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$'"
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
 
 
@@ -101,7 +110,10 @@ def test_the_pull_request_variant_watches_compose_the_makefile_envs_and_every_im
     assert not missing, f"smoke-images.yml does not watch {sorted(missing)}"
     own = {"scripts/ci/smoke-fresh-clone.sh", "scripts/ci/smoke_boot.py", "scripts/ci/smoke_report.py",
            "scripts/ci/smoke_images.py", "scripts/ci/smoke_images_report.py", ".github/workflows/smoke-images.yml",
-           "scripts/ci/smoke-make-up.sh", "scripts/stack_images.py"}
+           "scripts/ci/smoke-make-up.sh", "scripts/stack_images.py",
+           # PRD-262 US-037: make env, its CI check, the template it copies and the guard.
+           "scripts/stack_env.sh", "scripts/ci/smoke-make-env.sh", ".env.example",
+           "orchestrator/docker-secrets-guard.sh"}
     assert own <= set(paths)
 
 
@@ -127,17 +139,93 @@ def test_main_runs_run_make_up_with_the_tag_pinned_only_when_make_up_must_not_pi
     assert env["SMOKE_EXPECT_REVISION"] == "${{ steps.target.outputs.revision }}"
 
 
+def _fresh_env() -> dict:
+    return next(step for step in _yaml(_FRESH)["jobs"]["fresh-clone-boot"]["steps"]
+                if step.get("run") == "bash scripts/ci/smoke-fresh-clone.sh")["env"]
+
+
 @pytest.mark.parametrize("job", ["smoke-images", "smoke-images-pr"])
-def test_both_variants_use_the_fresh_clone_lanes_throwaway_secrets_and_upload_the_records(job):
-    fresh = next(step for step in _yaml(_FRESH)["jobs"]["fresh-clone-boot"]["steps"]
-                 if step.get("run") == "bash scripts/ci/smoke-fresh-clone.sh")["env"]
+def test_both_variants_use_the_fresh_clone_lanes_settings_and_upload_the_records(job):
+    fresh = _fresh_env()
     env = _boot_step(job)["env"]
-    for key in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_KEY", "AUTH_EDITION", "REQUIRE_AUTH", "DEFAULT_WORKSPACE_ID"):
+    for key in _SETTINGS:
         assert env[key] == fresh[key], key
     upload = _step(job, lambda step: "upload-artifact" in step.get("uses", ""))
     assert upload["if"] == "always()"
     assert upload["with"]["path"].rstrip("/") == env["SMOKE_OUT_DIR"].rstrip("/")
     assert "continue-on-error" not in _boot_step(job), "a boot that fails fails the job"
+
+
+def test_the_pr_variant_boots_on_the_fresh_clone_lanes_throwaway_secrets():
+    fresh, env = _fresh_env(), _boot_step("smoke-images-pr")["env"]
+    for key in _SECRETS:
+        assert env[key] == fresh[key], key
+
+
+def test_the_main_runs_export_no_secret_so_make_up_writes_them():
+    """PRD-262 US-037: make up on a clean checkout with no secrets exported."""
+    env = _boot_step("smoke-images")["env"]
+    assert not set(_SECRETS) & set(env), "make env must generate them, as on a self-hoster's checkout"
+
+
+# --------------------------------------------------------------------------- PRD-262 US-037: the secrets
+
+
+def test_the_pull_exports_no_secret_and_finds_three_generated_in_env():
+    text = _script()
+    block = text.split('if [ "$SMOKE_IMAGES" = "pull" ]; then\n  unset ', 1)[1].split("\nfi\n", 1)[0]
+    assert block.startswith("POSTGRES_PASSWORD REDIS_PASSWORD API_KEY\nelse\n"), block
+    assert 'export API_KEY="${API_KEY:-smoke_api_key}"' in block, "the other modes keep the throwaway secrets"
+    assert _GENERATED_SECRET in text
+    check = _function(text, "check_generated_secrets")
+    assert '[ "$SMOKE_IMAGES" = "pull" ] || return 0' in check
+    assert 'grep -cE "$GENERATED_SECRET" "$ENV_FILE"' in check and '= "3" ]' in check
+    main = _function(text, "main")
+    assert '[ ! -e "$ENV_FILE" ] || env_existed="true"' in main
+    order = ["trap finish EXIT", "env_existed=", "prepare_images", "finish_make_up", "check_generated_secrets",
+             "warm_restarts"]
+    assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
+
+
+def test_the_make_up_smoke_exports_no_secret_and_finds_three_generated_in_env():
+    text = _MAKE_UP_SCRIPT.read_text(encoding="utf-8")
+    assert _GENERATED_SECRET in text
+    main = _function(text, "main")
+    order = ["refuse_existing_stack", "refuse_an_existing_env", "unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY",
+             "trap finish EXIT", "make up 2>&1", "check_generated_secrets", "wait_for fresh"]
+    assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
+    assert '[ ! -e "$ENV_FILE" ] || fail' in _function(text, "refuse_an_existing_env")
+    check = _function(text, "check_generated_secrets")
+    assert 'grep -cE "$GENERATED_SECRET" "$ENV_FILE"' in check and '= "3" ]' in check
+
+
+def test_make_up_pr_then_checks_make_env_on_a_started_install():
+    steps = JOBS["make-up-pr"]["steps"]
+    runs = [step.get("run") for step in steps]
+    make_up = runs.index("bash scripts/ci/smoke-make-up.sh")
+    make_env = runs.index("bash scripts/ci/smoke-make-env.sh")
+    assert make_up < make_env, "after the make up smoke's teardown removed the stack's volumes"
+    step = steps[make_env]
+    assert "if" not in step and "continue-on-error" not in step
+    assert not set(_SECRETS) & set(step.get("env") or {})
+
+
+def test_the_make_env_check_leaves_placeholders_on_a_started_install():
+    text = _MAKE_ENV_SCRIPT.read_text(encoding="utf-8")
+    assert 'VOLUME="automatos_postgres_data"' in text and "set -uo pipefail" in text
+    main = _function(text, "main")
+    order = ["refuse_an_existing_volume", "unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY", "trap finish EXIT",
+             "set_env_aside", 'docker volume create "$VOLUME"', "cp .env.example", "check_make_env_changed_nothing"]
+    assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
+    assert 'docker volume inspect "$VOLUME"' in _function(text, "refuse_an_existing_volume")
+    check = _function(text, "check_make_env_changed_nothing")
+    assert "make env > \"$OUTPUT\" 2>&1 || code=$?" in check
+    assert '[ "$code" -ne 0 ] || fail' in check
+    assert 'cmp -s "$BEFORE" "$ENV_FILE" || fail' in check
+    assert 'grep -q "ALTER USER" "$OUTPUT"' in check
+    assert 'grep -q "the $VOLUME volume exists, so this install has started" "$OUTPUT"' in check
+    finish = _function(text, "finish")
+    assert 'docker volume rm "$VOLUME"' in finish and 'mv -f "$SAVED_ENV" "$ENV_FILE"' in finish
 
 
 # --------------------------------------------------------------------------- edge
@@ -410,10 +498,10 @@ def test_make_up_pr_pins_the_merge_bases_published_tag():
     run = _step("make-up-pr", lambda step: step.get("run") == "bash scripts/ci/smoke-make-up.sh")
     assert run["env"]["AUTOMATOS_IMAGE_TAG"] == "${{ steps.base.outputs.tag }}"
     assert run["env"]["SMOKE_EXPECT_REVISION"] == "${{ steps.base.outputs.revision }}"
-    fresh = next(step for step in _yaml(_FRESH)["jobs"]["fresh-clone-boot"]["steps"]
-                 if step.get("run") == "bash scripts/ci/smoke-fresh-clone.sh")["env"]
-    for key in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_KEY", "AUTH_EDITION", "REQUIRE_AUTH", "DEFAULT_WORKSPACE_ID"):
+    fresh = _fresh_env()
+    for key in _SETTINGS:
         assert run["env"][key] == fresh[key], key
+    assert not set(_SECRETS) & set(run["env"]), "PRD-262 US-037: make up generates the secrets"
     upload = _step("make-up-pr", lambda step: "upload-artifact" in step.get("uses", ""))
     assert upload["if"] == "always()" and upload["with"]["path"].rstrip("/") == run["env"]["SMOKE_OUT_DIR"].rstrip("/")
 
@@ -421,7 +509,8 @@ def test_make_up_pr_pins_the_merge_bases_published_tag():
 def test_the_make_up_smoke_checks_what_make_up_promises():
     text = _MAKE_UP_SCRIPT.read_text(encoding="utf-8")
     main = _function(text, "main")
-    order = [main.index(call) for call in ("refuse_existing_stack", "trap finish EXIT", "make up",
+    # The make up call itself: main's first lines also name make up in a message.
+    order = [main.index(call) for call in ("refuse_existing_stack", "trap finish EXIT", "make up 2>&1",
                                            "wait_for fresh", "wait_for frontend", "check_nothing_was_built")]
     assert order == sorted(order)
     assert 'make up 2>&1 | tee "$MAKE_UP_LOG" || fail "make up failed"' in main
