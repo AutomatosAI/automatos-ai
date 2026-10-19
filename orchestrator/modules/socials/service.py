@@ -683,6 +683,11 @@ def with_credits(copy: Any, lines: Iterable[str]) -> Any:
 
 
 # ── the lifecycle ───────────────────────────────────────────────────────────
+def _validated(**fields: Any) -> Dict[str, Any]:
+    """Each content field as its validator (``_VALIDATORS``) returns it, checked in the order given."""
+    return {name: _VALIDATORS[name](value) for name, value in fields.items()}
+
+
 def create_draft(
     db: Any,
     *,
@@ -711,21 +716,9 @@ def create_draft(
     channels, resolved by the caller (P256-FIX-SOC-4: an agent's tool sets them
     with the post, so its render sizes for them).
     """
-    fields = {
-        "title": title,
-        "brief": brief,
-        "copy": copy,
-        "format": format,
-        "template_id": template_id,
-        "variables": variables,
-        "sources": sources,
-        "media": media,
-        "voice": voice,
-        "footage": footage,
-        "length_seconds": length_seconds,
-        "music": music,
-    }
-    clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
+    clean = _validated(title=title, brief=brief, copy=copy, format=format, template_id=template_id,
+                       variables=variables, sources=sources, media=media, voice=voice, footage=footage,
+                       length_seconds=length_seconds, music=music)
     post = SocialPost(
         id=uuid4(),
         workspace_id=workspace_id,

@@ -178,8 +178,9 @@ def issue_tool_grant(
                 f"{(description or 'gated platform action')[:200]}"
             ),
             question_md=question_md,
+            # Flushed with the row (N17-3): a card read before the turn commits keeps its chat and lane.
+            details=_grant_details(action, params, description, caller_context or {}, lane),
         )
-        grant.details = _grant_details(action, params, description, caller_context or {}, lane)
 
         # PRD-193 S5: an ask that fires with nobody watching must not be
         # silent — announce the fresh pending grant on non-chat lanes (chat
