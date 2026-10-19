@@ -16,9 +16,10 @@ handler reads them:
   ``response_required`` with the next ``response_id``.
 
 ``TurnWatch`` reads the server's ``response`` frames for one turn: the first
-content frame, Auto's first frame (the one-time 'One moment.' ack never
-counts) and ``content_complete``. The ask set the owner keeps is validated
-here too, so a bad row is refused with its index before anything is minted.
+content frame, Auto's first frame (the one-time 'One moment.' ack and the
+PRD-264 AI reminder never count) and ``content_complete``. The ask set the
+owner keeps is validated here too, so a bad row is refused with its index
+before anything is minted.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from modules.policy.ai_disclosure import VOICE_REMINDER
 from modules.voice.providers.retell import (
     INTERACTION_CALL_DETAILS,
     INTERACTION_PING_PONG,
@@ -193,6 +195,8 @@ class TurnWatch:
         if is_ack:
             self.ack_heard = True
             return
+        if content.strip() == VOICE_REMINDER:
+            return  # the AI reminder (PRD-264 EUAI-04) opens a response; it is not Auto's reply
         self.reply_parts.append(content)
         if self.first_auto_frame_at is None:
             self.first_auto_frame_at = at

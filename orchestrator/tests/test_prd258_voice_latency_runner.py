@@ -105,6 +105,7 @@ class _ScriptedSocket:
 
 
 def test_the_ws_handler_reads_the_simulators_frames():
+    from modules.policy import ai_disclosure
     from modules.voice import live_socket
     from scripts.eval.voice_latency import protocol
 
@@ -117,7 +118,16 @@ def test_the_ws_handler_reads_the_simulators_frames():
     details = protocol.call_details_frame(_CALL_ID, workspace_id=_WS_ID, user_id=_USER_ID, chat_id=_CHAT_ID)
     script = [details, protocol.ping_frame(123)] + protocol.ask_frames((), "how is the board", response_id=1)
     ws = _ScriptedSocket(script)
-    ports = live_socket.SocketPorts(stream_turn=stream, call_status=lambda cid: "minted")
+    async def first_socket(call_id):  # not a reconnect: no Redis, no AI reminder frame
+        return False
+
+    ports = live_socket.SocketPorts(
+        stream_turn=stream,
+        call_status=lambda cid: "minted",
+        ai_greeting=ai_disclosure.VOICE_GREETING,
+        ai_reminder=ai_disclosure.VOICE_REMINDER,
+        socket_reconnected=first_socket,
+    )
     session = live_socket.LiveCallSocket(ws, _CALL_ID, ports)
     asyncio.run(session.run())
 
@@ -166,6 +176,20 @@ def test_a_reply_that_never_comes_is_none_not_a_number():
     assert watch.done
     assert watch.elapsed_ms(watch.first_frame_at) is None
     assert watch.elapsed_ms(watch.first_auto_frame_at) is None
+
+
+def test_the_ai_reminder_is_a_first_frame_but_not_autos():
+    """PRD-264 EUAI-04: the reminder that opens a response never times as Auto's reply."""
+    from modules.policy.ai_disclosure import VOICE_REMINDER
+    from scripts.eval.voice_latency.protocol import TurnWatch
+
+    watch = TurnWatch(response_id=5, started=0.0)
+    watch.observe(_frame(5, VOICE_REMINDER + " "), 0.1)
+    watch.observe(_frame(5, "The board is clear."), 0.9)
+    watch.observe(_frame(5, "", complete=True), 1.0)
+    assert watch.elapsed_ms(watch.first_frame_at) == 100
+    assert watch.elapsed_ms(watch.first_auto_frame_at) == 900
+    assert watch.reply == "The board is clear."
 
 
 def test_once_the_ack_is_spent_the_same_words_are_autos():
