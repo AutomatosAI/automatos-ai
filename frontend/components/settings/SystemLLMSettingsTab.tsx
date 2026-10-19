@@ -7,7 +7,7 @@
  * 1. LLM Configuration (existing, enhanced with thinking level)
  * 2. Soul & Personality (NEW)
  * 3. Heartbeat (NEW)
- * 4. HARNESS — Self-Optimizing Organization Loop (PRD-121)
+ * 4. HARNESS — the weekly review of the agents (PRD-121; its mode, PRD-263)
  *
  * Each section is its own component and the state lives in
  * use-orchestrator-settings.ts (split for the component length rule, PRD-263 PR-1E-a).
@@ -101,7 +101,7 @@ export default function SystemLLMSettingsTab({
 
       <HarnessSettingsSection orchConfig={orchConfig} onHarnessChange={config.handleHarnessChange} />
 
-      {/* Save Orchestrator Settings (Soul + Heartbeat) */}
+      {/* Save Orchestrator Settings (Soul + Heartbeat + HARNESS) */}
       <div className="flex justify-end">
         <Button onClick={handleSaveOrchestrator} disabled={orchSaving || orchLoading}>
           {orchSaving ? (

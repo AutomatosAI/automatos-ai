@@ -126,3 +126,32 @@ def test_set_missing_workspace_raises_value_error():
     db = _FakeSession(None)
     with pytest.raises(ValueError):
         svc.set_autonomy_level(db, uuid.uuid4(), "full")
+
+
+# ---------------------------------------------------------------------------
+# The platform setter records who flipped the dial and from what (PRD-142 Wave 4
+# HIGH-2; moved here from test_harness_governance_gate.py when PRD-263 US-016
+# deleted that file with the HARNESS auto-apply ceiling it tested)
+# ---------------------------------------------------------------------------
+
+def test_set_autonomy_level_audits_previous_level(monkeypatch):
+    import asyncio
+
+    import core.services.auto_autonomy as aa
+    from modules.tools.discovery.handlers_autonomy import set_autonomy_level
+
+    monkeypatch.setattr(aa, "get_autonomy_level", lambda db, ws: "standard")
+    monkeypatch.setattr(aa, "set_autonomy_level", lambda db, ws, level: {"level": level})
+
+    class _DB:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    out = asyncio.run(set_autonomy_level(_DB(), uuid.uuid4(), {"level": "full", "_agent_id": 7}))
+    assert out["success"] is True
+    assert out["data"]["level"] == "full"
+    # The prior level is captured (returned + logged) so the change is auditable.
+    assert out["data"]["previous_level"] == "standard"

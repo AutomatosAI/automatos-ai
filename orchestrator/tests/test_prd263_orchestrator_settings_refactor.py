@@ -3,10 +3,14 @@
 ``PUT /api/workspaces/current/orchestrator`` was one 230-line function. Its
 validation, merge and response view moved into helpers in api/workspaces.py, and its
 Auto agent writes into services/orchestrator_auto_agent.py, with no behaviour
-change. These tests pin that behaviour on the helpers: HARNESS still takes
-``enabled``, a weekly/biweekly/monthly schedule and full_auto/manual, the merge is
-key by key, the first invalid field wins in the old order, and the Auto agent and
-the global ``orchestrator_llm`` system settings get the same writes. No DB.
+change. These tests pin that behaviour on the helpers: the merge is key by key, the
+first invalid field wins in the old order, and the Auto agent and the global
+``orchestrator_llm`` system settings get the same writes. No DB.
+
+HARNESS is the one part PR-1E-b (US-016) changed: the mode (report_only, propose,
+disabled) is the only switch and weekly the only schedule; the retired
+``enabled``/``disabled`` keys are neither validated, written nor returned, and the
+view reads the mode through services.harness_mode.
 """
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -36,41 +40,46 @@ def test_view_merges_stored_fields_over_the_defaults_key_by_key():
     assert list(view) == list(ws._ORCHESTRATOR_DEFAULTS)
     assert view["proactive_level"] == "silent"
     assert view["heartbeat"] == {**ws._ORCHESTRATOR_DEFAULTS["heartbeat"], "enabled": True}
-    assert view["harness"] == {"enabled": True, "schedule": "monthly", "mode": "manual"}
+    # PR-1E-b: a stored manual reads report_only, the one schedule, no retired key.
+    assert view["harness"] == {"schedule": "weekly", "mode": "report_only"}
     assert ws._orchestrator_view(None) == ws._ORCHESTRATOR_DEFAULTS
-    assert ws._ORCHESTRATOR_DEFAULTS["harness"] == {"enabled": False, "schedule": "weekly", "mode": "full_auto"}
+    assert ws._ORCHESTRATOR_DEFAULTS["harness"] == {"schedule": "weekly", "mode": "report_only"}
 
 
 def test_merge_writes_the_six_fields_and_merges_heartbeat_and_harness():
     existing = {"custom_soul": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
     payload = {
         "personality_mode": "technical", "llm": {"model_id": "m"}, "unknown": 1,
-        "heartbeat": {"enabled": True}, "harness": {"enabled": True, "schedule": "biweekly"},
+        "heartbeat": {"enabled": True}, "harness": {"enabled": True, "disabled": False, "mode": "propose"},
     }
     merged = ws._merge_orchestrator(existing, payload)
 
+    # PR-1E-b: the payload's retired keys are not written; the stored one is not rewritten.
     assert merged == {
         "custom_soul": "kept",
         "heartbeat": {"interval_minutes": 60, "enabled": True},
-        "harness": {"enabled": True, "schedule": "biweekly"},
+        "harness": {"enabled": False, "mode": "propose"},
         "personality_mode": "technical",
     }
     assert existing == {"custom_soul": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
 
 
-def test_validation_accepts_the_harness_settings_main_accepts():
+def test_validation_accepts_the_modes_that_exist_and_the_weekly_schedule():
     ws._validate_orchestrator_payload({
         "personality_mode": "custom", "preferred_channel": "channel:abc",
         "heartbeat": {"interval_minutes": 30, "active_hours_start": "08:00", "active_hours_end": "23:59"},
-        "harness": {"enabled": True, "schedule": "biweekly", "mode": "manual"},
+        "harness": {"schedule": "weekly", "mode": "propose"},
     })
-    ws._validate_orchestrator_payload({"harness": {"enabled": False, "schedule": "monthly", "mode": "full_auto"}})
+    for mode in ("report_only", "disabled"):
+        ws._validate_orchestrator_payload({"harness": {"mode": mode}})
+    # The retired keys are not validated (nor written, see the merge test).
+    ws._validate_orchestrator_payload({"harness": {"enabled": "anything", "disabled": 7}})
 
 
 def test_validation_rejects_with_the_same_status_and_message():
-    assert _detail({"harness": {"mode": "report_only"}}) == (400, "harness.mode must be one of ['full_auto', 'manual']")
-    assert _detail({"harness": {"schedule": "daily"}}) == (
-        400, "harness.schedule must be one of ['weekly', 'biweekly', 'monthly']")
+    assert _detail({"harness": {"mode": "full_auto"}}) == (
+        400, "harness.mode must be one of ['report_only', 'propose', 'disabled']")
+    assert _detail({"harness": {"schedule": "biweekly"}}) == (400, "harness.schedule must be one of ['weekly']")
     assert _detail({"preferred_channel": 7}) == (400, "preferred_channel must be a string")
     assert _detail({"heartbeat": {"active_hours_end": "24:00"}}) == (
         400, "heartbeat.active_hours_end must be HH:MM format")

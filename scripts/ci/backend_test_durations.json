@@ -605,7 +605,6 @@
 "tests/test_graph_single_store.py": 0.9,
 "tests/test_harness_api.py": 1.28,
 "tests/test_harness_commands.py": 0.23,
-"tests/test_harness_governance_gate.py": 0.13,
 "tests/test_harness_power_mode.py": 0.24,
 "tests/test_harness_routing_rule.py": 0.14,
 "tests/test_harness_self_management.py": 0.54,

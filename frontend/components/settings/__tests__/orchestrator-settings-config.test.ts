@@ -2,12 +2,16 @@
  * PRD-263 PR-1E-a — the pure helpers moved out of SystemLLMSettingsTab.tsx keep what
  * the tab did inline: the heartbeat channel key parsed for delivery on save, one
  * connected channel per platform, and the fallback config when the endpoint fails.
+ * PR-1E-b (US-017) changed only HARNESS: the fallback is report_only with no Enable
+ * switch, and a stored mode the list does not offer shows as Report only.
  */
 import { describe, it, expect } from 'vitest'
 import {
+  HARNESS_MODE_OPTIONS,
   HeartbeatConfig,
   connectedChannelsFrom,
   fallbackOrchestratorConfig,
+  harnessModeOption,
   heartbeatPayload,
 } from '../orchestrator-settings-config'
 
@@ -59,13 +63,23 @@ describe('connectedChannelsFrom', () => {
 })
 
 describe('fallbackOrchestratorConfig', () => {
-  it('keeps HARNESS off, weekly and full_auto, as the tab did', () => {
+  it('falls back to HARNESS report_only and weekly, with no Enable switch', () => {
     const config = fallbackOrchestratorConfig()
 
-    expect(config.harness).toEqual({ enabled: false, schedule: 'weekly', mode: 'full_auto' })
+    expect(config.harness).toEqual({ schedule: 'weekly', mode: 'report_only' })
     expect(config.heartbeat.enabled).toBe(false)
     expect(config.heartbeat.interval_minutes).toBe(30)
     expect(config.personality_mode).toBe('friendly')
     expect(config.llm?.max_tokens).toBe(4000)
+  })
+})
+
+describe('harnessModeOption', () => {
+  it('shows an offered mode as itself and anything else as Report only', () => {
+    expect(HARNESS_MODE_OPTIONS.map((option) => option.value)).toEqual(['report_only', 'disabled'])
+    expect(harnessModeOption('disabled').label).toBe('Disabled')
+    for (const mode of ['full_auto', 'manual', 'propose', undefined]) {
+      expect(harnessModeOption(mode).value).toBe('report_only')
+    }
   })
 })
