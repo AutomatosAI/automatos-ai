@@ -955,6 +955,28 @@ class Config:
     # where F408, F409 and F416 happened. It becomes a trigger only through
     # services.schedule_util.scheduler_cron_trigger (F240: weekday as day names).
     HARNESS_SWEEP_CRON: str = os.getenv("HARNESS_SWEEP_CRON", "0 10 * * 1")
+    # PRD-263 US-014a/US-014b: how DIAGNOSE judges each agent x metric (design section
+    # 5.1 ORG-4; services.harness_diagnose passes each to core.stats.harness_verdicts).
+    # Below HARNESS_MIN_SAMPLES in the judged week or its reference a pair is
+    # INSUFFICIENT_DATA. The reference is the HARNESS_REF_DAYS before the judged week,
+    # in whole ISO weeks, less weeks already flagged and weeks after an applied change.
+    # A rate flags only when it worsens by both HARNESS_ABS_DROP and HARNESS_REL_DROP
+    # (fractions) with a one-sided p below HARNESS_ALPHA; cost or tokens per run only
+    # when the median rises by both HARNESS_COST_REL_RISE and HARNESS_COST_ABS_RISE ($)
+    # with a Mann-Whitney p below HARNESS_ALPHA. Benjamini-Hochberg at HARNESS_FDR_Q
+    # runs across every test of a run. A first flag is WATCH; REGRESSION needs a flag
+    # in the previous ISO week too, or p below HARNESS_STRONG_P. Below
+    # HARNESS_MIN_COVERAGE (judged over active agents) convergence reads insufficient_data.
+    HARNESS_MIN_SAMPLES: int = int(os.getenv("HARNESS_MIN_SAMPLES", "20"))
+    HARNESS_REF_DAYS: int = int(os.getenv("HARNESS_REF_DAYS", "28"))
+    HARNESS_ABS_DROP: float = float(os.getenv("HARNESS_ABS_DROP", "0.15"))
+    HARNESS_REL_DROP: float = float(os.getenv("HARNESS_REL_DROP", "0.20"))
+    HARNESS_ALPHA: float = float(os.getenv("HARNESS_ALPHA", "0.05"))
+    HARNESS_FDR_Q: float = float(os.getenv("HARNESS_FDR_Q", "0.10"))
+    HARNESS_COST_REL_RISE: float = float(os.getenv("HARNESS_COST_REL_RISE", "0.25"))
+    HARNESS_COST_ABS_RISE: float = float(os.getenv("HARNESS_COST_ABS_RISE", "0.005"))
+    HARNESS_STRONG_P: float = float(os.getenv("HARNESS_STRONG_P", "0.001"))
+    HARNESS_MIN_COVERAGE: float = float(os.getenv("HARNESS_MIN_COVERAGE", "0.5"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1527,6 +1549,29 @@ class Config:
     THEME_FILE_CACHE_SECONDS: int = int(os.getenv("THEME_FILE_CACHE_SECONDS", "86400"))
     # Step-up on sensitive routes (themes now; role changes with W-A2): a first factor this recent (D1-e: 10).
     STEP_UP_MAX_AGE_MINUTES: int = int(os.getenv("STEP_UP_MAX_AGE_MINUTES", "10"))
+    # PRD-261 W-C1 Marketplace review (D3, 19 Oct: a person reviews every version, auto-publish
+    # is off for themes). Q9: one pending submission per author at a time; on by default, so one
+    # author can't queue many paid review stages at once.
+    THEMES_ONE_OPEN_SUBMISSION: bool = (
+        os.getenv("THEMES_ONE_OPEN_SUBMISSION", "true").strip().lower() in ("true", "1", "yes", "on")
+    )
+    # The automated stage's LLM check (services/themes/llm_stage.py), on PLUGIN_LLM_SCAN_MODEL:
+    # tokens per chunk, chunks per package (more is "LLM stage did not run"), seconds for the whole
+    # stage (parts unread by then are "did not run", so one upload holds its request for a bounded
+    # time), seconds per call.
+    THEME_LLM_CHUNK_TOKENS: int = int(os.getenv("THEME_LLM_CHUNK_TOKENS", "8000"))
+    THEME_LLM_MAX_CHUNKS: int = int(os.getenv("THEME_LLM_MAX_CHUNKS", "48"))
+    THEME_LLM_STAGE_SECONDS: int = int(os.getenv("THEME_LLM_STAGE_SECONDS", "300"))
+    THEME_LLM_TIMEOUT_SECONDS: int = int(os.getenv("THEME_LLM_TIMEOUT_SECONDS", "60"))
+    # What theme reviews may spend (services/themes/review_limits.py): review stages running at once
+    # in one process (more is 503, try again); Marketplace submissions per person and private
+    # uploads per workspace in a rolling 24 hours (more is 429); and the LLM tokens all theme
+    # reviews may use in a rolling 24 hours (past it the LLM check doesn't run: review_required).
+    THEME_REVIEW_MAX_CONCURRENT: int = int(os.getenv("THEME_REVIEW_MAX_CONCURRENT", "2"))
+    THEME_SUBMISSIONS_PER_DAY: int = int(os.getenv("THEME_SUBMISSIONS_PER_DAY", "10"))
+    THEME_UPLOADS_PER_DAY: int = int(os.getenv("THEME_UPLOADS_PER_DAY", "20"))
+    THEME_REVIEW_DAILY_TOKENS: int = int(os.getenv("THEME_REVIEW_DAILY_TOKENS", "2000000"))
+    # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)
