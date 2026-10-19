@@ -1,3 +1,4 @@
+import { GLOW_SCALE, rgbList } from '@/lib/look-kit/css'
 import type { PrepaintKnobTable, PrepaintPairTable, PrepaintTable, PrepaintVars } from '@/lib/theme-host/boot-types'
 
 import {
@@ -9,19 +10,18 @@ import {
   TYPE_STYLE_KEYS,
 } from './catalogue'
 import {
-  GLOW_SCALE,
   GLOW_VAR,
   accentTextVars,
   accentVars,
   fontVars,
   groundVars,
   lightVars,
-  rgbList,
   safeGlowAlpha,
   shellVars,
-} from './css'
+  studioAccentTokens,
+  studioGroundTokens,
+} from './engine'
 import { DEFAULT_LOOK } from './presets'
-import { studioAccentTokens, studioGroundTokens } from './studio-tokens'
 import { GLOW_MAX, GLOW_MIN, type Look } from './types'
 
 /**

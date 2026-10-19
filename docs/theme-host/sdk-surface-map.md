@@ -92,7 +92,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/lib/nav-exposure` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav` | The plan-tier filter runs inside `useCoreNav`. |
 | `@/lib/page-context` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | The controller sends the page's context with each turn; a theme does not build it. |
 | `@/lib/studio-menu` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav`, `navigation.resolveActiveNavId` | The Studio menu after the host's filters, without icons (`StudioMenuItem` is the SDK's `CoreNavItem`). |
-| `@/lib/text/plain-line` | l/play/draft.ts, l/looks/validate.ts | copied into Play | — | Pure text helpers (`oneLine`). `UNSAFE_TEXT` is read by `lib/looks/validate.ts`, which A-13a moves into core's `lib/look-kit`. |
+| `@/lib/text/plain-line` | l/play/draft.ts | copied into Play | — | Pure text helpers (`oneLine`). `UNSAFE_TEXT` is read by the look runtime's `lib/look-kit/validate.ts` (moved out of `lib/looks` by A-13a). |
 | `@/lib/theme-host/boot-sanitize` | l/looks/tone.ts | host-only | — | The boot data's tone parser; the host applies the tone before first paint (A-03). |
 | `@/lib/theme-host/boot-types` | l/looks/prepaint.ts | host-only | — | Builtin Play's first-paint tables (A-03, PA-7); an installed theme ships them as data in its package, not code. |
 | `@/lib/theme-host/builtin/play-entry` | c/looks/look-provider.tsx, c/looks/play-only-route.tsx | host-only | — | Builtin Play's registry entry (PA-7); deleted at A-19. |
@@ -117,7 +117,7 @@ the move lands.
 | `@/stores/play-chat-store` | hooks/use-start-chat.ts, hooks/use-play-conversation.ts | SDK | `chat.useStartChat` | "Show a fresh chat" is part of New chat. |
 | `@/hooks/use-celebrate-new` | hooks/use-shelf-mascot.ts | copied into Play | — | Play's own code in core's `hooks/` (§0); it moves with Play. |
 | `@/hooks/use-idle-timeout` | hooks/use-auto-mascot.ts | copied into Play | — | A pure timer the mascot driver uses; it moves with it. |
-| `@/lib/look-kit/*` | `lib/looks`, `components/looks` after A-13a | copied into Play | — | The look runtime is core-owned in Phase A and the kit vendors it by version (PA-9); the active look and saving are `looks.useLook` and `looks.saveLook`. |
+| `@/lib/look-kit/*` | `lib/looks` (`engine.ts` binds Play's catalogue, prefix and look spec; the pure helpers directly), `components/looks` through `lib/looks/engine` after A-13a | copied into Play | — | The look runtime is core-owned in Phase A and the kit vendors it by version (PA-9); the active look and saving are `looks.useLook` and `looks.saveLook`. |
 | `@/lib/theme-host/builtin/*` | `lib/looks` after A-09b | host-only | — | Builtin Play's registration files (PA-7: `play-look-keys.ts`, `play-boot.ts` and the rest); deleted at A-19. |
 | `@/components/theme-host/*` | Play's frame and cards after A-12c, A-13c | host-only | — | The host's own components (slots, the protected-surface guard, the look runtime); a theme gets the cards through `cards.*`. |
 | `@/lib/api-client` | Play's tests today; `lib/looks/store.ts` if A-09b reads the server directly | host-only | — | A theme never holds the backend client (PRD §4.3 item 7); every call it needs is an SDK hook (looks: `looks.listLooks`, `looks.saveLook`, A-13c). |

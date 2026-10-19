@@ -9,7 +9,6 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { ACCENTS, ACCENT_KEYS, ERROR_COLOUR, GROUNDS, GROUND_KEYS } from '@/lib/looks/catalogue'
 import {
   AA_NON_TEXT,
   AA_TEXT,
@@ -21,22 +20,13 @@ import {
   readableOnTinted,
   readsOnAll,
   relativeLuminance,
-} from '@/lib/looks/contrast'
-import {
-  ACCENT_FAINT_ALPHA,
-  ACCENT_HALO_ALPHA,
-  ACCENT_TEXT_TINTS,
-  GLOW_SCALE,
-  GLOW_SNAG_VAR,
-  GLOW_VAR,
-  SNAG_GLOW,
-  lookToCssVars,
-  rgba,
-  safeGlow,
-} from '@/lib/looks/css'
-import { tripletToHex } from '@/lib/looks/hsl'
+} from '@/lib/look-kit/contrast'
+import { ACCENT_FAINT_ALPHA, ACCENT_HALO_ALPHA, ACCENT_TEXT_TINTS, GLOW_SCALE, SNAG_GLOW, rgba } from '@/lib/look-kit/css'
+import { tripletToHex } from '@/lib/look-kit/hsl'
+import { PRIMARY_TINT_MAX } from '@/lib/look-kit/studio-tokens'
+import { ACCENTS, ACCENT_KEYS, ERROR_COLOUR, GROUNDS, GROUND_KEYS } from '@/lib/looks/catalogue'
+import { GLOW_SNAG_VAR, GLOW_VAR, lookToCssVars, lookToStudioTokens, safeGlow, textFills } from '@/lib/looks/engine'
 import { EMBER } from '@/lib/looks/presets'
-import { PRIMARY_TINT_MAX, lookToStudioTokens, textFills } from '@/lib/looks/studio-tokens'
 import { GLOW_MAX, GLOW_MIN } from '@/lib/looks/types'
 
 const PAIRS = GROUND_KEYS.flatMap((ground) => ACCENT_KEYS.map((accent) => ({ ground, accent })))
@@ -45,7 +35,7 @@ const WRAPPED = /^hsl\((.+)\)$/
 const PLAY_THEME_CSS = path.resolve(__dirname, '../../../app/play-theme.css')
 const RGBA_ALPHA = /^rgba\([\d,]+,([\d.]+)\)$/
 const PERCENT = 100
-/** What Play sets straight on the page, so over the glow (lib/looks/css.ts pageTexts). */
+/** What Play sets straight on the page, so over the glow (lib/look-kit/css.ts pageTexts). */
 const PAGE_TEXTS = ['--pl-ground-text', '--pl-ground-text-2', '--pl-accent-text', '--pl-error-text'] as const
 
 function channels(hex: string): readonly number[] {

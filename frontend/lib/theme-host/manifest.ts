@@ -28,7 +28,7 @@ import {
   THEME_FILES_PATH,
   THEME_SLOT_IDS,
 } from './constants'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 
 import { HTML_CLASS_OWNERS, MANIFEST_SCHEMA as PACKAGE_SCHEMA, RESERVED_HTML_CLASSES } from './package-manifest'
 import { DEFAULT_THEME_BASE } from './registry'
