@@ -248,6 +248,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       - name: Install Python dependencies
+        id: deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
@@ -334,6 +335,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      # PRD-262 US-032 (FR-6): `import main`, which every API process runs before it
+      # serves, loads none of camelot, cv2, matplotlib, pandas, nltk,
+      # google.generativeai or googleapiclient; a failure names the import chain that
+      # loaded one. Its 25 slowest imports (cumulative, from `python -X importtime`) and
+      # its wall time go to the step summary (scripts/ci/import_main_report.py). Once
+      # per run, on the first shard, after the tests and their coverage, so a failure
+      # here never hides theirs. IMPORT_MAIN_BUDGET_SECONDS is empty until the first
+      # week of main runs sets it; while empty, the time is reported, not judged.
+      - name: import main loads no FR-6 module, and its import time
+        if: ${{ !cancelled() && matrix.shard == 0 && steps.deps.outcome == 'success' }}
+        env:
+          IMPORT_MAIN_BUDGET_SECONDS: ""
+        run: python ../scripts/ci/import_main_report.py --budget-seconds "$IMPORT_MAIN_BUDGET_SECONDS" --summary "$GITHUB_STEP_SUMMARY"
 
   # The required check (the Protect-Main ruleset names `orchestrator-tests`). It
   # always reports: green when every shard passed, or when no backend test reads
