@@ -29,7 +29,6 @@ from config import config
 
 # PDF and image processing
 import pdfplumber
-from pdfplumber.utils.exceptions import PdfminerException
 from PIL import Image
 import pytesseract
 
@@ -155,6 +154,8 @@ class TableProcessor:
         Returns:
             List of extracted tables
         """
+        from pdfplumber.utils.exceptions import PdfminerException
+
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 return [table for page in pdf.pages for table in self._page_tables(page)]
