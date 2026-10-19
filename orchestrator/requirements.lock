@@ -3871,7 +3871,6 @@ tree-sitter==0.26.0 \
     # via
     #   -r orchestrator/requirements.in
     #   graphifyy
-    #   tree-sitter-language-pack
 tree-sitter-bash==0.25.1 \
     --hash=sha256:0e6235f59e366d220dde7d830196bed597d01e853e44d8ccd1a82c5dd2500acf \
     --hash=sha256:3f484c4bb8796cde7a87ca351e6116f09653edac0eb3c6d238566359dd28b117 \
@@ -3893,7 +3892,9 @@ tree-sitter-c==0.24.2 \
     --hash=sha256:abb549225091f7b25df2dd3a0143ece6e208f7055d8bcb4700b41ee79b9ef1e1 \
     --hash=sha256:c098bedcd5ac86ff93fa734d51d1dd86aed40fd5ed7d634c7af11380a0469969 \
     --hash=sha256:e2b42e8e22202c251f8629306f9321233542e07a6e01611b5fe83489272143eb
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-c-sharp==0.23.5 \
     --hash=sha256:05a9256415e7f24d4f133133794a9c224c60d19f677a04e2f6a94c25090b6d65 \
     --hash=sha256:2635c7d5ec93e59f2e831b571bed99c4cc68a5d183a0994020aa769e1b990a71 \
@@ -3904,7 +3905,9 @@ tree-sitter-c-sharp==0.23.5 \
     --hash=sha256:8636dc70b5a373c35c1036ed5de98e801f2e4d105ae41e2e20b6804c36e3bf33 \
     --hash=sha256:a75994a11f6fed3f5b8c36ad6a00e5dc43205bd912c43af3a2a54fdf649664eb \
     --hash=sha256:aa88a780204cd153c4c1ae2d59c654cee1402212fa0d069823d6d34301587438
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-cpp==0.23.4 \
     --hash=sha256:247d127f0eb6574b0f6b30c0151e0bd0774e2e7acf9c558bdf9fbb8adc2e80c0 \
     --hash=sha256:68606a45bea92669d155399e1239f771a7767d8683cd8f8e30e7d813107030ca \
@@ -3914,7 +3917,9 @@ tree-sitter-cpp==0.23.4 \
     --hash=sha256:aacb1759f0efd9dbc25bd8ee88184a340483018869f75412d9c3bc32c039a520 \
     --hash=sha256:bc3c404d9f0cbd87951213a85440afbf4c31e718f8d907fa9ee12bea4b8d276f \
     --hash=sha256:ccc43ddf1279d5d5a4ef190373f4cb16522801bec4492bcd4754edf2aeba2b7b
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-elixir==0.3.5 \
     --hash=sha256:015f537731af690cfa238b0fb76a8af4f0d1a2c54a38563f159926d2967ce650 \
     --hash=sha256:514078a2f68d27da9a1e6b6e9601b8456faba6260ecfa252e898a848c4f8584d \
@@ -3947,7 +3952,9 @@ tree-sitter-go==0.25.0 \
     --hash=sha256:a7466e9b8d94dda94cae8d91629f26edb2d26166fd454d4831c3bf6dfa2e8d68 \
     --hash=sha256:b852993063a3429a443e7bd0aa376dd7dd329d595819fabf56ac4cf9d7257b54 \
     --hash=sha256:d5d62362059bf79997340773d47cc7e7e002883b527a05cca829c46e40b70ded
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-groovy==0.1.2 \
     --hash=sha256:1942a9a1b22e154da9bbf1b03e6b4dbec4211b1109d24bcf4c12b006cbc04037 \
     --hash=sha256:27adb7a4077511782dbd94a12f4635dfb52ccb88f734fe1569393e2d28b18bbd \
@@ -3967,7 +3974,9 @@ tree-sitter-java==0.23.5 \
     --hash=sha256:9401e7271f0b333df39fc8a8336a0caf1b891d9a2b89ddee99fae66b794fc5b7 \
     --hash=sha256:aae84449e330363b55b14a2af0585e4e0dae75eb64ea509b7e5b0e1de536846a \
     --hash=sha256:f5cd57b8f1270a7f0438878750d02ccc79421d45cca65ff284f1527e9ef02e38
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-javascript==0.25.0 \
     --hash=sha256:199d09985190852e0912da2b8d26c932159be314bc04952cf917ed0e4c633e6b \
     --hash=sha256:1b852d3aee8a36186dbcc32c798b11b4869f9b5041743b63b65c2ef793db7a54 \
@@ -4010,16 +4019,9 @@ tree-sitter-kotlin==1.1.0 \
     --hash=sha256:9a92afe24b634cf914c5812af0f5c53184b1c18bdf6ee5505c83afac81f6bf6c \
     --hash=sha256:d4d3f330f515ba8b91da04a5335eb9ff3ce071c7b7855958912f2560f6e14976 \
     --hash=sha256:e030f127a7d07952907adb9070248bd42fb86dc76fd92744727551b50e131ee7
-    # via graphifyy
-tree-sitter-language-pack==1.22.1 \
-    --hash=sha256:34e4e7a77d02d102abf95c7b088962fcd56825bd48eabbe80f93e1d43665e7ad \
-    --hash=sha256:624d90afb8b210584bdcb871935385035872eeb12b26e41f487c0c8e1cab350b \
-    --hash=sha256:852a0129463a94f898dda2aa9616fb19e598d9a0a9d3024ec9dc2bffb3fa7945 \
-    --hash=sha256:8a476b71c2f6c71f23b0b63f5ff6f72a8ba2c11901db63c360ebcaf1fc51af5c \
-    --hash=sha256:b85116c8a8d7bbdca2e1be8068d6c3d4f0ac66e95b3310a6dbdd21fc87332323 \
-    --hash=sha256:d34a528bdd845d024c42da3fa43495c5d51c66151597ea6e46a1e9d79d863e89 \
-    --hash=sha256:e0cba16312890fc7747da5fb5edb7aabfc68aac7db0ebab5212986a67cd01ed4
-    # via -r orchestrator/requirements.in
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-lua==0.5.0 \
     --hash=sha256:0e46356038ccb8ce1049289104c56230003448309a335f2e353f1edc7b373552 \
     --hash=sha256:5ec448c854fea32414a0449147d648bc5baddf7a0357008c4abe3269db35370a \
@@ -4051,7 +4053,9 @@ tree-sitter-php==0.25.1 \
     --hash=sha256:bc2d4503814c55912e69713623610ddd9c6058f6c6c2f521847d86db0b179cb2 \
     --hash=sha256:db2f82bc9a33664f150750a1b6d3cb0291760d9ab5727455d713141f7dc9e6a9 \
     --hash=sha256:ee642411d457f8b0a96b7d5ba24fc1f28d05014b7db98dd9f71d00224858dec1
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-powershell==0.26.4 \
     --hash=sha256:0bf8beac7ed4501d1c52456f8ae9728ab2a5a079325548b06b1bc9746655524e \
     --hash=sha256:1170665958ed29abe015ad294408f15b1f76e5d52e0b96e7718ffbf340b9670c \
@@ -4085,7 +4089,9 @@ tree-sitter-ruby==0.23.1 \
     --hash=sha256:aa4ee7433bd42fac22e2dad4a3c0f332292ecf482e610316828c711a0bb7f794 \
     --hash=sha256:ed042007e89f2cceeb1cbdd8b0caa68af1e2ce54c7eb2053ace760f90657ac9f \
     --hash=sha256:f7bcd93972b4ca2803856d4fe0fbd04123ff29c4592bbb9f12a27528bd252341
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-rust==0.24.2 \
     --hash=sha256:01a46622735498493f29f3e628a90de95c96a07bfbeb88996243eb986b1cee36 \
     --hash=sha256:3620cfd12340efa43082d45df76349ff511893a9c361da2f8d6d51e307020a59 \
@@ -4096,7 +4102,9 @@ tree-sitter-rust==0.24.2 \
     --hash=sha256:9d76d1208c3638b871236090759dfc13d478921320653a6c9da5336e7c58f65a \
     --hash=sha256:da2b86099028fd42c6cd32878b7b16b01f8aac0f7b0e98742b7fa6bc3cf09b89 \
     --hash=sha256:e033c5a93b57c88e0a835880de39fc802909ff69f57aaff6000211c196ea5190
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-scala==0.26.3 \
     --hash=sha256:050ee0e9336a39b1d53b0d8adb3e6b04c3e65919d5a02983099e441dd63d0f99 \
     --hash=sha256:0a4815be510f6e86938923df4143efaa8f6a62a069329bb20107be1ea94dd5b1 \
@@ -4118,7 +4126,9 @@ tree-sitter-swift==0.7.4 \
     --hash=sha256:d11d15a479d7d3b14c7fc526b4daab107995feca5752936fec5c60cc7fa6fe4d \
     --hash=sha256:e76bc562815bbeb4a6504a9fac6699ffc2b779ef55e12ea863f6a3f8fa0dfee6 \
     --hash=sha256:f54606c229c32ba130fbb005cbfb99e50ccfa0023ab9d1ffd45850515c893a7b
-    # via graphifyy
+    # via
+    #   -r orchestrator/requirements.in
+    #   graphifyy
 tree-sitter-typescript==0.23.2 \
     --hash=sha256:05db58f70b95ef0ea126db5560f3775692f609589ed6f8dd0af84b7f19f1cbb7 \
     --hash=sha256:3cd752d70d8e5371fdac6a9a4df9d8924b63b6998d268586f7d374c9fba2a478 \
