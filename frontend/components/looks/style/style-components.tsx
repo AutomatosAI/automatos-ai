@@ -1,7 +1,7 @@
 import chat from '@/components/play/chat/chat.module.css'
 import composer from '@/components/play/chat/composer.module.css'
 import { JUST_NOW, OPEN } from '@/components/play/chat/deliverable-card'
-import { KIND_WORDS } from '@/components/play/chat/deliverables'
+import { KIND_WORDS } from '@/lib/chat/deliverables'
 import { MARK_DONE, MARK_FAILED } from '@/components/play/chat/labels'
 import { BADGE_DONE, RECEIPTS_TITLE } from '@/components/play/chat/receipts'
 import turn from '@/components/play/chat/turn.module.css'

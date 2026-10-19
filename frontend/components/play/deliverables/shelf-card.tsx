@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 
-import { deliverableHref, isDeliverableId, UNTITLED } from '@/components/play/chat/deliverables'
+import { deliverableHref, isDeliverableId, UNTITLED } from '@/lib/chat/deliverables'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { kindOf, shelfDate, typeLabel } from '@/lib/play/shelf'

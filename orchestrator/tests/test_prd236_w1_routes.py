@@ -268,10 +268,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     timings = (versions / "prd258_voice_timings.py").read_text()
     assert 'down_revision = "user_api_keys_provider_workspace_id"' in timings
     # 2026-10-17 (PRD-261 W-B1, A-05): prd261_themes chains onto it — the ONE migration of
-    # installable themes, Phase A and C (the nine theme tables); the guard follows it.
+    # installable themes, Phase A and C (the nine theme tables).
     themes = (versions / "prd261_themes.py").read_text()
     assert 'down_revision = "prd258_voice_timings"' in themes
-    assert 'EXPECTED_HEAD = "prd261_themes"' in guard
+    # 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto prd261_themes — the HARNESS
+    # run table (harness_runs), a new table only; the guard follows it.
+    harness_runs = (versions / "prd263_harness_runs.py").read_text()
+    assert 'down_revision = "prd261_themes"' in harness_runs
+    assert 'EXPECTED_HEAD = "prd263_harness_runs"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

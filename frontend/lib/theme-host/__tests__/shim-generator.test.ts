@@ -102,8 +102,9 @@ describe('PRD-261 A-01 — reading export names statically', () => {
     }
   })
 
+  // PRD-261 A-10a: the SDK is lib/theme-sdk, reached by its alias; its names come from its surface files.
   it("lists the SDK's own runtime exports for @automatos/theme-sdk", async () => {
-    const sdk = (await import('../sdk')) as Record<string, unknown>
+    const sdk = (await import('@automatos/theme-sdk')) as Record<string, unknown>
     expect(namesFor('@automatos/theme-sdk')).toEqual(Object.keys(sdk).filter((name) => !SKIPPED.has(name)).sort())
   })
 
