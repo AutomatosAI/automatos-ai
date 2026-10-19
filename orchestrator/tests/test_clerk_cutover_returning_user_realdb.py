@@ -36,7 +36,7 @@ from core.auth.hybrid import (  # noqa: E402
     _provision_new_user_workspace,
     _resolve_workspace_for_clerk_user,
 )
-from core.auth.user_link import ensure_user_row  # noqa: E402
+from core.auth.user_link import ensure_user_row, user_id_for_invitee  # noqa: E402
 from core.database.database import get_database_url  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -275,3 +275,20 @@ def test_a_new_person_gets_one_row_however_often_they_arrive(people, new_session
     assert first == second
     assert _rows_with_email(check, email) == 1
     assert _clerk_id_of(check, first) == clerk_id
+
+
+def test_an_invitee_claims_an_unlinked_mixed_case_row_instead_of_making_a_twin(people, new_session):
+    email = f"Cutover-Invitee-{people.tag}@Example.test"
+    person = people.person("invitee", email=email)
+    unlink = new_session()
+    unlink.execute(text("UPDATE users SET clerk_user_id = NULL WHERE id = :id"), {"id": person["id"]})
+    unlink.commit()
+
+    db = new_session()
+    claimed = user_id_for_invitee(db, person["new_clerk_id"], email.lower())
+    db.commit()
+
+    check = new_session()
+    assert claimed == person["id"]
+    assert _rows_with_email(check, email) == 1
+    assert _clerk_id_of(check, person["id"]) == person["new_clerk_id"]

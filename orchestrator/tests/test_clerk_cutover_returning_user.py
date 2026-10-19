@@ -38,6 +38,7 @@ from core.auth.hybrid import _resolve_workspace_for_clerk_user  # noqa: E402
 from core.auth.user_link import (  # noqa: E402
     LINK_CONFLICT_MESSAGE,
     ensure_user_row,
+    user_id_for_invitee,
 )
 
 OLD_CLERK_ID = "user_dev_2xOldDevInstance"
@@ -46,8 +47,9 @@ EMAIL = "returning@example.test"
 
 
 class _Result:
-    def __init__(self, rows):
+    def __init__(self, rows, rowcount=0):
         self._rows = rows
+        self.rowcount = rowcount
 
     def fetchone(self):
         return self._rows[0] if self._rows else None
@@ -75,9 +77,17 @@ class _UsersTable:
         if sql.startswith("SELECT id, clerk_user_id FROM users WHERE LOWER(email) = LOWER(:email)"):
             hits = sorted((r for r in self.rows if r["email"].lower() == params["email"].lower()), key=lambda r: r["id"])
             return _Result([(r["id"], r["clerk_user_id"]) for r in hits])
+        if sql == "UPDATE users SET clerk_user_id = :cid WHERE id = :id AND clerk_user_id IS NULL":
+            return self._claim(params)
         if sql.startswith("INSERT INTO users"):
             return self._insert(sql, params)
         raise AssertionError(f"unexpected SQL: {sql}")
+
+    def _claim(self, params):
+        hits = [r for r in self.rows if r["id"] == params["id"] and r["clerk_user_id"] is None]
+        for row in hits:
+            row["clerk_user_id"] = params["cid"]
+        return _Result([], rowcount=len(hits))
 
     def _insert(self, sql, params):
         assert sql.endswith("ON CONFLICT DO NOTHING"), "the insert must skip on ANY unique conflict"
@@ -198,3 +208,33 @@ def test_the_resolver_still_provisions_a_genuinely_new_person(accessible, pendin
     assert resolved == new_workspace
     db.commit.assert_not_called()
     provision.assert_called_once_with(db, NEW_CLERK_ID, email=EMAIL, name="New")
+
+
+# ── user_id_for_invitee: accepting an invitation ─────────────────────────
+
+def test_an_invitee_with_a_known_clerk_id_uses_their_row():
+    db = _UsersTable(_returning_user(clerk_user_id=NEW_CLERK_ID))
+    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL) == 7
+    assert db.updates() == [] and db.inserts() == []
+
+
+def test_an_invitee_claims_an_unlinked_row_whatever_the_case_of_its_email():
+    """team.py matched User.email == the lowercased email, so a mixed-case row got a twin."""
+    db = _UsersTable(_returning_user(clerk_user_id=None, email="Returning@Example.TEST"))
+    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL) == 7
+    assert db.rows[0]["clerk_user_id"] == NEW_CLERK_ID
+    assert db.inserts() == []
+    assert db.commits == 0, "the caller commits with the membership"
+
+
+def test_an_invitee_never_takes_a_row_that_belongs_to_another_clerk_id():
+    db = _UsersTable(_returning_user(email="Returning@Example.TEST"))
+    _conflict(lambda: user_id_for_invitee(db, NEW_CLERK_ID, EMAIL))
+    assert db.rows[0]["clerk_user_id"] == OLD_CLERK_ID
+    assert db.inserts() == [] and db.updates() == []
+
+
+def test_a_new_invitee_gets_one_row():
+    db = _UsersTable()
+    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL, name="New") == 1
+    assert db.rows == [{"id": 1, "clerk_user_id": NEW_CLERK_ID, "email": EMAIL, "username": EMAIL}]

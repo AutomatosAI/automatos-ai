@@ -95,3 +95,44 @@ def ensure_user_row(
     if created is not None:
         return created
     raise _link_conflict(clerk_user_id, "another row holds its email or username")
+
+
+def _claim_unlinked_row(db, clerk_user_id: str, email: str) -> Optional[int]:
+    """The row with this email (case-insensitive) once claimed for this Clerk ID, or None.
+
+    Only a row with no Clerk ID is claimed. One that belongs to another Clerk ID is
+    a 409: it is never moved or used.
+    """
+    row = _row_with_email(db, email)
+    if not row:
+        return None
+    if row[1] is None:
+        claimed = db.execute(
+            text("UPDATE users SET clerk_user_id = :cid WHERE id = :id AND clerk_user_id IS NULL"),
+            {"cid": clerk_user_id, "id": row[0]},
+        )
+        if claimed.rowcount == 1:
+            return row[0]
+    raise _link_conflict(clerk_user_id, f"users.id={row[0]} with its email belongs to another Clerk ID")
+
+
+def user_id_for_invitee(
+    db, clerk_user_id: str, email: Optional[str], name: Optional[str] = None,
+) -> int:
+    """The ``users.id`` that accepts an invitation for this Clerk user.
+
+    Found by Clerk ID; else the row with the same email (case-insensitive, so a
+    stored ``Jane@Example.com`` is found for ``jane@example.com`` and no second row
+    is made) is claimed when it has no Clerk ID yet; else a new row is inserted.
+    A row with the same email that belongs to another Clerk ID is never moved or
+    used: the invitee gets a 409. Not committed: the caller commits with the
+    membership.
+    """
+    existing = user_id_for_clerk_id(db, clerk_user_id)
+    if existing is not None:
+        return existing
+    if email:
+        claimed = _claim_unlinked_row(db, clerk_user_id, email)
+        if claimed is not None:
+            return claimed
+    return ensure_user_row(db, clerk_user_id, email=email, name=name)
