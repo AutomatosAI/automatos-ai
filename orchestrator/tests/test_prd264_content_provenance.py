@@ -344,6 +344,52 @@ def test_the_window_lets_an_ip_check_again_once_it_has_passed(client, fake_redis
     assert client.get(f"/api/public/provenance/{UNKNOWN}", headers=ip).status_code == 200
 
 
+def _bucket_keys(fake_redis):
+    return sorted(key for key in fake_redis.z if ":provenance:ip:" in key)
+
+
+def test_a_client_ip_that_is_not_an_address_never_becomes_a_redis_key(client, fake_redis):
+    from api.provenance import UNPARSABLE_IP_BUCKET
+
+    for junk in ("not-an-ip", "x" * 4000, "203.0.113.7:8080", "<script>"):
+        response = client.get(f"/api/public/provenance/{UNKNOWN}", headers={"X-Forwarded-For": junk})
+        assert response.status_code == 200
+
+    keys = _bucket_keys(fake_redis)
+    assert len(keys) == 1
+    assert keys[0].endswith(UNPARSABLE_IP_BUCKET)
+
+
+def test_an_ipv6_caller_is_counted_per_64_so_rotating_addresses_inside_it_gains_nothing(
+    client, fake_redis, monkeypatch,
+):
+    from config import config
+
+    monkeypatch.setattr(config, "PROVENANCE_RATE_PER_MINUTE", 1)
+    first = {"X-Forwarded-For": "2001:db8:1:2::1"}
+    same_64 = {"X-Forwarded-For": "2001:db8:1:2:ffff:ffff:ffff:fffe"}
+    other_64 = {"X-Forwarded-For": "2001:db8:1:3::1"}
+
+    assert client.get(f"/api/public/provenance/{UNKNOWN}", headers=first).status_code == 200
+    assert client.get(f"/api/public/provenance/{UNKNOWN}", headers=same_64).status_code == 429
+    assert client.get(f"/api/public/provenance/{UNKNOWN}", headers=other_64).status_code == 200
+    assert [key.rsplit(":ip:", 1)[1] for key in _bucket_keys(fake_redis)] == [
+        "2001:db8:1:2::/64", "2001:db8:1:3::/64",
+    ]
+
+
+def test_an_ipv4_mapped_ipv6_address_shares_its_ipv4_bucket(client, monkeypatch):
+    from config import config
+
+    monkeypatch.setattr(config, "PROVENANCE_RATE_PER_MINUTE", 1)
+
+    plain = client.get(f"/api/public/provenance/{UNKNOWN}", headers={"X-Forwarded-For": "203.0.113.9"})
+    mapped = client.get(f"/api/public/provenance/{UNKNOWN}", headers={"X-Forwarded-For": "::ffff:203.0.113.9"})
+
+    assert plain.status_code == 200
+    assert mapped.status_code == 429
+
+
 def test_the_route_needs_no_account_and_ignores_one_it_is_sent(client):
     headers = {"Authorization": "Bearer not-a-real-token", "X-Workspace-ID": str(uuid4())}
 
