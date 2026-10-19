@@ -34,6 +34,12 @@ name: smoke-fresh-clone
 # lifespan leader's seeds, start no seed loader, and leave credential_types' rows as
 # they were (scripts/ci/smoke_seeds.py; the fingerprints, orchestrator/core/seeds/).
 #
+# PRD-262 US-034 — the API answers once its core is up and boots the rest in the
+# background, off the event loop: in every boot's /health/bootstrap the stages up to and
+# including trust_gate sum to 3 s or less, and no APScheduler `Run time of job … was
+# missed` warning appears in a boot's first 60 s (scripts/ci/smoke_ready.py). /health 200
+# and /health/ready 200 are timed separately.
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -54,9 +60,9 @@ name: smoke-fresh-clone
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
 # stack builds or boots from: compose, the Makefile, the env defaults, the
-# backend's image, .dockerignore, entrypoint, requirements, boot module, seeds and
-# migrations, the worker, the frontend's image and lock file, the scripts and this
-# workflow. Not on every push, since it builds and boots the full stack.
+# backend's image, .dockerignore, entrypoint, requirements, boot module and boot
+# stages, seeds and migrations, the worker, the frontend's image and lock file, the
+# scripts and this workflow. Not on every push, since it builds and boots the full stack.
 
 on:
   workflow_dispatch:
@@ -78,6 +84,8 @@ on:
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
       - "orchestrator/main.py"
+      - "orchestrator/core/boot/**"
+      - "orchestrator/core/models/bootstrap.py"
       - "orchestrator/core/seeds/**"
       - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/alembic.ini"
@@ -98,6 +106,7 @@ on:
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
       - "scripts/ci/smoke_seeds.py"
+      - "scripts/ci/smoke_ready.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -115,6 +124,8 @@ on:
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
       - "orchestrator/main.py"
+      - "orchestrator/core/boot/**"
+      - "orchestrator/core/models/bootstrap.py"
       - "orchestrator/core/seeds/**"
       - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/alembic.ini"
@@ -135,6 +146,7 @@ on:
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
       - "scripts/ci/smoke_seeds.py"
+      - "scripts/ci/smoke_ready.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual

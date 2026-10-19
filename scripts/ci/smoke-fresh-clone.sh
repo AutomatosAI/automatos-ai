@@ -91,6 +91,14 @@
 # read in the postgres container) must be the same after the warm restarts as before
 # them (scripts/ci/smoke_seeds.py).
 #
+# PRD-262 US-034: the API answers once its core is up and boots the rest in the
+# background, off the event loop. After the last boot has run its first 60 s,
+# scripts/ci/smoke_ready.py reads every backend boot: the stages of its
+# /health/bootstrap report up to and including trust_gate (what the server waits for
+# before it listens) sum to 3 s or less, and its log holds no APScheduler `Run time of
+# job … was missed` warning in its first 60 s. /health 200 and /health/ready 200 are
+# timed separately, as above.
+#
 # PRD-262 US-017, when it builds from this checkout: the build log is kept, and
 # scripts/ci/build_context.py reads what the backend's build sent as its context off it.
 # The workflow first seeds dummy uploads and caches where a self-hoster's checkout
@@ -109,7 +117,8 @@
 # over its budget, the document did not come back from object storage, a boot ran
 # alembic twice (or the CMD ran it), or ran it at head, or the behind-head boot did
 # not, or a warm restart ran a seed stage, started the seed loader or rewrote
-# credential_types.
+# credential_types, or a boot's core stages took over 3 s or APScheduler missed a job
+# in a boot's first 60 s.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -169,6 +178,9 @@ SEEDS_TOOL="scripts/ci/smoke_seeds.py"
 SEEDS_FILE="${OUT_DIR}/seed-stages.json"
 CREDENTIAL_TYPES_BEFORE="${OUT_DIR}/credential-types-before.txt"
 CREDENTIAL_TYPES_AFTER="${OUT_DIR}/credential-types-after.txt"
+# PRD-262 US-034: smoke_ready.py's record.
+READY_TOOL="scripts/ci/smoke_ready.py"
+READY_FILE="${OUT_DIR}/ready-after-core.json"
 CREDENTIAL_TYPES_SQL="SELECT count(*) || ' ' || coalesce(md5(string_agg(name || '=' || coalesce(updated_at::text, 'null'), ',' ORDER BY name)), '') FROM credential_types"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
@@ -468,6 +480,24 @@ check_seed_stages() {
     || fail "a warm restart ran a seed stage again, started the seed loader or rewrote credential_types"
 }
 
+# PRD-262 US-034: every backend boot's core stages (to trust_gate) took 3 s or less, and
+# APScheduler missed no job in its first 60 s. The last boot's 60 s must be in the log
+# before it is read, so this waits for them first.
+check_ready_after_core() {
+  local left
+  left="$(python3 "$READY_TOOL" --results "$BOOTS_FILE" --backend-container "$BACKEND_CONTAINER" --window-left)" \
+    || fail "could not work out when the last backend boot's first 60 s end"
+  if [ "$left" -gt 0 ]; then
+    echo "Waiting ${left}s for the last backend boot's first 60 s to be in its log..."
+    sleep "$left"
+  fi
+  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
+  python3 "$READY_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
+    --backend-container "$BACKEND_CONTAINER" \
+    --out "$READY_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a backend boot's core stages (to trust_gate) took over 3s, or APScheduler missed a job in a boot's first 60s"
+}
+
 dump_failure_logs() {
   echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
   compose logs --tail 200 postgres >&2 || true
@@ -539,11 +569,12 @@ main() {
   boot_behind_head
   check_alembic_runs
   check_seed_stages
+  check_ready_after_core
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot," \
     "${WARM_RESTARTS} warm restarts and a behind-head boot; only the behind-head boot ran alembic, once;" \
-    "the warm restarts redid no seed work;" \
+    "the warm restarts redid no seed work; every boot's core took 3s or less and no job was missed;" \
     ":3000 answered 200 and a document came back from object storage — the local" \
     "edition serves with NO external credentials"
 }
