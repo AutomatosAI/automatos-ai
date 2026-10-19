@@ -18,8 +18,8 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   moves;
 * every Python lock file has an updater, or is listed below with the reason
   Dependabot cannot update it. A new lock (US-044) fails here until one or the
-  other is true; US-022's three API locks and US-023's frozen reference lock are
-  listed.
+  other is true; US-022's three API locks and the frozen reference locks of US-023
+  and US-026 are listed.
 
 Pure file reads: no Docker, no network.
 """
@@ -72,6 +72,13 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "the versions its W2 lock installed, which test.yml's reference-goldens job runs "
         "in a throwaway venv to re-record the grids pdfplumber is judged against. A bump "
         "would change the reference, not fix anything that ships; no image installs it."
+    ),
+    "scripts/ci/reference/requirements-text-splitters.lock": (
+        "Frozen on purpose: the text splitters the API ran before PRD-262 US-026 "
+        "(langchain-text-splitters and langchain-core), at the versions its W2 lock "
+        "installed, which test.yml's reference-goldens job runs in a throwaway venv to "
+        "re-record the chunks the vendored splitters are judged against. A bump would "
+        "change the reference, not fix anything that ships; no image installs it."
     ),
 }
 

@@ -102,7 +102,7 @@ jobs:
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$
           # PRD-262 W3: the goldens each code swap is judged against, the fixtures they
           # are recorded from, and the pinned libraries that record them.
-          REFERENCE_PATHS: ^scripts/ci/reference/|^orchestrator/tests/fixtures/pdf_table|^\.github/workflows/test\.yml$
+          REFERENCE_PATHS: ^scripts/ci/reference/|^orchestrator/tests/fixtures/pdf_table|^orchestrator/tests/fixtures/text_splitter|^\.github/workflows/test\.yml$
         run: |
           set -euo pipefail
           full_backend() {
@@ -1568,6 +1568,25 @@ jobs:
             exit 1
           fi
           echo "the committed PDF table grids are what the reference extractor records: PASS"
+      # Runs after a failed step above too, so each reference is judged on its own.
+      - name: Golden chunks (US-026) are what langchain-text-splitters 1.0.0 records
+        if: ${{ !cancelled() }}
+        env:
+          RECORDED: ${{ runner.temp }}/references
+          VENV: ${{ runner.temp }}/text-splitters
+          LOCK: scripts/ci/reference/requirements-text-splitters.lock
+          CHUNKS: orchestrator/tests/fixtures/text_splitter_chunks.json
+        run: |
+          set -euo pipefail
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --no-deps --require-hashes --only-binary :all: -r "$LOCK"
+          mkdir -p "$RECORDED"
+          "$VENV/bin/python" scripts/ci/reference/text_splitters.py --out "$RECORDED/text_splitter_chunks.json"
+          if ! diff -u <(jq -S . "$CHUNKS") <(jq -S . "$RECORDED/text_splitter_chunks.json"); then
+            echo "::error file=$CHUNKS::the committed chunks are not what the reference splitters record (diff above; the recorded file is this run's reference-goldens artifact)"
+            exit 1
+          fi
+          echo "the committed golden chunks are what the reference splitters record: PASS"
       - name: Upload what the references recorded
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
