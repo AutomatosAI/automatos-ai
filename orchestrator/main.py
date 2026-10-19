@@ -32,7 +32,6 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
-from sqlalchemy import text  # the SQL left in _boot_phase_1_core (PRD-262 US-030)
 from core.models import Base
 
 # Import API routers
@@ -164,11 +163,12 @@ api_call_stats = defaultdict(lambda: {
     "status_codes": defaultdict(int)
 })
 
-def _seed_social_starters_where_on() -> None:
+def _seed_social_starters_where_on() -> bool:
     """PRD-251B: a social starter that shipped after a workspace turned Socials on (the photo
     cards) reaches it too. Turning Socials on seeds the starters; this covers the workspaces
     already on. Only the boot leader runs it (the core seeds' advisory lock); it is idempotent,
-    so a worker that takes the lock after the leader finds nothing to do."""
+    so a worker that takes the lock after the leader finds nothing to do. True when every
+    workspace got its starters (PRD-262 US-031: the leader stage's fingerprint waits for it)."""
     from core.database.boot_lock import boot_leader_lock
     from core.database.database import engine, get_db_session
     from modules.documents.seed_templates import seed_social_starters_where_on
@@ -177,18 +177,21 @@ def _seed_social_starters_where_on() -> None:
     try:
         with boot_leader_lock(engine) as is_leader:
             if not is_leader:
-                return
+                return False
             with get_db_session() as db:
                 starters = seed_social_starters_where_on(db, lambda settings: parse_workspace_socials(settings).enabled)
             logger.info("Social starters seed: %s", starters)
+            return starters["failed"] == 0
     except Exception:
         logger.exception("Social starters seed failed; the next boot tries again")
+        return False
 
 
-def _seed_document_starters_everywhere() -> None:
+def _seed_document_starters_everywhere() -> bool:
     """#996: a starter that changed after a hosted workspace was provisioned reaches it too
     (the seeder ran only at provisioning there). Boot leader only, like the social starters;
-    idempotent, and it never brings back a starter a person deleted or edited."""
+    idempotent, and it never brings back a starter a person deleted or edited. True when
+    every workspace got its starters."""
     from core.database.boot_lock import boot_leader_lock
     from core.database.database import engine, get_db_session
     from modules.documents.seed_templates import seed_starters_everywhere
@@ -196,25 +199,35 @@ def _seed_document_starters_everywhere() -> None:
     try:
         with boot_leader_lock(engine) as is_leader:
             if not is_leader:
-                return
+                return False
             with get_db_session() as db:
                 starters = seed_starters_everywhere(db)
             logger.info("Document starters seed: %s", starters)
+            return starters["failed"] == 0
     except Exception:
         logger.exception("Document starters seed failed; the next boot tries again")
+        return False
 
 
 def _then_starters(phase):
-    """``phase``, then the document starters for every workspace and the social starters for
-    workspaces already on Socials. A decorator, so the long core phase below stays as it is."""
+    """``phase``, then the starters pass: the document starters for every workspace and the
+    social starters for workspaces already on Socials. A decorator, so the core phase stays
+    short. PRD-262 US-031: the pass belongs to the leader stage, so it runs only after the
+    leader's gated seeds ran (``phase`` returns what they did), and the stage's fingerprint
+    is stored after it."""
 
     import asyncio as _asyncio
 
     @functools.wraps(phase)
     async def run():
-        await phase()
-        await _asyncio.to_thread(_seed_document_starters_everywhere)
-        await _asyncio.to_thread(_seed_social_starters_where_on)
+        from core.seeds.leader_stage import finish_leader_stage
+
+        seeds = await phase()
+        if seeds is None or not seeds.ran:
+            return
+        documents = await _asyncio.to_thread(_seed_document_starters_everywhere)
+        socials = await _asyncio.to_thread(_seed_social_starters_where_on)
+        await _asyncio.to_thread(finish_leader_stage, seeds, documents and socials)
 
     return run
 
@@ -222,140 +235,29 @@ def _then_starters(phase):
 @_then_starters
 async def _boot_phase_1_core():
     """
-    Phase 1: Core infrastructure — database tables + per-deploy seeds.
+    Phase 1: Core infrastructure — database tables, then the boot leader's work.
 
-    Seeds run once per deploy (not per worker) via pg_advisory_lock.
-    Per-workspace seeding (templates, Auto agent) happens at signup time
-    in _provision_new_user_workspace(), NOT here.
+    Only 1 of N workers leads (pg_advisory_lock); the rest skip and return None.
+    The leader runs the seeds when seed_fingerprint.leader changed
+    (core/seeds/leader_stage.py, PRD-262 US-031), then, on every boot, the local
+    first-run seed and the orphaned-run reaper. It returns what the seeds did, for
+    the starters pass after it. Per-workspace seeding (templates, Auto agent)
+    happens at signup time in _provision_new_user_workspace(), NOT here.
     """
     import core.models.system_prompts  # register models with Base.metadata
     import core.models.core  # noqa: F811 — registers all models with Base
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
+    from core.seeds.leader_stage import run_leader_seeds, seed_local_first_run_on_boot
 
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
 
-    # ── Single-worker seed gate ──
-    # Only 1 of N workers runs seeds. The rest skip immediately.
-    # Per-workspace seeds (templates, Auto agent) are NOT here —
-    # they run at workspace creation time in hybrid.py.
     with boot_leader_lock(engine) as is_leader:
         if not is_leader:
-            return
-
-        # Seed system prompts (new prompts may ship with code changes)
-        try:
-            from core.seeds.seed_system_prompts import seed_system_prompts
-            with get_db_session() as db:
-                seed_system_prompts(db)
-        except Exception as e:
-            logger.warning("System prompts seed: %s", e)
-
-        # Seed system settings (new setting keys may ship with code changes)
-        try:
-            from core.seeds.seed_system_settings import seed_system_settings
-            with get_db_session() as db:
-                created, updated = seed_system_settings(db)
-                if created or updated:
-                    logger.info("System settings seeded: %d created, %d updated", created, updated)
-        except Exception as e:
-            logger.warning("System settings seed: %s", e)
-
-        # Seed credential types (schema changes ship with code)
-        try:
-            from core.database.load_seed_data import load_seed_data
-            load_seed_data(load_credentials=True, load_platform_defaults=False)
-        except Exception as e:
-            logger.warning("Credential types seed: %s", e)
-
-        # Update LinkedIn credential type schema (direct SQL — seed upsert may not fire)
-        try:
-            import json as _json
-            _li_schema = _json.dumps([
-                {"displayName": "Client ID", "name": "client_id", "type": "string", "required": True, "description": "OAuth2 Client ID from LinkedIn Developer Portal"},
-                {"displayName": "Client Secret", "name": "client_secret", "type": "password", "required": True, "description": "OAuth2 Client Secret"},
-                {"displayName": "Access Token", "name": "access_token", "type": "password", "required": True, "description": "OAuth2 access token"},
-                {"displayName": "Refresh Token", "name": "refresh_token", "type": "password", "required": False, "description": "OAuth2 refresh token for automatic renewal"},
-                {"displayName": "Organization URN", "name": "organization_urn", "type": "string", "required": True, "description": "e.g. urn:li:organization:108072660"},
-            ])
-            with engine.connect() as conn:
-                conn.execute(
-                    text("UPDATE credential_types SET schema_definition = :schema, category = 'social', description = 'LinkedIn Community Management API — posts images to organization pages' WHERE name = 'linkedInCommunityManagementOAuth2Api'"),
-                    {"schema": _li_schema},
-                )
-                conn.commit()
-        except Exception as e:
-            logger.warning("LinkedIn credential type update: %s", e)
-
-        # PRD-226: bring existing workspaces' Auto persona up to the current
-        # doctrine-carrying seed. Hash-guarded — a customized soul is left
-        # untouched and the skip is reported; brand-new workspaces already carry
-        # the doctrine via the seed CREATE path. This is the ONLY reachable
-        # production home for the backfill: every lazy-seed caller (chat.py,
-        # workspaces.py, hybrid.py) reaches seed_auto_agent only when the Auto
-        # row is ABSENT, so its existing-row backfill branch never fires for the
-        # rows that need it. Leader-gated + idempotent, so it is a cheap no-op on
-        # every boot after the one that first lands a new doctrine version.
-        try:
-            from core.seeds.seed_auto_agent import sync_auto_personas
-            with get_db_session() as db:
-                counts = sync_auto_personas(db)  # get_db_session commits on exit
-            logger.info(
-                "Auto doctrine backfill: %s updated, %s skipped (customized), %s current",
-                counts["updated"], counts["skipped"], counts["current"],
-            )
-        except Exception as e:
-            logger.warning("Auto persona doctrine backfill: %s", e)
-
-        # PRD-251 US-119: the built-in skills (core/seeds/skills/manifest.json).
-        # CREATE-only: a skill the owner synced (scripts/sync-skills.py) lands on
-        # the next deploy; an existing row is refreshed by content hash when it is
-        # loaded (SkillLoader), never here. Runs before the marketplace seeds,
-        # which resolve their agents' skills by name.
-        try:
-            from core.seeds.seed_builtin_skills import seed_builtin_skills
-            with get_db_session() as db:
-                skills_seeded = seed_builtin_skills(db)
-            logger.info(
-                "Built-in skills: created %s; not synced yet %s; name held by another source %s; invalid %s",
-                skills_seeded["created"], skills_seeded["not_synced"],
-                skills_seeded["left_alone"], skills_seeded["invalid"],
-            )
-        except Exception as e:
-            logger.warning("Built-in skills seed: %s", e)
-
-        # PRD-251 US-120: the Socials package's two marketplace agents and four
-        # Playbooks (core/seeds/seed_socials_package.py). Creates what is missing
-        # and leaves existing rows alone, except the agents' skill links: every
-        # boot links the built-in skills that exist now, so a skill the owner
-        # syncs after the first boot attaches on the next one. After the built-in
-        # skills above; the package row itself is seed_packages below.
-        try:
-            from core.seeds.seed_socials_package import seed_socials_marketplace
-            with get_db_session() as db:
-                socials_seeded = seed_socials_marketplace(db)
-            logger.info("Socials package seed: %s", socials_seeded)
-        except Exception as e:
-            logger.warning("Socials package seed: %s", e)
-
-        # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
-        # manual script, so prod carried ZERO packages — the Packages tab was
-        # empty and onboarding's proposal silently fell back to custom-design
-        # (D10 masked the gap). CREATE-only here: missing packages land on the
-        # next deploy; existing rows are never touched, so live curation of
-        # package content survives redeploys. Full refresh stays a deliberate
-        # manual run of core/seeds/seed_packages.py.
-        try:
-            from core.seeds.seed_packages import seed_packages
-            with get_db_session() as db:
-                pkg_created, _ = seed_packages(db, create_only=True)
-            if pkg_created:
-                logger.info("Marketplace packages seeded: %d created", pkg_created)
-        except Exception as e:
-            logger.warning("Marketplace packages seed: %s", e)
-
-        logger.info("Boot seeds completed (leader worker)")
+            return None
+        seeds = run_leader_seeds()
+        seed_local_first_run_on_boot()
 
         # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
         # Runs under the leader lock so exactly one worker reaps per deploy.
@@ -371,6 +273,7 @@ async def _boot_phase_1_core():
             logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
             from core.utils.exception_telemetry import record_error
             record_error(subsystem="startup", operation="boot_reaper", error=reap_err)
+        return seeds
 
 
 async def _seed_semantic_embeddings():

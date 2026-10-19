@@ -27,6 +27,12 @@ import; it logs ``schema at head — alembic skipped``. A missing table still go
 init_fresh_db first, and a database ahead of the code still goes to alembic, which
 fails loudly.
 
+PRD-262 US-031: before a server, the seed step starts the boot loader (``--boot``) only
+when ``seed_fingerprint.loader`` changed: it pipes the stored value into ``python -m
+core.seeds.fingerprint loader``, which exits 0 (and logs the skip line) when it
+matches. The local workspace and operator are ensured either way. ``migrate`` runs the
+full loader every time, without asking.
+
 Each test runs the script under bash, from ``orchestrator/`` as the image runs it from
 ``/app``, with ``pg_isready``, ``psql``, ``alembic``, ``python`` and ``uvicorn``
 replaced by stubs that record their arguments, so the assertions are about what the
@@ -66,12 +72,16 @@ _DATABASE_URL = "postgresql://u:p@db.internal:5432/app"
 # the queries the script parses; FAKE_DB_STATE is the fresh-path state the
 # script reads (empty | interrupted | existing), unset looks migrated.
 # FAKE_DB_VERSION is alembic_version's rows (none by default) and FAKE_VERSION_RC
-# that query's exit status.
+# that query's exit status. FAKE_STORED_FINGERPRINT is seed_fingerprint.loader's
+# stored value (none by default) and FAKE_FINGERPRINT_READ_RC that query's status.
 _STUBS = {
     "pg_isready": 'echo "pg_isready $*" >> "$CALL_LOG"',
     "psql": (
         'echo "psql $* $(cat | tr \'\\n\' \' \')" >> "$CALL_LOG"\n'
         'case "$*" in\n'
+        '  *seed_fingerprint.loader*)\n'
+        '    [ -z "${FAKE_STORED_FINGERPRINT:-}" ] || printf \'%s\\n\' "$FAKE_STORED_FINGERPRINT"\n'
+        '    exit "${FAKE_FINGERPRINT_READ_RC:-0}" ;;\n'
         '  *automatos_fresh_init_incomplete*) echo "${FAKE_DB_STATE-existing}" ;;\n'
         '  *COUNT*) echo 3 ;;\n'
         '  *"SELECT version_num FROM alembic_version"*)\n'
@@ -83,6 +93,10 @@ _STUBS = {
     "python": (
         'echo "python $*" >> "$CALL_LOG"\n'
         'case "$*" in\n'
+        '  *core.seeds.fingerprint*)\n'
+        '    [ -z "${REAL_FINGERPRINT_PYTHON:-}" ] || exec "$REAL_FINGERPRINT_PYTHON" "$@"\n'
+        '    echo "fingerprint stdin: $(cat | tr \'\\n\' \' \')" >> "$CALL_LOG"\n'
+        '    exit "${FAKE_SEEDS_UNCHANGED_RC:-1}" ;;\n'
         '  *load_seed_data*) exit "${FAKE_SEED_RC:-0}" ;;\n'
         '  *init_fresh_db*) exit "${FAKE_INIT_RC:-0}" ;;\n'
         '  *alembic_heads*)\n'
@@ -98,6 +112,8 @@ _STUBS = {
 _SERVER = ["uvicorn", "main:app", "--port", "8000"]
 _SERVED = "uvicorn main:app --port 8000"
 _SEED = "python -m core.database.load_seed_data"
+_BOOT_SEED = f"{_SEED} --boot"
+_SEED_CHECK = "python -m core.seeds.fingerprint loader"
 _BANNER = "🚀 Starting Backend Application"
 _HEAD_CHECK = "python scripts/alembic_heads.py"
 _SKIPPED = "schema at head — alembic skipped"
@@ -420,6 +436,84 @@ def test_failed_seed_only_warns_on_boot(tmp_path):
     assert code == 0, out
     assert calls[-1] == _SERVED
     assert "will continue anyway" in out
+
+
+# --------------------------------------------------------------------------- the seed fingerprint (PRD-262 US-031)
+
+
+def test_a_boot_whose_seed_inputs_are_unchanged_starts_no_seed_loader(tmp_path):
+    """The stored fingerprint matches: no loader process, and the local rows are still ensured."""
+    env = {**_POSTGRES_ENV, **_LOCAL_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true",
+           "FAKE_STORED_FINGERPRINT": "the_stored_fingerprint", "FAKE_SEEDS_UNCHANGED_RC": "0"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert not any(call.startswith(_SEED) for call in calls), calls
+    assert "Loading seed data" not in out
+    assert "fingerprint stdin: the_stored_fingerprint" in calls, "the check reads the stored value on stdin"
+    order = [_containing(calls, "seed_fingerprint.loader"), _first(calls, _SEED_CHECK),
+             _containing(calls, "INSERT INTO workspaces"), len(calls) - 1]
+    assert order == sorted(order), calls
+    assert calls[-1] == _SERVED
+
+
+def test_a_boot_whose_seed_inputs_changed_runs_the_boot_loader(tmp_path):
+    env = {**_POSTGRES_ENV, **_LOCAL_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert [call for call in calls if call.startswith(_SEED)] == [_BOOT_SEED]
+    assert _first(calls, _SEED_CHECK) < _first(calls, _BOOT_SEED) < _containing(calls, "INSERT INTO workspaces")
+    assert "Loading seed data" in out
+
+
+def test_an_unreadable_stored_fingerprint_runs_the_boot_loader(tmp_path):
+    env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true", "FAKE_FINGERPRINT_READ_RC": "2",
+           "FAKE_SEEDS_UNCHANGED_RC": "0"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert not any(call.startswith(_SEED_CHECK) for call in calls), calls
+    assert _BOOT_SEED in calls
+
+
+def test_migrate_runs_the_full_loader_without_asking(tmp_path):
+    env = {**_POSTGRES_ENV, "FAKE_SEEDS_UNCHANGED_RC": "0"}
+    code, calls, out = _run(tmp_path, ["migrate"], env)
+    assert code == 0, out
+    assert not any("seed_fingerprint" in call or call.startswith(_SEED_CHECK) for call in calls), calls
+    assert [call for call in calls if call.startswith(_SEED)] == [_SEED]
+
+
+def test_the_entrypoint_reads_the_fingerprint_the_loader_stores():
+    """The shell's query is core/seeds/fingerprint.py's, for the loader's key."""
+    from core.seeds import fingerprint
+
+    text = _ENTRYPOINT.read_text(encoding="utf-8")
+    sql = re.search(r'^SEED_FINGERPRINT_SQL="(.*)"$', text, re.M).group(1)
+    expected = (fingerprint.READ_SQL.replace(":category", f"'{fingerprint.SETTING_CATEGORY}'")
+                .replace(":key", f"'{fingerprint.setting_key(fingerprint.LOADER)}'"))
+    assert sql == expected
+    assert re.search(rf"^SEED_FINGERPRINT_CHECK={re.escape(fingerprint.__name__)}$", text, re.M)
+
+
+def _real_loader_fingerprint(env: dict) -> str:
+    """The loader's fingerprint as the check computes it in this environment (config reads it)."""
+    code = "from core.seeds.fingerprint import seed_fingerprint; print(seed_fingerprint('loader'))"
+    proc = subprocess.run([sys.executable, "-c", code], cwd=_ORCH, env=env, capture_output=True, text=True,
+                          timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip().splitlines()[-1]
+
+
+@pytest.mark.parametrize("stored,skipped", [("current", True), ("0" * 64, False)])
+def test_the_real_check_skips_the_loader_only_for_the_current_fingerprint(tmp_path, stored, skipped):
+    """End to end: the shell pipes the stored value into the real check, which imports config."""
+    base = {**_POSTGRES_ENV, **_LOCAL_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
+    current = _real_loader_fingerprint({"PATH": f"/usr/bin{os.pathsep}/bin", **base})
+    env = {**base, "REAL_FINGERPRINT_PYTHON": sys.executable,
+           "FAKE_STORED_FINGERPRINT": current if stored == "current" else stored}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert ("seed_fingerprint.loader: seeds unchanged" in out) is skipped, out
+    assert (_BOOT_SEED in calls) is not skipped, calls
 
 
 def test_database_url_is_used_when_postgres_host_is_unset(tmp_path):

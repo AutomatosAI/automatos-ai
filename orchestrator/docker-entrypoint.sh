@@ -7,7 +7,8 @@
 #   2. Verifies the database connection
 #   3. Initializes an empty database, then runs Alembic migrations (fail closed),
 #      unless alembic_version already holds the code's head(s) (PRD-262 US-030)
-#   4. Loads seed data (idempotent)
+#   4. Loads seed data (idempotent): before a server, the boot loader, and only
+#      when seed_fingerprint.loader changed (PRD-262 US-031); `migrate`, the full one
 #   5. Ensures the local-edition workspace and operator exist (local only)
 # Steps 1-3 are the migration step; 4-5 run only where a flag below asks.
 #
@@ -15,16 +16,18 @@
 #
 #   docker-entrypoint.sh migrate
 #       Runs all five steps, then exits 0 without starting the app. Idempotent.
-#       A failed seed fails it (exit 1). This is what a Kubernetes migration
-#       Job runs before app pods start. It ignores AUTOMATOS_SKIP_MIGRATIONS.
+#       It always runs the full seed loader, whatever the fingerprint. A failed
+#       seed fails it (exit 1). This is what a Kubernetes migration Job runs
+#       before app pods start. It ignores AUTOMATOS_SKIP_MIGRATIONS.
 #
 #   docker-entrypoint.sh <server command>   (the image CMD: uvicorn)
 #       The boot steps run first, then the server. Each flag has one meaning:
 #       AUTOMATOS_SKIP_MIGRATIONS=true: none of the boot steps run. The Helm
 #         api pods set it, because the migration Job owns the schema there.
-#       AUTOMATOS_MIGRATE_ON_BOOT=true: the migration step, then the seed
-#         loader and the local workspace and operator; a failed seed only
-#         warns. Set by envs/api.defaults, so `docker compose up` does this.
+#       AUTOMATOS_MIGRATE_ON_BOOT=true: the migration step, then the boot seed
+#         loader (when its fingerprint changed) and the local workspace and
+#         operator; a failed seed only warns. Set by envs/api.defaults, so
+#         `docker compose up` does this.
 #       Neither set (Railway): the migration step only. The seed loader never
 #         runs there: its package seed is a full refresh, which would
 #         overwrite the packages curated in production.
@@ -195,17 +198,50 @@ run_migrations() {
 }
 
 # =============================================================================
+# Function: Have the boot seeds' inputs changed? (PRD-262 US-031)
+# =============================================================================
+# The boot loader is a Python process that imports most of the seeders, about 38 s on a
+# warm local boot, to redo seeds that could not have changed. It stores the fingerprint
+# of its inputs (the seed files, the modules they import, the config values they read)
+# in system_settings once every section ran clean. core/seeds/fingerprint.py computes
+# the current one, importing config but not the app, and compares it with the stored
+# one on stdin. True only when they match, and it then logs `seeds unchanged
+# (fingerprint …) — skipped`. Anything else runs the loader as before: no stored value,
+# an unreadable one, or a check that fails.
+SEED_FINGERPRINT_CHECK=core.seeds.fingerprint
+SEED_FINGERPRINT_SQL="SELECT value FROM system_settings WHERE category = 'boot' AND key = 'seed_fingerprint.loader' ORDER BY id DESC LIMIT 1"
+
+boot_seeds_unchanged() {
+    local stored
+    stored=$(db_psql -tAc "$SEED_FINGERPRINT_SQL" 2>/dev/null) || return 1
+    printf '%s\n' "$stored" | python -m "$SEED_FINGERPRINT_CHECK" loader
+}
+
+# =============================================================================
 # Function: Load Seed Data
 # =============================================================================
+# Before a server (LIFECYCLE_MODE=boot), the boot loader (--boot) runs only when its
+# fingerprint changed. It leaves out what the lifespan's boot leader seeds on every
+# boot that runs its own stage: credential types, system settings, the create-only
+# packages and the local first-run content (core/seeds/leader_stage.py). `migrate`
+# runs the full loader every time, the full package refresh included.
 load_seed_data() {
     echo ""
     echo "📦 Checking seed data..."
 
-    # No shell-level "already loaded" gate: every section of the loader is
-    # idempotent on its own (credential types insert-if-missing, models/skills/
-    # personas/categories upsert, marketplace catalog checks by name/slug).
-    # The old credential_types>0 early-return silently skipped every LATER
-    # section (marketplace catalog, packages) on any pre-seeded database.
+    local loader_args=()
+    if [ "${LIFECYCLE_MODE:-boot}" = "boot" ]; then
+        if boot_seeds_unchanged; then
+            return 0
+        fi
+        loader_args=(--boot)
+    fi
+
+    # No shell-level "already loaded" gate on the rows: every section of the
+    # loader is idempotent on its own (credential types insert-if-missing,
+    # models/skills/personas/categories upsert, marketplace catalog checks by
+    # name/slug). The old credential_types>0 early-return silently skipped every
+    # LATER section (marketplace catalog, packages) on any pre-seeded database.
     echo "📥 Loading seed data (idempotent)..."
 
     # Run seed data loader AS A MODULE — script-mode sets sys.path[0] to the
@@ -213,7 +249,7 @@ load_seed_data() {
     # resolve. (The old `database/` path also never existed in the image, so
     # this step silently failed on every boot since PRD-176; fail-open hid
     # both bugs. PRD-209 local-run finding.)
-    if python -m core.database.load_seed_data; then
+    if python -m core.database.load_seed_data "${loader_args[@]}"; then
         echo "✅ Seed data loaded successfully!"
     elif [ "${LIFECYCLE_MODE:-boot}" = "migrate" ]; then
         # A migration Job that reports success on an unseeded database hides
@@ -284,7 +320,8 @@ run_migration_step() {
 }
 
 # The full lifecycle: the migration step, then the seeds and the local edition's
-# workspace and operator (`migrate`, and AUTOMATOS_MIGRATE_ON_BOOT=true).
+# workspace and operator (`migrate`, and AUTOMATOS_MIGRATE_ON_BOOT=true). The local
+# workspace and operator are ensured whether or not the seed loader ran.
 run_lifecycle() {
     run_migration_step
     load_seed_data
