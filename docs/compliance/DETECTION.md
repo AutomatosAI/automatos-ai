@@ -96,7 +96,7 @@ The route, `services/content_provenance.py` and the rate-limit wiring were revie
 
 ### Review record
 
-security-reviewer agent, 19 Oct 2026, commit 7c530cdb1: no CRITICAL/HIGH; M1 metrics labels (fixed in this commit), L1 X-Forwarded-For trust (owner decision, documented), L2 Redis fail-open (owner decision, documented), L3 confirmation oracle on low-entropy files (FR-16: random per-file instance id in every mark), L4 onboarding reset (fixed), L5 public pattern (fixed), I1 no-store (fixed), I2 doc corrections (this edit).
+security-reviewer agent, 19 Oct 2026, commit 7c530cdb1 (the EUAI-10 review-fix commit before this branch was rebased onto main; it is b5ffe7f68 after the rebase): no CRITICAL/HIGH; M1 metrics labels (fixed in this commit), L1 X-Forwarded-For trust (owner decision, documented), L2 Redis fail-open (owner decision, documented), L3 confirmation oracle on low-entropy files (FR-16: random per-file instance id in every mark), L4 onboarding reset (fixed), L5 public pattern (fixed), I1 no-store (fixed), I2 doc corrections (this edit).
 
 "This commit" is the PRD-264 `fix(prd-264): EUAI-10 security review fixes` commit. FR-16 is built for documents and images (EUAI-09, above); media-render files get theirs with EUAI-06a and EUAI-06b. The `/verify` page is public at `/verify` and `/verify/...` only, so `/verify-email` or `/verification` stay behind sign-in.
 

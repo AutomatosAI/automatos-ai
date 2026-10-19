@@ -83,7 +83,7 @@ Article 50(2) covers text as well as media. How Automatos's text outputs stand:
 - **Interoperable.** Published vocabularies and containers (IPTC, XMP, C2PA), readable by third-party tools, plus a documented public route. The custom office-document properties and the Automatos-only route are the limits.
 - **Robust.** Marks are written after the last encode, so the platform's own processing doesn't drop them (media-render's JPEG step re-marks its output). An upstream C2PA manifest is kept, never stripped (FR-9). A copy edited or re-encoded outside Automatos loses the metadata. That is the limit of metadata, and the reason the watermark gap is named above.
 - **Reliable.** CI reads each mark back from a real output file for every format: media-render's formats with exiftool (EUAI-06a) and the C2PA reader (EUAI-06b); PDF, DOCX, XLSX, PNG, JPEG and one SSE message for EUAI-09. A document that can't be marked is deleted and the error raised, so it is never delivered unmarked; an image that can't be read as its type is not kept. Two files made from identical input never share a hash (FR-16), so the public check can't confirm a predictable file by guessing.
-- **No personal data.** The marks carry the IPTC term and a random instance id only (¶94). Manifests carry no user or workspace identifier. The public answer never reads the workspace, and the route itself logs no hash. PRD-264 FR-17 also asks that the answers carry `Cache-Control: no-store` and that the request-metrics path collapses the hash; on 19 Oct 2026 neither was built (gap 9 below).
+- **No personal data.** The marks carry the IPTC term and a random instance id only (¶94). Manifests carry no user or workspace identifier. The public answer never reads the workspace, and the route itself logs no hash. Following PRD-264 FR-17, every answer carries `Cache-Control: no-store`, and the request metrics, the shipped log lines, the access log, the error converter and (with `OTEL_ENABLED`) the trace span all collapse the hash in the path to `{sha256}` ([DETECTION.md](./DETECTION.md)).
 
 ## The gaps in one list
 
@@ -95,7 +95,7 @@ Article 50(2) covers text as well as media. How Automatos's text outputs stand:
 6. No machine-readable mark in **channel bot messages** (other than the webhook driver), **agent-sent email**, or **live voice audio**.
 7. Detection matches **exact files only**; altered copies read "no".
 8. The detection route is **Automatos's own interface**, not a shared cross-provider protocol.
-9. The public route's answers don't yet carry `Cache-Control: no-store`, and request metrics don't yet collapse the hash in the path (PRD-264 FR-17). The server's access log records the path, which holds the hash, as it does for every route ([DETECTION.md](./DETECTION.md)).
+9. Closed on 19 Oct 2026 (PRD-264 FR-17): the public route's answers carry `Cache-Control: no-store`, and every place that copies the request path out of the process collapses the hash first ([DETECTION.md](./DETECTION.md)). What stays open: the rate limiter trusts the first `X-Forwarded-For` hop, and fails open while Redis is down. Both are owner decisions, recorded in DETECTION.md.
 
 ## Revisit
 
