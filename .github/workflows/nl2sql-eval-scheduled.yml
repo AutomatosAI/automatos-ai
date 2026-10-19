@@ -70,8 +70,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            orchestrator/requirements.txt
-            orchestrator/requirements-dev.txt
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         if: steps.gate.outputs.configured == 'true'
@@ -85,7 +85,7 @@ jobs:
         if: steps.gate.outputs.configured == 'true'
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       - name: Run the generation eval (RUN_NL2SQL_EVAL=1)
         if: steps.gate.outputs.configured == 'true'

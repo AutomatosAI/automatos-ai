@@ -85,13 +85,14 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image; the scripts
+          # manifests and locks (with the splitter the API's pybuild runs, PRD-262
+          # US-022), the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
           # test image, site-packages' native libraries, botocore's services), the one
           # that reads the API's build context off its log, and the clone tests the
           # test image runs.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -207,8 +208,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            orchestrator/requirements.txt
-            orchestrator/requirements-dev.txt
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       # The downloaded .debs, kept a week: on 7 Oct (run 37689615384) the Azure
       # Ubuntu mirror served ghostscript and its libraries at 58 kB/s, 5 min 18 s
@@ -247,10 +248,13 @@ jobs:
           sudo rm -f ~/apt-archives/lock
           sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
+      # The locks, exactly (PRD-262 US-022): every pin with its hashes, the versions the
+      # API image installs. One command: a hashed lock puts pip in hash-checking mode for
+      # the whole command, and a dev install of its own could move a locked version.
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       # PRD-140 hierarchy audit (F147): every mutating platform action is
       # hierarchy-gated or allow-listed with its reason. A new unlisted
@@ -480,8 +484,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            orchestrator/requirements.txt
-            orchestrator/requirements-dev.txt
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -498,7 +502,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       - name: Run NL2SQL eval
         run: |
@@ -766,8 +770,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            orchestrator/requirements.txt
-            orchestrator/requirements-dev.txt
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -784,7 +788,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       # Gate 1 — the single-head invariant (Step 1, green now, no DB needed).
       - name: Assert exactly one Alembic head
@@ -1096,7 +1100,8 @@ jobs:
           docker image rm "$EDGE" > /dev/null
           python3 scripts/ci/image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"
       # PRD-262 US-019: pytest inside the image runs in a throwaway image built FROM it with
-      # requirements-dev.txt installed as its user (scripts/ci/image_test_image.py). It is
+      # requirements-dev.lock installed as its user, hashes required (PRD-262 US-022;
+      # scripts/ci/image_test_image.py). It is
       # never pushed, and orchestrator/Dockerfile has no stage for it. The clone tests run
       # there, with the tests mounted read-only and no network: git's trim must leave the
       # code graph's and the skill loader's clones working.
@@ -1311,8 +1316,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            orchestrator/requirements.txt
-            orchestrator/requirements-dev.txt
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -1329,7 +1334,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       - name: Initialise test database schema
         run: python scripts/init_test_db.py

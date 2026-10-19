@@ -82,7 +82,9 @@ def _listing(session, row: dict) -> dict:
 
 
 def read_edge(ref: str, arch: str) -> Tuple[Optional[dict], str]:
-    """``edge``'s layers for ``arch``, or None and why (an unpublished image has none)."""
+    """``edge``'s layers for ``arch``, each with the instruction that made it, or None and
+    why (an unpublished image has none). image_pip_layers.py finds edge's pip layers by
+    their instruction (PRD-262 US-022)."""
     if not ref:
         return None, "no `edge`: this image is not published, so only its size is reported"
     try:
@@ -95,7 +97,8 @@ def read_edge(ref: str, arch: str) -> Tuple[Optional[dict], str]:
         "manifest": manifest["digest"],
         "revision": _revision(config),
         "bytes": sum(layer["size"] for layer in manifest["layers"]),
-        "layers": [{"digest": layer["digest"], "size": layer["size"]} for layer in manifest["layers"]],
+        "layers": [{key: row[key] for key in ("digest", "size", "media_type", "instruction")}
+                   for row in layers.layer_rows(manifest, config)],
     }, ""
 
 
