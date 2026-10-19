@@ -4,18 +4,20 @@ US-019 trims git in the API image: its server-side and mail binaries go, and
 /usr/lib/git-core/git, a second copy of /usr/bin/git, becomes a link to it. Every
 builtin in git-core (git-clone, git-fetch, git-upload-pack, …) is a relative link to
 that file, and a clone or a pull runs git-upload-pack from there. These tests clone for
-real, through the code's own paths, from a repository made on the spot, so they need no
-network:
+real, through the code's own paths, from a repository made on the spot, so the clones
+need no network:
 
 - the code graph: ``CodeGraphService._clone_github_repo`` (GitPython, then the git CLI),
   one commit deep on a branch, and a failed clone that leaves no directory behind;
 - the skill loader: ``SkillLoader._git_clone`` and ``_git_pull`` (the git CLI).
 
 CI runs them in the backend shards and, inside the API image, in the throwaway test
-image (scripts/ci/image_test_image.py, test.yml's prod-image-parity). The code graph's
-HTTPS-and-allowlist URL check has tests of its own (tests/security,
-test_prd154_s12); here it lets a file:// URL through. prod-image-parity also clones a
-public repository over HTTPS in the image.
+image (scripts/ci/image_test_image.py, test.yml's prod-image-parity), with the app's
+throwaway database settings. That run stays on the network: importing the skill loader
+loads modules/rag/service.py, which fetches tiktoken's encoding when imported (until
+PRD-262 US-033). The code graph's HTTPS-and-allowlist URL check has tests of its own
+(tests/security, test_prd154_s12); here it lets a file:// URL through.
+prod-image-parity also clones a public repository over HTTPS in the image.
 """
 from __future__ import annotations
 

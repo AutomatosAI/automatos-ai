@@ -19,17 +19,37 @@ holds only the dev lock.
         orchestrator/tests mounted read-only over /app/tests and no bytecode written.
         ``--network none`` keeps the run off the network.
 
-test.yml's prod-image-parity runs US-019's clone tests in it. US-028 runs its
-per-language parser tests here with ``--network none``. Stdlib only.
+The run gets the throwaway database settings image_site_packages.py imports the app
+with (``APP_IMPORT_ENV``): the image sets none, and core/database/database.py raises
+when imported without them, so a test whose module reaches it (the skill loader's
+does) would fail to collect. Nothing listens there, and nothing connects on import.
+
+test.yml's prod-image-parity runs US-019's clone tests in it, on the network:
+importing the skill loader loads modules/rag/service.py, which fetches tiktoken's
+encoding when imported until US-033. US-028 runs its per-language parser tests here
+with ``--network none``. Stdlib only.
 """
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+
+def _sibling(name: str):
+    """``scripts/ci/<name>.py``, loaded by path: the tests load these scripts by path too."""
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # registered before exec, as the tests load them
+    spec.loader.exec_module(module)
+    return module
+
+
+site_packages = _sibling("image_site_packages")
 
 ROOT = Path(__file__).resolve().parents[2]
 DEV_LOCK = ROOT / "orchestrator" / "requirements-dev.lock"
@@ -54,9 +74,12 @@ def build_command(tag: str, context: str) -> List[str]:
 
 
 def pytest_command(tag: str, pytest_args: List[str], network: Optional[str] = None) -> List[str]:
-    """``docker run`` of pytest in TAG with the tests mounted read-only. Pure."""
+    """``docker run`` of pytest in TAG with the tests mounted read-only and the app's
+    throwaway database settings. Pure."""
     command = ["docker", "run", "--rm", "--workdir", "/app", "--entrypoint", "python",
                "--volume", f"{TESTS}:{IMAGE_TESTS}:ro", "--env", "PYTHONDONTWRITEBYTECODE=1"]
+    for key, value in site_packages.APP_IMPORT_ENV.items():
+        command += ["--env", f"{key}={value}"]
     if network:
         command += ["--network", network]
     return command + [tag, "-m", "pytest", "-p", "no:cacheprovider", *pytest_args]

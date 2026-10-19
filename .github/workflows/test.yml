@@ -1101,14 +1101,17 @@ jobs:
           python3 scripts/ci/image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"
       # PRD-262 US-019: pytest inside the image runs in a throwaway image built FROM it with
       # requirements-dev.lock installed as its user, hashes required (PRD-262 US-022;
-      # scripts/ci/image_test_image.py). It is
-      # never pushed, and orchestrator/Dockerfile has no stage for it. The clone tests run
-      # there, with the tests mounted read-only and no network: git's trim must leave the
-      # code graph's and the skill loader's clones working.
+      # scripts/ci/image_test_image.py). It is never pushed, and orchestrator/Dockerfile
+      # has no stage for it. The clone tests run there, with the tests mounted read-only
+      # and the throwaway database settings `import main` gets in image_site_packages.py:
+      # git's trim must leave the code graph's and the skill loader's clones working.
+      # They clone a repository made on the spot, but they run on the network: importing
+      # the skill loader loads modules/rag/service.py, which fetches tiktoken's encoding
+      # when imported until PRD-262 US-033.
       - name: Backend — the clone tests pass in the test image
         run: |
           python3 scripts/ci/image_test_image.py build parity-be parity-be-test
-          python3 scripts/ci/image_test_image.py pytest parity-be-test --network none \
+          python3 scripts/ci/image_test_image.py pytest parity-be-test \
             -q --timeout=120 tests/test_prd262_codegraph_clone.py
           docker image rm parity-be-test > /dev/null
       - name: Worker — headless browser present with no args
