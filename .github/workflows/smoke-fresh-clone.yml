@@ -42,6 +42,15 @@ name: smoke-fresh-clone
 # the records and logs are uploaded as the smoke-fresh-clone-boot artifact, which
 # PRD-262 US-004 takes its five-run medians from. No time is a bar here yet.
 #
+# PRD-262 US-033 — the API boots with no internet egress (FR-7). Unlike the measurements
+# above, the egress-boot job holds one time to a bar. It boots the backend twice with its
+# egress cut, once per way (scripts/ci/smoke-egress.sh): refused, through a proxy at
+# 127.0.0.1:9 where nothing listens, and blackholed, by a DOCKER-USER rule that silently
+# drops TCP from the stack's network to anywhere outside it, which is where a
+# timeout-less download hangs. The first boot is on an empty database; a new container
+# must then answer /health 200 within the §8 fresh-boot bar (30 s), and the tokenizer
+# must load from the image's own cache.
+#
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
 # stack builds or boots from: compose, the Makefile, the env defaults, the
@@ -80,6 +89,7 @@ on:
       - "frontend/Dockerfile"
       - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-egress.sh"
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
@@ -116,6 +126,7 @@ on:
       - "frontend/Dockerfile"
       - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-egress.sh"
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
@@ -178,5 +189,47 @@ jobs:
         with:
           name: smoke-fresh-clone-boot
           path: ${{ runner.temp }}/smoke-fresh-clone/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # PRD-262 US-033 (FR-7): the backend boots with its internet egress cut, refused or
+  # blackholed (scripts/ci/smoke-egress.sh). Each way is its own job, so a failure
+  # names the way. ubuntu-24.04, like the job above: the blackholed way adds a rule to
+  # the runner's firewall with sudo iptables.
+  egress-boot:
+    name: Backend boot with egress ${{ matrix.egress }} -> /health 200 (non-required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        egress: [refused, blackholed]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same throwaway local-only values as the fresh-clone job, and no external
+      # credential.
+      - name: Boot the backend with egress ${{ matrix.egress }}
+        env:
+          POSTGRES_PASSWORD: smoke_pg_pw
+          REDIS_PASSWORD: smoke_redis_pw
+          API_KEY: smoke_api_key
+          AUTH_EDITION: local
+          REQUIRE_AUTH: "false"
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          SMOKE_EGRESS: ${{ matrix.egress }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-egress
+        run: bash scripts/ci/smoke-egress.sh
+
+      - name: Upload boot records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-egress-${{ matrix.egress }}
+          path: ${{ runner.temp }}/smoke-egress/
           if-no-files-found: warn
           retention-days: 30
