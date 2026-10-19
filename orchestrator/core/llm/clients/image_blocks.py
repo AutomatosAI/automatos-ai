@@ -25,14 +25,20 @@ def _decoded(media_type: str, data: str) -> Tuple[str, bytes]:
         raise ValueError("An image in the conversation isn't valid base64, so it can't be sent.") from error
 
 
+def _mapping(value: Any) -> Dict[str, Any]:
+    """``value`` when it is a dict; ``{}`` for anything else (a bare URL string, say), so a
+    malformed block is left out like any other non-image block, never an AttributeError."""
+    return value if isinstance(value, dict) else {}
+
+
 def decoded_image(block: Dict[str, Any]) -> Optional[Tuple[str, bytes]]:
     """``(media type, bytes)`` for a base64 image block or a data URL; None for any other
     block, a plain ``https://`` image URL included (its bytes aren't in the message).
     Raises ``ValueError`` for data that isn't valid base64."""
-    source = block.get("source") or {}
+    source = _mapping(block.get("source"))
     if block.get("type") == "image" and source.get("type") == "base64":
         return _decoded(source.get("media_type", ""), source.get("data", ""))
-    url = (block.get("image_url") or {}).get("url", "")
+    url = str(_mapping(block.get("image_url")).get("url", ""))
     if block.get("type") == "image_url" and url.startswith("data:") and ";base64," in url:
         media_type, data = url[len("data:"):].split(";base64,", 1)
         return _decoded(media_type, data)

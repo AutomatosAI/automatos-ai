@@ -86,6 +86,12 @@ def test_an_image_gemini_cant_take_or_only_has_a_url_for_is_left_out_and_logged(
     assert "'image/gif' has no Gemini form" in caplog.text and "given only by URL" in caplog.text
 
 
+def test_a_malformed_image_block_is_left_out_not_a_failed_request(sent):
+    _ask({"type": "text", "text": "Here."}, {"type": "image_url", "image_url": "https://files.example/cat.png"},
+         {"type": "image", "source": "not-a-mapping"})
+    assert _parts(sent[0]) == [{"text": "Here."}]
+
+
 def test_an_image_that_isnt_base64_fails_before_any_request(sent):
     with pytest.raises(ValueError, match="isn't valid base64"):
         _ask({"type": "image_url", "image_url": {"url": "data:image/png;base64,!!!"}})
