@@ -10,6 +10,9 @@ runs on the image it built, on both arches:
 - row 21: Node's binary comes from a `node-stripped` stage that media-render carries
   byte for byte, copied with --link as the production stage's first instruction, so
   the two images' layers are one blob on the same base;
+- row 40: the stable layer's RUN strips the debug sections from every *.so* it
+  installed outside the auditwheel *.libs directories, as the API's US-020 does;
+- row 47, tests: the same RUN deletes every directory named exactly `tests`;
 - row 47, npm: an `npm` stage drops npm's docs and man pages before the copy, and the
   pnpm install's RUN deletes Node's compile cache and npm's logs it leaves behind;
 - row 47, gosu: gone from the apt list; entrypoint.sh drops to the worker with setpriv
@@ -19,7 +22,9 @@ runs on the image it built, on both arches:
 scripts/ci/image_worker_toolchain.py proves inside the image that ``gcc -flto`` still
 links, that git still commits, branches, clones, pulls and clones over HTTPS, that the
 stripped node runs, keeps .dynsym and loads a native N-API addon, and that setpriv drops
-root to the worker with the worker's HOME.
+root to the worker with the worker's HOME. scripts/ci/image_worker_site_packages.py
+loads every library the strip touched, as the worker user, and finds no debug section
+and no tests directory.
 
 Pure file reads: no Docker, no network.
 """
@@ -39,6 +44,8 @@ DOCKERFILE = (WORKER / "Dockerfile").read_text()
 IMAGES = yaml.safe_load((ROOT / ".github" / "workflows" / "images.yml").read_text())
 BUILD_STEPS = IMAGES["jobs"]["build"]["steps"]
 TOOLCHAIN_SCRIPT = "scripts/ci/image_worker_toolchain.py"
+SITE_PACKAGES_SCRIPT = "scripts/ci/image_worker_site_packages.py"
+SITE = "/usr/local/lib/python3.12/site-packages"
 
 
 def _load(relative: str):
@@ -52,6 +59,7 @@ def _load(relative: str):
 
 
 toolchain = _load(TOOLCHAIN_SCRIPT)
+site_packages = _load(SITE_PACKAGES_SCRIPT)
 
 
 def _instructions(text: str) -> list[str]:
@@ -184,6 +192,37 @@ def test_the_in_image_node_checks_look_for_the_strip():
     assert set(toolchain.NODE_TOOLS) == {"npm", "npx", "corepack", "pnpm"}
 
 
+# --------------------------------------------------------------------------- rows 40 and 47
+
+
+STABLE_RUN = _only(lambda line: line.startswith("RUN uv pip install") and "stable.lock" in line)
+STRIP = ["find", SITE, "-type", "f", "-name", "*.so*", "-not", "-path", "*.libs/*",
+         "-exec", "strip", "--strip-debug", "{}", "+"]
+PRUNE = ["find", SITE, "-type", "d", "-name", "tests", "-prune", "-exec", "rm", "-rf", "{}", "+"]
+
+
+def test_the_stable_layer_strips_its_libraries_and_drops_their_test_suites():
+    commands = _commands(STABLE_RUN)
+    assert commands[0][:3] == ["uv", "pip", "install"], "the install first, in the same layer"
+    assert commands[1:] == [STRIP, PRUNE]
+
+
+def test_the_in_image_check_loads_what_the_strip_touched():
+    assert site_packages.LIBRARY_GLOB == "*.so*" and site_packages.AUDITWHEEL_SUFFIX == ".libs"
+    assert site_packages.TESTS_DIR == "tests"
+    assert {"cryptography.hazmat.bindings._rust", "pydantic_core._pydantic_core"} <= site_packages.MUST_LOAD
+
+
+def test_the_in_image_check_names_extensions_as_python_imports_them(monkeypatch, tmp_path):
+    monkeypatch.setattr(site_packages, "SITE", tmp_path)
+    for relative in ("rpds/rpds.cpython-312-x86_64-linux-gnu.so", "_cffi_backend.cpython-312-aarch64-linux-gnu.so",
+                     "cryptography/hazmat/bindings/_rust.abi3.so", "pkg.libs/libz-1a2b.so.1.3"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_bytes(b"")
+    found = [site_packages.module_name(path) for path in site_packages.stripped_files()]
+    assert found == ["_cffi_backend", "cryptography.hazmat.bindings._rust", "rpds.rpds"], "*.libs is skipped"
+
+
 # --------------------------------------------------------------------------- images.yml
 
 
@@ -238,6 +277,16 @@ def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
     exec_line = (WORKER / "entrypoint.sh").read_text().rstrip().splitlines()[-1]
     assert exec_line == f'exec {" ".join(toolchain.SETPRIV_DROP)} python -m main "$@"'
     assert toolchain.WORKER_IDENTITY == "1000 1000 /home/worker"
+
+
+def test_images_runs_the_site_packages_check_as_the_worker_user():
+    step = _worker_step(SITE_PACKAGES_SCRIPT)
+    condition = " ".join(step["if"].split())
+    assert "!cancelled()" in condition and "matrix.name == 'workspace-worker'" in condition
+    assert "steps.build.outcome == 'success'" in condition
+    assert step["env"] == {"IMAGE": "${{ matrix.image }}", "DIGEST": "${{ steps.build.outputs.digest }}"}
+    assert f'--user 1000 --entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {SITE_PACKAGES_SCRIPT}' in step["run"]
+    assert [title.split(":")[0] for title, _ in site_packages.CHECKS][:2] == ["row 40", "row 47"]
 
 
 def test_every_toolchain_check_names_its_breakdown_row():

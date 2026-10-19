@@ -119,9 +119,20 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 # yet (PRD-262 §10). With it, each install becomes
 # RUN --mount=type=cache,id=s/<worker-service-id>-/root/.cache/uv,target=/root/.cache/uv
 # without --no-cache.
+# Then what runs, and nothing else (PRD-262, rows 40 and 47, the API's US-020 rule):
+# strip --strip-debug drops the .debug_* sections from every compiled library the lock
+# installed (8.1 MB, most of it cryptography's) and leaves .dynsym, which the loader
+# resolves symbols through. It skips the auditwheel *.libs directories, libraries
+# auditwheel rewrote with patchelf, the kind of file strip has broken before. Then every
+# directory named exactly `tests` goes (0.62 MB: jsonschema's, referencing's and
+# certifi's suites). scripts/ci/image_worker_site_packages.py loads every file the
+# strip touched.
 COPY --from=locks /locks/stable.lock /opt/worker-locks/
 RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
-    -r /opt/worker-locks/stable.lock
+    -r /opt/worker-locks/stable.lock \
+    && find /usr/local/lib/python3.12/site-packages -type f -name '*.so*' -not -path '*.libs/*' \
+        -exec strip --strip-debug {} + \
+    && find /usr/local/lib/python3.12/site-packages -type d -name tests -prune -exec rm -rf {} +
 
 # The worker user first, so everything after it can be created worker-owned:
 # /app (the code lands below with --chown), the volume mount point and HOME's

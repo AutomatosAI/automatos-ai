@@ -529,6 +529,19 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
 
+      # PRD-262, the worker's Python layer (rows 40 and 47, and the rows each check
+      # names): every library the stable layer's strip touched still loads, as the
+      # worker user, with no debug sections left, and no tests directory is left
+      # (scripts/ci/image_worker_site_packages.py). Same conditions as the step above.
+      - name: The worker's site-packages load after the strip
+        if: ${{ !cancelled() && matrix.name == 'workspace-worker' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --user 1000 --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_site_packages.py
+
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
   # counts as its current `edge`. PRD-262 US-058's shared-layer check reads it.
