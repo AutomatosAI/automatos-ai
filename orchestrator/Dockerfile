@@ -160,9 +160,10 @@ RUN useradd -m -u 1000 automatos && \
     mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
     chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
 
-# The wait-migrate-seed entrypoint. It runs the lifecycle only for `migrate` or
-# AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
-# directly. Compose also bind-mounts it, so edits apply without a rebuild.
+# The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029):
+# before the server it runs the migration step, plus the seeds where
+# AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it) asks. Compose also bind-mounts
+# it, so edits apply without a rebuild.
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
@@ -178,19 +179,15 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Default command — apply pending alembic migrations before starting,
-# so the deployed code and the live schema can never drift. ``heads``
-# (plural) upgrades the repository's single migration head. The
-# single-head invariant is enforced by the migration guard tests. If any
-# migration fails the container fails to boot — loud is better than
-# silent UndefinedColumn errors at request time.
-# --timeout-graceful-shutdown (dev stage only; prod runs --workers below): a
-# --reload first waits for open HTTP connections to close and the browser's SSE
-# streams (notifications, board events) never do, so every code edit wedged the
-# server in "Waiting for connections to close" until a restart (PRD-233 finding).
+# Default command — the hot-reload server. It runs no alembic: the entrypoint
+# migrates, once, before it starts (PRD-262 US-029).
+# --timeout-graceful-shutdown: a --reload first waits for open HTTP connections to
+# close and the browser's SSE streams (notifications, board events) never do, so
+# every code edit wedged the server in "Waiting for connections to close" until a
+# restart (PRD-233 finding).
 # `exec` (F416): uvicorn replaces the shell, so the entrypoint's watchdog and a
 # `docker stop` signal uvicorn itself, not a shell that would die without it.
-CMD sh -c "alembic upgrade heads && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5"
+CMD exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5
 
 # =============================================================================
 # Production Stage - Optimized & Minimal
@@ -215,10 +212,12 @@ RUN useradd -m -u 1000 automatos && \
 # code change nor an entrypoint edit rebuilds this layer.
 RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
 
-# The wait-migrate-seed entrypoint. By default it runs the CMD directly, so
-# Railway boots exactly as before (the CMD migrates). `docker-entrypoint.sh
-# migrate` runs the full lifecycle and exits (the Kubernetes migration Job);
-# AUTOMATOS_MIGRATE_ON_BOOT=true runs it before the CMD.
+# The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029).
+# Before the server it runs the migration step, so Railway (no flag set) migrates
+# there; AUTOMATOS_MIGRATE_ON_BOOT=true adds the seeds (compose), and
+# AUTOMATOS_SKIP_MIGRATIONS=true runs nothing (the Helm api pods).
+# `docker-entrypoint.sh migrate` runs the full lifecycle and exits (the Kubernetes
+# migration Job).
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
@@ -242,12 +241,16 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Production command — apply pending alembic migrations before starting,
-# so deploys can't ship a model change ahead of the schema. ``heads``
-# (plural) upgrades the repository's single migration head. The
-# single-head invariant is enforced by the migration guard tests.
-# ``&&`` ensures uvicorn never starts if a
-# migration fails (visible deploy failure beats silent UndefinedColumn
-# errors at request time). Concurrent replicas serialise via alembic's
-# row lock — second runner sees no pending migrations and continues.
-CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
+# The worker count, which uvicorn reads from WEB_CONCURRENCY when the command
+# names no --workers (PRD-262 US-029). 4 is Railway's, which sets none;
+# envs/api.defaults sets 1 for compose. Set it on a service to change it there.
+ENV WEB_CONCURRENCY=4
+
+# Production command — uvicorn, and no alembic: the entrypoint migrates, once,
+# before it starts, and a failed migration exits before uvicorn runs (PRD-262
+# US-029). Shell form, so the shell expands Railway's PORT. `exec` (F416):
+# uvicorn replaces the shell, so `docker stop` and the entrypoint's watchdog
+# signal uvicorn itself. No --timeout-graceful-shutdown here, so Railway's
+# shutdown is unchanged; compose sets UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN
+# (envs/api.defaults).
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

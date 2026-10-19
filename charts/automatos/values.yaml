@@ -67,7 +67,8 @@ api:
 # The schema lifecycle runs once per install and upgrade, in a Job, before the
 # API pods start: `docker-entrypoint.sh migrate` waits for PostgreSQL, builds an
 # empty database, migrates, seeds, and (local edition) creates the workspace and
-# operator. API pods start uvicorn directly and never migrate.
+# operator. API pods start uvicorn with AUTOMATOS_SKIP_MIGRATIONS=true and never
+# migrate.
 migrations:
   backoffLimit: 1
   activeDeadlineSeconds: 900

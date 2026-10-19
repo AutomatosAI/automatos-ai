@@ -25,8 +25,9 @@ spec:
         - name: api
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.api.image) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
-          # uvicorn directly: the image CMD would run `alembic upgrade heads` first,
-          # and the migration Job is the only thing that may change the schema.
+          # The migration Job is the only thing that may change the schema. The
+          # image's entrypoint migrates before a uvicorn command, so the pods set
+          # AUTOMATOS_SKIP_MIGRATIONS=true (below): it then runs no boot step.
           args:
             - uvicorn
             - main:app
@@ -39,6 +40,9 @@ spec:
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
             {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-api") | nindent 12 }}
+            # Last, so a `config` entry of the same name cannot turn it off.
+            - name: AUTOMATOS_SKIP_MIGRATIONS
+              value: "true"
           ports:
             - name: http
               containerPort: 8000

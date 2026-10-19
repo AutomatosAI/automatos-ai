@@ -276,11 +276,15 @@ def test_the_watchdog_matches_compose_and_restarts_within_about_two_minutes():
     assert worst_case <= _RESTART_BUDGET_SECONDS
 
 
-def test_the_image_carries_the_probe_and_the_dev_server_replaces_its_shell():
+def test_the_image_carries_the_probe_and_both_servers_replace_their_shell():
     text = _DOCKERFILE.read_text(encoding="utf-8")
     assert text.count("COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh") == 2
     assert text.count("CMD docker-healthcheck.sh") == 2
     assert "curl -f http://localhost" not in text, "one probe, not a second copy"
     development = text.split("FROM base as development", 1)[1].split("FROM base as production", 1)[0]
-    cmd = next(line for line in development.splitlines() if line.startswith("CMD "))
-    assert "&& exec uvicorn" in cmd, "the watchdog and docker stop must signal uvicorn, not a shell"
+    production = text.split("FROM base as production", 1)[1]
+    for stage in (development, production):
+        cmd = next(line for line in stage.splitlines() if line.startswith("CMD "))
+        assert cmd.startswith("CMD exec uvicorn "), f"the watchdog and docker stop must signal uvicorn, not a shell: {cmd}"
+        # PRD-262 US-029: the entrypoint is the only owner of migrations.
+        assert "alembic" not in cmd, f"the CMD runs alembic, which the entrypoint already ran: {cmd}"

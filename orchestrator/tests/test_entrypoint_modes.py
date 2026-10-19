@@ -1,23 +1,34 @@
 """The backend entrypoint's run modes, exercised for real with fake binaries.
 
 ``orchestrator/docker-entrypoint.sh`` is the image ENTRYPOINT (copied in by the
-Dockerfile) and has three ways to run:
+Dockerfile) and the only owner of migrations (PRD-262 US-029). It runs:
 
-* ``migrate`` — the wait-migrate-seed lifecycle, then exit 0 without starting
-  the app (the Kubernetes migration Job).
-* ``AUTOMATOS_MIGRATE_ON_BOOT=true`` — the lifecycle, then the CMD (compose,
-  via ``envs/api.defaults``).
-* neither — the CMD directly, touching nothing (the image default, so Railway,
-  which builds this image and relies on the CMD's own ``alembic upgrade heads``,
-  boots unchanged).
+* ``migrate`` — the whole wait-migrate-seed lifecycle, then exit 0 without
+  starting the app (the Kubernetes migration Job). It ignores
+  ``AUTOMATOS_SKIP_MIGRATIONS``.
+* a server command (uvicorn: the image CMD) — the boot steps first, and each
+  flag has one meaning:
 
-Each test runs the script under bash with ``pg_isready``, ``psql``, ``alembic``
-and ``python`` replaced by stubs that record their arguments, so the assertions
-are about what the script actually calls, in what order.
+  * ``AUTOMATOS_SKIP_MIGRATIONS=true`` (the Helm api pods): none of them;
+  * ``AUTOMATOS_MIGRATE_ON_BOOT=true`` (compose, via ``envs/api.defaults``): the
+    migration step, then the seed loader and the local workspace and operator;
+  * neither (Railway): the migration step only, never the seed loader, whose
+    package seed would overwrite the packages curated in production.
+
+* any other command — a one-off, run as given with no boot step: ``docker
+  compose run backend <cmd>`` and test.yml's ``docker run --rm parity-be python
+  -c …`` neither migrate nor seed.
+
+The image CMDs run no alembic of their own: they exec uvicorn.
+
+Each test runs the script under bash with ``pg_isready``, ``psql``, ``alembic``,
+``python`` and ``uvicorn`` replaced by stubs that record their arguments, so the
+assertions are about what the script actually calls, in what order.
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -60,8 +71,15 @@ _STUBS = {
         '  *init_fresh_db*) exit "${FAKE_INIT_RC:-0}" ;;\n'
         "esac"
     ),
+    "uvicorn": 'echo "uvicorn $*" >> "$CALL_LOG"',
     "fake-app": 'echo "fake-app $*" >> "$CALL_LOG"',
 }
+# The server the image CMD starts, and what its stub records.
+_SERVER = ["uvicorn", "main:app", "--port", "8000"]
+_SERVED = "uvicorn main:app --port 8000"
+_SEED = "python -m core.database.load_seed_data"
+_BANNER = "🚀 Starting Backend Application"
+_LOCAL_ENV = {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000000c1"}
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
@@ -101,11 +119,114 @@ def _first(calls: list[str], prefix: str) -> int:
     return next(i for i, call in enumerate(calls) if call.startswith(prefix))
 
 
-def test_default_runs_the_command_and_touches_nothing(tmp_path):
-    """No flag, no `migrate`: exactly today's Railway boot — the CMD, nothing else."""
-    code, calls, out = _run(tmp_path, ["fake-app", "--port", "8000"], dict(_POSTGRES_ENV))
+def _containing(calls: list[str], needle: str) -> int:
+    return next(i for i, call in enumerate(calls) if needle in call)
+
+
+def _alembic(calls: list[str]) -> list[str]:
+    return [call for call in calls if call.startswith("alembic")]
+
+
+def _cmd(stage: str) -> str:
+    """A Dockerfile stage's CMD. Shell form: Docker runs it as `/bin/sh -c '<CMD>'`."""
+    body = _DOCKERFILE.read_text(encoding="utf-8").split(f"FROM base as {stage}", 1)[1].split("\nFROM ", 1)[0]
+    return next(line for line in body.splitlines() if line.startswith("CMD ")).removeprefix("CMD ")
+
+
+# --------------------------------------------------------------------------- one-off commands
+
+
+@pytest.mark.parametrize("flags", [{}, {"AUTOMATOS_MIGRATE_ON_BOOT": "true"}])
+def test_a_one_off_command_runs_alone(tmp_path, flags):
+    """`docker compose run backend <cmd>`: no migration and no seed, whatever the flags."""
+    code, calls, out = _run(tmp_path, ["fake-app", "--port", "8000"], {**_POSTGRES_ENV, **flags})
     assert code == 0, out
     assert calls == ["fake-app --port 8000"]
+    assert _BANNER not in out
+
+
+def test_the_image_import_check_neither_migrates_nor_seeds(tmp_path):
+    """test.yml's prod-image-parity runs `docker run --rm parity-be python -c …` with no database."""
+    code, calls, out = _run(tmp_path, ["python", "-c", "import graspologic"], {"AUTOMATOS_MIGRATE_ON_BOOT": "true"})
+    assert code == 0, out
+    assert calls == ["python -c import graspologic"]
+
+
+# --------------------------------------------------------------------------- server commands
+
+
+def test_a_server_without_either_flag_migrates_and_never_seeds(tmp_path):
+    """Railway: neither flag. The migration step runs; the seed loader and the local SQL never do."""
+    code, calls, out = _run(tmp_path, _SERVER, {**_POSTGRES_ENV, **_LOCAL_ENV})
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"]
+    assert calls[-1] == _SERVED
+    assert not any(call.startswith(_SEED) for call in calls), calls
+    assert not any("INSERT INTO" in call for call in calls), calls
+    assert _BANNER in out
+
+
+def test_migrate_on_boot_runs_the_lifecycle_then_the_server(tmp_path):
+    env = {**_POSTGRES_ENV, **_LOCAL_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"], "one migration run per boot"
+    order = [
+        _first(calls, "alembic upgrade heads"),
+        _first(calls, _SEED),
+        _containing(calls, "INSERT INTO workspaces"),
+        len(calls) - 1,
+    ]
+    assert order == sorted(order), calls
+    assert calls[-1] == _SERVED
+    assert _BANNER in out
+
+
+def test_skip_migrations_runs_no_boot_step(tmp_path):
+    """The Helm api pods: the migration Job owns the schema, so not even the database wait runs."""
+    env = {"AUTOMATOS_SKIP_MIGRATIONS": "true", "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert calls == [_SERVED]
+    assert _BANNER not in out
+
+
+@pytest.mark.parametrize("command", [
+    ["{bin}/uvicorn", "main:app"],
+    ["python", "-m", "uvicorn", "main:app"],
+    ["sh", "-c", "uvicorn main:app"],
+    ["/bin/sh", "-c", "exec uvicorn main:app --port ${PORT:-8000}"],
+])
+def test_every_way_of_starting_uvicorn_is_a_server_command(tmp_path, command):
+    args = [word.format(bin=tmp_path / "bin") if word.startswith("{bin}") else word for word in command]
+    code, calls, out = _run(tmp_path, args, dict(_POSTGRES_ENV))
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"], calls
+    assert _BANNER in out
+
+
+@pytest.mark.parametrize("stage", ["development", "production"])
+def test_the_image_cmds_migrate_once_through_the_entrypoint(tmp_path, stage):
+    """Each stage's own CMD, as Docker runs it: one alembic run (the entrypoint's), then uvicorn."""
+    code, calls, out = _run(tmp_path, ["/bin/sh", "-c", _cmd(stage)], dict(_POSTGRES_ENV))
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"], calls
+    assert calls[-1].startswith("uvicorn main:app --host 0.0.0.0 --port 8000"), calls
+
+
+def test_a_server_without_database_settings_fails_clearly(tmp_path):
+    code, calls, out = _run(tmp_path, _SERVER, {})
+    assert code != 0
+    assert "No database configured" in out
+    assert calls == []
+
+
+def test_migrate_ignores_skip_migrations(tmp_path):
+    """An explicit `migrate` is the migration Job: the api pods' flag does not turn it off."""
+    code, calls, out = _run(tmp_path, ["migrate"], {**_POSTGRES_ENV, "AUTOMATOS_SKIP_MIGRATIONS": "true"})
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"]
+    assert any(call.startswith(_SEED) for call in calls), calls
 
 
 def test_migrate_runs_the_lifecycle_in_order_and_exits(tmp_path):
@@ -119,14 +240,6 @@ def test_migrate_runs_the_lifecycle_in_order_and_exits(tmp_path):
     ]
     assert order == sorted(order), calls
     assert not any(c.startswith("fake-app") for c in calls)
-
-
-def test_migrate_on_boot_runs_the_lifecycle_then_the_command(tmp_path):
-    env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
-    code, calls, out = _run(tmp_path, ["fake-app"], env)
-    assert code == 0, out
-    assert calls[-1] == "fake-app"
-    assert _first(calls, "alembic upgrade heads") < len(calls) - 1
 
 
 def test_empty_database_is_initialized_before_migrating(tmp_path):
@@ -155,16 +268,17 @@ def test_an_interrupted_fresh_build_is_resumed_before_migrating(tmp_path):
 
 def test_a_failed_resume_fails_closed(tmp_path):
     env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true", "FAKE_DB_STATE": "interrupted", "FAKE_INIT_RC": "1"}
-    code, calls, out = _run(tmp_path, ["fake-app"], env)
+    code, calls, out = _run(tmp_path, _SERVER, env)
     assert code != 0, out
-    assert not any(c.startswith("alembic upgrade heads") or c.startswith("fake-app") for c in calls), calls
+    assert not any(c.startswith("alembic upgrade heads") or c.startswith("uvicorn") for c in calls), calls
 
 
-def test_failed_migration_fails_closed(tmp_path):
-    env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true", "FAKE_ALEMBIC_RC": "1"}
-    code, calls, out = _run(tmp_path, ["fake-app"], env)
+@pytest.mark.parametrize("flags", [{}, {"AUTOMATOS_MIGRATE_ON_BOOT": "true"}])
+def test_failed_migration_fails_closed(tmp_path, flags):
+    """Railway (no flag) and compose alike: uvicorn never starts on a half-built schema."""
+    code, calls, out = _run(tmp_path, _SERVER, {**_POSTGRES_ENV, **flags, "FAKE_ALEMBIC_RC": "1"})
     assert code != 0, out
-    assert not any(c.startswith("fake-app") for c in calls)
+    assert not any(c.startswith("uvicorn") for c in calls)
 
 
 def test_failed_seed_fails_migrate(tmp_path):
@@ -177,9 +291,9 @@ def test_failed_seed_fails_migrate(tmp_path):
 def test_failed_seed_only_warns_on_boot(tmp_path):
     """Compose keeps today's lenient boot: a seed failure warns, the app starts."""
     env = {**_POSTGRES_ENV, "AUTOMATOS_MIGRATE_ON_BOOT": "true", "FAKE_SEED_RC": "1"}
-    code, calls, out = _run(tmp_path, ["fake-app"], env)
+    code, calls, out = _run(tmp_path, _SERVER, env)
     assert code == 0, out
-    assert calls[-1] == "fake-app"
+    assert calls[-1] == _SERVED
     assert "will continue anyway" in out
 
 
@@ -241,13 +355,35 @@ def test_dockerfile_copies_the_entrypoint_into_both_stages():
     assert "> /usr/local/bin/docker-entrypoint.sh" not in text, "a generated stub entrypoint is back"
 
 
-def test_production_cmd_still_migrates_for_railway():
-    """Railway runs the production CMD with the flag unset, so the CMD must migrate."""
-    text = _DOCKERFILE.read_text(encoding="utf-8")
-    production = text.split("FROM base as production", 1)[1]
-    cmd = next(line for line in production.splitlines() if line.startswith("CMD "))
-    assert "alembic upgrade heads" in cmd
+@pytest.mark.parametrize("stage", ["development", "production"])
+def test_the_cmds_exec_uvicorn_and_run_no_alembic(stage):
+    """The entrypoint is the only owner of migrations; `exec` lets signals reach uvicorn (F416)."""
+    cmd = _cmd(stage)
+    assert cmd.startswith("exec uvicorn main:app "), cmd
+    assert "alembic" not in cmd and "--workers" not in cmd, cmd
+
+
+def test_the_production_cmd_takes_its_workers_from_web_concurrency():
+    """Railway sets no WEB_CONCURRENCY: the image's 4 keeps its worker count; its shutdown is unchanged."""
+    production = _DOCKERFILE.read_text(encoding="utf-8").split("FROM base as production", 1)[1]
+    assert re.search(r"^ENV WEB_CONCURRENCY=4$", production, re.M), "the production image keeps Railway's 4 workers"
+    assert "--timeout-graceful-shutdown" not in _cmd("production")
+    assert "--port ${PORT:-8000}" in _cmd("production"), "Railway's PORT, expanded by the shell"
+
+
+def test_the_header_documents_each_flag():
+    header = _ENTRYPOINT.read_text(encoding="utf-8").split("\nset -e\n", 1)[0]
+    for text in ("AUTOMATOS_SKIP_MIGRATIONS=true", "AUTOMATOS_MIGRATE_ON_BOOT=true", "Neither set (Railway)",
+                 "docker-entrypoint.sh migrate", "one-off"):
+        assert text in header, f"the entrypoint header does not document {text!r}"
 
 
 def test_compose_defaults_turn_the_lifecycle_on():
     assert "AUTOMATOS_MIGRATE_ON_BOOT=true" in _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
+
+
+def test_compose_defaults_run_one_worker_that_stops_within_five_seconds():
+    """The production stage under compose: one uvicorn process, and SSE streams cut after 5 s on stop."""
+    lines = _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
+    assert "WEB_CONCURRENCY=1" in lines
+    assert "UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=5" in lines

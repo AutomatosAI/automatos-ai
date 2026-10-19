@@ -2,34 +2,42 @@
 # =============================================================================
 # Automatos AI - Backend Entrypoint Script
 # =============================================================================
-# The single wait-migrate-seed lifecycle (PRD-176 F051):
+# The only owner of migrations (PRD-176 F051, PRD-262 US-029). The boot steps:
 #   1. Waits for PostgreSQL to be ready
 #   2. Verifies the database connection
 #   3. Initializes an empty database, then runs Alembic migrations (fail closed)
 #   4. Loads seed data (idempotent)
 #   5. Ensures the local-edition workspace and operator exist (local only)
+# Steps 1-3 are the migration step; 4-5 run only where a flag below asks.
 #
 # The image carries this script as its ENTRYPOINT. How it runs:
 #
 #   docker-entrypoint.sh migrate
-#       Runs the lifecycle, then exits 0 without starting the app. Idempotent.
+#       Runs all five steps, then exits 0 without starting the app. Idempotent.
 #       A failed seed fails it (exit 1). This is what a Kubernetes migration
-#       Job runs before app pods start.
+#       Job runs before app pods start. It ignores AUTOMATOS_SKIP_MIGRATIONS.
 #
-#   docker-entrypoint.sh <command...>   (the image CMD, or any other command)
-#       AUTOMATOS_MIGRATE_ON_BOOT=true: runs the lifecycle, then the command;
-#       a failed seed only warns. Set by envs/api.defaults, so `docker compose
-#       up` does this.
-#       Unset or anything else: runs the command directly, touching nothing.
-#       This is the image default, so Railway (which builds this image and
-#       relies on the CMD's own `alembic upgrade heads`) boots unchanged.
-#       Note the image CMD itself runs `alembic upgrade heads` before uvicorn.
-#       AUTOMATOS_LIVENESS_WATCHDOG=true (envs/api.defaults): the command runs
-#       as this script's child, and a server that stops serving is stopped so
-#       the container exits and restarts (the liveness watchdog, below).
-#       Where a migration Job owns the schema (Kubernetes), override the app
-#       container's command to start uvicorn directly, so several replicas
-#       don't race Alembic with each other or with the Job.
+#   docker-entrypoint.sh <server command>   (the image CMD: uvicorn)
+#       The boot steps run first, then the server. Each flag has one meaning:
+#       AUTOMATOS_SKIP_MIGRATIONS=true: none of the boot steps run. The Helm
+#         api pods set it, because the migration Job owns the schema there.
+#       AUTOMATOS_MIGRATE_ON_BOOT=true: the migration step, then the seed
+#         loader and the local workspace and operator; a failed seed only
+#         warns. Set by envs/api.defaults, so `docker compose up` does this.
+#       Neither set (Railway): the migration step only. The seed loader never
+#         runs there: its package seed is a full refresh, which would
+#         overwrite the packages curated in production.
+#       The image CMD runs no alembic of its own: it execs uvicorn.
+#
+#   docker-entrypoint.sh <any other command>   (a one-off)
+#       Runs the command as given, with no boot step: `docker compose run
+#       backend <cmd>` and CI's `docker run <image> python -c …` neither
+#       migrate nor seed. A server command starts uvicorn: directly, as
+#       `python -m uvicorn`, or through `sh -c` (after an optional `exec`).
+#
+#   AUTOMATOS_LIVENESS_WATCHDOG=true (envs/api.defaults): the command runs as
+#   this script's child, and a server that stops serving is stopped so the
+#   container exits and restarts (the liveness watchdog, below).
 #
 # Database connection: POSTGRES_HOST/PORT/USER/PASSWORD/DB when POSTGRES_HOST
 # is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets).
@@ -146,9 +154,10 @@ init_fresh_if_empty() {
 # Function: Run Database Migrations (PRD-176 F051)
 # =============================================================================
 # Brings the schema to head via Alembic — the single owner of the schema
-# lifecycle. Fails CLOSED: unlike seed loading, a failed migration exits
-# non-zero so the app never starts against a half-built schema. Alembic is
-# idempotent — on an already-migrated database `upgrade heads` is a no-op.
+# lifecycle, run once per boot (the image CMD runs no alembic). Fails CLOSED:
+# unlike seed loading, a failed migration exits non-zero so the app never
+# starts against a half-built schema. Alembic is idempotent — on an
+# already-migrated database `upgrade heads` is a no-op.
 run_migrations() {
     echo ""
     echo "🗄️  Running database migrations (alembic upgrade heads)..."
@@ -235,9 +244,10 @@ SQL
 }
 
 # =============================================================================
-# The lifecycle, in order: wait -> check -> init -> migrate -> seed -> local
+# The boot steps, in order: wait -> check -> init -> migrate -> seed -> local
 # =============================================================================
-run_lifecycle() {
+# The migration step: wait -> check -> init -> migrate.
+run_migration_step() {
     echo "========================================="
     echo "Automatos AI Backend Starting..."
     echo "========================================="
@@ -247,8 +257,75 @@ run_lifecycle() {
     check_database
     init_fresh_if_empty
     run_migrations
+}
+
+# The full lifecycle: the migration step, then the seeds and the local edition's
+# workspace and operator (`migrate`, and AUTOMATOS_MIGRATE_ON_BOOT=true).
+run_lifecycle() {
+    run_migration_step
     load_seed_data
     ensure_local_workspace
+}
+
+# =============================================================================
+# A server command, or a one-off (PRD-262 US-029)
+# =============================================================================
+# The boot steps run before the server only. A server command starts uvicorn:
+# `uvicorn …`, `python -m uvicorn …`, or `sh -c '[exec] uvicorn …'` (the image
+# CMD is shell form, which Docker runs as `/bin/sh -c '<CMD>'`).
+SERVER_PROGRAM=uvicorn
+
+# Prints the program a command starts. Call it in a subshell, $(…): it splits a
+# `sh -c` script into words, with globbing off, to read its first one.
+command_program() {
+    case "${1##*/}" in
+        sh|bash|dash)
+            if [ "${2:-}" = "-c" ]; then
+                set -f
+                # shellcheck disable=SC2086  # the script's words, split on purpose
+                set -- ${3:-}
+                if [ "${1:-}" = "exec" ]; then
+                    shift
+                fi
+                command_program "$@"
+                return
+            fi
+            ;;
+        python|python3|python3.*)
+            if [ "${2:-}" = "-m" ]; then
+                printf '%s' "${3:-}"
+                return
+            fi
+            ;;
+    esac
+    printf '%s' "${1##*/}"
+}
+
+is_server_command() {
+    [ "$(command_program "$@")" = "$SERVER_PROGRAM" ]
+}
+
+# Before a server command. AUTOMATOS_SKIP_MIGRATIONS=true: nothing.
+# AUTOMATOS_MIGRATE_ON_BOOT=true: the full lifecycle. Neither: the migration
+# step only, so Railway migrates and never runs the seed loader.
+run_boot_steps() {
+    if [ "${AUTOMATOS_SKIP_MIGRATIONS:-}" = "true" ]; then
+        return 0
+    fi
+    if [ "${AUTOMATOS_MIGRATE_ON_BOOT:-}" = "true" ]; then
+        run_lifecycle
+    else
+        run_migration_step
+    fi
+    echo ""
+    echo "========================================="
+    echo "🚀 Starting Backend Application"
+    echo "========================================="
+    echo "   API: http://0.0.0.0:${PORT:-8000}"
+    echo "   Docs: http://0.0.0.0:${PORT:-8000}/docs"
+    echo "   Environment: ${ENVIRONMENT:-}"
+    echo "========================================="
+    echo ""
 }
 
 # =============================================================================
@@ -357,22 +434,13 @@ if [ "${1:-}" = "migrate" ]; then
     exit 0
 fi
 
-if [ "${AUTOMATOS_MIGRATE_ON_BOOT:-}" = "true" ]; then
-    run_lifecycle
-    echo ""
-    echo "========================================="
-    echo "🚀 Starting Backend Application"
-    echo "========================================="
-    echo "   API: http://0.0.0.0:8000"
-    echo "   Docs: http://0.0.0.0:8000/docs"
-    echo "   Environment: $ENVIRONMENT"
-    echo "========================================="
-    echo ""
+if is_server_command "$@"; then
+    run_boot_steps
 fi
 
 if [ "${AUTOMATOS_LIVENESS_WATCHDOG:-}" = "true" ]; then
     run_supervised "$@"
 fi
 
-# Execute the CMD from Dockerfile (uvicorn command)
+# Execute the command: the image CMD (uvicorn), or a one-off
 exec "$@"
