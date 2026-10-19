@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { usePlatformDefaultRoute } from '@/hooks/use-model-api'
+import { fetchPlatformDefaultRoute, NO_MODEL_ROUTE, type ModelRoute } from '@/lib/llm-defaults'
 import { Download, Zap, Wrench, Brain, Settings, Info } from 'lucide-react'
 import { DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -128,7 +128,17 @@ function ModelStat({ icon: Icon, label, value }: { icon: typeof Info; label: str
 
 export function ItemModelSection({ item }: { item: MarketplaceItem }) {
   // Prefer model_config, fall back to the agent's llm_config, then the platform default.
-  const { data: platformRoute } = usePlatformDefaultRoute()
+  // A plain fetch, not react-query: this section renders inside dialogs that tests
+  // mount without a QueryClientProvider, and a failed read just leaves the fallback empty.
+  const [platformRoute, setPlatformRoute] = useState<ModelRoute>(NO_MODEL_ROUTE)
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve()
+      .then(() => fetchPlatformDefaultRoute())
+      .then((route) => { if (!cancelled && route?.model_id) setPlatformRoute(route) })
+      .catch(() => { /* no platform default readable here: the item's own model stands */ })
+    return () => { cancelled = true }
+  }, [])
   const modelConfig = item.metadata?.model_config || {}
   const llmConfig = item.metadata?.configuration?.llm_config || {}
   const capabilities: string[] = item.metadata?.configuration?.capabilities || []
