@@ -3,6 +3,11 @@
  * and "—" where there is no value. It read `harness.iteration` (the backend sends
  * `iteration_count`), counted `data.prescriptions` (gone with PRD-187) and showed
  * the recorder's process-global signal counter, so it showed fake zeros.
+ *
+ * PRD-263 US-058 — it also shows how many of HARNESS's Approvals cards are pending,
+ * applied, declined and expired, from the ledger counts the backend sends. An
+ * "Applied" label is back, as one of those counts: with no count sent it reads "—",
+ * so it still shows no figure the backend did not send.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
@@ -28,9 +33,18 @@ function payload(overrides: Partial<SelfLearningHealthData> = {}): SelfLearningH
     regression: 0,
     mode: 'report_only',
     signals_7d: 12,
+    pending: null,
+    applied: null,
+    denied: null,
+    expired: null,
     unavailable: [],
     ...overrides,
   }
+}
+
+/** The figure shown above a KPI's label, e.g. the "Applied" card count. */
+function cardCount(label: string): string | null | undefined {
+  return screen.getByText(label).parentElement?.querySelector('span')?.textContent
 }
 
 afterEach(() => {
@@ -67,8 +81,19 @@ describe('SelfLearningHealthWidget', () => {
     expect(screen.getByText('Signals (7 days)')).toBeInTheDocument()
     expect(screen.getByText('Agents with not enough data: 2')).toBeInTheDocument()
     expect(screen.getByText('· Mode Report only')).toBeInTheDocument()
-    expect(screen.queryByText('Applied')).not.toBeInTheDocument()
+    // No applied figure the backend did not send: the card count reads "—" (US-058).
+    expect(cardCount('Applied')).toBe('—')
     expect(screen.queryByText('Queued')).not.toBeInTheDocument()
+  })
+
+  it('shows the pending, applied, declined and expired card counts, "—" for an absent one (US-058)', () => {
+    health.data = payload({ pending: 3, applied: 1, denied: 0, expired: null })
+    render(<SelfLearningHealthWidget />)
+    expect(screen.getByText('Approvals cards')).toBeInTheDocument()
+    expect(cardCount('Pending')).toBe('3')
+    expect(cardCount('Applied')).toBe('1')
+    expect(cardCount('Declined')).toBe('0')
+    expect(cardCount('Expired')).toBe('—')
   })
 
   it('shows the mode as the owner reads it, Propose included', () => {
@@ -86,11 +111,12 @@ describe('SelfLearningHealthWidget', () => {
   it('a section the backend could not read shows "—" and says it is unavailable', () => {
     health.data = payload({
       status: null, iteration_count: null, coverage: null, insufficient_data: null,
-      watch: null, regression: null, mode: null, signals_7d: null, unavailable: ['harness', 'signals'],
+      watch: null, regression: null, mode: null, signals_7d: null, unavailable: ['harness', 'signals', 'ledger'],
     })
     render(<SelfLearningHealthWidget />)
     expect(screen.getByText('degraded')).toBeInTheDocument()
     expect(screen.getByText('HARNESS section unavailable')).toBeInTheDocument()
-    expect(screen.getAllByText('—')).toHaveLength(4)
+    // Coverage, Watch, Regression and Signals, then the four card counts (US-058).
+    expect(screen.getAllByText('—')).toHaveLength(8)
   })
 })

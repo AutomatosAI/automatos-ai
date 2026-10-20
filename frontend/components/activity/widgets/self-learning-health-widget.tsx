@@ -1,5 +1,6 @@
 'use client'
 
+import { Fragment } from 'react'
 import { Brain, Gauge, Loader2, Sparkles, Zap } from 'lucide-react'
 import {
   useSelfLearningHealth,
@@ -38,6 +39,15 @@ const MODE_LABELS: Record<string, string> = {
   disabled: 'Disabled',
 }
 
+// PRD-263 US-058: what became of HARNESS's proposals, its Approvals cards, as the
+// ledger counts them. The backend calls a declined card `denied`.
+const CARD_COUNTS = [
+  { field: 'pending', label: 'Pending', tone: 'text-info' },
+  { field: 'applied', label: 'Applied', tone: 'text-success' },
+  { field: 'denied', label: 'Declined', tone: 'text-muted-foreground' },
+  { field: 'expired', label: 'Expired', tone: 'text-warning' },
+] as const
+
 /** A status as words: "scheduled_not_run_yet" → "scheduled not run yet". */
 function statusWords(status?: string | null): string {
   return status ? status.replace(/_/g, ' ') : ABSENT
@@ -73,6 +83,23 @@ function Divider() {
   return <div className="w-px h-8 bg-border/50" />
 }
 
+/** HARNESS's Approvals cards: pending, applied, declined and expired, "—" for any absent. */
+function CardCounts({ data }: { data: SelfLearningHealthData }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[10px] text-muted-foreground">Approvals cards</p>
+      <div className="flex items-center gap-3">
+        {CARD_COUNTS.map(({ field, label, tone }, index) => (
+          <Fragment key={field}>
+            {index > 0 && <Divider />}
+            <Kpi value={figure(data[field])} label={label} tone={tone} />
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SelfLearningFigures({ data }: { data: SelfLearningHealthData }) {
   const harnessDown = sectionDown(data, 'harness')
   const mode = harnessDown ? ABSENT : modeLabel(data.mode)
@@ -89,6 +116,8 @@ function SelfLearningFigures({ data }: { data: SelfLearningHealthData }) {
         <Divider />
         <Kpi value={figure(data.signals_7d)} label="Signals (7 days)" />
       </div>
+
+      <CardCounts data={data} />
 
       {/* Detail lines: the HARNESS run and mode, and what Signals counts */}
       <div className="space-y-1.5 text-[11px] text-muted-foreground">
@@ -117,14 +146,15 @@ function SelfLearningFigures({ data }: { data: SelfLearningHealthData }) {
 }
 
 /**
- * Self-Learning health tile (PRD-142 Wave 4, W4-S16; PRD-263 US-022).
+ * Self-Learning health tile (PRD-142 Wave 4, W4-S16; PRD-263 US-022, US-058).
  *
  * Renders GET /api/harness/self-learning: the latest HARNESS run's status,
  * iteration, coverage and WATCH / REGRESSION / not-enough-data counts, the
- * workspace's HARNESS mode, and this workspace's production tool calls over the
- * last 7 days (Signals). A figure the backend does not have shows "—", never 0;
- * a backend section that failed to load is named in `unavailable` and shown as
- * "unavailable" rather than breaking the tile.
+ * workspace's HARNESS mode, this workspace's production tool calls over the
+ * last 7 days (Signals), and how many of HARNESS's Approvals cards are pending,
+ * applied, declined and expired (US-058). A figure the backend does not have
+ * shows "—", never 0; a backend section that failed to load is named in
+ * `unavailable` and shown as "unavailable" rather than breaking the tile.
  */
 export function SelfLearningHealthWidget({ className }: SelfLearningHealthWidgetProps) {
   const { data, isLoading, isError } = useSelfLearningHealth()
