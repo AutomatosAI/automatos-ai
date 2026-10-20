@@ -32,8 +32,6 @@ from services.content_reports.targets import clip_excerpt
 
 logger = logging.getLogger(__name__)
 
-# The existing generic outbound driver; no client of our own.
-WEBHOOK_PLATFORM = "webhook"
 REQUIRED_URL_SCHEME = "https"
 
 NO_NOTE = "(none)"
@@ -128,7 +126,8 @@ async def post_to_moderation(summary: str, *, report_id: int, workspace_id: str)
     if url is None:
         return False
     try:
-        result = await get_driver(WEBHOOK_PLATFORM)().send(
+        # The existing generic outbound driver (channels/drivers/webhook.py); no client of our own.
+        result = await get_driver("webhook")().send(
             workspace_id=workspace_id, config={"webhook_url": url}, target=None, text=summary,
         )
     except Exception as exc:  # noqa: BLE001 — its text can quote the URL: logged by class only, returns False
@@ -147,7 +146,6 @@ async def post_to_moderation(summary: str, *, report_id: int, workspace_id: str)
 
 
 __all__ = [
-    "WEBHOOK_PLATFORM",
     "moderation_summary",
     "moderation_url",
     "post_to_moderation",

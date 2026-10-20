@@ -395,7 +395,7 @@ def test_the_post_goes_through_the_existing_webhook_driver(saas, monkeypatch):
     posted = asyncio.run(moderation.post_to_moderation(summary, report_id=41, workspace_id=str(WS_ID)))
 
     assert posted is True
-    assert get_driver(moderation.WEBHOOK_PLATFORM) is webhook_mod.WebhookDriver
+    assert get_driver("webhook") is webhook_mod.WebhookDriver
     assert posts == [(INBOX_URL, {"text": summary, "message": summary, "ai_generated": True}, 15.0)]
 
 
