@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -249,7 +250,8 @@ def test_every_third_party_compose_image_is_pinned_as_tag_at_digest():
 def test_this_repositorys_own_compose_images_are_its_published_and_dev_names():
     """docker-compose.yml names the three published images, docker-compose.dev.yml their dev builds."""
     own = {where: image for where, image in _compose_images().items() if FIRST_PARTY.match(image)}
-    published = {where for where, image in own.items() if image.startswith("ghcr.io/")}
+    # The registry is the reference's host, the part before its first slash.
+    published = {where for where, image in own.items() if urlparse(f"//{image}").netloc == "ghcr.io"}
     dev = {where for where, image in own.items() if image.endswith(":dev")}
     services = ("backend", "frontend", "workspace-worker")
     assert published == {f"docker-compose.yml:{service}" for service in services}
