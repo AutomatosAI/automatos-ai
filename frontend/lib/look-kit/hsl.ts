@@ -5,6 +5,8 @@ import { parseHex, toHex, type Rgb } from './contrast'
  * wrapper: tailwind.config.ts reads every token as hsl(var(--x))). Every number
  * goes through formatNumber: at most two decimals, no trailing zeros, so a
  * triplet converts back to the same #rrggbb.
+ *
+ * PRD-261 A-13a — part of the core look runtime (lib/look-kit, PA-9).
  */
 
 export interface Hsl {

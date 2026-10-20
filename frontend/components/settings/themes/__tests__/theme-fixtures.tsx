@@ -61,6 +61,7 @@ export function themeSettings(overrides: Partial<ThemeSettings> = {}): ThemeSett
     installRole: 'admins',
     installRoles: ['admins', 'owner'],
     canInstall: true,
+    marketplace: 'on',
     defaultInstallId: null,
     pins: [],
     updatedAt: null,

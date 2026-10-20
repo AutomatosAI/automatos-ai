@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 
 import { MainLayout } from '@/components/layout/main-layout'
 import type { SlotId } from '@/lib/theme-host/registry-types'
+import { CorePageProvider } from '@/lib/theme-sdk/host-cards/core-page'
 
 import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from './theme-slot-registrations'
 
@@ -18,7 +19,10 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  *   names values of one that the theme's page still is). An installed theme's page draws full
  *   bleed inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d); builtin
  *   Play's pages draw MainLayout themselves (ActiveThemeSlots.framesPages).
- * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed.
+ *   The theme's page is handed the core page (CorePageProvider, A-12a), so its `cards.CorePage`
+ *   draws the core page where the theme keeps a surface only the core page has.
+ * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed. A slot has no core page
+ *   to hand down: `cards.CorePage` in it renders its own children.
  *
  * Where the theme decides (it registered this page or slot, or an installed theme is still
  * loading and may have), nothing renders while the layout is 'pending' (the width is not known:
@@ -94,29 +98,39 @@ export function corePageAsked(
   )
 }
 
+/** How a page entry draws the theme's page: `framed` inside MainLayout (an installed theme's page). */
+interface PageEntryVersion {
+  readonly framed: boolean
+}
+
 /**
- * The theme's version if it draws here now, null for nothing yet, or the core's version. `framed`
- * draws the theme's version inside MainLayout (an installed theme's page).
+ * The theme's version if it draws here now, null for nothing yet, or the core's version. A page
+ * entry (`page`) hands the core page down to the theme's page and may frame it.
  */
-function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, framed = false): ReactNode {
+function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, page?: PageEntryVersion): ReactNode {
   const Theme = registeredComponent(registered)
   if (active.layout === 'none' || active.layout === 'narrow') return core
   if (active.layout === 'pending') return active.registrations === null || Theme !== null ? null : core
-  return Theme === null ? core : <ThemeVersion component={Theme} framed={framed} />
+  if (Theme === null) return core
+  if (page === undefined) return <ThemeVersion component={Theme} framed={false} />
+  return <ThemeVersion component={Theme} framed={page.framed} corePage={{ page: core }} />
 }
 
 interface ThemeVersionProps {
   readonly component: ComponentType
   readonly framed: boolean
+  /** The core page a page entry hands down (cards.CorePage); absent for a slot. */
+  readonly corePage?: { readonly page: ReactNode }
 }
 
 /** The theme's component; a lazy one (an installed theme's React.lazy) suspends to nothing. */
-function ThemeVersion({ component: Component, framed }: ThemeVersionProps) {
-  const version = (
+function ThemeVersion({ component: Component, framed, corePage }: ThemeVersionProps) {
+  const theme = (
     <Suspense fallback={null}>
       <Component />
     </Suspense>
   )
+  const version = corePage === undefined ? theme : <CorePageProvider page={corePage.page}>{theme}</CorePageProvider>
   return framed ? <MainLayout fullBleed>{version}</MainLayout> : version
 }
 
@@ -127,7 +141,8 @@ function ThemePageSlot({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED
   const params = useSearchParams()
   const here = routeMatches(page, pathname) && !corePageAsked(params, keepCorePage, themeServes)
   if (!here) return <>{children}</>
-  return <>{chooseVersion(active, active.registrations?.pages.get(page), children, active.framesPages)}</>
+  const version = chooseVersion(active, active.registrations?.pages.get(page), children, { framed: active.framesPages })
+  return <>{version}</>
 }
 
 function ThemeNamedSlot({ slot, children }: ThemeNamedSlotProps) {

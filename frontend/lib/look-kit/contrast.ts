@@ -3,6 +3,9 @@
  * the colour to use when an accent or the error colour is shown as text, on a
  * ground's bg and surface or (readableOnAll, readableOnTinted) on any list of
  * fills. Pure; colours are #rrggbb.
+ *
+ * PRD-261 A-13a — part of the core look runtime (lib/look-kit, PA-9): theme-neutral,
+ * no catalogue of its own. A theme's kit vendors it by version.
  */
 
 /** WCAG AA for body text. */

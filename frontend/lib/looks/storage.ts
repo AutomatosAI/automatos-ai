@@ -1,10 +1,10 @@
 import type { ThemeLookStorage } from '@/lib/theme-host/boot-types'
 import { BUILTIN_PLAY_LOOK_KEYS } from '@/lib/theme-host/builtin/play-look-keys'
 
+import { validateLook } from './engine'
 import { DEFAULT_LOOK, isPresetId } from './presets'
 import { moveUnscopedOnce, scopedKey } from './scope'
 import type { Look } from './types'
-import { validateLook } from './validate'
 
 /**
  * PRD-260, PRD-261 A-09b — this browser's copy of the looks, per signed-in

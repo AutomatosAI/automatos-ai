@@ -1,5 +1,5 @@
 {
-  "_comment": "PRD-261 A-12d: test data the spec (specs/pages-agents.spec.ts) answers the agents page's two reads with. The stats count more agents than the roster lists, so the page shows which read each number came from.",
+  "_comment": "PRD-261 A-12d: test data the spec (specs/pages-agents.spec.ts) answers the agents page's reads with. The stats count more agents than the roster lists, so the page shows which read each number came from. iconMappings answers the icon-mapping read useAgents makes first: empty, as on a fresh workspace, so the roster's query key never changes under the spec and every roster read it counts is one the page asked for.",
   "agents": [
     {
       "id": 12401,
@@ -58,5 +58,15 @@
     "inactive_agents": 4,
     "agents_by_type": { "custom": 7 },
     "timestamp": "2026-10-19T09:00:00Z"
+  },
+  "iconMappings": {
+    "id": 0,
+    "config_key": "system_icon_mappings",
+    "config_value": {},
+    "description": null,
+    "is_active": true,
+    "created_at": "2026-10-19T09:00:00Z",
+    "updated_at": "2026-10-19T09:00:00Z",
+    "updated_by": null
   }
 }

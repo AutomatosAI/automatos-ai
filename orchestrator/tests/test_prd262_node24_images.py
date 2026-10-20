@@ -11,7 +11,9 @@ edit could quietly undo:
 - the worker and media-render: Node from a stage named `node`, pinned as tag@digest,
   never NodeSource; the C headers never copied; production last. The worker copies
   npm and corepack too; media-render the node binary alone, because Hyperframes
-  comes from its js stage's npm ci (US-053);
+  comes from its js stage's npm ci (US-053). A file may come through a stage built
+  FROM `node` (PRD-262 #22: media-render's `node-stripped` strips the binary,
+  test_prd262_media_render_node_strip.py pins it);
 - the worker's pnpm pinned exactly, its npm cache cleaned in the same RUN;
 - every Dockerfile that runs Node takes it through a named stage, never a bare
   `COPY --from=<image>`, because an updater reads FROM lines only;
@@ -36,13 +38,15 @@ DEBIAN_NODE_IMAGES = {
     "services/workspace-worker/Dockerfile": WORKER,
     "services/media-render/Dockerfile": MEDIA_RENDER,
 }
-# What each copies from the `node` stage.
+# What each copies of Node's own files from the `node` stage or a stage built FROM it.
 NODE_COPIES = {
     "services/workspace-worker/Dockerfile": [
         "/usr/local/bin/node",
         "/usr/local/lib/node_modules/corepack",
         "/usr/local/lib/node_modules/npm",
     ],
+    # PRD-262 #22: the binary alone, through its node-stripped stage
+    # (tests/test_prd262_media_render_node_strip.py).
     "services/media-render/Dockerfile": ["/usr/local/bin/node"],
 }
 NODE_DOCKERFILES = (
@@ -52,6 +56,10 @@ NODE_DOCKERFILES = (
     ".oss-scanner/Dockerfile",
 )
 DIGEST = r"@sha256:[0-9a-f]{64}"
+NODE_INSTALL = "/usr/local/"  # where the official image keeps node, npm and corepack
+# The node-stripped stage's tree, copied to /: Node's binary alone, at its own path
+# (test_prd262_media_render_node_strip.py).
+NODE_LAYER = {"/node-layer/": "/usr/local/bin/node"}
 BUILD_TOOLS = {"python3", "make", "g++", "curl"}
 
 _FROM = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", re.M | re.I)
@@ -89,6 +97,11 @@ def _apk_packages(instructions: list[str]) -> list[str]:
         for word in args.split()
         if not word.startswith("-")
     ]
+
+
+def _node_stages(dockerfile: str) -> set[str]:
+    """The `node` stage and every stage built FROM it, such as `node-stripped`."""
+    return {"node"} | {name for image, name in _stages(dockerfile) if image.lower() == "node" and name}
 
 
 def _copies_from(instructions: list[str], source: str) -> list[str]:
@@ -139,7 +152,12 @@ def test_the_debian_images_take_node_24_from_the_official_image(path):
     images = _stage_images(dockerfile)
     assert re.fullmatch(rf"node:24-trixie-slim{DIGEST}", images.get("node", "")), images
     assert _stages(dockerfile)[-1][1] == "production", "production must stay the last stage"
-    copied = sorted(_copies_from(_instructions(dockerfile), "node"))
+    instructions = _instructions(dockerfile)
+    # Node's own files, wherever a node-based stage keeps them; a stage like media-render's
+    # js also copies its build output out, which is not Node.
+    sources = [NODE_LAYER.get(source, source)
+               for stage in _node_stages(dockerfile) for source in _copies_from(instructions, stage)]
+    copied = sorted(source for source in sources if source.startswith(NODE_INSTALL))
     assert copied == NODE_COPIES[path]
     code = "\n".join(_instructions(dockerfile)).lower()
     for gone in ("nodesource", "/usr/local/include", "gnupg", "python3.13"):

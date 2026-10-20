@@ -27,6 +27,7 @@ interface AgentRow {
 interface Responses {
   readonly agents: readonly AgentRow[]
   readonly stats: Readonly<Record<string, unknown>>
+  readonly iconMappings: Readonly<Record<string, unknown>>
 }
 
 const FIXTURE = path.resolve(__dirname, '../../../../e2e/browser/fixtures/hello-a12d')
@@ -41,6 +42,8 @@ const IMPORT = /^import\s+(?:\{([^}]*)\}|[\w$]+)\s+from\s+'([^']+)'/gm
 const SELECTOR = /([^{}]+)\{/g
 const COMMENT = /\/\*[\s\S]*?\*\//g
 const STATS_COUNTS = ['active_agents', 'inactive_agents', 'total_agents']
+/** The system config key useAgents reads its icon mappings from (hooks/use-system-config-api.ts). */
+const ICON_MAPPINGS_KEY = 'system_icon_mappings'
 
 function syntaxErrors(source: string, fileName: string): string[] {
   const output = ts.transpileModule(source, {
@@ -130,5 +133,10 @@ describe('PRD-261 A-12d — the test data', () => {
     for (const key of STATS_COUNTS) expect(Number.isInteger(RESPONSES.stats[key]), key).toBe(true)
     expect(RESPONSES.stats.total_agents).not.toBe(RESPONSES.agents.length)
     expect(RESPONSES.stats.active_agents).not.toBe(RESPONSES.agents.filter((row) => row.status === 'active').length)
+  })
+
+  it("answers the icon-mapping read with no mappings, so the roster's query key never changes under the spec", () => {
+    expect(RESPONSES.iconMappings.config_key).toBe(ICON_MAPPINGS_KEY)
+    expect(RESPONSES.iconMappings.config_value).toEqual({})
   })
 })

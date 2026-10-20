@@ -29,7 +29,7 @@ import {
   sameLookSet,
 } from '@/lib/looks/store'
 import type { Look, ValidationResult } from '@/lib/looks/types'
-import { validateLook } from '@/lib/looks/validate'
+import { validateLook } from '@/lib/looks/engine'
 import { BUILTIN_PLAY_REF } from '@/lib/theme-host/builtin/play-entry'
 import { BUILTIN_PLAY_LOOK_THEME } from '@/lib/theme-host/builtin/play-look-keys'
 
