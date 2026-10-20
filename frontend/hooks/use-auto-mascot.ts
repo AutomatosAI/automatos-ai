@@ -3,9 +3,9 @@
 import { type Dispatch, useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 import { IDLE_MS, useIdleTimeout } from './use-idle-timeout'
+import { mascotEventsFromData } from '../lib/mascot/data-events'
 import {
   type ChatStatus,
-  mascotEventsFromData,
   mascotEventsFromReply,
   mascotEventsFromStatus,
   NO_REPLY,
@@ -19,9 +19,9 @@ import type { MascotEvent, MascotName, MascotState } from '../lib/mascot/types'
  * PRD-260 D5, D6 — Auto driven by the core chat. Play's reducer
  * (lib/mascot/reducer.ts) is fed from useChatWithReceipts' data callback, its
  * status and its newest reply (the model's reasoning, the words starting, a cap)
- * through lib/mascot/events.ts, from the page's own events through dispatch,
- * and from the idle nap. The screen hands `mascot` and `onClipEnded` to
- * <AutoMascot>.
+ * through lib/mascot/data-events.ts and lib/mascot/events.ts, from the page's
+ * own events through dispatch, and from the idle nap. The screen hands
+ * `mascot` and `onClipEnded` to <AutoMascot>.
  */
 
 export type BackendStatus = 'up' | 'down'

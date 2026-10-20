@@ -106,7 +106,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/lib/utils` | c/looks/look-manager.tsx | copied into Play | — | A pure utility (`copyToClipboard`). |
 | `@/stores/chat-session-store` | c/play/shell/play-sidebar.tsx, l/chat-controller/controller.ts, l/chat-controller/conversation.ts | SDK | `chat.useChatController`, `chat.useRecentChats` | A store is never exposed; the controller tells the host a new chat's id, and the active chat id comes with the recent list. |
 | `@/stores/mission-store` | c/play/chat/mission-suggestion.tsx | SDK | `chat.useChatController` | The Mission the chat is planning comes on the view model. |
-| `@/types` | c/play/chat/*, hooks/use-play-turn.ts, l/chat-controller/*, l/chat/deliverables.ts, l/chat/message-text.ts, l/chat/suggestion.ts, l/play/conversations.ts, l/mascot/types.ts | copied into Play | — | Types only (`ChatMessage`, `Chat`, `Receipt`, `ToolCall`, `TaskCardData`); the SDK's own types are in its `.d.ts` (A-10b). |
+| `@/types` | c/play/chat/*, hooks/use-play-turn.ts, l/chat-controller/*, l/chat/deliverables.ts, l/chat/message-text.ts, l/chat/suggestion.ts, l/play/conversations.ts, l/mascot/types.ts (until W-A5: `Receipt` is the SDK's `HostReceipt` there now) | copied into Play | — | Types only (`ChatMessage`, `Chat`, `Receipt`, `ToolCall`, `TaskCardData`); the SDK's own types are in its `.d.ts` (A-10b). |
 
 ## 2. Imports the lanes in flight will add
 
