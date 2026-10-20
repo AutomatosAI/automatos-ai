@@ -17,7 +17,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN, bundle
+from helpers import TOKEN, VOICES, bundle
 from media_render.bundle import MediaInput, parse_bundle
 from media_render.fixture import COMPOSITION, fixture_bundle
 from media_render.media_urls import parse_prefixes
@@ -132,7 +132,7 @@ def test_the_fetcher_stops_at_the_size_limit(settings, tmp_path):
 
 
 def test_staging_writes_the_composition_its_files_and_gsap(settings, tmp_path):
-    parsed = parse_bundle(fixture_bundle(), settings, {})
+    parsed = parse_bundle(fixture_bundle(), settings, {}, VOICES)
     project = tmp_path / "project"
     stage_project(parsed, project, settings.gsap_path)
     index = (project / "index.html").read_text()
@@ -165,8 +165,12 @@ def test_tts_speaks_with_kokoro_through_the_api(settings):
             line = body["lines"][0]
             assert line["id"] == "l01" and line["seconds"] > 1.0 and line["sample_rate"] == 24000
             assert len(line["segments"]) >= 3 and "audio_base64" not in line
+            # PRD-262 US-052: a voice the image's voices file lacks is refused before Kokoro
+            # runs, as a 400 naming the field (test_server.py covers lang too).
             unknown = await client.post("/tts", data=json.dumps({**request, "voice": "zz_nobody"}), headers=AUTH)
-            assert unknown.status == 400 and (await unknown.json())["error"] == "voice_refused"
+            refusal = await unknown.json()
+            assert unknown.status == 400 and refusal["error"] == "invalid_request", refusal
+            assert refusal["message"].startswith("voice must be one of "), refusal
 
     asyncio.run(go())
 

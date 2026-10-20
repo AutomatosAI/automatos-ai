@@ -14,7 +14,10 @@ workspace-permission gate (only the caller's workspace role is stubbed) and the 
   keeps looks and moves members to the default; a pinned install refuses update;
 * a ``disable`` revocation makes ``active`` answer the base; a stale ``clonedFrom`` shows
   ``needsUpdate``; ``builtin:play`` round-trips; members-may-choose off answers 403;
-* the answer carries what ``frontend/lib/theme-host/manifest.ts`` parseActiveInstall reads;
+* the answer carries what ``frontend/lib/theme-host/manifest.ts`` parseActiveInstall reads,
+  including the default look a package's preset path is built from;
+* ``source`` says where the choice came from (the member's choice, the workspace default or
+  Studio's fallback), so a tab can store a cookie-only pick instead of following a default;
 * the local edition's anonymous owner works; manage routes refuse a viewer.
 """
 from __future__ import annotations
@@ -187,7 +190,7 @@ def test_an_install_pointing_at_another_workspaces_private_package_is_404(api, r
     assert resp.status_code == 404, resp.text
     api.db.add(ThemeChoice(workspace_id=WS_A, user_id=MEMBER_PK, choice=str(forged.id)))
     api.db.commit()
-    assert _active(api) == {"choice": "studio", "theme": None}
+    assert _active(api) == {"choice": "studio", "source": "fallback", "theme": None}
     assert api.client.get("/api/themes/installed").json() == {"installs": []}
 
 
@@ -209,11 +212,11 @@ def test_moving_an_install_to_another_workspaces_private_package_is_404(api, rou
 
 
 def test_builtin_play_round_trips_as_a_choice(api):
-    assert _active(api) == {"choice": "studio", "theme": None}
+    assert _active(api) == {"choice": "studio", "source": "fallback", "theme": None}
     resp = _choose(api, "builtin:play")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"choice": "builtin:play", "theme": None}
-    assert _active(api) == {"choice": "builtin:play", "theme": None}
+    assert resp.json() == {"choice": "builtin:play", "source": "choice", "theme": None}
+    assert _active(api) == {"choice": "builtin:play", "source": "choice", "theme": None}
     assert _choose(api, "classic").json()["choice"] == "classic"
     for bad in ("play", "theme:builtin:play", str(uuid.uuid4()).upper()):
         assert _choose(api, bad).status_code == 400, bad
@@ -229,7 +232,7 @@ def test_active_falls_back_from_the_choice_to_the_default_then_studio(api):
     api.ctx = _ctx(clerk="clerk-8")  # another member of the same workspace never sees that choice
     assert _active(api)["choice"] == str(install.id)
     assert api.client.put("/api/themes/default", json={"installId": None}).json() == {"defaultInstallId": None}
-    assert _active(api) == {"choice": "studio", "theme": None}
+    assert _active(api) == {"choice": "studio", "source": "fallback", "theme": None}
 
 
 def test_active_answers_what_parse_active_install_reads(api):
@@ -240,6 +243,7 @@ def test_active_answers_what_parse_active_install_reads(api):
     assert theme["installId"] == str(install.id)
     assert theme["digest"] == package.digest and len(theme["digest"]) == 64
     assert theme["manifest"]["id"] == "acme/ink"
+    assert theme["defaultLook"] is None  # no "look" in the manifest and no preset in the package
     assert (theme["themeId"], theme["version"], theme["reviewed"], theme["revoked"]) == ("acme/ink", "1.0.0", True, None)
     assert theme["optIn"] == {"required": False, "wording": OPT_IN_WORDING, "packageId": str(package.id)}
     url = f"/api/themes/files/{package.digest}/dist/entry.js"
@@ -310,7 +314,33 @@ def test_members_may_not_choose_answers_403_and_active_shows_the_default(api):
     api.db.add(ThemeWorkspaceSettings(workspace_id=WS_A, members_may_choose=False))
     api.db.commit()
     assert _choose(api, "studio").status_code == 403
-    assert _active(api)["choice"] == str(default.id)
+    assert (_active(api)["choice"], _active(api)["source"]) == (str(default.id), "default")
+
+
+def test_source_says_where_the_choice_came_from(api):
+    install = _install(api.db, _package(api.db))
+    assert _active(api)["source"] == "fallback"
+    assert api.client.put("/api/themes/default", json={"installId": str(install.id)}).status_code == 200
+    assert (_active(api)["choice"], _active(api)["source"]) == (str(install.id), "default")
+    assert _choose(api, "studio").json()["source"] == "choice"  # a stored Studio is the member's own
+    assert (_active(api)["choice"], _active(api)["source"]) == ("studio", "choice")
+    assert _choose(api, str(install.id)).json()["source"] == "choice"
+    api.client.delete(f"/api/themes/installs/{install.id}")
+    assert (_active(api)["choice"], _active(api)["source"]) == ("studio", "fallback")  # the choice's install is gone
+
+
+def test_the_default_look_is_the_manifests_else_the_first_preset(api):
+    presets = {f"looks/presets/{name}.look.json": {"type": "application/json", "size": 1, "sha256": "ef" * 32}
+               for name in ("night", "day")}
+    package = _package(api.db)
+    package.file_manifest = {**package.file_manifest, **presets}
+    api.db.commit()
+    install = _install(api.db, package)
+    _choose(api, str(install.id))
+    assert _active(api)["theme"]["defaultLook"] == "day"
+    package.manifest = {**package.manifest, "look": "night"}
+    api.db.commit()
+    assert _active(api)["theme"]["defaultLook"] == "night"
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
-import { LOOK_VAR_NAMES } from '@/lib/looks/css'
 import { MOTION_ATTRIBUTE } from '@/lib/looks/document'
+import { LOOK_VAR_NAMES, STUDIO_TOKEN_NAMES } from '@/lib/looks/engine'
 import { EMBER } from '@/lib/looks/presets'
-import { STUDIO_TOKEN_NAMES } from '@/lib/looks/studio-tokens'
 import type { Look } from '@/lib/looks/types'
 import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
 import { STUDIO_HTML_CLASS } from '@/lib/ui-style'

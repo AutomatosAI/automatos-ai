@@ -1,0 +1,26 @@
+# PRD-262 #7: npm paths that render, check and snapshot never load, relative to
+# node_modules. The Dockerfile's js stage deletes each one after `npm ci`, and the
+# build fails if one is missing, so a Hyperframes bump that moves a path is noticed.
+# media-render.yml proves the rest: a render, a check and a snapshot run with Node's
+# module loading traced (ci/trace_modules.mjs), and none may resolve a path below.
+#
+# Hyperframes' preview studio (served only by `hyperframes preview`), its agent
+# skills (`hyperframes skills` and `init`; HYPERFRAMES_SKIP_SKILLS=1 is set) and
+# its font-localising CLI (the separate hyperframes-localize-fonts bin).
+hyperframes/dist/studio
+hyperframes/dist/skills
+hyperframes/dist/fontLocalizeCli.js
+hyperframes/bin/hyperframes-localize-fonts.mjs
+# Dependencies Hyperframes declares but its bundled cli.js never imports.
+prettier
+giget
+# WebDriver BiDi: puppeteer-core imports it only for Firefox or protocol
+# 'webDriverBiDi'; Hyperframes drives Chrome over CDP.
+chromium-bidi
+zod
+webdriver-bidi-protocol
+# Type definitions only: no runtime import.
+devtools-protocol
+# puppeteer-core's TypeScript sources and its browser (not Node) bundle.
+puppeteer-core/src
+puppeteer-core/lib/es5-iife

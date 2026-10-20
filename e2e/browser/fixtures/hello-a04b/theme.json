@@ -1,0 +1,13 @@
+{
+  "schema": "automatos-theme-spike/v1",
+  "id": "automatos-e2e/hello-a04b",
+  "name": "Hello theme routes (A-04b)",
+  "version": "0.0.1",
+  "engines": { "sdk": "^1.0.0" },
+  "base": "studio",
+  "htmlClass": "hello-a04b",
+  "entry": "entry.js",
+  "styleSheet": "theme.css",
+  "preset": "presets/default.look.json",
+  "slots": ["frame@1"]
+}

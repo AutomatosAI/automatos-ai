@@ -9,6 +9,10 @@ failed of a failed or partially published post. Each answers 202 with the post i
 and ends the post ``published``, ``partially_published`` or ``failed``, each target
 with its receipt.
 
+``GET /api/socials/posts/{post_id}/ai-labels`` (PRD-264 EUAI-05) answers each channel's
+AI label decision for the receipt (``modules/socials/ai_media.py``): the line a target's
+publish used, once one ran, else the line its publish will use, and the post's AI media.
+
 The approval guard runs first (D6): a post whose approval no longer matches its
 content answers 409 and nothing reaches Composio. The claim is a compare-and-set
 (``modules/socials/publisher.py``): a second request for a post already claimed
@@ -34,11 +38,12 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.socials import publisher, schedule_jobs, service
+from modules.socials import ai_media, publisher, schedule_jobs, service
 
 router = APIRouter()
 
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
+CAN_READ = Depends(require_workspace_permission("documents:read"))
 
 
 def _posts_api() -> Any:
@@ -83,3 +88,15 @@ def retry_social_post(
     with it in ``publishing``. A published target is never run again. 409 unless the
     post's approval still matches its content and one of its targets failed."""
     return _start(db, ctx, post_id, publisher.begin_retry)
+
+
+@router.get("/posts/{post_id}/ai-labels", dependencies=[CAN_READ])
+def social_post_ai_labels(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """Each channel's AI label decision for the post (PRD-264 EUAI-05), and its AI media:
+    ``{"ai_media": {...}, "targets": [{"id", "toolkit", "post_kind", "ai_label", "at_publish"}]}``.
+    404 for a post outside the caller's workspace."""
+    return ai_media.labels_for(_posts_api()._load(db, ctx, post_id))

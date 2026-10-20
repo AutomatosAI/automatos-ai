@@ -12,7 +12,7 @@ import {
   echo, errorIf, hasOwn, isFiniteNumber, isOneOf, isRecord, isWholeNumber, own, plainTextProblem, themeError,
   unknownFieldErrors, type JsonRecord, type ThemeError,
 } from './css-value'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 
 export const LOOK_SCHEMA_SCHEMA = 'automatos-look-schema/v1'
 export const LOOK_SCHEMA_PATH = 'looks/schema.json'

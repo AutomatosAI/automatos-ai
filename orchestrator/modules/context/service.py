@@ -47,6 +47,7 @@ from modules.context.planning import (
     apply_pack_budget,
     trim_to_tokens,
 )
+from modules.context.ai_identity_rule import with_rule_for_mode
 from modules.context.result import ContextResult
 from modules.context.sections import SECTION_REGISTRY, SectionContext
 from core.observability.tracer import fire_assembly_trace
@@ -263,8 +264,9 @@ class ContextService:
             budget = self._get_budget(mode, config, resolved_model_id, self._db_session)
             included, trimmed_names = _budget_manager.allocate(rendered, budget)
 
-            # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering) ---
+            # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering), the AI rule last (PRD-264) ---
             system_prompt, cacheable_prefix = self._assemble_prompt(included)
+            system_prompt = with_rule_for_mode(system_prompt, mode, ctx.db_session, ctx.workspace_id, ctx.widget_mode)
 
             # --- 7. Load tools ---
             tools, tool_choice = await self._load_tools(config, ctx)

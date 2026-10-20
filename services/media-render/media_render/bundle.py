@@ -9,21 +9,24 @@
                 "fonts": [{"family": "Geist", "weight": 700, "path": "assets/brand/geist-700.woff2"}]},
       "files": [{"path": "assets/brand/logo.svg", "data_uri": "data:image/svg+xml;base64,…"}],
       "media": [{"path": "assets/cine/hook.mp4", "url": "<presigned GET on our storage>"}],
-      "audio": {"voice": {"voice": "af_heart", "speed": 0.95,
+      "audio": {"voice": {"voice": "af_heart", "speed": 0.95, "lang": "en-us",
                           "lines": [{"id": "l01", "at": 0.3, "text": "…"},
                                     {"id": "l02", "at": 2.4, "path": "assets/vo/l02.wav"}]},
                 "music": {"track": "<library id>", "start": 32.0},
                 "sfx": [{"path": "assets/sfx/click.ogg", "at": 10.44, "volume": 0.5}]},
       "preview": {"at": [1.2, 10.0, 36.5]},     optional: snapshot these moments, not the full render
-      "still": {"at": [0.5, 1.5]}               optional: an image, one full-size PNG per moment
+      "still": {"at": [0.5, 1.5]},              optional: an image, one full-size PNG per moment
+      "ai_inputs": {"footage": true, "stills": false, "voice": true,
+                    "uploads": false, "template": true}   optional: which inputs are AI-made
     }
 
 ``files`` are inlined as data: URIs (the brand kit's logo and font files, small
 generated charts). ``media`` are fetched from our storage when the job runs, and
 only from the allowlisted prefixes; ``parse_bundle`` refuses any other URL
 before anything is fetched. Voice lines are Kokoro text, or a file from a
-workspace's voice toolkit already copied into our storage. Nothing here is
-generated: the renderer assembles (D3).
+workspace's voice toolkit already copied into our storage. A Kokoro voice is one
+the image's voices file holds, and its ``lang`` en-us or en-gb (PRD-262 US-052).
+Nothing here is generated: the renderer assembles (D3).
 
 A ``preview`` asks for frames instead of the video (US-106): the job is
 staged, spoken, mixed and checked exactly as a render is, then snapshots the
@@ -34,6 +37,11 @@ A ``still`` is an image (US-107): the job is staged, mixed and checked the same
 way, then its render is a full-size PNG of the composition at each moment
 (pipeline.RenderPipeline.still): one for a card, one per slide for a carousel.
 A still has no sound, so it takes no audio plan, and it is its own preview.
+
+``ai_inputs`` (PRD-264 EUAI-06a) says which of the render's inputs are AI-made (AI
+footage, AI stills, a synthetic voice) and which are not (the person's own uploads, the
+template). Every output with an AI element carries the IPTC "AI-generated" mark that
+follows from it (provenance.py). A bundle without it (an older caller) is still taken.
 """
 
 from __future__ import annotations
@@ -41,13 +49,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from . import audio, validate
 from .composition import VARIABLE_NAME, Composition, FontFace, brand_stylesheet, build_document, inspect_document
 from .config import Settings
 from .media_urls import redact, url_allowed
 from .music import Track
+from .provenance import UNDECLARED, AiInputs, parse_ai_inputs
 from .validate import BundleError
 
 ASSETS_ROOT = "assets/"
@@ -157,6 +166,7 @@ class Bundle:
     audio: AudioPlan
     preview: Optional[Preview] = None
     still: Optional[Still] = None
+    ai_inputs: AiInputs = UNDECLARED
 
 
 def _file_path(value: Any, where: str, extensions: FrozenSet[str]) -> str:
@@ -243,7 +253,9 @@ def _audio_input(value: Any, where: str, audio_paths: FrozenSet[str]) -> str:
     return value
 
 
-def _voice(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Settings) -> Optional[VoicePlan]:
+def _voice(
+    raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Settings, voices: AbstractSet[str]
+) -> Optional[VoicePlan]:
     if raw is None:
         return None
     voice = validate.mapping(raw, "audio.voice")
@@ -264,7 +276,7 @@ def _voice(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Set
         else:
             lines.append(VoiceLine(id=line_id, at=at, path=_audio_input(entry["path"], f"{where}.path", audio_paths)))
     return VoicePlan(
-        voice=validate.voice_name(voice.get("voice", settings.kokoro_voice), "audio.voice.voice"),
+        voice=validate.voice_name(voice.get("voice", settings.kokoro_voice), "audio.voice.voice", voices),
         speed=validate.speed(voice.get("speed", settings.kokoro_speed), "audio.voice.speed"),
         lang=validate.language(voice.get("lang", settings.kokoro_lang), "audio.voice.lang"),
         lines=tuple(lines),
@@ -302,11 +314,18 @@ def _sfx(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Setti
     return tuple(cues)
 
 
-def _audio(raw: Any, duration: float, audio_paths: FrozenSet[str], settings: Settings, library: Mapping[str, Track]) -> AudioPlan:
+def _audio(
+    raw: Any,
+    duration: float,
+    audio_paths: FrozenSet[str],
+    settings: Settings,
+    library: Mapping[str, Track],
+    voices: AbstractSet[str],
+) -> AudioPlan:
     plan = validate.mapping(raw or {}, "audio")
     validate.keys(plan, "audio", optional=("voice", "music", "sfx"))
     return AudioPlan(
-        voice=_voice(plan.get("voice"), duration, audio_paths, settings),
+        voice=_voice(plan.get("voice"), duration, audio_paths, settings, voices),
         music=_music(plan.get("music"), duration, library),
         sfx=_sfx(plan.get("sfx"), duration, audio_paths, settings),
     )
@@ -340,14 +359,18 @@ def _still(raw: Any, duration: float, settings: Settings) -> Optional[Still]:
     return Still(at=tuple(at))
 
 
-def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track]) -> Bundle:
-    """Validate a render bundle. Raises BundleError (HTTP 400) before anything is fetched."""
+def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track], voices: AbstractSet[str]) -> Bundle:
+    """Validate a render bundle. Raises BundleError (HTTP 400) before anything is fetched.
+
+    ``library`` is the music library and ``voices`` the voices the image's voices
+    file holds, both read at boot.
+    """
     body = validate.mapping(payload, "the bundle")
     validate.keys(
         body,
         "the bundle",
         required=("workspace_id", "composition"),
-        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still"),
+        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still", "ai_inputs"),
     )
     if body.get("still") is not None:
         if body.get("preview") is not None:
@@ -373,7 +396,8 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track])
         composition=composition,
         files=files,
         media=media,
-        audio=_audio(body.get("audio"), composition.duration, audio_paths, settings, library),
+        audio=_audio(body.get("audio"), composition.duration, audio_paths, settings, library, voices),
         preview=_preview(body.get("preview"), composition.duration, settings),
         still=_still(body.get("still"), composition.duration, settings),
+        ai_inputs=parse_ai_inputs(body.get("ai_inputs")),
     )
