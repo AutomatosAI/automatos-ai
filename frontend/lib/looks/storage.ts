@@ -248,7 +248,7 @@ export function setLookMark(storage: StorageSource, scope: string, bases: LookKe
 }
 
 /**
- * The look the pre-paint script paints (lib/looks/prepaint.ts): the active
+ * The look the pre-paint script paints (lib/theme-host/builtin/play-prepaint.ts): the active
  * look of the scope the pointer key names, else the one this browser kept
  * before F5, else the default. It only reads: nothing moves, nothing is
  * written. The LookProvider paints it under Play until the account's own
@@ -267,7 +267,7 @@ export function readPrepaintLook(storage: StorageSource, bases: LookKeyBases = B
   }
 }
 
-/** Points the pre-paint script at this scope's active look (lib/looks/prepaint.ts). */
+/** Points the pre-paint script at this scope's active look (lib/theme-host/builtin/play-prepaint.ts). */
 export function rememberLookScope(
   storage: StorageSource,
   scope: string,

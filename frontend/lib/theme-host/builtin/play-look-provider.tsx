@@ -19,7 +19,7 @@ import { clearPlayToneCookie, writePlayToneCookie } from './play-tone-cookie'
 /**
  * PRD-260 K3, K4 — the active look for the whole app, applied only while the
  * style is play. Its variables live on <html>, so every screen follows a
- * change at once; the pre-paint script (lib/looks/prepaint.ts) has already
+ * change at once; the pre-paint script (play-prepaint.ts) has already
  * set them before first paint, and this takes over once storage is read.
  * Until then, under Play, it paints what the pre-paint script paints
  * (readPrepaintLook), so Play is never without its variables: the account's
@@ -117,7 +117,7 @@ function useLookOnDocument({ active, look, reducedMotion }: DocumentLook): void 
   useEffect(() => () => clearLook(document.documentElement), [])
 }
 
-/** Under Play, the next page load's pre-paint script paints this account's active look (lib/looks/prepaint.ts). */
+/** Under Play, the next page load's pre-paint script paints this account's active look (play-prepaint.ts). */
 function useLookPointer(storage: StorageSource, active: boolean, scope: string | null): void {
   useEffect(() => {
     if (active && scope !== null) rememberLookScope(storage, scope)
