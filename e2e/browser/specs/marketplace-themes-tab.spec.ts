@@ -8,13 +8,14 @@ import { chooseStyle } from '../support/hello-theme'
 // PRD-261 C-04b (@host): the Marketplace's Themes tab, end to end on the local edition, against
 // the real backend and the real files route (no route interception):
 //
-//   submit hello-c04b.autotheme to the Marketplace (C-01a) → approve it (C-03a; the local operator
-//   is super_admin and the local edition has no isolated review stage) → /marketplace › Themes →
-//   the listing card → its detail → Add to my workspace (C-04a, install by reference) → Use this
-//   theme → the choice is stored and the page reloads into the theme → reload again → still
-//   active, and the server says the install references the approved Marketplace package.
+//   /marketplace › Themes → Publish theme: submit hello-c04b.autotheme (C-01b's form, C-01a's
+//   route) → approve it (C-03a; the local operator is super_admin and the local edition has no
+//   isolated review stage) → reload › Themes → the listing card → its detail → Add to my
+//   workspace (C-04a, install by reference) → Use this theme → the choice is stored and the page
+//   reloads into the theme → reload again → still active, and the server says the install
+//   references the approved Marketplace package.
 //
-// Submit and approve go through the API: their pages are W-C2's other lanes (C-01b, C-03b). The
+// Approve goes through the API: its page is C-03b's, proved by admin-theme-review.spec.ts. The
 // package has its own theme id (fixtures/hello-c04b/build.py), so no other spec meets its listing
 // or install. Chromium only: the lane's backend is one database for the whole run, and a listing
 // install is per workspace, so a second browser would race this one for it. The spec removes the
@@ -29,6 +30,10 @@ const THEME_ID = 'automatos-e2e/hello-c04b'
 const LISTING_ID = 'automatos-e2e.hello-c04b'
 const THEME_NAME = 'Hello Marketplace (C-04b)'
 const MARKETPLACE_PATH = '/marketplace'
+const SUBMIT_PATH = '/api/marketplace/themes/submit'
+const THEMES_TAB = 'Themes'
+const PUBLISH_THEME = 'Publish theme'
+const SUBMIT_FOR_REVIEW = 'Submit for review'
 const STATUS_ATTR = 'data-theme-host'
 const STYLE_COOKIE = 'automatos-style'
 const INSTALLED_STYLE_PREFIX = 'theme:install:'
@@ -60,16 +65,29 @@ function buildPackage(): Buffer {
   return fs.readFileSync(out)
 }
 
-/** Submits the package (201, or 200 with the version held already), waiting out another spec's open submission. */
-async function submit(request: APIRequestContext): Promise<Submission> {
+async function openThemesTab(page: Page): Promise<void> {
+  await page.goto(MARKETPLACE_PATH)
+  await page.getByRole('tab', { name: THEMES_TAB }).click()
+}
+
+/**
+ * Submits the package through the tab's Publish theme form (201, or 200 with the version held
+ * already), waiting out another spec's open submission (its 409 shows as the form's refusal).
+ * The answer is read off the form's own request, so the spec approves the package it sent.
+ */
+async function submitThroughTab(page: Page): Promise<Submission> {
   const buffer = buildPackage()
+  const publish = page.getByRole('region', { name: PUBLISH_THEME })
   const held: { answer?: Submission } = {}
   await expect(async () => {
-    const response = await request.post(`${API_URL}/api/marketplace/themes/submit`, {
-      multipart: { file: { name: PACKAGE_NAME, mimeType: PACKAGE_TYPE, buffer } },
-    })
-    expect(response.ok(), `POST /api/marketplace/themes/submit answered ${response.status()}: ${await response.text()}`).toBe(true)
+    const answered = page.waitForResponse((response) =>
+      response.url().includes(SUBMIT_PATH) && response.request().method() === 'POST')
+    await publish.getByTestId('publish-theme-input').setInputFiles({ name: PACKAGE_NAME, mimeType: PACKAGE_TYPE, buffer })
+    await publish.getByRole('button', { name: SUBMIT_FOR_REVIEW }).click()
+    const response = await answered
+    expect(response.ok(), `POST ${SUBMIT_PATH} answered ${response.status()}: ${await response.text()}`).toBe(true)
     held.answer = (await response.json()) as Submission
+    await expect(publish.getByTestId('publish-result')).toContainText(THEME_ID)
   }).toPass({ timeout: OPEN_SUBMISSION_WAIT_MS })
   expect(held.answer, 'the submission answered').toBeDefined()
   return held.answer as Submission
@@ -115,12 +133,12 @@ test.describe('Marketplace › Themes', () => {
   })
 
   test('submit, approve, add from the Themes tab, use it: the theme is active', { tag: '@host' }, async ({ page }) => {
-    const submission = await submit(page.request)
+    await openThemesTab(page)
+    const submission = await submitThroughTab(page)
     expect(submission.package.themeId).toBe(THEME_ID)
     await approve(page.request, submission)
 
-    await page.goto(MARKETPLACE_PATH)
-    await page.getByRole('tab', { name: 'Themes' }).click()
+    await openThemesTab(page) // a fresh load, so the grid lists the version just approved
     const card = page.getByTestId(`theme-listing-${LISTING_ID}`)
     await expect(card).toContainText(THEME_NAME)
     await card.click()

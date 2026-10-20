@@ -25,6 +25,7 @@ const api = vi.hoisted(() => ({
   rollbackTheme: vi.fn(),
   uninstallTheme: vi.fn(),
   putThemeSettings: vi.fn(),
+  submitTheme: vi.fn(),
 }))
 const clerk = vi.hoisted(() => ({ openReverification: vi.fn() }))
 const workspace = vi.hoisted(() => ({ role: 'owner' as string }))
@@ -61,7 +62,15 @@ import {
   themeSettings,
 } from '@/components/settings/themes/__tests__/theme-fixtures'
 
-import { ADD_TO_WORKSPACE, INSTALLED_HEADING, MANAGERS_ADD, NOT_COMPATIBLE_HINT } from '../listing-format'
+import {
+  ADD_TO_WORKSPACE,
+  INSTALLED_HEADING,
+  MANAGERS_ADD,
+  MARKETPLACE_OFF_NOTE,
+  NOT_COMPATIBLE_HINT,
+} from '../listing-format'
+import { PENDING_REVIEW } from '../publish-result'
+import { PUBLISH_THEME, SUBMIT_FOR_REVIEW } from '../publish-theme'
 import { MarketplaceThemesTab } from '../tab'
 import { FILES, LISTED_PACKAGE_ID, LISTING_ID, LISTING_INSTALL_ID, listing, listingDetail } from './listing-fixtures'
 
@@ -251,6 +260,67 @@ describe('who sees what', () => {
     fireEvent.click(screen.getByTestId(`theme-listing-${LISTING_ID}`))
     const detail = await screen.findByTestId('theme-listing-detail')
     expect(await within(detail).findByText(MANAGERS_ADD)).toBeInTheDocument()
+    expect(within(detail).queryByRole('button', { name: ADD_TO_WORKSPACE })).not.toBeInTheDocument()
+    expect(api.installThemeListing).not.toHaveBeenCalled()
+  })
+})
+
+describe('Publish theme on the tab', () => {
+  const SUBMISSION = {
+    package: {
+      id: 'pkg-new', themeId: 'acme/hello', version: '1.0.0', name: 'Hello theme', digest: 'b'.repeat(64),
+      ownerType: 'marketplace', status: 'pending', reviewed: false, scanVerdict: 'pass', scanReport: null,
+    },
+    duplicate: false,
+  }
+
+  it('every member gets C-01b’s form, and it submits through apiClient.submitTheme', async () => {
+    workspace.role = 'member'
+    api.submitTheme.mockResolvedValue(SUBMISSION)
+    renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
+
+    const publish = await screen.findByRole('region', { name: PUBLISH_THEME })
+    const file = new File(['zip'], 'hello.autotheme', { type: 'application/zip' })
+    fireEvent.change(within(publish).getByTestId('publish-theme-input'), { target: { files: [file] } })
+    fireEvent.click(within(publish).getByRole('button', { name: SUBMIT_FOR_REVIEW }))
+
+    await waitFor(() => expect(api.submitTheme).toHaveBeenCalledWith(file))
+    expect(await within(publish).findByText(PENDING_REVIEW)).toBeInTheDocument()
+  })
+})
+
+describe('the Marketplace switch', () => {
+  it('off: no grid, no Publish theme and no listing request; private uploads and the list stay', async () => {
+    api.getThemeSettings.mockResolvedValue(themeSettings({ marketplace: 'off' }))
+    renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
+
+    expect(await screen.findByTestId('themes-marketplace-off')).toHaveTextContent(MARKETPLACE_OFF_NOTE)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: PUBLISH_THEME })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('theme-listing-grid')).not.toBeInTheDocument()
+    const manage = screen.getByRole('region', { name: INSTALLED_HEADING })
+    expect(within(manage).getByRole('button', { name: INSTALL_THEME })).toBeInTheDocument()
+    expect(api.getThemeListings).not.toHaveBeenCalled()
+  })
+
+  it('on: the grid and Publish theme show, and no off note', async () => {
+    renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
+
+    expect(await screen.findByTestId(`theme-listing-${LISTING_ID}`)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: PUBLISH_THEME })).toBeInTheDocument()
+    expect(screen.queryByTestId('themes-marketplace-off')).not.toBeInTheDocument()
+  })
+})
+
+describe('who installs', () => {
+  it('an admin left out by "who installs" gets the reason instead of Add to my workspace', async () => {
+    workspace.role = 'admin'
+    api.getThemeSettings.mockResolvedValue(themeSettings({ canInstall: false, installRole: 'owner' }))
+    const detail = await openAurora()
+
+    expect(await within(detail).findByTestId('theme-listing-install-refused')).toHaveTextContent(
+      'In this workspace only the workspace owner can install themes.',
+    )
     expect(within(detail).queryByRole('button', { name: ADD_TO_WORKSPACE })).not.toBeInTheDocument()
     expect(api.installThemeListing).not.toHaveBeenCalled()
   })

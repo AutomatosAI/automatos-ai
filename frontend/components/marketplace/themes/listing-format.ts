@@ -28,6 +28,10 @@ export const MANAGERS_ADD = 'A workspace owner or admin adds themes to this work
 export const NO_LISTINGS = 'No themes are listed in the Marketplace yet.'
 export const NO_MATCHES = 'No theme matches your search.'
 export const INSTALLED_HEADING = 'Installed in this workspace'
+export const MARKETPLACE_OFF_NOTE =
+  'The theme Marketplace is turned off on this platform, so nothing is listed or published here. Private uploads and the themes in this workspace are below.'
+/** `ThemeSettings.marketplace` while THEMES_MARKETPLACE is off. */
+export const MARKETPLACE_SWITCH_OFF = 'off'
 export const LOADING_LISTINGS = 'Loading themes…'
 export const LOADING_LISTING = 'Loading the theme…'
 

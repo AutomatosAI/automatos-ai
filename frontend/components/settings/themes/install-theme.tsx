@@ -36,13 +36,19 @@ const STATUS_TEXT: Readonly<Record<ThemeUpload['status'], string>> = {
   stored: 'Stored. It is not installed.',
 }
 
+/**
+ * Why this caller can't install any theme here (the workspace's "who installs", the server's
+ * `require_install_role`), or null. Also the Marketplace's "Add to my workspace" gate (C-04b).
+ */
+export function installRoleRefusal(settings: ThemeSettings | undefined): string | null {
+  if (!settings || settings.canInstall) return null
+  return `In this workspace only ${WHO_INSTALLS[settings.installRole] ?? WHO_INSTALLS.owner} can install themes.`
+}
+
 /** Why this caller can't upload here, or null when the button works. */
 export function uploadBlockedReason(settings: ThemeSettings | undefined): string | null {
   if (!settings) return null
-  if (!settings.canInstall) {
-    return `In this workspace only ${WHO_INSTALLS[settings.installRole] ?? WHO_INSTALLS.owner} can install themes.`
-  }
-  return settings.privateUploads.effective === 'off' ? UPLOADS_OFF : null
+  return installRoleRefusal(settings) ?? (settings.privateUploads.effective === 'off' ? UPLOADS_OFF : null)
 }
 
 /** A note that does not block: under the platform's `admins` switch the server decides who uploads. */

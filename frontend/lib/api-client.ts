@@ -1005,6 +1005,8 @@ export interface ThemeSettings {
   installRoles: string[]
   /** This caller may install (the gate of POST /api/themes/import). */
   canInstall: boolean
+  /** The platform switch THEMES_MARKETPLACE (services/themes/listings.py marketplace_switch). */
+  marketplace: 'on' | 'off'
   defaultInstallId: string | null
   pins: ThemePinState[]
   updatedAt: string | null

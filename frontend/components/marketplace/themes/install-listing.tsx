@@ -3,8 +3,10 @@
 /**
  * PRD-261 C-04b — "Add to my workspace" on a listing's detail (C-04a install by reference).
  *
- * Owners and admins (`workspace:manage`) add the newest version this host runs; the server also
- * checks who may install and asks for step-up. Once the theme is in the workspace every member
+ * Owners and admins (`workspace:manage`) add the newest version this host runs, unless the
+ * workspace's "who installs" leaves them out (`ThemeSettings.canInstall`, the route's
+ * `require_install_role`): then the button gives way to the same sentence A-07d's Install theme
+ * shows. The server still checks both and asks for step-up. Once the theme is in the workspace every member
  * gets "Use this theme" (`UseInstalledTheme`: A-07d's opt-in dialog and choice, reused). Update,
  * rollback and uninstall of a listing install are A-07d's installed list, on the same tab.
  */
@@ -12,6 +14,8 @@ import { Download } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { installRoleRefusal } from '@/components/settings/themes/install-theme'
+import { useThemeSettings } from '@/hooks/use-installed-themes'
 import type { ThemeListing } from '@/lib/api-client'
 
 import { UseInstalledTheme } from './install-use'
@@ -51,10 +55,18 @@ function InstalledState({ listing, installId }: { listing: ThemeListing; install
 
 export function AddToWorkspace({ listing, canManage }: AddToWorkspaceProps) {
   const install = useInstallThemeListing()
+  const refusal = installRoleRefusal(useThemeSettings().data)
   const installId = listing.installed?.installId ?? install.data?.install.installId ?? null
 
   if (installId) return <InstalledState listing={listing} installId={installId} />
   if (!canManage) return <p className="text-xs text-muted-foreground">{MANAGERS_ADD}</p>
+  if (refusal) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="theme-listing-install-refused">
+        {refusal}
+      </p>
+    )
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-3">
