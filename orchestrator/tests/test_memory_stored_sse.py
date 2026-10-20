@@ -7,7 +7,6 @@ L3, with the real tier. SmartMemoryManager exposes ``_last_l3_facts_stored``
 """
 import os
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -23,7 +22,6 @@ for _k, _v in {
     os.environ.setdefault(_k, _v)
 
 import core.llm as core_llm  # noqa: E402
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 from consumers.chatbot.smart_memory import SmartMemoryManager  # noqa: E402
 
 

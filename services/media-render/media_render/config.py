@@ -67,6 +67,8 @@ class Settings:
     hyperframes_bin: str
     ffmpeg_bin: str
     ffprobe_bin: str
+    # PRD-264 EUAI-06a (D14): the XMP writer and reader of the AI mark (provenance.py).
+    exiftool_bin: str
     render_quality: str
     render_fps: int
     render_workers: str
@@ -75,6 +77,7 @@ class Settings:
     mix_timeout_seconds: int
     probe_timeout_seconds: int
     fetch_timeout_seconds: int
+    mark_timeout_seconds: int
     # Where jobs stage their compositions and keep their outputs until they expire.
     work_dir: str
     # The music library (US-112): manifest.json plus the tracks it names.
@@ -185,6 +188,7 @@ def _image(env: _Env) -> Dict[str, Any]:
         "hyperframes_bin": env.text("MEDIA_RENDER_HYPERFRAMES_BIN", "hyperframes"),
         "ffmpeg_bin": env.text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
         "ffprobe_bin": env.text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
+        "exiftool_bin": env.text("MEDIA_RENDER_EXIFTOOL_BIN", "exiftool"),
         "work_dir": env.text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
         "music_dir": env.text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
     }
@@ -215,6 +219,7 @@ def _rendering(env: _Env) -> Dict[str, Any]:
         "mix_timeout_seconds": env.positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", 120),
         "probe_timeout_seconds": env.positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
         "fetch_timeout_seconds": env.positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
+        "mark_timeout_seconds": env.positive_int("MEDIA_RENDER_MARK_TIMEOUT_SECONDS", 60),
     }
 
 

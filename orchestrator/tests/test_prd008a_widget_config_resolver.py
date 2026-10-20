@@ -67,6 +67,21 @@ def _db_returning(site_result, workspace_result):
     return db
 
 
+# PRD-264 EUAI-02a: the public config always carries the server-built AI
+# notice. The Site's name is the one it speaks for; with no name, the
+# unnamed default line.
+_NOTICE_FOR_TEST_SITE = {
+    "badge": "AI",
+    "line": "You are chatting with an AI assistant for test.",
+    "locale": "en",
+}
+_NOTICE_UNNAMED = {
+    "badge": "AI",
+    "line": "You are chatting with an AI assistant.",
+    "locale": "en",
+}
+
+
 # ---------------------------------------------------------------------------
 # resolve_widget_settings_dict — Site preferred
 # ---------------------------------------------------------------------------
@@ -135,27 +150,27 @@ def test_resolve_widget_config_strips_internal_keys():
     db = _db_returning(site_result=site, workspace_result=None)
 
     result = resolve_widget_config(db, uuid4())
-    assert result == {"widget_proactive": {"enabled": True}}
+    assert result == {"widget_proactive": {"enabled": True}, "ai_disclosure": _NOTICE_FOR_TEST_SITE}
     assert "shopify_access_token" not in str(result)
     assert "shopify_domain" not in str(result)
 
 
-def test_resolve_widget_config_returns_none_for_empty_settings():
-    """No public keys configured → None (so the SDK doesn't get an
-    empty config object it didn't expect)."""
+def test_resolve_widget_config_carries_only_the_ai_notice_for_internal_settings():
+    """No public keys configured → only the AI notice (PRD-264 EUAI-02a:
+    the widget never starts unlabelled); internal keys still never leak."""
     from api.widgets.config import resolve_widget_config
 
     site = _make_site(settings={"shopify_access_token": "x"})  # only internal
     db = _db_returning(site_result=site, workspace_result=None)
 
-    assert resolve_widget_config(db, uuid4()) is None
+    assert resolve_widget_config(db, uuid4()) == {"ai_disclosure": _NOTICE_FOR_TEST_SITE}
 
 
-def test_resolve_widget_config_returns_none_when_no_source():
+def test_resolve_widget_config_carries_the_ai_notice_when_no_source():
     from api.widgets.config import resolve_widget_config
 
     db = _db_returning(site_result=None, workspace_result=None)
-    assert resolve_widget_config(db, uuid4()) is None
+    assert resolve_widget_config(db, uuid4()) == {"ai_disclosure": _NOTICE_UNNAMED}
 
 
 # ---------------------------------------------------------------------------
@@ -170,13 +185,13 @@ def test_legacy_build_widget_config_still_works_on_workspace():
         settings={"widget_proactive": {"enabled": True}, "internal_key": "x"}
     )
     result = build_widget_config(workspace)
-    assert result == {"widget_proactive": {"enabled": True}}
+    assert result == {"widget_proactive": {"enabled": True}, "ai_disclosure": _NOTICE_UNNAMED}
 
 
-def test_legacy_build_widget_config_returns_none_for_none_workspace():
+def test_legacy_build_widget_config_carries_the_ai_notice_for_none_workspace():
     from api.widgets.config import build_widget_config
 
-    assert build_widget_config(None) is None
+    assert build_widget_config(None) == {"ai_disclosure": _NOTICE_UNNAMED}
 
 
 if __name__ == "__main__":

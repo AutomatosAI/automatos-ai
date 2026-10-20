@@ -44,8 +44,9 @@ HOSTED_EDITION = (
 # The Settings tabs every owner has (frontend/components/settings/SettingsPanel.tsx;
 # System Settings is a platform admin's only). A test holds the two lists to the page.
 # PRD-251B US-B106 added Socials (the workspace's own Socials switch), in both editions.
+# PRD-261 A-07d added Appearance (Themes: install, opt in, choose), in both editions.
 SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
-                 "Socials", "Widget SDK")
+                 "Socials", "Appearance", "Widget SDK")
 LOCAL_SETTINGS_TABS = ("Profile", "Session mode")
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
 UNSURE = (

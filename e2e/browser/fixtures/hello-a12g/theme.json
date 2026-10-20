@@ -1,0 +1,13 @@
+{
+  "schema": "automatos-theme-spike/v1",
+  "id": "automatos-e2e/hello-a12g",
+  "name": "Hello playbooks data (A-12g)",
+  "version": "0.0.1",
+  "engines": { "sdk": "^1.0.0" },
+  "base": "studio",
+  "htmlClass": "hello-a12g",
+  "entry": "entry.js",
+  "styleSheet": "theme.css",
+  "preset": "presets/default.look.json",
+  "slots": ["frame@1"]
+}

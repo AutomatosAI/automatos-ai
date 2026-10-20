@@ -44,6 +44,7 @@ def collect_versions(browser_path: str, node_modules: Path) -> Dict[str, str]:
     }
     versions["node"] = _run(["node", "--version"])
     versions["ffmpeg"] = _run(["ffmpeg", "-version"]).splitlines()[0].split()[2]
+    versions["exiftool"] = _run(["exiftool", "-ver"])  # PRD-264 EUAI-06a: the AI mark's writer and reader
     versions["chrome-headless-shell"] = _browser_version(browser_path)
     for name in PYTHON_PACKAGES:
         versions[name] = importlib.metadata.version(name)

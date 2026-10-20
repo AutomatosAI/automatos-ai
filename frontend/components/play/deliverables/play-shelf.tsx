@@ -1,42 +1,49 @@
 'use client'
 
-import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  DELIVERABLE_EXPLORER_HREF,
+  DELIVERABLE_PARAM,
+  DELIVERABLE_TAB_LABELS,
+  DELIVERABLES_HREF,
+  HostLink,
+  useDeliverables,
+  useHostSearchParams,
+  visibleDeliverableTabs,
+} from '@automatos/theme-sdk'
 
-import { MainLayout } from '@/components/layout/main-layout'
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { isDeliverableId } from '@/lib/chat/deliverables'
-import { PageColumns } from '@/components/play/shell/page-columns'
-import { useWorkspace } from '@/components/workspace-provider'
-import { useDeliverables } from '@/hooks/use-deliverables-api'
-import { useShelfMascot } from '@/hooks/use-shelf-mascot'
-import { EXPLORER_HREF, TAB_LABELS, visibleDeliverableTabs } from '@/lib/deliverables/tabs'
+import { useShelfMascot } from '../../../hooks/use-shelf-mascot'
 import {
   ALL_FILTER,
   countLine,
+  isDeliverableId,
   SHELF_FILTERS,
   SHELF_REFRESH_MS,
   shelfFilters,
   shelfView,
   type ShelfFilter,
-} from '@/lib/play/shelf'
-import { DELIVERABLE_PARAM, DELIVERABLES_HREF } from '@/lib/ticket-links'
+} from '../../../lib/play/shelf'
+import { AutoMascot } from '../../mascot/auto-mascot'
+import { PageColumns } from '../shell/page-columns'
 
 import { PlayDeliverable } from './play-deliverable'
 import { ShelfBody, type ShelfPaging } from './shelf-body'
 import styles from './shelf.module.css'
+import { useSocialsOffered } from './socials-offered'
 
 /**
  * PRD-260 §4, D5 — Play's Deliverables shelf (Ember mock 04), ported from
  * Automatos Play's components/deliverables/ShelfScreen.tsx onto the core's
- * list (useDeliverables, hooks/use-deliverables-api.ts): "Your shelf" with
+ * list (the theme SDK's useDeliverables, PRD-261 A-14b): "Your shelf" with
  * Auto in the header, the type chips (the list's artifact_type), the card
  * grid with the newest in the spotlight, and Load more (the hook's next page:
  * its offset, buildListQuery). A card opens /deliverables?deliverable=<id> (K8).
  *
- * app/deliverables/layout.tsx renders it through PlayRouteSwitch under Play at
- * >= 1024 px on /deliverables (K7); a link into one of the page's other
+ * app/deliverables/layout.tsx renders it through ThemeSlot (PRD-261 A-04b) under Play at
+ * >= 1024 px on /deliverables (K7), in the host's frame: builtin Play's slot for the
+ * page (lib/theme-host/builtin/play-shelf-lazy.tsx) draws MainLayout around it, as
+ * ThemeSlot does for an installed theme's page (MainLayout is host-only,
+ * docs/theme-host/sdk-surface-map.md). A link into one of the page's other
  * sections (?tab=, a post, a type drill-down) keeps the core's page inside
  * Play's frame (D8), and the shelf links to those sections, so none of them
  * is out of reach under Play.
@@ -54,18 +61,11 @@ export const SECTIONS_LABEL = 'More in Deliverables'
 export const BAD_LINK = "That link doesn't name a Deliverable, so here's your shelf."
 const EXPLORER_LABEL = 'Explorer'
 
-/** The shelf, or the Deliverable the link names, in Play's frame: the route's layout shows it instead of the page. */
+/** The shelf, or the Deliverable the link names: the route's layout shows it, in Play's frame, instead of the page. */
 export function PlayShelf() {
-  const asked = useSearchParams()?.get(DELIVERABLE_PARAM) || null
-  return (
-    <MainLayout fullBleed>
-      {asked !== null && isDeliverableId(asked) ? (
-        <PlayDeliverable key={asked} id={asked} />
-      ) : (
-        <ShelfScreen notice={asked === null ? undefined : BAD_LINK} />
-      )}
-    </MainLayout>
-  )
+  const asked = useHostSearchParams().get(DELIVERABLE_PARAM) || null
+  if (asked !== null && isDeliverableId(asked)) return <PlayDeliverable key={asked} id={asked} />
+  return <ShelfScreen notice={asked === null ? undefined : BAD_LINK} />
 }
 
 export interface ShelfScreenProps {
@@ -73,6 +73,11 @@ export interface ShelfScreenProps {
   readonly now?: Date
   /** A quiet line over the shelf (a link that named no Deliverable). */
   readonly notice?: string
+}
+
+/** Whether the page a Load more asked for failed (react-query's answer to fetchNextPage, unknown to the SDK). */
+function pageFailed(result: unknown): boolean {
+  return typeof result === 'object' && result !== null && (result as { readonly isError?: unknown }).isError === true
 }
 
 /**
@@ -93,7 +98,7 @@ function useShelfList(filter: ShelfFilter) {
   const loadMore = useCallback(() => {
     setMoreFailedFor(null)
     void fetchNextPage().then((result) => {
-      if (result.isError) setMoreFailedFor(filter)
+      if (pageFailed(result)) setMoreFailedFor(filter)
     })
   }, [fetchNextPage, filter])
   const retry = useCallback(() => {
@@ -168,21 +173,21 @@ function FilterChips({ selected, onSelect }: FilterChipsProps) {
 
 /** The page's other sections (Blogs, Templates, Brand kit, Socials while offered, Explorer): the core's own pages. */
 function Sections() {
-  const { workspace } = useWorkspace()
+  const socialsOffered = useSocialsOffered()
   // PRD-251 D1: Socials only while the platform offers it, as on the page's own tabs.
-  const tabs = visibleDeliverableTabs(workspace?.socials?.available === true).filter((tab) => tab !== 'outputs')
+  const tabs = visibleDeliverableTabs(socialsOffered).filter((tab) => tab !== 'outputs')
   const links = [
-    ...tabs.map((tab) => ({ href: `${DELIVERABLES_HREF}?tab=${tab}`, label: TAB_LABELS[tab] })),
-    { href: EXPLORER_HREF, label: EXPLORER_LABEL },
+    ...tabs.map((tab) => ({ href: `${DELIVERABLES_HREF}?tab=${tab}`, label: DELIVERABLE_TAB_LABELS[tab] })),
+    { href: DELIVERABLE_EXPLORER_HREF, label: EXPLORER_LABEL },
   ]
   return (
     <nav aria-label={SECTIONS_LABEL}>
       <ul className={styles.sections}>
         {links.map((link) => (
           <li key={link.href}>
-            <Link href={link.href} className={styles.sectionLink}>
+            <HostLink href={link.href} className={styles.sectionLink}>
               {link.label}
-            </Link>
+            </HostLink>
           </li>
         ))}
       </ul>

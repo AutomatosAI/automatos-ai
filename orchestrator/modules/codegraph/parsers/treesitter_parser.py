@@ -3,9 +3,13 @@ Tree-sitter based multi-language code parser.
 
 Replaces Python ast module and regex-based TypeScript/JavaScript parsing
 with tree-sitter for accurate, cross-language symbol and relationship extraction.
-Supports 15+ languages via tree-sitter-language-pack.
+Each language in SUPPORTED_LANGUAGES is parsed with the grammar of its own installed
+tree_sitter_* package (TreeSitterParser.GRAMMARS), all named in requirements.in, so
+parsing never downloads a grammar (PRD-262 US-028). tree-sitter-language-pack, which
+since 1.0.0 ships no grammars and fetches them on first use, is gone.
 """
 
+import importlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,23 +17,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Try to import tree-sitter-language-pack (preferred)
-# Falls back to individual tree-sitter-{lang} packages
-_HAS_LANGUAGE_PACK = False
 _HAS_TREE_SITTER = False
 
 try:
-    from tree_sitter_language_pack import get_language, get_parser
-    _HAS_LANGUAGE_PACK = True
+    import tree_sitter
     _HAS_TREE_SITTER = True
-    logger.info("Using tree-sitter-language-pack for multi-language parsing")
 except ImportError:
-    try:
-        import tree_sitter
-        _HAS_TREE_SITTER = True
-        logger.info("tree-sitter-language-pack not available, using individual grammars")
-    except ImportError:
-        logger.warning("tree-sitter not installed — TreeSitterParser will be unavailable")
+    logger.warning("tree-sitter not installed — TreeSitterParser will be unavailable")
 
 
 @dataclass
@@ -69,7 +63,8 @@ class TreeSitterParser:
     Parse source code using tree-sitter grammars.
 
     Extracts symbols (functions, classes, methods, interfaces) and
-    relationships (calls, imports, extends, implements) from 15+ languages.
+    relationships (calls, imports, extends, implements) from the languages in
+    SUPPORTED_LANGUAGES.
     """
 
     SUPPORTED_LANGUAGES: Dict[str, str] = {
@@ -88,6 +83,26 @@ class TreeSitterParser:
         '.swift': 'swift',
         '.kt': 'kotlin',
         '.cs': 'c_sharp',
+    }
+
+    # Language -> (its grammar package, the function that returns its language). Most
+    # packages export language(); tree_sitter_typescript has one function per dialect,
+    # and tree_sitter_php's language_php() reads PHP inside HTML, as a .php file is.
+    GRAMMARS: Dict[str, Tuple[str, str]] = {
+        'python': ('tree_sitter_python', 'language'),
+        'javascript': ('tree_sitter_javascript', 'language'),
+        'typescript': ('tree_sitter_typescript', 'language_typescript'),
+        'tsx': ('tree_sitter_typescript', 'language_tsx'),
+        'java': ('tree_sitter_java', 'language'),
+        'go': ('tree_sitter_go', 'language'),
+        'rust': ('tree_sitter_rust', 'language'),
+        'cpp': ('tree_sitter_cpp', 'language'),
+        'c': ('tree_sitter_c', 'language'),
+        'ruby': ('tree_sitter_ruby', 'language'),
+        'php': ('tree_sitter_php', 'language_php'),
+        'swift': ('tree_sitter_swift', 'language'),
+        'kotlin': ('tree_sitter_kotlin', 'language'),
+        'c_sharp': ('tree_sitter_c_sharp', 'language'),
     }
 
     # Node types that represent symbol definitions (cross-language)
@@ -110,6 +125,13 @@ class TreeSitterParser:
         'interface_declaration': 'interface',
         'trait_item': 'interface',             # Rust
         'protocol_declaration': 'interface',   # Swift
+    }
+
+    # Ruby's grammar names its definitions after their keywords. JavaScript's and
+    # TypeScript's grammars have a `class` node too, a class expression, so these count
+    # in Ruby only.
+    LANGUAGE_SYMBOL_NODE_TYPES: Dict[str, Dict[str, str]] = {
+        'ruby': {'class': 'class', 'method': 'function', 'singleton_method': 'function'},
     }
 
     # Node types for relationship extraction
@@ -139,46 +161,35 @@ class TreeSitterParser:
         return self.SUPPORTED_LANGUAGES.get(extension)
 
     def _get_parser(self, lang_name: str):
-        """Get or create a cached parser for a language."""
-        if lang_name in self._parser_cache:
-            return self._parser_cache[lang_name]
+        """Get or create a cached parser for a language.
 
-        if _HAS_LANGUAGE_PACK:
-            try:
-                parser = get_parser(lang_name)
-                self._parser_cache[lang_name] = parser
-                return parser
-            except Exception as e:
-                logger.warning(f"Could not get parser for {lang_name}: {e}")
-                return None
-        else:
-            # Fallback to individual tree-sitter-{lang} packages
-            return self._get_parser_individual(lang_name)
+        A grammar that does not load is cached as None, so it is logged once and its
+        files report "No parser available" without importing it again for each one.
+        """
+        if lang_name not in self._parser_cache:
+            self._parser_cache[lang_name] = self._load_parser(lang_name)
+        return self._parser_cache[lang_name]
 
-    def _get_parser_individual(self, lang_name: str):
-        """Fallback: try individual tree-sitter-{lang} packages."""
-        import tree_sitter
-
-        # Map language names to their package module names
-        pkg_map = {
-            'python': 'tree_sitter_python',
-            'javascript': 'tree_sitter_javascript',
-            'typescript': 'tree_sitter_typescript',
-        }
-        pkg_name = pkg_map.get(lang_name)
-        if not pkg_name:
+    def _load_parser(self, lang_name: str):
+        """A parser over the grammar of ``lang_name``'s own installed package (GRAMMARS),
+        or None when it has none or it does not load. Nothing is downloaded."""
+        grammar = self.GRAMMARS.get(lang_name)
+        if grammar is None:
             return None
-
+        module_name, function_name = grammar
         try:
-            import importlib
-            mod = importlib.import_module(pkg_name)
-            lang = tree_sitter.Language(mod.language())
-            parser = tree_sitter.Parser(lang)
-            self._parser_cache[lang_name] = parser
-            return parser
-        except Exception as e:
-            logger.debug(f"Individual parser not available for {lang_name}: {e}")
+            language = getattr(importlib.import_module(module_name), function_name)()
+            return tree_sitter.Parser(tree_sitter.Language(language))
+        except (ImportError, AttributeError, TypeError, ValueError):
+            logger.exception("The %s grammar did not load from %s.%s()", lang_name, module_name, function_name)
             return None
+
+    def _symbol_type(self, node_type: str, lang_name: str) -> Optional[str]:
+        """The symbol type a ``node_type`` node defines in ``lang_name``, or None."""
+        symbol_type = self.SYMBOL_NODE_TYPES.get(node_type)
+        if symbol_type is None:
+            symbol_type = self.LANGUAGE_SYMBOL_NODE_TYPES.get(lang_name, {}).get(node_type)
+        return symbol_type
 
     def parse_file(self, file_path: str, content: str, repo_root: str = "") -> TreeSitterParseResult:
         """
@@ -261,7 +272,7 @@ class TreeSitterParser:
         """Recursively walk tree nodes to find symbol definitions."""
         node_type = node.type
 
-        if node_type in self.SYMBOL_NODE_TYPES:
+        if self._symbol_type(node_type, lang_name):
             symbol = self._node_to_symbol(node, file_path, content, content_lines, lang_name, parent_class)
             if symbol:
                 symbols.append(symbol)
@@ -288,7 +299,7 @@ class TreeSitterParser:
         if not name:
             return None
 
-        base_type = self.SYMBOL_NODE_TYPES[node.type]
+        base_type = self._symbol_type(node.type, lang_name)
         # Reclassify functions inside classes as methods
         if base_type == 'function' and parent_class:
             base_type = 'method'
@@ -330,9 +341,11 @@ class TreeSitterParser:
 
     def _get_node_name(self, node, lang_name: str) -> Optional[str]:
         """Extract the name from a definition node."""
-        # Look for 'name' or 'declarator' child
+        # Look for 'name' or 'declarator' child. Ruby names a class with a constant,
+        # and Swift a function with a simple_identifier.
         for child in node.children:
-            if child.type in ('identifier', 'name', 'property_identifier', 'type_identifier'):
+            if child.type in ('identifier', 'name', 'property_identifier', 'type_identifier', 'constant',
+                              'simple_identifier'):
                 return child.text.decode('utf-8')
             # function_declarator in C/C++
             if child.type == 'function_declarator':
@@ -590,7 +603,7 @@ class TreeSitterParser:
     ):
         """Recursively extract function/method call relationships."""
         # Track which scope we're in
-        if node.type in self.SYMBOL_NODE_TYPES:
+        if self._symbol_type(node.type, lang_name):
             name = self._get_node_name(node, lang_name)
             if name:
                 current_scope = f"{file_path}::{name}"

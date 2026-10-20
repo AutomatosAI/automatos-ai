@@ -37,6 +37,9 @@ class CtoPromptBuilder:
         memories: Optional[List[str]] = None,
         tool_names: Optional[List[str]] = None,
         platform_state: Optional[Dict[str, Any]] = None,
+        db_session: Any = None,
+        workspace_id: Any = None,
+        widget_mode: bool = False,
     ) -> str:
         """
         Build the complete CTO system prompt.
@@ -49,7 +52,18 @@ class CtoPromptBuilder:
             memories: Retrieved memory strings
             tool_names: Available tool names
             platform_state: Live platform metrics (workspace count, agent count, etc.)
+            db_session: SQLAlchemy session the rule's public name is read through
+            workspace_id: The workspace the agent acts for; with ``db_session`` the rule names
+                its business profile's company name, else its public workspace name (FR-15),
+                the same way ContextService's prompt does
+            widget_mode: A public widget visitor's turn: the rule names only the Site's public
+                ``display_name``, never the workspace's (FR-15)
+
+        PRD-264 EUAI-11a: the prompt ends with the platform rule that the agent answers
+        truthfully that it is an AI, after the soul document, so the soul can't remove it.
         """
+        from modules.context.ai_identity_rule import principal_for_turn, with_ai_identity_rule
+
         now = datetime.now(timezone.utc)
         time_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -90,27 +104,33 @@ class CtoPromptBuilder:
 
         # ── 5. Tool Descriptions ──
         if tool_names:
-            # Categorize for readability
-            admin_tools = [t for t in tool_names if t.startswith("admin_")]
-            platform_tools = [t for t in tool_names if t.startswith("platform_")]
-            code_tools = [t for t in tool_names if "code" in t or "search" in t]
-            other_tools = [t for t in tool_names if t not in admin_tools + platform_tools + code_tools]
-
-            tool_parts = ["## My Tools"]
-            if admin_tools:
-                tool_parts.append(f"**Admin:** {', '.join(admin_tools)}")
-            if platform_tools:
-                tool_parts.append(f"**Platform:** {', '.join(platform_tools)}")
-            if code_tools:
-                tool_parts.append(f"**Code & Search:** {', '.join(code_tools)}")
-            if other_tools:
-                tool_parts.append(f"**Other:** {', '.join(other_tools)}")
-            parts.append("\n".join(tool_parts))
+            parts.append(CtoPromptBuilder._tool_descriptions(tool_names))
 
         # ── 6. Response Rules (Admin/CTO version) ──
         parts.append(CtoPromptBuilder._response_rules())
 
-        return "\n\n".join(parts)
+        # ── 7. The platform AI rule, last (PRD-264) ──
+        principal = principal_for_turn(db_session, workspace_id, widget_mode)
+        return with_ai_identity_rule("\n\n".join(parts), principal)
+
+    @staticmethod
+    def _tool_descriptions(tool_names: List[str]) -> str:
+        """The "My Tools" block: the tool names grouped for readability."""
+        admin_tools = [t for t in tool_names if t.startswith("admin_")]
+        platform_tools = [t for t in tool_names if t.startswith("platform_")]
+        code_tools = [t for t in tool_names if "code" in t or "search" in t]
+        other_tools = [t for t in tool_names if t not in admin_tools + platform_tools + code_tools]
+
+        tool_parts = ["## My Tools"]
+        if admin_tools:
+            tool_parts.append(f"**Admin:** {', '.join(admin_tools)}")
+        if platform_tools:
+            tool_parts.append(f"**Platform:** {', '.join(platform_tools)}")
+        if code_tools:
+            tool_parts.append(f"**Code & Search:** {', '.join(code_tools)}")
+        if other_tools:
+            tool_parts.append(f"**Other:** {', '.join(other_tools)}")
+        return "\n".join(tool_parts)
 
     @staticmethod
     def _response_rules() -> str:

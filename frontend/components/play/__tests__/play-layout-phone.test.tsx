@@ -1,8 +1,8 @@
 /**
  * PRD-260 P260-FX-25 (M69) — one width source for Play. The five places that
- * pick Play's version or the core's (MainLayout, PlayRouteSwitch through the
+ * pick Play's version or the core's (MainLayout, ThemeSlot through the
  * chat layout, the 404, the Play-only pages /looks and /looks/style, and
- * Conversations) read usePlayLayout, which knows the width on a browser
+ * Conversations) read useThemeLayout, which knows the width on a browser
  * mount's first render. useIsTabletOrBelow starts false, so under Play on a
  * phone each of them used to mount Play's version for one render before the
  * width flipped it: Play's chat opened a linked conversation and the event
@@ -113,13 +113,23 @@ vi.mock('@/components/ui/sheet', () => ({
 }))
 
 // Play's slots as they are once their chunks have loaded: the screen renders in the same pass.
-vi.mock('@/components/play/chat/play-chat-lazy', async () => ({
-  PlayChat: (await import('@/components/play/chat/play-chat')).PlayChat,
+// The chat's slot (builtin Play's, lib/theme-host/builtin/play-chat-lazy.tsx: the real PlayChat in
+// MainLayout, full bleed, PRD-261 A-14a) reads them from a holder the imports below fill. Its factory
+// may not import them itself: MainLayout reaches this slot through the builtin registrations
+// (theme-slot-registrations -> builtin/slots -> play-slots, PRD-261 A-04b), so a factory awaiting
+// MainLayout waits on the factory: the file never loads.
+const loadedChat = vi.hoisted(() => ({ PlayChat: null as null | (() => React.ReactElement | null) }))
+vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({
+  PlayChat: () => {
+    const Screen = loadedChat.PlayChat
+    if (Screen === null) throw new Error('play-chat has not loaded: the test imports it below')
+    return <Screen />
+  },
 }))
-vi.mock('@/components/play/shell/play-frame-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-frame-lazy', async () => ({
   PlayFrame: (await import('@/components/play/shell/play-frame')).PlayFrame,
 }))
-vi.mock('@/components/play/edges/lost-screen-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-lost-screen-lazy', async () => ({
   LostScreen: (await import('@/components/play/edges/lost-screen')).LostScreen,
 }))
 
@@ -128,14 +138,20 @@ import LooksPage from '@/app/looks/page'
 import LookStylePage from '@/app/looks/style/page'
 import NotFound from '@/app/not-found'
 import { MainLayout } from '@/components/layout/main-layout'
-import { WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { WIDER_SCREEN_NOTE } from '@/lib/theme-host/builtin/play-only-route'
 import { MASCOT_LABEL } from '@/components/looks/style/style-mascots'
-import { OPENING } from '@/components/play/chat/play-chat'
+import { OPENING, PlayChat } from '@/components/play/chat/play-chat'
 import { PlayConversations } from '@/components/play/conversations/play-conversations'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION } from '@/lib/ui-style'
+
+loadedChat.PlayChat = () => (
+  <MainLayout fullBleed>
+    <PlayChat />
+  </MainLayout>
+)
 
 const CHAT_PAGE = 'The core chat page'
 const STUDIO_PAGE = 'A Studio page Play has no design for'

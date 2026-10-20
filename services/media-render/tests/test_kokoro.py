@@ -1,5 +1,7 @@
 """Kokoro speaks inside the image: one line, one WAV, longer than 0.5 s (US-101),
-with the voiced segments on-screen text lands on (US-102).
+with the voiced segments on-screen text lands on (US-102). Synthesis runs no exiftool
+and writes no mark (PRD-264 EUAI-06a): a render's voice step is timed in CI, and the
+WAVs that leave the service are marked by POST /tts (test_provenance*.py).
 
 This loads the real 310 MB model through the image's espeak-ng data, so it
 also proves the data moved to the short path works end to end.
@@ -12,6 +14,7 @@ a fixed English sentence as the package's full data gave the build.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import espeakng_loader
@@ -20,6 +23,7 @@ import soundfile
 from kokoro_onnx.config import EspeakConfig
 from kokoro_onnx.tokenizer import Tokenizer
 
+from media_render import provenance
 from media_render.config import load_settings
 from media_render.espeak_build import LANGUAGES
 from media_render.kokoro_tts import synthesize_line
@@ -39,6 +43,29 @@ def test_kokoro_synthesises_one_line(tmp_path):
     assert rate == spoken.sample_rate
     assert len(samples) / rate > 0.5
     assert float(abs(samples).max()) > 0.01, "the line is silent"
+
+
+def test_speaking_a_line_runs_no_exiftool_and_writes_no_mark(tmp_path, monkeypatch):
+    """EUAI-06a: the mark is not paid for inside the timed voice step; the WAV comes out unmarked."""
+    settings = load_settings()
+    real_run = subprocess.run
+    ran = []
+
+    def watched(argv, *args, **kwargs):
+        ran.append(list(argv) if isinstance(argv, (list, tuple)) else [argv])
+        return real_run(argv, *args, **kwargs)
+
+    def no_mark(*args, **kwargs):
+        raise AssertionError("synthesize_line marked its WAV")
+
+    monkeypatch.setattr(subprocess, "run", watched)
+    monkeypatch.setattr(provenance, "mark", no_mark)
+    spoken = synthesize_line("No mark inside the timed step.", tmp_path / "l01.wav", settings)
+    monkeypatch.undo()
+    exiftool = Path(settings.exiftool_bin).name
+    assert [argv for argv in ran if argv and Path(str(argv[0])).name == exiftool] == []
+    assert provenance.read_source_type(spoken.path, exiftool_bin=settings.exiftool_bin, timeout_seconds=60) is None
+    assert provenance.XMP_CHUNK not in spoken.path.read_bytes(), "the WAV carries an XMP chunk"
 
 
 def test_a_line_with_pauses_has_a_segment_per_phrase(tmp_path):

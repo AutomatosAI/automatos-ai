@@ -10,7 +10,6 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
 - [frontend/components/settings/SystemLLMSettingsTab.tsx](frontend/components/settings/SystemLLMSettingsTab.tsx)
 - [frontend/components/settings/SystemSettingsTab.tsx](frontend/components/settings/SystemSettingsTab.tsx)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/alembic/versions/prd136_collapse_llm_tiers.py](orchestrator/alembic/versions/prd136_collapse_llm_tiers.py)
 - [orchestrator/api/workspaces.py](orchestrator/api/workspaces.py)
 - [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)

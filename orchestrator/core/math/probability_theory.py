@@ -58,9 +58,11 @@ class ProbabilityTheory:
         if n < 30:
             # Use t-distribution for small samples
             try:
-                from scipy import stats
+                # Student's t quantile, what scipy.stats.t.ppf returns: scipy.stats is not in
+                # the API image (PRD-262 row #17), scipy.special is.
+                from scipy.special import stdtrit
                 degrees_of_freedom = n - 1
-                t_critical = stats.t.ppf((1 + confidence_level) / 2, degrees_of_freedom)
+                t_critical = stdtrit(degrees_of_freedom, (1 + confidence_level) / 2)
                 margin_of_error = t_critical * standard_error
             except ImportError:
                 # Fallback without scipy

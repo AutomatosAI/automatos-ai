@@ -1,5 +1,5 @@
-import { TEXT_SPECIMENS, displayLine, displaySpecimens } from '@/lib/looks/style'
-import type { Look } from '@/lib/looks/types'
+import { TEXT_SPECIMENS, displayLine, displaySpecimens } from '../../../lib/looks/style'
+import type { Look } from '../../../lib/looks/types'
 
 import styles from './style.module.css'
 import typeStyles from './type.module.css'

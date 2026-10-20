@@ -25,6 +25,9 @@ const SHIMS_THE_THEME_IMPORTS = ['react.js', 'react-jsx-runtime.js', 'react-dom.
 const SAFE_MODE_PATH = `${THEME_E2E_PATH}?safe_mode=themes`
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const ACTIVE_PATH = '/api/themes/active'
+const ACTIVE_ROUTE = '**/api/themes/active'
+/** GET /api/themes/active for a member whose choice is Classic (A-07b). */
+const CLASSIC_CHOICE = { choice: 'classic', theme: null }
 const WORKSPACE_PATH = '/api/workspaces/current'
 const PAGE_ERROR_TEST_ID = 'theme-page-error'
 // The /agents page renders the roster total as text, so an object there throws while the page
@@ -83,6 +86,15 @@ async function expectStudioFallback(page: Page, reason: string): Promise<void> {
  */
 function waitForWorkspace(page: Page): Promise<unknown> {
   return page.waitForResponse((response) => response.url().endsWith(WORKSPACE_PATH) && response.request().method() === 'GET')
+}
+
+/** The URLs of the page's GET requests (a preflight is an OPTIONS, not a request for a theme). */
+function watchGets(page: Page): string[] {
+  const gets: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'GET') gets.push(request.url())
+  })
+  return gets
 }
 
 function hostGlobalType(page: Page): Promise<string> {
@@ -268,16 +280,22 @@ test.describe('the theme host', () => {
 
   // A-04a: the host is off under every style but an installed theme's, and off writes no status
   // on <html> (the spike wrote 'off' here because only its build carried the host).
+  // A-02c (PA-12): the server holds the choice, so a Classic tab asks GET /api/themes/active once,
+  // and that is its only theme request. A server naming an install would move the tab onto it
+  // (specs/theme-choice.spec.ts), so the server here agrees with the cookie: Classic.
   test('loads no theme code under Classic', { tag: '@host' }, async ({ page }) => {
-    const watch = watchPage(page)
     await chooseStyle(page, 'classic', APP_URL)
-    await serveHelloTheme(page, 'ok')
+    await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, CLASSIC_CHOICE))
     const appRan = waitForWorkspace(page)
+    const gets = watchGets(page)
+    const choiceChecked = page.waitForResponse((response) => new URL(response.url()).pathname === ACTIVE_PATH && response.request().method() === 'GET')
     await page.goto(THEME_E2E_PATH)
     await appRan
+    await choiceChecked
     await expect(page.locator('html')).not.toHaveAttribute(STATUS_ATTR)
     await expect(page.locator('html')).not.toHaveClass(STUDIO_CLASS)
-    expect(themeRequestPaths(watch.requests)).toEqual([])
+    // A cross-origin preflight (OPTIONS) is not a request for a theme: the GETs are counted.
+    expect(themeRequestPaths(gets)).toEqual([ACTIVE_PATH])
     expect(await hostGlobalType(page)).toBe('undefined')
   })
 })

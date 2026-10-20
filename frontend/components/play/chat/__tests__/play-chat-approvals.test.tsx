@@ -45,7 +45,12 @@ vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connec
 // PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
 // It also asks the history again when a turn ends (P260-FX-10, proved in play-chat.test.tsx); no history list here.
-vi.mock('@/hooks/use-refresh-history-on-turn-end', () => ({ useRefreshHistoryOnTurnEnd: vi.fn() }))
+// Keep the real module (the SDK's chat area builds its history query keys from CHAT_HISTORY_QUERY_PREFIX
+// when it loads); only the hook is replaced.
+vi.mock('@/hooks/use-refresh-history-on-turn-end', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-refresh-history-on-turn-end')>()),
+  useRefreshHistoryOnTurnEnd: vi.fn(),
+}))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
@@ -190,7 +195,9 @@ const reply = (): HTMLElement => {
   const replies = screen.getAllByRole('article', { name: 'Auto said' })
   return replies[replies.length - 1]
 }
-const cards = () => within(reply()).getByRole('region', { name: APPROVALS_LABEL })
+const cardsNow = () => within(reply()).getByRole('region', { name: APPROVALS_LABEL })
+/** The reply's approvals region once it is on screen: on a slow runner it renders a tick after its data part. */
+const cards = () => waitFor(cardsNow)
 const data = (part: unknown) => act(() => chat.options?.onData(part))
 const click = (button: HTMLElement) => act(async () => {
   fireEvent.click(button)
@@ -225,7 +232,7 @@ describe('an action that needs approval (tool_approval)', () => {
   it("renders the core's 'Action approval needed' card inside the reply: the action, its oversight and its params", async () => {
     await renderTurn()
     data(toolData({ tool_approval: TOOL_APPROVAL }))
-    const card = cards()
+    const card = await cards()
     expect(within(card).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
     expect(within(card).getAllByText('platform_delete_document').length).toBeGreaterThan(0)
     expect(within(card).getByText(/deletes data/)).toBeInTheDocument()
@@ -242,10 +249,10 @@ describe('an action that needs approval (tool_approval)', () => {
     expect(auto()).toHaveAttribute('data-state', 'listening')
     expect(auto()).toHaveTextContent(AWAITING_ANSWER)
 
-    await click(within(cards()).getByRole('button', { name: /approve & run/i }))
+    await click(within(await cards()).getByRole('button', { name: /approve & run/i }))
     expect(grants.grant).toHaveBeenCalledWith(42)
     expect(grants.deny).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(cards()).getByRole('status')).toHaveTextContent(/the action ran/i))
+    await waitFor(() => expect(within(cardsNow()).getByRole('status')).toHaveTextContent(/the action ran/i))
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
   })
 
@@ -254,10 +261,10 @@ describe('an action that needs approval (tool_approval)', () => {
     const view = await renderTurn()
     data(toolData({ tool_approval: TOOL_APPROVAL }))
     finishTurn(view)
-    await click(within(cards()).getByRole('button', { name: /deny/i }))
+    await click(within(await cards()).getByRole('button', { name: /deny/i }))
     expect(grants.deny).toHaveBeenCalledWith(42)
     expect(grants.grant).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(cards()).getByRole('status')).toHaveTextContent(/will not run/i))
+    await waitFor(() => expect(within(cardsNow()).getByRole('status')).toHaveTextContent(/will not run/i))
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
   })
 
@@ -266,9 +273,9 @@ describe('an action that needs approval (tool_approval)', () => {
     const view = await renderTurn()
     data(toolData({ tool_approval: TOOL_APPROVAL }))
     finishTurn(view)
-    await click(within(cards()).getByRole('button', { name: /approve & run/i }))
+    await click(within(await cards()).getByRole('button', { name: /approve & run/i }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to approve the action'))
-    expect(within(cards()).getByRole('button', { name: /approve & run/i })).toBeInTheDocument()
+    expect(within(await cards()).getByRole('button', { name: /approve & run/i })).toBeInTheDocument()
     expect(auto()).toHaveAttribute('data-state', 'listening')
   })
 
@@ -276,7 +283,7 @@ describe('an action that needs approval (tool_approval)', () => {
     const view = await renderTurn()
     data(toolData({ tool_approval: TOOL_APPROVAL }))
     finishTurn(view)
-    await click(within(cards()).getByRole('button', { name: 'Close' }))
+    await click(within(await cards()).getByRole('button', { name: 'Close' }))
     expect(within(reply()).queryByRole('region', { name: APPROVALS_LABEL })).toBeNull()
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
   })
@@ -286,7 +293,7 @@ describe('a Mission plan that needs approval (mission_approval)', () => {
   it("renders the core's plan card: the goal, its tasks in order and the oversight", async () => {
     await renderTurn()
     data(toolData({ mission_approval: MISSION_APPROVAL }))
-    const card = cards()
+    const card = await cards()
     expect(within(card).getByText(MISSION_APPROVAL_TITLE)).toBeInTheDocument()
     expect(within(card).getByText('Refund the customer and email them')).toBeInTheDocument()
     expect(within(card).getByText(/2 tasks/)).toBeInTheDocument()
@@ -303,7 +310,7 @@ describe('a Mission plan that needs approval (mission_approval)', () => {
     data(toolData({ mission_approval: MISSION_APPROVAL }))
     finishTurn(view)
     expect(auto()).toHaveAttribute('data-state', 'listening')
-    await click(within(cards()).getByRole('button', { name: /approve & run/i }))
+    await click(within(await cards()).getByRole('button', { name: /approve & run/i }))
     expect(missions.approve).toHaveBeenCalledWith({ id: 'm-1', body: {} })
     await waitFor(() => expect(within(reply()).queryByRole('region', { name: APPROVALS_LABEL })).toBeNull())
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
@@ -314,7 +321,7 @@ describe('a Mission plan that needs approval (mission_approval)', () => {
     const view = await renderTurn()
     data(toolData({ mission_approval: MISSION_APPROVAL }))
     finishTurn(view)
-    await click(within(cards()).getByRole('button', { name: /reject/i }))
+    await click(within(await cards()).getByRole('button', { name: /reject/i }))
     expect(missions.reject).toHaveBeenCalledWith({ id: 'm-1', body: { reason: 'Rejected from chat' } })
     expect(missions.approve).not.toHaveBeenCalled()
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
@@ -325,10 +332,10 @@ describe('a Mission plan that needs approval (mission_approval)', () => {
     const view = await renderTurn()
     data(toolData({ mission_approval: MISSION_APPROVAL, tool_approval: TOOL_APPROVAL }))
     finishTurn(view)
-    await click(within(cards()).getByRole('button', { name: /reject/i }))
-    await waitFor(() => expect(within(cards()).queryByText(MISSION_APPROVAL_TITLE)).toBeNull())
+    await click(within(await cards()).getByRole('button', { name: /reject/i }))
+    await waitFor(() => expect(within(cardsNow()).queryByText(MISSION_APPROVAL_TITLE)).toBeNull())
     expect(auto()).toHaveAttribute('data-state', 'listening')
-    await click(within(cards()).getByRole('button', { name: 'Close' }))
+    await click(within(await cards()).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
   })
 })
@@ -359,7 +366,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
     data(toolData({ tool_approval: TOOL_APPROVAL }))
     finishTurn(view)
     await openAgain(view, 'c1', [QUESTION, autoMessage('m2', 'That needs your OK first.')])
-    expect(within(cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    expect(within(await cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBeNull()
   })
 
@@ -374,7 +381,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
     useChatSessionStore.setState({ session: SESSION })
 
     const again = await renderTurn()
-    await click(within(cards()).getByRole('button', { name: 'Close' }))
+    await click(within(await cards()).getByRole('button', { name: 'Close' }))
     await openAgain(again, 'c1', [QUESTION, STORED_REPLY])
     expect(screen.queryByText(TOOL_APPROVAL_TITLE)).toBeNull()
   })
@@ -386,7 +393,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
     await screen.findAllByRole('article', { name: 'Auto said' })
     data(toolData({ tool_approval: TOOL_APPROVAL }))
     act(() => chat.options?.onChatIdUpdate('c9'))
-    expect(within(cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    expect(within(await cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
     finishTurn(view)
 
     await openAgain(view, 'c9', [QUESTION, STORED_REPLY])

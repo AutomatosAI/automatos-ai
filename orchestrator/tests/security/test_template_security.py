@@ -12,27 +12,12 @@ any network/weasyprint import).
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import pathlib
-import sys as _sys
 from unittest.mock import MagicMock
 
 import pytest
 
 ORCH = pathlib.Path(__file__).resolve().parents[2]
-
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 
 # --- SSTI: SandboxedEnvironment renders dangerous payloads inert ---------------

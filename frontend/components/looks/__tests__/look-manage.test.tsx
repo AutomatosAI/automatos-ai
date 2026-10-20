@@ -24,6 +24,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
 }))
+// PRD-261 A-04b: builtin Play's look editor comes through its lazy slot (lookEditor@1); here as it
+// is once its chunk has loaded, so the screen renders in the same pass (and on the server).
+vi.mock('@/lib/theme-host/builtin/play-looks-lazy', async () => ({
+  LooksScreen: (await import('@/components/looks/looks-screen')).LooksScreen,
+}))
 
 import { exportStarted } from '@/components/looks/look-manager'
 import { LOOKS_NOT_KEPT } from '@/components/looks/look-notice'

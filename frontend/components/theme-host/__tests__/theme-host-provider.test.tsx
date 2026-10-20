@@ -6,14 +6,23 @@
  * install, falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders
  * cleanly), cleans the theme up when the style changes or it unmounts, and runs loads one after
  * another so a cancelled load cannot strip the live one's look.
+ *
+ * A-04c: the theme's own failures are recorded per theme; the third within ten minutes sends the
+ * member back to Studio (the server choice, the cookie, the style, a notice that outlives the
+ * host's), `auth` never counts, and /safe-mode is safe mode.
+ *
+ * W-A6b (gap G1): the host releases the installed theme's registry entry (the style context's
+ * releaseInstalledTheme) when it cannot run the theme, and holds it while it loads or runs it.
  */
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { THEME_NOTICE_ID } from '@/lib/theme-host/constants'
+import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
+import { SAFE_MODE_STORAGE_KEY, THEME_NOTICE_ID } from '@/lib/theme-host/constants'
+import { FAILURE_LEDGER_KEY } from '@/lib/theme-host/failure-ledger'
 import type { SlotId } from '@/lib/theme-host/registry-types'
-import type { SpikeManifest, ThemeLoadResult } from '@/lib/theme-host/types'
+import type { SpikeManifest, ThemeFailureReason, ThemeLoadResult } from '@/lib/theme-host/types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 
 const INSTALLED_STYLE: UiStyle = 'theme:install:00000000-0000-4000-8000-00000000e2e1'
@@ -22,12 +31,18 @@ const OTHER_INSTALLED_STYLE: UiStyle = 'theme:install:00000000-0000-4000-8000-00
 const mocks = vi.hoisted(() => ({
   style: { current: 'studio' as string | null },
   loadThemeForStyle: vi.fn(),
-  toast: Object.assign(vi.fn(), { error: vi.fn(), dismiss: vi.fn() }),
+  setStyle: vi.fn(),
+  releaseInstalledTheme: vi.fn(),
+  putThemeChoice: vi.fn(),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }),
 }))
 
 vi.mock('@/contexts/ui-style-context', () => ({
-  useUiStyleOptional: () => (mocks.style.current === null ? null : { style: mocks.style.current }),
+  useUiStyleOptional: () => (mocks.style.current === null
+    ? null
+    : { style: mocks.style.current, setStyle: mocks.setStyle, releaseInstalledTheme: mocks.releaseInstalledTheme }),
 }))
+vi.mock('@/lib/api-client', () => ({ apiClient: { putThemeChoice: mocks.putThemeChoice } }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 vi.mock('@/lib/theme-host/sources', () => ({ loadThemeForStyle: mocks.loadThemeForStyle }))
 vi.mock('framer-motion', () => ({
@@ -36,8 +51,17 @@ vi.mock('framer-motion', () => ({
 
 import { PageHeader } from '@/components/shared/page-header'
 import { PAGE_HEADER_MASCOT_SLOT, PLACEMENT_SLOT_ATTR } from '../placement-slot'
-import { THEME_FALLBACK_NOTICE, THEME_SAFE_MODE_NOTICE, ThemeHostProvider } from '../theme-host-provider'
+import {
+  SAFE_MODE_ADD_CLASSES,
+  THEME_FALLBACK_NOTICE,
+  THEME_REVERT_NOTICE_ID,
+  THEME_REVERTED_NOTICE,
+  THEME_REVOKED_WARNING_NOTICE,
+  THEME_SAFE_MODE_NOTICE,
+  ThemeHostProvider,
+} from '../theme-host-provider'
 import { useThemeHost } from '../theme-host-context'
+import { useActiveThemeSlots } from '../theme-slot-registrations'
 
 const HOST_GLOBAL = '__AUTOMATOS_THEME_HOST__'
 const MANIFEST: SpikeManifest = {
@@ -123,14 +147,22 @@ function hostStatus(): string | null {
 beforeEach(() => {
   mocks.style.current = INSTALLED_STYLE
   mocks.loadThemeForStyle.mockReset()
+  mocks.setStyle.mockReset()
+  mocks.releaseInstalledTheme.mockReset()
+  mocks.putThemeChoice.mockReset()
+  mocks.putThemeChoice.mockResolvedValue({ choice: 'studio', theme: null })
   mocks.toast.mockReset()
   mocks.toast.error.mockReset()
+  mocks.toast.warning.mockReset()
   mocks.toast.dismiss.mockReset()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
+  // A-04c: every failed load is recorded in localStorage; each test starts with no failures.
+  window.localStorage.clear()
+  document.cookie = 'automatos-style=; Path=/; Max-Age=0'
   window.history.replaceState(null, '', '/')
 })
 
@@ -297,6 +329,104 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
   })
 })
 
+describe("PRD-261 W-A6b — the installed theme's registry entry stands only while the host runs the theme", () => {
+  function lastRelease(): unknown {
+    const calls = mocks.releaseInstalledTheme.mock.calls
+    return calls.length === 0 ? undefined : calls[calls.length - 1][0]
+  }
+
+  it('holds it while the theme loads and once it runs', async () => {
+    const pending = deferred<ThemeLoadResult>()
+    mocks.loadThemeForStyle.mockReturnValue(pending.promise)
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('loading'))
+    expect(mocks.releaseInstalledTheme).toHaveBeenCalledWith(null)
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+    await act(async () => pending.resolve(okResult()))
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(lastRelease()).toBeNull()
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+  })
+
+  it('releases it when the load fails', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: 'load', detail: 'refused' })
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it in safe mode', async () => {
+    window.history.replaceState(null, '', '/agents?safe_mode=themes')
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it when the server names no theme to run for the install', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: null, detail: 'no active install' })
+    render(app())
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('names nothing under a style with no installed theme', async () => {
+    mocks.style.current = 'studio'
+    render(app())
+    await act(async () => undefined)
+    expect(lastRelease()).toBeNull()
+  })
+})
+
+describe('PRD-261 A-04b seam — ThemeHostProvider hands the theme\'s pages and routes to the slots', () => {
+  function HelloRoute() {
+    return <p>hello route</p>
+  }
+
+  function ChatPage() {
+    return <p>theme chat</p>
+  }
+
+  /** What ThemeSlot and ThemeSlotRoute read: the registrations useActiveThemeSlots hands them. */
+  function SlotsProbe() {
+    const { registrations } = useActiveThemeSlots()
+    if (registrations === null) return <p>no registrations</p>
+    const Route = registrations.routes.get('hello') as React.ComponentType | undefined
+    const Page = registrations.pages.get('/chat') as React.ComponentType | undefined
+    return <div>{Route ? <Route /> : <p>no route</p>}{Page ? <Page /> : <p>no page</p>}</div>
+  }
+
+  it("hands registerRoute's routes and registerPage's pages from the loaded theme", async () => {
+    const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
+    const routes = new Map<string, unknown>([['hello', HelloRoute]])
+    const pages = new Map<string, unknown>([['/chat', ChatPage]])
+    mocks.loadThemeForStyle.mockResolvedValue({ ...loaded, routes, pages })
+    render(<ThemeHostProvider><SlotsProbe /></ThemeHostProvider>)
+    expect(await screen.findByText('hello route')).toBeInTheDocument()
+    expect(screen.getByText('theme chat')).toBeInTheDocument()
+  })
+})
+
+describe('PRD-261 seam — a warn revocation of the running theme', () => {
+  it('keeps the theme active and shows the warning with the maintainer\'s reason', async () => {
+    const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
+    mocks.loadThemeForStyle.mockResolvedValue({ ...loaded, revoked: { level: 'warn', reason: 'Update soon.' } })
+    render(app())
+    await screen.findByTestId('f')
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(mocks.toast.warning).toHaveBeenCalledWith(
+      THEME_REVOKED_WARNING_NOTICE,
+      expect.objectContaining({ id: THEME_NOTICE_ID, description: 'Update soon.' }),
+    )
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+  })
+
+  it('shows no warning for a theme with no revocation', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue(okResult())
+    render(app())
+    await screen.findByTestId('f')
+    expect(mocks.toast.warning).not.toHaveBeenCalled()
+  })
+})
+
 describe('PRD-261 A-12b — ThemeHostProvider hands the theme\'s placement slots to PageHeader', () => {
   function HeaderMascot({ title }: { title: string }) {
     return <span data-testid="header-mascot">{title}</span>
@@ -325,5 +455,147 @@ describe('PRD-261 A-12b — ThemeHostProvider hands the theme\'s placement slots
     await act(async () => undefined)
     expect(container.querySelector(`[${PLACEMENT_SLOT_ATTR}]`)).toBeNull()
     expect(mocks.loadThemeForStyle).not.toHaveBeenCalled()
+  })
+})
+
+describe('PRD-261 A-04c — three failures in ten minutes send the member back to Studio', () => {
+  const MINUTE_MS = 60_000
+
+  /** One page load that fails with `reason`: mount, wait for the fallback, unmount (as a reload does). */
+  async function failOnce(reason: ThemeFailureReason): Promise<void> {
+    mocks.loadThemeForStyle.mockResolvedValueOnce({ ok: false, reason, detail: `failed by the test (${reason})` })
+    const { unmount } = render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    unmount()
+  }
+
+  function seedFailures(times: readonly number[]): void {
+    window.localStorage.setItem(FAILURE_LEDGER_KEY, JSON.stringify({ [INSTALLED_STYLE]: times }))
+  }
+
+  function ledgerTimes(): unknown {
+    const ledger = JSON.parse(window.localStorage.getItem(FAILURE_LEDGER_KEY) ?? '{}') as Record<string, unknown>
+    return ledger[INSTALLED_STYLE]
+  }
+
+  /** Reports a render failure as soon as the theme is active, as the frame slot's boundary does. */
+  function FrameThrowsOnceActive() {
+    const host = useThemeHost()
+    useEffect(() => {
+      if (host?.status === 'active') host.reportRenderFailure(new Error('the frame threw'))
+    }, [host])
+    return null
+  }
+
+  it('two failures fall back and leave the choice alone', async () => {
+    await failOnce('load')
+    await failOnce('register')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(mocks.setStyle).not.toHaveBeenCalled()
+    expect(ledgerTimes()).toHaveLength(2)
+  })
+
+  it('the third reverts: the server choice, the cookie, the style and a notice of its own', async () => {
+    await failOnce('load')
+    await failOnce('look')
+    await failOnce('engines')
+    expect(mocks.putThemeChoice).toHaveBeenCalledTimes(1)
+    expect(mocks.putThemeChoice).toHaveBeenCalledWith('studio')
+    expect(mocks.setStyle).toHaveBeenCalledWith('studio')
+    expect(document.cookie).toContain('automatos-style=studio')
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      THEME_REVERTED_NOTICE,
+      expect.objectContaining({ id: THEME_REVERT_NOTICE_ID, duration: Infinity }),
+    )
+    // Its own id: the host turning off dismisses THEME_NOTICE_ID, never the revert's notice.
+    expect(THEME_REVERT_NOTICE_ID).not.toBe(THEME_NOTICE_ID)
+    expect(mocks.toast.dismiss).not.toHaveBeenCalledWith(THEME_REVERT_NOTICE_ID)
+    // The server took the choice, so the failures are forgotten.
+    await waitFor(() => expect(window.localStorage.getItem(FAILURE_LEDGER_KEY)).toBeNull())
+  })
+
+  it('counts a frame that throws while drawing (render)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    seedFailures([Date.now() - 2_000, Date.now() - 1_000])
+    mocks.loadThemeForStyle.mockResolvedValue(okResult())
+    render(
+      <ThemeHostProvider>
+        <FrameThrowsOnceActive />
+      </ThemeHostProvider>,
+    )
+    await waitFor(() => expect(mocks.putThemeChoice).toHaveBeenCalledWith('studio'))
+    expect(document.documentElement.getAttribute('data-theme-host-reason')).toBe('render')
+  })
+
+  it('never counts a refused session (auth), however often it happens', async () => {
+    await failOnce('auth')
+    await failOnce('auth')
+    await failOnce('auth')
+    await failOnce('auth')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(mocks.setStyle).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(FAILURE_LEDGER_KEY)).toBeNull()
+  })
+
+  it('forgets failures older than ten minutes', async () => {
+    const elevenMinutesAgo = Date.now() - 11 * MINUTE_MS
+    seedFailures([elevenMinutesAgo, elevenMinutesAgo + 1])
+    await failOnce('load')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(ledgerTimes()).toHaveLength(1)
+  })
+
+  it('records one failure per failed load, however often the provider renders again', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: 'load', detail: 'failed by the test' })
+    const { rerender } = render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    rerender(app())
+    rerender(app())
+    await act(async () => undefined)
+    expect(ledgerTimes()).toHaveLength(1)
+  })
+
+  it('keeps the failures when the server refuses the Studio choice, so the next failure tries again', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks.putThemeChoice.mockRejectedValue(new Error('HTTP 403: members may not choose'))
+    await failOnce('load')
+    await failOnce('load')
+    await failOnce('load')
+    await waitFor(() => expect(error).toHaveBeenCalledWith('[theme-host]', 'the Studio choice was not saved', expect.any(Error)))
+    expect(document.cookie).toContain('automatos-style=studio')
+    expect(ledgerTimes()).toHaveLength(3)
+    await failOnce('load')
+    expect(mocks.putThemeChoice).toHaveBeenCalledTimes(2)
+  })
+
+  it('safe mode takes the installed theme\'s first paint off <html> (the boot\'s classes and prepaint)', async () => {
+    const boot = document.createElement('script')
+    boot.type = 'application/json'
+    boot.id = THEME_BOOT_ELEMENT_ID
+    boot.textContent = JSON.stringify({ addClasses: [...SAFE_MODE_ADD_CLASSES, MANIFEST.htmlClass] })
+    document.head.appendChild(boot)
+    const root = document.documentElement
+    root.classList.add(MANIFEST.htmlClass)
+    root.style.setProperty('--background', '0 0% 0%')
+    window.history.replaceState(null, '', '/agents?safe_mode=themes')
+    try {
+      render(app())
+      await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+      expect(root.classList.contains(MANIFEST.htmlClass)).toBe(false)
+      SAFE_MODE_ADD_CLASSES.forEach((name) => expect(root.classList.contains(name)).toBe(true))
+      expect(root.style.getPropertyValue('--background')).toBe('')
+    } finally {
+      boot.remove()
+      root.className = ''
+      root.removeAttribute('style')
+    }
+  })
+
+  it('/safe-mode is safe mode: no load, and the tab remembers it', async () => {
+    window.history.replaceState(null, '', '/safe-mode')
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+    expect(mocks.loadThemeForStyle).not.toHaveBeenCalled()
+    expect(window.sessionStorage.getItem(SAFE_MODE_STORAGE_KEY)).toBe('1')
   })
 })

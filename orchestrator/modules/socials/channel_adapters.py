@@ -57,9 +57,9 @@ A source is ``$copy`` (the channel's copy), ``$title`` (the post's title),
 (the post's still), ``$option.<name>`` (the target's option, chosen in the composer
 or at publish), ``$steps.<id>`` (the ``id`` an earlier step returned: the
 account, upload, container or publish), ``$steps.<id>.<name>`` (another value it
-returned), ``$generated`` (true when a render recorded AI-made footage for the post,
-D12) or ``$idempotency_key`` (the target's own key, for an action that takes one; no
-seeded action does). A choice, ``{"choose", "among", "else"}``, takes ``choose``'s
+returned), ``$generated`` (true when the post carries AI media: AI footage, AI stills or a
+synthetic voice, from its render record, PRD-264 ``ai_media.py``) or ``$idempotency_key``
+(the target's own key, for an action that takes one; no seeded action does). A choice, ``{"choose", "among", "else"}``, takes ``choose``'s
 value when ``among`` (a list) holds it, else the first of ``else`` that ``among``
 holds. ``a|b`` takes the first that resolves, a
 list is a list parameter, and any other value is passed as it is.
@@ -432,7 +432,7 @@ CHANNEL_ADAPTERS = {
         "setup_note": None,
         "kinds": {
             # The privacy level is one the creator info allows, chosen at publish;
-            # is_aigc labels generated footage (or the person's own choice).
+            # is_aigc labels AI media (ai_media.py: footage, stills, a synthetic voice), or the person's own choice.
             "video": [
                 {
                     "id": "creator",
@@ -486,6 +486,7 @@ CHANNEL_ADAPTERS = {
                     "id": "upload",
                     "action": "YOUTUBE_UPLOAD_VIDEO",
                     "class": "publish",
+                    # PRD-264: its schema has no status.containsSyntheticMedia (ai_media.py): the receipt asks for Studio's.
                     "params": {
                         "title": "$title",
                         "description": "$copy",

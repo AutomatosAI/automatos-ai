@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-from qdrant_client.http.exceptions import UnexpectedResponse
 
+from core.qdrant.errors import UnexpectedResponse
 from modules.context.adapters import vector_field as vf
 
 FIELD = "field-7"

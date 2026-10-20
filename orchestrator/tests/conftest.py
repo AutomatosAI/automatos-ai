@@ -110,7 +110,7 @@ def _repair_stubbed_package_bindings():
     Many unit tests inject ``types.ModuleType`` stubs straight into
     ``sys.modules`` (for ``consumers``, ``consumers.chatbot``, ``modules``,
     ``modules.tools`` ...) to dodge a heavy package __init__ that pulls optional
-    deps (asyncpg / pdfplumber / tiktoken / camelot). A real ``import a.b`` binds
+    deps (asyncpg / pdfplumber / tiktoken). A real ``import a.b`` binds
     ``b`` as an attribute on package ``a``; a manual ``sys.modules['a.b'] = stub``
     does NOT. Worse, replacing ``sys.modules['a']`` with a bare stub drops every
     real child attribute it used to carry.
@@ -456,30 +456,3 @@ def new_session(engine):
     # Files with no sweep of their own must still not pin row locks for the
     # rest of the run -- a leak here would hang a LATER module's sweep.
     _release_sessions(created)
-
-
-@pytest.fixture
-def harness_ledger(monkeypatch):
-    """F156: an in-memory HARNESS task ledger, for suites that run HARNESS on fake
-    executors and databases. The real one (harness_task_ledger) is tested against
-    the database in test_f156_the_harness_ledger_is_in_the_database.py."""
-    from services.harness_service import HarnessService
-
-    class _Ledger:
-        def __init__(self):
-            self.applied, self.held, self.entries = set(), set(), []
-
-        def read(self, db, workspace_id):
-            return {"applied_task_ids": sorted(self.applied),
-                    "needs_approve_task_ids": sorted(self.held - self.applied)}
-
-        def write(self, db, workspace_id, newly_applied, newly_held):
-            for entry in newly_applied:
-                self.applied.add(str(entry["task_id"]))
-                self.entries.append(entry)
-            self.held |= {str(task_id) for task_id in newly_held}
-
-    ledger = _Ledger()
-    monkeypatch.setattr(HarnessService, "_read_applied_tasks", staticmethod(ledger.read))
-    monkeypatch.setattr(HarnessService, "_write_applied_tasks", staticmethod(ledger.write))
-    return ledger

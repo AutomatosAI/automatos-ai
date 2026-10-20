@@ -35,7 +35,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Isolation — stub consumers.chatbot package init + camelot
+# Isolation — stub consumers.chatbot package init
 # ---------------------------------------------------------------------------
 
 _ORCH = Path(__file__).resolve().parents[1]
@@ -47,8 +47,6 @@ for _pkg in ("consumers", "consumers.chatbot"):
         _stub = types.ModuleType(_pkg)
         _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
-
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 # Stub core.llm.manager — store_conversation calls _get_store_max_chars which
 # imports get_system_setting at call-time; the real module triggers DB / Redis

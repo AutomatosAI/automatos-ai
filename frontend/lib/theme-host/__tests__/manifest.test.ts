@@ -8,7 +8,16 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { parseActiveInstall, parseLookPreset, parseSpikeManifest, resolveUnderRoot, themeFilesRoot } from '../manifest'
+import {
+  PACKAGE_ENTRY_PATH,
+  PACKAGE_STYLE_PATH,
+  parseActiveInstall,
+  parseLookPreset,
+  parseSpikeManifest,
+  parseThemeManifest,
+  resolveUnderRoot,
+  themeFilesRoot,
+} from '../manifest'
 import { HTML_CLASS_OWNERS, RESERVED_HTML_CLASSES } from '../package-manifest'
 import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 
@@ -16,6 +25,11 @@ import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 const FIXTURES = path.resolve(__dirname, '../../../../e2e/browser/fixtures/hello-theme')
 const HELLO_MANIFEST = JSON.parse(readFileSync(path.join(FIXTURES, 'theme.json'), 'utf8')) as Readonly<Record<string, unknown>>
 const MISMATCHED_MANIFEST: unknown = JSON.parse(readFileSync(path.join(FIXTURES, 'theme.engines-mismatch.json'), 'utf8'))
+/** The real hello package (automatos-theme/v1), as the browser lane's hello.autotheme is built from it. */
+const PACKAGE_DIR = path.resolve(__dirname, '../../../../orchestrator/tests/fixtures/themes/hello')
+const readPackageJson = (file: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(path.join(PACKAGE_DIR, file), 'utf8')) as Record<string, unknown>
+const PACKAGE_MANIFEST = readPackageJson('theme.json')
 const DIGEST = '0123456789abcdef'.repeat(4)
 const OTHER_DIGEST = 'fedcba9876543210'.repeat(4)
 const ROOT = `/api/themes/files/${DIGEST}/`
@@ -125,7 +139,14 @@ describe('PRD-261 A-04a — parseActiveInstall', () => {
 
   it("takes the install's digest, files folder and manifest when it is the install the style names", () => {
     const parsed = parseActiveInstall(active(theme), INSTALL_ID)
-    expect(parsed).toEqual({ ok: true, digest: DIGEST, filesRoot: ROOT, manifest: HELLO_MANIFEST })
+    expect(parsed).toEqual({ ok: true, digest: DIGEST, filesRoot: ROOT, manifest: HELLO_MANIFEST, defaultLook: null })
+  })
+
+  it("carries the server's defaultLook when it is a string", () => {
+    const parsed = parseActiveInstall(active({ ...theme, defaultLook: 'night' }), INSTALL_ID)
+    expect(parsed.ok && parsed.defaultLook).toBe('night')
+    const odd = parseActiveInstall(active({ ...theme, defaultLook: 7 }), INSTALL_ID)
+    expect(odd.ok && odd.defaultLook).toBeNull()
   })
 
   it('refuses no theme, another install, a bad digest and an answer that is not an object', () => {
@@ -160,5 +181,58 @@ describe('PRD-261 A-01 — parseLookPreset', () => {
     if (!parsed.ok) return
     expect(parsed.preset.vars).toEqual({ '--hello-accent': '#2f6fed', '--hello-gap': '12px' })
     expect(Object.isFrozen(parsed.preset.vars)).toBe(true)
+  })
+})
+
+describe('PRD-261 A-06b — parseThemeManifest reads a real automatos-theme/v1 package', () => {
+  const root = `${window.location.origin}${ROOT}`
+
+  it("finds the hello package's entry, stylesheet and default look by the package layout", () => {
+    const parsed = parseThemeManifest(PACKAGE_MANIFEST, ROOT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.manifest).toMatchObject({
+      id: 'automatos-e2e/hello',
+      htmlClass: 'hello',
+      sdkRange: '^1.0.0',
+      slots: ['frame@1', 'lookEditor@1', 'styleSheet@1'],
+    })
+    expect(parsed.manifest.entry).toBe(`${root}${PACKAGE_ENTRY_PATH}`)
+    expect(parsed.manifest.styleSheet).toBe(`${root}${PACKAGE_STYLE_PATH}`)
+    expect(parsed.manifest.preset).toBe(`${root}looks/presets/default.look.json`)
+    for (const file of [PACKAGE_ENTRY_PATH, PACKAGE_STYLE_PATH, 'looks/presets/default.look.json']) {
+      expect(readFileSync(path.join(PACKAGE_DIR, file)).length, file).toBeGreaterThan(0)
+    }
+  })
+
+  it("uses the server's defaultLook when theme.json names no look, and refuses a theme with neither", () => {
+    const noLook = Object.fromEntries(Object.entries(PACKAGE_MANIFEST).filter(([field]) => field !== 'look'))
+    const parsed = parseThemeManifest(noLook, ROOT, 'night')
+    expect(parsed.ok && parsed.manifest.preset).toBe(`${root}looks/presets/night.look.json`)
+    expect(parseThemeManifest(noLook, ROOT).ok).toBe(false)
+    expect(parseThemeManifest(noLook, ROOT, '../night').ok).toBe(false)
+  })
+
+  it.each(['../x', 'a/b', 'a.b', '', 7, null])('refuses the look %j: it would leave the presets folder or name nothing', (look) => {
+    expect(parseThemeManifest({ ...PACKAGE_MANIFEST, look }, ROOT, 'default').ok).toBe(false)
+  })
+
+  it('ignores the spike file fields on a package: its files are where the layout puts them', () => {
+    const parsed = parseThemeManifest({ ...PACKAGE_MANIFEST, entry: 'evil.js', styleSheet: 'x.css', preset: 'p.json' }, ROOT)
+    expect(parsed.ok && parsed.manifest.entry).toBe(`${root}${PACKAGE_ENTRY_PATH}`)
+  })
+
+  it('keeps parseSpikeManifest as the same reader', () => {
+    expect(parseSpikeManifest).toBe(parseThemeManifest)
+  })
+
+  it("accepts the package's looks as presets that set no host variables", () => {
+    for (const id of ['default', 'night']) {
+      const parsed = parseLookPreset(readPackageJson(`looks/presets/${id}.look.json`))
+      expect(parsed.ok, id).toBe(true)
+      expect(parsed.ok && parsed.preset.vars, id).toEqual({})
+    }
+    expect(parseLookPreset({ schema: 'x/v1', id: '../x' }).ok).toBe(false)
+    expect(parseLookPreset({ schema: '', id: 'default' }).ok).toBe(false)
   })
 })

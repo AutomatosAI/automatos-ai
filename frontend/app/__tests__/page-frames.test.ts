@@ -17,13 +17,14 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 const APP = path.resolve(__dirname, '..')
-const COMPONENTS = path.resolve(__dirname, '..', '..', 'components')
+const FRONTEND = path.resolve(__dirname, '..', '..')
 
 /** Routes that legitimately carry no page header. */
 const NO_HEADER: Record<string, string> = {
   '/': 'redirects to the workspace entry point',
   '/chat': 'a conversation surface, not a document page',
-  '/conversations': "Play's Conversations: its title row heads the list's own column, as in the Play app (P260-FX-14, M35); Classic and Studio redirect to /chat",
+  '/conversations': 'redirects to /x/conversations under a theme that serves it (PRD-261 A-04b), else to /chat',
+  '/x/[...path]': "a theme's own route (registerRoute): the theme draws the page and its head; Play's Conversations heads the list's own column, as in the Play app (P260-FX-14, M35)",
   '/missions': 'redirects to the Assignments Missions tab',
   '/playbooks': 'redirects to the Assignments Playbooks tab',
   '/marketplace/widgets/[id]': 'item detail — the record’s own name is the title',
@@ -38,15 +39,18 @@ const NO_HEADER: Record<string, string> = {
   '/sign-up/[[...rest]]': 'Clerk flow',
 }
 
-const IMPORT = /import \{ ([A-Z][A-Za-z]+)[^}]*\} from ["']@\/components\/([^"']+)["']/g
+// A page's frame can come from a component under components/ or, for builtin Play's host-side pieces
+// (PRD-261 W-A5 moved PlayOnlyNote to lib/theme-host/builtin/), under lib/theme-host/.
+const IMPORT = /import \{ ([A-Z][A-Za-z]+)[^}]*\} from ["']@\/(components|lib\/theme-host)\/([^"']+)["']/g
 
 function framed(file: string, depth = 0): boolean {
   const src = readFileSync(file, 'utf8')
   if (src.includes('<PageHeader') || src.includes('className="cc-page"') || src.includes('cc-h1')) return true
   if (depth > 1) return false
-  for (const [, , rel] of src.matchAll(IMPORT)) {
+  for (const [, , root, rel] of src.matchAll(IMPORT)) {
     if (rel.includes('main-layout')) continue
-    for (const cand of [path.join(COMPONENTS, `${rel}.tsx`), path.join(COMPONENTS, rel, 'index.tsx')]) {
+    const base = path.join(FRONTEND, root)
+    for (const cand of [path.join(base, `${rel}.tsx`), path.join(base, rel, 'index.tsx')]) {
       if (existsSync(cand) && framed(cand, depth + 1)) return true
     }
   }

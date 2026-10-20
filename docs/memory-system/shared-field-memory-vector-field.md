@@ -68,7 +68,7 @@ graph TD
     subgraph CodeEntitySpace ["Code Entity Space"]
         B --> C["EmbeddingManager._embedder"]
         C --> D["VectorFieldSharedContext.store_pattern()"]
-        D --> E["Qdrant AsyncQdrantClient"]
+        D --> E["Qdrant REST client (core/qdrant)"]
         E --> F["Collection: field_memory"]
         F --> G["Payload Index: field_id & workspace_id"]
     end

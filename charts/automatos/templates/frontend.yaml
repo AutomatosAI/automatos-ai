@@ -24,7 +24,7 @@ spec:
       containers:
         - name: frontend
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.frontend.image) }}
-          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.frontend.image) }}
           env:
             # Server-side route handlers (the chat proxy) reach the API in-cluster.
             - name: BACKEND_INTERNAL_URL

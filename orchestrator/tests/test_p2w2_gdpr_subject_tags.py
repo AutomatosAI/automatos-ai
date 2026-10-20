@@ -6,7 +6,7 @@ delete over ``workspace_id AND subject_id`` (fail-closed tenancy). The gap ledge
 turns dynamic — SQL stays a documented gap, pre-tag rows an untagged-history
 caveat.
 
-Pure: ``AsyncQdrantClient`` is mocked at the boundary (the PRD-187 S1 shape); we
+Pure: the Qdrant client (``QdrantRestClient``) is mocked at the boundary (the PRD-187 S1 shape); we
 assert the payload the store writes and the FILTER the erase builds — no Qdrant,
 no network.
 """
@@ -57,14 +57,14 @@ def _fake_qdrant():
 
 
 def _make_durable(client) -> DurableMemoryStore:
-    with patch("modules.memory.durable_store.AsyncQdrantClient", return_value=client), \
+    with patch("modules.memory.durable_store.QdrantRestClient", return_value=client), \
          patch("modules.memory.durable_store.EmbeddingManager") as emb:
         emb.return_value.generate_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
         return DurableMemoryStore()
 
 
 def _make_field(client) -> VectorFieldSharedContext:
-    with patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=client), \
+    with patch("modules.context.adapters.vector_field.QdrantRestClient", return_value=client), \
          patch("modules.context.adapters.vector_field.EmbeddingManager") as emb:
         emb.return_value.generate_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
         return VectorFieldSharedContext()

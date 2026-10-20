@@ -37,14 +37,15 @@ orchestrator/
 There is no bare-metal setup to maintain. From the repository root:
 
 ```bash
-cp .env.example .env     # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY (+ one LLM key)
-docker compose up
+make dev                 # make env writes .env's three secrets, then
+                         # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-- The `backend` service builds this directory with the `development` target,
-  bind-mounts it at `/app` and runs `uvicorn main:app --reload`, so edits are
-  live. Dependency or Dockerfile changes need
-  `docker compose up -d --build backend`.
+- Under `make dev` the `backend` service builds this directory with the
+  `development` target, bind-mounts it at `/app` and runs
+  `uvicorn main:app --reload`, so edits are live. Dependency or Dockerfile
+  changes need `make dev` again, which rebuilds. Plain `docker compose up` runs
+  the production target instead, with the code inside the image and no reload.
 - Configuration is layered: `envs/api.defaults` (committed local topology,
   `AUTH_EDITION=local`), `envs/api.local` (gitignored overrides for any
   `config.py` dial) and the compose `environment:` block (secrets substituted
@@ -95,24 +96,30 @@ request:
 | `schema-drift` | The four-writer drift check. |
 | eval lanes | NL2SQL, retrieval-recall, memory-recall and graph-uplift harness self-tests (informational). |
 
-Alongside it: `smoke-fresh-clone` (a real `docker compose up` from an empty
-checkout must reach a green `/health` and `/health/ready` and a frontend that
+Alongside it: `smoke-fresh-clone` (a real `make build` from an empty checkout,
+the production stages built from source, must reach a green `/health` and
+`/health/ready` and a frontend that
 answers on `:3000`, and the boots are timed; `scripts/ci/smoke-fresh-clone.sh`
 refuses to run on a Docker host with its own Automatos containers or volumes,
-because its teardown deletes the stack's volumes), `smoke-images` (the
-published images, pulled into an empty Docker cache and booted through the
-same script after each main publish, before `edge` moves to them; outside CI
-the pull refuses to empty the host's image cache unless
-`SMOKE_EMPTY_IMAGE_CACHE=true`), `import-linter`
+because its teardown deletes the stack's volumes), `smoke-images` (`make up`
+on a clean checkout pulls the published images into an empty Docker cache and
+boots them through the same script after each main publish, before `edge`
+moves to them, and must build nothing; outside CI it refuses to empty the
+host's image cache unless `SMOKE_EMPTY_IMAGE_CACHE=true`), `import-linter`
 (module-boundary contracts in `orchestrator/.importlinter`), `dco`,
 `gitleaks`, `CodeQL`, `malware-scan` and `check-shopify-isolation`.
 
-Pure tests (no database) can be run inside the compose image:
+Pure tests (no database) run on the host, in a Python 3.11 environment with the
+backend's runtime and dev requirements installed the way CI's backend job installs
+them (`.github/workflows/test.yml`):
 
 ```bash
-docker compose run --rm --no-deps -v "$PWD:/repo" -w /repo/orchestrator backend \
-  python -m pytest tests/test_prd209_quickstart_honest.py -q -p no:cacheprovider
+cd orchestrator && python -m pytest tests/test_prd209_quickstart_honest.py -q -p no:cacheprovider
 ```
+
+Not inside a compose image: neither backend stage carries pytest, which only the dev
+requirements install (PRD-262 US-014), and plain `docker compose run backend` now runs
+the published production image (US-035).
 
 Tests that need Postgres need the schema `init_test_db.py` builds; CI is the
 reference run for those.

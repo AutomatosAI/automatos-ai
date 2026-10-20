@@ -1,11 +1,13 @@
 """HARNESS state in the database: the task ledger (F156) and the run table (PRD-263).
 
-``HarnessTaskLedger``: which done [HARNESS] board tasks self-management has
-applied (with the value each change replaced, for US-022 rollback), and which
-wait for an owner's or admin's /approve. It is the idempotency key for the
-weekly tick and the /approve command. It lives here, written only by
-services.harness_service, instead of in a file on the workspace volume that a
-workspace tool could write.
+``HarnessTaskLedger``: which done [HARNESS] board tasks self-management
+applied (with the value each change replaced), and which waited for an owner's
+or admin's /approve. It was the idempotency key for the weekly tick's
+card-to-Done path and the /approve command, and lived here instead of in a file
+on the workspace volume that a workspace tool could write. PRD-263 deleted both
+(US-016, US-047) and the service code that wrote it (US-048): DIAGNOSE reads its
+applied rows (services.harness_diagnose), and nothing writes it until the
+governed apply (US-051, US-052).
 
 ``HarnessRun`` (PRD-263 US-009): one HARNESS run of one workspace, for the ISO
 week it judges. Every worker reads the same row, so run state no longer lives in

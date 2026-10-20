@@ -32,7 +32,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.graph_storage import DbWorkspaceClient
-from core.workspace_client import WorkspaceClient
+from core.workspace_client import WORKER_UNAVAILABLE, WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,16 @@ router = APIRouter(
 # a worker container provisioned). Everything else still proxies to the
 # worker over HTTP as before.
 _DB_BACKED_PREFIXES = ("graph/", "graph")
+
+
+def _raise_if_worker_unavailable(result: dict) -> None:
+    """A call the worker never answered, as the 503 it is (PRD-262 US-040).
+
+    The core stack (docker-compose.core.yml) runs without the worker. Where a route reads
+    a failed call as "no session" or "no changes", that would hide it.
+    """
+    if result.get("success") is False and result.get("status_code") == WORKER_UNAVAILABLE:
+        raise HTTPException(status_code=WORKER_UNAVAILABLE, detail=result["error"])
 
 
 def _select_client(workspace_id: str, path: str):
@@ -473,11 +483,13 @@ async def preview_canvas_commit(
 
     client = WorkspaceClient(workspace_id)
     status = await client.canvas_session_status()
+    _raise_if_worker_unavailable(status or {})
     session = (status or {}).get("session") or {}
     session_id = session.get("canvas_session_id") or "session"
     branch = canvas_branch_name(session_id)
 
     git_status = await client.git("status", cwd=cwd, args="--porcelain")
+    _raise_if_worker_unavailable(git_status if isinstance(git_status, dict) else {})
     changed = _parse_porcelain_paths(git_status.get("stdout", "")) if isinstance(git_status, dict) else []
     message = generate_commit_message(CommitContext(changed_paths=changed, branch=branch))
 
@@ -517,6 +529,7 @@ async def commit_canvas_session(
 
     # Resolve the session id (branch-per-session) from live/volume state.
     status = await client.canvas_session_status()
+    _raise_if_worker_unavailable(status or {})
     session = (status or {}).get("session") or {}
     session_id = session.get("canvas_session_id")
     if not session_id:

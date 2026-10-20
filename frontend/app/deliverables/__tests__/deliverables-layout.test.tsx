@@ -1,6 +1,7 @@
 /**
  * PRD-260 T-007a, K7, D7, D8 — app/deliverables/layout.tsx mounts Play's
- * shelf through PlayRouteSwitch: under Play at >= 1024 px on /deliverables
+ * shelf through ThemeSlot (PRD-261 A-04b: builtin Play registers it as its
+ * /deliverables page, lib/theme-host/builtin/play-slots.tsx): under Play at >= 1024 px on /deliverables
  * only, the existing page under Classic and Studio, below 1024 px, on the
  * explorer, and for a link into one of the page's other sections (a tab, a
  * post, a type drill-down). DeliverableDeepLink is mounted beside the page
@@ -16,8 +17,12 @@
  * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here);
  * while it isn't known (the server, hydration) neither the shelf nor the page
  * and its deep link mount.
+ * PRD-261 A-04b: on the server the layout adds no Suspense boundary of its own
+ * around the page (components/theme-host/theme-slot.tsx: a boundary around it
+ * streamed the page twice); the deep link keeps the one it has always had.
  */
-import React from 'react'
+import React, { Suspense } from 'react'
+import { renderToString } from 'react-dom/server'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,18 +44,32 @@ vi.mock('@/hooks/use-studio-theme', async () => {
   }
 })
 vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
+// PRD-261 A-14b: the frame moved out of Play's shelf into its slot (lib/theme-host/builtin/play-shelf-lazy.tsx),
+// which draws MainLayout around the shelf as before; it stands in here as it did inside the mocked shelf.
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}))
 vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
   DeliverableDeepLink: () => <div data-testid="deep-link" />,
 }))
 
 import DeliverablesLayout from '@/app/deliverables/layout'
+import { DeliverableDeepLink } from '@/components/deliverables/deliverable-deep-link'
+
+function CorePage() {
+  return <div data-testid="page">The Deliverables page</div>
+}
+
+function layoutTree() {
+  return (
+    <DeliverablesLayout>
+      <CorePage />
+    </DeliverablesLayout>
+  )
+}
 
 function renderLayout() {
-  return render(
-    <DeliverablesLayout>
-      <div data-testid="page">The Deliverables page</div>
-    </DeliverablesLayout>,
-  )
+  return render(layoutTree())
 }
 
 async function showsShelf(yes: boolean) {
@@ -136,4 +155,24 @@ describe('app/deliverables/layout.tsx', () => {
       await showsShelf(false)
     },
   )
+})
+
+describe('app/deliverables/layout.tsx on the server', () => {
+  it('sends the page and its deep link under Classic or Studio exactly as they render without ThemeSlot', () => {
+    state.play = false
+    const core = renderToString(
+      <>
+        <CorePage />
+        <Suspense fallback={null}>
+          <DeliverableDeepLink />
+        </Suspense>
+      </>,
+    )
+    expect(renderToString(layoutTree())).toBe(core)
+  })
+
+  it('sends nothing under Play while the width is not known: no page, no deep link, no empty boundary', () => {
+    state.widthUnknown = true
+    expect(renderToString(layoutTree())).toBe('')
+  })
 })

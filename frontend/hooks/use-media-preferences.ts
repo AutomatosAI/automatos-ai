@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import { videoFormat, type VideoFormat } from '@/lib/mascot/media'
+import { videoFormat, type VideoFormat } from '../lib/mascot/media'
 
 /**
  * PRD-260 — browser preferences Play's theme and Auto follow. They read as

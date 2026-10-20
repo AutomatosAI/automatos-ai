@@ -7,7 +7,8 @@ output strings.
 
 Why a script + AST extraction rather than a normal import? ``api.widgets.chat``
 pulls in the full FastAPI / SQLAlchemy / RAG / multimodal dependency tree, which
-requires a configured database and optional native libs (camelot, etc) to import.
+requires a configured database and the native libraries behind PDF and image
+handling to import.
 For a fixture generator that just needs four pure-ish functions, we parse chat.py
 with ``ast`` and exec only the four function definitions plus their two helpers
 into an isolated namespace. The function source is byte-identical to chat.py's,

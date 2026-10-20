@@ -55,8 +55,12 @@ def test_the_orchestrator_never_imports_the_gpl_voice_stack():
 
 
 def test_the_orchestrator_does_not_depend_on_the_gpl_voice_stack():
-    manifests = sorted((ROOT / "orchestrator").glob("requirements*.txt"))
-    assert manifests, "no orchestrator requirements file found"
+    # PRD-262 US-022: requirements.in is the input and the locks are what the image and
+    # CI install, so the scan reads every one of them, transitive pins included.
+    manifests = sorted(path for pattern in ("requirements*.txt", "requirements*.in", "requirements*.lock")
+                       for path in (ROOT / "orchestrator").glob(pattern))
+    names = {path.name for path in manifests}
+    assert {"requirements.in", "requirements.lock"} <= names, f"the API's dependency set is not scanned: {names}"
     pyproject = ROOT / "orchestrator" / "pyproject.toml"
     if pyproject.exists():
         manifests.append(pyproject)
@@ -94,7 +98,9 @@ def test_hyperframes_is_pinned_exactly_on_node_24():
     # PRD-262 US-007: Node comes from the official image's named stage, not NodeSource.
     assert re.search(r"^FROM node:24-trixie-slim@sha256:[0-9a-f]{64} AS node$", DOCKERFILE, re.M)
     assert re.search(r"^FROM node AS js$", DOCKERFILE, re.M)
-    assert "COPY --link --from=node /usr/local/bin/node /usr/local/bin/node" in _stage("runtime")
+    # PRD-262 #22: the binary from the stripped stage built on that one.
+    assert re.search(r"^FROM node AS node-stripped$", DOCKERFILE, re.M)
+    assert "COPY --link --from=node-stripped /node-layer/ /" in _stage("runtime")
     # The instructions, not the comments: the comment that says NodeSource is gone names it.
     assert "nodesource" not in _instructions(DOCKERFILE).lower()
 
@@ -159,7 +165,8 @@ def test_chrome_is_preinstalled_at_build_not_fetched_per_render():
     assert "COPY --link --from=chrome /opt/chrome /opt/chrome" in runtime
     assert "HYPERFRAMES_BROWSER_PATH=/opt/chrome/chrome-headless-shell" in runtime
     # Its libraries are the runtime's, so the runtime checks them.
-    assert "ldd /opt/chrome/chrome-headless-shell | grep 'not found'" in runtime
+    # PRD-262 #34, #47: with the libraries beside it, which it loads at runtime.
+    assert "ldd /opt/chrome/chrome-headless-shell /opt/chrome/*.so* | grep 'not found'" in runtime
 
 
 def test_the_media_render_job_runs_on_demand_only():

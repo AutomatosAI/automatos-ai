@@ -1,6 +1,7 @@
 'use client'
 
 import { type FormEvent, type KeyboardEvent, forwardRef, useState } from 'react'
+import { AiLabelFence } from '@automatos/theme-sdk'
 
 import styles from './composer.module.css'
 
@@ -9,7 +10,8 @@ import styles from './composer.module.css'
  * components/chat/MessageBox.tsx. Enter sends, Shift+Enter adds a line (and an
  * IME composition is never cut short), Send becomes Stop while Auto answers.
  * Focus and blur tell Auto you're typing. The ref is the textarea: Try again
- * puts focus back in it as its snag box goes (P260-FX-22, M20).
+ * puts focus back in it as its snag box goes (P260-FX-22, M20). PRD-264 EUAI-11a: the host's
+ * AI label fence (the SDK's `cards.AiLabelFence`) disables it while a theme hides the label.
  */
 
 export const PLACEHOLDER = 'Message Auto'
@@ -51,30 +53,32 @@ export const MessageBox = forwardRef<HTMLTextAreaElement, MessageBoxProps>(funct
   }
 
   return (
-    <form className={styles.box} onSubmit={onSubmit}>
-      <textarea
-        ref={ref}
-        className={styles.input}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={onKeyDown}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        placeholder={PLACEHOLDER}
-        aria-label={PLACEHOLDER}
-        autoFocus={autoFocus}
-        rows={1}
-      />
-      {streaming ? (
-        <button type="button" className={styles.stop} onClick={() => onStop()}>
-          <span className={styles.stopIcon} aria-hidden="true" />
-          Stop
-        </button>
-      ) : (
-        <button type="submit" className={styles.send} disabled={!ready}>
-          Send
-        </button>
-      )}
-    </form>
+    <AiLabelFence>
+      <form className={styles.box} onSubmit={onSubmit}>
+        <textarea
+          ref={ref}
+          className={styles.input}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          placeholder={PLACEHOLDER}
+          aria-label={PLACEHOLDER}
+          autoFocus={autoFocus}
+          rows={1}
+        />
+        {streaming ? (
+          <button type="button" className={styles.stop} onClick={() => onStop()}>
+            <span className={styles.stopIcon} aria-hidden="true" />
+            Stop
+          </button>
+        ) : (
+          <button type="submit" className={styles.send} disabled={!ready}>
+            Send
+          </button>
+        )}
+      </form>
+    </AiLabelFence>
   )
 })
