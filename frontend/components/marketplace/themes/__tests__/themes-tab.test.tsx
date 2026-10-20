@@ -257,7 +257,8 @@ describe('who sees what', () => {
     expect(screen.queryByRole('button', { name: INSTALL_THEME })).not.toBeInTheDocument()
     expect(screen.queryByTestId('install-theme-input')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId(`theme-listing-${LISTING_ID}`))
+    // The grid waits for the theme settings (the marketplace switch), so it can come after the list.
+    fireEvent.click(await screen.findByTestId(`theme-listing-${LISTING_ID}`))
     const detail = await screen.findByTestId('theme-listing-detail')
     expect(await within(detail).findByText(MANAGERS_ADD)).toBeInTheDocument()
     expect(within(detail).queryByRole('button', { name: ADD_TO_WORKSPACE })).not.toBeInTheDocument()
