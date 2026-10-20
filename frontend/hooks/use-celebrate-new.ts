@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { useLookScope } from '@/components/looks/look-scope'
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '@/lib/play/seen'
+import type { Deliverable } from '@automatos/theme-sdk'
+
+import { useLookScope } from '../components/looks/look-scope'
+import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '../lib/play/seen'
 
 /** The record as last read or written, and the scope it belongs to. */
 interface ScopedSeen {
