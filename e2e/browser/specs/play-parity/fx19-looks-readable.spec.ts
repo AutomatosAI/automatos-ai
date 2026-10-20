@@ -1,13 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { computedStyleOf, resolvedColour } from '../../support/computed-style'
-import {
-  describeParity,
-  GAP_INSTALLED_THEME_HAS_NO_ENTRY,
-  knownPackageGap,
-  openPlay,
-  PARITY_TAG,
-  type PlayVariant,
-} from '../../support/play-parity'
+import { describeParity, openPlay, PARITY_TAG, type PlayVariant } from '../../support/play-parity'
 
 // PRD-261 A-17b (@parity), P260-FX-19 (M18, M19, M73): Make it yours stays readable, under builtin
 // Play and the installed package, read from what the page draws (computed styles).
@@ -133,7 +126,6 @@ describeParity('Make it yours stays readable (FX-19)', (variant) => {
   })
 
   test('on Paper (Daylight) the edges use the accent as text, not the raw accent', { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     const editor = await openLooks(page, request, variant)
     const daylight = page.getByRole('region', { name: LOOKS_ROW, exact: true }).getByRole('button', { name: DAYLIGHT })
     await daylight.click()
@@ -145,7 +137,6 @@ describeParity('Make it yours stays readable (FX-19)', (variant) => {
   })
 
   test('a 40-character name keeps the heading readable at 1024 px and stays whole in its card', { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     const editor = await openLooks(page, request, variant)
     await saveAndRename(page, editor, LONG_NAME)
     await page.setViewportSize(NARROW_DESKTOP)

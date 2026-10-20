@@ -2,6 +2,10 @@
  * PRD-261 A-03 — first paint from data: the boot of every style, the gate it passes (bad classes
  * and bad prepaint values dropped, never written), its escape inside a <script> element, and
  * the one constant script that applies it.
+ *
+ * PRD-261 W-A6b (gap G2): an installed theme's boot names its own look keys (a '/' in the theme
+ * id), which pass the gate, so the script paints the stored look; a 'from-look' installed boot
+ * starts on the tone cookie, as builtin Play's does.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,6 +22,7 @@ import {
 import { CSS_VAR_NAME_PATTERN, isCssValue, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
 import { BUILTIN_PLAY_BOOT } from '@/lib/theme-host/builtin/play-boot'
 import { BUILTIN_PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { bootLookStorage, installedLookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { HTML_CLASS_PATTERN } from '@/lib/theme-host/constants'
 import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
 import { STUDIO_HTML_CLASS, parseUiStyle, type UiStyle } from '@/lib/ui-style'
@@ -184,5 +189,45 @@ describe('PRD-261 A-03 — the one constant boot script', () => {
   it('paints the default look when no look storage is named', () => {
     runThemeBoot(sanitizeThemeBoot(sampleBoot()))
     expect(html().style.getPropertyValue(SAMPLE_VAR)).toBe('#FF6A1F')
+  })
+})
+
+describe("PRD-261 W-A6b (gap G2) — an installed theme's stored look and tone before first paint", () => {
+  const LOOK_STORAGE = bootLookStorage(installedLookKeys('automatos/play'))
+  const GUARD = { schema: 'automatos-e2e-look/v1', iface: 'sample' }
+  const SCOPE = 'ws-1:user_a'
+  const COLD = '#1F6AFF'
+  const FROM_LOOK: ThemeBoot['tone'] = { policy: 'from-look', value: null }
+
+  /** An installed theme's boot: two tints, the warm one the default, its look keys and guard. */
+  function installedBoot(fields: Partial<ThemeBoot> = {}): ThemeBoot {
+    const knobs = { tint: { warm: { [SAMPLE_VAR]: '#FF6A1F' }, cold: { [SAMPLE_VAR]: COLD } } }
+    return sampleBoot({ prepaint: { knobs, pairs: [], numeric: [], defaults: { tint: 'warm' } }, lookStorage: LOOK_STORAGE, lookGuard: GUARD, ...fields })
+  }
+
+  afterEach(() => window.localStorage.clear())
+
+  it("keeps the theme's own look keys, a '/' in its id, through the gate, and still refuses a key that isn't one", () => {
+    expect(sanitizeThemeBoot(installedBoot()).lookStorage).toEqual(LOOK_STORAGE)
+    for (const pointerKey of ['</script>', 'a b', 'k"ey', 'x'.repeat(161), '']) {
+      expect({ pointerKey, kept: sanitizeThemeBoot(installedBoot({ lookStorage: { ...LOOK_STORAGE, pointerKey } })).lookStorage }).toEqual({ pointerKey, kept: null })
+    }
+  })
+
+  it("paints the look stored under the theme's own keys for the account the pointer names", () => {
+    window.localStorage.setItem(LOOK_STORAGE.pointerKey, SCOPE)
+    window.localStorage.setItem(`${LOOK_STORAGE.scopedPrefix}${SCOPE}`, JSON.stringify({ schema: GUARD.schema, interface: GUARD.iface, tint: 'cold' }))
+    runThemeBoot(sanitizeThemeBoot(installedBoot()))
+    expect(html().style.getPropertyValue(SAMPLE_VAR)).toBe(COLD)
+  })
+
+  it("starts a 'from-look' installed boot that names its look keys on the tone cookie, strictly", async () => {
+    const resolve = (cookies: Record<string, string>, boot: ThemeBoot) => createThemeBootResolver(cookieReader(cookies), async () => boot)(INSTALL_STYLE)
+    const fromLook = installedBoot({ tone: FROM_LOOK })
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, fromLook)).tone).toEqual({ policy: 'from-look', value: 'light' })
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'bogus' }, fromLook)).tone.value).toBeNull()
+    expect((await resolve({}, fromLook)).tone.value).toBeNull()
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot({ tone: FROM_LOOK, lookStorage: null }))).tone.value).toBeNull()
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot())).tone).toEqual({ policy: 'user', value: null })
   })
 })

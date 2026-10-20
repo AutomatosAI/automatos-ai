@@ -1,12 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import {
-  describeParity,
-  GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK,
-  GAP_INSTALLED_THEME_HAS_NO_ENTRY,
-  knownPackageGap,
-  openPlay,
-  PARITY_TAG,
-} from '../../support/play-parity'
+import { describeParity, openPlay, PARITY_TAG } from '../../support/play-parity'
 
 // PRD-261 A-17b (@parity): Play below 1024 px (PRD-260 D7, K4), under builtin Play and the
 // installed package. Play's frame and pages step aside and the core's own chrome draws, recoloured
@@ -103,7 +96,6 @@ describeParity('Play below 1024 px', (variant) => {
   })
 
   test("the look's tone is forced over the user's own, and the theme menu says so", { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), STORED_TONE)
     await openPlay(page, request, variant, FRAME_PATH)
     await expectCoreChrome(page)
@@ -117,7 +109,6 @@ describeParity('Play below 1024 px', (variant) => {
   })
 
   test('a look chosen before paints from the first frame, and sets the tone', { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK)
     await page.setViewportSize(DESKTOP)
     await openPlay(page, request, variant, LOOKS_PATH)
     const daylight = page.getByRole('region', { name: LOOKS_ROW, exact: true }).getByRole('button', { name: DAYLIGHT })
