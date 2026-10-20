@@ -8,14 +8,24 @@ Tokens are real RS256 JWTs signed with a key made here; the JWKS lookup is stubb
   dependency answers 401.
 * ``azp`` missing: accepted with a warning by default; refused when
   ``CLERK_AZP_REQUIRED`` is true.
+* The native marker (PRD-266 US-020): an azp-less token with ``client:
+  "automatos-go"`` is accepted under either setting, without the warning; a token
+  without it, or with another value, is still refused when ``CLERK_AZP_REQUIRED`` is
+  true; a token that has an ``azp`` is judged by the allow-list, marker or not.
+* The ``mobile`` JWT template (core/auth/clerk_mobile_template.py): every claim
+  clerk.py and clerk_azp.py read is in the template or listed as left out, and a
+  token rendered from the template resolves the same user and role as the web's
+  session token.
 * Config parsing: the shipped default, normalisation, ``FRONTEND_URL``, and the two
   environment variables read by a fresh copy of config.py.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +35,15 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
+
+from core.auth.clerk_mobile_template import (
+    CLAIMS_NOT_IN_TEMPLATE,
+    CLERK_TEMPLATE_DEFAULT_CLAIMS,
+    MOBILE_JWT_TEMPLATE_CLAIMS,
+    MOBILE_JWT_TEMPLATE_NAME,
+    NATIVE_CLIENT_CLAIM,
+    NATIVE_CLIENT_MARKER,
+)
 
 # Dummy POSTGRES_* satisfies the config import chain without a live DB.
 os.environ.setdefault("POSTGRES_USER", "test")
@@ -47,6 +66,19 @@ def signing_key():
 def _token(private_key, **claims) -> str:
     now = int(time.time())
     body = {"sub": "user_azp_test", "sid": "sess_azp_test", "iat": now - 5, "nbf": now - 5, "exp": now + 300}
+    body.update(claims)
+    return jwt.encode(body, private_key, algorithm="RS256")
+
+
+def _native_token(private_key, **claims) -> str:
+    """A token shaped like the ``mobile`` template's: Clerk's own claims (no ``sid``,
+    no ``azp``, as from a native request) plus the marker, then ``claims``."""
+    now = int(time.time())
+    body = {
+        "sub": "user_azp_test", "iat": now - 5, "nbf": now - 5, "exp": now + 300,
+        "iss": "https://clerk.automatos.app", "jti": "jti_azp_test",
+        NATIVE_CLIENT_CLAIM: NATIVE_CLIENT_MARKER,
+    }
     body.update(claims)
     return jwt.encode(body, private_key, algorithm="RS256")
 
@@ -133,6 +165,76 @@ def test_frontend_url_origin_is_always_allowed(clerk, signing_key):
 
 
 # ---------------------------------------------------------------------------
+# The native marker (PRD-266 US-020)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("no_azp", [{}, {"azp": ""}], ids=["azp-absent", "azp-empty"])
+def test_native_marker_without_azp_is_accepted(clerk, signing_key, required, no_azp, caplog):
+    import core.auth.clerk_azp as azp_mod
+
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", required), \
+         caplog.at_level(logging.DEBUG, logger="core.auth.clerk_azp"):
+        claims = clerk.verify_token(_native_token(signing_key, **no_azp))
+    assert claims is not None and claims.get("azp") in (None, "")
+    assert claims[NATIVE_CLIENT_CLAIM] == NATIVE_CLIENT_MARKER
+    assert "accepted as Automatos Go" in caplog.text
+    # Phones must not raise the warning the runbook watches for unknown azp-less clients.
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_no_marker_and_no_azp_is_still_refused_when_required(clerk, signing_key, caplog):
+    import core.auth.clerk_azp as azp_mod
+
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", True), \
+         caplog.at_level(logging.WARNING, logger="core.auth.clerk_azp"):
+        # A browser-shaped session token whose azp is missing.
+        assert clerk.verify_token(_token(signing_key)) is None
+        # The mobile template's claims without its marker are no better.
+        assert clerk.verify_token(_native_token(signing_key, **{NATIVE_CLIENT_CLAIM: None})) is None
+    assert "no azp claim (CLERK_AZP_REQUIRED=true)" in caplog.text
+
+
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("azp", [STUDIO, "https://evil.example", "ui.automatos.app"])
+def test_native_marker_does_not_rescue_a_disallowed_azp(clerk, signing_key, azp, required, caplog):
+    import core.auth.clerk_azp as azp_mod
+
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", required), \
+         caplog.at_level(logging.WARNING, logger="core.auth.clerk_azp"):
+        assert clerk.verify_token(_native_token(signing_key, azp=azp)) is None
+    assert "not in CLERK_AUTHORIZED_PARTIES" in caplog.text
+
+
+@pytest.mark.parametrize("azp", [PRODUCTION_FRONTEND, LOCAL_DEV])
+def test_native_marker_with_an_allowed_azp_is_accepted(clerk, signing_key, azp):
+    import core.auth.clerk_azp as azp_mod
+
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", True):
+        claims = clerk.verify_token(_native_token(signing_key, azp=azp))
+    assert claims is not None and claims["azp"] == azp
+
+
+@pytest.mark.parametrize("marker", [
+    "automatos-web", "Automatos-Go", "automatos-go ", " automatos-go", "", None,
+    ["automatos-go"], {"automatos-go": True}, True, 1,
+])
+def test_wrong_marker_value_is_refused_when_required(clerk, signing_key, marker):
+    import core.auth.clerk_azp as azp_mod
+
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", True):
+        assert clerk.verify_token(_native_token(signing_key, **{NATIVE_CLIENT_CLAIM: marker})) is None
+
+
+def test_wrong_marker_value_counts_as_no_marker_by_default(clerk, signing_key, caplog):
+    with caplog.at_level(logging.WARNING, logger="core.auth.clerk_azp"):
+        claims = clerk.verify_token(_native_token(signing_key, **{NATIVE_CLIENT_CLAIM: "automatos-web"}))
+    assert claims is not None
+    assert "no azp claim; accepted" in caplog.text
+    assert "client='automatos-web'" in caplog.text
+
+
+# ---------------------------------------------------------------------------
 # The request dependency: a wrong azp is a 401
 # ---------------------------------------------------------------------------
 
@@ -151,6 +253,117 @@ async def test_wrong_azp_bearer_gets_401_from_request_context(clerk, signing_key
         with pytest.raises(HTTPException) as exc:
             await hybrid.get_request_context_hybrid(request)
     assert exc.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# The mobile JWT template: claim set and parity with a session token
+# ---------------------------------------------------------------------------
+
+# The names clerk.py and clerk_azp.py give a verified token's claims.
+CLAIMS_VARIABLES = frozenset({"claims", "payload"})
+
+
+def _claim_key(node: ast.AST, module) -> str:
+    """A claim name from a string literal, or from a ``str`` constant in ``module``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name) and isinstance(getattr(module, node.id, None), str):
+        return getattr(module, node.id)
+    raise AssertionError(f"{module.__name__} reads a claim this test cannot name: {ast.unparse(node)}")
+
+
+def _claims_read(module) -> set:
+    """Every claim ``module`` reads as ``claims.get(key)`` or ``claims[key]`` (or ``payload``)."""
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    keys = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id in CLAIMS_VARIABLES and node.args):
+            keys.add(_claim_key(node.args[0], module))
+        elif (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                and isinstance(node.value, ast.Name) and node.value.id in CLAIMS_VARIABLES):
+            keys.add(_claim_key(node.slice, module))
+    return keys
+
+
+def test_mobile_template_accounts_for_every_claim_the_api_reads():
+    import core.auth.clerk as clerk_mod
+    import core.auth.clerk_azp as azp_mod
+
+    read = _claims_read(clerk_mod) | _claims_read(azp_mod)
+    # The scan has to see the claims everyone knows are read, or it proves nothing.
+    assert {"email", "metadata", "sub", "azp", NATIVE_CLIENT_CLAIM} <= read
+    pinned = set(MOBILE_JWT_TEMPLATE_CLAIMS) | set(CLAIMS_NOT_IN_TEMPLATE)
+    unaccounted = read - CLERK_TEMPLATE_DEFAULT_CLAIMS - pinned
+    assert not unaccounted, (
+        f"core/auth/clerk.py or clerk_azp.py now reads {sorted(unaccounted)}. Add each claim to "
+        "MOBILE_JWT_TEMPLATE_CLAIMS (and to the Clerk dashboard's mobile template), or to "
+        "CLAIMS_NOT_IN_TEMPLATE with the reason, in core/auth/clerk_mobile_template.py."
+    )
+    stale = pinned - read
+    assert not stale, f"nothing reads {sorted(stale)} any more: drop it from core/auth/clerk_mobile_template.py"
+
+
+def test_mobile_template_is_well_formed():
+    # The contract with Automatos Go: getToken({template: "mobile"}) and this marker.
+    assert MOBILE_JWT_TEMPLATE_NAME == "mobile"
+    assert MOBILE_JWT_TEMPLATE_CLAIMS[NATIVE_CLIENT_CLAIM] == NATIVE_CLIENT_MARKER == "automatos-go"
+    # PRD-266 US-020: verification and role resolution need these.
+    assert {"email", "metadata"} <= set(MOBILE_JWT_TEMPLATE_CLAIMS)
+    # Clerk sets its default claims itself; a template entry for one would be ignored.
+    assert not set(MOBILE_JWT_TEMPLATE_CLAIMS) & CLERK_TEMPLATE_DEFAULT_CLAIMS
+    assert not set(MOBILE_JWT_TEMPLATE_CLAIMS) & set(CLAIMS_NOT_IN_TEMPLATE)
+    for claim, value in MOBILE_JWT_TEMPLATE_CLAIMS.items():
+        if claim != NATIVE_CLIENT_CLAIM:
+            assert re.fullmatch(r"\{\{(user|org)\.[a-z_]+\}\}", value), (claim, value)
+    with pytest.raises(TypeError):
+        MOBILE_JWT_TEMPLATE_CLAIMS["email"] = "changed at runtime"
+
+
+def _render_mobile_template(shortcode_values) -> dict:
+    """The claims Clerk would put in a mobile-template token, given each shortcode's value."""
+    rendered = {claim: shortcode_values.get(code, code) for claim, code in MOBILE_JWT_TEMPLATE_CLAIMS.items()}
+    unresolved = sorted(claim for claim, value in rendered.items() if isinstance(value, str) and "{{" in value)
+    assert not unresolved, f"the test gives no value for the shortcodes of {unresolved}"
+    return rendered
+
+
+@pytest.mark.parametrize("role, email_domain, expected_role", [
+    ("admin", "automatos.app", "admin"),
+    ("admin", "customer.example", "user"),
+    (None, "customer.example", "user"),
+])
+def test_native_token_resolves_the_same_user_and_role_as_a_session_token(
+    clerk, signing_key, role, email_domain, expected_role,
+):
+    import core.auth.clerk as clerk_mod
+    import core.auth.clerk_azp as azp_mod
+
+    metadata = {"role": role} if role else {}
+    profile = {"email": f"pat@{email_domain}", "metadata": metadata, "name": "Pat Doe",
+               "first_name": "Pat", "last_name": "Doe", "image_url": "https://img.example/pat.png"}
+    # The web: the session token the runbook's template produces (§2 step 4).
+    session_token = _token(signing_key, azp=PRODUCTION_FRONTEND, fva=[0, -1], **profile)
+    # The phone: the mobile template, rendered for the same person, with no active org.
+    phone_token = _native_token(signing_key, **_render_mobile_template({
+        "{{user.primary_email_address}}": profile["email"],
+        "{{user.public_metadata}}": metadata,
+        "{{user.full_name}}": profile["name"],
+        "{{user.first_name}}": profile["first_name"],
+        "{{user.last_name}}": profile["last_name"],
+        "{{user.image_url}}": profile["image_url"],
+        "{{org.id}}": None,
+        "{{org.slug}}": None,
+    }))
+    with patch.object(azp_mod.config, "CLERK_AZP_REQUIRED", True), \
+         patch.object(clerk_mod.config, "PLATFORM_STAFF_EMAIL_DOMAIN", "automatos.app"):
+        web = clerk.verify_token(session_token)
+        phone = clerk.verify_token(phone_token)
+        assert web is not None and phone is not None
+        web_user, phone_user = clerk.extract_user_info(web), clerk.extract_user_info(phone)
+    assert phone_user == web_user
+    assert phone_user["system_role"] == expected_role
+    assert phone_user["email"] == profile["email"]
 
 
 # ---------------------------------------------------------------------------
