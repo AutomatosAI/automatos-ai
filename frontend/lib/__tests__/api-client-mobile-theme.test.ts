@@ -28,7 +28,7 @@ const ANSWER: MobileTheme = {
   mobile: {
     source: 'fromLooks',
     tone: 'dark',
-    tokens: { light: null, dark: { '--background': '222 47% 8%', '--foreground': '#F4F4F5' } },
+    tokens: { light: null, dark: { '--background': '222 47% 8%', '--foreground': '240 4.76% 95.88%' } },
     fonts: { sans: `${FILES}/assets/fonts/mobile/harbour-sans.ttf` },
     mascot: {
       mode: 'clips',
