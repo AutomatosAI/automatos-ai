@@ -28,10 +28,11 @@ never loads a theme's `dist/entry.js` or `dist/theme.css`: an app may not downlo
 
 The review measures AA contrast for the block (4.5:1 for text on its fill, 3:1 for `--primary` and
 `--ring` on `--background`) on exactly what the answer below can serve: per scheme for `tokens`; for
-`fromLooks`, the table's `defaults` (listed as `defaults`, named `boot/prepaint.json#defaults`: what
-every member with no saved look gets) and then each preset, each painted as the web paints it. A pair
-under its minimum blocks the listing, and so does a scheme or painting that gives no `--background` or
-`--foreground` (a phone can't draw it).
+`fromLooks`, the table's `defaults` (what every member with no saved look gets; listed first with id
+`boot/prepaint.json#defaults` and kind `defaults`, which no look id can be, so a preset named
+`defaults` keeps its own entry, kind `preset`) and then each preset, each painted as the web paints
+it. A pair under its minimum blocks the listing, and so does a scheme or painting that gives no
+`--background` or `--foreground` (a phone can't draw it).
 
 ## The answer: `GET /api/themes/mobile/{install_id}`
 

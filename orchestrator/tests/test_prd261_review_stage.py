@@ -152,7 +152,7 @@ def test_from_looks_a_preset_under_aa_blocks_and_is_named():
 
     assert (report["verdict"], contrast["level"], contrast["source"]) == ("blocked", "error", "fromLooks")
     assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
-        ("defaults", "pass"), ("default", "pass"), ("night", "fail"),
+        ("boot/prepaint.json#defaults", "pass"), ("default", "pass"), ("night", "fail"),
     ]
     assert contrast["problems"] == [
         'Preset "night": --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.',
@@ -174,7 +174,7 @@ def test_from_looks_defaults_under_aa_block_while_every_preset_passes():
 
     assert (report["verdict"], contrast["level"]) == ("blocked", "error")
     assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
-        ("defaults", "fail"), ("default", "pass"), ("night", "pass"),
+        ("boot/prepaint.json#defaults", "fail"), ("default", "pass"), ("night", "pass"),
     ]
     assert contrast["problems"] == [
         "boot/prepaint.json#defaults: --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.",

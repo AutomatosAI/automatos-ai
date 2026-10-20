@@ -12,14 +12,15 @@ measures exactly what ``GET /api/themes/mobile/{id}`` (``mobile.py``) can serve 
   (``tests/test_prd261_mobile_contrast.py`` and ``frontend/lib/look-kit/__tests__/contrast-parity.test.ts``).
 * :func:`measure_mobile` measures every pair of each subject the phone can be served: each scheme of
   ``mobile.tokens`` (``light``, then ``dark`` when given) or, under ``fromLooks``, the prepaint table's
-  ``defaults`` (id ``defaults``: what every member with no readable stored look gets) and then each
-  preset in ``looks/presets/``, each painted as the web paints it (``mobile_tokens.paint_look``: Studio
-  tokens as ``H S% L%`` triplets only, the one form the web paints them in). A
-  subject that gives no colour for a ``MOBILE_REQUIRED_TOKENS`` token (``mobile_tokens.missing_tokens``)
-  fails, named with the tokens it lacks: a phone can't draw it. Otherwise a pair whose two tokens are
-  not both set is ``not_measured``; a measured pair is ``pass`` at or over its minimum (the unrounded
-  ratio, as WCAG reads it) and ``fail`` under it, and each failure is a sentence naming the scheme,
-  defaults or preset, both tokens and the ratio. The outcome (``status``) is ``fail`` when any subject
+  ``defaults`` (what every member with no readable stored look gets: kind ``defaults``, id
+  ``boot/prepaint.json#defaults``, which no look id can be, so a preset named ``defaults`` keeps its
+  own) and then each preset in ``looks/presets/`` (kind ``preset``), each painted as the web paints it
+  (``mobile_tokens.paint_look``: Studio tokens as ``H S% L%`` triplets only, the one form the web
+  paints them in). A subject that gives no colour for a ``MOBILE_REQUIRED_TOKENS`` token
+  (``mobile_tokens.missing_tokens``) fails, named with the tokens it lacks: a phone can't draw it.
+  Otherwise a pair whose two tokens are not both set is ``not_measured``; a measured pair is ``pass``
+  at or over its minimum (the unrounded ratio, as WCAG reads it) and ``fail`` under it, and each
+  failure is a sentence naming the scheme, defaults or preset, both tokens and the ratio. The outcome (``status``) is ``fail`` when any subject
   fails, ``pass`` when at least one was measured and none failed, else ``not_measured``. A manifest
   without the block gives None, and the review keeps its unmeasured contrast check;
   ``review_stage.py`` turns the outcome into a level.
@@ -28,8 +29,9 @@ The measured entry, as the review report stores it::
 
     {"source": "tokens" | "fromLooks", "status": "pass" | "fail" | "not_measured",
      "reason": "<one or two sentences>", "problems": ["<a failing subject or pair, named>", ...],
-     "schemes" (tokens) | "presets" (fromLooks; "defaults" first): [
-       {"id": "light" | "defaults" | "<preset id>", "status": ..., "missing": ["--background", ...],
+     "schemes" (tokens) | "presets" (fromLooks; the table's defaults first): [
+       {"id": "light" | "boot/prepaint.json#defaults" | "<preset id>", "kind": "scheme" | "defaults" | "preset",
+        "status": ..., "missing": ["--background", ...],
         "pairs": [{"foreground": "--foreground", "background": "--background", "kind": "text" | "ui",
                    "minimum": 4.5, "status": ..., "ratio": 17.84 | None}, ...]}]}
 
@@ -38,7 +40,7 @@ Standard library only; a table or preset of the wrong shape paints nothing (and 
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Tuple
 
 from services.themes.contract import MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, parse_json
 from services.themes.css_value import PREPAINT_PATH
@@ -61,9 +63,13 @@ OUTCOME_PASS, OUTCOME_FAIL, OUTCOME_NOT_MEASURED = "pass", "fail", "not_measured
 
 SCHEME_LABEL = "mobile.tokens.{scheme}"
 PRESET_LABEL = 'Preset "{preset}"'
-# The prepaint table's default look, measured as its own subject under fromLooks.
-DEFAULTS_ID = "defaults"
-DEFAULTS_LABEL = f"{PREPAINT_PATH}#{DEFAULTS_ID}"
+# The prepaint table's default look, measured as its own subject under fromLooks. Its id is its label, which
+# no look id can be (look_schema.LOOK_ID_PATTERN has no '/' or '#'), so it never collides with a preset's.
+DEFAULTS_LABEL = f"{PREPAINT_PATH}#defaults"
+DEFAULTS_ID = DEFAULTS_LABEL
+# Each subject's "kind" (a pair's "kind" is KIND_TEXT or KIND_UI), so a page listing presets can leave the
+# table's defaults out (frontend/components/settings/themes/scan-report.tsx).
+SUBJECT_SCHEME, SUBJECT_DEFAULTS, SUBJECT_PRESET = "scheme", "defaults", "preset"
 FAILED_PAIR = "{subject}: {foreground} on {background} is {ratio:.2f}:1, under the AA minimum of {minimum:g}:1 for {kind}."
 UNPAINTED_SUBJECT = "{subject}: gives no {missing}, so a phone can't draw it."
 AA_MINIMUMS = f"WCAG AA ({MOBILE_AA_TEXT:g}:1 for text, {MOBILE_AA_UI:g}:1 for UI marks)"
@@ -79,6 +85,15 @@ UNPAINTED_REASON = (
     "{unpainted} of the mobile block's colour sets give no --background or --foreground, so a phone can't draw them."
 )
 UNMEASURED_NOTE = " {unmeasured} pair(s) are not measured: their two tokens are not both set."
+
+
+class Subject(NamedTuple):
+    """One colour set the phone can be served: a scheme, the table's defaults or a preset."""
+
+    subject_id: str
+    kind: str
+    label: str
+    tokens: Any
 
 
 def contrast_ratio(foreground: str, background: str) -> float:
@@ -116,21 +131,24 @@ def _document(files: Mapping[str, bytes], path: str) -> Any:
     return None if error is not None else document
 
 
-def _scheme_tokens(block: Mapping[str, Any]) -> List[Tuple[str, str, Any]]:
-    """``(scheme, its label, its tokens)`` for each scheme of ``mobile.tokens``, light first."""
+def _scheme_tokens(block: Mapping[str, Any]) -> List[Subject]:
+    """Each scheme of ``mobile.tokens``, light first, with its label and its tokens."""
     tokens = block.get(SOURCE_TOKENS)
     schemes = tokens if isinstance(tokens, dict) else {}
-    return [(scheme, SCHEME_LABEL.format(scheme=scheme), schemes[scheme]) for scheme in MOBILE_SCHEMES if scheme in schemes]
+    return [
+        Subject(scheme, SUBJECT_SCHEME, SCHEME_LABEL.format(scheme=scheme), schemes[scheme])
+        for scheme in MOBILE_SCHEMES if scheme in schemes
+    ]
 
 
-def _look_tokens(files: Mapping[str, bytes]) -> List[Tuple[str, str, Any]]:
-    """``(id, label, painting)``: the table's defaults (no stored look), then each preset by id, as the web paints them."""
+def _look_tokens(files: Mapping[str, bytes]) -> List[Subject]:
+    """The table's defaults (no stored look), then each preset by id, each painted as the web paints it."""
     table = _document(files, PREPAINT_PATH)
     presets = [
-        (preset, PRESET_LABEL.format(preset=preset), paint_look(table, _document(files, path)))
+        Subject(preset, SUBJECT_PRESET, PRESET_LABEL.format(preset=preset), paint_look(table, _document(files, path)))
         for preset, path in preset_ids(files).items()
     ]
-    return [(DEFAULTS_ID, DEFAULTS_LABEL, paint_look(table, None)), *presets]
+    return [Subject(DEFAULTS_ID, SUBJECT_DEFAULTS, DEFAULTS_LABEL, paint_look(table, None)), *presets]
 
 
 def _failure(label: str, pair: Mapping[str, Any]) -> str:
@@ -140,15 +158,16 @@ def _failure(label: str, pair: Mapping[str, Any]) -> str:
     )
 
 
-def _measure_subject(subject_id: str, label: str, tokens: Any) -> Tuple[Dict[str, Any], List[str]]:
+def _measure_subject(subject: Subject) -> Tuple[Dict[str, Any], List[str]]:
     """One subject's entry and its problems: it fails on a missing required token, else on its pairs."""
-    given = tokens if isinstance(tokens, dict) else {}
+    given = subject.tokens if isinstance(subject.tokens, dict) else {}
     missing = missing_tokens(given)
     pairs = [measure_pair(given, pair) for pair in MOBILE_CONTRAST_PAIRS]
-    problems = [UNPAINTED_SUBJECT.format(subject=label, missing=" or ".join(missing))] if missing else []
-    problems += [_failure(label, pair) for pair in pairs if pair["status"] == OUTCOME_FAIL]
+    problems = [UNPAINTED_SUBJECT.format(subject=subject.label, missing=" or ".join(missing))] if missing else []
+    problems += [_failure(subject.label, pair) for pair in pairs if pair["status"] == OUTCOME_FAIL]
     status = OUTCOME_FAIL if missing else outcome_of(pair["status"] for pair in pairs)
-    return {"id": subject_id, "status": status, "missing": missing, "pairs": pairs}, problems
+    entry = {"id": subject.subject_id, "kind": subject.kind, "status": status, "missing": missing, "pairs": pairs}
+    return entry, problems
 
 
 def _reason(outcome: str, subjects: List[Mapping[str, Any]]) -> str:
@@ -177,8 +196,8 @@ def measure_mobile(manifest: Mapping[str, Any], files: Mapping[str, bytes]) -> O
     subjects = _look_tokens(files) if source == SOURCE_LOOKS else _scheme_tokens(block)
     measured: List[Dict[str, Any]] = []
     problems: List[str] = []
-    for subject_id, label, tokens in subjects:
-        entry, found = _measure_subject(subject_id, label, tokens)
+    for subject in subjects:
+        entry, found = _measure_subject(subject)
         measured, problems = [*measured, entry], [*problems, *found]
     outcome = outcome_of(subject["status"] for subject in measured)
     return {
