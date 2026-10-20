@@ -293,8 +293,15 @@ def test_the_base_stage_fetches_the_encodings_into_the_cache_dir():
     env = f"ENV TIKTOKEN_CACHE_DIR={CACHE_DIR}"
     run = _bake_run()
     assert env in base, "the image must point tiktoken at the cache it fetched"
-    # tiktoken is installed before the fetch, and the cache dir is set before it.
-    assert base.index("COPY --from=pybuild /install /usr/local") < base.index(env) < base.index(run)
+    # tiktoken is installed before the fetch, and the cache dir is set before it. Since
+    # US-022, pybuild installs into two layers (stable and rest) and base copies both.
+    installs = [i for i, line in enumerate(base) if line.startswith("COPY --from=pybuild /install")]
+    assert installs, "the base stage must copy pybuild's installed packages"
+    copied = {base[i] for i in installs}
+    for layer in ("stable", "rest"):
+        assert f"COPY --from=pybuild /install/{layer} /usr/local" in copied, \
+            f"the base stage must copy pybuild's /install/{layer} layer"
+    assert max(installs) < base.index(env) < base.index(run)
     assert "tiktoken.get_encoding(name) for name in sys.argv[1:]" in run
     assert run.count("$encodings") == 2, "fetched once, then loaded again offline"
     # The second load goes through a proxy where nothing listens: the cache serves it.
