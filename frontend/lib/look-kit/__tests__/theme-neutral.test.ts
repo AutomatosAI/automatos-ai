@@ -9,6 +9,8 @@
  *   no prepaint-apply.ts exists in either folder (the plan's S2-19: it never existed).
  * - No source file in the frontend imports a moved module from its old place, by alias or by a
  *   relative path.
+ * - PRD-261 A-19a: the look scope (scope.ts) moved in from lib/looks too, and is held to the same
+ *   markers; its old path stays as a re-export for Play's own code (lib/__tests__/prd261-a19-seams).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import path from 'path'
@@ -19,6 +21,8 @@ const KIT_DIR = path.join(FRONTEND, 'lib', 'look-kit')
 const OLD_DIR = path.join(FRONTEND, 'lib', 'looks')
 const MOVED: readonly string[] = ['css', 'contrast', 'hsl', 'validate', 'studio-tokens']
 const NEVER_CREATED = 'prepaint-apply.ts'
+/** Moved in by A-19a; lib/looks keeps a re-export at the old path, so it is not one of MOVED. */
+const MOVED_IN_A19A: readonly string[] = ['scope']
 const SOURCE_DIRS: readonly string[] = ['app', 'components', 'lib', 'hooks', 'contexts', 'stores', 'e2e']
 const SKIP_DIRS = new Set(['node_modules'])
 const TEST_DIR = '__tests__'
@@ -75,6 +79,11 @@ describe('PRD-261 A-13a — the look runtime is theme-neutral', () => {
   it('has the moved modules', () => {
     const names = RUNTIME_FILES.map((file) => path.basename(file, '.ts'))
     expect(MOVED.filter((name) => !names.includes(name))).toEqual([])
+  })
+
+  it("scans the look scope A-19a moved in, so the markers hold it", () => {
+    const names = RUNTIME_FILES.map((file) => path.basename(file, '.ts'))
+    expect(MOVED_IN_A19A.filter((name) => !names.includes(name))).toEqual([])
   })
 
   it("holds no theme's code or names in its runtime files", () => {

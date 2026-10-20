@@ -1,6 +1,6 @@
 import { validateLook } from '@/lib/looks/engine'
 import { DEFAULT_LOOK, isPresetId } from '@/lib/looks/presets'
-import { moveUnscopedOnce, scopedKey } from '@/lib/looks/scope'
+import { moveUnscopedOnce, scopedKey } from '@/lib/look-kit/scope'
 import type { Look } from '@/lib/looks/types'
 
 import type { ThemeLookStorage } from '../boot-types'
@@ -8,7 +8,7 @@ import { BUILTIN_PLAY_LOOK_KEYS } from './play-look-keys'
 
 /**
  * PRD-260, PRD-261 A-09b — this browser's copy of the looks, per signed-in
- * user and workspace (F5: each key is scoped, lib/looks/scope.ts) and per
+ * user and workspace (F5: each key is scoped, lib/look-kit/scope.ts) and per
  * theme: the keys come from the active theme (LookKeyBases). An installed
  * theme's are `automatos-theme.<themeId>.*` (installedLookKeys); builtin
  * Play's are its PRD-260 keys (lib/theme-host/builtin/play-look-keys.ts), the

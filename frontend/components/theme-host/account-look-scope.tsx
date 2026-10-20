@@ -6,7 +6,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { BACKEND_HEALTH_QUERY_KEY } from '@/hooks/use-backend-health'
 import { useUser } from '@/lib/auth-hooks'
-import { lookScope } from '@/lib/looks/scope'
+import { lookScope } from '@/lib/look-kit/scope'
 
 import { LookScopeContext } from './look-scope'
 
@@ -20,7 +20,7 @@ import { LookScopeContext } from './look-scope'
  * back to a scope without their workspace; it is asked for again once the
  * backend answers (useWorkspaceRetry), and until then the LookProvider paints
  * the pre-paint script's look under Play. The local edition is signed in with
- * no user id, so its one user gets lib/looks/scope.ts's NO_USER.
+ * no user id, so its one user gets lib/look-kit/scope.ts's NO_USER.
  * PRD-261 A-14d: host code (it reads the account, the workspace and the
  * query cache), so it lives with the host's look runtime
  * (components/theme-host/theme-look-runtime.tsx), out of Play's folders; the

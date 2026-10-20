@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { refocusWhenShown } from '@/lib/play/focus'
+import { refocusWhenShown } from '@/lib/theme-host/focus'
 import { takeHeadingFocusAfterReload } from '@/lib/theme-host/switch-focus'
 import type { SlotId } from '@/lib/theme-host/registry-types'
 
