@@ -47,6 +47,7 @@ import { THEME_HOST_RUNNING_STATUSES } from '@/lib/theme-host/types'
 
 import { AccountLookScope } from './account-look-scope'
 import { useThemeHost } from './theme-host-context'
+import { ThemeStateScope } from './theme-state-scope'
 
 /** The slot a theme with looks fills (PA-14: every installable theme ships one). */
 const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
@@ -97,7 +98,7 @@ export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimePro
   return (
     <AccountLookScope enabled={mounted}>
       <LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>
-        {children}
+        <ThemeStateScope>{children}</ThemeStateScope>
       </LookProvider>
     </AccountLookScope>
   )
