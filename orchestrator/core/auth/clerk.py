@@ -438,6 +438,28 @@ class ClerkAuth:
             )
             return False
 
+    def list_users_page(self, limit: int, offset: int) -> list[dict]:
+        """One page of this instance's users (GET /v1/users), oldest first.
+
+        Clerk returns a plain JSON array of user objects. Used by the one-time
+        production cutover (``scripts/clerk_cutover_relink.py``), which pages with
+        ``offset`` until a page comes back shorter than ``limit``. Raises
+        ValueError on any failure: an operator step must never act on half a list.
+        """
+        if not self.clerk_secret_key:
+            raise ValueError("Clerk secret key not configured")
+        api_url = f"{self.clerk_api_base}/v1/users"
+        headers = {"Authorization": f"Bearer {self.clerk_secret_key}"}
+        params = {"limit": limit, "offset": offset, "order_by": "+created_at"}
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(api_url, headers=headers, params=params)
+        if response.status_code != 200:
+            raise ValueError(f"Clerk user list failed ({response.status_code}) at offset {offset}")
+        page = response.json()
+        if not isinstance(page, list):
+            raise ValueError("Clerk user list: expected a JSON array")
+        return page
+
 
 
 # Global instance for dependency injection
