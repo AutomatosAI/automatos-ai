@@ -39,7 +39,7 @@ from modules.tools.discovery.agent_sends import AGENT_SEND
 from modules.tools.discovery.agent_sends import CARD_RAISED as SEND_CARD_RAISED
 from modules.tools.discovery.owner_only import asks_before_a_send
 from tests.test_prd251_composio_deny import _execution_sites, _function, _Playbook
-from tests.test_prd256_fix_agent_sends_wait_for_the_click import _auto_run, _click, _grants
+from tests.test_prd256_fix_agent_sends_wait_for_the_click import _auto_run, _click, _grants, _told
 
 LINKEDIN_POST = "LINKEDIN_CREATE_LINKED_IN_POST"
 IMAGES = {"text": "Launch day", "images": ["/workspace/launch.png"]}
@@ -145,7 +145,8 @@ def test_a_step_of_an_auto_started_run_raises_the_card_and_posts_nothing(desk):
     assert call[WAITING] is True                                   # F401: waiting, not "Error executing …"
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["lane"] == "playbook"
-    assert grant.details["params"] == {"action": LINKEDIN_POST, "params": IMAGES}
+    told = {**IMAGES, "text": _told(desk, IMAGES["text"])}   # PRD-264 EUAI-07: the post starts with the AI line
+    assert grant.details["params"] == {"action": LINKEDIN_POST, "params": told}
 
 
 def test_the_owners_click_posts_once_with_the_images_as_given(desk):
@@ -285,6 +286,32 @@ def test_a_chats_composio_send_checked_against_the_intent_asks_the_owner(desk, m
     composio.execute.assert_not_called()
     assert out["success"] is False and out["llm_context"].startswith("Card raised: ")
     assert len(_grants(desk)) == 1
+
+
+def test_a_step_meeting_the_card_a_chat_raised_still_waits_and_its_run_is_not_failed(desk):
+    """P256-FIX-N17-3 (F439): the owner's chat raised the card for this exact post, then a step of
+    Auto's run makes the same call. A step is no chat turn: it waits on that card (never replaces
+    it, never 'already waiting'), so the step reads '(waiting)' and the run does not fail."""
+    from api import recipe_executor as rex
+    import modules.tools.tool_router as tr
+
+    asyncio.run(tr.ToolRouter().execute_and_format(
+        tool_name="composio_execute", tool_args={"action": LINKEDIN_POST, "params": IMAGES},
+        agent_id=desk.poster.id, workspace_id=desk.ws, original_intent="post the launch",
+        caller_context={"driving_user_id": "7", "conversation_id": str(uuid4()), "turn_id": "t-1"},
+    ))
+    (chats,) = _grants(desk)
+
+    call = _run_step(desk, _auto_run(desk))
+
+    desk.linkedin.assert_not_called()
+    assert call["result"].startswith("Card raised: ") and call["success"] is False and call[WAITING] is True
+    (grant,) = _grants(desk)
+    assert grant.id == chats.id and grant.status == "pending" and grant.details[AGENT_SEND]["lane"] == "playbook"
+    calls = rex._normalize_tool_calls([call])
+    assert rex.step_failure(calls, {}) is None
+    compact = rex._build_compact_step_result({"order": 2, "status": "completed", "tool_calls": calls})
+    assert compact["tool_calls_summary"] == [f"{LINKEDIN_POST} (waiting)"]
 
 
 # ── The seams ───────────────────────────────────────────────────────────────────────

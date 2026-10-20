@@ -658,6 +658,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
+    # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
+    # takes no account, so each client IP gets this many checks a minute (at least one).
+    PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
@@ -732,6 +735,10 @@ class Config:
     # burst waits for a slot holding no pool connection; keep it well under the
     # pool (10 + 20), since each call can hold its own connection plus one more.
     SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
+    # P256-FIX-N17-9 (F448): how long, from the call's arrival, a session's document or memory
+    # read (services/session_read_deadline.DEADLINED_TOOLS) may take before it answers with a
+    # worded failure, so the session's own client never gives up first ("The operation timed out.").
+    SESSION_TOOL_READ_DEADLINE_S: float = float(os.getenv("SESSION_TOOL_READ_DEADLINE_S", "45"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
@@ -936,10 +943,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5. HIGH RISK — default OFF. Nothing reads it from PRD-263
-    # US-047, which deleted the owner's /approve it gated, until US-054 redefines
-    # it as the switch for approval grants. The weekly run is report_only and
-    # applies nothing whatever its value (PRD-263 US-016).
+    # PRD-263 US-054: the installation's switch that allows HARNESS to raise approval
+    # grants. HIGH RISK — default OFF. Only while it is on does a ``propose`` workspace
+    # get an Approvals card per proposed change (services.harness_grants), applied only
+    # on the owner's click; off, every workspace runs report_only and gets no card.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
@@ -980,6 +987,17 @@ class Config:
     # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
     HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
     HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
+    # PRD-263 US-053 (section 11-Q7 default): a HARNESS proposal granted, or being applied,
+    # longer than HARNESS_RECONCILE_GRACE_MINUTES ago with no outcome is closed as failed.
+    # The daily sweep of HARNESS grants runs on HARNESS_GRANT_SWEEP_CRON, read in UTC
+    # (default 09:00 every day; services.harness_grants).
+    HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
+    HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
+    # PRD-263 US-056: each change HARNESS applied is judged week by week against the
+    # HARNESS_REF_DAYS before it (services.harness_post_change). A metric waits for a week
+    # of at least HARNESS_MIN_SAMPLES for up to HARNESS_POST_CHANGE_MAX_WEEKS weeks after
+    # the change; otherwise the report says it was not judged.
+    HARNESS_POST_CHANGE_MAX_WEEKS: int = int(os.getenv("HARNESS_POST_CHANGE_MAX_WEEKS", "4"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -2116,6 +2134,12 @@ class Config:
     # declared duration against the monthly quota while it runs, at most this;
     # one whose duration cannot be read holds this much.
     SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
+    # PRD-264 EUAI-08a (EU AI Act Art. 50(4)): a labelled video shows "AI-generated" for
+    # its first this many seconds, and again for as long every interval after
+    # (modules/socials/deepfake_label.py; media-render burns it in). An interval no longer
+    # than the label shows it the whole video.
+    SOCIALS_AI_LABEL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_SECONDS", "3"))
+    SOCIALS_AI_LABEL_INTERVAL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_INTERVAL_SECONDS", "30"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.

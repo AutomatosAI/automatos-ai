@@ -31,7 +31,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, nudge_about  # F306, F297
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
-from .claims_in_place import in_place, its_answer_is_checked  # N15-1, N15-2: the not-done line only in place
+from .claims_in_place import in_place, its_answer_is_checked, reads_ahead  # N15-1, N15-2: the line only in place
 from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
 from .draft_here import shows_the_work  # F413, F419: the work the owner asked to see, or for here, is in the reply
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
@@ -192,16 +192,16 @@ class ToolLoopExecutor:
         content_truncate_tokens: int = 2000,
         tracker: Optional[ToolExecutionTracker] = None,
         promises: Optional[bool] = None,
+        read_ahead: bool = False,
     ) -> None:
         self._tool = tool_callback
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
-        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides.
-        self.promises = promises
+        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides. N17-5:
+        self.promises, self.read_ahead = promises, reads_ahead() or read_ahead  # the turn read before the loop
         self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
-        # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
-        self._stuck = StuckDetector()
+        self._stuck = StuckDetector()  # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
 
     # ------------------------------------------------------------------
     # Public API

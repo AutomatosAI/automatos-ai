@@ -15,6 +15,7 @@ import pytest
 
 from modules.tools.discovery import get_action_registry
 from modules.tools.discovery.platform_executor import PlatformActionExecutor
+from modules.tools.execution.owner_reasons import NO_SUCH_ACTION, OWNER_REASON
 
 LEGACY_ALIASES = (
     "platform_list_recipes",
@@ -42,8 +43,9 @@ def test_every_handler_has_a_registered_definition():
 
 @pytest.mark.parametrize("alias", LEGACY_ALIASES)
 def test_a_legacy_recipe_alias_is_an_unknown_action(alias):
+    """P256-FIX-N17-10 (F449): the refusal also says why in the owner's words."""
     reply = asyncio.run(_executor().execute(alias, {"playbook_id": 81}, OWNER))
-    assert reply == {"success": False, "error": f"Unknown platform action: {alias}"}
+    assert reply == {"success": False, "error": f"Unknown platform action: {alias}", OWNER_REASON: NO_SUCH_ACTION}
 
 
 def test_a_handler_without_a_definition_never_runs():

@@ -34,13 +34,16 @@ fields its schema declares forwarded.
   agent's work, and stay out.
 
 Plain specs, like ``session_data_tools``: ``session_tools`` builds its rows from
-``GROUP_TOOL_SPECS`` (this module's and the data tools, in the catalogue's order).
+``GROUP_TOOL_SPECS`` (the data tools, this module's and the Socials tools, in the
+catalogue's order). ``forward`` and the schema shape are ``session_tool_scope``'s.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, Tuple
+from typing import Any, Dict, Tuple
 
 from services.session_data_tools import DATA_TOOL_SPECS, project_answer
+from services.session_socials_tools import SOCIAL_TOOL_SPECS
+from services.session_tool_scope import forward, object_schema as _schema
 
 # How ``generate_document`` reaches the executor (``session_tools.DISPATCH_TOOL_NAME``,
 # repeated here because that module imports this one to build its list).
@@ -52,38 +55,10 @@ DOCUMENT_FORMATS_TEXT = (
     "pdf, docx or xlsx; social_image (a PNG) or social_video (an MP4) render one of the "
     "workspace's social templates and need its template_id or template_name."
 )
-SCOPED = Callable[[Dict[str, Any], Any], Dict[str, Any]]
-
-
-def _blank(value: Any) -> bool:
-    return value is None or (isinstance(value, str) and not value.strip())
-
-
-def forward(fields: Mapping[str, str], required: Tuple[str, ...] = (), needs: str = "",
-            one_of: Tuple[str, ...] = ()) -> SCOPED:
-    """A scope that forwards the session's ``fields`` under the action's names
-    (``{session_name: action_name}``) and drops everything else. A missing
-    ``required`` field, or none of ``one_of``, is refused with ``needs``, the
-    sentence the model reads."""
-
-    def scope(params: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
-        out = {fields[key]: value for key, value in params.items() if key in fields and not _blank(value)}
-        missing = any(fields[key] not in out for key in required)
-        if missing or (one_of and not any(fields[key] in out for key in one_of)):
-            from services.session_tools import SessionToolRefused
-
-            raise SessionToolRefused(needs)
-        return out
-
-    return scope
 
 
 def _string(description: str) -> Dict[str, Any]:
     return {"type": "string", "description": description}
-
-
-def _schema(properties: Dict[str, Any], required: Tuple[str, ...] = ()) -> Dict[str, Any]:
-    return {"type": "object", "properties": properties, "required": list(required)}
 
 
 PLAYBOOK_REF = {
@@ -401,5 +376,5 @@ WORK_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
     LIST_MISSIONS_SPEC, GET_MISSION_SPEC, SEARCH_MISSION_FINDINGS_SPEC,
 )
 # Every grouped tool, in the catalogue's order (data, graph, documents, playbooks,
-# reports, missions): ``session_tools`` appends these after its core ten.
-GROUP_TOOL_SPECS: Tuple[Dict[str, Any], ...] = DATA_TOOL_SPECS + WORK_TOOL_SPECS
+# reports, missions, socials): ``session_tools`` appends these after its core tools.
+GROUP_TOOL_SPECS: Tuple[Dict[str, Any], ...] = DATA_TOOL_SPECS + WORK_TOOL_SPECS + SOCIAL_TOOL_SPECS

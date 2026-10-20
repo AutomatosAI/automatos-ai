@@ -14,17 +14,22 @@ nothing deleted). A memory is replaced when it is
   ('Table 1', 'Q2', 'step 3') is not, so 'Table 2 is for VIPs' never retires 'Table 1 is for VIPs'.
 Only that person's own memories in the workspace's namespace are weighed, and only for a write that
 is their standing rule: what Auto words itself never retires anything.
+
+P256-FIX-N17-4 (night 17, F447): 'forget the other posting rules, from November we post on
+Wednesdays, replace the lot' named one old rule, so Auto deleted the other three. ``replaces`` now
+takes a list (or JSON text of one): every rule it names is retired once the new one stands.
 """
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, FrozenSet, List, Tuple
 
 from sqlalchemy.orm import Session
 
 from modules.memory.agent_sources import memory_text
 from modules.tools.discovery.rule_wording import words
+from modules.tools.execution.params_text import json_container
 
 logger = logging.getLogger(__name__)
 
@@ -80,20 +85,29 @@ def same_but_its_numbers(old: str, new: str) -> bool:
     return sum(1 for x in a if not _numeric(x)) >= MIN_SHARED_WORDS
 
 
-def replaced_rows(rows: List[Dict[str, Any]], new: str, replaces: Optional[str]) -> List[Dict[str, Any]]:
-    """The rows (one person's memories) the rule ``new`` replaces: the standing rule ``replaces``
+def _named(replaces: Any) -> Tuple[FrozenSet[str], FrozenSet[Tuple[str, ...]]]:
+    """The ids and the words of the rules ``replaces`` names: one rule (an id or its words), a
+    list of them, or JSON text of a list (N17-4); nothing for anything else."""
+    decoded = json_container(replaces) if isinstance(replaces, str) else replaces
+    named = decoded if isinstance(decoded, list) else [decoded]
+    said = [str(item).strip() for item in named if isinstance(item, (str, int)) and not isinstance(item, bool)]
+    said = [item for item in said if item]
+    return frozenset(said), frozenset(tuple(words(item)) for item in said if words(item))
+
+
+def replaced_rows(rows: List[Dict[str, Any]], new: str, replaces: Any) -> List[Dict[str, Any]]:
+    """The rows (one person's memories) the rule ``new`` replaces: each standing rule ``replaces``
     names (by id or by its words), and any that is ``new`` with other quantities. Never ``new``."""
     from modules.memory.injection_filter import is_standing_rule
 
-    said, named = words(new), words(replaces) if replaces else []
-    named_id = str(replaces or "").strip()
+    said = words(new)
+    named_ids, named_words = _named(replaces)
     out = []
     for row in rows:
         text = memory_text(row)
         if words(text) == said:
             continue
-        by_name = bool(named_id) and is_standing_rule(row) and (str(row.get("id")) == named_id
-                                                                or words(text) == named)
+        by_name = is_standing_rule(row) and (str(row.get("id")) in named_ids or tuple(words(text)) in named_words)
         if by_name or same_but_its_numbers(text, new):
             out.append(row)
     return out

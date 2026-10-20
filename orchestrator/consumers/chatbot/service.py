@@ -49,14 +49,13 @@ from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
+from consumers.chatbot.tool_cut import TOOL_RESULT_TOKEN_BUDGET as _TOOL_RESULT_TOKEN_BUDGET, logs_what_the_cut_keeps
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
-from modules.tools.tool_router import (
-    get_tools_for_agent_async,
-)
+from modules.tools.tool_router import get_tools_for_agent_async
 from services.page_context import (
     merge_into_trace,
     page_actions_from_context as _page_actions_from_context,
@@ -79,15 +78,13 @@ from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_fai
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
+from consumers.chatbot.waiting_asks_turn import reads_the_waiting_asks  # F439 (nights 16-17)
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
     about_a_document, full_path_for_documents, with_document_actions,
 )
+from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
-
-# PRD-157 S3: token budget for a single tool result fed back into the LLM loop
-# (replaces the former 6000/4000-char cuts). Truncation is token-aware.
-_TOOL_RESULT_TOKEN_BUDGET = 2000
 
 
 NARRATED_ACTIONS_NOTICE = (
@@ -547,6 +544,7 @@ _BASE64_IMG_RE = re.compile(
 
 
 @a_saved_reply_is_on_brand  # F337 (night 10): the saved reply's placeholder company and sign-off are filled
+@reply_images_are_marked  # PRD-264 EUAI-09: each image it saves carries the AI mark and a provenance row
 async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
     """Find base64 image markdown in text, upload to S3, replace with URLs."""
     matches = list(_BASE64_IMG_RE.finditer(text))
@@ -1403,16 +1401,17 @@ class StreamingChatService:
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
+    @reads_the_waiting_asks  # F439 (night 16): "did it run?" names the cards still waiting for the click
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
-        """F085-A: search the documents for a question before the first model
-        call. Yields the activity-trail frames; appends the cited passages to
+        """F085-A: search the documents for a question (N17-11: or a drafting turn)
+        before the first model call. Yields the activity-trail frames; appends the cited passages to
         ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
-        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, is_question, prefetch
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, prefetch, searched_first
 
-        if not is_question(latest_text):
+        if (how := searched_first(latest_text)) is None:  # P256-FIX-N17-11 (F443): a question, or a drafting turn
             return
 
         async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1430,7 +1429,7 @@ class StreamingChatService:
         try:
             found = await prefetch(
                 self.db, self.workspace_id, latest_text, search=_search, viewer=getattr(self, "_viewer_subject_id", None),
-                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH,
+                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH, **how,
                 limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
             )
         except Exception:
@@ -2094,6 +2093,7 @@ class StreamingChatService:
     # fire on this lane and failures surface honestly (no unconditional
     # success:True). No shim (CLAUDE.md §5).
 
+    @logs_what_the_cut_keeps  # P256-FIX-N17-11 (F443): the cut that follows, logged ('[tool-cut] kept N of M')
     def _track_search_spiral(
         self,
         result: Dict[str, Any],

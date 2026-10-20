@@ -167,9 +167,9 @@ def test_a_refused_composio_send_is_named_by_its_action():
     tracker = _tracker(refused)
     assert tracker.failed == {"GMAIL_SEND_EMAIL"}
     (tried,) = honesty_lines(build_receipts(tracker), SAID_SENT)          # above: the refused send alone
-    assert tried == "I tried to do that and it didn't go through: no recipient."
+    assert tried == "I tried to send the email and it didn't go through: no recipient."     # N17-5: its slug's words
     assert _said(SAID_SENT, refused) == [
-        "Just to be clear: I haven't sent anything in this reply; I tried to do that and it didn't go through. "
+        "Just to be clear: I haven't sent anything in this reply; I tried to send the email and it didn't go through. "
         "Ask me again if you want it done."]
 
 

@@ -1,5 +1,5 @@
 {
-  "route_count": 941,
+  "route_count": 944,
   "routes": [
     {
       "method": "GET",
@@ -628,6 +628,10 @@
     {
       "method": "POST",
       "path": "/api/blog/posts/{post_id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts/{post_id}/review"
     },
     {
       "method": "POST",
@@ -2046,6 +2050,10 @@
       "path": "/api/profile"
     },
     {
+      "method": "GET",
+      "path": "/api/public/provenance/{sha256}"
+    },
+    {
       "method": "POST",
       "path": "/api/query/platform-help"
     },
@@ -2352,6 +2360,10 @@
     {
       "method": "PATCH",
       "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/ai-label"
     },
     {
       "method": "GET",

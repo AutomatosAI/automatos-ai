@@ -82,8 +82,9 @@ PAGE_SOURCES: Dict[str, Tuple[str, ...]] = {
     "/": ("app/page.tsx",),
 }
 # PRD §4.4: pages that are always the host's (sign-in, security and roles, admin, the
-# Marketplace, the theme menu and look pages, safe mode, the theme-only route root, the API).
-HOST_OWNED_ROUTES: Tuple[str, ...] = ("/sign-in", "/sign-up", "/auth", "/sso-callback", "/reset-password", "/accept-invitation", "/settings", "/team", "/admin", "/marketplace", "/looks", "/safe-mode", "/x", "/api", "/dev")
+# Marketplace, the theme menu and look pages, safe mode, the theme-only route root, the API,
+# and PRD-264 EUAI-10's public AI-content check, /verify).
+HOST_OWNED_ROUTES: Tuple[str, ...] = ("/sign-in", "/sign-up", "/auth", "/sso-callback", "/reset-password", "/accept-invitation", "/settings", "/team", "/admin", "/marketplace", "/looks", "/safe-mode", "/x", "/api", "/dev", "/verify")
 
 # PA-18: the sha256 of every PAGE_SOURCES file in this host release, {"files": {path: sha256}}.
 # The running image has no frontend/ folder, so the drift check (A-07b) reads this file;

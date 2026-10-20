@@ -21,9 +21,18 @@ workspace's Auto as target, or an apply kind with no prior value or a proposed v
 its params builder refuses) is dropped, and its reason is kept on the run's row
 (``harness_runs.prescriptions``). Nothing is queued with a placeholder.
 
-Two detectors run today: ``heartbeat_tune`` (US-050) and ``reconnect_app`` (DIAGNOSE's
-tool issues, US-019). A rollback is raised by the post-change check (US-056), and a
-tool removal waits for its dependency gate (US-057), so PRESCRIBE detects neither.
+The detectors: ``heartbeat_tune`` (US-050); ``reconnect_app`` (DIAGNOSE's tool issues,
+US-019); ``tool_assignment_remove`` behind its gate (US-057, below); and ``rollback``,
+whose suggestions the post-change check (services.harness_post_change, US-056) puts in
+DIAGNOSE's result.
+
+**The tool-removal gate (US-057, section 11-Q17 default).** A removal is suggested only
+for an app assigned to the agent whose judged week's production calls (asked and refused
+rows are never read) number at least HARNESS_MIN_SAMPLES and fail, not counting failures
+``classify_tool_error`` puts down to the app's sign-in or connection (those are "reconnect
+<app>" lines), with a Wilson lower bound of at least HARNESS_TOOL_FAIL_WILSON_MIN. It is an
+apply kind only while no Playbook or active Mission that routes to the agent needs the app
+(harness_metrics' app links); otherwise it stays a report line naming what needs the app.
 
 No write, no platform action, no model call: the prior-value readers only read.
 """
@@ -31,15 +40,17 @@ No write, no platform action, no model call: the prior-value readers only read.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from core.stats import harness_verdicts as hv
-from services.harness_diagnose import RECONNECT_APP
-from services.harness_metrics import HarnessMetrics, heartbeat_interval, heartbeat_setting
+from services.harness_diagnose import PLATFORM_APPS, RECONNECT_APP, TOOL_FAILURE
+from services.harness_metrics import (
+    LINK_ASSIGNED, LINK_MISSION, LINK_PLAYBOOK, HarnessMetrics, heartbeat_interval, heartbeat_setting,
+)
 
 # The apply kinds (FR-13).
 HEARTBEAT_TUNE = "heartbeat_tune"
@@ -73,6 +84,12 @@ APP_KEY = "app_name"
 ASSIGNED_KEY = "assigned"
 ROLLBACK_OF_KEY = "kind"
 ROLLBACK_VALUE_KEY = "value"
+# The rx id of the change a rollback undoes (US-056): its ledger row moves to rolled_back.
+ROLLBACK_RX_KEY = "rx_id"
+# A suggestion of an apply kind its gate keeps a report line carries why under this key.
+REPORT_ONLY_KEY = "report_only"
+# What needs an app, as a removal kept a report line names it (US-057).
+NEEDED_BY = {LINK_PLAYBOOK: 'the Playbook "{source}"', LINK_MISSION: 'the Mission "{source}"'}
 
 TARGET_AGENT = "agent"
 # A dropped suggestion's entry on the run's row carries its reason under this key.
@@ -90,6 +107,8 @@ class ChangeSettings:
 
     heartbeat_min_runs: int
     heartbeat_max_met: float
+    min_samples: int
+    tool_fail_wilson_min: float
 
 
 @dataclass(frozen=True)
@@ -112,6 +131,8 @@ class Proposal:
     rationale: str
     expected_improvement: str
     evidence: Dict[str, Any] = field(default_factory=dict)
+    # Set when the kind's gate keeps this suggestion a report line (US-057): why.
+    report_only: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +194,8 @@ def settings_from_config() -> ChangeSettings:
     return ChangeSettings(
         heartbeat_min_runs=config.HARNESS_HEARTBEAT_MIN_RUNS,
         heartbeat_max_met=config.HARNESS_HEARTBEAT_MAX_MET,
+        min_samples=config.HARNESS_MIN_SAMPLES,
+        tool_fail_wilson_min=config.HARNESS_TOOL_FAIL_WILSON_MIN,
     )
 
 
@@ -251,6 +274,77 @@ def detect_reconnects(evidence: Evidence) -> Tuple[Proposal, ...]:
         for issue in evidence.diagnosis.get("issues", [])
         if issue.get("root_cause") == RECONNECT_APP
     )
+
+
+@dataclass(frozen=True)
+class AppLinks:
+    """From COLLECT's app links (US-057): the (agent id, app) pairs assigned, and for each
+    pair what needs the app, as the report names it."""
+
+    assigned: FrozenSet[Tuple[int, str]]
+    needed: Mapping[Tuple[int, str], Tuple[str, ...]]
+
+
+def app_links(metrics: HarnessMetrics) -> AppLinks:
+    """The run's :class:`AppLinks`."""
+    assigned = frozenset((link["agent_id"], link["app_name"]) for link in metrics.app_links
+                         if link["link"] == LINK_ASSIGNED)
+    needed: Dict[Tuple[int, str], List[str]] = {}
+    for link in metrics.app_links:
+        if link["link"] in NEEDED_BY:
+            name = NEEDED_BY[link["link"]].format(source=link["source"])
+            needed.setdefault((link["agent_id"], link["app_name"]), []).append(name)
+    return AppLinks(assigned, {pair: tuple(names) for pair, names in needed.items()})
+
+
+def _kept_because(needs: Tuple[str, ...], agent: str, app: str) -> Optional[str]:
+    """Why a removal stays a report line: what needs the app (None when nothing does)."""
+    if not needs:
+        return None
+    return f"{app} is needed by {' and '.join(needs)}, which {'routes' if len(needs) == 1 else 'route'} to {agent}"
+
+
+def _removal(issue: Mapping[str, Any], links: AppLinks, evidence: Evidence) -> Optional[Proposal]:
+    """US-057: a removal of a failing app assigned to the agent, when its calls number at least
+    HARNESS_MIN_SAMPLES and the failures that are not the app's sign-in or connection have a
+    Wilson lower bound of at least HARNESS_TOOL_FAIL_WILSON_MIN; kept a report line while a
+    Playbook or active Mission that routes to the agent needs the app."""
+    agent_id, agent, app = int(issue["agent_id"]), issue["agent_name"], str(issue["app_name"]).upper()
+    if app in PLATFORM_APPS or (agent_id, app) not in links.assigned:
+        return None
+    calls, failed = issue["calls"], issue["failed_calls"] - issue["reconnect_calls"]
+    bound = hv.wilson_lower_bound(failed, calls)
+    if calls < evidence.settings.min_samples or bound < evidence.settings.tool_fail_wilson_min:
+        return None
+    needs = links.needed.get((agent_id, app), ())
+    kept = _kept_because(needs, agent, app)
+    rationale = (f"{failed} of {agent}'s {calls} {app} calls this week failed, not counting failures of "
+                 f"{app}'s sign-in or connection; even allowing for chance, at least {bound:.0%} fail.")
+    return Proposal(
+        target_id=agent_id, target_name=agent,
+        current_value={APP_KEY: app, ASSIGNED_KEY: True}, proposed_value={APP_KEY: app, ASSIGNED_KEY: False},
+        rationale=f"{rationale} Reported only: {kept}." if kept else rationale,
+        expected_improvement=f"{agent} stops calling {app}, which fails",
+        evidence={"window": evidence.metrics.window.cur_week, "calls": calls, "failed_calls": failed,
+                  "reconnect_calls": issue["reconnect_calls"], "failure_lower_bound": bound, "needed_by": list(needs)},
+        report_only=kept,
+    )
+
+
+def detect_tool_removals(evidence: Evidence) -> Tuple[Proposal, ...]:
+    """A tool_assignment_remove for each of DIAGNOSE's tool failures (never a reconnect
+    line) that passes the gate (:func:`_removal`)."""
+    links = app_links(evidence.metrics)
+    issues = (issue for issue in evidence.diagnosis.get("issues", []) if issue.get("root_cause") == TOOL_FAILURE)
+    proposals = (_removal(issue, links, evidence) for issue in issues)
+    return tuple(proposal for proposal in proposals if proposal is not None)
+
+
+def detect_rollbacks(evidence: Evidence) -> Tuple[Proposal, ...]:
+    """The rollbacks the post-change check suggests this run (US-056), from DIAGNOSE's result."""
+    from services.harness_post_change import rollbacks_of
+
+    return rollbacks_of(evidence.diagnosis)
 
 
 # ------------------------------------------------------------------ params and rollback builders
@@ -368,13 +462,13 @@ KINDS: Dict[str, ChangeKind] = {kind.name: kind for kind in (
                params_builder=heartbeat_params, predicted_metric=HEARTBEAT_OBJECTIVE,
                guard_metrics=GUARD_METRICS, prior_value_reader=read_heartbeat_interval,
                rollback_builder=heartbeat_params),
-    ChangeKind(TOOL_ASSIGNMENT_REMOVE, no_detector, risk=3, inner_actions=(UNASSIGN_TOOL,),
+    ChangeKind(TOOL_ASSIGNMENT_REMOVE, detect_tool_removals, risk=3, inner_actions=(UNASSIGN_TOOL,),
                params_builder=unassign_params, predicted_metric=APP_TOOL_FAILURE,
                guard_metrics=GUARD_METRICS, prior_value_reader=read_tool_assignment,
                rollback_builder=assign_params),
     # A rollback runs the undo call of the kind it reverses, so its actions are theirs. It
     # restores the agent as it was; its card names the metric that fell (US-056).
-    ChangeKind(ROLLBACK, no_detector, risk=1, inner_actions=(CONFIGURE_HEARTBEAT, ASSIGN_TOOL),
+    ChangeKind(ROLLBACK, detect_rollbacks, risk=1, inner_actions=(CONFIGURE_HEARTBEAT, ASSIGN_TOOL),
                params_builder=rollback_params, predicted_metric=TASK_SUCCESS,
                guard_metrics=GUARD_METRICS, prior_value_reader=read_rolled_back,
                rollback_builder=never_rolled_back),
@@ -425,14 +519,16 @@ def drop_reason(rx: Mapping[str, Any], auto_agent_id: Optional[int]) -> Optional
 
 
 def _prescription(kind: ChangeKind, proposal: Proposal, rx_id: str) -> Dict[str, Any]:
-    """A proposal with its id and its kind's risk and metrics: one entry of the run's row."""
+    """A proposal with its id and its kind's risk and metrics: one entry of the run's row. A
+    suggestion its kind's gate keeps a report line is no apply kind, and says why."""
     return {
         "prescription_id": rx_id,
         "target_type": TARGET_AGENT,
         "target_id": proposal.target_id,
         "target_name": proposal.target_name,
         "change_type": kind.name,
-        "apply_kind": kind.applies,
+        "apply_kind": kind.applies and proposal.report_only is None,
+        **({REPORT_ONLY_KEY: proposal.report_only} if proposal.report_only else {}),
         "current_value": dict(proposal.current_value),
         "proposed_value": dict(proposal.proposed_value),
         "risk_score": kind.risk,
@@ -472,6 +568,7 @@ def prescribe(evidence: Evidence, run_id: int, auto_agent_id: Optional[int]) -> 
 
 __all__ = [
     "APPLY_KINDS",
+    "AppLinks",
     "ChangeKind",
     "ChangeSettings",
     "Evidence",
@@ -480,6 +577,9 @@ __all__ = [
     "Prescribed",
     "Proposal",
     "REPORT_KINDS",
+    "app_links",
+    "detect_rollbacks",
+    "detect_tool_removals",
     "doubled_interval",
     "drop_reason",
     "prescribe",

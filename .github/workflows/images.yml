@@ -697,6 +697,46 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           bash frontend/scripts/check-standalone-image.sh "${IMAGE}@${DIGEST}" /chat
 
+      # PRD-262, the worker's trims (rows 16 and 19 of the 19 Oct size breakdown, and
+      # the rows each check names): in the image this job pushed, on this arch, the
+      # agent toolchain still works. gcc -flto links without lto-dump; git makes,
+      # commits, branches, clones and pulls without its server-side binaries, and
+      # clones over HTTPS (scripts/ci/image_worker_toolchain.py). It pulls the digest,
+      # from the job's registry on a pull request, and runs whenever the build pushed
+      # one, even after a failed check above, so one red step never hides this one.
+      # On main a failure leaves the digest untagged and unsigned, as a failed scan does.
+      - name: The worker's agent toolchain still compiles, clones and runs
+        if: ${{ !cancelled() && matrix.name == 'workspace-worker' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
+
+      # PRD-262, the worker's Python layer (rows 27, 40 and 47, and the rows each check
+      # names): every library the stable layer's strip touched still loads, as the
+      # worker user, with no debug sections left, and no tests directory is left;
+      # psycopg2, built against Debian's libpq, connects to the compose stack's
+      # Postgres image (trust auth on a throwaway network, so no password) and runs a
+      # parameterised query; the distributions the cuts removed are gone
+      # (scripts/ci/image_worker_site_packages.py). Same conditions as the step above.
+      - name: The worker's site-packages load after the strip, and psycopg2 reaches Postgres
+        if: ${{ !cancelled() && matrix.name == 'workspace-worker' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          # docker-compose.yml's database image, the one the worker writes task status to.
+          POSTGRES_IMAGE: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker network create worker-probe > /dev/null
+          docker run -d --name worker-probe-db --network worker-probe \
+            -e POSTGRES_HOST_AUTH_METHOD=trust "$POSTGRES_IMAGE" > /dev/null
+          docker run --rm -i --user 1000 --network worker-probe \
+            -e PROBE_DATABASE_URL=postgresql://postgres@worker-probe-db:5432/postgres \
+            --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_site_packages.py
+
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
   # counts as its current `edge`. PRD-262 US-058's shared-layer check reads it.

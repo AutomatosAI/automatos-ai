@@ -84,12 +84,19 @@ export const THINKING_LEVELS: Record<string, string> = {
 
 export const DEFAULT_HARNESS_MODE = 'report_only'
 
-/** The HARNESS modes P1 offers (PRD-263 US-017, section 8 copy). US-054 adds Propose. */
+/** The HARNESS modes (PRD-263 US-017, section 8 copy); US-054 added Propose. */
 export const HARNESS_MODE_OPTIONS = [
   {
     value: DEFAULT_HARNESS_MODE,
     label: 'Report only',
     description: 'HARNESS writes a weekly report on your agents and changes nothing.',
+  },
+  {
+    value: 'propose',
+    label: 'Propose',
+    description:
+      'each change HARNESS suggests comes to you as an Approvals card, and nothing changes until you ' +
+      'approve it. Cards appear only when proposals are switched on for this installation.',
   },
   {
     value: 'disabled',

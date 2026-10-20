@@ -8,9 +8,13 @@ the same way, against the main lock, so the packages both carry keep one pin.
 
 The Dockerfile installs the locks with the uv binary it copies from the pinned uv
 image, with --require-hashes and --no-deps, in three layers: everything except
-claude-agent-sdk, then Playwright in the browser step, then the SDK alone, last.
-Its `locks` stage cuts requirements.lock into those two parts, and this suite
-runs that awk on the real lock. SQLAlchemy has left the worker
+claude-agent-sdk and psycopg2, then Playwright in the browser step, then the SDK
+alone, last. psycopg2 is built from its hash-checked sdist in a stage of its own,
+against Debian's libpq, into /install, which the production stage copies (PRD-262,
+row 27 of the 19 Oct size breakdown), on a build backend from requirements-build.lock
+(hash-checked, so the build is not isolated: an isolated build would fetch its backend
+unhashed). Its `locks` stage cuts requirements.lock into
+those three parts, and this suite runs that awk on the real lock. SQLAlchemy has left the worker
 (test_prd262_worker_task_executions.py covers its replacement).
 
 test.yml's prod-image-parity job checks the built image: the SDK version against
@@ -36,12 +40,18 @@ REL = "services/workspace-worker"
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
 MAIN_LOCK = "requirements.lock"
 BROWSER_LOCK = "requirements-browser.lock"
+BUILD_LOCK = "requirements-build.lock"
 SDK = "claude-agent-sdk"
 PIN_LINE = re.compile(r"^([a-z0-9][a-z0-9._-]*)==([^\s;\\]+)(?: ; [^\\]+)? \\$")
 HASH_LINE = re.compile(r"^    --hash=sha256:[0-9a-f]{64}(?: \\)?$")
 UV_STAGE = re.compile(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@sha256:[0-9a-f]{64} AS uv$", re.M)
 UV_INSTALL = re.compile(r"\buv pip install ([^;&]*?)-r (\S+\.lock)")
-INSTALL_FLAGS = ("--system", "--no-cache", "--compile-bytecode", "--require-hashes", "--no-deps")
+INSTALL_FLAGS = ("--no-cache", "--compile-bytecode", "--require-hashes", "--no-deps")
+# Where each install goes: the image's own Python, or psycopg2's build stage's prefix.
+PSYCOPG2_LOCK = "/locks/psycopg2.lock"
+BUILD_LOCK_IN_IMAGE = f"/locks/{BUILD_LOCK}"
+TARGET_FLAGS = {PSYCOPG2_LOCK: ("--prefix", "/install")}
+SYSTEM = ("--system",)
 
 
 def _instructions(text: str) -> list[str]:
@@ -98,6 +108,14 @@ def test_the_requirements_are_an_input_and_a_hash_lock():
         assert flag in command, flag
 
 
+def test_the_build_lock_is_compiled_like_the_main_lock():
+    command = _lock(BUILD_LOCK).splitlines()[1]
+    assert f"uv pip compile {REL}/requirements-build.in " in command
+    for flag in ("--universal", "--python-version 3.12", "--generate-hashes", f"-o {REL}/{BUILD_LOCK}"):
+        assert flag in command, flag
+    assert set(_pins(_lock(BUILD_LOCK))) == {"setuptools"}, "psycopg2's build backend, and nothing else"
+
+
 def test_the_browser_lock_is_compiled_against_the_main_lock():
     command = _lock(BROWSER_LOCK).splitlines()[1]
     assert f"uv pip compile {REL}/requirements-browser.in " in command
@@ -110,7 +128,7 @@ def test_the_browser_lock_is_compiled_against_the_main_lock():
     assert {name: (main[name], browser[name]) for name in shared if main[name] != browser[name]} == {}
 
 
-@pytest.mark.parametrize("lock", [MAIN_LOCK, BROWSER_LOCK])
+@pytest.mark.parametrize("lock", [MAIN_LOCK, BROWSER_LOCK, BUILD_LOCK])
 def test_every_line_of_the_lock_is_an_exact_pin_or_its_hash(lock):
     """Every entry is name==version with at least one sha256; every other line a comment."""
     text = _lock(lock)
@@ -126,7 +144,8 @@ def test_every_line_of_the_lock_is_an_exact_pin_or_its_hash(lock):
 
 
 @pytest.mark.parametrize(("source", "lock"), [("requirements.in", MAIN_LOCK),
-                                              ("requirements-browser.in", BROWSER_LOCK)])
+                                              ("requirements-browser.in", BROWSER_LOCK),
+                                              ("requirements-build.in", BUILD_LOCK)])
 def test_each_lock_satisfies_its_input(source, lock):
     pins = _pins(_lock(lock))
     for requirement in _requirements(source):
@@ -167,10 +186,13 @@ def test_uv_comes_from_a_pinned_stage_to_the_path_agents_use():
 def test_every_install_is_a_hash_checked_lock_with_no_resolution():
     installs = [(line, match) for line in INSTRUCTIONS for match in UV_INSTALL.finditer(line)]
     assert [match.group(2) for _, match in installs] == [
-        "/opt/worker-locks/stable.lock", BROWSER_LOCK, "/opt/worker-locks/sdk.lock"]
+        BUILD_LOCK_IN_IMAGE, PSYCOPG2_LOCK, "/opt/worker-locks/stable.lock", BROWSER_LOCK, "/opt/worker-locks/sdk.lock"]
     for _, match in installs:
-        missing = [flag for flag in INSTALL_FLAGS if flag not in match.group(1).split()]
+        words = match.group(1).split()
+        missing = [flag for flag in INSTALL_FLAGS if flag not in words]
         assert missing == [], f"{match.group(0)} lacks {missing}"
+        target = TARGET_FLAGS.get(match.group(2), SYSTEM)
+        assert " ".join(target) in " ".join(words), f"{match.group(0)} does not install into {target}"
 
 
 def test_the_sdk_installs_last_in_its_own_layer_after_the_browser():
@@ -192,11 +214,11 @@ def _locks_stage_awk() -> dict[str, str]:
     stage = DOCKERFILE.split(" AS locks\n", 1)[1].split("\nFROM ", 1)[0]
     run = re.sub(r"\\[ \t]*\n", " ", stage)
     programs = dict((out, program) for program, out in re.findall(r"awk '([^']+)' requirements\.lock > (\S+)", run))
-    assert set(programs) == {"stable.lock", "sdk.lock"}, programs
+    assert set(programs) == {"stable.lock", "sdk.lock", "psycopg2.lock"}, programs
     return programs
 
 
-def test_the_locks_stage_cuts_the_lock_into_the_sdk_and_the_rest():
+def test_the_locks_stage_cuts_the_lock_into_the_sdk_psycopg2_and_the_rest():
     awk = shutil.which("awk")
     assert awk, "awk is needed to run the Dockerfile's split"
     lock = _lock(MAIN_LOCK)
@@ -204,13 +226,14 @@ def test_the_locks_stage_cuts_the_lock_into_the_sdk_and_the_rest():
         out: subprocess.run([awk, program], input=lock, capture_output=True, text=True, check=True, timeout=30).stdout
         for out, program in _locks_stage_awk().items()
     }
-    sdk, stable = _pins(parts["sdk.lock"]), _pins(parts["stable.lock"])
+    sdk, stable, psycopg2 = (_pins(parts[name]) for name in ("sdk.lock", "stable.lock", "psycopg2.lock"))
     assert sdk == {SDK: _pins(lock)[SDK]}
-    assert stable == {name: version for name, version in _pins(lock).items() if name != SDK}
+    assert psycopg2 == {"psycopg2": _pins(lock)["psycopg2"]}
+    assert stable == {name: version for name, version in _pins(lock).items() if name not in {SDK, "psycopg2"}}
     # Nothing lost and nothing doubled: every line of the lock lands in exactly one part.
-    assert Counter(parts["stable.lock"].splitlines()) + Counter(parts["sdk.lock"].splitlines()) == Counter(lock.splitlines())
-    hashes = [line for line in parts["sdk.lock"].splitlines() if HASH_LINE.match(line)]
-    assert hashes, "the SDK part lost its hashes"
+    assert sum((Counter(part.splitlines()) for part in parts.values()), Counter()) == Counter(lock.splitlines())
+    for name in ("sdk.lock", "psycopg2.lock"):
+        assert [line for line in parts[name].splitlines() if HASH_LINE.match(line)], f"{name} lost its hashes"
 
 
 def test_no_cache_mount_in_the_worker_until_railway_gives_its_service_id():

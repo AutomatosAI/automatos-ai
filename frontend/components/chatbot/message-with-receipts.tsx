@@ -8,12 +8,16 @@
  * `receipts` (lib/chat/use-chat-with-receipts.ts), reloaded from its saved part. `Message`,
  * far over the component-length limit, is not touched; the chat page renders this in its place.
  * A message from before PRD-256, and every user message, renders exactly as `Message` does.
+ *
+ * PRD-264 EUAI-09 (Art. 50(2)): every assistant message is marked machine-readable as
+ * AI-generated: `data-ai-generated="true"` on the plain block that holds it (no class, so
+ * the list's spacing and the message's own layout are unchanged).
  */
 import { Message, type MessageProps } from './message'
 import { ReceiptsBlock } from './receipts-block'
 import { receiptsOf } from '@/lib/chat/receipts'
 
-export function MessageWithReceipts(props: MessageProps) {
+function MessageAndReceipts(props: MessageProps) {
   const { message } = props
   const receipts = message.role === 'assistant' ? receiptsOf(message) : undefined
   if (!receipts) return <Message {...props} />
@@ -24,6 +28,15 @@ export function MessageWithReceipts(props: MessageProps) {
         <ReceiptsBlock receipts={receipts} above={message.receiptsAbove} />
       </div>
       <Message {...props} />
+    </div>
+  )
+}
+
+export function MessageWithReceipts(props: MessageProps) {
+  if (props.message.role !== 'assistant') return <MessageAndReceipts {...props} />
+  return (
+    <div data-ai-generated="true" data-testid="ai-generated-message">
+      <MessageAndReceipts {...props} />
     </div>
   )
 }

@@ -17,6 +17,7 @@
 #   assets  the Kokoro files and the music tracks, in the media assets image's layout
 #   kokoro  the model and voices, checked against kokoro/SHA256SUMS; the voices
 #           cut to the catalogue's (PRD-262 US-052)
+#   esbuild the locked esbuild's binary, built from its source with a patched Go
 #   js      Hyperframes and GSAP, `npm ci` from js/package-lock.json
 #   chrome  chrome-headless-shell, built FROM js
 #   py      the Python packages, from requirements.lock with every hash checked;
@@ -95,6 +96,22 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
     && python /build/voices/voices_build.py /build/voices/voices.json voices-v1.0.bin \
     && rm SHA256SUMS
 
+# esbuild's binary, built from the source of the version js/package-lock.json locks.
+# Hyperframes requires esbuild ^0.25.12, and npm's 0.25.12 binary was built with Go
+# 1.23.12, whose standard library carries GO-2026-4337 (crypto/tls, fixed in 1.24.13,
+# 1.25.7 and 1.26) and GO-2026-6612 (net/http, fixed in 1.26.9). No esbuild release
+# is built with Go 1.26.9 or later yet (0.28.2, the newest, ships Go 1.26.5), so the
+# same 0.25.12 source is built here with esbuild's own release flags (its Makefile:
+# no cgo, -trimpath, -s -w, no build id or VCS stamp) on Go's patched 1.26 line,
+# the line esbuild itself builds on. `go install` checks every module against the
+# Go checksum database. The js stage puts the binary where npm put its own and
+# fails the build unless esbuild's JavaScript API accepts it, which it does only
+# when the binary's version is the locked package's.
+FROM golang:1.26.10-trixie@sha256:9ba7dc6d09ebf6e9317263973174bbf44e15bdf58cb0103747d7376f7cfa2d2f AS esbuild
+RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install -trimpath -buildvcs=false \
+        -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.25.12 \
+    && /out/esbuild --version
+
 # Hyperframes pinned EXACTLY (Apache-2.0), and GSAP for each composition's one
 # paused timeline, from js/package-lock.json: `npm ci` installs exactly the locked
 # tree, so Hyperframes' caret-range dependencies are pinned too. playwright-core is
@@ -113,6 +130,11 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
 
 WORKDIR /opt/media-render/js
 COPY js/package.json js/package-lock.json js/prune.txt ./
+COPY --from=esbuild /out/esbuild /tmp/esbuild
+# The esbuild stage's binary replaces the one npm installed for this platform, and
+# esbuild/bin/esbuild is hard-linked to it again, as esbuild's install script links
+# it, so the tree holds one copy. A transform through esbuild's JavaScript API
+# proves the binary starts and carries the locked version.
 # gsap.min.js is staged into every render from /opt/media-render/vendor.
 # PRD-262 #7: then what render, check and snapshot never load goes (about 75 MB):
 # the paths js/prune.txt lists (`rm -r`, so a path a bump moved fails the build),
@@ -120,6 +142,10 @@ COPY js/package.json js/package-lock.json js/prune.txt ./
 # notices, and the .bin links left pointing at nothing. media-render.yml traces
 # Node's module loading through a render, a check and a snapshot to prove it.
 RUN npm ci --omit=dev --no-fund --no-audit \
+    && native="node_modules/@esbuild/linux-$(node -p process.arch)/bin/esbuild" \
+    && cp --remove-destination /tmp/esbuild "$native" \
+    && ln -f "$native" node_modules/esbuild/bin/esbuild \
+    && node -e 'require("esbuild").transformSync("let a = 1")' \
     && mkdir -p /opt/media-render/vendor \
     && cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js \
     && sed -e 's/#.*//' -e '/^[[:space:]]*$/d' prune.txt | (cd node_modules && xargs rm -r --) \
@@ -209,6 +235,12 @@ RUN set -eux; \
 #   links to it (the build fails if they differ); every shared library is stripped
 #   (binutils here alone). The espeak build below then speaks through the stripped
 #   library, and the probes load every native part before the layer is kept.
+# - PRD-264 EUAI-06b: c2pa-python's wheel ships the Rust static library and its
+#   dependency file beside the shared one (libc2pa_c.rlib, 30 MB, and .d), which
+#   only a Rust build links; Python loads libc2pa_c.so through ctypes. Its shared
+#   library and cryptography's are stripped with the rest; c2pa and cryptography
+#   are imported and the SDK's version printed before the layer is kept, so a
+#   release that needs the deleted files, or a library the strip broke, fails here.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
@@ -225,6 +257,7 @@ RUN set -eux; \
     find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
     rm -r "$site"/onnxruntime/transformers "$site"/onnxruntime/quantization "$site"/onnxruntime/tools \
         "$site"/numpy/f2py /opt/venv/bin/f2py; \
+    rm "$site"/c2pa/libs/libc2pa_c.rlib "$site"/c2pa/libs/libc2pa_c.d; \
     for lib in "$site"/espeakng_loader/libespeak-ng.so.*; do \
         cmp "$lib" "$site"/espeakng_loader/libespeak-ng.so; \
         ln -sf libespeak-ng.so "$lib"; \
@@ -236,7 +269,8 @@ RUN set -eux; \
     /opt/venv/bin/python /opt/media-render/build/espeak_build.py /opt/espeak /opt/media-render/espeak-phonemes.json; \
     chmod -R a+rX /opt/espeak; \
     /opt/venv/bin/python -c 'import ctypes, aiohttp, numpy, soundfile, espeakng_loader; ctypes.CDLL(espeakng_loader.get_library_path()).espeak_Initialize'; \
-    /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'
+    /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'; \
+    /opt/venv/bin/python -c 'import c2pa, cryptography.x509; print("c2pa", c2pa.sdk_version())'
 ENV PATH=/opt/venv/bin:$PATH
 
 # The music library (PRD-251 S1.6), on py (numpy) plus ffmpeg (to decode). Every
@@ -345,8 +379,13 @@ COPY media_render/__init__.py media_render/versions.py /app/media_render/
 RUN python -m media_render.versions --browser /opt/chrome/chrome-headless-shell \
         --node-modules /opt/media-render/js/node_modules --write /opt/media-render/versions.json
 
+# PRD-264 EUAI-06b: /var/lib/media-render is where the local edition keeps its own
+# C2PA signing certificate (MEDIA_RENDER_C2PA_DATA_DIR, compose's media_render_data
+# volume, which takes this directory's owner and mode when it is first created). The
+# image holds the empty directory only: the certificate is made on first use, never at build.
 RUN useradd -m -u 1000 render \
-    && install -d -o render -g render /opt/media-render/node-cache
+    && install -d -o render -g render /opt/media-render/node-cache \
+    && install -d -m 0700 -o render -g render /var/lib/media-render
 USER render
 # NODE_COMPILE_CACHE is set only now, so nothing that ran as root wrote into it.
 ENV HOME=/home/render \

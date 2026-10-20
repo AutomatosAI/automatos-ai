@@ -922,7 +922,7 @@ export interface SocialSeriesShownPost {
 }
 
 /** Why a series approval left a post unapproved. */
-export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown' | 'not_in_batch'
+export type SocialSeriesLeftReason = 'changed' | 'unsourced' | 'not_waiting' | 'not_in_campaign' | 'not_shown' | 'not_in_batch' | 'render_again'
 
 export interface SocialSeriesLeftPost {
   post_id: string

@@ -288,11 +288,21 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
     ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
     assert 'down_revision = "prd262_boot_columns"' in ledger_grants
+    # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+    # prd263_harness_ledger_grants — the provenance record (content_provenance), a
+    # new table only; the guard follows it.
+    provenance = (versions / "prd264_content_provenance.py").read_text()
+    assert 'down_revision = "prd263_harness_ledger_grants"' in provenance
+    # 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto it — blog_posts gains
+    # reviewed_by_user_id, reviewed_at and reviewed_content_sha256 (three nullable columns); the
+    # guard follows it.
+    blog_review = (versions / "prd264_blog_review.py").read_text()
+    assert 'down_revision = "prd264_content_provenance"' in blog_review
     # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
-    # prd263_harness_ledger_grants — a new table only (the audit record of the one-time
+    # prd264_blog_review — a new table only (the audit record of the one-time
     # relink); the guard follows it.
     relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
-    assert 'down_revision = "prd263_harness_ledger_grants"' in relinks
+    assert 'down_revision = "prd264_blog_review"' in relinks
     assert 'EXPECTED_HEAD = "clerk_user_relinks_20261019"' in guard
 
 

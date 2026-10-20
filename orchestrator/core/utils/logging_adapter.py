@@ -19,6 +19,7 @@ from core.monitoring.automatos_logging import (
     http_method_var,
     http_path_var,
 )
+from core.monitoring.path_digests import redact_digest_segments
 
 # Re-export for backwards compat (existing code imports from here)
 __all__ = [
@@ -62,7 +63,7 @@ class ContextFilter(logging.Filter):
         record.run_id = run_id_var.get("")
         record.tenant_id = tenant_id_var.get("")
         record.http_method = http_method_var.get("")
-        record.http_path = http_path_var.get("")
+        record.http_path = redact_digest_segments(http_path_var.get(""))   # PRD-264 FR-17
         from core.observability.otel import current_trace_ids
 
         record.trace_id, record.span_id = current_trace_ids()

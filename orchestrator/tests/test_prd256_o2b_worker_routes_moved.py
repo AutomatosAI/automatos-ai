@@ -4,7 +4,9 @@ A move with no behaviour change: the same routes with the same methods (GET
 also answers HEAD, as ``add_get`` did), the same middleware order (metrics,
 then the internal-token check), and the same answers. The handlers' own
 behaviour is covered by the F173/F178/F333 and binary-pieces suites, which run
-the worker's server unchanged.
+the worker's server unchanged. PRD-262 (row 36) moved the server from aiohttp to
+Starlette on uvicorn; these tests read Starlette's routes and run its TestClient
+(test_prd262_worker_starlette.py covers what aiohttp did on its own).
 """
 from __future__ import annotations
 
@@ -51,7 +53,7 @@ def test_the_app_serves_the_same_routes_as_before_the_move(monkeypatch, tmp_path
     import worker_http
 
     app = worker_http.build_app(_worker())
-    routes = {(r.method, r.resource.canonical) for r in app.router.routes()}
+    routes = {(method, route.path) for route in app.routes for method in route.methods}
     assert routes == ROUTES_BEFORE_THE_MOVE
 
 
@@ -73,13 +75,12 @@ def test_a_configured_internal_token_refuses_a_request_without_it(monkeypatch, t
     monkeypatch.setenv("WORKER_INTERNAL_TOKEN", "s3cret")
     app = worker_http.build_app(_worker())
 
-    async def run():
-        from aiohttp.test_utils import TestClient, TestServer
+    from starlette.testclient import TestClient
 
-        async with TestClient(TestServer(app)) as client:
-            assert (await client.get("/health")).status == 200
-            assert (await client.get(f"/workspaces/{WS}/files")).status == 401
-            ok = await client.get(f"/workspaces/{WS}/files", headers={"X-Internal-Token": "s3cret"})
-            assert ok.status == 200
-
-    asyncio.run(run())
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        refused = client.get(f"/workspaces/{WS}/files")
+        assert refused.status_code == 401 and refused.json() == {"error": "Unauthorized"}
+        assert client.get(f"/workspaces/{WS}/files", headers={"X-Internal-Token": "wrong"}).status_code == 401
+        ok = client.get(f"/workspaces/{WS}/files", headers={"X-Internal-Token": "s3cret"})
+        assert ok.status_code == 200

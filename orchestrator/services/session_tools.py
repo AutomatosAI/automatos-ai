@@ -28,8 +28,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
-from uuid import UUID
 
+from services.session_file_reads import (run_read_document, run_read_step_file, scope_read_document,
+                                         scope_read_step_file)
 from services.session_work_tools import GROUP_TOOL_SPECS
 
 logger = logging.getLogger(__name__)
@@ -404,48 +405,6 @@ async def _run_record_memory(db: Any, params: Dict[str, Any], ctx: SessionContex
     }
 
 
-def _scope_read_step_file(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    """An id from the ticket's list and nothing else: no path, no other field."""
-    raw = str(params.get("file_id") or "").strip()
-    try:
-        return {"file_id": str(UUID(raw))}
-    except ValueError:
-        raise SessionToolRefused(
-            "read_step_file takes the id your ticket lists beside the file "
-            "(e.g. 125a3625-1351-435e-a128-6eca909f17b6), never a path or a name."
-        ) from None
-
-
-async def _run_read_step_file(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    """F161: read one file another step of this ticket's mission saved. The
-    ticket names the mission; the id must be one its other steps registered.
-    The read itself is the executor's own ``platform_get_deliverable``."""
-    from config import config
-    from modules.tools.execution.unified_executor import UnifiedToolExecutor
-    from services.step_files import NOT_A_MISSION_STEP, files_for_ticket, not_listed, step_file_answer
-
-    files = files_for_ticket(db, ticket_id=ctx.task_id, workspace_id=ctx.workspace_id)
-    if files is None:
-        raise SessionToolRefused(NOT_A_MISSION_STEP)
-    chosen = next((f for f in files if f.deliverable_id == params["file_id"]), None)
-    if chosen is None:
-        raise SessionToolRefused(not_listed(files))
-    result = await UnifiedToolExecutor(db).execute_tool(
-        tool_name=PLATFORM_DISPATCHER,
-        parameters={
-            "action": "platform_get_deliverable",
-            "params": {"deliverable_id": chosen.deliverable_id, "include_content": True},
-        },
-        agent_id=int(ctx.agent_id or 0),
-        workspace_id=ctx.workspace_id,
-        trace_id=f"session:{ctx.task_id}:read_step_file",
-        caller_context=None,
-    )
-    configured = int(getattr(config, "SESSION_STEP_FILE_MAX_CHARS", 0) or 0)
-    ceiling = MAX_TOOL_RESULT_CHARS - STEP_FILE_FRAME_CHARS
-    return await step_file_answer(chosen, result, min(configured, ceiling) if configured > 0 else ceiling, ctx)
-
-
 class SessionToolRefused(Exception):
     """The call is outside what a session may ask for; the reason is for the model."""
 
@@ -631,6 +590,27 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         tags=("knowledge", "documents"),
     ),
     SessionTool(
+        name="read_document",       # F448: a file the brief names, read whole (services/session_file_reads.py)
+        action="platform_read_document",
+        description=(
+            "Read one of the owner's knowledge-base documents in full, a page at a time, by its filename or "
+            "its document_id: when your brief names a file, or to read past a search passage. A spreadsheet "
+            "also arrives as a copy in your folder to count with code."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "The document's filename, as your brief names it."},
+                "document_id": {"type": "integer", "description": "Its id, from a search result."},
+                "page": {"type": "integer", "description": "The page to read (0 first; the answer's next_page)."},
+            },
+            "required": [],
+        },
+        scope=scope_read_document,
+        runner=run_read_document,
+        tags=("knowledge", "documents"),
+    ),
+    SessionTool(
         name="record_memory",
         action="platform_store_memory",
         description=(
@@ -669,10 +649,11 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         name="read_step_file",
         action="platform_get_deliverable",
         description=(
-            "Read a file an earlier step of THIS mission saved. Your session opens only its own "
-            "folder; your ticket lists the files the mission's other steps saved, each with an id. "
+            "Read a file an earlier step of THIS mission saved, or a file on a card your ticket names. Your "
+            "session opens only its own folder; your ticket lists those files, each with an id. "
             "Pass that id, never a path: only those files can be read, read-only, a long file comes "
-            "back cut with a note saying where, and a picture is copied into your folder to open there."
+            "back cut with a note saying where, and a picture is copied into your folder to open there, "
+            "and so is a PDF or other document file."
         ),
         input_schema={
             "type": "object",
@@ -682,8 +663,8 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
             },
             "required": ["file_id"],
         },
-        scope=_scope_read_step_file,
-        runner=_run_read_step_file,
+        scope=scope_read_step_file,
+        runner=run_read_step_file,
         tags=("mission", "files"),
     ),
 ) + tuple(SessionTool(**spec) for spec in GROUP_TOOL_SPECS)  # F329/#942: the owner-chosen groups' tools

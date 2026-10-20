@@ -93,8 +93,8 @@ from modules.tools.discovery.handlers_monitoring import (
     get_alerts,
     get_system_health,
 )
+from modules.tools.discovery.chat_history_read import search_chat_history  # N17-11 (F443): by words or window
 from modules.tools.discovery.handlers_search import (
-    search_chat_history,
     search_memory,
     browse_memories,
     delete_memory,
@@ -140,6 +140,7 @@ from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_g
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
+from modules.tools.execution.owner_reasons import NO_SUCH_ACTION, SENT_WRONG, refused  # F449
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     get_board_task,
@@ -169,6 +170,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
     harness_history,
+    harness_apply,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
 from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
@@ -357,6 +359,7 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
     "platform_my_actions", "platform_browse_memories", "platform_delete_memory", "platform_search_chat_history",  # N14-3/4, N15-4: the asker's chats, clicks, rules
+    "platform_get_task",   # N17-6 (F445): the card's send-backs, on the owner's own turn only
 )
 
 
@@ -890,10 +893,10 @@ class PlatformActionExecutor:
             try:
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
-                return {"success": False, "error": f"Invalid params format: expected dict, got string"}
+                return refused("Invalid params format: expected dict, got string", SENT_WRONG)  # F449
         handler = self._handlers.get(action_name)
         if not handler:
-            return {"success": False, "error": f"Unknown platform action: {action_name}"}
+            return refused(f"Unknown platform action: {action_name}", NO_SUCH_ACTION)  # F449
 
         # F179: the gates a call clears are one method, so the workspace tools
         # clear the same ones.
@@ -1477,6 +1480,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_harness_status": harness_status,
     "platform_harness_trigger": harness_trigger,
     "platform_harness_history": harness_history,
+    "platform_harness_apply": harness_apply,  # PRD-263 US-052: an owner-approved HARNESS change
     # PRD-142 Wave 4 (W4-S6): routing-rule creation
     "platform_create_routing_rule": create_routing_rule,
     # PRD-142 Wave 4 (W4-S5): workspace power-mode knob

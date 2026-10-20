@@ -28,6 +28,7 @@ from api.widgets.auth import _extract_origin
 from core.security.log_safe import log_safe
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
+from core.services.blog_post_view import post_view, read_post_view  # PRD-264 EUAI-09/08b: ai_generated
 from core.services.blog_service import BlogService
 from modules.documents.blocks.markdown_body import view_html
 
@@ -121,7 +122,7 @@ async def list_published_posts(
         page=page,
         per_page=per_page,
     )
-    posts = [p.to_dict(include_content=False) for p in result["posts"]]
+    posts = [await read_post_view(svc, p, include_content=False) for p in result["posts"]]
     response = JSONResponse(content={
         "posts": posts,
         "total": result["total"],
@@ -147,9 +148,11 @@ async def get_published_post(
 
     svc.increment_views(post.id)
 
-    data = post.to_dict(include_content=False)
     content = await svc.get_content(post) or ""
-    data["content"] = view_html(content)  # 7 Oct: the reports' markdown reader, sanitised
+    data = {
+        **post_view(post, include_content=False, current_text=content),  # PRD-264 EUAI-08b: the text as it is now
+        "content": view_html(content),  # 7 Oct: the reports' markdown reader, sanitised
+    }
 
     response = JSONResponse(content=data)
     response.headers["Cache-Control"] = "public, max-age=3600"

@@ -13,6 +13,7 @@ from services.chat_messenger import strip_caller_narration_origin
 logger = logging.getLogger(__name__)
 
 MIN_CONTENT_CHARS = 500
+PUBLISH_IMMEDIATELY = "publish_immediately"
 PLACEHOLDER_PATTERNS = (
     re.compile(r"^\s*\[[^\[\]]+\]\s*$", re.IGNORECASE),
     re.compile(r"\[(blog post|article|post)\s+content[^\]]*\]", re.IGNORECASE),
@@ -71,6 +72,14 @@ def _normalize_tags(raw) -> List[str]:
     return []
 
 
+def goes_live(params: Dict[str, Any]) -> bool:
+    """Whether a publish_blog_post call puts the post live: ``publish_immediately`` true, or the
+    string 'true'. P256-FIX-N17-11 (F443): the string 'false' was truthy here, so a call that
+    asked for a draft published the post; its card now says which (``card_question_publish``)."""
+    said = params.get(PUBLISH_IMMEDIATELY)
+    return said is True or (isinstance(said, str) and said.strip().lower() == "true")
+
+
 async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create and optionally publish a blog post."""
     from core.services.blog_service import BlogService
@@ -85,8 +94,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
         logger.warning("publish_blog_post rejected: %s | title=%r", content_error, title)
         return {"success": False, "error": content_error}
 
-    publish_immediately = params.get("publish_immediately", False)
-    status = "published" if publish_immediately else "draft"
+    status = "published" if goes_live(params) else "draft"
 
     agent_name = params.get("_agent_name", "AI Agent")
     agent_id = params.get("_agent_id")
@@ -368,18 +376,34 @@ async def _image_from_model(workspace_id: UUID, full_prompt: str, context: str) 
             "Cover image generation returned no image data | %s | content_len=%d", context, len(content),
         )
         raise ImageNotMade("Image model did not return base64 image data — try a clearer prompt")
-    return extracted
+    return _ai_marked(*extracted, context=context)
+
+
+def _ai_marked(mime: str, b64: str, context: str) -> tuple:
+    """PRD-264 EUAI-09: the model's image with the AI mark, before anything keeps it.
+    One that cannot be read to mark it is not kept: :class:`ImageNotMade`."""
+    from modules.documents.marked_images import marked_model_image
+
+    try:
+        return marked_model_image(mime, b64)
+    except ValueError as e:
+        logger.warning("Cover image could not be marked as AI-generated | %s | %s", context, e)
+        raise ImageNotMade("The image model returned an image that could not be read — try again") from e
 
 
 async def _saved_image(workspace_id: UUID, mime: str, b64: str) -> str:
-    """The image store's id for the image; raises :class:`ImageNotMade`."""
+    """The image store's id for the image (its provenance row recorded once it is kept,
+    PRD-264 EUAI-09); raises :class:`ImageNotMade`."""
     from core.services.image_store import get_image_store
+    from modules.documents.marked_images import record_model_image
 
     try:
-        return await get_image_store().save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
+        image_id = await get_image_store().save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
     except Exception as e:
         logger.error("Image store save failed: %s", e, exc_info=True)
         raise ImageNotMade(f"Image upload failed: {str(e)[:_ERROR_DETAIL_CHARS]}") from e
+    record_model_image(workspace_id, mime, b64)  # PRD-264 EUAI-09: the kept image's provenance row
+    return image_id
 
 
 def _image_url(image_id: str) -> str:

@@ -5,3 +5,11 @@
 # name. The worker's fi.evals and fi.opt modules come from ai-evaluation and
 # agent-opt themselves.
 fi ; sys_platform == 'never'
+# ai-evaluation 1.1.0 requires openai<2,>=1.109.1, and litellm 1.84 and later
+# (the fix for GHSA-7488-6r32-c95q, KEV) require openai<3,>=2.20.0. openai
+# 2.0.0's only breaking change is the type of a Responses API tool-call output,
+# which neither SDK reads: ai-evaluation calls chat completions, embeddings and
+# moderations. Its source repository (future-agi/ai-evaluation, now
+# agent-learning-kit) allows openai<3 on main. This replaces every requirement
+# on openai in the resolution.
+openai>=2.20.0,<3

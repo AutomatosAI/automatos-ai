@@ -20,6 +20,11 @@ const isPublicRoute = createRouteMatcher([
   // or a <video> range request with a 404 before the handler runs, which reads as a broken
   // theme instead of an expired session.
   "/api/themes/files/(.*)",
+  // PRD-264 EUAI-10: anyone can check a file for an Automatos AI mark, signed in or not.
+  // Segment-bounded (like the theme host's isHostOwned): "/verify(.*)" would also make
+  // /verify-email or /verification public.
+  "/verify",
+  "/verify/(.*)",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {

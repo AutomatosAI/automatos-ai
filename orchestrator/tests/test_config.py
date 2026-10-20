@@ -78,9 +78,9 @@ def test_semantic_tool_routing_top_k_override(monkeypatch):
 
 
 def test_harness_self_management_defaults_false(monkeypatch):
-    """HARNESS_SELF_MANAGEMENT_ENABLED is off when unset (PRD-141, HIGH RISK). Moved here
-    from test_harness_self_management.py, which PRD-263 US-048 deleted; the setting stays
-    until US-054 redefines it as the switch for approval grants."""
+    """HARNESS_SELF_MANAGEMENT_ENABLED is off when unset (HIGH RISK). Moved here from
+    test_harness_self_management.py, which PRD-263 US-048 deleted; US-054 redefined it
+    as the installation's switch that allows HARNESS to raise approval grants."""
     config_module = _reload_config(monkeypatch, None, name="HARNESS_SELF_MANAGEMENT_ENABLED")
 
     assert config_module.config.HARNESS_SELF_MANAGEMENT_ENABLED is False

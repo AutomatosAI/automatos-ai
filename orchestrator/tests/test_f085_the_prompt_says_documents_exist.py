@@ -37,6 +37,11 @@ def db(test_engine):
         session.close()
 
 
+# P256-FIX-N17-11 (F443): the documents sentence ends with the absence rule.
+ABSENCE = ("Never tell the owner a document does not give something until search_knowledge, in the thing's own "
+           "words, finds nothing either; platform_search_documents calls do not count.")
+
+
 def _doc(db, doc_id, ws, name, *, report=False, day=1, status="completed"):
     db.execute(text("INSERT INTO documents (id, workspace_id, filename, source_type, status, upload_date) "
                     "VALUES (:id, CAST(:ws AS uuid), :name, :st, :status, make_timestamp(2026, 9, :day, 12, 0, 0))"),
@@ -54,7 +59,7 @@ def test_the_section_names_the_owners_newest_documents_and_counts_the_reports(db
         "## Documents in this workspace\n"
         "This workspace holds 2 of the owner's documents (green-coffee-list-autumn-2026.csv, brand-voice.md) "
         "and 1 report its agents saved. For a question about the business, a document, or how the product "
-        "works, search them with search_knowledge first and name the file you used.")
+        f"works, search them with search_knowledge first and name the file you used. {ABSENCE}")
 
 
 def test_a_long_list_is_cut_to_the_newest_ten_and_an_empty_workspace_has_no_section(db):
@@ -75,7 +80,7 @@ def test_a_workspace_holding_only_reports_counts_them_as_reports(db):
     assert documents_summary(db, ws) == (
         "## Documents in this workspace\n"
         "This workspace holds 3 reports its agents saved. For a question about the business, a document, or "
-        "how the product works, search them with search_knowledge first and name the file you used.")
+        f"how the product works, search them with search_knowledge first and name the file you used. {ABSENCE}")
 
 
 def test_the_section_is_on_autos_prompt_after_the_cached_prefix():

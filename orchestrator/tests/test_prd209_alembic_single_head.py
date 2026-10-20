@@ -112,9 +112,15 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # skills.content_hash) become a revision.
 # 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto prd262_boot_columns
 # — harness_task_ledger gains the governed apply columns, and its held rows become expired.
+# 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+# prd263_harness_ledger_grants — the provenance record (content_provenance) the
+# public detection route reads.
+# 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto prd264_content_provenance
+# — blog_posts.reviewed_by_user_id, reviewed_at and reviewed_content_sha256: who took editorial
+# responsibility, when, and for which text.
 # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
-# prd263_harness_ledger_grants — a new table only, the audit record of the one-time
-# relink of returning users to production IDs.
+# prd264_blog_review — a new table only, the audit record of the one-time relink
+# of returning users to production IDs.
 EXPECTED_HEAD = "clerk_user_relinks_20261019"
 
 

@@ -8,9 +8,12 @@
   Knowledge Graph … that the agent's groups leave out. ``?groups=data,graph``
   previews other groups for that one response (empty = core only), and the gaps
   follow it.
+* ``GET /api/marketplace/items/{id}?type=agent`` carries, in ``dependencies``, what a
+  CLI-session copy of the agent could not call (PRD-256 F430, ``with_session_tool_gaps``).
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -18,6 +21,7 @@ from fastapi import HTTPException
 from core.models import AgentResponse
 from services.session_capability_gaps import workspace_gaps
 from services.session_tool_groups import (
+    DEFAULT_SESSION_TOOL_GROUPS,
     UnknownToolGroup,
     check_configuration,
     effective_groups,
@@ -26,7 +30,10 @@ from services.session_tool_groups import (
     tools_for_groups,
 )
 
+logger = logging.getLogger(__name__)
+
 UNPROCESSABLE = 422
+SKILL_GAP_KIND = "skill"
 
 
 class AgentDetailResponse(AgentResponse):
@@ -77,3 +84,15 @@ async def agent_detail(
         "session_tool_gaps": gaps,
         "session_tool_groups": groups_payload(agent, preview),
     })
+
+
+def with_session_tool_gaps(detail: Any, agent: Any) -> Any:
+    """F430: a marketplace agent's detail with ``dependencies.session_tool_gaps``: what its
+    skills name that a CLI-session copy on the default groups could not call (an install
+    is an API agent; a copy switched to a CLI session gets the default groups)."""
+    try:
+        gaps = [{**gap, "kind": SKILL_GAP_KIND} for gap in skill_gaps(agent, list(DEFAULT_SESSION_TOOL_GROUPS))]
+    except Exception:  # noqa: BLE001 — logged; the detail renders without the gaps
+        logger.exception("[F430] session tool gaps unavailable for marketplace agent %s", getattr(agent, "id", "?"))
+        return detail
+    return detail.model_copy(update={"dependencies": {**detail.dependencies, "session_tool_gaps": gaps}})

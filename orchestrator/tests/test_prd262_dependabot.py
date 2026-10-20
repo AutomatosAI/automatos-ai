@@ -79,6 +79,14 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "lock is compiled with -c requirements.lock, which neither updater passes. "
         "How it is kept current is open for Gerard and Dave (PRD-262 US-012, US-044)."
     ),
+    # PRD-262 (row 27 of the 19 Oct size breakdown): psycopg2's build backend, hash-checked
+    # because the worker builds psycopg2 without build isolation.
+    "services/workspace-worker/requirements-build.lock": (
+        "Dependabot's pip and uv updaters read only *.txt and *.in files "
+        "(dependabot-core python/shared_file_fetcher.rb, read 18 Oct 2026), so they "
+        "cannot regenerate a requirements.lock. How this lock is kept current is open "
+        "for Gerard and Dave (PRD-262 US-012, US-044)."
+    ),
     **dict.fromkeys(
         ("orchestrator/requirements.lock", "orchestrator/requirements-dev.lock"),
         "Dependabot's pip and uv updaters fetch only *.txt and *.in files (and uv.lock), so "

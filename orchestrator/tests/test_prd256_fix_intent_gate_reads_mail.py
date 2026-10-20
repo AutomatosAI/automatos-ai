@@ -167,3 +167,14 @@ def test_an_unknown_action_on_a_synced_table_is_still_refused():
     svc = get_action_capability_filter(_SyncedWithoutIt())
     eligible, reason = svc.check_action_eligibility(FETCH, THE_NIGHTS_ASK)
     assert eligible is False and "Unknown action" in reason
+
+
+def test_an_instagram_read_back_passes_a_publish_intent():
+    """P256-FIX-SOC-4 (F432-c, 14 Oct): reading back what went out on Instagram was refused by the
+    gate on the night. The slug's verb is a read word and both stored capabilities are reads, with no
+    send, order or write word: the read passes whatever the turn's intent."""
+    stored = ["user.lookup", "data.query"]
+    intent = ["user.status", "message.reply", "message.send", "channel.manage"]
+
+    assert only_reads("INSTAGRAM_GET_USER_MEDIA", stored) is True
+    assert intent_allows("INSTAGRAM_GET_USER_MEDIA", stored, intent) is True

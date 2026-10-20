@@ -11,6 +11,14 @@ So the answer is compact: the post's id, title, status, format, template and its
 links. A post whose render was refused is a failed call (``success: false``) whose ``error`` says
 first that the post was saved as a draft and did not render, why in plain words (the labels of
 the fields left empty), and the call that fixes it, which never makes the post again.
+
+P256-FIX-SOC-4 (F432-b, 14 Oct): ``platform_get_social_post`` answered the whole post, and a
+carousel's channels came after its copy, variables, media and a history whose every agent edit
+carried a copy of up to 4,000 characters: the chat kept the head, and Auto never saw where the post
+went out or when. ``read_view`` puts who it is, its channels with their receipts, its times, its
+approval and what it still needs first, then the rest, with the last ``REVIEW_LOG_KEPT`` history
+entries and none of their copies (the count of all of them beside). Only the composer's preview and
+the hashes are left out. ``SocialPost.to_dict`` itself is unchanged: REST and the app read it.
 """
 from __future__ import annotations
 
@@ -33,6 +41,14 @@ FIX_TEMPLATE = ('Give it a template with platform_update_social_post {{"post_id"
                 '"variables": {{its fields}}, "render": true}}.')
 FIX_OTHER = 'When that is sorted, render it with platform_update_social_post {{"post_id": "{id}", "render": true}}.'
 NO_TEMPLATE_WORDS = ("no template", "pick a template")
+# read_view (P256-FIX-SOC-4): what comes first, in order, and what an agent's read leaves out.
+READ_FIRST = ("id", "status", "title", "format", "template_id")
+TARGET_KEYS = ("toolkit", "post_kind", "options", "status", "published_at", "remote_id", "permalink", "error", "notes")
+WHEN_KEYS = ("scheduled_for", "planned_for", "timezone")
+APPROVAL_KEYS = ("approved_by", "approved_at", "override_unsourced")
+READ_DROPPED = ("preview", "content_hash", "approved_hash", "workspace_id")
+REVIEW_LOG = "review_log"
+REVIEW_LOG_KEPT = 5
 
 
 def media_links(post: Mapping[str, Any]) -> List[str]:
@@ -55,6 +71,27 @@ def post_view(post: Mapping[str, Any], template_name: Optional[str]) -> Dict[str
         "template": template_name,
         "template_id": post.get("template_id"),
         "media": media_links(post),
+    }
+
+
+def read_view(post: Mapping[str, Any]) -> Dict[str, Any]:
+    """The post as an agent reads it (``SocialPost.to_dict``, reordered): who it is, its channels and
+    their receipts, when, its approval and what it still needs, then the rest, and its last
+    ``REVIEW_LOG_KEPT`` history entries without the copies they keep (see the module note)."""
+    from modules.socials.voice_examples import AUTO_COPY_KEY
+    from modules.tools.discovery.social_post_list import what_it_needs
+
+    targets = [{key: target.get(key) for key in TARGET_KEYS} for target in post.get("targets") or []
+               if isinstance(target, Mapping)]
+    log = list(post.get(REVIEW_LOG) or [])
+    kept = [{key: value for key, value in entry.items() if key != AUTO_COPY_KEY} if isinstance(entry, Mapping)
+            else entry for entry in log[-REVIEW_LOG_KEPT:]]
+    placed = {*READ_FIRST, "targets", *WHEN_KEYS, *APPROVAL_KEYS, REVIEW_LOG, *READ_DROPPED}
+    return {
+        **{key: post.get(key) for key in READ_FIRST}, "targets": targets,
+        **{key: post.get(key) for key in (*WHEN_KEYS, *APPROVAL_KEYS)}, "needs": what_it_needs(post),
+        **{key: value for key, value in post.items() if key not in placed},
+        REVIEW_LOG: kept, "review_log_total": len(log),
     }
 
 
@@ -94,5 +131,5 @@ def not_rendered(post: Mapping[str, Any], template: Any, error: str, template_na
             "render": {"started": False, "error": error}}
 
 
-__all__ = ["CHANGED", "DRAFT_SAVED", "RENDER_STARTED", "media_links", "not_rendered", "post_view", "rendering",
-           "saved"]
+__all__ = ["CHANGED", "DRAFT_SAVED", "RENDER_STARTED", "media_links", "not_rendered", "post_view", "read_view",
+           "rendering", "saved"]

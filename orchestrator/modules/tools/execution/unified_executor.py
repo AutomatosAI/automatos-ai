@@ -38,6 +38,7 @@ from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.tools.execution.params_text import decodes_nested_params, params_refusal_text
 from modules.tools.execution.direct_contract import missing_on_a_direct_call  # PRD-256 US-006
+from modules.tools.execution.refused_calls import says_why_it_refused  # P256-FIX-N17-10 (F449)
 from modules.tools.discovery.owner_only import asks_before_a_send  # PRD-256 US-004
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
@@ -877,6 +878,7 @@ class UnifiedToolExecutor:
 
     @decodes_nested_params  # F321 (night 9b): params sent as JSON text run as the object they hold
     @asks_before_a_send  # PRD-256 US-004: a Composio send from a person's chat waits for their click
+    @says_why_it_refused  # P256-FIX-N17-10 (F449): its refusals carry the owner's reason
     async def execute_tool(
         self,
         tool_name: str,

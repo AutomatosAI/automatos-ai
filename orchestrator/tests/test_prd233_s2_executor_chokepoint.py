@@ -28,7 +28,8 @@ def no_policy_gate(monkeypatch):
 async def test_direct_composio_call_is_refused_when_unavailable(monkeypatch, no_policy_gate):
     monkeypatch.setattr("core.composio.client.composio_available", lambda: False)
     ex = _bare_executor()
-    for name, params in (("composio_execute", {"action": "SLACK_SEND_MESSAGE"}), ("composio_slack_send", {}), ("SLACK_SEND_MESSAGE", {})):
+    # PRD-264 EUAI-07: a send the map does not name carries its words, or the gate refuses it first.
+    for name, params in (("composio_execute", {"action": "SLACK_SEND_MESSAGE"}), ("composio_slack_send", {"text": "hi"}), ("SLACK_SEND_MESSAGE", {})):
         res = await ex.execute_tool(name, params, agent_id=1, trace_id="t-chokepoint")
         assert res["success"] is False, name
         assert res.get("error_code") == "integrations_unavailable", (name, res)

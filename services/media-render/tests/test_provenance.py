@@ -154,7 +154,7 @@ def test_a_jpeg_keeps_the_mark_of_the_still_it_was_made_from(settings, tmp_path)
     for source, expected in ((marked.read_bytes(), COMPOSITE), (plain, None)):
         jpeg = to_jpeg(source, ffmpeg_bin=settings.ffmpeg_bin, timeout_seconds=30)
         out = tmp_path / "out.jpg"
-        out.write_bytes(provenance.carry_mark(source, jpeg, **kwargs))
+        out.write_bytes(provenance.carry_mark(source, jpeg, **kwargs).data)
         assert out.read_bytes()[:3] == b"\xff\xd8\xff"
         assert source_type_of(settings, out) == expected
         if expected:
@@ -282,7 +282,7 @@ def test_a_jpeg_made_from_a_marked_still_gets_its_own_instance_id(settings, tmp_
     kwargs = {"exiftool_bin": settings.exiftool_bin, "timeout_seconds": 60}
     outs = [tmp_path / "one.jpg", tmp_path / "two.jpg"]
     for out in outs:
-        out.write_bytes(provenance.carry_mark(still.read_bytes(), jpeg, **kwargs))
+        out.write_bytes(provenance.carry_mark(still.read_bytes(), jpeg, **kwargs).data)
     ids = {instance_id_of(packet_of(settings, path)) for path in (still, *outs)}
     assert len(ids) == 3 and _sha256(outs[0]) != _sha256(outs[1])
 

@@ -23,6 +23,7 @@ from enum import Enum
 from uuid import uuid4
 # F292: a playbook's steps say their order on every read.
 from core.playbook_steps import steps_in_order
+from core.models.blog_post_review import BlogPostReviewColumns
 
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
@@ -1740,7 +1741,7 @@ class BoardTask(Base):
 # Blog Posts (PRD Blog Widget)
 # ---------------------------------------------------------------------------
 
-class BlogPost(Base):
+class BlogPost(BlogPostReviewColumns, Base):  # PRD-264 EUAI-08b: the review columns
     __tablename__ = "blog_posts"
     __table_args__ = (
         UniqueConstraint("workspace_id", "slug", name="uq_blog_posts_workspace_slug"),
@@ -1755,7 +1756,6 @@ class BlogPost(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     author_agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     author_name = Column(String(255), nullable=False)
-
     title = Column(String(500), nullable=False)
     slug = Column(String(500), nullable=False)
     excerpt = Column(String(500), nullable=True)

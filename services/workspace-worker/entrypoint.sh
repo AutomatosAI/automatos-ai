@@ -15,5 +15,8 @@ if [ -d "$WORKSPACE_VOLUME_PATH" ] && [ "$(stat -c '%u' "$WORKSPACE_VOLUME_PATH"
     chown worker:worker "$WORKSPACE_VOLUME_PATH" 2>/dev/null || true
 fi
 
-# Drop to worker user and exec the main process
-exec gosu worker python -m main "$@"
+# Drop to the worker user and exec the main process. setpriv, from util-linux in the
+# base image, replaced gosu (PRD-262, row 47 of the size breakdown: 2.9 MB). It sets
+# all three uids and gids and the worker's groups, but unlike gosu it leaves HOME as
+# root's, so HOME is set here: the canvas's Claude CLI and ~/.cache read it.
+exec setpriv --reuid=worker --regid=worker --init-groups env HOME=/home/worker python -m main "$@"

@@ -32,3 +32,9 @@ phonemizer==3.4.0
 onnxruntime==1.30.0
 numpy==2.5.3
 soundfile==0.14.0
+
+# PRD-264 EUAI-06b (D14, approved 19 Oct 2026): the Content Authenticity Initiative's SDK
+# (MIT OR Apache-2.0) signs and reads the C2PA manifest on every AI-made output: MP4,
+# PNG, JPEG and WAV are among its formats. It brings cryptography, which signing_keys.py
+# also uses to make a per-install signing certificate, and requests and toml.
+c2pa-python==0.38.0

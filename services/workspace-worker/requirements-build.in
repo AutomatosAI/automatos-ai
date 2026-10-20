@@ -1,0 +1,12 @@
+# The build backend psycopg2's source build needs (PRD-262, row 27), and nothing else.
+# The Dockerfile's psycopg2 stage installs requirements-build.lock, never this file,
+# with --require-hashes, then builds psycopg2 with --no-build-isolation, so the build
+# runs on these hash-checked files: an isolated build would fetch its backend unpinned
+# and unhashed, past --require-hashes. psycopg2's pyproject.toml asks for
+# setuptools>=70.1 only (that release carries its own bdist_wheel, so no `wheel`).
+# Regenerate from the repository root after changing this file:
+#
+#   uv pip compile services/workspace-worker/requirements-build.in \
+#     --universal --python-version 3.12 --generate-hashes \
+#     -o services/workspace-worker/requirements-build.lock
+setuptools>=70.1

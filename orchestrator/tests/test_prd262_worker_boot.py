@@ -11,9 +11,11 @@
 - test.yml's prod-image-parity runs the real block as root in throwaway containers:
   a symlink to a root-owned file, and a read-only volume.
 
-The entrypoint itself runs here under bash with stand-in stat, find, chown and gosu,
-so its control flow is proved in the required suite. The smoke's 20 s bar and
-/metrics 200 are in test_prd262_smoke_worker_health.py.
+The entrypoint itself runs here under bash with stand-in stat, find, chown and setpriv,
+so its control flow is proved in the required suite. setpriv replaced gosu (PRD-262,
+row 47 of the 19 Oct size breakdown): it is in the base image's util-linux, and the
+exec sets HOME to the worker's, which setpriv, unlike gosu, leaves as root's. The
+smoke's 20 s bar and /metrics 200 are in test_prd262_smoke_worker_health.py.
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ ENTRYPOINT = WORKER / "entrypoint.sh"
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
 SYNTAX_LINE = "# syntax=docker/dockerfile:1"
 LOG_LINE = "[entrypoint] some files could not be re-owned"
+DROP = "setpriv --reuid=worker --regid=worker --init-groups env HOME=/home/worker python -m main"
 OWNERSHIP_FIND = (
     "find \"$WORKSPACE_VOLUME_PATH\" -mindepth 1 -path '*/projects' -prune -o ! -user worker "
     "-exec chown -h worker:worker {} + || echo \"" + LOG_LINE + "\" >&2"
@@ -63,14 +66,15 @@ def test_the_ownership_walk_skips_owned_files_never_follows_a_link_and_logs_a_fa
     walks = [line for line in lines if line.startswith("find ")]
     assert walks == [OWNERSHIP_FIND], "one walk, and it no longer hides chown's errors"
     assert lines[1] == "set -e"
-    assert lines[-1] == 'exec gosu worker python -m main "$@"'
+    assert lines[-1] == f'exec {DROP} "$@"'
+    assert not [line for line in lines if "gosu" in line and not line.startswith("#")]
 
 
 _STANDINS = {
     "stat": '#!/bin/sh\necho "$FAKE_UID"\n',
     "find": '#!/bin/sh\necho "find $*" >> "$CALL_LOG"\nexit "$FIND_EXIT"\n',
     "chown": '#!/bin/sh\necho "chown $*" >> "$CALL_LOG"\n',
-    "gosu": '#!/bin/sh\necho "gosu $*"\n',
+    "setpriv": '#!/bin/sh\necho "setpriv $*"\n',
 }
 
 
@@ -95,7 +99,7 @@ def test_a_failed_chown_is_logged_and_the_worker_still_starts(tmp_path):
     proc, calls, volume = _boot(tmp_path, uid="0", find_exit=1)
     assert proc.returncode == 0, proc.stderr
     assert LOG_LINE in proc.stderr.splitlines()
-    assert proc.stdout.splitlines()[-1] == "gosu worker python -m main --flag"
+    assert proc.stdout.splitlines()[-1] == f"{DROP} --flag"
     assert calls[0] == (f"find {volume} -mindepth 1 -path */projects -prune -o ! -user worker "
                         "-exec chown -h worker:worker {} +")
 
@@ -106,7 +110,7 @@ def test_a_clean_walk_logs_nothing(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert LOG_LINE not in proc.stderr
     assert calls[-1] == f"chown worker:worker {volume}"
-    assert proc.stdout.splitlines()[-1] == "gosu worker python -m main --flag"
+    assert proc.stdout.splitlines()[-1] == f"{DROP} --flag"
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -114,7 +118,7 @@ def test_a_volume_the_worker_already_owns_is_not_walked(tmp_path):
     proc, calls, _ = _boot(tmp_path, uid="1000", find_exit=1)
     assert proc.returncode == 0, proc.stderr
     assert calls == []
-    assert proc.stdout.splitlines() == ["gosu worker python -m main --flag"]
+    assert proc.stdout.splitlines() == [f"{DROP} --flag"]
 
 
 # --------------------------------------------------------------------------- the Dockerfile
@@ -160,6 +164,7 @@ def test_the_parity_job_runs_the_ownership_block_in_throwaway_containers():
         "out=$(boot /srv/readonly); code=$?",
         "some files could not be re-owned$",
         '"started as uid 1000"',
+        'check "the worker\'s HOME" "$(grep -o \'HOME=[^ ]*\' <<< "$out")" "HOME=/home/worker"',
     ):
         assert needle in script, needle
     assert script.rstrip().endswith('exit "$bad"\nSH')

@@ -6,6 +6,9 @@
  *
  * PRD-252 R1: "View on Board" opens the ticket just filed. It opened the whole
  * board, where the new card was one of many.
+ *
+ * PRD-256 F430: a ticket filed for a CLI-session agent that cannot call what it names
+ * also shows the answer's warning.
  */
 
 import { useCallback } from 'react'
@@ -15,6 +18,7 @@ import { useCreateTask, type CreateTaskPayload } from '@/hooks/use-board-tasks-a
 import { useCreateScheduledBoardTask } from '@/hooks/use-scheduled-tasks-api'
 import { BOARD_HREF, ticketHref } from '@/lib/ticket-links'
 import { buildSchedulePayload, describeSchedule, isScheduleInFuture, type ScheduleMode } from './schedule-choice'
+import { toastAssignmentWarning } from './assignment-warning'
 
 const CALENDAR_HREF = '/command-center?tab=calendar'
 
@@ -45,6 +49,7 @@ async function fileNow(create: CreateNow, payload: CreateTaskPayload, agentName:
       duration: 5000,
       action: { label: 'View on Board', onClick: () => navigate(filedTicketHref(created)) },
     })
+    toastAssignmentWarning(created)  // PRD-256 F430: what a CLI-session agent cannot call
     return true
   } catch {
     toast.error('Failed to create task')

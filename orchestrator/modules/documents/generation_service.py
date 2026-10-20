@@ -50,11 +50,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.legacy_jinja import legacy_brand, with_document_filters
 from modules.documents.blocks import (
-    legacy_render_data,
-    collect_variable_paths,
-    render_document_docx,
-    render_document_html,
-    validate_blocks,
+    legacy_render_data, collect_variable_paths, render_document_docx, render_document_html, validate_blocks,
 )
 from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
@@ -68,6 +64,7 @@ from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
 from modules.documents.workspace_documents import copy_when_registered
 from modules.documents.kit_dates import dates_follow_the_kit  # F383: ISO dates print in the kit's style
+from modules.documents.marked_documents import ai_documents_are_marked, marked_before_it_is_kept  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +121,7 @@ class DocumentGenerationService:
     # Public dispatch
     # ------------------------------------------------------------------
 
+    @ai_documents_are_marked  # PRD-264 EUAI-09: an agent's document carries the AI mark (none named a person)
     @the_parties_are_remembered  # F354: who the document is for rides to its Deliverable
     @unpriced_amounts_are_said  # F367: amounts that print with no currency sign (the kit has none) are named
     @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
@@ -568,8 +566,7 @@ class DocumentGenerationService:
         started = time.monotonic()
         try:
             finished = await self._render_client().render_to_file(
-                bundle,
-                output_path,
+                bundle, output_path, workspace_id=workspace_id,  # PRD-264 EUAI-06b: its provenance row
                 max_wait_seconds=config.SOCIALS_RENDER_MAX_WAIT_SECONDS,
                 poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS,
             )
@@ -755,6 +752,7 @@ class DocumentGenerationService:
         os.makedirs(directory, exist_ok=True)
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
+    @marked_before_it_is_kept  # PRD-264 EUAI-09: marked and recorded after its last write, before upload
     def _build_result(
         self,
         path: str,

@@ -18,6 +18,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { readFileSync } from 'fs'
 import path from 'path'
+import { format } from 'date-fns'
 
 const api = vi.hoisted(() => ({
   scheduleSocialPost: vi.fn(),
@@ -189,6 +190,28 @@ describe('receipts', () => {
     expect(screen.getByTestId('socials-receipt-twitter-text').textContent).toContain('429 Too Many Requests')
     fireEvent.click(screen.getByRole('button', { name: 'Retry the failed channels' }))
     await waitFor(() => expect(api.retrySocialPost).toHaveBeenCalledWith('p1'))
+  })
+
+  it('a published target shows when it went out and its platform id next to View the post (P256-FIX-SOC-4)', () => {
+    const at = '2026-10-14T18:05:00Z'
+    renderDetail(post({
+      status: 'published',
+      targets: [target('instagram', {
+        post_kind: 'carousel', status: 'published', remote_id: '17945112233', published_at: at,
+        permalink: 'https://www.instagram.com/p/Cx7/',
+      })],
+    }))
+    const receipt = within(screen.getByTestId('socials-receipt-instagram-carousel'))
+    expect(receipt.getByRole('link', { name: 'View the post' }).getAttribute('href')).toBe('https://www.instagram.com/p/Cx7/')
+    expect(receipt.getByText(`Published ${format(new Date(at), 'd MMM yyyy, HH:mm')}`)).toBeTruthy()
+    expect(receipt.getByText(/id 17945112233$/)).toBeTruthy()
+  })
+
+  it('a target not yet out shows no time and no id', () => {
+    renderDetail(post({ targets: [target('linkedin')] }))
+    const receipt = screen.getByTestId('socials-receipt-linkedin-text')
+    expect(receipt.textContent).not.toContain('Published ')
+    expect(receipt.textContent).not.toContain(' id ')
   })
 
   it('a published target shows the AI label its publish used', async () => {

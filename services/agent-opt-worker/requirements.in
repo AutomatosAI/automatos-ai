@@ -13,8 +13,9 @@
 # modules the worker imports come from ai-evaluation (fi.evals) and agent-opt
 # (fi.opt). CI fails on a `fi==` line in the lock.
 #
-# litellm stays at 1.80.0 in the lock: ai-evaluation 1.1.0 requires openai<2,
-# and litellm 1.80.5 and later require openai>=2.8.0.
+# litellm is past 1.84.0, which fixes the KEV-listed GHSA-7488-6r32-c95q and
+# GHSA-v4p8-mg3p-g94g. litellm 1.84 and later require openai>=2.20.0, and
+# ai-evaluation 1.1.0 still caps openai<2, so overrides.txt lifts that cap.
 fastapi==0.146.0
 # GHSA-86qp-5c8j-p5mr (a forged Host header rewrites request.url.path) is fixed in 1.0.1.
 starlette>=1.0.1
@@ -24,6 +25,10 @@ uvicorn==0.34.0
 agent-opt==0.0.1
 # 1.x provides fi.evals itself; 0.1.x still required the `fi` package.
 ai-evaluation>=1.1.0
-litellm>=1.61.0
+# 1.91.5 is the newest litellm that ships a pure-Python wheel (16.7 MB; 1.92 adds a
+# Rust extension, and 1.95.1's manylinux wheel is 26.3 MB) and adds no package to
+# the lock (1.96 adds pydantic-settings, 1.98 boto3). It is past every fixed
+# litellm advisory, GHSA-3cv6-jpf6-8222 included (fixed in 1.91.5 on that line).
+litellm==1.91.5
 httpx>=0.27.0
 prometheus_client>=0.20.0

@@ -7,8 +7,12 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.agent_listing import (
+    assigned_skills, assigned_tools, runs_on, runtime_of as _runtime_of, tool_and_skill_counts,
+)
 from modules.tools.discovery.agent_made_by import describes_the_agent, lists_the_team
 from modules.tools.discovery.agent_runtime import sets_the_runtime_on_create, sets_the_runtime_on_update
+from services.session_capability_gaps import agent_session_view
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +30,7 @@ def _widget_turn() -> bool:
 
 @lists_the_team  # F244: whether each can run now; FX-012: who made it, and when
 async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    from core.models import Agent, agent_skills
-    from core.models.composio_cache import AgentAppAssignment
+    from core.models import Agent
 
     query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
 
@@ -38,41 +41,7 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     agents = query.order_by(Agent.id).all()
     if _widget_turn():
         return {"success": True, "agents": [_visitor_view(a) for a in agents], "count": len(agents)}
-    agent_ids = [a.id for a in agents]
-
-    # Batch-load tool counts (active assignments only) and skill counts in two grouped queries.
-    tool_counts: Dict[int, int] = {}
-    skill_counts: Dict[int, int] = {}
-    try:
-        tool_rows = (
-            db.query(
-                AgentAppAssignment.agent_id,
-                func.count(AgentAppAssignment.id).label("cnt"),
-            )
-            .filter(
-                AgentAppAssignment.agent_id.in_(agent_ids) if agent_ids else False,
-                AgentAppAssignment.is_active == True,
-            )
-            .group_by(AgentAppAssignment.agent_id)
-            .all()
-        )
-        tool_counts = {r.agent_id: r.cnt for r in tool_rows}
-    except Exception:
-        pass
-    try:
-        if agent_ids:
-            skill_rows = (
-                db.query(
-                    agent_skills.c.agent_id,
-                    func.count(agent_skills.c.skill_id).label("cnt"),
-                )
-                .filter(agent_skills.c.agent_id.in_(agent_ids))
-                .group_by(agent_skills.c.agent_id)
-                .all()
-            )
-            skill_counts = {r.agent_id: r.cnt for r in skill_rows}
-    except Exception:
-        pass
+    tool_counts, skill_counts = tool_and_skill_counts(db, [a.id for a in agents])
 
     agent_list = []
     for a in agents:
@@ -85,8 +54,9 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
             "type": a.agent_type,
             "status": a.status,
             "description": (a.description or "")[:200],
-            "model_id": mc.get("model_id") or cfg.get("model") or cfg.get("llm_model"),
-            "provider": mc.get("provider") or cfg.get("provider"),
+            # N17-8: a session agent names its CLI and the CLI's model, never its model route.
+            **runs_on(cfg, mc.get("model_id") or cfg.get("model") or cfg.get("llm_model"),
+                      mc.get("provider") or cfg.get("provider")),
             # PRD-234: which lane runs this agent — 'cli' = the user's own Claude Code
             # session on their machine, 'api' = a platform-run model.
             "runtime": _runtime_of(cfg),
@@ -111,17 +81,22 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
 
 @describes_the_agent  # FX-012: who made it and how it runs; N15-6: whether it can run now
 async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    from core.models import Agent, Skill, agent_skills
-    from core.models.composio_cache import AgentAppAssignment
+    from core.models import Agent
+    from modules.tools.discovery.agent_binding import the_agent_named
 
     agent_id = params.get("agent_id")
     agent_name = params.get("agent_name")
+    same_name: List[str] = []
 
     query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
     if agent_id:
         query = query.filter(Agent.id == agent_id)
     elif agent_name:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
+        # N17-8: the agent the board gives work to (an active one), and every namesake.
+        chosen, same_name = the_agent_named(db, workspace_id, str(agent_name))
+        if chosen is None:
+            return {"success": False, "error": "Agent not found"}
+        query = query.filter(Agent.id == chosen)
     else:
         return {"success": False, "error": "Provide agent_name or agent_id"}
 
@@ -130,89 +105,46 @@ async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
         return {"success": False, "error": "Agent not found"}
     if _widget_turn():
         return {"success": True, "agent": _visitor_view(agent)}
+    described = {"success": True, "agent": _described(db, agent)}
+    return {**described, "same_name": same_name} if same_name else described
 
-    # Full assigned tool list — names, app type, active state, dates, priority.
-    tool_list = []
-    try:
-        tool_rows = (
-            db.query(AgentAppAssignment)
-            .filter(AgentAppAssignment.agent_id == agent.id)
-            .order_by(AgentAppAssignment.priority.desc(), AgentAppAssignment.assigned_at.desc())
-            .all()
-        )
-        tool_list = [
-            {
-                "id": t.id,
-                "name": t.app_name,
-                "app_type": t.app_type,
-                "is_active": bool(t.is_active),
-                "priority": t.priority or 0,
-                "assigned_at": t.assigned_at.isoformat() if t.assigned_at else None,
-            }
-            for t in tool_rows
-        ]
-    except Exception as e:
-        logger.warning("[get_agent] Failed to load tool assignments: %s", e)
 
-    # Full assigned skill list — joins agent_skills → skills for name, description,
-    # category, version, origin (marketplace vs workspace), active state.
-    skill_list = []
-    try:
-        skill_rows = (
-            db.query(Skill)
-            .join(agent_skills, agent_skills.c.skill_id == Skill.id)
-            .filter(agent_skills.c.agent_id == agent.id)
-            .order_by(Skill.name)
-            .all()
-        )
-        for s in skill_rows:
-            metadata = s.skill_metadata if isinstance(s.skill_metadata, dict) else {}
-            skill_list.append({
-                "id": s.id,
-                "name": s.name,
-                "description": (s.description or "")[:200],
-                "category": s.category,
-                "skill_version": s.skill_version,
-                "skill_source": s.skill_source,
-                "origin": "workspace" if s.workspace_id is not None else "marketplace",
-                "forked_from_skill_id": metadata.get("forked_from_skill_id"),
-                "is_active": bool(s.is_active),
-            })
-    except Exception as e:
-        logger.warning("[get_agent] Failed to load skill assignments: %s", e)
-
+def _described(db: Session, agent: Any) -> Dict[str, Any]:
+    """One agent as platform_get_agent describes it, with its full tool and skill lists."""
+    tool_list = assigned_tools(db, agent.id)
+    skill_list = assigned_skills(db, agent.id)
     mc = agent.model_config or {}
     config = agent.configuration or {}
     heartbeat = config.get("heartbeat") if isinstance(config, dict) else None
 
     return {
-        "success": True,
-        "agent": {
-            "id": agent.id,
-            "name": agent.name,
-            "type": agent.agent_type,
-            "status": agent.status,
-            "description": agent.description,
-            "model_id": mc.get("model_id") or config.get("model") or config.get("llm_model"),
-            "provider": mc.get("provider") or config.get("provider") or config.get("llm_provider"),
-            "temperature": mc.get("temperature"),
-            "max_tokens": mc.get("max_tokens"),
-            "has_system_prompt": bool(agent.custom_persona_prompt),
-            "system_prompt_preview": (agent.custom_persona_prompt or "")[:200] or None,
-            # Full lists (callers that just want counts can read len()):
-            "assigned_tools": tool_list,
-            "assigned_tools_count": len(tool_list),
-            "active_tools_count": sum(1 for t in tool_list if t["is_active"]),
-            "assigned_skills": skill_list,
-            "assigned_skills_count": len(skill_list),
-            "heartbeat": heartbeat,
-            "tags": agent.tags or [],
-            "team": getattr(agent, "team", None),
-            "job_title": getattr(agent, "job_title", None),
-            "reports_to_id": getattr(agent, "reports_to_id", None),
-            "created_at": agent.created_at.isoformat() if agent.created_at else None,
-            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
-        },
+        "id": agent.id,
+        "name": agent.name,
+        "type": agent.agent_type,
+        "status": agent.status,
+        "description": agent.description,
+        # N17-8: a session agent names its CLI and the CLI's model, never its model route.
+        **runs_on(config, mc.get("model_id") or config.get("model") or config.get("llm_model"),
+                  mc.get("provider") or config.get("provider") or config.get("llm_provider")),
+        "runtime": _runtime_of(config),
+        **agent_session_view(agent),  # F430: a CLI agent's session tools and its skills' gaps
+        "temperature": mc.get("temperature"),
+        "max_tokens": mc.get("max_tokens"),
+        "has_system_prompt": bool(agent.custom_persona_prompt),
+        "system_prompt_preview": (agent.custom_persona_prompt or "")[:200] or None,
+        # Full lists (callers that just want counts can read len()):
+        "assigned_tools": tool_list,
+        "assigned_tools_count": len(tool_list),
+        "active_tools_count": sum(1 for t in tool_list if t["is_active"]),
+        "assigned_skills": skill_list,
+        "assigned_skills_count": len(skill_list),
+        "heartbeat": heartbeat,
+        "tags": agent.tags or [],
+        "team": getattr(agent, "team", None),
+        "job_title": getattr(agent, "job_title", None),
+        "reports_to_id": getattr(agent, "reports_to_id", None),
+        "created_at": agent.created_at.isoformat() if agent.created_at else None,
+        "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
     }
 
 
@@ -603,8 +535,10 @@ async def delete_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
 
 def _resolve_agent(db, workspace_id, params):
-    """Resolve an agent by id or name within the workspace. Returns (agent, error_dict)."""
+    """Resolve an agent by id or name within the workspace. Returns (agent, error_dict). A name
+    is read by agent_binding.one_named (N17-8): a name several agents carry is refused naming them."""
     from core.models import Agent
+    from modules.tools.discovery.agent_binding import one_named
 
     agent_id = params.get("agent_id")
     agent_name = params.get("agent_name")
@@ -613,7 +547,10 @@ def _resolve_agent(db, workspace_id, params):
     if agent_id:
         query = query.filter(Agent.id == agent_id)
     elif agent_name:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
+        named_id, refusal = one_named(db, workspace_id, str(agent_name))
+        if refusal or named_id is None:
+            return None, refusal or {"success": False, "error": "Agent not found"}
+        query = query.filter(Agent.id == named_id)
     else:
         return None, {"success": False, "error": "Provide agent_name or agent_id"}
 
@@ -765,14 +702,6 @@ async def unassign_tool_from_agent(db: Session, workspace_id: UUID, params: Dict
         "action": action,
         "message": f"Tool '{target_label}' {action} on agent '{agent.name}'.",
     }
-
-def _runtime_of(cfg: Any) -> str:
-    try:
-        from core.cli_runtime import runtime_kind_of
-        return runtime_kind_of(cfg if isinstance(cfg, dict) else {})
-    except Exception:  # noqa: BLE001
-        return "api"
-
 
 async def recommend_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_recommend_agent — PRD-234 S3.

@@ -139,8 +139,9 @@ def test_params_and_rollback_builders_name_the_inner_call():
 
 
 def test_kinds_with_no_evidence_wired_detect_nothing():
-    """A rollback comes from the post-change check (US-056) and a tool removal waits for its
-    dependency gate (US-057); the report kinds that were placeholders have no detector."""
+    """With no tool failure (US-057) and no rollback from the post-change check (US-056) in
+    the evidence, neither kind detects anything; the report kinds that were placeholders
+    have no detector."""
     evidence = hcx.evidence(hcx.agent_row(SCOUT, "Scout", **RARELY_MET), issues=[hcx.reconnect_issue(SCOUT, "Scout")])
     detected = {name for name, kind in hc.KINDS.items() if kind.detector(evidence)}
     assert detected == {"heartbeat_tune", "reconnect_app"}
@@ -180,15 +181,16 @@ def test_the_tool_assignment_reader_reads_this_workspaces_assignment(db_session,
 def test_a_run_keeps_a_dropped_suggestion_and_its_reason_on_its_row(db_session, ws, monkeypatch):
     """Scout stands in for the workspace's Auto: its heartbeat suggestion is dropped, kept
     on the run's row with the reason, and not reported."""
-    from services.harness_service import SUGGESTIONS_HEADING, HarnessService
+    from services import harness_grants
+    from services.harness_service import SUGGESTIONS_HEADING
 
     scout = hdx.agent(db_session, ws, "Scout", configuration={"heartbeat": {"enabled": True, "interval_minutes": 60}})
     beat = text("INSERT INTO heartbeat_results (source_type, source_id, workspace_id, status, tokens_used, "
                 "objective_met, created_at) VALUES ('agent', :sid, CAST(:ws AS uuid), 'success', 10, :met, :at)")
     for met in [True] + [False] * 24:
         db_session.execute(beat, {"sid": str(scout), "ws": ws, "met": met, "at": hdx.at(0)})
-    monkeypatch.setattr(HarnessService, "_resolve_auto_agent", staticmethod(lambda db, workspace_id: {
-        "id": scout, "name": "Scout"}))
+    monkeypatch.setattr(harness_grants, "resolve_auto_agent", lambda db, workspace_id: {
+        "id": scout, "name": "Scout"})
 
     run = hdx.judge(db_session, ws)
 

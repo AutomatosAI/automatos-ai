@@ -40,6 +40,7 @@ from core.database.database import get_db
 from core.database.read_release import release_if_read_only
 from services import cli_host_service as svc
 from services import session_tool_groups, session_tools, session_tools_rpc
+from services.session_read_deadline import arrived_at, stamp_arrival, within_read_deadline
 from services.session_tool_slots import session_tool_slot
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,10 @@ async def require_session(
     whole request, through the tool's model calls and its own sessions: 26
     sessions at once held the pool, and a pool wait on the loop froze the
     process (``pool._do_get``, /health timing out).
+
+    F448: the call's arrival is stamped first, so a slow read's deadline counts all of it.
     """
+    stamp_arrival(request)
     _require_cli_runtime()
     resolved = await asyncio.to_thread(_identity, db, bearer_token(request))
     if resolved is None:
@@ -265,8 +269,10 @@ async def session_tools_mcp(
         await asyncio.to_thread(_stamp_connected, db, task)
 
     async def _call(tool, scoped_params, context):
-        # The wire scoped these (services/session_tools_rpc.py); we only run them.
-        return await _run_in_a_slot(db, tool, scoped_params, context)
+        # The wire scoped these (services/session_tools_rpc.py); we only run them. F448: a slow
+        # read answers in words within its deadline, the wait for a slot included.
+        return await within_read_deadline(tool.name, arrived_at(request),
+                                          lambda: _run_in_a_slot(db, tool, scoped_params, context))
 
     reply = await session_tools_rpc.handle_payload(
         payload, ctx,

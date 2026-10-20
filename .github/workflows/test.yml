@@ -1482,7 +1482,8 @@ jobs:
       # the worker already owns is left alone (its ctime holds), and projects/ is skipped.
       # Then a read-only volume: every chown fails, the block logs that, and the script
       # still starts the worker. A stand-in `python`, first on PATH, takes the worker's
-      # place and prints the uid gosu dropped it to.
+      # place and prints the uid setpriv dropped it to and its HOME, which the entrypoint
+      # sets because setpriv, unlike the gosu it replaced (PRD-262, row 47), leaves root's.
       - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
         run: |
           docker volume create parity-wk-readonly > /dev/null
@@ -1494,7 +1495,7 @@ jobs:
           check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
           owner() { stat -c %U "$1"; }  # no -L: a symlink's own owner
           mkdir -p /tmp/stand-in
-          printf '#!/bin/sh\necho "worker started as uid $(id -u)"\n' > /tmp/stand-in/python
+          printf '#!/bin/sh\necho "worker started as uid $(id -u) with HOME=$HOME"\n' > /tmp/stand-in/python
           chmod 755 /tmp/stand-in/python
           boot() { WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
 
@@ -1517,6 +1518,7 @@ jobs:
           check "a file in projects/" "$(owner "$vol/ws/projects/mine")" root
           check "the ctime of a file the worker already owned" "$(stat -c %z "$vol/ws/owned")" "$owned_ctime"
           check "the worker" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "the worker's HOME" "$(grep -o 'HOME=[^ ]*' <<< "$out")" "HOME=/home/worker"
           check "failed-chown lines on a writable volume" "$(grep -c 'could not be re-owned' <<< "$out")" 0
 
           out=$(boot /srv/readonly); code=$?
