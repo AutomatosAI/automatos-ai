@@ -140,6 +140,8 @@ def check_pair(chain_pem: bytes, key_pem: bytes, now: datetime) -> None:
         key = serialization.load_pem_private_key(key_pem, password=None)
     except (ValueError, TypeError) as exc:
         raise SigningKeyError(f"the signing certificate chain or key cannot be read ({type(exc).__name__})") from None
+    if not certificates:
+        raise SigningKeyError("the signing certificate chain cannot be read (it holds no certificate)")
     spki = serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     if certificates[0].public_key().public_bytes(*spki) != key.public_key().public_bytes(*spki):
         raise SigningKeyError("the signing key is not the key of the chain's first certificate")

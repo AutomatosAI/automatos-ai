@@ -72,6 +72,13 @@ def test_a_key_that_is_not_the_chains_or_a_lapsed_chain_is_refused():
         signing_keys.check_pair(b"not a certificate", key, NOW)
 
 
+def test_a_chain_that_parses_to_no_certificate_is_refused_not_an_index_error(monkeypatch):
+    chain, key = _pair()
+    monkeypatch.setattr(signing_keys.x509, "load_pem_x509_certificates", lambda _pem: [])
+    with pytest.raises(signing_keys.SigningKeyError, match="holds no certificate"):
+        signing_keys.check_pair(chain, key, NOW)
+
+
 # ── hosted: configured, swapped by configuration alone ────────────────────
 
 
