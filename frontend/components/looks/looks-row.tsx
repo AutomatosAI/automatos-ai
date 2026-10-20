@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from 'react'
 
-import type { Look } from '@/lib/looks/types'
+import type { Look } from '../../lib/looks/types'
 
 import styles from './looks.module.css'
 import { cardStyle } from './swatch-style'

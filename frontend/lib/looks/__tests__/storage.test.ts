@@ -23,7 +23,7 @@ import {
   rememberLookScope,
   writeActiveLook,
   writeSavedLooks,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 
 import { blockedStorage, memoryStorage, myLook } from './helpers'
 

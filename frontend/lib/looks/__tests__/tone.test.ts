@@ -6,13 +6,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { GROUND_KEYS } from '@/lib/looks/catalogue'
-import {
-  PLAY_TONE_COOKIE,
-  clearPlayToneCookie,
-  parsePlayTone,
-  toneOfGround,
-  writePlayToneCookie,
-} from '@/lib/looks/tone'
+import { PLAY_TONE_COOKIE, parsePlayTone, toneOfGround } from '@/lib/looks/tone'
+import { clearPlayToneCookie, writePlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 
 function toneCookie(): string | undefined {
   return document.cookie.split('; ').find((entry) => entry.startsWith(`${PLAY_TONE_COOKIE}=`))?.split('=')[1]

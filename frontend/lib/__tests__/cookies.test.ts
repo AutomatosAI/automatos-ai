@@ -1,13 +1,15 @@
 /**
  * PRD-260 P260-FX-27 (M88) — one cookie writer: the style cookie and Play's
  * tone cookie are written by lib/cookies.ts, so their flags can't drift apart.
+ * PRD-261 A-14d: the host writes the tone cookie (lib/theme-host/builtin/play-tone-cookie.ts).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { applyUiStyleToDocument } from '@/contexts/ui-style-context'
 import { writeCookie } from '@/lib/cookies'
-import { PLAY_TONE_COOKIE, writePlayToneCookie } from '@/lib/looks/tone'
+import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { writePlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 import { STYLE_HTML_CLASS_NAMES, UI_STYLE_COOKIE, UI_STYLE_COOKIE_MAX_AGE_S } from '@/lib/ui-style'
 
 const TEST_COOKIE = 'fx27-cookie'

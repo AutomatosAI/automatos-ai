@@ -1,6 +1,6 @@
 'use client'
 
-import { PlayOnlyNote, SCREEN_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { PlayOnlyNote, SCREEN_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/lib/theme-host/builtin/play-only-route'
 import { STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
 import { ThemeSlotPage } from '@/components/theme-host/theme-slot-page'
 

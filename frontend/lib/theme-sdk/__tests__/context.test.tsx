@@ -2,6 +2,8 @@
  * PRD-261 A-10a — SDK area `context`. Each hook hands a theme a small copy of the host's
  * provider value (never the webhook key, plan limits or settings), answers "unknown" outside a
  * provider instead of throwing, and keeps its answer's identity while nothing it reads changes.
+ * useThemeLayout is the host's width source (hooks/use-studio-theme.ts, stood in for here; its own
+ * tests run the real one).
  */
 import { renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,12 +15,14 @@ const host = vi.hoisted(() => ({
   reducedMotion: false,
   health: { connection: 'connected', checking: false, check: () => undefined } as Record<string, unknown>,
   healthOptions: [] as unknown[],
+  layout: 'fallback' as string,
 }))
 
 vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => host.workspace }))
 vi.mock('@/contexts/role-context', () => ({ useSystemRoleOptional: () => host.role }))
 vi.mock('next-themes', () => ({ useTheme: () => host.theme }))
 vi.mock('@/hooks/use-media-preferences', () => ({ usePrefersReducedMotion: () => host.reducedMotion }))
+vi.mock('@/hooks/use-studio-theme', () => ({ useThemeLayout: () => host.layout }))
 vi.mock('@/hooks/use-backend-health', () => ({
   useBackendHealth: (options: unknown) => {
     host.healthOptions.push(options)
@@ -26,7 +30,16 @@ vi.mock('@/hooks/use-backend-health', () => ({
   },
 }))
 
-import { useEdition, useHealth, useMediaPreferences, useRole, useTone, useTrial, useWorkspace } from '../context'
+import {
+  useEdition,
+  useHealth,
+  useMediaPreferences,
+  useRole,
+  useThemeLayout,
+  useTone,
+  useTrial,
+  useWorkspace,
+} from '../context'
 import { authEdition } from '@/lib/auth-edition'
 
 const PROVIDER_WORKSPACE = {
@@ -49,13 +62,17 @@ afterEach(() => {
   host.reducedMotion = false
   host.health = { connection: 'connected', checking: false, check: () => undefined }
   host.healthOptions.length = 0
+  host.layout = 'fallback'
 })
 
 describe('PRD-261 A-10a — useWorkspace', () => {
-  it('hands over id, name, slug and plan only', () => {
+  it('hands over id, name, slug, plan and whether Socials is offered, only', () => {
     host.workspace = { workspace: PROVIDER_WORKSPACE, isLoading: false, canEdit: false }
     const { result } = renderHook(() => useWorkspace())
-    expect(result.current).toEqual({ workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro' }, isLoading: false })
+    expect(result.current).toEqual({
+      workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro', socialsAvailable: false },
+      isLoading: false,
+    })
     expect(JSON.stringify(result.current)).not.toContain('not-for-themes')
     expect(Object.isFrozen(result.current)).toBe(true)
     expect(Object.isFrozen(result.current.workspace)).toBe(true)
@@ -68,6 +85,17 @@ describe('PRD-261 A-10a — useWorkspace', () => {
     host.workspace = { workspace: { ...PROVIDER_WORKSPACE }, isLoading: false, canEdit: true }
     rerender()
     expect(result.current).toBe(first)
+  })
+
+  it("says Socials is offered exactly when the platform's switch (socials.available) is on, not this workspace's", () => {
+    const socials = (available: boolean, enabled: boolean) => ({ ...PROVIDER_WORKSPACE, socials: { available, enabled } })
+    host.workspace = { workspace: socials(true, false), isLoading: false, canEdit: true }
+    const { result, rerender } = renderHook(() => useWorkspace())
+    expect(result.current.workspace).toMatchObject({ id: 'ws-1', socialsAvailable: true })
+    expect(Object.keys(result.current.workspace ?? {})).not.toContain('socials')
+    host.workspace = { workspace: socials(false, true), isLoading: false, canEdit: true }
+    rerender()
+    expect(result.current.workspace?.socialsAvailable).toBe(false)
   })
 
   it('answers no workspace while loading, and outside the provider', () => {
@@ -146,5 +174,16 @@ describe('PRD-261 A-10a — edition, trial, health, media and tone', () => {
     expect(renderHook(() => useTone()).result.current).toBeNull()
     host.theme = {}
     expect(renderHook(() => useTone()).result.current).toBeNull()
+  })
+})
+
+describe('PRD-261 W-A5 — useThemeLayout', () => {
+  it("answers the host's own layout for the active theme: pending, theme or fallback", () => {
+    const { result, rerender } = renderHook(() => useThemeLayout())
+    for (const layout of ['pending', 'theme', 'fallback']) {
+      host.layout = layout
+      rerender()
+      expect(result.current).toBe(layout)
+    }
   })
 })

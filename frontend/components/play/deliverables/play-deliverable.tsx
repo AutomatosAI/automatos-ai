@@ -1,14 +1,18 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect } from 'react'
+import {
+  DELIVERABLES_HREF,
+  deliverableFilename,
+  HostLink,
+  useDeliverable,
+  type Deliverable,
+  type DeliverableDetailResponse,
+} from '@automatos/theme-sdk'
 
-import { PageColumns } from '@/components/play/shell/page-columns'
-import { type Deliverable, type DeliverableDetailResponse, useDeliverable } from '@/hooks/use-deliverables-api'
-import { deliverableFilename } from '@/lib/deliverables/download'
-import { contentView, detailDate, detailTitle, madeLine } from '@/lib/play/detail'
-import { kindOf } from '@/lib/play/shelf'
-import { DELIVERABLES_HREF } from '@/lib/ticket-links'
+import { contentView, detailDate, detailTitle, madeLine } from '../../../lib/play/detail'
+import { kindOf } from '../../../lib/play/shelf'
+import { PageColumns } from '../shell/page-columns'
 
 import { DeliverableContent } from './deliverable-content'
 import styles from './deliverable-detail.module.css'
@@ -18,8 +22,8 @@ import { TypeBadge } from './shelf-card'
 /**
  * PRD-260 §4, K8 — one Deliverable's page under Play (Ember mock 05), ported
  * from Automatos Play's components/deliverables/{DeliverableScreen,
- * DeliverableView}.tsx onto the core's useDeliverable(id, true)
- * (hooks/use-deliverables-api.ts: GET /api/deliverables/{id}?include_content=true).
+ * DeliverableView}.tsx onto the core's Deliverable, read through the theme SDK's
+ * useDeliverable(id, true) (GET /api/deliverables/{id}?include_content=true).
  * It loads, then shows the title, type, date and "Made by", the content
  * (deliverable-content.tsx) and the side panel (detail-panel.tsx); or says the
  * Deliverable isn't on the shelf (the backend's 404), or that it couldn't be
@@ -54,7 +58,7 @@ type DetailState =
   | { readonly status: 'missing' }
   | { readonly status: 'ready'; readonly deliverable: Deliverable }
 
-/** What useDeliverable gives the page, read only. */
+/** What the SDK's useDeliverable gives the page, read only. */
 interface DetailQuery {
   readonly data?: DeliverableDetailResponse
   readonly isError: boolean
@@ -104,10 +108,10 @@ export function PlayDeliverable({ id, now }: PlayDeliverableProps) {
   return (
     <PageColumns>
       <div className={styles.page}>
-        <Link href={DELIVERABLES_HREF} className={styles.back}>
+        <HostLink href={DELIVERABLES_HREF} className={styles.back}>
           <span aria-hidden="true">← </span>
           {BACK_TO_SHELF}
-        </Link>
+        </HostLink>
         <p className={note ? styles.note : SCREEN_READER_ONLY} role="status">
           {note}
         </p>
@@ -145,7 +149,11 @@ interface DeliverableViewProps {
   readonly now: Date
 }
 
-/** A loaded Deliverable: title, type badge, date and "Made by", the content, the side panel. */
+/**
+ * A loaded Deliverable: title, type badge, date and "Made by", the content, the side panel.
+ * contentView (lib/play/detail.ts, lane A-14c) still takes the core's Deliverable, whose
+ * tags are a mutable string[]; the SDK's are readonly, so they go in as a copy.
+ */
 function DeliverableView({ deliverable, now }: DeliverableViewProps) {
   const kind = kindOf(deliverable)
   const title = detailTitle(deliverable)
@@ -163,7 +171,7 @@ function DeliverableView({ deliverable, now }: DeliverableViewProps) {
           </p>
         </header>
         <DeliverableContent
-          view={contentView(deliverable)}
+          view={contentView({ ...deliverable, tags: deliverable.tags?.slice() })}
           kind={kind}
           title={title}
           filename={deliverableFilename(deliverable)}

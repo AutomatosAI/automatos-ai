@@ -7,8 +7,10 @@ import { useRef } from 'react'
  * failure twice leave its text as it was, and a screen reader hears nothing.
  * The owner renders the words in a <span key={notice.seq}> inside its polite
  * region, and keys its role=alert by seq, so every telling is a new node.
- * Used by the Looks page's notices (components/looks/look-notice.tsx) and the
- * style sheet's Copy tokens (components/looks/style/style-screen.tsx).
+ * Used by the Looks page's notices (./look-notice.tsx) and the style sheet's
+ * Copy tokens (./style/style-screen.tsx). PRD-261 A-14d moved it here from the
+ * core's hooks/ (docs/theme-host/sdk-surface-map.md: copied into Play): no
+ * core code used it.
  */
 
 /** A notice as told: `seq` numbers each telling, counting from 1. */

@@ -4,6 +4,7 @@
  * while the theme declares looks; it keeps the looks, paints the active one and forces the tone it sets. Every look
  * a theme hands in is checked against the theme's own look spec first. Outside a look runtime `useLook()` answers
  * `available: false` with no look, `listLooks()` is empty, `exportLook()` is null and the rest refuse; none throws.
+ * `useLookScope()` is whose looks these are (the signed-in user in this workspace), for what a theme keeps per account.
  */
 
 /**
@@ -61,3 +62,9 @@ export declare function listLooks(): readonly HostLook[]
 export declare function exportLook(look: HostLook): HostLookFile | null
 /** Pasted or read text as a look ready to save (under a fresh id), or why it is refused. Size-checked first. */
 export declare function importLook(text: string): HostLookResult
+/**
+ * Whose looks these are: the signed-in user in this workspace, as one opaque string to key what the theme keeps
+ * per account in this browser. Null until the account and the workspace are known (keep nothing then); outside the
+ * host's account scope (an isolated mount) the host's default scope.
+ */
+export declare function useLookScope(): string | null

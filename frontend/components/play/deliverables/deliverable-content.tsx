@@ -1,13 +1,11 @@
 'use client'
 
 import { useEffect } from 'react'
+import { fileDownloadUrl, MarkdownView, useAuthenticatedBlobUrl, useFileDownload } from '@automatos/theme-sdk'
 
-import { PLAY_MARKDOWN_COMPONENTS } from '@/components/play/chat/play-markdown'
-import { MarkdownView } from '@/components/shared/markdown-view'
-import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
-import { useApiFileDownload } from '@/hooks/use-api-file-download'
-import { DOWNLOAD_FAILED, fileDownloadUrl } from '@/lib/deliverables/download'
-import { type ContentView, unsupportedMessage } from '@/lib/play/detail'
+import { type ContentView, unsupportedMessage } from '../../../lib/play/detail'
+import { DOWNLOAD_FAILED } from '../../../lib/play/shelf'
+import { PLAY_MARKDOWN_COMPONENTS } from '../chat/play-markdown'
 
 import styles from './deliverable-content.module.css'
 import page from './deliverable-detail.module.css'
@@ -15,8 +13,9 @@ import page from './deliverable-detail.module.css'
 /**
  * PRD-260 §4 — a Deliverable's content on its page (Ember mock 05), ported
  * from Automatos Play's components/deliverables/DeliverableContent.tsx onto the
- * core's own renderers and file paths:
- * - text and markdown on the sheet through the core's MarkdownView with Play's
+ * core's own renderers and file paths, through the theme SDK (PRD-261 A-14b):
+ * - text and markdown on the sheet through the core's MarkdownView (the SDK's
+ *   cards.MarkdownView) with Play's
  *   rules for model output: raw HTML dropped (skipHtml), links open in a new
  *   tab without this window, images show as their alt text, a code block in
  *   Play's own pre rules (PrintedPre) on the sheet's colours;
@@ -24,7 +23,7 @@ import page from './deliverable-detail.module.css'
  *   path the core's FilePreview loads them by (a blob: URL, so an SVG's
  *   scripts never run in its <img>);
  * - anything else as Play's file card, with the core's download
- *   (useApiFileDownload: the API client's auth, never a plain link) of the
+ *   (the SDK's useFileDownload: the API client's auth, never a plain link) of the
  *   file's bytes (fileDownloadUrl: never a text file's JSON content route).
  */
 
@@ -117,7 +116,7 @@ interface FileCardProps {
 
 /** Nothing to show here: what the file is, and Download when it has one. */
 function FileCard({ message, url, filename }: FileCardProps) {
-  const { download, downloading } = useApiFileDownload(DOWNLOAD_FAILED)
+  const { download, downloading } = useFileDownload(DOWNLOAD_FAILED)
   const file = url ? fileDownloadUrl(url) : null
   return (
     <div className={styles.unavailable}>

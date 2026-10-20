@@ -2,13 +2,13 @@
 
 import { type ChangeEvent, type FormEvent, useEffect, useId, useRef, useState } from 'react'
 
-import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
-import { importLook, readLookFile } from '@/lib/looks/transfer'
-import type { ValidationResult } from '@/lib/looks/types'
+import { importLook, readLookFile } from '../../lib/looks/transfer'
+import type { ValidationResult } from '../../lib/looks/types'
 
 import { LookNotice, type Notice, failed, storedNotice } from './look-notice'
-import { useLook } from './look-provider'
 import styles from './manage.module.css'
+import { type Told, useNoticeSeq } from './use-notice-seq'
+import { usePlayLook } from './use-play-look'
 
 /**
  * PRD-260 — 'Import a look' on the Looks page, ported from Automatos Play's
@@ -32,7 +32,7 @@ const FILE_ACCEPT = '.json,application/json'
 
 /** The paste box's text, the last outcome, and the two ways in. */
 function useImport() {
-  const { saved, saveLook, setLook } = useLook()
+  const { saved, saveLook, setLook } = usePlayLook()
   const [text, setText] = useState('')
   const [notice, setNotice] = useState<Told<Notice> | null>(null)
   const stamp = useNoticeSeq()
