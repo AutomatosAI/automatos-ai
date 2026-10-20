@@ -2,12 +2,12 @@
 
 import { useEffect, useRef } from 'react'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { useOnline } from '@/hooks/use-online'
-import { useRecheckCountdown } from '@/hooks/use-recheck-countdown'
-import type { MascotName } from '@/lib/mascot/types'
-import { refocus } from '@/lib/play/focus'
+import { useOnline } from '@automatos/theme-sdk'
 
+import { useRecheckCountdown } from '../../../hooks/use-recheck-countdown'
+import type { MascotName } from '../../../lib/mascot/types'
+import { refocus } from '../../../lib/play/focus'
+import { AutoMascot } from '../../mascot/auto-mascot'
 import styles from './edges.module.css'
 import { StartCommand } from './start-command'
 import { EdgeWordmark } from './wordmark'
@@ -22,6 +22,8 @@ import { EdgeWordmark } from './wordmark'
  * check is in flight it says Checking… (M94); while the browser is offline it
  * says so, in place of either (M83, P260-FX-21). It focuses its heading as it
  * opens, since the swap took focus away with the page (P260-FX-22, M21).
+ * PRD-261 A-14f: online comes through '@automatos/theme-sdk' (useOnline); Auto,
+ * the mascot library, the recheck and the focus helper are Play's own.
  */
 
 export const ASLEEP_TITLE = 'Automatos is asleep'
