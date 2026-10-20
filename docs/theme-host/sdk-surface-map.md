@@ -177,6 +177,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | `cards.CorePage`, `cards.FilePreview` | Wrapping core's own page inside a theme's page; the host's file preview. |
 | `looks.useLook`, `looks.saveLook`, `looks.listLooks`, `looks.exportLook`, `looks.importLook` | The active look and the saved looks; Play's own `lib/looks` store is the look runtime the host mounts from A-13c (PA-9). |
 | `assets.assetUrl` | The URL of a file in the theme's package (Play's mascot clips move from `public/auto` into it, A-16b). |
+| `storage.readThemeState`, `storage.writeThemeState`, `storage.removeThemeState`, `storage.subscribeThemeState`, `storage.useThemeState`, `storage.THEME_STATE_LIMITS` | Small per-user state a theme keeps through the host instead of the browser's storage (E3b, SDK 1.1.0): JSON values by key, scoped per theme and per account (`within: 'workspace'`: per account in this workspace), in this browser or for the tab's session (`lifetime`), within the caps. Scoped, not isolated: every theme runs on the host's origin, so the kit's review rules and core's review stage are the controls. Play's mascot pause, seen record and celebrations port onto it (E3g). |
 
 ## Host-owned AI label (PRD-264 EUAI-11a, EUAI-11b)
 
