@@ -141,7 +141,15 @@ def worker_read_path(path: str, workspace_id: str, projects_dir: Optional[str] =
     raw = str(path or "")
     if is_absolute_host_path(as_host_path(raw)):
         return workspace_relative_path(raw, workspace_id, projects_dir) or raw
-    return from_the_root(raw)
+    stripped = from_the_root(raw)
+    # Security review: a name with a '.' or '..' step is never rewritten here, so the platform holds the
+    # root on its own and does not lean on the worker's check alone; the worker refuses it as it came.
+    return raw if _has_dot_steps(stripped) else stripped
+
+
+def _has_dot_steps(name: str) -> bool:
+    """Whether a relative name has a '.' or '..' segment ('/' or '\\' separated)."""
+    return any(part in (".", "..") for part in re.split(r"[\\/]", name))
 
 
 def _platform_written(name: str) -> bool:

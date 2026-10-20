@@ -77,7 +77,9 @@ def test_a_path_outside_the_root_is_never_mapped_into_it(worker, path):
 def test_a_step_out_after_the_roots_name_still_steps_out(worker):
     _call("workspace_read_file", "deliverables/../../etc/passwd")
 
-    assert worker[0][1].startswith("../")                           # never "etc/passwd" inside the root
+    assert worker[0][1] == "deliverables/../../etc/passwd"          # never rewritten: the worker refuses it
+    _call("workspace_read_file", "deliverables/./sessions/3131/a.md")
+    assert worker[1][1] == "deliverables/./sessions/3131/a.md"      # a dot step is not rewritten either
 
 
 def test_a_write_goes_as_it_came(worker):
