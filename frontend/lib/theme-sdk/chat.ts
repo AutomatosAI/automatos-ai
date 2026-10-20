@@ -18,6 +18,10 @@
  *   P260-FX-30). Keying the child is what starts the stream afresh for another conversation, as
  *   Play's PlayChatView is keyed.
  *
+ * `liveReceiptsOf(part)` reads the turn's receipts off one of onData's parts (the receipts frame the
+ * backend sends after the tool loop) exactly as the controller reads them for the reply, so a theme
+ * can react the moment they arrive (Play's Auto celebrates a done one, and a refused one is oops).
+ *
  * A component calls it one way for its whole life: switching throws, instead of React's hook-order
  * error. Only a conversation the first call handed out opens a stream (it carries the host's own
  * state under a private symbol); a hand-made object is refused. Everything returned is a frozen,
@@ -32,6 +36,8 @@ import { useChatController as useCoreChatController } from '@/lib/chat-controlle
 import { useChatConversation } from '@/lib/chat-controller/conversation'
 import type { ChatControllerView, ChatConversationView } from '@/lib/chat-controller/view-model'
 import {
+  LIVE_KEY,
+  liveReceiptsFromToolData,
   movedSomethingOnTheBoard as coreMovedSomethingOnTheBoard,
   receiptLine as coreReceiptLine,
   safeLink,
@@ -66,6 +72,15 @@ export interface HostReceipt {
   readonly effect: string
   readonly link: string | null
   readonly reason: string | null
+}
+
+/** The turn's receipts as one stream part carries them (liveReceiptsOf), before the reply shows them. */
+export interface HostLiveReceipts {
+  readonly receipts: readonly HostReceipt[]
+  /** The lines the platform puts above the reply (a refused write, work not done). */
+  readonly above: readonly string[]
+  /** The model the frame names; null when it names none. */
+  readonly model: string | null
 }
 
 /** A Deliverable a reply made live this page session. */
@@ -287,6 +302,7 @@ const MODE_CHANGED =
 const NOT_HANDED_OUT =
   'Automatos theme SDK: useChatController opens only a conversation that useChatController() handed out.'
 const LOADING: HostConversationListState = Object.freeze({ status: 'loading' })
+const NO_LINES: readonly string[] = Object.freeze([])
 
 /** The conversation on screen, as a theme may hold it. */
 function useConversationOnScreen(options: HostChatOnScreenOptions | undefined): HostChatOnScreen {
@@ -409,4 +425,27 @@ export function receiptLink(receipt: HostReceipt): string | null {
 /** Whether a done write touched a card on the board (named by its number). */
 export function movedSomethingOnTheBoard(receipts: readonly HostReceipt[]): boolean {
   return coreMovedSomethingOnTheBoard([...receipts])
+}
+
+/** The model a receipts frame names (a string), else null. */
+function frameModel(part: unknown): string | null {
+  const frame = (part as { data?: Record<string, unknown> } | null)?.data?.[LIVE_KEY]
+  const model = (frame as { model?: unknown } | null | undefined)?.model
+  return typeof model === 'string' ? model : null
+}
+
+/**
+ * The turn's receipts on one of onData's parts: the receipts frame on a `tool-data` part, read as the
+ * host reads it for the reply (only real receipts; the lines above the reply; the model it names).
+ * null for any other part, and for a frame without a list.
+ */
+export function liveReceiptsOf(part: unknown): HostLiveReceipts | null {
+  const live = liveReceiptsFromToolData(part)
+  const receipts = live?.receipts
+  if (live === undefined || receipts === undefined) return null
+  return Object.freeze({
+    receipts: Object.freeze([...receipts]),
+    above: live.receiptsAbove ? Object.freeze([...live.receiptsAbove]) : NO_LINES,
+    model: frameModel(part),
+  })
 }

@@ -10,6 +10,9 @@
  *
  * The approval cards on a message (`approvals`, and `looseApprovals` after the conversation) are drawn by the
  * host: pass one to `cards.ToolApproval` or `cards.MissionApproval` (protected surfaces, A-12c).
+ *
+ * `liveReceiptsOf(part)` reads the turn's receipts off one of the parts `onData` hands over, exactly as the
+ * reply will carry them, so a theme can react the moment they arrive.
  */
 
 import type { WithdrawOffer } from './cards'
@@ -27,6 +30,15 @@ export interface HostReceipt {
   readonly effect: string
   readonly link: string | null
   readonly reason: string | null
+}
+
+/** The turn's receipts as one stream part carries them (liveReceiptsOf), before the reply shows them. */
+export interface HostLiveReceipts {
+  readonly receipts: readonly HostReceipt[]
+  /** The lines the platform puts above the reply (a refused write, work not done). */
+  readonly above: readonly string[]
+  /** The model the frame names; null when it names none. */
+  readonly model: string | null
 }
 
 /** A Deliverable a reply made live this page session. */
@@ -264,3 +276,10 @@ export declare function receiptLink(receipt: HostReceipt): string | null
 
 /** Whether a done write touched a card on the board (named by its number). */
 export declare function movedSomethingOnTheBoard(receipts: readonly HostReceipt[]): boolean
+
+/**
+ * The turn's receipts on one of onData's parts: the receipts frame on a `tool-data` part, read as the host reads
+ * it for the reply (only real receipts; the lines above the reply; the model it names). null for any other part,
+ * and for a frame without a list.
+ */
+export declare function liveReceiptsOf(part: unknown): HostLiveReceipts | null

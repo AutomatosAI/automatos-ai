@@ -4,11 +4,12 @@
  * lib/chat-controller/__tests__; here it is a stand-in, and these tests hold the SDK to what it adds: the two
  * calls of useChatController (the conversation on screen, then that conversation's chat), the frozen,
  * theme-neutral copies (no raw core message, no store), a forged or switched call refused, and the list, New chat
- * and receipt names. The browser proof is e2e/browser/specs/sdk-chat.spec.ts (fixtures/hello-a11b).
+ * and receipt names, the live receipts on a stream part (liveReceiptsOf, W-A5) included. The browser proof is e2e/browser/specs/sdk-chat.spec.ts (fixtures/hello-a11b).
  */
 import { renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { LIVE_KEY, liveReceiptsFromToolData } from '@/lib/chat/receipts'
 import type { ChatMessage, Receipt } from '@/types'
 
 type Options = Record<string, unknown>
@@ -60,6 +61,7 @@ vi.mock('@/hooks/use-recent-chats', () => ({ useRecentChats: () => host.recent }
 vi.mock('@/hooks/use-start-chat', () => ({ useStartChat: () => host.start }))
 
 import {
+  liveReceiptsOf,
   movedSomethingOnTheBoard,
   receiptLine,
   receiptLink,
@@ -355,5 +357,43 @@ describe('PRD-261 A-11b — the receipt lines', () => {
     expect(movedSomethingOnTheBoard([MOVED])).toBe(true)
     expect(movedSomethingOnTheBoard([REFUSED])).toBe(false)
     expect(movedSomethingOnTheBoard(Object.freeze([]))).toBe(false)
+  })
+})
+
+describe('PRD-261 W-A5 — liveReceiptsOf, the receipts a stream part carries', () => {
+  const part = (frame: unknown, type = 'tool-data') => ({ type, data: { [LIVE_KEY]: frame } })
+
+  it('reads the receipts frame on a tool-data part as the reply reads it: real receipts, the lines above, the model', () => {
+    const frame = { receipts: [MOVED, { action: 'x', status: 'exploded' }, null, REFUSED], above: ['Nothing was sent.', ' '], model: 'claude' }
+    const live = liveReceiptsOf(part(frame))
+    const core = liveReceiptsFromToolData(part(frame))
+    expect(live).toEqual({ receipts: [MOVED, REFUSED], above: ['Nothing was sent.'], model: 'claude' })
+    expect(live?.receipts).toEqual(core?.receipts)
+    expect(live?.above).toEqual(core?.receiptsAbove)
+  })
+
+  it('reads a frame with an empty list, no lines above and no model as empty lists and a null model', () => {
+    expect(liveReceiptsOf(part({ receipts: [] }))).toEqual({ receipts: [], above: [], model: null })
+    expect(liveReceiptsOf(part({ receipts: [MOVED], model: 7 }))?.model).toBeNull()
+  })
+
+  it('answers null for any other part: another type, no frame, a frame without a list, not a part', () => {
+    expect(liveReceiptsOf(part({ receipts: [MOVED] }, 'tool-start'))).toBeNull()
+    expect(liveReceiptsOf({ type: 'tool-data', data: { other: 1 } })).toBeNull()
+    expect(liveReceiptsOf(part({ receipts: 'not a list' }))).toBeNull()
+    expect(liveReceiptsOf(part(null))).toBeNull()
+    for (const notAPart of [null, undefined, 'tool-data', 3, { type: 'tool-data' }, { type: 'tool-data', data: null }]) {
+      expect(liveReceiptsOf(notAPart)).toBeNull()
+    }
+  })
+
+  it('hands out a frozen copy: the part it read is never handed back or changed', () => {
+    const list = [MOVED]
+    const live = liveReceiptsOf(part({ receipts: list, above: ['Work said done was not done.'] }))
+    expect(Object.isFrozen(live)).toBe(true)
+    expect(Object.isFrozen(live?.receipts)).toBe(true)
+    expect(Object.isFrozen(live?.above)).toBe(true)
+    expect(live?.receipts).not.toBe(list)
+    expect(list).toEqual([MOVED])
   })
 })
