@@ -1,0 +1,36 @@
+{
+  "schema": "automatos-look-schema/v1",
+  "look": {
+    "schema": "automatos-e2e-a09b-look/v1",
+    "interface": "hello-a09b"
+  },
+  "knobs": {
+    "ground": {
+      "kind": "choice",
+      "label": "Ground",
+      "choices": [
+        "paper",
+        "ink",
+        "dusk"
+      ],
+      "default": "paper"
+    },
+    "accent": {
+      "kind": "choice",
+      "label": "Accent",
+      "choices": [
+        "blue",
+        "green"
+      ],
+      "default": "blue"
+    },
+    "glow": {
+      "kind": "number",
+      "label": "Glow",
+      "min": 0,
+      "max": 40,
+      "integer": true,
+      "default": 12
+    }
+  }
+}

@@ -3,9 +3,11 @@
  * 404 for an address no theme of the style can serve (a bad route, Classic, Studio, a builtin
  * theme without the route) and otherwise renders ThemeSlotRoute full bleed inside MainLayout,
  * which sits inside the host's AI label gate (PRD-264 EUAI-11a).
- * ThemeSlotRoute renders the active theme's route (builtin Play's Conversations through its lazy
- * slot, findBy*; an installed theme's from the theme host), nothing while an installed theme
- * loads, and calls notFound() when nothing is registered by that name.
+ * ThemeSlotRoute renders the active theme's route from the theme host (the fixture theme's
+ * `fixture-route`, PRD-261 A-19b, and an installed theme's), at any width, nothing while an
+ * installed theme loads, and calls notFound() when nothing is registered by that name.
+ * The server page's rows for builtin Play's style cookies test builtin Play's own branch of
+ * themeMayServe (its entry lists its routes); they go with builtin Play in W-A8 (A-19f2).
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -32,14 +34,16 @@ vi.mock('@/components/layout/main-layout', () => ({
     </div>
   ),
 }))
-vi.mock('@/components/play/conversations/play-conversations', () => ({
-  PlayConversations: () => <div data-testid="play-conversations" />,
-}))
 
 import ThemeRoutePage from '@/app/x/[...path]/page'
 import { AiLabelGate } from '@/components/ai-label/ai-label'
 import { MainLayout } from '@/components/layout/main-layout'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import {
+  FIXTURE_THEME_ENTRY,
+  FIXTURE_THEME_ROUTE,
+  FIXTURE_THEME_TEST_IDS,
+  fixtureThemeHost,
+} from '@/lib/theme-host/__tests__/fixture-theme-entry'
 
 import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-context'
 import { ThemeSlotRoute } from '../theme-slot-route'
@@ -71,7 +75,7 @@ function installedHost(status: 'active' | 'loading'): HostValue {
 }
 
 /** ThemeSlotRoute for `route`, under `host` when given, with a boundary standing in for Next's 404. */
-function renderRoute(route: string, host: HostValue | null = null) {
+function renderRoute(route: string, host: ThemeHostContextValue | null = null) {
   const onCaught = vi.fn()
   const tree = (
     <OuterBoundary onCaught={onCaught}>
@@ -93,17 +97,17 @@ afterEach(() => {
 })
 
 describe('ThemeSlotRoute', () => {
-  it("renders builtin Play's route 'conversations' through its lazy slot", async () => {
-    state.entry = BUILTIN_PLAY_ENTRY
-    renderRoute('conversations')
-    expect(await screen.findByTestId('play-conversations')).toBeInTheDocument()
+  it("renders the theme's route 'fixture-route' from its registrations", async () => {
+    state.entry = FIXTURE_THEME_ENTRY
+    renderRoute(FIXTURE_THEME_ROUTE, fixtureThemeHost())
+    expect(await screen.findByTestId(FIXTURE_THEME_TEST_IDS.route)).toBeInTheDocument()
   })
 
-  it("renders builtin Play's route below its width too: the route decides itself (Conversations sends a phone to /chat)", async () => {
-    state.entry = BUILTIN_PLAY_ENTRY
+  it("renders the theme's route below its width too: the route decides itself what a phone gets", async () => {
+    state.entry = FIXTURE_THEME_ENTRY
     state.layout = 'fallback'
-    renderRoute('conversations')
-    expect(await screen.findByTestId('play-conversations')).toBeInTheDocument()
+    renderRoute(FIXTURE_THEME_ROUTE, fixtureThemeHost())
+    expect(await screen.findByTestId(FIXTURE_THEME_TEST_IDS.route)).toBeInTheDocument()
   })
 
   it("renders an installed theme's route from the theme host", () => {
@@ -118,12 +122,12 @@ describe('ThemeSlotRoute', () => {
   })
 
   it.each([
-    ['a route the theme did not register', BUILTIN_PLAY_ENTRY, 'hello'],
-    ['no theme (Classic or Studio)', null, 'conversations'],
-  ])('is the 404 for %s', (_label, entry, route) => {
+    ['a route the theme did not register', FIXTURE_THEME_ENTRY, true, 'hello'],
+    ['no theme (Classic or Studio)', null, false, 'conversations'],
+  ])('is the 404 for %s', (_label, entry, themed, route) => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     state.entry = entry
-    const onCaught = renderRoute(route)
+    const onCaught = renderRoute(route, themed ? fixtureThemeHost() : null)
     expect(onCaught).toHaveBeenCalledWith(expect.objectContaining({ digest: expect.stringMatching(NOT_FOUND_DIGEST) }))
   })
 })

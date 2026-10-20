@@ -48,7 +48,7 @@ import {
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useMissionStore } from '@/stores/mission-store'
-import { usePlayChatStore } from '@/stores/play-chat-store'
+import { useFreshDraftStore } from '@/stores/fresh-draft-store'
 
 import type { WithdrawOffer } from './host-cards/chat-cards'
 import { gatedByAiLabel } from './internal/ai-label-gate'
@@ -310,7 +310,7 @@ const NO_LINES: readonly string[] = Object.freeze([])
 
 /** The conversation on screen, as a theme may hold it. */
 function useConversationOnScreen(options: HostChatOnScreenOptions | undefined): HostChatOnScreen {
-  const freshDrafts = usePlayChatStore((s) => s.freshDrafts)
+  const freshDrafts = useFreshDraftStore((s) => s.freshDrafts)
   const { view, adopt, draft, takeDraft } = useChatConversation({ freshDrafts, draftLink: options?.draftLink })
   const conversation = useMemo(() => (view ? hostConversation(view, adopt) : null), [view, adopt])
   return useMemo(() => Object.freeze({ conversation, draft, takeDraft }), [conversation, draft, takeDraft])

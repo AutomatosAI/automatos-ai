@@ -1,0 +1,10 @@
+{
+  "schema": "automatos-e2e-a09b-look/v1",
+  "interface": "hello-a09b",
+  "id": "ink",
+  "name": "Ink",
+  "sub": "Dark, with a blue accent",
+  "ground": "ink",
+  "accent": "blue",
+  "glow": 30
+}

@@ -5,10 +5,19 @@
  * client host saw another digest active), and drops any
  * integrity entry that is not a files-route module with a sha256 value. Anything slow or broken
  * paints the base boot (Studio's classes), and the client host takes over.
+ *
+ * PRD-261 A-19c (host 1.1.0): the boot of a theme with looks carries its presets (`looks`) and its
+ * prepaint table's tone rule. e2e/browser/fixtures/hello-a09b/boot.json is what the server answers
+ * for that fixture's theme data (orchestrator/tests/test_prd261_boot_looks.py); the gate keeps all
+ * of it, and drops a rule or a preset that does not fit.
  */
+import { readFileSync } from 'fs'
+import path from 'path'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { baseThemeBoot, builtinThemeBoot, createThemeBootResolver, type ThemeBoot } from '@/lib/theme-host/boot'
+import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
+import type { ThemeBootPreset } from '@/lib/theme-host/boot-types'
 import {
   INSTALLED_BOOT_CACHE_TTL_MS,
   INSTALLED_BOOT_TIMEOUT_MS,
@@ -353,5 +362,103 @@ describe('PRD-261 A-08c — the digest hint the request carries', () => {
       throw new Error('cookies() was called outside a request scope')
     })
     expect(await outside(INSTALL_ID)).toBeNull()
+  })
+})
+
+interface A09bBoot {
+  readonly prepaint: Readonly<Record<string, unknown>> & { readonly knobs: unknown; readonly tone: unknown }
+  readonly lookGuard: unknown
+  readonly looks: { readonly defaultLook: string; readonly presets: readonly ThemeBootPreset[] }
+}
+
+const A09B_BOOT_PATH = path.resolve(__dirname, '../../../..', 'e2e/browser/fixtures/hello-a09b/boot.json')
+const A09B: A09bBoot = JSON.parse(readFileSync(A09B_BOOT_PATH, 'utf8'))
+const [PAPER, DUSK, INK] = A09B.looks.presets
+
+/** What the boot route answers for hello-a09b's theme (A-19c), with `fields` over it. */
+function lookBoot(fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return { ...runningBoot(), prepaint: A09B.prepaint, lookGuard: A09B.lookGuard, looks: A09B.looks, ...fields }
+}
+
+function gate(fields: Record<string, unknown>): ThemeBoot {
+  return sanitizeThemeBoot(lookBoot(fields) as unknown as ThemeBoot)
+}
+
+function withTone(tone: unknown): ThemeBoot {
+  return gate({ prepaint: { ...A09B.prepaint, tone } })
+}
+
+describe("PRD-261 A-19c — the boot carries a theme's presets and its tone rule", () => {
+  it("keeps hello-a09b's presets, the default first, and its tone rule: nothing dropped", async () => {
+    const boot = await createInstalledBootResolver(deps(answering(() => json(lookBoot()))))(INSTALL_STYLE)
+    expect(boot.prepaint).toEqual(A09B.prepaint)
+    expect(boot.prepaint?.tone).toEqual({ knob: 'ground', values: { paper: 'light', ink: 'dark', dusk: 'dark' } })
+    expect(boot.lookGuard).toEqual(A09B.lookGuard)
+    expect(boot.looks).toEqual(A09B.looks)
+    expect(boot.looks?.presets.map((preset) => preset.id)).toEqual(['paper', 'dusk', 'ink'])
+  })
+
+  it('drops a tone rule that does not fit the table, and keeps the table', () => {
+    const values = { paper: 'light', ink: 'dark', dusk: 'dark' }
+    const unfit: unknown[] = [
+      { knob: 'glow', values: { 0: 'light' } },
+      { knob: 'missing', values },
+      { knob: 'ground', values: { paper: 'light', ink: 'dark' } },
+      { knob: 'ground', values: { ...values, ink: 'dim' } },
+      { values },
+      { knob: 'ground', values: ['light', 'dark'] },
+      'dark',
+    ]
+    for (const tone of unfit) {
+      const prepaint = withTone(tone).prepaint
+      expect({ tone, kept: prepaint?.knobs }).toEqual({ tone, kept: A09B.prepaint.knobs })
+      expect({ tone, rule: prepaint?.tone }).toEqual({ tone, rule: undefined })
+    }
+  })
+
+  it("keeps only the knob's own choices of a tone rule, and a table without one has none", () => {
+    const rule = { knob: 'ground', values: { paper: 'light', ink: 'dark', dusk: 'dark', moss: 'dark' } }
+    expect(withTone(rule).prepaint?.tone).toEqual(A09B.prepaint.tone)
+    const untoned = Object.fromEntries(Object.entries(A09B.prepaint).filter(([key]) => key !== 'tone'))
+    const boot = gate({ prepaint: untoned })
+    expect(boot.prepaint).not.toBeNull()
+    expect(boot.prepaint && 'tone' in boot.prepaint).toBe(false)
+  })
+
+  it('keeps at most 12 presets, each a flat look of at most 4 KB with a look id, each id once', () => {
+    const many = Array.from({ length: BOOT_PRESETS_MAX + 2 }, (_, index) => ({ ...PAPER, id: `p${index}` }))
+    const capped = gate({ looks: { defaultLook: 'p0', presets: many } }).looks
+    expect(capped?.presets.map((preset) => preset.id)).toEqual(many.slice(0, BOOT_PRESETS_MAX).map((preset) => preset.id))
+    const unfit = [
+      { ...DUSK, extra: { nested: true } },
+      { ...DUSK, id: 'not an id' },
+      { ...DUSK, id: 'big', name: 'x'.repeat(BOOT_PRESET_MAX_BYTES) },
+      { ...DUSK, glow: true },
+      PAPER,
+    ]
+    const looks = gate({ looks: { defaultLook: 'paper', presets: [PAPER, ...unfit, INK] } }).looks
+    expect(looks).toEqual({ defaultLook: 'paper', presets: [PAPER, INK] })
+  })
+
+  it('drops the presets when the default look is not the first one kept, or none is kept', () => {
+    const shapes: unknown[] = [
+      { defaultLook: 'ink', presets: [PAPER, INK] },
+      { defaultLook: 'paper', presets: [{ ...PAPER, id: 'not an id' }] },
+      { defaultLook: 'paper', presets: [] },
+      { defaultLook: 'paper' },
+      { presets: [PAPER] },
+      [PAPER],
+      'paper',
+    ]
+    for (const looks of shapes) expect({ looks, kept: gate({ looks }).looks }).toEqual({ looks, kept: null })
+  })
+
+  it("gives every boot without presets null looks: a 1.0.0 host's, the base boot and builtin boots", async () => {
+    const boot = await createInstalledBootResolver(deps(answering(() => json(runningBoot()))))(INSTALL_STYLE)
+    expect(boot.looks).toBeNull()
+    for (const style of ['classic', 'studio', BUILTIN_PLAY_STYLE, INSTALL_STYLE] as const) {
+      expect(baseThemeBoot(style).looks).toBeNull()
+      expect(builtinThemeBoot(style, NO_COOKIES).looks).toBeNull()
+    }
   })
 })

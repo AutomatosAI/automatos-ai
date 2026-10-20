@@ -91,6 +91,9 @@ describe("Play's New chat away from the chat (saas)", () => {
     fireEvent.click(newChat())
     expect(store.getState().session).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: ['abc'] })
     expect(nav.push).toHaveBeenCalledWith('/chat')
+    // PRD-261 A-19a: the press is counted in the host's store, which the SDK's chat follows.
+    const { useFreshDraftStore } = await import('@/stores/fresh-draft-store')
+    expect(useFreshDraftStore.getState().freshDrafts).toBe(1)
     // SaaS keeps the tabs on the server. Waiting for that debounced save also keeps its timer
     // from firing into the next test (the local edition's, which asserts nothing is sent).
     await waitFor(() => expect(chatApi.putChatSession).toHaveBeenCalled(), { timeout: SAVE_WAIT_MS })

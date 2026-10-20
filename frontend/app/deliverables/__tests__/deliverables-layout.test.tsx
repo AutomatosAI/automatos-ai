@@ -1,22 +1,21 @@
 /**
- * PRD-260 T-007a, K7, D7, D8 — app/deliverables/layout.tsx mounts Play's
- * shelf through ThemeSlot (PRD-261 A-04b: builtin Play registers it as its
- * /deliverables page, lib/theme-host/builtin/play-slots.tsx): under Play at >= 1024 px on /deliverables
+ * PRD-260 T-007a, K7, D7, D8 — app/deliverables/layout.tsx mounts a theme's
+ * Deliverables page through ThemeSlot (PRD-261 A-04b: the theme registers its
+ * /deliverables page; here the fixture theme's, PRD-261 A-19b, handed over by
+ * the theme host): under the theme at >= 1024 px on /deliverables
  * only, the existing page under Classic and Studio, below 1024 px, on the
  * explorer, and for a link into one of the page's other sections (a tab, a
  * post, a type drill-down). DeliverableDeepLink is mounted beside the page
- * only: under Play the shelf switch opens a Deliverable as Play's own page
- * (T-007b, K8), so its sheet never opens over it.
+ * only: under the theme its page opens a Deliverable as its own page
+ * (T-007b, K8), so the sheet never opens over it.
  *
- * P260-FX-11 (M13): the Outputs tab IS Play's shelf, so every
+ * P260-FX-11 (M13): the Outputs tab IS the theme's page, so every
  * `?tab=outputs` link (the explorer's Back, Generate's 'Open Deliverables',
- * the backend's own `?tab=outputs&deliverable=<id>`) keeps Play's screen;
+ * the backend's own `?tab=outputs&deliverable=<id>`) keeps the theme's screen;
  * another tab, a post or a type drill-down still keeps the core's page.
- * P260-FX-23 (M17): the layout hands the switch Play's shelf through its lazy
- * slot, so the shelf arrives a moment after the first render (findBy*).
  * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here);
- * while it isn't known (the server, hydration) neither the shelf nor the page
- * and its deep link mount.
+ * while it isn't known (the server, hydration) neither the theme's page nor
+ * the core page and its deep link mount.
  * PRD-261 A-04b: on the server the layout adds no Suspense boundary of its own
  * around the page (components/theme-host/theme-slot.tsx: a boundary around it
  * streamed the page twice); the deep link keeps the one it has always had.
@@ -26,26 +25,24 @@ import { renderToString } from 'react-dom/server'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ play: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' }))
+const state = vi.hoisted(() => ({ themed: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }))
 vi.mock('@/hooks/use-studio-theme', async () => {
-  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  const { FIXTURE_THEME_ENTRY } = await import('@/lib/theme-host/__tests__/fixture-theme-entry')
   return {
     useIsStudio: () => true,
-    useActiveTheme: () => (state.play ? BUILTIN_PLAY_ENTRY : null),
+    useActiveTheme: () => (state.themed ? FIXTURE_THEME_ENTRY : null),
     useThemeLayout: () => {
-      if (!state.play || state.narrow) return 'fallback'
+      if (!state.themed || state.narrow) return 'fallback'
       return state.widthUnknown ? 'pending' : 'theme'
     },
   }
 })
-vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
-// PRD-261 A-14b: the frame moved out of Play's shelf into its slot (lib/theme-host/builtin/play-shelf-lazy.tsx),
-// which draws MainLayout around the shelf as before; it stands in here as it did inside the mocked shelf.
+// PRD-261 A-04d: ThemeSlot draws an installed theme's page full bleed inside MainLayout (its frame); it stands in here.
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
@@ -55,17 +52,24 @@ vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
 
 import DeliverablesLayout from '@/app/deliverables/layout'
 import { DeliverableDeepLink } from '@/components/deliverables/deliverable-deep-link'
+import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
+import { FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
+
+/** The theme's Deliverables page, as the fixture theme registers it. */
+const THEME_PAGE = FIXTURE_THEME_TEST_IDS.deliverables
 
 function CorePage() {
   return <div data-testid="page">The Deliverables page</div>
 }
 
+/** The layout around the core page; under the theme, inside the theme host that loaded it. */
 function layoutTree() {
-  return (
+  const tree = (
     <DeliverablesLayout>
       <CorePage />
     </DeliverablesLayout>
   )
+  return state.themed ? <ThemeHostContext.Provider value={fixtureThemeHost()}>{tree}</ThemeHostContext.Provider> : tree
 }
 
 function renderLayout() {
@@ -74,35 +78,35 @@ function renderLayout() {
 
 async function showsShelf(yes: boolean) {
   if (yes) {
-    expect(await screen.findByTestId('play-shelf')).toBeInTheDocument()
+    expect(await screen.findByTestId(THEME_PAGE)).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.queryByTestId('deep-link')).toBeNull()
   } else {
     expect(screen.getByTestId('page')).toBeInTheDocument()
-    expect(screen.queryByTestId('play-shelf')).toBeNull()
+    expect(screen.queryByTestId(THEME_PAGE)).toBeNull()
     expect(screen.getByTestId('deep-link')).toBeInTheDocument()
   }
 }
 
 afterEach(() => {
   cleanup()
-  Object.assign(state, { play: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' })
+  Object.assign(state, { themed: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' })
 })
 
 describe('app/deliverables/layout.tsx', () => {
-  it("renders Play's shelf instead of the page under Play at desktop width, without the deep link's sheet", async () => {
+  it("renders the theme's page instead of the core page under the theme at desktop width, without the deep link's sheet", async () => {
     renderLayout()
     await showsShelf(true)
   })
 
-  it("keeps Play's screen for a link that opens one Deliverable, and the deep link stays closed (K8)", async () => {
+  it("keeps the theme's screen for a link that opens one Deliverable, and the deep link stays closed (K8)", async () => {
     state.search = 'deliverable=d-laptop'
     renderLayout()
     await showsShelf(true)
   })
 
   it('renders the existing page under Classic or Studio', async () => {
-    state.play = false
+    state.themed = false
     renderLayout()
     await showsShelf(false)
   })
@@ -113,29 +117,29 @@ describe('app/deliverables/layout.tsx', () => {
     await showsShelf(false)
   })
 
-  it('mounts neither the shelf nor the page and its deep link while the width is not known (M69)', () => {
+  it("mounts neither the theme's page nor the core page and its deep link while the width is not known (M69)", () => {
     state.widthUnknown = true
     state.search = 'deliverable=d-laptop'
     renderLayout()
-    // The shelf's chunk is loaded by now (the tests above), so it would render in this pass.
-    expect(screen.queryByTestId('play-shelf')).toBeNull()
+    // The theme's page is registered and needs no chunk, so it would render in this pass.
+    expect(screen.queryByTestId(THEME_PAGE)).toBeNull()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.queryByTestId('deep-link')).toBeNull()
   })
 
-  it("keeps Studio's explorer inside Play's frame", async () => {
+  it("keeps Studio's explorer inside the theme's frame", async () => {
     state.pathname = '/deliverables/explorer'
     renderLayout()
     await showsShelf(false)
   })
 
-  it("keeps Play's shelf for ?tab=outputs, the tab the shelf is (M13)", async () => {
+  it("keeps the theme's page for ?tab=outputs, the tab its page is (M13)", async () => {
     state.search = 'tab=outputs'
     renderLayout()
     await showsShelf(true)
   })
 
-  it("opens the backend's own Deliverable link (?tab=outputs&deliverable=<id>) as Play's page, the deep link not mounted (K8)", async () => {
+  it("opens the backend's own Deliverable link (?tab=outputs&deliverable=<id>) as the theme's page, the deep link not mounted (K8)", async () => {
     state.search = 'tab=outputs&deliverable=d-laptop'
     renderLayout()
     await showsShelf(true)
@@ -148,7 +152,7 @@ describe('app/deliverables/layout.tsx', () => {
     'tab=outputs&artifact_type=code',
     'tab=outputs&post=p1',
   ])(
-    "keeps the core's page for ?%s under Play (D8)",
+    "keeps the core's page for ?%s under the theme (D8)",
     async (search) => {
       state.search = search
       renderLayout()
@@ -159,7 +163,7 @@ describe('app/deliverables/layout.tsx', () => {
 
 describe('app/deliverables/layout.tsx on the server', () => {
   it('sends the page and its deep link under Classic or Studio exactly as they render without ThemeSlot', () => {
-    state.play = false
+    state.themed = false
     const core = renderToString(
       <>
         <CorePage />
@@ -171,7 +175,7 @@ describe('app/deliverables/layout.tsx on the server', () => {
     expect(renderToString(layoutTree())).toBe(core)
   })
 
-  it('sends nothing under Play while the width is not known: no page, no deep link, no empty boundary', () => {
+  it('sends nothing under the theme while the width is not known: no page, no deep link, no empty boundary', () => {
     state.widthUnknown = true
     expect(renderToString(layoutTree())).toBe('')
   })

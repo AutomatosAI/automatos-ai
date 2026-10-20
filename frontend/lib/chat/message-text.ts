@@ -1,5 +1,5 @@
+import { NO_REPLY, type ReplyProgress } from '@/lib/chat/chat-status'
 import { upsertTaskCard } from '@/lib/chat/tool-calls'
-import { NO_REPLY, type ReplyProgress } from '@/lib/mascot/events'
 import type { ChatMessage, TaskCardData } from '@/types'
 
 /**
@@ -121,7 +121,7 @@ export function runningToolInput(reply: ChatMessage | undefined): unknown {
 }
 
 /**
- * The reply being written, for Auto (lib/mascot/events.ts): the newest message
+ * The reply being written (lib/chat/chat-status.ts), as a theme's mascot reads it: the newest message
  * when it is a reply (useChat appends the empty reply as it sends), whether its
  * words have started, whether one of its tool calls still runs, how long the
  * model's reasoning on it is and whether a cap ended its turn (useChat writes

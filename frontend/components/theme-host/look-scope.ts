@@ -2,11 +2,11 @@
 
 import { createContext, useContext } from 'react'
 
-import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
+import { DEFAULT_LOOK_SCOPE } from '@/lib/look-kit/scope'
 
 /**
  * PRD-260 F5 — whose looks these are: the signed-in user in the active
- * workspace (lib/looks/scope.ts). The LookProvider keys the looks and the
+ * workspace (lib/look-kit/scope.ts). The LookProvider keys the looks and the
  * active look by it, and the shelf its seen Deliverables record
  * (hooks/use-celebrate-new.ts). AccountLookScope (./account-look-scope.tsx,
  * mounted inside the WorkspaceProvider by the host's look runtime) provides

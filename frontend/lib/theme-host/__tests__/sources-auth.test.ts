@@ -14,6 +14,7 @@ vi.mock('@/lib/api-client', () => ({ apiClient: { getActiveTheme: api.getActiveT
 vi.mock('../native-import', () => ({ importThemeModule: native.importThemeModule }))
 
 import { settleLoad, step } from '../loader'
+import { SDK_VERSION } from '../sdk'
 import {
   defaultLoaderDeps,
   fetchActiveInstall,
@@ -27,7 +28,7 @@ import type { LoaderDeps, ThemeFailureReason, ThemeHostGlobal, ThemeLoadOk, Them
 const INSTALL_ID = '00000000-0000-4000-8000-0000000a08b0'
 const ENTRY_URL = `/api/themes/files/${'c'.repeat(64)}/dist/entry.js`
 const PRESET_URL = `/api/themes/files/${'c'.repeat(64)}/looks/presets/default.look.json`
-const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: '1.0.0', modules: Object.freeze({}) })
+const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: SDK_VERSION, modules: Object.freeze({}) })
 /** What apiClient throws for a 401 (api-client.ts httpErrorOf): a message naming the sign-in, no status. */
 const API_CLIENT_401 = new Error('HTTP 401: Unauthorized (missing/invalid Clerk token). Make sure you are signed in.')
 

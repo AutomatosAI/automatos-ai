@@ -5,7 +5,8 @@ test reaches the network. Proven here: a large bundle is cut into chunks, one ca
 one combined score; ``dist/`` is always read and ``source/`` too when shipped and asked for
 (never instead); each part sits between delimiters carrying a fresh nonce; reviewer-directed text
 holds the score at the review threshold; the day's token budget is reserved before any call; one
-shared thread pool; the plugin scanner's thresholds; and every way the stage can fail to run is a
+shared thread pool; the plugin scanner's thresholds; the prompt's fair use of the SDK's storage area
+(E3d); and every way the stage can fail to run is a
 warning "LLM stage did not run", never a pass.
 """
 from __future__ import annotations
@@ -134,6 +135,32 @@ def test_the_thresholds_are_the_plugin_scanners():
     source = (ORCH_ROOT / "core/services/plugin_security_scanner.py").read_text(encoding="utf-8")
     assert "risk_score >= 70" in source and "risk_score >= 20" in source
     assert (llm_stage.BLOCK_AT, llm_stage.REVIEW_AT) == (70, 20)
+
+
+# ---------------------------------------------------------------------------
+# The prompt: the SDK's storage area is fair use, raw browser storage still is not (E3d)
+# ---------------------------------------------------------------------------
+
+STORAGE_CALLS = ("readThemeState", "writeThemeState", "removeThemeState", "subscribeThemeState", "useThemeState")
+RAW_BROWSER_STORAGE = ("localStorage", "sessionStorage", "IndexedDB")
+
+
+def _prompt_paragraph(starts: str) -> str:
+    return next(part for part in llm_stage.THEME_SCAN_PROMPT.split("\n") if part.startswith(starts))
+
+
+def test_the_prompt_calls_the_sdk_storage_area_expected_for_the_themes_own_ui_state():
+    fair = _prompt_paragraph("Be fair:")
+    assert "The SDK's storage area" in fair and "is expected for the theme's own UI state" in fair
+    assert all(name in fair for name in STORAGE_CALLS)
+
+
+def test_the_prompt_keeps_tokens_cookies_or_foreign_data_stored_through_it_in_category_1():
+    fair = _prompt_paragraph("Be fair:")
+    assert "storing tokens, cookies or foreign data through it" in fair and "is still category 1" in fair
+    exfiltration = _prompt_paragraph("1. ")
+    assert exfiltration.startswith("1. **Exfiltration**")
+    assert all(name in exfiltration for name in RAW_BROWSER_STORAGE)
 
 
 # ---------------------------------------------------------------------------

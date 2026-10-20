@@ -4,8 +4,9 @@
  * playbooks (/playbooks), the Command Center (/command-center) and home (/).
  *
  * Each route's layout wraps the core page in a ThemeSlot page entry with its keepCorePage list
- * (the app/chat/layout.tsx pattern). With no theme, under builtin Play (which registers none of
- * these pages) and under an installed theme that registers none, the layout renders its children
+ * (the app/chat/layout.tsx pattern). With no theme, under a theme whose registrations hold none of
+ * these pages (the fixture theme, PRD-261 A-19b: /chat and /deliverables only) and under an
+ * installed theme that registers none, the layout renders its children
  * unchanged, the same DOM. An installed theme's registered page draws instead, full bleed inside
  * MainLayout (its frame), unless the link asks for a surface only the core page has. Every route
  * the host lets a theme register (THEME_PAGE_ROUTES) has its seam. With no theme the server sends
@@ -14,7 +15,8 @@
  *
  * Home: the core has no page there. Under Classic, Studio and builtin Play the server forwards to
  * /chat as before; under an installed theme the page renders ThemeSlot, the theme's `/` page
- * draws when it registered one, and otherwise the browser forwards to /chat.
+ * draws when it registered one, and otherwise the browser forwards to /chat. (Builtin Play's two
+ * style cookies forward there after W-A8 too: they then parse to the default style.)
  */
 import fs from 'fs'
 import path from 'path'
@@ -72,7 +74,7 @@ import PlaybooksLayout from '@/app/playbooks/layout'
 import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
 import { ThemeSlot } from '@/components/theme-host/theme-slot'
 import { CoreHomeForward } from '@/components/theme-host/theme-slot-home'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { FIXTURE_THEME_ENTRY, fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 import { THEME_PAGE_ROUTES } from '@/lib/theme-host/constants'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
@@ -90,7 +92,7 @@ const LAYOUTS: ReadonlyArray<readonly [string, Layout, string, string]> = [
 
 const INSTALLED_STYLE = 'theme:install:00000000-0000-4000-8000-0000000a04d0'
 const INSTALLED_ENTRY: ThemeEntry = {
-  ...BUILTIN_PLAY_ENTRY,
+  ...FIXTURE_THEME_ENTRY,
   ref: 'install:00000000-0000-4000-8000-0000000a04d0',
   kind: 'installed',
   ownsPages: [],
@@ -195,12 +197,12 @@ describe.each(LAYOUTS)('%s', (_seam, Layout, route, address) => {
     ).toBe(core)
   })
 
-  it('renders its children unchanged under builtin Play, which registers no page here', () => {
+  it('renders its children unchanged under a theme whose registrations hold no page here (the fixture theme)', () => {
     const core = coreHtml()
-    state.entry = BUILTIN_PLAY_ENTRY
+    state.entry = FIXTURE_THEME_ENTRY
     state.layout = 'theme'
     state.pathname = address
-    expect(renderLayout(Layout)).toBe(core)
+    expect(renderLayout(Layout, fixtureThemeHost())).toBe(core)
   })
 
   it('renders its children unchanged under an installed theme that registered no page here', () => {

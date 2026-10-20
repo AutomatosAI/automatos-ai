@@ -143,6 +143,14 @@
       "useWorkflowPlaybook",
       "useWorkflowPlaybooks"
     ],
+    "storage": [
+      "THEME_STATE_LIMITS",
+      "readThemeState",
+      "removeThemeState",
+      "subscribeThemeState",
+      "useThemeState",
+      "writeThemeState"
+    ],
     "theme": [
       "SDK_VERSION",
       "defineTheme"

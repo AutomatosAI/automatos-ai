@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { THEME_HOST_VERSION } from '../constants'
 import { registerTheme } from '../loader'
 import type { SlotId } from '../registry-types'
+import { SDK_VERSION } from '../sdk'
 import { installedThemeSource } from '../sources'
 import type { LoaderDeps, ThemeHostGlobal, ThemeLoadResult, ThemeRegistrationHost } from '../types'
 
@@ -38,7 +39,7 @@ const MANIFEST = {
   slots: ['frame@1'],
 }
 const PRESET = { vars: { [ACCENT]: '#2f6fed', '--hello-ink': '#1a1814' } }
-const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: '1.0.0', modules: Object.freeze({}) })
+const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: SDK_VERSION, modules: Object.freeze({}) })
 
 /** The GET /api/themes/active answer for the install, carrying `manifest`. */
 function activeWith(manifest: unknown, theme: Record<string, unknown> = {}) {
@@ -252,7 +253,7 @@ describe('PRD-261 A-04a — an installed theme on success', () => {
     expect(result.manifest?.id).toBe(MANIFEST.id)
     const host = theme.register.mock.calls[0]?.[0]
     expect(theme.register).toHaveBeenCalledTimes(1)
-    expect(host?.sdkVersion).toBe('1.0.0')
+    expect(host?.sdkVersion).toBe(SDK_VERSION)
     expect(host?.hostVersion).toBe(THEME_HOST_VERSION)
     expect(Object.isFrozen(host)).toBe(true)
     expect(document.documentElement.classList.contains(HTML_CLASS)).toBe(true)
@@ -302,7 +303,7 @@ describe('PRD-261 A-04a — registerTheme: what the host accepts', () => {
         host.registerRoute('hello', Page)
         host.registerRoute('hello/world', Page)
       }),
-      '1.0.0',
+      SDK_VERSION,
     )
     expect(registrations.frame).toBe(Frame)
     expect([...registrations.slots.keys()]).toEqual(['frame@1', 'lookEditor@1'])
@@ -324,7 +325,7 @@ describe('PRD-261 A-04a — registerTheme: what the host accepts', () => {
       host.registerSlot('frame@1', Frame)
       extra(host)
     })
-    expect(() => registerTheme(theme, '1.0.0')).toThrow()
+    expect(() => registerTheme(theme, SDK_VERSION)).toThrow()
     expect(theme.unregister).toHaveBeenCalledTimes(1)
   })
 })

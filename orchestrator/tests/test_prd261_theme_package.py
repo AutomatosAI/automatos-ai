@@ -142,7 +142,18 @@ def test_every_invalid_css_value_is_refused_with_a_reason(value):
 
 @pytest.mark.parametrize("case", CASES["prepaint"]["cases"], ids=_ids(CASES["prepaint"]))
 def test_every_prepaint_case_gives_its_code(case):
-    _assert_verdict(prepaint_errors(case["document"]), case["code"])
+    errors = prepaint_errors(case["document"])
+    _assert_verdict(errors, case["code"])
+    if "messages" in case:  # A-19c: the tone rule's sentences, the same in both languages
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+def test_the_corpus_has_a_valid_tone_rule_and_each_refusal_kind():
+    tone_cases = [case for case in CASES["prepaint"]["cases"] if "tone" in (case["document"] or {})]
+    assert any(case["code"] is None for case in tone_cases)
+    refused = {message.split(": ", 1)[0] for case in tone_cases for message in case.get("messages", [])}
+    assert {"boot/prepaint.json#tone", "boot/prepaint.json#tone.knob"} <= refused
+    assert any(path.startswith("boot/prepaint.json#tone.values.") for path in refused)
 
 
 @pytest.mark.parametrize("case", CASES["cssScope"]["cases"], ids=_ids(CASES["cssScope"]))
@@ -352,11 +363,20 @@ def test_an_encrypted_member_is_refused():
 
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
-    assert contract.THEME_HOST_VERSION == "1.0.0"
+    # PB-3 (D7, QB-3): 1.1.0 for the storage area (SDK) and the boot tone rule and looks presets (host).
+    assert contract.THEME_HOST_VERSION == "1.1.0"
+    assert contract.SDK_VERSION == "1.1.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
     assert {"studio", "classic", "play", "dark", "light"} <= set(contract.RESERVED_HTML_CLASSES)
     assert contract.HTML_CLASS_OWNERS == {"play": "automatos/play"}
     assert set(contract.REQUIRED_SLOTS) == {"lookEditor@1", "styleSheet@1"} <= set(contract.KNOWN_SLOTS)
+
+
+def test_the_contract_pins_the_tone_rule_and_the_boot_preset_caps():
+    # A-19c (plan §2.2.3): a tone rule of a knob and its choices' tones; at most 12 presets of 4 KB each.
+    assert (contract.TONE_RULE_KEY, contract.TONE_RULE_FIELDS, contract.TONE_RULE_TONES) == ("tone", ("knob", "values"), ("light", "dark"))
+    assert (contract.BOOT_PRESETS_MAX, contract.BOOT_PRESET_MAX_BYTES) == (12, 4 * KB)
+    assert "BAD_TONE_RULE" in PREPAINT_ERROR_CODES
 
 
 def test_the_frontend_carries_the_same_host_and_sdk_versions():
