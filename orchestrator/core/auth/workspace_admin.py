@@ -18,6 +18,11 @@ PRD-143 observability posture. Every tile behind this gate is already filtered b
 ``ctx.workspace_id``, so the gate only decides *who in a workspace* sees health —
 it can never surface another tenant's data. Fail-closed: anonymous / plain-member
 / non-member principals refuse.
+
+A paired phone or browser (PRD-266, ``auth_type`` ``device``) has no Clerk identity:
+the same rule is read for its bound person by ``users.id``
+(``core.auth.principal.resolve_user_pk``). The local operator's device is
+``super_admin`` and passes as the operator does.
 """
 from __future__ import annotations
 
@@ -25,12 +30,34 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
 
 from core.auth.dependencies import RequestContext
+from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.principal import resolve_user_pk
 from core.auth.super_admin import SUPER_ADMIN_ROLE
 from core.database.database import get_db
 
 # workspace_members.role values that administer a workspace.
 WORKSPACE_ADMIN_ROLES = ("owner", "admin")
+
+# PRD-266: the Clerk query below, read by ``users.id`` (a paired device's person).
+_ADMIN_MEMBER_BY_PK_SQL = text(
+    "SELECT 1 FROM users u "
+    "LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws "
+    "LEFT JOIN workspace_members wm ON wm.user_id = u.id "
+    "  AND wm.workspace_id = :ws AND wm.is_active = true "
+    "  AND wm.role IN ('owner', 'admin') "
+    "WHERE u.id = :uid AND (w.id IS NOT NULL OR wm.id IS NOT NULL) "
+    "LIMIT 1"
+)
+
+
+def _is_device_admin_member(db, ctx: RequestContext) -> bool:
+    """``_is_workspace_admin_member`` for a paired device: its bound person, by ``users.id``."""
+    user_pk = resolve_user_pk(db, ctx) if ctx.workspace_id is not None else None
+    if user_pk is None:
+        return False
+    row = db.execute(_ADMIN_MEMBER_BY_PK_SQL, {"uid": user_pk, "ws": str(ctx.workspace_id)}).fetchone()
+    return bool(row)
 
 
 def _is_workspace_admin_member(db, ctx: RequestContext) -> bool:
@@ -39,10 +66,13 @@ def _is_workspace_admin_member(db, ctx: RequestContext) -> bool:
 
     Mirrors ``hybrid._user_has_workspace_access`` (owner OR active member) and
     narrows it to administering roles. Owning the workspace always qualifies —
-    the personal-workspace owner is its admin by definition.
+    the personal-workspace owner is its admin by definition. A caller with no
+    ``clerk_user_id`` is read by ``users.id`` only on the device path.
     """
     user = getattr(ctx, "user", None)
     clerk_uid = getattr(user, "clerk_user_id", None) if user else None
+    if not clerk_uid and getattr(ctx, "auth_type", None) == DEVICE_AUTH_TYPE:
+        return _is_device_admin_member(db, ctx)
     if not clerk_uid or ctx.workspace_id is None:
         return False
     row = db.execute(

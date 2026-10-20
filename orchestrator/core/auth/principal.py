@@ -31,11 +31,22 @@ from sqlalchemy import text
 LOCAL_OPERATOR_CLAIM_SOURCE = "local_operator"
 MOBILE_DEVICE_CLAIM_SOURCE = "mobile_device"
 _PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE})
+# The lane whose raw_claims is that verified JWT's payload: whatever it says, it is
+# never one of the two lanes above (PRD-266 US-004b security review).
+CLERK_AUTH_TYPE = "clerk"
 
 
-def _claimed_pk(user: Any) -> Optional[int]:
-    """The integer PK the local-operator or device lane stashed on ``raw_claims``, else None."""
-    claims = getattr(user, "raw_claims", None)
+def claimed_user_pk(ctx: Any) -> Optional[int]:
+    """The integer PK the local-operator or device lane stashed on ``raw_claims``, else None.
+
+    The one claim rule: ``resolve_user_pk`` reads it, and so does the strict voice caller
+    (``modules/voice/caller.py``), which must never fall back to any other principal. It is
+    never read on the Clerk lane, so a token carrying a ``source`` and a ``user_id`` of its
+    own cannot name a person.
+    """
+    if getattr(ctx, "auth_type", None) == CLERK_AUTH_TYPE:
+        return None
+    claims = getattr(getattr(ctx, "user", None), "raw_claims", None)
     if not isinstance(claims, dict) or claims.get("source") not in _PK_CLAIM_SOURCES:
         return None
     claimed = claims.get("user_id")
@@ -66,7 +77,7 @@ def resolve_user_pk(db: Any, ctx: Any) -> Optional[int]:
     if isinstance(uid, int) and not isinstance(uid, bool):
         return uid
 
-    claimed = _claimed_pk(user)
+    claimed = claimed_user_pk(ctx)
     if claimed is not None:
         return claimed
 
@@ -82,4 +93,4 @@ def resolve_user_pk(db: Any, ctx: Any) -> Optional[int]:
     return None
 
 
-__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "resolve_user_pk"]
+__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "claimed_user_pk", "resolve_user_pk"]
