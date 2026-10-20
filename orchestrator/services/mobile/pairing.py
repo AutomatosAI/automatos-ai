@@ -116,12 +116,14 @@ def pair_link(api: str, code: str) -> str:
 
 def create_pairing_code(
     db: Session, workspace_id: Any, user_pk: int, *, request_base_url: str,
+    name: Optional[str] = None,
 ) -> PairingCode:
     """Add a PENDING paired row for this workspace and person and return its code once.
 
     ``request_base_url`` is the base URL the caller reached the API on; the pair link names
     it only when the install has no ``PUBLIC_API_HOST`` of its own (K15). The link is built
     before the row, so a misconfigured address (``MobileUrlError``) leaves nothing behind.
+    ``name`` (the console's ``--name``) labels the device until it pairs with a name of its own.
     """
     _require_local_edition()
     code = new_pairing_code()
@@ -134,6 +136,7 @@ def create_pairing_code(
         user_id=user_pk,
         kind=MobileDeviceKind.PAIRED.value,
         status=MobileDeviceStatus.PENDING.value,
+        name=name,
         pairing_code_hash=hash_secret(normalize_pairing_code(code)),
         pairing_expires_at=expires_at,
         events=[],

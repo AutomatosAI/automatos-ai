@@ -10,6 +10,13 @@
 #   PRD-234/262: every published port, the web app included, listens on ${BIND_ADDRESS:-127.0.0.1}
 #   — this machine only. Set BIND_ADDRESS=0.0.0.0 in .env to expose them to your network
 #   deliberately (whoever reaches the local edition is its owner; session mode runs commands).
+#   PRD-266: API_PUBLISH_ADDRESS (the backend) and WEB_PUBLISH_ADDRESS (the frontend) publish
+#   only those two, each defaulting to BIND_ADDRESS; Postgres, Redis, MinIO, Qdrant, Adminer
+#   and SearXNG always stay on BIND_ADDRESS. LOCAL_REMOTE_ACCESS (off | paired | open) says
+#   who may call a published install. off (the default) refuses to start the backend while
+#   either address reaches beyond loopback; paired makes every phone and browser pair with
+#   a one-time code (docker compose exec backend python -m scripts.mint_pairing_code); open
+#   keeps the anonymous owner and warns at every boot.
 #   2. Run: make up (or docker compose up)
 #   3. Access: http://localhost:3000
 #   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
@@ -403,8 +410,14 @@ services:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+
+      # PRD-266 remote access (header): the two publish addresses below, so the backend
+      # knows whether it is reachable beyond this machine, and who may call it then.
+      API_PUBLISH_ADDRESS: ${API_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}
+      WEB_PUBLISH_ADDRESS: ${WEB_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}
+      LOCAL_REMOTE_ACCESS: ${LOCAL_REMOTE_ACCESS:-off}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+      - "${API_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}:${API_PORT:-8000}:8000"
     volumes:
       # No checkout over the image (PRD-262 US-035): the code, the entrypoint and the
       # healthcheck are the image's own. Only data mounts here; `make dev` adds the
@@ -496,7 +509,7 @@ services:
       NEXT_PUBLIC_MEDIA_ORIGINS: ${NEXT_PUBLIC_MEDIA_ORIGINS:-http://localhost:9000}
       NODE_ENV: production
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
+      - "${WEB_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}:${FRONTEND_PORT:-3000}:3000"
     networks:
       - automatos
 

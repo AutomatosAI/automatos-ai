@@ -11,7 +11,11 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import text
 
 from config import config
-from core.auth.bearer_registry import bearer_token as _get_bearer_token, resolve_registered_bearers
+from core.auth.bearer_registry import (
+    api_key as _get_api_key,
+    bearer_token as _get_bearer_token,
+    resolve_registered_bearers,
+)
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.personal_workspace import insert_personal_workspace, seed_new_workspace
@@ -575,23 +579,6 @@ def _local_operator_user_context(db) -> Optional[UserContext]:
             "avatar_url": row["avatar_url"],
         },
     )
-
-
-def _get_api_key(request: Request) -> Optional[str]:
-    # Common patterns
-    api_key = request.headers.get("x-api-key") or request.headers.get("X-Api-Key")
-    if api_key:
-        return api_key.strip()
-
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not auth:
-        return None
-
-    # Allow "ApiKey <key>" (optional)
-    if auth.lower().startswith("apikey "):
-        return auth.split(" ", 1)[1].strip()
-
-    return None
 
 
 def _extract_origin(request: Request) -> Optional[str]:

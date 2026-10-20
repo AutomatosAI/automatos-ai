@@ -1461,3 +1461,23 @@ local edition an anonymous request is the operator (through the web app's chat a
 much as through the API), and with session mode (PRD-234) the API can start
 Claude Code sessions that run commands on this machine — do not expose it to a
 network you do not control.
+
+`API_PUBLISH_ADDRESS` and `WEB_PUBLISH_ADDRESS` publish only the API and the web
+app (each defaults to `BIND_ADDRESS`); Postgres, Redis, MinIO, Qdrant, Adminer and
+SearXNG stay on `BIND_ADDRESS`. Whichever way the API or the web app reaches beyond
+this machine, `BIND_ADDRESS=0.0.0.0` included, `LOCAL_REMOTE_ACCESS` must say who
+may call it, or the backend refuses to start and names the fix:
+
+- `LOCAL_REMOTE_ACCESS=paired`: every phone and browser pairs with a one-time code,
+  and a request with no credential is refused (`401 device_pairing_required`). Mint
+  the first code from the server console with
+  `docker compose exec backend python -m scripts.mint_pairing_code`.
+- `LOCAL_REMOTE_ACCESS=open`: today's behaviour, for a network you trust: anyone who
+  reaches it is the operator. The backend logs a warning at every boot.
+- `LOCAL_REMOTE_ACCESS=off` (the default): only for an install on `127.0.0.1`.
+
+Prefer the two publish variables to `BIND_ADDRESS=0.0.0.0`, which publishes the
+datastores as well. The backend sees only what compose tells it: a tunnel or a
+reverse proxy on this machine in front of a `127.0.0.1` publish (Caddy, nginx,
+cloudflared, ngrok) also reaches beyond this machine, so run
+`LOCAL_REMOTE_ACCESS=paired` behind one.
