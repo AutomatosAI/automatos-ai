@@ -144,17 +144,30 @@ def test_each_capability_the_chart_keeps_names_the_entrypoint_command_that_needs
 # --------------------------------------------------------------------------- the in-image checks
 
 
+NONE = "0000000000000000"
+
+
 def test_the_in_image_drop_sets_no_new_privs_and_reads_it_back(monkeypatch):
     drop = list(toolchain.SETPRIV_DROP)
     assert NO_NEW_PRIVS in drop[:drop.index("env")]
     assert toolchain.NO_NEW_PRIVS == "1" and "NoNewPrivs:" in toolchain.DROPPED_PROBE
     monkeypatch.setattr(toolchain.shutil, "which", lambda name: None)
-    monkeypatch.setattr(toolchain, "must", lambda argv, cwd: "1000 1000 /home/worker 0")
+    monkeypatch.setattr(toolchain, "must", lambda argv, cwd: f"1000 1000 /home/worker 0 {NONE} {NONE}")
     assert toolchain.check_setpriv(Path("/")) == [
-        "setpriv ran the command as '1000 1000 /home/worker 0' (uid gid HOME NoNewPrivs), "
-        "not '1000 1000 /home/worker 1'"]
-    monkeypatch.setattr(toolchain, "must", lambda argv, cwd: "1000 1000 /home/worker 1")
+        f"setpriv ran the command as '1000 1000 /home/worker 0 {NONE} {NONE}' (uid gid HOME NoNewPrivs CapPrm "
+        f"CapEff), not '1000 1000 /home/worker 1 {NONE} {NONE}'"]
+    monkeypatch.setattr(toolchain, "must", lambda argv, cwd: f"1000 1000 /home/worker 1 {NONE} {NONE}")
     assert toolchain.check_setpriv(Path("/")) == []
+
+
+def test_the_in_image_drop_leaves_the_worker_no_capability(monkeypatch):
+    """Security review: the chart adds CHOWN, DAC_READ_SEARCH, SETGID and SETUID back for the root part;
+    past the drop the worker's permitted and effective sets must be empty."""
+    assert "CapPrm:" in toolchain.DROPPED_PROBE and "CapEff:" in toolchain.DROPPED_PROBE
+    monkeypatch.setattr(toolchain.shutil, "which", lambda name: None)
+    kept = "00000000000000c0"                                   # CAP_SETGID | CAP_SETUID still held
+    monkeypatch.setattr(toolchain, "must", lambda argv, cwd: f"1000 1000 /home/worker 1 {kept} {kept}")
+    assert toolchain.check_setpriv(Path("/")) != []
 
 
 def test_the_in_image_check_lists_every_setuid_or_setgid_file(monkeypatch):

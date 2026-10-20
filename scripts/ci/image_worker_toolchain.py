@@ -150,7 +150,12 @@ SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", 
 WORKER_IDENTITY = "1000 1000 /home/worker"
 # F452: the NoNewPrivs field of /proc/<pid>/status in the dropped process.
 NO_NEW_PRIVS = "1"
-DROPPED_PROBE = 'echo "$(id -u) $(id -g) $HOME $(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)"'
+# F452 review: past the drop to a non-zero uid the kernel clears the permitted and effective sets
+# (no SECURE_KEEP_CAPS), so the chart's add-back caps are the root part's only, never the worker's.
+NO_CAPABILITIES = "0000000000000000 0000000000000000"
+_STATUS = 'sed -n "s/^{field}:[[:space:]]*//p" /proc/$$/status'
+DROPPED_PROBE = ('echo "$(id -u) $(id -g) $HOME $(' + _STATUS.format(field="NoNewPrivs") + ') $('
+                 + _STATUS.format(field="CapPrm") + ') $(' + _STATUS.format(field="CapEff") + ')"')
 # F452: every file with a setuid or setgid bit; -xdev keeps find off /proc, /sys and /dev.
 SETID_FILES = ("find", "/", "-xdev", "-perm", "/6000", "-type", "f")
 
@@ -343,13 +348,15 @@ def check_node_tools(work: Path) -> List[str]:
 
 
 def check_setpriv(work: Path) -> List[str]:
-    """No gosu, and setpriv drops root to the worker with the worker's HOME and no_new_privs."""
+    """No gosu, and setpriv drops root to the worker with the worker's HOME, no_new_privs and no
+    capability left (permitted and effective sets empty)."""
     failures = [] if shutil.which("gosu") is None else ["gosu is still in the image"]
     # From /: the worker may not enter root's temporary directory.
     identity = must([*SETPRIV_DROP, "sh", "-c", DROPPED_PROBE], Path("/"))
-    expected = f"{WORKER_IDENTITY} {NO_NEW_PRIVS}"
+    expected = f"{WORKER_IDENTITY} {NO_NEW_PRIVS} {NO_CAPABILITIES}"
     if identity != expected:
-        failures.append(f"setpriv ran the command as {identity!r} (uid gid HOME NoNewPrivs), not {expected!r}")
+        failures.append(f"setpriv ran the command as {identity!r} (uid gid HOME NoNewPrivs CapPrm CapEff), "
+                        f"not {expected!r}")
     return failures
 
 
@@ -377,7 +384,7 @@ CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 21: node is stripped, keeps .dynsym and runs", check_node_binary),
     ("row 21: a native N-API addon loads into the stripped node", check_node_addon),
     ("row 21: npm, npx, corepack and pnpm run on the stripped node", check_node_tools),
-    ("row 47: no gosu, and setpriv drops to the worker with no_new_privs", check_setpriv),
+    ("row 47: no gosu, and setpriv drops to the worker with no_new_privs and no capabilities", check_setpriv),
     ("F452: no file keeps a setuid or setgid bit", check_no_setid_files),
 )
 
