@@ -232,6 +232,9 @@ function ClassicShell({ children, fullBleed, autoWidget, isMobileLayout, isStudi
 }
 
 export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
+  // Known on a browser mount's first render (false on the server and while hydrating): a client
+  // navigation on a phone never takes the desktop branch below for a render, where the theme host
+  // would hand an installed theme's frame to ThemeFrameSlot (M69).
   const isMobileLayout = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const themeLayout = useThemeLayout()

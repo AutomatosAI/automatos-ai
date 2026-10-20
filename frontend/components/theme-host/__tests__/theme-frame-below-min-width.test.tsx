@@ -6,8 +6,10 @@
  * hooks/use-mobile.ts over a window of a given width (hooks/__tests__/window-width.ts), with the
  * theme host's value as its provider hands it over. Each registered component is wrapped in a spy.
  *
- * On a phone: MainLayout settles on the core's fallback chrome with the page in it, never the
- * theme's frame; the chat and Deliverables layouts and the 404 show the core's own versions, and the
+ * On a phone: MainLayout draws the core's fallback chrome with the page in it from its first render,
+ * and the theme's frame never renders, not even for one render (a client navigation: a fresh mount
+ * under a host that already has the theme loaded; useIsTabletOrBelow reads the width on the first
+ * render, W-L1); the chat and Deliverables layouts and the 404 show the core's own versions, and the
  * theme's page or 404 never mounts, not even for a render; widening the window past the theme's width
  * brings the frame in. On a laptop the same trees are the theme's (the frame around the page, which
  * mounts once; the theme's chat in it; its 404). On the server, where no width is known, they render
@@ -166,6 +168,12 @@ describe("below the theme's width (a phone), the core's chrome and pages", () =>
     expect(screen.queryByTestId(ids.frame)).toBeNull()
   })
 
+  it("MainLayout never renders the theme's frame on a client navigation, not even for one render; the page mounts once", () => {
+    render(underTheme(mainLayout()))
+    expect(rendered.names, "the theme's frame rendered on a phone").not.toContain(FRAME_SLOT)
+    expect(rendered.pageMounts, 'the page mounted in one chrome and again in another').toBe(1)
+  })
+
   it("the chat layout shows the core's chat; the theme's chat never mounts", () => {
     Object.assign(nav, { pathname: CHAT_HREF, search: 'chatId=c1' })
     render(underTheme(chatRoute()))
@@ -208,6 +216,11 @@ describe("at the theme's width (a laptop), the same trees are the theme's", () =
     expect(screen.getByTestId(ids.frame)).toContainElement(screen.getByText(STUDIO_PAGE))
     expect(screen.queryByTestId('fallback-header')).toBeNull()
     expect(rendered.pageMounts).toBe(1)
+  })
+
+  it("MainLayout renders the theme's frame (the spy the phone case relies on sees it here)", () => {
+    render(underTheme(mainLayout()))
+    expect(rendered.names).toContain(FRAME_SLOT)
   })
 
   it("the chat layout draws the theme's chat inside its frame, not the core's", () => {
