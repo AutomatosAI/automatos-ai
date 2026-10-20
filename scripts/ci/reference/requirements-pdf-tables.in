@@ -1,0 +1,26 @@
+# The PDF table extractor the API ran before PRD-262 US-023, for
+# scripts/ci/reference/pdf_tables.py only: camelot-py 0.11.0, the opencv it imports,
+# and every package they pull in, each pinned at the version the API's W2 lock
+# (orchestrator/requirements.lock before US-023) installed with them. Never bumped:
+# the reference is what production ran, and it runs only in a throwaway CI venv on
+# fixtures this repository draws. Compile with the command at the top of
+# requirements-pdf-tables.lock.
+camelot-py==0.11.0
+opencv-python-headless==5.0.0.93
+cffi==2.1.1
+chardet==7.7.0
+charset-normalizer==3.5.2
+click==8.5.0
+cryptography==50.0.2
+et-xmlfile==2.0.0
+numpy==2.4.6
+openpyxl==3.1.5
+pandas==2.3.3
+pdfminer.six==20260107
+pycparser==3.11
+pypdf==6.21.1
+python-dateutil==2.9.0.post0
+pytz==2026.5
+six==1.17.0
+tabulate==0.10.0
+tzdata==2026.5

@@ -183,7 +183,7 @@ def test_the_build_pulls_it_from_the_jobs_registry_and_reads_dockers_size_before
     assert 'docker pull --quiet "${IMAGE}@${DIGEST}"' in run
     assert "size=$(docker image inspect -f '{{.Size}}' \"${IMAGE}@${DIGEST}\")" in run
     assert 'scripts/ci/image_report.py disk --report "$REPORT" --bytes "$size"' in run
-    order = [_index(name) for name in ("Size, layers and update delta", "On-disk size", "Size budget",
+    order = [_index(name) for name in ("Size, layers and update delta", "On-disk size", "Size and update budgets",
                                        "Upload the layer report")]
     assert order == sorted(order), "measured after the report is written, before it is judged and kept"
 

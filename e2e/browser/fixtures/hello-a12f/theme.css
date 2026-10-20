@@ -1,0 +1,11 @@
+/* PRD-261 A-12f: the knowledge-data hello theme's one stylesheet. Every rule sits under
+   html.hello-a12f, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12f .hello-a12f-frame {
+  min-height: 100vh;
+  background: var(--hello-a12f-ground);
+  color: var(--hello-a12f-ink);
+}
+
+html.hello-a12f .hello-a12f-page {
+  padding: 24px;
+}

@@ -14,11 +14,11 @@ seeded evidence is an agent with a week of tickets and a judged week in which ev
 GMAIL call failed on its expired connection, so PRESCRIBE has a "reconnect GMAIL" to
 suggest (PRD-263 US-019 replaced the tool-routing graph's lifetime failure count, and
 the tool removal it suggested, with that week's production tool logs). The platform
-executor records every
-action and runs the real platform_submit_report handler (ReportService) with the
-workspace file and the knowledge ingest stubbed; every notification the run
-dispatches and every channel notice it sends is recorded, and so is any call to the
-decision engine's report triage or to an LLM client.
+executor records any action; a run calls none, because the audit report goes straight
+to the real ReportService (US-048), run with the workspace file and the knowledge
+ingest stubbed. Every notification the run dispatches and every channel notice it
+sends is recorded, and so is any call to the decision engine's report triage or to an
+LLM client.
 """
 from __future__ import annotations
 
@@ -28,42 +28,18 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from tests import helpers_harness_diagnose as hdx
 from tests import helpers_harness_runs as hr
 
-# agent_reports has no SQLAlchemy model, so a database built from the models has no
-# such table; the audit report's insert needs these columns (ReportService.create_report).
-AGENT_REPORTS = """
-    CREATE TABLE agent_reports (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        workspace_id UUID NOT NULL, agent_id INTEGER, agent_name TEXT, heartbeat_result_id INTEGER,
-        report_type TEXT, title TEXT, summary TEXT, status TEXT,
-        file_path TEXT, file_type TEXT, file_size_bytes INTEGER,
-        metrics JSONB, attachments JSONB, recommendations JSONB, action_items JSONB, linked_task_ids JSONB,
-        requires_approval BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
-    )
-"""
 FAILING_APP = "GMAIL"
 EXPIRED = "Connected account ca_scout_gmail has expired; reconnect it to continue"
 
 
 @pytest.fixture(scope="module")
 def engine():  # conftest's new_session binds to it
-    from core.database.database import get_database_url
-
-    eng = create_engine(get_database_url(), pool_pre_ping=True)
-    with eng.begin() as conn:
-        built = not conn.execute(text("SELECT to_regclass('agent_reports') IS NOT NULL")).scalar()
-        if built:
-            conn.execute(text(AGENT_REPORTS))
-    yield eng
-    if built:
-        with eng.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS agent_reports"))
-    eng.dispose()
+    yield from hr.agent_reports_engine()
 
 
 @pytest.fixture
@@ -84,59 +60,11 @@ def record(monkeypatch, tmp_path):
     """What a run does: its platform actions, notifications, channel notices,
     report-triage calls and LLM calls."""
     seen = SimpleNamespace(actions=[], notifications=[], channel_notices=[], triage=[], llm_calls=[])
-    hr.fake_platform(monkeypatch, tmp_path)
-    monkeypatch.setattr("modules.tools.discovery.platform_executor.PlatformActionExecutor", _recording_executor(seen))
-    _stub_report_side_effects(monkeypatch, seen)
+    hr.pin_run(monkeypatch, tmp_path)
+    hr.record_platform_actions(monkeypatch, seen.actions)
+    hr.stub_report_side_effects(monkeypatch, seen)
     _record_llm(monkeypatch, seen)
     return seen
-
-
-def _recording_executor(seen):
-    class _Executor:
-        def __init__(self, db=None, workspace_id=None, **_kwargs):
-            self.db, self.workspace_id = db, workspace_id
-
-        async def execute(self, action, params, caller_context=None):
-            seen.actions.append(action)
-            if action == hr.REPORT:
-                from modules.tools.discovery.handlers_reports import submit_report
-
-                return await submit_report(self.db, self.workspace_id, params)
-            return {"success": True, "data": {"id": 1}}
-
-    return _Executor
-
-
-def _stub_report_side_effects(monkeypatch, seen):
-    import core.services.notification_service as notification_service
-    import services.knowledge_flywheel as flywheel
-    import services.report_service as report_service
-    from config import config
-    from core.services.notification_dispatcher import NotificationDispatcher
-
-    class _Files:
-        def __init__(self, workspace_id):
-            pass
-
-        async def write_file(self, path, content):
-            return {"success": True}
-
-    async def _no_ingest(*_args, **_kwargs):
-        return None
-
-    async def _dispatch(self, event_type, title, *_args, **_kwargs):
-        seen.notifications.append(event_type)
-        return {}
-
-    async def _channel_notice(workspace_id, message, channel=None):
-        seen.channel_notices.append(message)
-        return True
-
-    monkeypatch.setattr(report_service, "WorkspaceClient", _Files)
-    monkeypatch.setattr(flywheel, "ingest_agent_output", _no_ingest)
-    monkeypatch.setattr(NotificationDispatcher, "dispatch", _dispatch)
-    monkeypatch.setattr(notification_service, "send_workspace_notification", _channel_notice)
-    monkeypatch.setattr(config, "DOCUMENT_THUMBNAILS_ENABLED", False)
 
 
 def _record_llm(monkeypatch, seen):
@@ -209,17 +137,21 @@ async def _swept(monkeypatch) -> list:
 
 
 def _assert_reported_only(record, new_session, ws: UUID, tickets_before: int) -> dict:
-    """One completed run whose suggestion is a report line; nothing filed, granted or sent but the report."""
-    from services.harness_service import RECONNECT_RISK, SUGGESTIONS_HEADING
+    """One completed run whose suggestion is a report line; nothing filed, granted or sent but the report,
+    which goes straight to ReportService (no platform action, US-048)."""
+    from services.harness_changes import KINDS
+    from services.harness_diagnose import RECONNECT_APP
+    from services.harness_service import SUGGESTIONS_HEADING
 
     (run,) = hr.runs(new_session, ws)
     assert (run["status"], run["report_status"]) == ("completed", "ok")
     (rx,) = run["prescriptions"]
     assert (rx["prescription_id"], rx["change_type"], rx["risk_score"], rx["proposed_value"]) == (
-        f"rx-{run['id']}-001", "reconnect_app", RECONNECT_RISK, {"app_name": FAILING_APP})
+        f"rx-{run['id']}-001", RECONNECT_APP, KINDS[RECONNECT_APP].risk, {"app_name": FAILING_APP})
+    assert rx["apply_kind"] is False                   # a report kind: a line of the report, never a card
     assert SUGGESTIONS_HEADING in run["report_md"] and rx["prescription_id"] in run["report_md"]
     assert f"reconnect {FAILING_APP}" in run["report_md"]
-    assert record.actions == [hr.REPORT]               # no platform write but the audit report
+    assert record.actions == []                        # no platform action, not even for the audit report
     assert record.notifications == ["report_submitted"]
     assert record.channel_notices == []                # no escalation
     assert _board_tasks(new_session, ws) == tickets_before and _grants(new_session, ws) == 0

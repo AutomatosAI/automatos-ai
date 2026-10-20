@@ -12,14 +12,14 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { LookProvider, useLook } from '@/components/looks/look-provider'
+import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { MOTION_ATTRIBUTE, MOTION_VAR, lookDocumentVars } from '@/lib/looks/document'
 import { SAVED_SUB, asNewLook } from '@/lib/looks/editor'
 import { DAYLIGHT, DEFAULT_LOOK, OBSIDIAN } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
-import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
@@ -29,11 +29,13 @@ import { blockedStorage, clearRoot, lookNamesLeft, myLook, rootVars } from '@/li
 /** next-themes' storage key in components/providers.tsx: the user's own tone. */
 const TONE_STORAGE_KEY = 'automatos-theme'
 const PROVIDERS = path.resolve(__dirname, '../../providers.tsx')
+/** PRD-261 A-13c: the host component that mounts this provider (components/providers.tsx mounts it). */
+const LOOK_RUNTIME = path.resolve(__dirname, '../../theme-host/theme-look-runtime.tsx')
 /** No AccountLookScope above the provider here, so the looks are kept under the default scope (F5). */
 const KEYS = lookKeys(DEFAULT_LOOK_SCOPE)
 
 /** The appearance providers exactly as components/providers.tsx nests them. */
-function Appearance({ style, storage, children }: { style: UiStyle; storage?: StorageSource; children: ReactNode }) {
+function Appearance({ style, storage, enabled, children }: { style: UiStyle; storage?: StorageSource; enabled?: boolean; children: ReactNode }) {
   const [playTone, setPlayTone] = useState<PlayTone | undefined>(undefined)
   return (
     <ThemeProvider
@@ -46,7 +48,7 @@ function Appearance({ style, storage, children }: { style: UiStyle; storage?: St
       forcedTheme={playTone}
     >
       <UiStyleProvider initialStyle={style}>
-        <LookProvider storage={storage} onToneChange={setPlayTone}>{children}</LookProvider>
+        <LookProvider storage={storage} onToneChange={setPlayTone} enabled={enabled}>{children}</LookProvider>
       </UiStyleProvider>
     </ThemeProvider>
   )
@@ -178,6 +180,19 @@ describe('LookProvider under Play', () => {
   })
 })
 
+describe('LookProvider switched off (PRD-261 A-13c: the theme has no look runtime)', () => {
+  it('paints nothing and forces no tone, even under Play', async () => {
+    window.localStorage.setItem(TONE_STORAGE_KEY, 'dark')
+    storeActive(DAYLIGHT)
+    render(<Appearance style={BUILTIN_PLAY_STYLE} enabled={false}><Probe /></Appearance>)
+    expect(await screen.findByText('Active: Daylight')).toBeInTheDocument()
+    expect(screen.getByText('Tone: not forced')).toBeInTheDocument()
+    await waitFor(() => expect(htmlTone()).toBe('dark'))
+    expect(lookNamesLeft()).toEqual([])
+    expect(toneCookie()).toBeUndefined()
+  })
+})
+
 describe('LookProvider — the tone follows the ground (K4)', () => {
   it('a Paper look forces light, Obsidian forces dark, and back on Studio the stored tone returns', async () => {
     window.localStorage.setItem(TONE_STORAGE_KEY, 'dark')
@@ -210,27 +225,37 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     await waitFor(() => expect(htmlTone()).toBe('light'))
   })
 
-  it('is wired the same way in components/providers.tsx', () => {
+  // PRD-261 A-13c moved the mount: components/providers.tsx mounts ThemeLookRuntime with the same tone
+  // setter, and ThemeLookRuntime mounts this provider (at every width), switched on while the theme declares looks.
+  // These two pin the same wiring through both files; theme-look-runtime.test.tsx renders it.
+  it('is wired the same way in components/providers.tsx, through the host look runtime', () => {
     const src = readFileSync(PROVIDERS, 'utf8')
+    const runtime = readFileSync(LOOK_RUNTIME, 'utf8')
     // At every width, as this file's harness renders it: the look paints below 1024 px too (K4, P260-SEAM).
     expect(src).toContain('forcedTheme={playTone}')
-    expect(src).toContain('<LookProvider onToneChange={setPlayTone}>')
+    expect(src).toContain('<ThemeLookRuntime onToneChange={setPlayTone}>')
     expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
+    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {
-    const src = readFileSync(PROVIDERS, 'utf8')
-    const order = [
+    const inOrder = (src: string, order: readonly string[]) => {
+      const at = order.map((tag) => src.indexOf(tag))
+      expect(at.every((index) => index >= 0), order.join(' ')).toBe(true)
+      expect([...at].sort((a, b) => a - b)).toEqual(at)
+    }
+    inOrder(readFileSync(PROVIDERS, 'utf8'), [
       '<WorkspaceProvider>',
-      '<AccountLookScope>',
-      '<LookProvider onToneChange={setPlayTone}>',
+      '<ThemeLookRuntime onToneChange={setPlayTone}>',
+      '</ThemeLookRuntime>',
+      '</WorkspaceProvider>',
+    ])
+    inOrder(readFileSync(LOOK_RUNTIME, 'utf8'), [
+      '<AccountLookScope enabled={mounted}>',
+      '<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>',
       '</LookProvider>',
       '</AccountLookScope>',
-      '</WorkspaceProvider>',
-    ]
-    const at = order.map((tag) => src.indexOf(tag))
-    expect(at.every((index) => index >= 0)).toBe(true)
-    expect([...at].sort((a, b) => a - b)).toEqual(at)
+    ])
   })
 })
 

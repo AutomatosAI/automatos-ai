@@ -1,6 +1,6 @@
 'use client'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
+import { AutoMascot } from '../mascot/auto-mascot'
 
 import styles from './looks.module.css'
 

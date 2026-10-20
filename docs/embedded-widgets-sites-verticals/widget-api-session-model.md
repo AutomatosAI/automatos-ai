@@ -53,7 +53,7 @@ The widget chat API provides a streaming Server-Sent Events (SSE) endpoint for e
 
 The primary endpoint is `POST /api/widgets/chat` [orchestrator/api/widgets/chat.py:127-128](), which accepts a `WidgetChatRequest` [orchestrator/api/widgets/chat.py:57-68]() containing the user's message, an optional `conversation_id`, `agent_id`, `model_id`, `page_context`, and `trigger_reason`. The `page_context` and `trigger_reason` fields are crucial for proactive engagement scenarios, such as contextual openers on product pages or cart-idle nudges [orchestrator/api/widgets/chat.py:62-67]().
 
-The API streams back various SSE event types: `message` (text delta), `tool-start`, `tool-end`, `tool-data`, and `done` [orchestrator/api/widgets/chat.py:141-145]().
+The API streams back various SSE event types. The first is always `ai_disclosure`, the AI notice `{"type": "ai_disclosure", "badge", "line", "locale", "conversation_id"}`, sent before any token (PRD-264 EUAI-02a, EU AI Act Art. 50(1)). Then `message` (text delta, always `"ai_generated": true`), `tool-start`, `tool-end`, `open-callback-form`, `error` and `done` [orchestrator/api/widgets/chat_stream.py]().
 
 ### Data Flow for Widget Chat
 
@@ -202,6 +202,8 @@ Sources:
 The widget configuration is resolved by `resolve_widget_config` [orchestrator/api/widgets/session.py:155](), which fetches settings relevant to the widget from the workspace's default `Site` [orchestrator/services/sites.py:40-56](). This ensures that widget behavior (e.g., proactive engagement settings) is dynamically configured based on the workspace's setup.
 
 The `build_widget_config` function [orchestrator/api/widgets/config.py:1-10]() projects only public-facing keys from `workspace.settings` to prevent sensitive information from leaking to the browser [orchestrator/tests/test_widget_proactive_prd007.py:86-99]().
+
+The public config always carries `ai_disclosure` (PRD-264 EUAI-02a), even when the workspace has no widget settings. The server builds it in `orchestrator/modules/policy/ai_disclosure.py`: a fixed badge from one per-locale table (`en` → `AI`; `pt`, `es`, `fr`, `it` → `IA`; `de` → `KI`; any other locale → `AI`), and the first-turn line "You are chatting with an AI assistant for {site}.", where `{site}` is the Site's name, falling back to the workspace's. The locale is `site.settings.locale`. A deployer may store their own line as `settings.ai_disclosure.line`; the Sites settings save (and the `platform_update_widget_config` tool) refuses it with HTTP 422 unless it contains the locale's term as a whole word, and the badge itself can't be set.
 
 Sources:
 - [orchestrator/api/widgets/session.py:153-155]()

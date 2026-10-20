@@ -1,0 +1,13 @@
+{
+  "schema": "automatos-theme-spike/v1",
+  "id": "automatos-e2e/hello-a12a",
+  "name": "Hello host cards (A-12a)",
+  "version": "0.0.1",
+  "engines": { "sdk": "^1.0.0" },
+  "base": "studio",
+  "htmlClass": "hello-a12a",
+  "entry": "entry.js",
+  "styleSheet": "theme.css",
+  "preset": "presets/default.look.json",
+  "slots": ["frame@1"]
+}

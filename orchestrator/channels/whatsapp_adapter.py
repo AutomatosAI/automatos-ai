@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _WA_MAX_LEN = 4096
 _GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
+_HTTP_ERROR_STATUS = 400
 
 
 class WhatsAppAdapter(BaseChannelAdapter):
@@ -87,8 +88,12 @@ class WhatsAppAdapter(BaseChannelAdapter):
 
     async def send_message(
         self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Send a text message to a WhatsApp user by phone number."""
+    ) -> bool:
+        """Send a text message to a WhatsApp user by phone number.
+
+        Returns False when the Graph API refuses any chunk, so the base reply
+        point doesn't record an AI notice the person never got (PRD-264 EUAI-03).
+        """
         import httpx
 
         url = f"{_GRAPH_API_BASE}/{self._phone_number_id}/messages"
@@ -98,6 +103,7 @@ class WhatsAppAdapter(BaseChannelAdapter):
         }
 
         chunks = self._chunk_text(text, _WA_MAX_LEN)
+        delivered = True
         async with httpx.AsyncClient(timeout=30) as client:
             for chunk in chunks:
                 payload = {
@@ -107,8 +113,10 @@ class WhatsAppAdapter(BaseChannelAdapter):
                     "text": {"body": chunk},
                 }
                 resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code >= 400:
+                if resp.status_code >= _HTTP_ERROR_STATUS:
                     logger.error("WhatsApp send failed: %s", resp.text)
+                    delivered = False
+        return delivered
 
     # ------------------------------------------------------------------
     # Envelope conversion
@@ -146,7 +154,13 @@ class WhatsAppAdapter(BaseChannelAdapter):
     # ------------------------------------------------------------------
 
     async def handle_webhook(self, payload: Dict[str, Any]) -> Optional[str]:
-        """Process an incoming WhatsApp webhook payload."""
+        """Process an incoming WhatsApp webhook payload.
+
+        Each message goes through ``handle_message``, which replies to the
+        sender through the base class's one reply point, so the reply carries
+        the AI notice (PRD-264 EUAI-03). The sender's number is the reply
+        target and the person the notice is tracked for.
+        """
         try:
             entry = payload.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
@@ -159,10 +173,10 @@ class WhatsAppAdapter(BaseChannelAdapter):
 
             for i, msg in enumerate(messages):
                 contact = contacts[i] if i < len(contacts) else {}
-                msg["_contact"] = contact
-                response = await self.handle_message(msg)
-                if response:
-                    await self.send_message(msg.get("from", ""), response)
+                sender = msg.get("from", "")
+                await self.handle_message({
+                    **msg, "_contact": contact, "reply_channel_id": sender, "user_id": sender,
+                })
                 self._increment_message_count()
 
             return "ok"

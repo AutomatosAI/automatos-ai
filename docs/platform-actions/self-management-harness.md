@@ -52,7 +52,7 @@ Sources:
 1. **Dormancy.** A workspace with fewer than three active agents is `dormant_insufficient_agents`, and the run stops there.
 2. **Collect.** One workspace-bound read of the tables that record each agent's work (Tasks done and failed, model usage, heartbeat outcomes, Mission steps, production tool calls) returns raw weekly counts for the judged week and the weeks before it. An agent with no rows has n = 0, never 0% ([orchestrator/services/harness_metrics.py]()).
 3. **Diagnose.** Each agent and metric is judged against a clean reference: the `HARNESS_REF_DAYS` before the judged week, less weeks already flagged and weeks after a change. Every threshold is a `HARNESS_*` setting in `config.py`, with Benjamini-Hochberg across the run.
-4. **Suggest.** Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". Suggestions are report lines only.
+4. **Suggest.** One registry defines every kind of change HARNESS may suggest ([orchestrator/services/harness_changes.py]()). Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". An enabled heartbeat that rarely met its objective in the judged week (at least `HARNESS_HEARTBEAT_MIN_RUNS` runs with an outcome, and even allowing for chance fewer than `HARNESS_HEARTBEAT_MAX_MET` of them met it; runs that reported nothing to judge are not counted) gets a suggestion to double its interval, up to 1,440 minutes. A suggestion that is invalid, or that names the workspace's Auto, is dropped and its reason kept on the run's row. Suggestions are report lines only.
 5. **Report.** Auto files the audit report ("HARNESS Weekly Org Review — Run #n") in Reports, with the coverage, each agent's verdicts and the suggested changes under "Suggested changes (reported only; nothing was changed)".
 
 ### The four verdicts
@@ -117,10 +117,6 @@ Sources:
 - [orchestrator/modules/tools/discovery/handlers_harness.py]()
 - [orchestrator/core/services/auto_cadence.py]()
 - [orchestrator/api/harness.py]()
-
-## The /approve routes (removed in PRD-263 phase 3)
-
-`POST /api/harness/prescriptions/{rx_id}/approve` and `/reject` remain until PRD-263 phase 3 removes them (US-047). The weekly run files no Task, so they act only on a [HARNESS] Task filed before PRD-263, and only while `HARNESS_SELF_MANAGEMENT_ENABLED` is on (default off).
 
 ## Idle-in-Transaction Prevention
 

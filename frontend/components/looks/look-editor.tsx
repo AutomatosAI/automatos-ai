@@ -1,7 +1,7 @@
 'use client'
 
-import type { LookValues } from '@/lib/looks/editor'
-import type { Look } from '@/lib/looks/types'
+import type { LookValues } from '../../lib/looks/editor'
+import type { Look } from '../../lib/looks/types'
 
 import styles from './editor.module.css'
 import { AccentOptions, GlowSlider, GroundOptions, LightOptions, ShellOptions, TypeOptions } from './look-options'

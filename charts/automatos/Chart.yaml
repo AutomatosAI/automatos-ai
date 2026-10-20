@@ -4,8 +4,11 @@ description: >-
   Automatos AI on Kubernetes: the API, its database migration Job, the web app and
   the workspace worker. PostgreSQL (with pgvector) and Redis are external.
 type: application
-version: 0.4.0
-# The image tag used when a component's image.tag is empty.
+version: 0.5.0
+# The image tag used when a component's image.tag and image.digest are empty. edge
+# moves with main, so the chart pulls it with imagePullPolicy Always. To pin a build,
+# stamp it at package time (helm package charts/automatos --app-version sha-<7>), or
+# set the components' image.tag or image.digest (values.yaml).
 appVersion: "edge"
 home: https://github.com/AutomatosAI/automatos-ai
 sources:

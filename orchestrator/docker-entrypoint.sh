@@ -2,34 +2,46 @@
 # =============================================================================
 # Automatos AI - Backend Entrypoint Script
 # =============================================================================
-# The single wait-migrate-seed lifecycle (PRD-176 F051):
+# The only owner of migrations (PRD-176 F051, PRD-262 US-029). The boot steps:
 #   1. Waits for PostgreSQL to be ready
 #   2. Verifies the database connection
-#   3. Initializes an empty database, then runs Alembic migrations (fail closed)
-#   4. Loads seed data (idempotent)
+#   3. Initializes an empty database, then runs Alembic migrations (fail closed),
+#      unless alembic_version already holds the code's head(s) (PRD-262 US-030)
+#   4. Loads seed data (idempotent): before a server, the boot loader, and only
+#      when seed_fingerprint.loader changed (PRD-262 US-031); `migrate`, the full one
 #   5. Ensures the local-edition workspace and operator exist (local only)
+# Steps 1-3 are the migration step; 4-5 run only where a flag below asks.
 #
 # The image carries this script as its ENTRYPOINT. How it runs:
 #
 #   docker-entrypoint.sh migrate
-#       Runs the lifecycle, then exits 0 without starting the app. Idempotent.
-#       A failed seed fails it (exit 1). This is what a Kubernetes migration
-#       Job runs before app pods start.
+#       Runs all five steps, then exits 0 without starting the app. Idempotent.
+#       It always runs the full seed loader, whatever the fingerprint. A failed
+#       seed fails it (exit 1). This is what a Kubernetes migration Job runs
+#       before app pods start. It ignores AUTOMATOS_SKIP_MIGRATIONS.
 #
-#   docker-entrypoint.sh <command...>   (the image CMD, or any other command)
-#       AUTOMATOS_MIGRATE_ON_BOOT=true: runs the lifecycle, then the command;
-#       a failed seed only warns. Set by envs/api.defaults, so `docker compose
-#       up` does this.
-#       Unset or anything else: runs the command directly, touching nothing.
-#       This is the image default, so Railway (which builds this image and
-#       relies on the CMD's own `alembic upgrade heads`) boots unchanged.
-#       Note the image CMD itself runs `alembic upgrade heads` before uvicorn.
-#       AUTOMATOS_LIVENESS_WATCHDOG=true (envs/api.defaults): the command runs
-#       as this script's child, and a server that stops serving is stopped so
-#       the container exits and restarts (the liveness watchdog, below).
-#       Where a migration Job owns the schema (Kubernetes), override the app
-#       container's command to start uvicorn directly, so several replicas
-#       don't race Alembic with each other or with the Job.
+#   docker-entrypoint.sh <server command>   (the image CMD: uvicorn)
+#       The boot steps run first, then the server. Each flag has one meaning:
+#       AUTOMATOS_SKIP_MIGRATIONS=true: none of the boot steps run. The Helm
+#         api pods set it, because the migration Job owns the schema there.
+#       AUTOMATOS_MIGRATE_ON_BOOT=true: the migration step, then the boot seed
+#         loader (when its fingerprint changed) and the local workspace and
+#         operator; a failed seed only warns. Set by envs/api.defaults, so
+#         `docker compose up` does this.
+#       Neither set (Railway): the migration step only. The seed loader never
+#         runs there: its package seed is a full refresh, which would
+#         overwrite the packages curated in production.
+#       The image CMD runs no alembic of its own: it execs uvicorn.
+#
+#   docker-entrypoint.sh <any other command>   (a one-off)
+#       Runs the command as given, with no boot step: `docker compose run
+#       backend <cmd>` and CI's `docker run <image> python -c …` neither
+#       migrate nor seed. A server command starts uvicorn: directly, as
+#       `python -m uvicorn`, or through `sh -c` (after an optional `exec`).
+#
+#   AUTOMATOS_LIVENESS_WATCHDOG=true (envs/api.defaults): the command runs as
+#   this script's child, and a server that stops serving is stopped so the
+#   container exits and restarts (the liveness watchdog, below).
 #
 # Database connection: POSTGRES_HOST/PORT/USER/PASSWORD/DB when POSTGRES_HOST
 # is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets).
@@ -143,14 +155,38 @@ init_fresh_if_empty() {
 }
 
 # =============================================================================
+# Function: Is the schema already at head? (PRD-262 US-030)
+# =============================================================================
+# alembic's own start imports the app's models (alembic/env.py) before it finds
+# nothing to do: 7-9 s on a warm local boot, 35 s under load (F228).
+# scripts/alembic_heads.py reads the code's head(s) from the migration scripts
+# with no import (an AST parse) and compares them with alembic_version. True
+# only when they are the same set. Everything else goes to alembic as before:
+# an empty or unreadable alembic_version, a database behind the code, one ahead
+# of it (a rollback, which alembic refuses loudly), or a migration script the
+# AST reader cannot read.
+ALEMBIC_HEADS_SCRIPT=scripts/alembic_heads.py
+
+schema_at_head() {
+    local stamped
+    stamped=$(db_psql -tAc "SELECT version_num FROM alembic_version" 2>/dev/null) || return 1
+    printf '%s\n' "$stamped" | python "$ALEMBIC_HEADS_SCRIPT"
+}
+
+# =============================================================================
 # Function: Run Database Migrations (PRD-176 F051)
 # =============================================================================
 # Brings the schema to head via Alembic — the single owner of the schema
-# lifecycle. Fails CLOSED: unlike seed loading, a failed migration exits
-# non-zero so the app never starts against a half-built schema. Alembic is
-# idempotent — on an already-migrated database `upgrade heads` is a no-op.
+# lifecycle, run at most once per boot (the image CMD runs no alembic), and not
+# at all when the schema is already at head (above). Fails CLOSED: unlike seed
+# loading, a failed migration exits non-zero so the app never starts against a
+# half-built schema.
 run_migrations() {
     echo ""
+    if schema_at_head; then
+        echo "⏭️  schema at head — alembic skipped"
+        return 0
+    fi
     echo "🗄️  Running database migrations (alembic upgrade heads)..."
 
     if alembic upgrade heads; then
@@ -162,17 +198,50 @@ run_migrations() {
 }
 
 # =============================================================================
+# Function: Have the boot seeds' inputs changed? (PRD-262 US-031)
+# =============================================================================
+# The boot loader is a Python process that imports most of the seeders, about 38 s on a
+# warm local boot, to redo seeds that could not have changed. It stores the fingerprint
+# of its inputs (the seed files, the modules they import, the config values they read)
+# in system_settings once every section ran clean. core/seeds/fingerprint.py computes
+# the current one, importing config but not the app, and compares it with the stored
+# one on stdin. True only when they match, and it then logs `seeds unchanged
+# (fingerprint …) — skipped`. Anything else runs the loader as before: no stored value,
+# an unreadable one, or a check that fails.
+SEED_FINGERPRINT_CHECK=core.seeds.fingerprint
+SEED_FINGERPRINT_SQL="SELECT value FROM system_settings WHERE category = 'boot' AND key = 'seed_fingerprint.loader' ORDER BY id DESC LIMIT 1"
+
+boot_seeds_unchanged() {
+    local stored
+    stored=$(db_psql -tAc "$SEED_FINGERPRINT_SQL" 2>/dev/null) || return 1
+    printf '%s\n' "$stored" | python -m "$SEED_FINGERPRINT_CHECK" loader
+}
+
+# =============================================================================
 # Function: Load Seed Data
 # =============================================================================
+# Before a server (LIFECYCLE_MODE=boot), the boot loader (--boot) runs only when its
+# fingerprint changed. It leaves out what the lifespan's boot leader seeds on every
+# boot that runs its own stage: credential types, system settings, the create-only
+# packages and the local first-run content (core/seeds/leader_stage.py). `migrate`
+# runs the full loader every time, the full package refresh included.
 load_seed_data() {
     echo ""
     echo "📦 Checking seed data..."
 
-    # No shell-level "already loaded" gate: every section of the loader is
-    # idempotent on its own (credential types insert-if-missing, models/skills/
-    # personas/categories upsert, marketplace catalog checks by name/slug).
-    # The old credential_types>0 early-return silently skipped every LATER
-    # section (marketplace catalog, packages) on any pre-seeded database.
+    local loader_args=()
+    if [ "${LIFECYCLE_MODE:-boot}" = "boot" ]; then
+        if boot_seeds_unchanged; then
+            return 0
+        fi
+        loader_args=(--boot)
+    fi
+
+    # No shell-level "already loaded" gate on the rows: every section of the
+    # loader is idempotent on its own (credential types insert-if-missing,
+    # models/skills/personas/categories upsert, marketplace catalog checks by
+    # name/slug). The old credential_types>0 early-return silently skipped every
+    # LATER section (marketplace catalog, packages) on any pre-seeded database.
     echo "📥 Loading seed data (idempotent)..."
 
     # Run seed data loader AS A MODULE — script-mode sets sys.path[0] to the
@@ -180,7 +249,7 @@ load_seed_data() {
     # resolve. (The old `database/` path also never existed in the image, so
     # this step silently failed on every boot since PRD-176; fail-open hid
     # both bugs. PRD-209 local-run finding.)
-    if python -m core.database.load_seed_data; then
+    if python -m core.database.load_seed_data "${loader_args[@]}"; then
         echo "✅ Seed data loaded successfully!"
     elif [ "${LIFECYCLE_MODE:-boot}" = "migrate" ]; then
         # A migration Job that reports success on an unseeded database hides
@@ -235,9 +304,10 @@ SQL
 }
 
 # =============================================================================
-# The lifecycle, in order: wait -> check -> init -> migrate -> seed -> local
+# The boot steps, in order: wait -> check -> init -> migrate -> seed -> local
 # =============================================================================
-run_lifecycle() {
+# The migration step: wait -> check -> init -> migrate.
+run_migration_step() {
     echo "========================================="
     echo "Automatos AI Backend Starting..."
     echo "========================================="
@@ -247,8 +317,76 @@ run_lifecycle() {
     check_database
     init_fresh_if_empty
     run_migrations
+}
+
+# The full lifecycle: the migration step, then the seeds and the local edition's
+# workspace and operator (`migrate`, and AUTOMATOS_MIGRATE_ON_BOOT=true). The local
+# workspace and operator are ensured whether or not the seed loader ran.
+run_lifecycle() {
+    run_migration_step
     load_seed_data
     ensure_local_workspace
+}
+
+# =============================================================================
+# A server command, or a one-off (PRD-262 US-029)
+# =============================================================================
+# The boot steps run before the server only. A server command starts uvicorn:
+# `uvicorn …`, `python -m uvicorn …`, or `sh -c '[exec] uvicorn …'` (the image
+# CMD is shell form, which Docker runs as `/bin/sh -c '<CMD>'`).
+SERVER_PROGRAM=uvicorn
+
+# Prints the program a command starts. Call it in a subshell, $(…): it splits a
+# `sh -c` script into words, with globbing off, to read its first one.
+command_program() {
+    case "${1##*/}" in
+        sh|bash|dash)
+            if [ "${2:-}" = "-c" ]; then
+                set -f
+                # shellcheck disable=SC2086  # the script's words, split on purpose
+                set -- ${3:-}
+                if [ "${1:-}" = "exec" ]; then
+                    shift
+                fi
+                command_program "$@"
+                return
+            fi
+            ;;
+        python|python3|python3.*)
+            if [ "${2:-}" = "-m" ]; then
+                printf '%s' "${3:-}"
+                return
+            fi
+            ;;
+    esac
+    printf '%s' "${1##*/}"
+}
+
+is_server_command() {
+    [ "$(command_program "$@")" = "$SERVER_PROGRAM" ]
+}
+
+# Before a server command. AUTOMATOS_SKIP_MIGRATIONS=true: nothing.
+# AUTOMATOS_MIGRATE_ON_BOOT=true: the full lifecycle. Neither: the migration
+# step only, so Railway migrates and never runs the seed loader.
+run_boot_steps() {
+    if [ "${AUTOMATOS_SKIP_MIGRATIONS:-}" = "true" ]; then
+        return 0
+    fi
+    if [ "${AUTOMATOS_MIGRATE_ON_BOOT:-}" = "true" ]; then
+        run_lifecycle
+    else
+        run_migration_step
+    fi
+    echo ""
+    echo "========================================="
+    echo "🚀 Starting Backend Application"
+    echo "========================================="
+    echo "   API: http://0.0.0.0:${PORT:-8000}"
+    echo "   Docs: http://0.0.0.0:${PORT:-8000}/docs"
+    echo "   Environment: ${ENVIRONMENT:-}"
+    echo "========================================="
+    echo ""
 }
 
 # =============================================================================
@@ -349,6 +487,11 @@ run_supervised() {
 # =============================================================================
 # Main Execution
 # =============================================================================
+# PRD-262 US-037: no command but `migrate` starts on a CHANGE_ME placeholder secret.
+# The guard, next to this script, names the placeholders, prints how to rotate them
+# and exits 1; an unset or empty value passes.
+[ "${1:-}" = "migrate" ] || "$(dirname "$0")/docker-secrets-guard.sh"
+
 if [ "${1:-}" = "migrate" ]; then
     LIFECYCLE_MODE=migrate
     run_lifecycle
@@ -357,22 +500,13 @@ if [ "${1:-}" = "migrate" ]; then
     exit 0
 fi
 
-if [ "${AUTOMATOS_MIGRATE_ON_BOOT:-}" = "true" ]; then
-    run_lifecycle
-    echo ""
-    echo "========================================="
-    echo "🚀 Starting Backend Application"
-    echo "========================================="
-    echo "   API: http://0.0.0.0:8000"
-    echo "   Docs: http://0.0.0.0:8000/docs"
-    echo "   Environment: $ENVIRONMENT"
-    echo "========================================="
-    echo ""
+if is_server_command "$@"; then
+    run_boot_steps
 fi
 
 if [ "${AUTOMATOS_LIVENESS_WATCHDOG:-}" = "true" ]; then
     run_supervised "$@"
 fi
 
-# Execute the CMD from Dockerfile (uvicorn command)
+# Execute the command: the image CMD (uvicorn), or a one-off
 exec "$@"

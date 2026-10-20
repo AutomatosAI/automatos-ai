@@ -36,7 +36,7 @@ if str(_ORCH) not in sys.path:
 import tests.test_prd251w1_render_lifecycle as render_harness  # noqa: E402
 from core.models.core import DocumentTemplate  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
-from modules.socials import media_store, media_urls, render, service, slot_photos  # noqa: E402
+from modules.socials import ai_media, media_store, media_urls, render, service, slot_photos  # noqa: E402
 from tests.test_prd251w1_render_lifecycle import WS, Deliverables, FakeStore, _create, _post, _template  # noqa: E402
 
 env = render_harness.env
@@ -192,9 +192,9 @@ def test_the_persons_own_picture_is_not_ai_made():
                                          name="upload-1.png", content_type="image/png")
     library = {**upload, "toolkit": service.OWN_FILE_LIBRARY}
     ai = {**upload, "toolkit": "fal_ai"}
-    assert service.footage_generated({"photo": upload}) is False
-    assert service.footage_generated({"photo": library}) is False
-    assert service.footage_generated({"photo": upload, "hook": ai}) is True
+    assert ai_media.footage_generated({"photo": upload}) is False
+    assert ai_media.footage_generated({"photo": library}) is False
+    assert ai_media.footage_generated({"photo": upload, "hook": ai}) is True
 
 
 def test_only_an_image_slot_is_a_photo_spot():

@@ -47,7 +47,7 @@ DEPENDABOT = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
 WORKFLOW = yaml.safe_load((ROOT / ".github" / "workflows" / "media-render.yml").read_text())
 
 PINNED_PYTHON = re.compile(r"python:3\.12-slim@sha256:[0-9a-f]{64}")
-STAGES = ("node", "uv", "assets-fetch", "assets", "kokoro", "js", "chrome", "py", "music", "runtime", "test", "production")
+STAGES = ("node", "node-stripped", "uv", "assets-fetch", "assets", "kokoro", "js", "chrome", "py", "music", "runtime", "test", "production")
 COPIED_IN = {
     "kokoro": "/opt/kokoro",
     "js": "/opt/media-render/js",
@@ -210,7 +210,7 @@ def test_the_lock_records_each_sharp_builds_libc_so_npm_ci_skips_the_musl_ones()
 
 def test_the_js_stage_installs_exactly_the_lock():
     js = _stage("js")
-    assert "COPY js/package.json js/package-lock.json ./" in js
+    assert "COPY js/package.json js/package-lock.json js/prune.txt ./" in js
     assert "RUN npm ci --omit=dev --no-fund --no-audit" in js
     assert "npm install" not in _instructions(DOCKERFILE)
     assert "cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js" in js

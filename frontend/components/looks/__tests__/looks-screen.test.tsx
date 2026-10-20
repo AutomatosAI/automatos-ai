@@ -32,19 +32,20 @@ vi.mock('@/components/layout/main-layout', () => ({
 }))
 // PRD-261 A-04b: builtin Play's look editor comes through its lazy slot (lookEditor@1); here as it
 // is once its chunk has loaded, so the screen renders in the same pass (and on the server).
-vi.mock('@/components/looks/looks-screen-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-looks-lazy', async () => ({
   LooksScreen: (await import('@/components/looks/looks-screen')).LooksScreen,
 }))
 
 import { exportStarted } from '@/components/looks/look-manager'
 import { PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
 import { LooksScreen } from '@/components/looks/looks-screen'
+import { GLOW_SCALE, rgba } from '@/lib/look-kit/css'
 import { clearRoot, lookNamesLeft, myLook } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catalogue'
-import { GLOW_SCALE, rgba, safeGlow } from '@/lib/looks/css'
 import { SAVED_SUB } from '@/lib/looks/editor'
+import { safeGlow } from '@/lib/looks/engine'
 import { AURORA, DAYLIGHT, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
-import { LOOK_SCOPE_KEY } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY } from '@/lib/theme-host/builtin/play-look-storage'
 import { LOOK_FILE_MAX_BYTES, LOOK_FILE_TYPE, TOO_BIG, lookJson } from '@/lib/looks/transfer'
 import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'

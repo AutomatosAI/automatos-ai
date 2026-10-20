@@ -92,6 +92,15 @@ def test_boot_problems_collects_every_failure(tmp_path):
         raise AssertionError("assert_boot_environment did not raise")
 
 
+def test_a_missing_exiftool_stops_the_container(tmp_path):
+    """PRD-264 EUAI-06a: the AI mark's writer is part of a working image."""
+    assert boot.marker_problems(load_settings({})) == []
+    missing = load_settings({"MEDIA_RENDER_EXIFTOOL_BIN": str(tmp_path / "no-exiftool")})
+    problems = boot.marker_problems(missing)
+    assert len(problems) == 1 and "exiftool" in problems[0]
+    assert problems[0] in boot.boot_problems(missing, {})
+
+
 def test_a_broken_music_manifest_stops_the_container(tmp_path):
     music = tmp_path / "music"
     music.mkdir()

@@ -11,15 +11,17 @@
  * off, failed or in safe mode: the core draws), 'pending' (the width is not known yet, the server
  * and hydration; or the host is still loading an installed theme, whose registrations are not
  * known yet), 'narrow' (below the theme's minWidth: the core draws inside the fallback chrome) and
- * 'theme'. An installed theme with no registry entry yet (A-02c adds them) draws where MainLayout
- * draws its frame (theme-frame-slot.tsx): from the desktop width up (INSTALLED_FRAME_MIN_WIDTH_PX);
- * below it, as builtin Play below its minWidth, the core's pages, slots and notes ('narrow'), so a
- * phone never gets a theme page cut for a frame it does not have.
+ * 'theme'. An installed theme draws where MainLayout draws its frame (theme-frame-slot.tsx): from
+ * the desktop width up (INSTALLED_FRAME_MIN_WIDTH_PX); below it, as builtin Play below its minWidth,
+ * the core's pages, slots and notes ('narrow'), so a phone never gets a theme page cut for a frame
+ * it does not have. Its registry entry (W-A6b, lib/theme-host/installed-entry.ts) names that width
+ * as its minWidth; a theme with no entry (its boot carried none) reads the same width here.
  */
 import { useCallback, useMemo, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 
 import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import { builtinRegistrationsOf } from '@/lib/theme-host/builtin/slots'
+import { INSTALLED_FRAME_MIN_WIDTH_PX } from '@/lib/theme-host/installed-entry'
 import type { SlotId, ThemeEntry, ThemeLayout } from '@/lib/theme-host/registry-types'
 import type { ThemeRegistrations } from '@/lib/theme-host/types'
 
@@ -46,12 +48,7 @@ const INSTALLED_LOADING: ActiveThemeSlots = { layout: 'pending', registrations: 
 const NO_SLOTS: ReadonlyMap<SlotId, unknown> = new Map()
 const NO_PAGES: ReadonlyMap<string, unknown> = new Map()
 
-/**
- * Where MainLayout draws an installed theme's frame: its desktop shell, from useIsTabletOrBelow's
- * 1024 px (hooks/use-mobile.ts). The host loads only Studio-based installs for now (Phase A): the
- * loader refuses any other base (lib/theme-host/manifest.ts, STUDIO_BASE_ONLY).
- */
-export const INSTALLED_FRAME_MIN_WIDTH_PX = 1024
+export { INSTALLED_FRAME_MIN_WIDTH_PX }
 const BELOW_INSTALLED_FRAME_QUERY = `(max-width: ${INSTALLED_FRAME_MIN_WIDTH_PX - 1}px)`
 
 function hasMatchMedia(): boolean {

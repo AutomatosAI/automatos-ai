@@ -25,16 +25,23 @@ describe('quick-prompt chip data', () => {
 })
 
 describe('widget chip wiring (source contract)', () => {
+  // The empty thread lives in widget-empty-state.tsx (PRD-264: split out of
+  // chat-widget.tsx for the code-shape limit); chat-widget.tsx still picks the
+  // prompts and hands it sendMessage.
+  const read = (file: string) => readFileSync(path.resolve(__dirname, '..', file), 'utf8')
+
   it('renders manifest quick prompts as chips wired to sendMessage', () => {
-    const src = readFileSync(
-      path.resolve(__dirname, '..', 'chat-widget.tsx'),
-      'utf8',
-    )
-    expect(src).toContain('getPageEntry')
-    expect(src).toContain('useSystemRole')
-    expect(src).toContain('quickPrompts')
-    expect(src).toContain('sendMessage(qp.text)')
+    const widget = read('chat-widget.tsx')
+    expect(widget).toContain('getPageEntry')
+    expect(widget).toContain('useSystemRole')
+    expect(widget).toContain('quickPrompts={quickPrompts}')
+    expect(widget).toContain('onSend={sendMessage}')
     // admin filter present
-    expect(src).toContain('!qp.admin_only || isAdmin')
+    expect(widget).toContain('!qp.admin_only || isAdmin')
+
+    const emptyState = read('widget-empty-state.tsx')
+    expect(emptyState).toContain('quickPrompts.map')
+    expect(emptyState).toContain('send(qp.text)')
+    expect(emptyState).toContain('if (!isLoading) onSend(text)')
   })
 })

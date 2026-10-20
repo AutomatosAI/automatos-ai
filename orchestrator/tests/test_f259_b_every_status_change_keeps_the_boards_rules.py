@@ -18,8 +18,10 @@ And on the board itself, night 7b:
 - F272: Run now on #0177, the Analyst's, answered "nothing can start it yet:
   Waiting for a CLI host" and ran 8 s later: the line was night 7's, from when a CLI
   agent held it, and nothing ever took it off.
-- The HARNESS approves a change by marking its board task done, then writing the
-  actuation's result onto it: under the rule above, that move would be refused.
+
+The HARNESS's case (its /approve marked a card Done after writing the change's result
+on it) went with that path: PRD-263 US-047 deleted ``api/harness_commands.py``, and no
+HARNESS code moves a card any more.
 """
 from __future__ import annotations
 
@@ -267,20 +269,3 @@ def test_run_now_never_says_a_host_must_start_an_api_agents_ticket(shop):
 
     assert "nothing can start it" not in reply["message"] and reply["message"].endswith("started.")
     assert _row(shop, task).blocked_reason is None
-
-
-# --- the HARNESS: the result first, then Done --------------------------------------------------
-
-
-def test_the_harness_files_its_task_done_with_its_result(shop):
-    from api import harness_commands as hc
-    from modules.tools.discovery.handlers_board_tasks import update_board_task_status as tool  # the status move
-
-    task = f1094._ticket(shop, title="[HARNESS] heartbeat for Analyst", tags=["harness", "rx:rx-7"])
-    executor = NS(execute=lambda name, params: tool(shop.db, shop.ws, params))
-
-    asyncio.run(hc._done_with_its_result(shop.db, executor, shop.ws, task.id, {"success": True, "data": {"ok": 1}},
-                                         NS(reason="the owner approved it")))
-
-    row = _row(shop, task)
-    assert row.status == "done" and row.result and row.completed_at                # F048: done, result != null
