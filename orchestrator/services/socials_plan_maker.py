@@ -400,6 +400,8 @@ def _held(db: Any, plan: SocialCampaign, post: SocialPost, exc: BaseException) -
     if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
         return TAKEN
+    # Not api.socials._commit_unchanged: its notice fires on entering needs_approval and its job sync is
+    # for SCHEDULED posts, and a held post goes DRAFT→FAILED or stays a draft. Route it there if that changes.
     db.commit()
     plan_notify.notify_post_waiting(plan.workspace_id, post.id, post.title, (), why)
     return FAILED if kind == plan_refusals.REFUSED else WAITS
