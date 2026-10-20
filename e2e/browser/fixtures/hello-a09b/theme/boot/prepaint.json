@@ -1,0 +1,60 @@
+{
+  "knobs": {
+    "ground": {
+      "paper": {
+        "--a09b-bg": "#f4efe6",
+        "--a09b-ink": "#1a1814"
+      },
+      "ink": {
+        "--a09b-bg": "#101418",
+        "--a09b-ink": "#f2f2f2"
+      },
+      "dusk": {
+        "--a09b-bg": "#1b2340",
+        "--a09b-ink": "#e8ecf8"
+      }
+    },
+    "accent": {
+      "blue": {
+        "--a09b-accent": "#2f6fed"
+      },
+      "green": {
+        "--a09b-accent": "#1f9d55"
+      }
+    }
+  },
+  "pairs": [],
+  "numeric": [
+    {
+      "var": "--a09b-glow",
+      "knob": "glow",
+      "min": 0,
+      "max": 40,
+      "integer": true,
+      "scale": 100,
+      "capTable": null,
+      "caps": null,
+      "color": {
+        "knob": "accent",
+        "rgb": {
+          "blue": "47,111,237",
+          "green": "31,157,85"
+        }
+      },
+      "template": "rgba-alpha"
+    }
+  ],
+  "defaults": {
+    "ground": "paper",
+    "accent": "blue",
+    "glow": 12
+  },
+  "tone": {
+    "knob": "ground",
+    "values": {
+      "paper": "light",
+      "ink": "dark",
+      "dusk": "dark"
+    }
+  }
+}

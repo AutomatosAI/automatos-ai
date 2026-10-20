@@ -13,6 +13,11 @@
  * `UNITS`, `#` colours of 3, 4, 6 or 8 hex digits, identifiers, and calls to `FUNCTIONS` nested at
  * most `MAX_FUNCTION_DEPTH` deep (a `var()` naming a custom property first), separated by spaces,
  * commas or `/`. Nothing here throws on bad input.
+ *
+ * PRD-261 A-19c (host 1.1.0): a prepaint table may carry a tone rule, `tone: {knob, values}`. The
+ * knob must be a choice knob of the table (a key of `knobs`, not a `numeric` rule's knob) and
+ * `values` must give every one of its choices 'light' or 'dark', nothing else; otherwise
+ * BAD_TONE_RULE, with the sentence the server gives (the corpus pins a few).
  */
 import { UNSAFE_TEXT } from '@/lib/text/plain-line'
 
@@ -112,7 +117,7 @@ export function errorIf(refused: boolean, code: string, path: string, message: s
 // The CSS-value grammar
 // ---------------------------------------------------------------------------
 
-export const PREPAINT_ERROR_CODES: readonly string[] = ['BAD_PREPAINT', 'BAD_CSS_VALUE']
+export const PREPAINT_ERROR_CODES: readonly string[] = ['BAD_PREPAINT', 'BAD_CSS_VALUE', 'BAD_TONE_RULE']
 export const PREPAINT_PATH = 'boot/prepaint.json'
 const CSS_VALUE_MAX = 200
 const MAX_FUNCTION_DEPTH = 4
@@ -242,6 +247,11 @@ function childrenOf(node: unknown, path: string): PrepaintNode[] {
  */
 export function prepaintErrors(document: unknown): ThemeError[] {
   if (!isRecord(document)) return [themeError('BAD_PREPAINT', PREPAINT_PATH, `${PREPAINT_PATH} must be a JSON object.`)]
+  return [...walkErrors(document), ...toneRuleErrors(document)].slice(0, PREPAINT_MAX_ERRORS)
+}
+
+/** Every refused name or value the walk of the table finds, at most PREPAINT_MAX_ERRORS. */
+function walkErrors(document: JsonRecord): ThemeError[] {
   const errors: ThemeError[] = []
   const stack: PrepaintNode[] = childrenOf(document, '').reverse()
   while (stack.length > 0 && errors.length < PREPAINT_MAX_ERRORS) {
@@ -251,4 +261,81 @@ export function prepaintErrors(document: unknown): ThemeError[] {
     stack.push(...childrenOf(value, path).reverse())
   }
   return errors
+}
+
+// ---------------------------------------------------------------------------
+// The tone rule (A-19c, host 1.1.0): css_value.py tone_rule_errors, sentence for sentence
+// ---------------------------------------------------------------------------
+
+/** contract.py TONE_RULE_KEY, TONE_RULE_FIELDS and TONE_RULE_TONES (validator-parity.test.ts holds them equal). */
+export const TONE_RULE_KEY = 'tone'
+export const TONE_RULE_FIELDS: readonly string[] = ['knob', 'values']
+export const TONE_RULE_TONES: readonly string[] = ['light', 'dark']
+const TONE_RULE_CODE = 'BAD_TONE_RULE'
+const TONE_RULE_PATH = `${PREPAINT_PATH}#${TONE_RULE_KEY}`
+const TONES_TEXT = '"light" or "dark"'
+
+/** One refusal of the tone rule, at `tone<field>`. */
+function toneError(field: string, problem: string): ThemeError {
+  const where = `${TONE_RULE_PATH}${field}`
+  return themeError(TONE_RULE_CODE, where, `${where}: ${problem}.`)
+}
+
+/** `{knob: its choices}` for every knob of the table whose options are an object. */
+function choiceKnobs(document: JsonRecord): Readonly<Record<string, readonly string[]>> {
+  const knobs = own(document, 'knobs')
+  if (!isRecord(knobs)) return {}
+  const entries = Object.keys(knobs).flatMap((name): [string, string[]][] => {
+    const options = knobs[name]
+    return isRecord(options) ? [[name, Object.keys(options)]] : []
+  })
+  return Object.fromEntries(entries)
+}
+
+/** The knob of every numeric rule of the table. */
+function numberKnobs(document: JsonRecord): ReadonlySet<string> {
+  const rules = own(document, 'numeric')
+  if (!Array.isArray(rules)) return new Set()
+  const knobs = rules.map((rule) => (isRecord(rule) ? own(rule, 'knob') : undefined))
+  return new Set(knobs.filter((knob): knob is string => typeof knob === 'string'))
+}
+
+/** Why `knob` can't carry the tone rule, or null. */
+function toneKnobProblem(document: JsonRecord, knob: string): string | null {
+  if (numberKnobs(document).has(knob)) return `"${echo(knob)}" is a number knob; the tone rule needs a choice knob`
+  if (!hasOwn(choiceKnobs(document), knob)) return `"${echo(knob)}" is not a knob of this table`
+  return null
+}
+
+/** Every choice of `knob` mapped to light or dark, and nothing else mapped. */
+function toneValueErrors(knob: string, choices: readonly string[], values: JsonRecord): ThemeError[] {
+  const unmapped = choices
+    .filter((choice) => !hasOwn(values, choice))
+    .map((choice) => toneError(`.values.${echo(choice)}`, `the choice "${echo(choice)}" of "${echo(knob)}" has no tone; map it to ${TONES_TEXT}`))
+  const wrong = Object.keys(values).flatMap((choice): ThemeError[] => {
+    if (!choices.includes(choice)) return [toneError(`.values.${echo(choice)}`, `"${echo(choice)}" is not a choice of "${echo(knob)}"`)]
+    return isOneOf(TONE_RULE_TONES, values[choice]) ? [] : [toneError(`.values.${echo(choice)}`, `a tone is ${TONES_TEXT}`)]
+  })
+  return [...unmapped, ...wrong]
+}
+
+/**
+ * Why the table's tone rule (`tone`) is refused; empty when it has none or it is valid. The rule
+ * names one choice knob of the table and gives each of its choices a tone, so a look runtime can
+ * set the tone from the look alone (A-19d2) and every look has one.
+ */
+export function toneRuleErrors(document: unknown): ThemeError[] {
+  if (!isRecord(document) || !hasOwn(document, TONE_RULE_KEY)) return []
+  const rule = document[TONE_RULE_KEY]
+  if (!isRecord(rule)) return [toneError('', 'the tone rule must be an object with "knob" and "values"')]
+  const errors = Object.keys(rule)
+    .filter((key) => !TONE_RULE_FIELDS.includes(key))
+    .map((key) => toneError(`.${echo(key)}`, `"${echo(key)}" isn't part of the tone rule. Remove it`))
+  const knob = own(rule, 'knob')
+  const values = own(rule, 'values')
+  if (typeof knob !== 'string') return [...errors, toneError('.knob', '"knob" must name a choice knob of this table')]
+  const problem = toneKnobProblem(document, knob)
+  if (problem !== null) return [...errors, toneError('.knob', problem)]
+  if (!isRecord(values)) return [...errors, toneError('.values', `"values" must map every choice of "${echo(knob)}" to ${TONES_TEXT}`)]
+  return [...errors, ...toneValueErrors(knob, choiceKnobs(document)[knob], values)]
 }

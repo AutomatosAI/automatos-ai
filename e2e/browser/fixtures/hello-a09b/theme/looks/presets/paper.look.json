@@ -1,0 +1,10 @@
+{
+  "schema": "automatos-e2e-a09b-look/v1",
+  "interface": "hello-a09b",
+  "id": "paper",
+  "name": "Paper",
+  "sub": "Light, with a blue accent",
+  "ground": "paper",
+  "accent": "blue",
+  "glow": 12
+}

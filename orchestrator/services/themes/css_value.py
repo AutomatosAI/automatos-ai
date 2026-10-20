@@ -14,16 +14,25 @@ end a declaration. A value passes when it is, end to end, a run of:
 Every other character, ``url(``, ``expression(`` and any unknown function are refused. The
 TypeScript twin (``frontend/lib/theme-host/css-value.ts``, A-06b) is held to the same corpus
 (``tests/fixtures/themes/cases.json``, ``cssValues``).
+
+PRD-261 A-19c (host 1.1.0): a table may carry a tone rule, ``tone: {knob, values}``
+(``contract.TONE_RULE_KEY``). The knob must be a choice knob of the table (a key of ``knobs``,
+not a ``numeric`` rule's knob) and ``values`` must give every one of its choices ``light`` or
+``dark``, nothing else; otherwise the table is refused with ``BAD_TONE_RULE`` and a plain
+sentence, the same one the TypeScript twin gives (the corpus pins a few).
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
-from services.themes.contract import ThemeError, echo, is_finite_number, theme_error
+from services.themes.contract import (
+    TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, ThemeError, echo, is_finite_number, theme_error,
+)
 
-PREPAINT_ERROR_CODES = ("BAD_PREPAINT", "BAD_CSS_VALUE")
+PREPAINT_ERROR_CODES = ("BAD_PREPAINT", "BAD_CSS_VALUE", "BAD_TONE_RULE")
+TONE_RULE_CODE = "BAD_TONE_RULE"
 CSS_VALUE_MAX = 200
 MAX_FUNCTION_DEPTH = 4
 CUSTOM_PROPERTY_PATTERN = re.compile(r"--[a-z][a-z0-9-]{1,63}")
@@ -31,6 +40,7 @@ CUSTOM_PROPERTY_PATTERN = re.compile(r"--[a-z][a-z0-9-]{1,63}")
 PREPAINT_KEY_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 PREPAINT_MAX_ERRORS = 20
 PREPAINT_PATH = "boot/prepaint.json"
+TONE_RULE_PATH = f"{PREPAINT_PATH}#{TONE_RULE_KEY}"
 
 FUNCTIONS = frozenset({
     "rgb", "rgba", "hsl", "hsla", "var", "color-mix", "linear-gradient", "radial-gradient",
@@ -142,15 +152,8 @@ def _children(node: Any, path: str) -> List[Tuple[str, Optional[str], Any]]:
     return []
 
 
-def prepaint_errors(document: Any) -> List[ThemeError]:
-    """Every refused name or value in a prepaint table, at most ``PREPAINT_MAX_ERRORS``.
-
-    The table's layout is the boot contract's (A-03); this check holds only what reaches
-    ``style.setProperty``: each ``--name`` key is a custom property and its value passes the
-    grammar, and every other text in the table passes it too.
-    """
-    if not isinstance(document, dict):
-        return [theme_error("BAD_PREPAINT", PREPAINT_PATH, f"{PREPAINT_PATH} must be a JSON object.")]
+def _walk_errors(document: Any) -> List[ThemeError]:
+    """Every refused name or value the walk of the table finds, at most ``PREPAINT_MAX_ERRORS``."""
     errors: List[ThemeError] = []
     stack = list(reversed(_children(document, "")))
     while stack and len(errors) < PREPAINT_MAX_ERRORS:
@@ -160,3 +163,92 @@ def prepaint_errors(document: Any) -> List[ThemeError]:
             errors.append(error)
         stack.extend(reversed(_children(value, path)))
     return errors
+
+
+def prepaint_errors(document: Any) -> List[ThemeError]:
+    """Every refused name or value in a prepaint table, and its tone rule's, at most ``PREPAINT_MAX_ERRORS``.
+
+    The table's layout is the boot contract's (A-03); this check holds only what reaches
+    ``style.setProperty``: each ``--name`` key is a custom property and its value passes the
+    grammar, and every other text in the table passes it too. A tone rule (A-19c) is checked
+    against the table's own knobs (``tone_rule_errors``).
+    """
+    if not isinstance(document, dict):
+        return [theme_error("BAD_PREPAINT", PREPAINT_PATH, f"{PREPAINT_PATH} must be a JSON object.")]
+    return (_walk_errors(document) + tone_rule_errors(document))[:PREPAINT_MAX_ERRORS]
+
+
+# ---------------------------------------------------------------------------
+# The tone rule (A-19c, host 1.1.0)
+# ---------------------------------------------------------------------------
+
+
+def _tone_error(field: str, problem: str) -> ThemeError:
+    """One refusal of the tone rule, at ``tone<field>``."""
+    where = f"{TONE_RULE_PATH}{field}"
+    return theme_error(TONE_RULE_CODE, where, f"{where}: {problem}.")
+
+
+def _choice_knobs(document: Dict[str, Any]) -> Dict[str, List[str]]:
+    """``{knob: its choices}`` for every knob of the table whose options are an object."""
+    knobs = document.get("knobs")
+    if not isinstance(knobs, dict):
+        return {}
+    return {name: list(options) for name, options in knobs.items() if isinstance(options, dict)}
+
+
+def _number_knobs(document: Dict[str, Any]) -> FrozenSet[str]:
+    """The knob of every numeric rule of the table."""
+    rules = document.get("numeric")
+    if not isinstance(rules, list):
+        return frozenset()
+    return frozenset(rule["knob"] for rule in rules if isinstance(rule, dict) and isinstance(rule.get("knob"), str))
+
+
+def _tone_knob_problem(document: Dict[str, Any], knob: Any) -> Optional[str]:
+    """Why ``knob`` can't carry the tone rule, or None."""
+    if not isinstance(knob, str):
+        return '"knob" must name a choice knob of this table'
+    if knob in _number_knobs(document):
+        return f'"{echo(knob)}" is a number knob; the tone rule needs a choice knob'
+    if knob not in _choice_knobs(document):
+        return f'"{echo(knob)}" is not a knob of this table'
+    return None
+
+
+def _tone_value_errors(knob: str, choices: List[str], values: Dict[str, Any]) -> List[ThemeError]:
+    """Every choice of ``knob`` mapped to light or dark, and nothing else mapped."""
+    errors = [
+        _tone_error(f".values.{echo(choice)}", f'the choice "{echo(choice)}" of "{echo(knob)}" has no tone; map it to "light" or "dark"')
+        for choice in choices if choice not in values
+    ]
+    for choice, tone in values.items():
+        if choice not in choices:
+            errors.append(_tone_error(f".values.{echo(choice)}", f'"{echo(choice)}" is not a choice of "{echo(knob)}"'))
+        elif tone not in TONE_RULE_TONES:
+            errors.append(_tone_error(f".values.{echo(choice)}", 'a tone is "light" or "dark"'))
+    return errors
+
+
+def tone_rule_errors(document: Any) -> List[ThemeError]:
+    """Why the table's tone rule (``tone``) is refused; empty when it has none or it is valid.
+
+    The rule names one choice knob of the table and gives each of its choices a tone, so a look
+    runtime can set the tone from the look alone (A-19d2) and every look has one.
+    """
+    if not isinstance(document, dict) or TONE_RULE_KEY not in document:
+        return []
+    rule = document[TONE_RULE_KEY]
+    if not isinstance(rule, dict):
+        return [_tone_error("", 'the tone rule must be an object with "knob" and "values"')]
+    errors = [
+        _tone_error(f".{echo(key)}", f'"{echo(key)}" isn\'t part of the tone rule. Remove it')
+        for key in rule if key not in TONE_RULE_FIELDS
+    ]
+    knob, values = rule.get("knob"), rule.get("values")
+    problem = _tone_knob_problem(document, knob)
+    if problem is not None:
+        return errors + [_tone_error(".knob", problem)]
+    if not isinstance(values, dict):
+        return errors + [_tone_error(".values", f'"values" must map every choice of "{echo(knob)}" to "light" or "dark"')]
+    return errors + _tone_value_errors(knob, _choice_knobs(document)[knob], values)
