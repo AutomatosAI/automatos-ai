@@ -481,4 +481,4 @@ def test_images_runs_the_site_packages_check_as_the_worker_user():
 def test_every_toolchain_check_names_its_breakdown_row():
     rows = [title.split(":")[0] for title, _ in toolchain.CHECKS]
     assert rows == ["row 47", "row 16", "row 12", "row 31", "rows 12 and 31",
-                    "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]
+                    "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47", "F452"]

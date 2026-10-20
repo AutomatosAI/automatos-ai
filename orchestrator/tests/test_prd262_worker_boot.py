@@ -345,6 +345,11 @@ def test_the_parity_job_runs_the_ownership_block_in_throwaway_containers():
         '"$(grep -c "cannot take that uid (www-data\'s in the worker\'s image)" <<< "$out")" 1',
         'chown 1002:0 "$rootgroup"',
         '"$(grep -o \'started as uid [0-9]* gid [0-9]*\' <<< "$out")" "started as uid 1002 gid 1001"',
+        # F452, in the Railway build: no setuid or setgid file, and the drop sets no_new_privs.
+        'setid=$(find / -xdev -perm /6000 -type f)',
+        'check "files with a setuid or setgid bit" "${setid:-none}" none',
+        'no_new_privs=$(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)',
+        'check "the worker\'s no_new_privs" "$(grep -o \'no_new_privs=[0-9]*\' <<< "$out")" "no_new_privs=1"',
     ):
         assert needle in script, needle
     assert script.rstrip().endswith('exit "$bad"\nSH')

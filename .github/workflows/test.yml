@@ -1492,7 +1492,9 @@ jobs:
       # leaves root's. Then deliverables folders uid 1000 cannot write (US-040): one an
       # image account owns, www-data, which the worker never becomes; one the host's uid
       # 1001 owns, whose uid and gid the worker takes; one in root's group, whose uid
-      # alone it takes (the security review's fixes).
+      # alone it takes (the security review's fixes). F452: the stand-in also prints the
+      # NoNewPrivs that setpriv --no-new-privs set, and no file in the image keeps a setuid
+      # or setgid bit (the Dockerfile strips them; images.yml checks the GHCR build too).
       - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
         run: |
           docker volume create parity-wk-readonly > /dev/null
@@ -1504,9 +1506,11 @@ jobs:
           check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
           owner() { stat -c %U "$1"; }  # no -L: a symlink's own owner
           mkdir -p /tmp/stand-in
-          printf '#!/bin/sh\necho "worker started as uid $(id -u) gid $(id -g) with HOME=$HOME"\n' > /tmp/stand-in/python
+          printf '#!/bin/sh\necho "worker started as uid $(id -u) gid $(id -g) with HOME=$HOME no_new_privs=$(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)"\n' > /tmp/stand-in/python
           chmod 755 /tmp/stand-in/python
           boot() { WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
+          setid=$(find / -xdev -perm /6000 -type f)
+          check "files with a setuid or setgid bit" "${setid:-none}" none
 
           vol=/tmp/volume
           mkdir -p "$vol/ws/projects" "$vol/ws/sub"
@@ -1528,6 +1532,7 @@ jobs:
           check "the ctime of a file the worker already owned" "$(stat -c %z "$vol/ws/owned")" "$owned_ctime"
           check "the worker" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the worker's HOME" "$(grep -o 'HOME=[^ ]*' <<< "$out")" "HOME=/home/worker"
+          check "the worker's no_new_privs" "$(grep -o 'no_new_privs=[0-9]*' <<< "$out")" "no_new_privs=1"
           check "failed-chown lines on a writable volume" "$(grep -c 'could not be re-owned' <<< "$out")" 0
 
           out=$(boot /srv/readonly); code=$?

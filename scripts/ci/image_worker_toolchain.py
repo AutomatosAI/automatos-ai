@@ -7,7 +7,7 @@ worker image it built, on each architecture, with the image's own Python, as roo
 
     docker run --rm -i --entrypoint python IMAGE - < scripts/ci/image_worker_toolchain.py
 
-Each check names the row of the 19 Oct size breakdown it proves:
+Each check names the row of the 19 Oct size breakdown it proves, or the finding:
 
 - row 47, what the npm install left: npm's docs and man pages, Node's compile cache in
   /tmp and npm's cache and logs in /root/.npm are not in the image (checked first,
@@ -29,7 +29,10 @@ Each check names the row of the 19 Oct size breakdown it proves:
   runs JavaScript and crypto, a native N-API addon compiled here resolves Node's
   symbols and loads, and npm, npx, corepack and pnpm run on it;
 - row 47, gosu: it is gone, and setpriv (util-linux, in the base image) drops root to
-  the worker the way entrypoint.sh does, with the worker's uid, gid, groups and HOME.
+  the worker the way entrypoint.sh does, with the worker's uid, gid, groups and HOME,
+  and with no_new_privs set (F452);
+- F452: no file on the image's filesystem keeps a setuid or setgid bit, so nothing the
+  worker or an agent runs can gain privileges through one.
 
 Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
@@ -142,9 +145,14 @@ NODE_LEFTOVERS = (
 
 # Row 47: entrypoint.sh's drop to the worker, minus the exec of the worker itself.
 # --no-new-privs (F452, #1309): no setuid binary takes the worker back to root.
-SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", "--no-new-privs", "env",
-                "HOME=/home/worker")
-WORKER_IDENTITY = "1000 1000 /home/worker 1"   # uid, gid, HOME, NoNewPrivs
+SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", "--no-new-privs",
+                "env", "HOME=/home/worker")
+WORKER_IDENTITY = "1000 1000 /home/worker"
+# F452: the NoNewPrivs field of /proc/<pid>/status in the dropped process.
+NO_NEW_PRIVS = "1"
+DROPPED_PROBE = 'echo "$(id -u) $(id -g) $HOME $(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)"'
+# F452: every file with a setuid or setgid bit; -xdev keeps find off /proc, /sys and /dev.
+SETID_FILES = ("find", "/", "-xdev", "-perm", "/6000", "-type", "f")
 
 Check = Callable[[Path], List[str]]
 
@@ -335,15 +343,23 @@ def check_node_tools(work: Path) -> List[str]:
 
 
 def check_setpriv(work: Path) -> List[str]:
-    """No gosu, and setpriv drops root to the worker with the worker's HOME and
-    no_new_privs set (F452), so no setuid binary can raise it again."""
+    """No gosu, and setpriv drops root to the worker with the worker's HOME and no_new_privs."""
     failures = [] if shutil.which("gosu") is None else ["gosu is still in the image"]
     # From /: the worker may not enter root's temporary directory.
-    identity = must([*SETPRIV_DROP, "sh", "-c",
-                     'echo "$(id -u) $(id -g) $HOME $(grep NoNewPrivs /proc/self/status | cut -f2)"'], Path("/"))
-    if identity != WORKER_IDENTITY:
-        failures.append(f"setpriv ran the command as {identity!r}, not {WORKER_IDENTITY!r}")
+    identity = must([*SETPRIV_DROP, "sh", "-c", DROPPED_PROBE], Path("/"))
+    expected = f"{WORKER_IDENTITY} {NO_NEW_PRIVS}"
+    if identity != expected:
+        failures.append(f"setpriv ran the command as {identity!r} (uid gid HOME NoNewPrivs), not {expected!r}")
     return failures
+
+
+# --------------------------------------------------------------------------- F452
+
+
+def check_no_setid_files(work: Path) -> List[str]:
+    """No file keeps a setuid or setgid bit: the Dockerfile's last install step strips them."""
+    found = must(SETID_FILES, Path("/")).splitlines()
+    return [f"{path} keeps its setuid or setgid bit" for path in found if path.strip()]
 
 
 # --------------------------------------------------------------------------- the run
@@ -361,7 +377,8 @@ CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 21: node is stripped, keeps .dynsym and runs", check_node_binary),
     ("row 21: a native N-API addon loads into the stripped node", check_node_addon),
     ("row 21: npm, npx, corepack and pnpm run on the stripped node", check_node_tools),
-    ("row 47: no gosu, and setpriv drops to the worker", check_setpriv),
+    ("row 47: no gosu, and setpriv drops to the worker with no_new_privs", check_setpriv),
+    ("F452: no file keeps a setuid or setgid bit", check_no_setid_files),
 )
 
 

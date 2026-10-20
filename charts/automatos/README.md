@@ -18,7 +18,7 @@ Redis are **external**: use managed services, or anything you run yourself.
 | Job `<release>-migrate` | A `pre-install`/`pre-upgrade` hook running `docker-entrypoint.sh migrate`: waits for PostgreSQL, builds an empty database, migrates, seeds, and (local edition) creates the workspace and operator. A failure fails the install or upgrade. |
 | Deployment `<release>-api` | The API. It starts uvicorn with `AUTOMATOS_SKIP_MIGRATIONS=true`, so the image's entrypoint runs no boot step and the Job is the only thing that changes the schema. **One replica**: the in-process schedulers use a per-container lock, so a second replica would run every scheduled job twice. |
 | Deployment `<release>-frontend` | The web app. |
-| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. |
+| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. Its entrypoint starts as root with four capabilities (`CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID`) to fix the volume's ownership, then drops to uid 1000 with no capabilities; nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). |
 | PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. |
 | Ingress (off by default) | `/api` and `/ws` to the API, everything else to the web app. Useful once the web app reads its API address at runtime. |
 

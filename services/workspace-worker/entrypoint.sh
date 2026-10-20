@@ -86,5 +86,8 @@ fi
 # --no-new-privs (F452, #1309): the worker runs agent code, and the image carries
 # setuid-root binaries (su, mount, passwd, newgrp…). With no_new_privs set, exec never
 # grants a privilege again, so none of them can take the worker back to root. It holds
-# on Railway and in compose, where the chart's securityContext doesn't apply.
+# on Railway and in compose, where the chart's securityContext doesn't apply. The image
+# also carries no setuid or setgid file any more (the Dockerfile's last install step
+# strips them), and nothing after the drop needs one: no sudo or su, and git over ssh
+# authenticates with the workspace's key, which needs no ssh-keysign.
 exec setpriv --reuid=worker --regid=worker --init-groups --no-new-privs env HOME=/home/worker python -m main "$@"
