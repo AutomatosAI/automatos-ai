@@ -17,7 +17,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 const APP = path.resolve(__dirname, '..')
-const COMPONENTS = path.resolve(__dirname, '..', '..', 'components')
+const FRONTEND = path.resolve(__dirname, '..', '..')
 
 /** Routes that legitimately carry no page header. */
 const NO_HEADER: Record<string, string> = {
@@ -39,15 +39,18 @@ const NO_HEADER: Record<string, string> = {
   '/sign-up/[[...rest]]': 'Clerk flow',
 }
 
-const IMPORT = /import \{ ([A-Z][A-Za-z]+)[^}]*\} from ["']@\/components\/([^"']+)["']/g
+// A page's frame can come from a component under components/ or, for builtin Play's host-side pieces
+// (PRD-261 W-A5 moved PlayOnlyNote to lib/theme-host/builtin/), under lib/theme-host/.
+const IMPORT = /import \{ ([A-Z][A-Za-z]+)[^}]*\} from ["']@\/(components|lib\/theme-host)\/([^"']+)["']/g
 
 function framed(file: string, depth = 0): boolean {
   const src = readFileSync(file, 'utf8')
   if (src.includes('<PageHeader') || src.includes('className="cc-page"') || src.includes('cc-h1')) return true
   if (depth > 1) return false
-  for (const [, , rel] of src.matchAll(IMPORT)) {
+  for (const [, , root, rel] of src.matchAll(IMPORT)) {
     if (rel.includes('main-layout')) continue
-    for (const cand of [path.join(COMPONENTS, `${rel}.tsx`), path.join(COMPONENTS, rel, 'index.tsx')]) {
+    const base = path.join(FRONTEND, root)
+    for (const cand of [path.join(base, `${rel}.tsx`), path.join(base, rel, 'index.tsx')]) {
       if (existsSync(cand) && framed(cand, depth + 1)) return true
     }
   }

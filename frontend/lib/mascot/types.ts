@@ -1,4 +1,4 @@
-import type { Receipt } from '@/types'
+import type { HostReceipt } from '@automatos/theme-sdk'
 
 import type { ToolActivity } from './tools'
 
@@ -6,8 +6,9 @@ import type { ToolActivity } from './tools'
  * PRD-260 D6 — Auto's states and the events that move him, ported from
  * Automatos Play's lib/mascot/types.ts. The stream events the reducer reads
  * are re-declared below (Play's TYPES only: its stream parser is not ported,
- * D5); lib/mascot/events.ts makes them from the core chat's onData parts and
- * status. A receipt is the core's own (types/chat.ts).
+ * D5); lib/mascot/data-events.ts makes them from the core chat's onData parts
+ * and lib/mascot/events.ts from its status and newest reply. A receipt is the
+ * host's (the SDK's HostReceipt, the core's types/chat.ts Receipt read-only).
  */
 
 export const MASCOT_STATES = [
@@ -150,7 +151,7 @@ export type ToolEndEvent = {
 }
 export type ReceiptsEvent = {
   readonly type: 'receipts'
-  readonly receipts: readonly Receipt[]
+  readonly receipts: readonly HostReceipt[]
   readonly model: string | null
   /** Lines the reply shows above its text. */
   readonly above: readonly string[]

@@ -1,5 +1,5 @@
-import { captionFor } from '@/lib/mascot/media'
-import type { MascotName } from '@/lib/mascot/types'
+import { captionFor } from '../../../lib/mascot/media'
+import type { MascotName } from '../../../lib/mascot/types'
 
 import { toolDetail } from './labels'
 

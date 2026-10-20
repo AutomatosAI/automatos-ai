@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { useLookScope } from '@/components/looks/look-scope'
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '@/lib/play/seen'
+import { type Deliverable, useLookScope } from '@automatos/theme-sdk'
+
+import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '../lib/play/seen'
 
 /** The record as last read or written, and the scope it belongs to. */
 interface ScopedSeen {
@@ -16,7 +16,7 @@ interface ScopedSeen {
  * PRD-260 §4 — Auto celebrates once when Play's shelf shows a Deliverable this
  * account hasn't seen in this browser (lib/play/seen.ts decides what counts as
  * new), ported from Automatos Play's hooks/useCelebrateNew.ts. The record is
- * the signed-in user's in this workspace (F5, useLookScope): nothing is read
+ * the signed-in user's in this workspace (F5, the SDK's useLookScope): nothing is read
  * or remembered until they are known, and another account starts its own.
  * Returns the newest one that set it off, for the caption ("Your report is ready").
  */

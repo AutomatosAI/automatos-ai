@@ -42,8 +42,8 @@ vi.mock('@/components/workspace-provider', () => ({
   }),
 }))
 
-import { AccountLookScope } from '@/components/looks/account-look-scope'
-import { LookProvider, useLook } from '@/components/looks/look-provider'
+import { AccountLookScope } from '@/components/theme-host/account-look-scope'
+import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
 import { LOOKS_HEADING, LooksScreen } from '@/components/looks/looks-screen'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { BACKEND_HEALTH_QUERY_KEY } from '@/hooks/use-backend-health'
@@ -59,7 +59,7 @@ import {
   SAVED_LOOKS_KEY,
   UNSCOPED_LOOKS_MOVED_KEY,
   lookKeys,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { SEEN_KEY, seenKey } from '@/lib/play/seen'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'

@@ -18,24 +18,35 @@
  * Leaving a theme with looks switches it off: the LookProvider takes the look off <html>, and the
  * host gives the tone back to the user and deletes the forced tone's cookie.
  *
- * LookRuntimeBridge hands the runtime to the SDK's `looks` area (lib/theme-sdk/looks.ts) as a
- * theme-neutral copy: every look a theme hands in is checked against the theme's look spec first.
- * In Phase A the one look runtime the host has is the core-owned one Play's looks run on (PA-9:
- * lib/look-kit bound to Play's catalogue in lib/looks/engine.ts, lib/looks/transfer.ts for files).
+ * The LookProvider hands the runtime to the SDK's `looks` area (lib/theme-sdk/looks.ts) as a
+ * theme-neutral copy (lib/theme-host/builtin/play-look-bridge.tsx): every look a theme hands in is
+ * checked against the theme's look spec first. In Phase A the one look runtime the host has is the
+ * core-owned one Play's looks run on (PA-9: lib/look-kit bound to Play's catalogue in
+ * lib/looks/engine.ts, lib/looks/transfer.ts for files); PRD-261 A-14d moved its files out of Play's
+ * folders (./account-look-scope.tsx, lib/theme-host/builtin/play-look-{provider,store,bridge}).
+ *
+ * PRD-261 W-A6b (gap G1 of e2e/browser/parity-checklist.md): an installed theme that runs has a
+ * registry entry (from the root layout's boot, lib/theme-host/installed-entry.ts), so it gets the
+ * look runtime too when it declares looks, exactly as builtin Play does. The one runtime the host
+ * has paints Play's looks, so it paints and forces a tone only under the theme whose <html> class is
+ * Play's (Play's package); under any other installed theme it paints nothing and hands the SDK no
+ * looks, as before. While the host loads or runs an installed theme, a LookProvider that paints no
+ * look leaves <html> as the root layout's boot painted it (W-A6: the theme's prepaint table), so
+ * the theme keeps its first-paint look after hydration. A failed load, safe mode and every other
+ * style clear as before: the runtime stops for an installed theme the moment the host stops running
+ * it, without waiting for the host to release its entry.
  */
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 
-import { AccountLookScope } from '@/components/looks/account-look-scope'
-import { LookProvider, useLook as useRuntimeLook, type LookContextValue } from '@/components/looks/look-provider'
 import { useActiveTheme } from '@/hooks/use-studio-theme'
-import { validateLook } from '@/lib/looks/engine'
-import { clearPlayToneCookie } from '@/lib/looks/tone'
-import { importLook, LOOK_FILE_TYPE, lookFileName, lookJson } from '@/lib/looks/transfer'
-import type { Look, ValidationResult } from '@/lib/looks/types'
 import type { ThemeTone } from '@/lib/theme-host/boot'
+import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
+import { clearPlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 import type { SlotId, ThemeEntry } from '@/lib/theme-host/registry-types'
-import { LookRuntimeContext, registerLookRuntime, type HostLookRuntime } from '@/lib/theme-sdk/internal/look-runtime'
-import type { HostLook, HostLookFile, HostLookResult, HostLookState } from '@/lib/theme-sdk/looks'
+import { THEME_HOST_RUNNING_STATUSES } from '@/lib/theme-host/types'
+
+import { AccountLookScope } from './account-look-scope'
+import { useThemeHost } from './theme-host-context'
 
 /** The slot a theme with looks fills (PA-14: every installable theme ships one). */
 const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
@@ -51,72 +62,6 @@ export function declaresLooks(theme: ThemeEntry | null): boolean {
   return theme !== null && theme.slots.includes(LOOK_EDITOR_SLOT)
 }
 
-/** A look as the SDK hands it out: a frozen copy, so a theme can't change the runtime's. */
-function hostLook(look: Look): HostLook {
-  const copy: HostLook = { ...look }
-  return Object.freeze(copy)
-}
-
-function hostResult(result: ValidationResult): HostLookResult {
-  if (!result.ok) return Object.freeze({ ok: false as const, errors: result.errors })
-  return Object.freeze({ ok: true as const, look: hostLook(result.look) })
-}
-
-/** The look as a file, once it passes the theme's checks; null otherwise. */
-function lookFile(input: unknown): HostLookFile | null {
-  const checked = validateLook(input)
-  if (!checked.ok) return null
-  return Object.freeze({ fileName: lookFileName(checked.look), text: lookJson(checked.look), type: LOOK_FILE_TYPE })
-}
-
-/** What useLook() hands a theme: the runtime's state as copies, its actions behind the theme's checks. */
-function hostState(runtime: LookContextValue): HostLookState {
-  const setLook = (input: unknown): HostLookResult => {
-    const checked = validateLook(input)
-    if (checked.ok) runtime.setLook(checked.look)
-    return hostResult(checked)
-  }
-  return Object.freeze({
-    available: true,
-    look: hostLook(runtime.look),
-    saved: Object.freeze(runtime.saved.map(hostLook)),
-    loaded: runtime.loaded,
-    persisted: runtime.persisted,
-    tone: runtime.tone ?? null,
-    setLook,
-    deleteLook: (id: string) => runtime.deleteLook(id),
-    renameLook: (id: string, name: string) => hostResult(runtime.renameLook(id, name)),
-  })
-}
-
-/** The runtime as the SDK's looks area reads it. */
-function hostLookRuntime(runtime: LookContextValue): HostLookRuntime {
-  const saveLook = (input: unknown): HostLookResult => {
-    const checked = validateLook(input)
-    return hostResult(checked.ok ? runtime.saveLook(checked.look) : checked)
-  }
-  return Object.freeze({
-    state: hostState(runtime),
-    saveLook,
-    exportLook: lookFile,
-    importLook: (text: string) => hostResult(importLook(text, runtime.saved)),
-  })
-}
-
-interface LookRuntimeBridgeProps {
-  readonly children: ReactNode
-  /** False while no look runtime is on: the SDK gets none (null), and nothing is registered. */
-  readonly enabled: boolean
-}
-
-/** Gives the SDK the mounted runtime: to useLook through context, to the plain functions as the current one. */
-function LookRuntimeBridge({ children, enabled }: LookRuntimeBridgeProps) {
-  const value = useRuntimeLook()
-  const runtime = useMemo(() => (enabled ? hostLookRuntime(value) : null), [enabled, value])
-  useEffect(() => (runtime === null ? undefined : registerLookRuntime(runtime)), [runtime])
-  return <LookRuntimeContext.Provider value={runtime}>{children}</LookRuntimeContext.Provider>
-}
-
 /** With no look runtime mounted, nothing forces the tone: the user's own returns, and the cookie goes. */
 function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | undefined) => void): void {
   useEffect(() => {
@@ -126,14 +71,33 @@ function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | unde
   }, [mounted, onToneChange])
 }
 
+/**
+ * Whether the host loads or runs an installed theme. A LookProvider that paints no look then leaves
+ * <html> as the root layout's first paint (it is off under Classic, Studio and builtin Play).
+ */
+function useHostRunsTheme(): boolean {
+  const status = useThemeHost()?.status ?? null
+  return status !== null && THEME_HOST_RUNNING_STATUSES.includes(status)
+}
+
+/**
+ * Whether the active theme gets the look runtime: it declares looks and, for an installed one, the
+ * host still loads or runs it. The host's release reaches the style context one commit after it
+ * enters safe mode or fails, and the runtime must not repaint the look the host just took off.
+ */
+function runsLooks(theme: ThemeEntry | null, hostRunsTheme: boolean): boolean {
+  return declaresLooks(theme) && (theme?.kind !== 'installed' || hostRunsTheme)
+}
+
 export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimeProps) {
-  const mounted = declaresLooks(useActiveTheme())
+  const keepFirstPaint = useHostRunsTheme()
+  const mounted = runsLooks(useActiveTheme(), keepFirstPaint)
   useToneReleased(mounted, onToneChange)
   // One shape for both values of `mounted`: a different tree here would remount every page (M69).
   return (
     <AccountLookScope enabled={mounted}>
-      <LookProvider onToneChange={onToneChange} enabled={mounted}>
-        <LookRuntimeBridge enabled={mounted}>{children}</LookRuntimeBridge>
+      <LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>
+        {children}
       </LookProvider>
     </AccountLookScope>
   )

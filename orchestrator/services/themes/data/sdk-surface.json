@@ -5,6 +5,7 @@
       "assetUrl"
     ],
     "cards": [
+      "AiLabelFence",
       "CorePage",
       "FilePreview",
       "FirstRunNudge",
@@ -20,6 +21,7 @@
       "WithdrawOfferCard"
     ],
     "chat": [
+      "liveReceiptsOf",
       "movedSomethingOnTheBoard",
       "receiptLine",
       "receiptLink",
@@ -34,6 +36,7 @@
       "useMediaPreferences",
       "useOnline",
       "useRole",
+      "useThemeLayout",
       "useTone",
       "useTrial",
       "useWorkspace"
@@ -63,7 +66,8 @@
       "importLook",
       "listLooks",
       "saveLook",
-      "useLook"
+      "useLook",
+      "useLookScope"
     ],
     "navigation": [
       "BOARD_HREF",

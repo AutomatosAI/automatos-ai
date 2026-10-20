@@ -10,7 +10,12 @@
  *
  * The approval cards on a message (`approvals`, and `looseApprovals` after the conversation) are drawn by the
  * host: pass one to `cards.ToolApproval` or `cards.MissionApproval` (protected surfaces, A-12c).
+ *
+ * `liveReceiptsOf(part)` reads the turn's receipts off one of the parts `onData` hands over, exactly as the
+ * reply will carry them, so a theme can react the moment they arrive.
  */
+
+import type { WithdrawOffer } from './cards'
 
 export type HostChatRole = 'system' | 'user' | 'assistant'
 export type HostChatStatus = 'idle' | 'streaming' | 'error'
@@ -25,6 +30,15 @@ export interface HostReceipt {
   readonly effect: string
   readonly link: string | null
   readonly reason: string | null
+}
+
+/** The turn's receipts as one stream part carries them (liveReceiptsOf), before the reply shows them. */
+export interface HostLiveReceipts {
+  readonly receipts: readonly HostReceipt[]
+  /** The lines the platform puts above the reply (a refused write, work not done). */
+  readonly above: readonly string[]
+  /** The model the frame names; null when it names none. */
+  readonly model: string | null
 }
 
 /** A Deliverable a reply made live this page session. */
@@ -55,6 +69,23 @@ export interface HostTaskCard {
   readonly denials?: number
   readonly started_at?: string | null
   readonly completed_at?: string | null
+}
+
+/** One tool call of a reply, as its tool lines show it (PRD-238 S3). */
+export interface HostToolCall {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly state: 'running' | 'completed' | 'error'
+  /** The call's input as the model sent it (a query, a page, a title), unchecked. */
+  readonly input?: unknown
+  readonly error?: string
+  readonly durationMs?: number
+  /** The server's one-line result headline, never a raw payload. */
+  readonly summary?: string
+  /** The loop de-duplicated this call: it never ran. */
+  readonly skipped: boolean
+  /** An ask for the owner's click: it waits on its card, it did not fail. */
+  readonly waiting: boolean
 }
 
 /** A reply that failed in words. */
@@ -106,6 +137,20 @@ export interface HostChatMessage {
   /** The approval cards this reply raised that the owner has not closed. */
   readonly approvals: readonly HostChatApproval[]
   readonly taskCards: readonly HostTaskCard[]
+  /** The reply's tool calls, in the order they started. */
+  readonly toolCalls: readonly HostToolCall[]
+  /** Who wrote the reply when the turn didn't ("Auto · background"); null for a reply of the turn. */
+  readonly provenance: string | null
+  /** A failed turn the server saved, in its words: the reply is that failure, never an answer. */
+  readonly savedError: string | null
+  /** A cap that ended the reply's turn, in words; null when none did. */
+  readonly limitReached: string | null
+  /** The length of the model's reasoning on this reply: its growth is the model thinking. */
+  readonly reasoningChars: number
+  /** The owner said no while a request still waits on a yes: place it in cards.WithdrawOfferCard. */
+  readonly withdrawOffer: WithdrawOffer | null
+  /** The Deliverables the reply's done receipts link to, each id checked by the host. */
+  readonly linkedDeliverables: readonly HostDeliverable[]
 }
 
 /** A conversation the chat page shows. Pass it back to useChatController in a child keyed by `key`. */
@@ -226,8 +271,15 @@ export declare function useStartChat(): HostStartChat
 /** One receipt in the host's plain words ("#0422: moved to Done"), the same in every theme. */
 export declare function receiptLine(receipt: HostReceipt): string
 
-/** A done receipt's page, only when it is a path in this app; else null. */
+/** A done receipt's page, only when it is a path in this app that HostLink takes; else null. */
 export declare function receiptLink(receipt: HostReceipt): string | null
 
 /** Whether a done write touched a card on the board (named by its number). */
 export declare function movedSomethingOnTheBoard(receipts: readonly HostReceipt[]): boolean
+
+/**
+ * The turn's receipts on one of onData's parts: the receipts frame on a `tool-data` part, read as the host reads
+ * it for the reply (only real receipts; the lines above the reply; the model it names). null for any other part,
+ * and for a frame without a list.
+ */
+export declare function liveReceiptsOf(part: unknown): HostLiveReceipts | null

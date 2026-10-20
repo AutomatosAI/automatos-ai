@@ -1,9 +1,56 @@
 # PRD-262: Container diet: smaller images and a self-host first run that pulls instead of builds
 
+**Status, 20 Oct 2026:** shipped on main, except the worker cuts (#1220, waiting for Dave's review). §0 has the outcome. The 16 Oct status below is kept as written.
+
 **Status:** Approved to build, 16 Oct 2026 (Gerard: "get it built"). §3 D1–D6 and the §9 questions are taken at their recommendations, and §9 records each answer. Dave confirms D1–D6 in PR review. The answers that shape the waves: US-006 locks `agent-opt-worker` down, because the FutureAGI account could not be checked (§9-Q4); W9 is held until after WebSummit (§9-Q11); TESTER's constraints from §9-Q1 are in §2. §9-Q14, added in review, is open. · **Owner:** Gerard (Dave confirms D1–D6 in PR review) · **Written:** 16 Oct 2026, grounded on `main @ 73f18f175` and on registry and CI measurements taken the same day (`edge` = `sha-73f18f1`). Revised the same day after reviewers fact-checked the draft.
 **Source:** the 15 Oct engineering brief *Shrinking the Automatos containers* (claude.ai/artifact/JUEs6PmWZ4H2Fy1ErsEJo3). On 16 Oct, ten survey agents re-checked every claim against main, each checked by a second agent that tried to refute it. Where main or the numbers have moved since the brief, this PRD uses the 16 Oct figure.
 **Scope:** automatos-ai only (Gerard, 16 Oct). Container findings in the other repos are listed in Appendix B for a later PRD.
 **Type:** Refactor and consolidation, with extensions. It changes the existing Dockerfiles, compose files, Makefile, `images.yml`, the smoke lanes and the boot path. It deletes Gotenberg, the root `Dockerfile.backend`, `docker-compose.images.yml`, `promtail-config.yml` and its phantom profile, and `orchestrator/.railway-watch.json`. It locks `agent-opt-worker` down (US-006) instead of retiring it (§9-Q4; Appendix A stays the alternative). It makes six code swaps (camelot → pdfplumber, the Gemini SDK → Gemini's OpenAI-compatible endpoint, pandas → xlsxwriter and the stdlib, the langchain splitters → vendored code, tree-sitter-language-pack → the installed `tree_sitter_*` grammars, the worker's SQLAlchemy → psycopg2). It replaces the backend's shell entrypoint and healthcheck with Python (US-059) and adds one adapter (Leiden through `graspologic-native`). No new service, datastore or vendor.
+
+## 0. Outcome (20 Oct 2026)
+
+**Merged to main:**
+- W0 (#1145).
+- W1 and W6 (#1166, f230dad32).
+- W8 and the media-assets job (#1182, bcfecd379).
+- The 19 Oct media-render cuts (#1219, e7b7d8839).
+- W7 and the 19 Oct frontend cuts (#1168, 469ca5975), with the CodeQL follow-up (#1222, 9ec43ac6e).
+- W2–W5 and the 19 Oct API cuts (#1226, 0fc14dae9).
+
+**Open:** the 19 Oct worker cuts and the §3-D5 trims (#1220), waiting for Dave's review.
+
+**Published images on main 0fc14dae9.** Compressed size in the registry (the sum of the manifest's layers), against §8's bars:
+
+| Image | 16 Oct, amd64 | Now, amd64 / arm64 | §8 bar (amd64) |
+|---|---|---|---|
+| API | 520.5 MB | 250.2 / 244.6 MB | ≤ 320 MB, met |
+| Worker (local edition) | 506.6 MB | 418.0 / 410.1 MB (before #1220) | ≤ 420 MB, met |
+| Frontend | 93.8 MB | 68.6 / 68.9 MB | ≤ 75 MB, met |
+| media-render, on disk | 1.81 GB | media-render.yml on main e7b7d8839: on-disk bar passed. Local arm64: 1,282.8 MB, with #1209's exiftool | ≤ 1.30 GB, met |
+
+**Installed size on a local arm64 build** (`docker image inspect .Size`):
+- API: 1,920 → 789.5 MB.
+- Worker: 1,340 → 1,073 MB, and 910.1 MB with #1220.
+- Frontend: 252 → 167.9 MB.
+- media-render: 1,875 → 1,282.8 MB.
+
+**Boot on the local stack:**
+- A warm backend recreate was healthy in 10.6 s (19 s before the 19 Oct cuts).
+- The first boot on main's image was healthy in 19 s, with alembic skipped at head and seeds run only on a fingerprint change.
+
+**Decisions taken on 19 Oct (Gerard):**
+- §3-D5: trims only. The sanitizer runtimes and `libc.a`/`libstdc++.a` go (rows #12 and #31, in #1220); gcc, node, pnpm, uv, git and Perl stay.
+- After WebSummit:
+  - §9-Q14, fetching the bundled Claude CLI on first use (267 MB);
+  - §3-D4, the fp16 voice (#1144 stays open for the blind listen);
+  - §9-Q20, git and Perl;
+  - W9 and W10.
+- Dependabot stays on for media-render. `test_prd262_media_render_venv_trim.py` fails a lock that brings protobuf or flatbuffers back.
+
+**Known after merge:**
+- **smoke-images' core-stack step** is red on Linux runners. When a deliverables folder belongs to a uid other than 1000, the worker (uid 1000) can't write it. This is old behaviour, first exercised by this PRD's smoke. The fix is staged as P256-FIX-WRK-1 (branch `fix/prd-262-worker-deliverables-owner`), to land with F452's `--no-new-privs` and #1220 as one change to the worker entrypoint.
+- **Dependabot's media-render pip update job failed on 20 Oct, after #1226.** Its resolver can't find `kokoro-onnx==0.6.1`, which `requirements.in` pins: it lists only 0.1.x, so its Python is probably older than the package's `Requires-Python`. This isn't from this PRD's lock changes. Any media-render pip bump it does open still has to recompile the lock with `requirements.in`'s command (`--no-emit-package`).
+- **For Gerard:** `POST /api/missions/upload` answers 500 when no embedding provider is set, and leaves a failed document row behind. `/api/documents/upload` answers 200 with the processing error instead. #1226's US-021 smoke now proves object storage through attachments.
 
 ## 1. Introduction
 

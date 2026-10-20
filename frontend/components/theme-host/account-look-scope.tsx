@@ -21,6 +21,10 @@ import { LookScopeContext } from './look-scope'
  * backend answers (useWorkspaceRetry), and until then the LookProvider paints
  * the pre-paint script's look under Play. The local edition is signed in with
  * no user id, so its one user gets lib/looks/scope.ts's NO_USER.
+ * PRD-261 A-14d: host code (it reads the account, the workspace and the
+ * query cache), so it lives with the host's look runtime
+ * (components/theme-host/theme-look-runtime.tsx), out of Play's folders; the
+ * context it fills is the host's too (./look-scope.ts, W-A5 seam review).
  */
 
 type WorkspaceState = ReturnType<typeof useWorkspaceOptional>
