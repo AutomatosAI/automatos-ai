@@ -115,7 +115,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
 # prd263_harness_ledger_grants — the provenance record (content_provenance) the
 # public detection route reads.
-EXPECTED_HEAD = "prd264_content_provenance"
+# 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto prd264_content_provenance
+# — blog_posts.reviewed_by_user_id, reviewed_at and reviewed_content_sha256: who took editorial
+# responsibility, when, and for which text.
+EXPECTED_HEAD = "prd264_blog_review"
 
 
 def _literal(node: ast.AST):
