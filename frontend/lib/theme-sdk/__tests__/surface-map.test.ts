@@ -70,7 +70,8 @@ const Q3_DATA_HOOKS = [
   '@/components/workspace-provider',
 ]
 /** Imports the scan must see, so a broken pattern can never pass by finding nothing. */
-const KNOWN_IMPORTS = ['@/types', '@/lib/ticket-links', '@/hooks/use-deliverables-api', 'next/link', 'react']
+// Imports Play's folders hold after the W-A5 port (it reaches the core through the SDK), so the scan must see them.
+const KNOWN_IMPORTS = ['@automatos/theme-sdk', 'lucide-react', 'react']
 
 function cellsOf(line: string): string[] {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
