@@ -26,6 +26,9 @@ migrations:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 2Gi}
 
+# e2e.sh pulls the web app and the worker fresh and loads them into the cluster before
+# every install, so the node runs what was loaded: IfNotPresent here, where the chart
+# would pull a moving tag such as edge Always.
 frontend:
   image:
     pullPolicy: IfNotPresent

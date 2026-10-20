@@ -11,6 +11,7 @@ was refused the same way. It is unrelated to PRD-251's deny list.
 from __future__ import annotations
 
 import asyncio
+import importlib.machinery
 
 import pytest
 
@@ -23,11 +24,15 @@ class _SDK:
     """Stands in for ``composio.Composio``: the import succeeded."""
 
 
+_SDK_SPEC = importlib.machinery.ModuleSpec("composio", None)  # what the availability probe finds
+
+
 @pytest.fixture
 def gate(monkeypatch):
     """Composio up; the gate refuses whatever it is asked, and records the action id."""
     monkeypatch.setattr(config, "COMPOSIO_API_KEY", "test-key-not-a-secret")
     monkeypatch.setattr(cc, "_get_composio", lambda: _SDK)
+    monkeypatch.setattr(cc, "find_spec", lambda name, package=None: _SDK_SPEC)  # found, not imported (PRD-262 US-032)
     cc.reset_composio_availability()
     asked = []
 

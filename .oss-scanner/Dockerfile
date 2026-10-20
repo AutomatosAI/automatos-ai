@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git \
       libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
-      libmagic1 ghostscript tesseract-ocr fonts-dejavu-core \
+      libmagic1 tesseract-ocr fonts-dejavu-core fonts-urw-base35 \
       postgresql-15 postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,12 +35,13 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY . /src
 WORKDIR /src
 
-# Backend (orchestrator) and the Python services, as CI installs them. The
-# worker's direct dependencies, not its lock: the lock is resolved for the
+# Backend (orchestrator) and the Python services, as CI installs them: the API's locks
+# in one command, hashes required (PRD-262 US-022). The test tools, pytest-timeout
+# among them, are in orchestrator/requirements-dev.txt, locked in requirements-dev.lock.
+# The worker's direct dependencies, not its lock: the lock is resolved for the
 # worker's Python 3.12, and this image runs 3.11 (PRD-262 US-044).
-RUN pip install -r orchestrator/requirements.txt \
-    && pip install -r services/workspace-worker/requirements.in \
-    && pip install pytest-timeout
+RUN pip install --require-hashes -r orchestrator/requirements.lock -r orchestrator/requirements-dev.lock \
+    && pip install -r services/workspace-worker/requirements.in
 
 # Frontend: `npm install`, not `npm ci` (CI does the same; see frontend-ci in test.yml).
 RUN cd frontend && npm install --no-audit --no-fund

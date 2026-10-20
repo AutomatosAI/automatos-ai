@@ -9,6 +9,7 @@ Reuses the centralized EmbeddingManager (qwen3-embedding-8b, 2048-dim).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import List, Optional, Tuple
@@ -156,21 +157,47 @@ def compute_text_hash(text: str) -> str:
 # Embedding
 # ------------------------------------------------------------------
 
-async def embed_agent(agent: Agent, db: Session, *, force: bool = False) -> bool:
-    """Generate and store semantic embedding for a single agent.
+def _stale_semantic_text(agent: Agent, db: Session, force: bool) -> Optional[Tuple[str, str]]:
+    """The agent's semantic text and its hash, or None when its stored embedding is current.
 
-    Returns True if the embedding was (re)generated, False if skipped.
+    Synchronous database work (the agent's persona, skills, apps and plugins), so the
+    async callers run it in a worker thread.
     """
-    from core.llm.embedding_manager import get_embedding_manager
-
-    embedding_mgr = get_embedding_manager()
-
     text = build_agent_semantic_text(agent, db)
     text_hash = compute_text_hash(text)  # Includes model ID — auto-invalidates on provider change
 
     if not force and agent.semantic_text_hash == text_hash and agent.semantic_embedding:
         logger.debug("[semantic] Agent %d text unchanged, skipping embed", agent.id)
+        return None
+    return text, text_hash
+
+
+def _store_embedding(agent: Agent, db: Session, vector: List[float], text_hash: str) -> None:
+    """Write the agent's new embedding (synchronous: a commit, so in a worker thread)."""
+    agent.semantic_embedding = vector
+    agent.semantic_text_hash = text_hash
+    db.add(agent)
+    db.commit()
+
+    logger.info("[semantic] Embedded agent %d (%s) — %d dims", agent.id, agent.name, len(vector))
+
+
+async def embed_agent(agent: Agent, db: Session, *, force: bool = False) -> bool:
+    """Generate and store semantic embedding for a single agent.
+
+    Returns True if the embedding was (re)generated, False if skipped. Its database
+    work runs in worker threads (PRD-262 US-034), so the event loop keeps serving;
+    only the embedding call is awaited on the loop. The session is used by one thread
+    at a time.
+    """
+    from core.llm.embedding_manager import get_embedding_manager
+
+    embedding_mgr = get_embedding_manager()
+
+    stale = await asyncio.to_thread(_stale_semantic_text, agent, db, force)
+    if stale is None:
         return False
+    text, text_hash = stale
 
     try:
         vector = await embedding_mgr.generate_embedding(text)
@@ -178,24 +205,27 @@ async def embed_agent(agent: Agent, db: Session, *, force: bool = False) -> bool
         logger.exception("[semantic] Failed to embed agent %d", agent.id)
         return False
 
-    agent.semantic_embedding = vector
-    agent.semantic_text_hash = text_hash
-    db.add(agent)
-    db.commit()
-
-    logger.info("[semantic] Embedded agent %d (%s) — %d dims", agent.id, agent.name, len(vector))
+    await asyncio.to_thread(_store_embedding, agent, db, vector, text_hash)
     return True
+
+
+def _active_agents(workspace_id, db: Session) -> List[Agent]:
+    return (
+        db.query(Agent)
+        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
+        .all()
+    )
 
 
 async def embed_workspace_agents(
     workspace_id, db: Session, *, force: bool = False
 ) -> int:
-    """Embed all active agents in a workspace. Returns count of (re)embedded agents."""
-    agents = (
-        db.query(Agent)
-        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
-        .all()
-    )
+    """Embed all active agents in a workspace. Returns count of (re)embedded agents.
+
+    The agents are read in a worker thread (PRD-262 US-034), like each agent's own
+    database work in :func:`embed_agent`.
+    """
+    agents = await asyncio.to_thread(_active_agents, workspace_id, db)
 
     count = 0
     for agent in agents:

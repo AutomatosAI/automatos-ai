@@ -57,7 +57,8 @@ def test_a_file_with_no_record_weighs_the_median():
     "paths",
     [
         ["orchestrator/main.py"],
-        ["frontend/app/page.tsx", "orchestrator/requirements.txt"],
+        # A lock change runs every test, test_prd262_api_locks.py among them (PRD-262 US-022).
+        ["frontend/app/page.tsx", "orchestrator/requirements.lock"],
         [".github/workflows/test.yml"],
         ["docker-compose.yml"],
         ["services/workspace-worker/main.py"],

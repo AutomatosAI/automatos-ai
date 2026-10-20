@@ -7,15 +7,12 @@ Integration: countdown auto-proceed fires and is cancelable.
 from __future__ import annotations
 
 import os
-import sys
-import types
 import uuid
 
 for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
     os.environ.setdefault(_k, "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 import pytest  # noqa: E402
 
