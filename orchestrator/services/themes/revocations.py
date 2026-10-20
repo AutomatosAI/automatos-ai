@@ -11,6 +11,13 @@ version, and a level it doesn't know counts as ``disable``.
 
 This is the one revocation rule: the files and boot routes (``serve.py``), ``active``
 (``defaults.py``) and the install routes (``updates.py``) all read it here.
+
+PRD-261 C-05c (QB-28): a version whose stored signature doesn't check out (it fails, or its key
+is revoked in the keys file or by the hosted feed; ``signature_state.py``) reads as a ``disable``
+too. ``revocation_of`` answers it as a **transient** ``ThemeRevocation`` (``signature_disable``)
+with ``signature_state.SIGNATURE_DISABLE_REASON``: built on each load, never added to a session,
+so it is never stored and goes away once the version is re-signed. A stored ``disable`` keeps
+its own reason, and the signature is then not checked.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from sqlalchemy import or_
 
 from core.models.themes import ThemeRevocation
 from services.themes.manifest import RANGE_PATTERN, satisfies_range
+from services.themes.signature_state import SIGNATURE_DISABLE_REASON, signature_fails
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +77,32 @@ def _strongest(rows: List[ThemeRevocation]) -> Optional[ThemeRevocation]:
 
 
 def revocation_level(db: Any, digest: str, theme_id: str, version: str) -> Optional[str]:
-    """``'disable'``, ``'warn'`` or None for one package version (the strongest live revocation wins)."""
+    """``'disable'``, ``'warn'`` or None for one package version (the strongest live revocation wins).
+
+    The stored rows only: a signature check needs the package row (``revocation_of``).
+    """
     row = _strongest(_matching(db, digest, theme_id, version))
     return None if row is None else effective_level(row)
 
 
+def signature_disable(package: Any) -> ThemeRevocation:
+    """The transient ``disable`` of a version whose stored signature doesn't check out (C-05c).
+
+    A new object on every call and never added to a session: nothing ever stores it.
+    """
+    return ThemeRevocation(digest=package.digest, level=REVOKE_DISABLE, reason=SIGNATURE_DISABLE_REASON)
+
+
 def revocation_of(db: Any, package: Any) -> Optional[ThemeRevocation]:
-    """The strongest live revocation of a ``ThemePackage`` row, or None."""
-    return _strongest(_matching(db, package.digest, package.theme_id, package.version))
+    """The strongest live revocation of a ``ThemePackage`` row, or None.
+
+    A stored ``disable`` is answered as it is; otherwise a stored signature that doesn't check
+    out answers the transient ``signature_disable``, and anything else the strongest stored row.
+    """
+    stored = _strongest(_matching(db, package.digest, package.theme_id, package.version))
+    if disables(stored):
+        return stored
+    return signature_disable(package) if signature_fails(db, package) else stored
 
 
 def disables(revocation: Optional[ThemeRevocation]) -> bool:
@@ -96,5 +122,5 @@ def revocation_body(revocation: Optional[ThemeRevocation]) -> Optional[Dict[str,
 
 __all__ = [
     "REVOKE_DISABLE", "REVOKE_WARN", "disables", "effective_level", "is_disabled", "revocation_body",
-    "revocation_level", "revocation_of",
+    "revocation_level", "revocation_of", "signature_disable",
 ]
