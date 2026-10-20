@@ -14,7 +14,8 @@ Deliverable registry and the usage tracker are recording fakes. Pins:
   content hash covers it) and books the rendered seconds on the media lane;
 * a composition the renderer's check refuses ends the post in ``failed`` with
   the findings in ``review_log``; a failed post is edited and rendered again,
-  and nothing else; an approved post never renders;
+  and nothing else (but the planned-slot sweep, which ends a plan's failed post
+  missed: P256-FIX-SOC-5); an approved post never renders;
 * the quota: basic / pro / business read 10 / 60 / 240 minutes from config,
   enterprise and the local edition have none; the month's media-lane render
   units are the minutes used; a render past the quota is refused (429) BEFORE
@@ -619,6 +620,13 @@ def test_a_failed_post_is_edited_and_rendered_again_and_nothing_else():
     assert post.status == service.FAILED and post.content_hash != before
     service.start_render(post, "author")
     assert post.status == service.RENDERING
+
+    # P256-FIX-SOC-5: besides a person's edit and render, only the planned-slot sweep moves a failed
+    # post: one of a plan that never tried to publish ends missed once its slot passed (B11).
+    service.fail_render(post, "author", "The check failed.")
+    service.set_planned_for(post, datetime.now(timezone.utc) - timedelta(days=1), "UTC")
+    service.slot_passed(post, "scheduler", "Its planned slot passed with no approval.")
+    assert post.status == service.MISSED
 
 
 @pytest.mark.parametrize("status", ["approved", "scheduled", "archived", "rendering", "publishing", "published"])

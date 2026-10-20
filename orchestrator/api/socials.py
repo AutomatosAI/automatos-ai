@@ -582,7 +582,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     reservation = await render.reserve_seconds(db, workspace, post, template)
     try:
         await render.ensure_renderer()
-        service.start_render(post, actor)
+        service.start_render(post, actor, gives_up_after=config.SOCIALS_RENDER_MAX_WAIT_SECONDS)  # P256-FIX-SOC-5
         saved = _commit_unchanged(db, post, status=status, content_hash=content_hash)
     except BaseException:
         await render_quota.release_render(render_quota.sessions_for(db), reservation)

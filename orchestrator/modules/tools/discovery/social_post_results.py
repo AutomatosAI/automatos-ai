@@ -42,7 +42,7 @@ FIX_TEMPLATE = ('Give it a template with platform_update_social_post {{"post_id"
 FIX_OTHER = 'When that is sorted, render it with platform_update_social_post {{"post_id": "{id}", "render": true}}.'
 NO_TEMPLATE_WORDS = ("no template", "pick a template")
 # read_view (P256-FIX-SOC-4): what comes first, in order, and what an agent's read leaves out.
-READ_FIRST = ("id", "status", "title", "format", "template_id")
+READ_FIRST = ("id", "status", "render", "title", "format", "template_id")  # P256-FIX-SOC-5: the render's state too
 TARGET_KEYS = ("toolkit", "post_kind", "options", "status", "published_at", "remote_id", "permalink", "error", "notes")
 WHEN_KEYS = ("scheduled_for", "planned_for", "timezone")
 APPROVAL_KEYS = ("approved_by", "approved_at", "override_unsourced")

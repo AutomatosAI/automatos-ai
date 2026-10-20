@@ -155,6 +155,8 @@ ALLOWED = {
     (FAILED, RENDERING): lambda p: service.start_render(p, AUTHOR),
     (RENDERING, NEEDS_APPROVAL): lambda p: service.finish_render(p, AUTHOR, _RENDERED),
     (RENDERING, FAILED): lambda p: service.fail_render(p, AUTHOR, "The check failed."),
+    # P256-FIX-SOC-5 (F437): a plan's draft whose render the platform refused fails with the reason.
+    (DRAFT, FAILED): lambda p: service.refuse_render(p, AUTHOR, "The renderer cannot be reached right now."),
 }
 
 
@@ -179,7 +181,8 @@ PUBLISH_MOVES = {
 
 # PRD-251B (B11, US-B105): a planned slot that passes unapproved ends missed; a missed post
 # without an approval restarts as a draft with a new slot.
-SLOT_MOVES = {(DRAFT, "missed"), (NEEDS_APPROVAL, "missed"), (CHANGES_REQUESTED, "missed"), ("missed", DRAFT)}
+# P256-FIX-SOC-5: and a plan's failed post that never tried to publish (schedule_jobs.pass_planned_slots).
+SLOT_MOVES = {(DRAFT, "missed"), (NEEDS_APPROVAL, "missed"), (CHANGES_REQUESTED, "missed"), (FAILED, "missed"), ("missed", DRAFT)}
 
 
 def test_the_table_is_exactly_the_machine_through_wave_3():
@@ -195,16 +198,39 @@ def test_the_table_is_exactly_the_machine_through_wave_3():
         "edit": {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL, "missed": NEEDS_APPROVAL},
         "render": {DRAFT: RENDERING, CHANGES_REQUESTED: RENDERING, NEEDS_APPROVAL: RENDERING, FAILED: RENDERING},
         "render_done": {RENDERING: NEEDS_APPROVAL},
-        "render_failed": {RENDERING: FAILED},
+        "render_failed": {RENDERING: FAILED, DRAFT: FAILED},
         "publish": {APPROVED: "publishing", SCHEDULED: "publishing", "missed": "publishing"},
         "retry": {FAILED: "publishing", "partially_published": "publishing"},
         "published": {"publishing": "published"},
         "partially_published": {"publishing": "partially_published"},
         "publish_failed": {"publishing": FAILED},
         "missed": {SCHEDULED: "missed"},
-        "slot_passed": {DRAFT: "missed", NEEDS_APPROVAL: "missed", CHANGES_REQUESTED: "missed"},
+        "slot_passed": {DRAFT: "missed", NEEDS_APPROVAL: "missed", CHANGES_REQUESTED: "missed", FAILED: "missed"},
         "reslot": {"missed": DRAFT},
     }
+
+
+def test_soc5_fail_render_ends_only_a_started_render_and_refuse_render_only_a_draft():
+    draft = _post_in(DRAFT)
+    with pytest.raises(IllegalTransition):
+        service.fail_render(draft, AUTHOR, "The check failed.")
+    assert draft.status == DRAFT and draft.review_log == []
+    rendering = _post_in(RENDERING)
+    log_before = list(rendering.review_log)
+    with pytest.raises(IllegalTransition):
+        service.refuse_render(rendering, AUTHOR, "The renderer cannot be reached right now.")
+    assert rendering.status == RENDERING and rendering.review_log == log_before
+    refused = service.refuse_render(_post_in(DRAFT), AUTHOR, "  The renderer cannot be reached right now.  ")
+    assert refused.review_log[-1] == {"at": NOW.isoformat(), "by": AUTHOR, "action": "render_failed",
+                                      "comment": "The renderer cannot be reached right now."}
+
+
+def test_soc5_a_render_says_when_it_gives_up_from_the_same_clock():
+    post = service.start_render(_post_in(DRAFT), AUTHOR, gives_up_after=1500)
+    assert post.review_log[-1] == {"at": NOW.isoformat(), "by": AUTHOR, "action": "render", "comment": None,
+                                   "gives_up_at": (NOW + timedelta(seconds=1500)).isoformat()}
+    again = service.start_render(service.fail_render(post, AUTHOR, "The check failed."), AUTHOR)
+    assert "gives_up_at" not in again.review_log[-1]  # a caller that gives no limit (the crops' render) records none
 
 
 @pytest.mark.parametrize("move", sorted(ALLOWED), ids=lambda m: f"{m[0]}->{m[1]}")
