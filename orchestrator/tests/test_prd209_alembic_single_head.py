@@ -110,9 +110,11 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
 # the two columns main.py added with an ALTER on every boot (system_prompts.futureagi_eval_enabled,
 # skills.content_hash) become a revision.
+# 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto prd262_boot_columns
+# — harness_task_ledger gains the governed apply columns, and its held rows become expired.
 # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
-# prd262_boot_columns — a new table only, the audit record of the one-time relink of
-# returning users to production IDs.
+# prd263_harness_ledger_grants — a new table only, the audit record of the one-time
+# relink of returning users to production IDs.
 EXPECTED_HEAD = "clerk_user_relinks_20261019"
 
 
