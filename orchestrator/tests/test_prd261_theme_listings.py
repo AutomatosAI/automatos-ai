@@ -60,6 +60,7 @@ import services.themes.listings as listings_mod  # noqa: E402
 from services.themes import review, signature_verify, signing  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 from services.themes.listing_updates import offer_listed_update  # noqa: E402
+from services.themes.review_stage import VERDICT_PASS  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
@@ -67,6 +68,7 @@ from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.auth.principal import LOCAL_OPERATOR_CLAIM_SOURCE  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.themes import (  # noqa: E402
+    THEME_SCAN_VERDICT_DEFAULT,
     ThemeChoice,
     ThemeInstallation,
     ThemeLook,
@@ -136,7 +138,7 @@ def _file(sha="ab"):
 
 
 def _package(db, version="1.0.0", theme_id=PLAY, status="approved", reviewed=None, workspace_id=None,
-             engines=None, **manifest_extra):
+             engines=None, scan_verdict=THEME_SCAN_VERDICT_DEFAULT, **manifest_extra):
     owner = "workspace" if workspace_id else "marketplace"
     manifest = {
         "id": theme_id, "name": "Play", "version": version, "base": "studio", "htmlClass": "play",
@@ -149,7 +151,7 @@ def _package(db, version="1.0.0", theme_id=PLAY, status="approved", reviewed=Non
     row = ThemePackage(
         theme_id=theme_id, version=version, owner_type=owner, workspace_id=workspace_id,
         digest=uuid.uuid4().hex * 2, manifest=manifest, file_manifest=files,
-        storage_prefix=f"themes/{theme_id}/{version}/", status=status,
+        storage_prefix=f"themes/{theme_id}/{version}/", status=status, scan_verdict=scan_verdict,
         reviewed=(status == "approved" and owner == "marketplace") if reviewed is None else reviewed,
     )
     db.add(row)
@@ -546,7 +548,8 @@ def test_a_version_whose_key_was_retired_is_official_again_once_an_active_key_re
 
 def test_a_local_operator_who_approves_automatos_x_unsigned_is_not_official(api, monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
-    submitted = _signable(api.db, theme_id="automatos/x", status="pending")  # as the operator's submission is
+    # as the operator's submission is once the submit route's automated review passed it (approve refuses not_run)
+    submitted = _signable(api.db, theme_id="automatos/x", status="pending", scan_verdict=VERDICT_PASS)
     approved = review.approve(api.db, submitted.id, OPERATOR_PK)  # the local edition needs no isolated job
     api.db.commit()
     assert approved["status"] == "approved" and approved["signatureRequest"]["requestId"]

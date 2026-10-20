@@ -110,11 +110,21 @@ const MISSION_APPROVAL = { mission_id: 'm-1', goal: 'Refund the customer', task_
 const RAN = { grant: { id: 42, status: 'revoked', details: { executed_result: { success: true } } } }
 const APPROVE = { name: /approve & run/i }
 const CLOSE = { name: 'Close' }
+/** The hello page's message list (support/hello-chat-page.tsx). */
+const CONVERSATION = { name: 'Conversation' }
 
 type View = ReturnType<typeof renderPage>
 
 /** The theme hands a stream part on, as useChat's onData does. */
 const raise = (data: Record<string, unknown>) => act(() => chat.options?.onData({ type: 'tool-data', data }))
+
+/**
+ * `shown`'s words in the conversation. Only there: the page's heading is the chat's title, and a chat
+ * with no stored title (a new chat) is titled by its first user words (chatTitle, lib/chat/message-text.ts).
+ */
+function inConversation(shown: ChatMessage): Promise<HTMLElement> {
+  return waitFor(() => within(screen.getByRole('list', CONVERSATION)).getByText(firstWords(shown)))
+}
 
 /** A stored conversation whose reply 'm2' is being written. */
 async function renderTurn(): Promise<View> {
@@ -123,7 +133,7 @@ async function renderTurn(): Promise<View> {
   chat.status = 'streaming'
   const view = renderPage()
   await shownChat('c1')
-  await screen.findByText(firstWords(QUESTION))
+  await inConversation(QUESTION)
   return view
 }
 
@@ -150,7 +160,7 @@ async function openAgain(view: View, chatId: string, messages: ChatMessage[]): P
   serve(chatId, 'Tidy the shelf', messages)
   const again = renderPage()
   await shownChat(chatId)
-  await screen.findByText(firstWords(messages[0]))
+  await inConversation(messages[0])
   return again
 }
 
@@ -251,7 +261,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
     Object.assign(chat, { status: 'streaming', messages: [QUESTION, message('m2', 'assistant', '')] })
     const view = renderPage()
     await shownChat(null)
-    await screen.findByText(firstWords(QUESTION))
+    await inConversation(QUESTION)
     raise({ tool_approval: TOOL_APPROVAL })
     act(() => chat.options?.onChatIdUpdate('c9'))
     await waitFor(() => expect(seen.chat?.messages[1].approvals.map((card) => card.chatId)).toEqual(['c9']))
@@ -279,7 +289,7 @@ async function renderStored(messages: ChatMessage[]) {
   serve('c1', 'Laptop for uni', messages)
   renderPage()
   const shown = await shownChat('c1')
-  await screen.findByText(firstWords(messages[0]))
+  await inConversation(messages[0])
   return shown
 }
 
@@ -332,7 +342,8 @@ describe('what a stored reply carries', () => {
     await renderStored([message('q1', 'user', 'Shortlist three laptops?'), message('m2', 'assistant', 'That is a big one.')])
     const goal = 'Research ten competitors and compare pricing'
     act(() => chat.options?.onData({ type: 'mission-suggestion', data: { goal, complexity: 'organ', agent_id: 3 } }))
-    expect(await screen.findByText(goal)).toBeInTheDocument()
+    // The host's card shows the goal in quotes, "<goal>" (components/chatbot/mission-suggestion-card.tsx).
+    expect(await screen.findByText(goal, { exact: false })).toBeInTheDocument()
     expect(screen.getByText('Multi-step')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Launch Mission/ }))
     const context = [{ role: 'user', content: 'Shortlist three laptops?' }, { role: 'assistant', content: 'That is a big one.' }]
