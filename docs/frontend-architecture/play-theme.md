@@ -91,6 +91,14 @@ Play is opt-in. `DEFAULT_UI_STYLE` stays `'studio'` and `APPEARANCE_DEFAULTS_VER
 
 This page describes what the code does, the 15 Oct review's fixes (P260-FX-01 to FX-31, `scripts/ralph/prd260-review-fix-plan.md`) included; `Mnn` and `Fn` name that plan's merged findings and founder decisions. A path that doesn't start with `frontend/`, `docs/` or `scripts/` is under `frontend/`.
 
+### Play lives in two repositories until A-19 (PRD-261 A-16b)
+
+From core commit `ebedc7eb8` (W-A5's merge, which ported builtin Play onto `@automatos/theme-sdk`), Play's code is also in the Design Kit, `AutomatosAI/automatos-play`, under `themes/play`, copied from that commit and built there as the installable package `automatos/play` (its `README.md` names the commit and every line it changed). **Until PRD-261 A-19 removes builtin Play from core, a change to Play in core must be made in the kit too, and the reverse, and each pull request names the other.** The kit's copy then records the new core commit.
+
+What counts as Play here is what the kit copies: `components/play`, `components/looks`, `components/mascot`; `lib/play`, `lib/looks`, `lib/mascot`, `lib/look-kit`; the hooks and the store Play's code imports (`hooks/use-*.ts`, `stores/play-chat-store.ts`); `lib/text/plain-line.ts`; `app/play-theme.css`, `app/play-fonts.ts` with `app/fonts/play/`, and `public/auto/`. Three host files have a counterpart in the kit as well: what builtin Play registers (`lib/theme-host/builtin/play-slots.tsx`, `play-entry.ts`) is what the kit's `src/entry.ts` and `theme.json` register; `lib/theme-host/builtin/play-prepaint.ts` is copied as the kit's `scripts/looks/play-prepaint.ts`; and `orchestrator/services/themes/data/play-look-schema.json` must match the `looks/schema.json` the kit compiles, byte for byte.
+
+The browser lane installs the kit's package at the kit commit `.github/workflows/browser-e2e.yml` pins (`KIT_REF`, PRD-261 A-17a; `e2e/browser/README.md`). The core pull request that mirrors a kit change moves that pin to the kit commit carrying it.
+
 ---
 
 ## The Style axis with Play

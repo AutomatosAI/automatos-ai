@@ -25,6 +25,10 @@ name: browser-e2e
 # workflows that exist on the default branch. Before that, the lane runs on a
 # pull_request whose HEAD commit has no [skip ci].
 #
+# PRD-261 A-17a: the `package` job builds Play as the Design Kit packs it (the kit repository at
+# the commit KIT_REF pins, below), and this job installs that package in the local edition
+# (the @package specs). The kit is public since D2 (PA-10), so its checkout needs no secret.
+#
 # NON-REQUIRED at introduction; making it a required check is the repo admin's call.
 
 on:
@@ -170,9 +174,84 @@ concurrency:
 permissions:
   contents: read
 
+# PRD-261 A-17a: the Design Kit commit the lane packs Play from. W-K2's merge on the kit's main
+# (Play packed as automatos/play 1.0.0; kit CI run 39375088068 built it). Move it with the kit,
+# in the same pull request as the Play change it brings (the mirror rule,
+# docs/frontend-architecture/play-theme.md). npm is pinned to the kit's own version (its kit.yml).
+env:
+  KIT_REPOSITORY: AutomatosAI/automatos-play
+  KIT_REF: 2aacd0a4721062d61c625a8b1178cfe5aadf6ab4
+  KIT_NPM_VERSION: 11.21.1
+  KIT_PLAY_WORKSPACE: themes/play
+  PLAY_PACKAGE: automatos.play-1.0.0.autotheme
+  PLAY_PACKAGE_ARTIFACT: play-package
+
 jobs:
+  # PRD-261 A-17a: Play's .autotheme, built and packed with the kit's own scripts from its
+  # committed lockfile. No install script runs (--ignore-scripts); Play's build fetches Auto's
+  # clips from core at the commit its mascot.lock.json pins, checking each one's sha256.
+  package:
+    name: Pack Play from the Design Kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the Design Kit at its pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.KIT_REPOSITORY }}
+          ref: ${{ env.KIT_REF }}
+          path: kit
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: kit/package-lock.json
+
+      - name: Pin npm to the kit's version
+        run: npm install -g "npm@${KIT_NPM_VERSION}"
+
+      - name: Install the kit (its lockfile, no install scripts)
+        working-directory: kit
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build Play
+        working-directory: kit
+        run: npm run build --workspace="$KIT_PLAY_WORKSPACE"
+
+      - name: Pack Play
+        working-directory: kit
+        run: npm run pack --workspace="$KIT_PLAY_WORKSPACE"
+
+      # Fails when the pack wrote no package under the expected name.
+      - name: Record the package's size and sha256
+        working-directory: kit/${{ env.KIT_PLAY_WORKSPACE }}/out
+        run: |
+          {
+            echo "### Play from the Design Kit (${KIT_REPOSITORY}@${KIT_REF})"
+            echo
+            echo '```'
+            ls -l "$PLAY_PACKAGE"
+            sha256sum "$PLAY_PACKAGE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the Play package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.PLAY_PACKAGE_ARTIFACT }}
+          path: kit/${{ env.KIT_PLAY_WORKSPACE }}/out/${{ env.PLAY_PACKAGE }}
+          if-no-files-found: error
+          retention-days: 7
+
   browser-e2e:
     name: Browser e2e (non-required)
+    needs: package
+    # The lane runs when the package job failed too: every other spec still reports, and the
+    # @package specs fail on the missing package (specs/installed-play.spec.ts).
+    if: ${{ !cancelled() }}
     # Pinned, not -latest: the browsers' system packages are installed for this image.
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -192,6 +271,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Start the local backend (postgres, redis, minio, backend)
         run: docker compose up -d --build postgres redis minio backend
@@ -280,13 +361,36 @@ jobs:
           done
           echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
 
+      # PRD-261 A-17a: the package job's Play package. When that job failed there is nothing to
+      # download, and the @package specs fail on the missing file.
+      - name: Download the Play package from the Design Kit
+        if: needs.package.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.PLAY_PACKAGE_ARTIFACT }}
+          path: ${{ runner.temp }}/kit-package
+
       # EXPECTED_REACT_VERSION and NEXT_VERSION come from $GITHUB_ENV (set above).
       - name: Run the browser specs
+        id: specs
         working-directory: e2e/browser
         env:
           E2E_APP_URL: http://localhost:3000
           RECORD_DIR: records
         run: npx playwright test --grep "@smoke|@off|@host|@record" --project=chromium --project=webkit --project=firefox
+
+      # PRD-261 A-17a: the installed Play package, after the other specs and one test at a time.
+      # Its specs store the member's theme choice on the lane's one backend, which every other
+      # spec's tab reads, so they never run beside them. Their own output folders keep the run
+      # above's report and traces. They run when the specs above failed too.
+      - name: Run the installed Play package specs
+        if: ${{ !cancelled() && steps.specs.outcome != 'skipped' }}
+        working-directory: e2e/browser
+        env:
+          E2E_APP_URL: http://localhost:3000
+          E2E_KIT_PACKAGE: ${{ runner.temp }}/kit-package/${{ env.PLAY_PACKAGE }}
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-package
+        run: npx playwright test --grep "@package" --project=chromium --project=webkit --workers=1 --output=test-results-package
 
       # The theme-host record (React version, import-map integrity support), pass or fail.
       - name: Summarise the theme-host record
@@ -318,6 +422,8 @@ jobs:
           path: |
             e2e/browser/playwright-report
             e2e/browser/test-results
+            e2e/browser/playwright-report-package
+            e2e/browser/test-results-package
           retention-days: 7
           if-no-files-found: ignore
 
