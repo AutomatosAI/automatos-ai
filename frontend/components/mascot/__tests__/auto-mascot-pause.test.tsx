@@ -129,9 +129,11 @@ describe('Pause Auto (F10, WCAG 2.2.2)', () => {
     const { container } = render(<AutoMascot state="idle" playing={false} />)
     expect(screen.queryByRole('button', { name: PAUSE_AUTO })).toBeNull()
     expect(clips(container)).toHaveLength(0)
+    // His ring stands still too: with no control here, an infinite pulse would fail 2.2.2.
+    expect(container.firstElementChild).toHaveAttribute('data-motion', 'still')
   })
 
-  it('gives a picture of the chat (pauseControl={false}) no control, yet keeps his name and obeys the pause', () => {
+  it('drops his own control where the page stops him another way (pauseControl={false}), yet keeps his name and obeys the pause', () => {
     const preview = render(<AutoMascot state="celebrate" caption="Ta-da." pauseControl={false} />)
     expect(screen.queryByRole('button', { name: PAUSE_AUTO })).toBeNull()
     expect(screen.getByRole('img', { name: 'Ta-da.' })).toBeInTheDocument()

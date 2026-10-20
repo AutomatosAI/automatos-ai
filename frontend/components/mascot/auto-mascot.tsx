@@ -28,9 +28,9 @@ import { useMascotMotion } from './use-mascot-motion'
  *
  * PRD-261 A-13b (F10, WCAG 2.2.2): under him sits the Pause Auto control,
  * wherever he can move (playing, not decorative, not under the OS reduced-motion
- * setting) and is the page's live Auto (pauseControl, false on a picture of the
- * chat such as the Looks preview). Paused, he is his still and his ring stops (data-motion="still"),
- * and he stays paused across a state change, a remount and a reload, in every
+ * setting) unless the caller turns it off (pauseControl). Paused, or never asked
+ * to play (playing={false}), he is his still and his ring stops (data-motion="still"),
+ * so nothing of his moves without a control; he stays paused across a state change, a remount and a reload, in every
  * tab of this browser (lib/mascot/pause.ts). Under reduced motion he is the
  * same still, with no control, since nothing moves.
  */
@@ -67,9 +67,12 @@ export interface AutoMascotProps {
    */
   readonly decorative?: boolean
   /**
-   * False where he is a picture of the chat, not a live Auto (the Looks page's
-   * preview): he keeps his name and caption and obeys the shared pause, but has
-   * no Pause Auto control of his own, so a mockup never offers a real button.
+   * False drops his own Pause Auto control; he keeps his name and caption and
+   * obeys the shared pause. Only for a page that already gives the user a way
+   * to stop him (WCAG 2.2.2), as the style sheet's specimens have "Play Auto's
+   * states" (with playing={false} his clip and his ring both stand still): a
+   * moving Auto with no control anywhere on the page fails 2.2.2.
+   * No caller passes it yet; the Looks preview keeps its control.
    */
   readonly pauseControl?: boolean
 }
@@ -105,7 +108,9 @@ export function AutoMascot({
   const format = useVideoFormat()
   // One clip that won't play, or blocked autoplay, means stills from then on, not a stuck clip.
   const [videoFailed, setVideoFailed] = useState(false)
-  const video = playing && !motion.still && !videoFailed ? format : null
+  // Nothing of his moves unless he plays: no clip and no ring pulse (WCAG 2.2.2).
+  const still = motion.still || !playing
+  const video = !still && !videoFailed ? format : null
   const player = useMascotPlayer({ target: state, still: video === null, onClipEnded })
   const label = caption ?? captionFor(state)
   const pausable = showsPauseControl({ playing, decorative, pauseControl, reducedMotion: motion.reducedMotion })
@@ -120,7 +125,7 @@ export function AutoMascot({
     <div
       className={styles.auto}
       data-size={size}
-      data-motion={motion.still ? 'still' : undefined}
+      data-motion={still ? 'still' : undefined}
       aria-hidden={decorative ? true : undefined}
     >
       {/* data-glow: app/play-theme.css lights the page behind everything from it (body:has). */}
