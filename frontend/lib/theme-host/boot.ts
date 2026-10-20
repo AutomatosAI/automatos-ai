@@ -24,7 +24,7 @@ import type { BuiltinThemeBootData, CookieReader, ThemeBoot, ThemeBootResolver, 
 import { BUILTIN_PLAY_BOOT } from './builtin/play-boot'
 import { BUILTIN_PLAY_REF } from './builtin/play-entry'
 import { themeLookRulesOf } from './looks/spec'
-import { THEME_TONE_COOKIE } from './looks/tone-cookie'
+import { parseThemeToneCookie, THEME_TONE_COOKIE } from './looks/tone-cookie'
 import { findThemeEntry, isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeTonePolicy, UiStyle } from './registry-types'
 
@@ -115,12 +115,14 @@ function keepsLookTone(boot: ThemeBoot): boolean {
  * PRD-261 W-A6b (gap G2), A-19d2: an installed theme whose look sets the tone starts on the tone
  * its look last wrote to the generic look runtime's tone cookie, so the first paint is already that
  * tone. The cookie is read per request, after the backend's boot (which the boot cache may hold) is
- * answered, and strictly: anything but 'light' or 'dark' is no tone. Builtin Play's own cookie is
- * never read for an installed theme, Play's package included.
+ * answered, and strictly: only this theme's own value (its tone and its id's mark, tone-cookie.ts)
+ * is a tone, so a theme switched to from another installed one never starts on that one's tone.
+ * Builtin Play's own cookie is never read for an installed theme, Play's package included.
  */
 function withLookTone(boot: ThemeBoot, readCookie: CookieReader): ThemeBoot {
-  if (!keepsLookTone(boot)) return boot
-  return { ...boot, tone: { policy: boot.tone.policy, value: parseThemeTone(readCookie(THEME_TONE_COOKIE)) } }
+  if (boot.entry === null || !keepsLookTone(boot)) return boot
+  const value = parseThemeToneCookie(readCookie(THEME_TONE_COOKIE), boot.entry.themeId)
+  return { ...boot, tone: { policy: boot.tone.policy, value } }
 }
 
 /**

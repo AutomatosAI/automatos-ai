@@ -96,7 +96,7 @@ function clearHeldPaint(root: HTMLElement, held: HeldTable): void {
 /**
  * Switched off, the motion marks come off and, unless the host still loads or runs an installed theme
  * (keepFirstPaint), the variables of the last table this runtime held. A theme left in place (for
- * Studio, Classic or builtin Play: only a switch TO an installed theme reloads) hands in no table, as
+ * Studio, Classic or a builtin theme: only a switch TO an installed theme reloads) hands in no table, as
  * its rules go with its id, and the host's status can trail the style by a commit; so the table is
  * held, not replaced by none, into the commit where keepFirstPaint turns false.
  */
@@ -122,6 +122,8 @@ function useLookOnDocument({ table, look, active, reducedMotion, keepFirstPaint 
 }
 
 interface LookTone {
+  /** The theme whose look tone the cookie keeps (its theme.json id); null for every other style. */
+  readonly themeId: string | null
   readonly active: boolean
   /** The rules are not read yet: nothing is said about the tone (the server's stands). */
   readonly pending: boolean
@@ -132,17 +134,17 @@ interface LookTone {
 }
 
 /** Until a look is painted the server's tone (from its cookie) stands, so a reload never flips it. */
-function useLookTone({ active, pending, follows, tone, onToneChange }: LookTone): void {
+function useLookTone({ themeId, active, pending, follows, tone, onToneChange }: LookTone): void {
   useEffect(() => {
     if (pending) return
-    if (!active || !follows) {
+    if (!active || !follows || themeId === null) {
       clearThemeToneCookie()
       return
     }
     if (tone === null) return
-    writeThemeToneCookie(tone)
+    writeThemeToneCookie(themeId, tone)
     onToneChange?.(tone)
-  }, [active, pending, follows, tone, onToneChange])
+  }, [themeId, active, pending, follows, tone, onToneChange])
 }
 
 /** The next page load's boot script paints this account's active look (F5). */
@@ -186,7 +188,7 @@ export function ThemeLookProvider(props: ThemeLookProviderProps) {
   const reducedMotion = usePrefersReducedMotion()
 
   useLookOnDocument({ table, look: painted, active, reducedMotion, keepFirstPaint })
-  useLookTone({ active, pending: enabled && rules === undefined, follows, tone, onToneChange })
+  useLookTone({ themeId, active, pending: enabled && rules === undefined, follows, tone, onToneChange })
   useLookPointer(storage, theme, store.scope)
 
   const source = useMemo<LookBridgeSource | null>(() => (active && rules ? { store, rules, tone } : null), [active, rules, store, tone])

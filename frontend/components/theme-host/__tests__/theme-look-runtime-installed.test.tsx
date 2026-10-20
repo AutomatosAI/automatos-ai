@@ -45,7 +45,7 @@ import { HELLO_ENTRY, HELLO_RULES, helloThemeBoot, PAPER, putPageBoot } from '@/
 import { THEME_MOTION_ATTRIBUTE, THEME_MOTION_VAR } from '@/lib/theme-host/looks/motion'
 import { paint, paintNames } from '@/lib/theme-host/looks/paint'
 import { bootLookStorage, themeLookKeys } from '@/lib/theme-host/looks/storage'
-import { THEME_TONE_COOKIE } from '@/lib/theme-host/looks/tone-cookie'
+import { THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 import { useLook } from '@/lib/theme-sdk/looks'
@@ -222,7 +222,7 @@ describe("PRD-261 A-19d2 — Play's package runs on the generic look runtime", (
     renderApp(INSTALLED_PLAY_STYLE, status, play)
     expect(await screen.findByText('Looks: available')).toBeInTheDocument()
     expect(await screen.findByText('Tone: dark')).toBeInTheDocument()
-    await waitFor(() => expect(cookie(THEME_TONE_COOKIE)).toBe('dark'))
+    await waitFor(() => expect(cookie(THEME_TONE_COOKIE)).toBe(themeToneCookieValue(PLAY_PACKAGE_ENTRY.themeId, 'dark')))
     await waitFor(() => expect(document.documentElement.classList.contains('dark')).toBe(true))
     expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK))
   })
@@ -261,7 +261,7 @@ describe('PRD-261 A-19d2 — any installed theme with looks runs on it, from its
     renderApp(HELLO_LOOKS_STYLE, 'active', hello)
     expect(await screen.findByText('Looks: available')).toBeInTheDocument()
     expect(await screen.findByText('Tone: light')).toBeInTheDocument()
-    await waitFor(() => expect(cookie(THEME_TONE_COOKIE)).toBe('light'))
+    await waitFor(() => expect(cookie(THEME_TONE_COOKIE)).toBe(themeToneCookieValue(HELLO_ENTRY.themeId, 'light')))
     expect(helloVars()).toEqual(paint(HELLO_RULES.table, PAPER))
     expect(motionMarks()).toEqual({ theme: 'full', variable: '1', builtin: null })
   })

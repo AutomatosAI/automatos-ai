@@ -7,7 +7,9 @@
  * Gap G2: an installed theme whose look sets the tone starts on the tone its look last wrote to the
  * tone cookie, as builtin Play does, so Providers forces that tone from the server render on.
  * PRD-261 A-19d2: the generic look runtime's cookie (`automatos-theme-tone`), for a theme whose
- * boot carries its looks and a tone rule; builtin Play's own cookie is not read for it.
+ * boot carries its looks and a tone rule; builtin Play's own cookie is not read for it. The value
+ * names its theme (lib/theme-host/looks/tone-cookie.ts), so another installed theme's tone, left
+ * by a switch from it, or the old bare tone is not read either.
  *
  * The installed resolver (lib/theme-host/boot-server.ts, which fetches the backend's boot route) is
  * stood in for here by one that answers the boot the test gives; its own tests are boot-server.test.ts.
@@ -44,8 +46,8 @@ import { baseThemeBoot } from '@/lib/theme-host/boot'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
-import { helloThemeBoot } from '@/lib/theme-host/looks/__tests__/hello-looks'
-import { THEME_TONE_COOKIE } from '@/lib/theme-host/looks/tone-cookie'
+import { HELLO_ENTRY, helloThemeBoot } from '@/lib/theme-host/looks/__tests__/hello-looks'
+import { THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
 import { UI_STYLE_COOKIE } from '@/lib/ui-style'
 
 import { INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY } from '@/lib/theme-host/__tests__/installed-entry-fixture'
@@ -99,8 +101,12 @@ describe("PRD-261 W-A6b (gap G2) — an installed theme's look tone from the fir
   it("hands Providers the tone cookie's tone for a 'from-look' theme whose boot carries its looks and a tone rule", async () => {
     // A theme with looks as the boot route answers it (hello-a09b's table, guard and presets), under Play's package's entry.
     installedBoot.current = helloThemeBoot({ entry: PLAY_PACKAGE_ENTRY })
-    expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: 'light' }))?.initialTone).toBe('light')
+    const lightFor = (themeId: string) => themeToneCookieValue(themeId, 'light')
+    expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: lightFor(PLAY_PACKAGE_ENTRY.themeId) }))?.initialTone).toBe('light')
     expect((await providersProps(INSTALLED_PLAY_STYLE))?.initialTone).toBeUndefined()
     expect((await providersProps(INSTALLED_PLAY_STYLE, { [PLAY_TONE_COOKIE]: 'light' }))?.initialTone).toBeUndefined()
+    // Another installed theme's tone (a switch from it reloads into this one) and the old bare tone: none.
+    expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: lightFor(HELLO_ENTRY.themeId) }))?.initialTone).toBeUndefined()
+    expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: 'light' }))?.initialTone).toBeUndefined()
   })
 })

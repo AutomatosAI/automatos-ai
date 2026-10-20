@@ -6,6 +6,10 @@
  * is the theme's own tone rule (hello-a09b's here: paper is light, ink and dusk are dark); Play's
  * per-ground values are the kit's (K-19c, its compile-looks test).
  *
+ * The value names its theme (`<tone>.<mark>`, the mark a hash of the theme's id): one cookie serves
+ * the whole browser, and a switch from installed theme A to installed theme B reloads without
+ * leaving A, so B's boot takes only its own value; A's, or the old bare tone, is no tone.
+ *
  * Plain .ts (the ledger names this path), so the provider is rendered with createElement.
  */
 import { act, cleanup, render, waitFor } from '@testing-library/react'
@@ -21,6 +25,8 @@ import {
   THEME_TONE_COOKIE,
   clearThemeToneCookie,
   parseThemeToneCookie,
+  themeToneCookieValue,
+  themeToneMark,
   toneOfLook,
   writeThemeToneCookie,
 } from '@/lib/theme-host/looks/tone-cookie'
@@ -28,13 +34,17 @@ import type { ThemeTonePolicy, UiStyle } from '@/lib/theme-host/registry-types'
 import { useLook, type HostLookState } from '@/lib/theme-sdk/looks'
 
 import { cookieReader } from '@/lib/theme-host/__tests__/boot-harness'
-import { DUSK, HELLO, HELLO_RULES, HELLO_THEME_ID, helloThemeBoot, INK, memoryStorage, PAPER, putPageBoot } from './hello-looks'
+import { DUSK, HELLO, HELLO_ENTRY, HELLO_RULES, HELLO_THEME_ID, helloThemeBoot, INK, memoryStorage, PAPER, putPageBoot } from './hello-looks'
 
 const RULE = HELLO_RULES.table.tone
 const SCOPE = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_a')
 const INSTALL_STYLE: UiStyle = 'theme:install:5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d'
 /** Builtin Play's own tone cookie (lib/theme-host/builtin/play-boot.ts names it), never read for an installed theme. */
 const BUILTIN_TONE_COOKIE = 'automatos-play-tone'
+/** Another installed theme, the one a switch to hello-a09b reloads from. */
+const OTHER_THEME_ID = 'acme/other'
+/** The cookie's value for hello-a09b's look tone. */
+const hello = (tone: ThemeTone): string => themeToneCookieValue(HELLO_THEME_ID, tone)
 
 function toneCookie(name: string = THEME_TONE_COOKIE): string | undefined {
   return document.cookie.split('; ').find((entry) => entry.startsWith(`${name}=`))?.split('=')[1]
@@ -105,19 +115,33 @@ describe("the theme's tone rule", () => {
 })
 
 describe('the tone cookie', () => {
-  it("parses only 'dark' and 'light'", () => {
-    expect(parseThemeToneCookie('dark')).toBe('dark')
-    expect(parseThemeToneCookie('light')).toBe('light')
-    for (const value of ['Dark', 'system', '', ' dark', 'dark; Path=/', 'toString', null, undefined]) {
-      expect({ value, tone: parseThemeToneCookie(value) }).toEqual({ value, tone: null })
+  it("parses only the theme's own 'dark' or 'light'", () => {
+    expect(parseThemeToneCookie(hello('dark'), HELLO_THEME_ID)).toBe('dark')
+    expect(parseThemeToneCookie(hello('light'), HELLO_THEME_ID)).toBe('light')
+    const mark = themeToneMark(HELLO_THEME_ID)
+    // The old bare tone, another theme's value, and anything that isn't exactly the theme's own.
+    const others = ['dark', 'light', themeToneCookieValue(OTHER_THEME_ID, 'dark'), `Dark.${mark}`, `system.${mark}`, `toString.${mark}`]
+    const malformed = [`dark.${mark}.x`, ` ${hello('dark')}`, `${hello('dark')}; Path=/`, 'toString', '', '.', null, undefined]
+    for (const value of [...others, ...malformed]) {
+      expect({ value, tone: parseThemeToneCookie(value, HELLO_THEME_ID) }).toEqual({ value, tone: null })
     }
   })
 
-  it('is written and cleared on the whole site', () => {
-    writeThemeToneCookie('light')
-    expect(toneCookie()).toBe('light')
-    writeThemeToneCookie('dark')
-    expect(toneCookie()).toBe('dark')
+  it("names its theme by a bounded, URL-safe mark of the id (FNV-1a), never the id itself", () => {
+    expect(['', 'a', 'foobar'].map(themeToneMark)).toEqual(['811c9dc5', 'e40c292c', 'bf9cf968'])
+    expect(themeToneMark(HELLO_THEME_ID)).not.toBe(themeToneMark(OTHER_THEME_ID))
+    for (const themeId of [HELLO_THEME_ID, OTHER_THEME_ID, 'x'.repeat(200)]) {
+      expect(themeToneCookieValue(themeId, 'light')).toMatch(/^light\.[0-9a-f]{8}$/)
+    }
+  })
+
+  it('is written and cleared on the whole site, and reads back as the tone for its own theme only', () => {
+    writeThemeToneCookie(HELLO_THEME_ID, 'light')
+    expect(toneCookie()).toBe(hello('light'))
+    expect(parseThemeToneCookie(toneCookie(), HELLO_THEME_ID)).toBe('light')
+    expect(parseThemeToneCookie(toneCookie(), OTHER_THEME_ID)).toBeNull()
+    writeThemeToneCookie(HELLO_THEME_ID, 'dark')
+    expect(parseThemeToneCookie(toneCookie(), HELLO_THEME_ID)).toBe('dark')
     clearThemeToneCookie()
     expect(toneCookie()).toBeUndefined()
   })
@@ -134,12 +158,12 @@ describe("the generic look runtime's provider", () => {
     removeBoot = putPageBoot(helloThemeBoot())
     const onToneChange = vi.fn()
     const { rerender } = renderProvider(onToneChange, memoryStorage({ [lookKeys(SCOPE, HELLO.keys).active]: JSON.stringify(INK) }))
-    await waitFor(() => expect(toneCookie()).toBe('dark'))
+    await waitFor(() => expect(toneCookie()).toBe(hello('dark')))
     expect(onToneChange).toHaveBeenLastCalledWith('dark')
     expect(seen.current?.tone).toBe('dark')
 
     act(() => void seen.current?.setLook(PAPER))
-    await waitFor(() => expect(toneCookie()).toBe('light'))
+    await waitFor(() => expect(toneCookie()).toBe(hello('light')))
     expect(onToneChange).toHaveBeenLastCalledWith('light')
 
     rerender({ enabled: false })
@@ -151,7 +175,7 @@ describe("the generic look runtime's provider", () => {
 
   it("forces no tone and keeps no cookie under a theme whose tone doesn't follow its look", async () => {
     removeBoot = putPageBoot(helloThemeBoot())
-    writeThemeToneCookie('dark')
+    writeThemeToneCookie(HELLO_THEME_ID, 'dark')
     const onToneChange = vi.fn()
     renderProvider(onToneChange, memoryStorage(), 'user')
     await waitFor(() => expect(seen.current?.available).toBe(true))
@@ -165,14 +189,29 @@ describe('the boot reads it for an installed from-look theme', () => {
   const resolve = (cookies: Record<string, string>, boot: ThemeBoot) => createThemeBootResolver(cookieReader(cookies), async () => boot)(INSTALL_STYLE)
 
   it("starts the theme on the cookie's tone, strictly", async () => {
-    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: 'dark' })
-    expect((await resolve({ [THEME_TONE_COOKIE]: 'light' }, helloThemeBoot())).tone.value).toBe('light')
+    expect((await resolve({ [THEME_TONE_COOKIE]: hello('dark') }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: 'dark' })
+    expect((await resolve({ [THEME_TONE_COOKIE]: hello('light') }, helloThemeBoot())).tone.value).toBe('light')
     expect((await resolve({ [THEME_TONE_COOKIE]: 'bogus' }, helloThemeBoot())).tone.value).toBeNull()
     expect((await resolve({}, helloThemeBoot())).tone.value).toBeNull()
   })
 
+  it("never starts it on another theme's tone (a switch from that installed theme) or on the old bare tone", async () => {
+    expect((await resolve({ [THEME_TONE_COOKIE]: themeToneCookieValue(OTHER_THEME_ID, 'dark') }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: null })
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: null })
+  })
+
+  it("what the runtime wrote under a theme starts that theme again, never the installed theme a switch from it reloads into", async () => {
+    removeBoot = putPageBoot(helloThemeBoot())
+    renderProvider(vi.fn(), memoryStorage({ [lookKeys(SCOPE, HELLO.keys).active]: JSON.stringify(INK) }))
+    await waitFor(() => expect(toneCookie()).toBe(hello('dark')))
+    const written = { [THEME_TONE_COOKIE]: toneCookie() ?? '' }
+    const other = helloThemeBoot({ entry: { ...HELLO_ENTRY, themeId: OTHER_THEME_ID } })
+    expect((await resolve(written, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: 'dark' })
+    expect((await resolve(written, other)).tone).toEqual({ policy: 'from-look', value: null })
+  })
+
   it("never reads builtin Play's tone cookie for an installed theme", async () => {
-    expect((await resolve({ [BUILTIN_TONE_COOKIE]: 'dark' }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: null })
+    expect((await resolve({ [BUILTIN_TONE_COOKIE]: hello('dark') }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: null })
   })
 
   it('leaves it unread when nothing would keep it: no tone rule, no looks, no entry, no look keys, or not from-look', async () => {
@@ -185,7 +224,7 @@ describe('the boot reads it for an installed from-look theme', () => {
       helloThemeBoot({ tone: { policy: 'user', value: null } }),
     ]
     for (const boot of boots) {
-      expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, boot)).tone.value).toBeNull()
+      expect((await resolve({ [THEME_TONE_COOKIE]: hello('dark') }, boot)).tone.value).toBeNull()
     }
   })
 })
