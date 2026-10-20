@@ -3,8 +3,8 @@
 frontend/ tracked package-lock.json + yarn.lock + pnpm-lock.yaml → a fresh clone's
 install is nondeterministic (depends which package manager the developer runs). The
 frontend-ci lane uses npm against package-lock.json (test.yml: `cache: npm`,
-`cache-dependency-path: frontend/package-lock.json`, `npm install`), so that is the
-one kept; the other two are deleted. This guard asserts exactly one lockfile remains.
+`cache-dependency-path: frontend/package-lock.json`, `npm ci` since PRD-262 US-047), so
+that is the one kept; the other two are deleted. This guard asserts exactly one lockfile remains.
 
 Pure/static — reads the git index (`git ls-files`); no install, no build.
 """

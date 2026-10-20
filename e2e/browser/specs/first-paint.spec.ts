@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { fulfillBackendJson } from '../support/backend-route'
 import { THEME_E2E_PATH } from '../support/hello-theme'
 
 // PRD-261 A-03 (@smoke, so it runs in every build of the lane): first paint from data. A Studio
@@ -11,6 +12,14 @@ import { THEME_E2E_PATH } from '../support/hello-theme'
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const STYLE_COOKIE = 'automatos-style'
 const PLAY_COOKIES = ['play', 'theme:builtin:play']
+const ACTIVE_ROUTE = '**/api/themes/active'
+/**
+ * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
+ * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
+ * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
+ */
+const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
+const OK = 200
 const APPEARANCE_DEFAULTS = { key: 'automatos-appearance-defaults', value: '2026-09-17-studio-dark' }
 /** A declaration only app/play-theme.css makes: Play's page colour token on html.play. */
 const PLAY_THEME_MARKER = '--pl-color-bg:'
@@ -105,6 +114,7 @@ test('a Studio page requests none of Play: no stylesheet chunk, no face file', {
 for (const cookie of PLAY_COOKIES) {
   test(`under the '${cookie}' cookie, <html> has 'studio play' and the look before the first frame`, { tag: ['@smoke', '@first-paint'] }, async ({ page, request }) => {
     await keepTheChosenStyle(page)
+    await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
     await page.addInitScript((vars) => {
       requestAnimationFrame(() => {
         const root = document.documentElement

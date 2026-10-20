@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { useChatWithReceipts as useChat } from '@/lib/chat/use-chat-with-receipts' // PRD-256: + the turn's receipts
 import { usePageContext } from '@/lib/page-context'
 import { MessageWithReceipts as Message } from './message-with-receipts' // PRD-256: the receipts above the reply
-import { MultimodalInput } from './multimodal-input'
+import { FencedMultimodalInput as MultimodalInput } from '@/components/ai-label/fenced-multimodal-input' // PRD-264: paused while the AI label is hidden
 import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'

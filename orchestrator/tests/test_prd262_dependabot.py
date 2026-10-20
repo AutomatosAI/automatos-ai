@@ -5,7 +5,9 @@ A pin with nothing to move it freezes security fixes, so the two travel together
 * every FROM line that names an image is ``name:tag@sha256:<digest>``. The tag
   stays, so Dependabot moves the digest along the tag's line; a digest-only pin
   would be moved to the ``latest`` tag's digest. ``scratch`` and earlier stages
-  need no pin;
+  need no pin. A FROM line is read with the defaults of the ARGs declared before
+  the first FROM, as BuildKit reads it: ``FROM assets-${MEDIA_ASSETS}`` names the
+  stage the default picks (media-render, PRD-262 US-053);
 * a ``COPY --from`` or ``RUN --mount=…from=`` names a stage, never an image: an
   updater reads FROM lines only, so Node comes through a named ``FROM … AS node``
   stage (US-007);
@@ -79,6 +81,8 @@ _FROM_WORD = re.compile(r"^FROM\s", re.I)
 _FROM = re.compile(r"^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$", re.I)
 _COPY_FROM = re.compile(r"(?:^|\s)--from=(\S+)", re.I)
 _MOUNT_FROM = re.compile(r"--mount=\S*?[=,]from=([^,\s]+)", re.I)
+_GLOBAL_ARG = re.compile(r"^ARG\s+([A-Za-z_]\w*)(?:=(\S*))?\s*$", re.I)
+_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
 
 
 def _tracked(pattern: re.Pattern) -> list[str]:
@@ -93,16 +97,26 @@ def _instructions(text: str) -> list[str]:
     return [line.strip() for line in _CONTINUATION.sub(" ", code).splitlines() if line.strip()]
 
 
+def _with_defaults(word: str, defaults: dict[str, str]) -> str:
+    """``word`` with each ``$NAME`` or ``${NAME}`` a global ARG gives a default replaced by it."""
+    return _VARIABLE.sub(lambda m: defaults.get(m.group(1) or m.group(2), m.group(0)), word)
+
+
 def dockerfile_pin_problems(text: str) -> list[str]:
     """Each FROM image that is not tag@digest, and each copy or mount from an image."""
     stages: set[str] = set()
+    defaults: dict[str, str] = {}
     problems = []
     for line in _instructions(text):
+        global_arg = _GLOBAL_ARG.match(line) if not stages else None
+        if global_arg:
+            defaults[global_arg.group(1)] = global_arg.group(2) or ""
+            continue
         if _FROM_WORD.match(line):
             match = _FROM.match(line)
             if not match:
                 raise ValueError(f"a FROM line this check cannot read: {line}")
-            image, name = match.group(1), match.group(2)
+            image, name = _with_defaults(match.group(1), defaults), match.group(2)
             if image.lower() not in stages and image != "scratch" and not PINNED.match(image):
                 problems.append(f"FROM {image} is not pinned as name:tag@sha256:<digest>")
             stages.add((name or "").lower())
@@ -171,6 +185,12 @@ def test_every_tracked_dockerfile_pins_its_images_and_copies_only_from_stages():
     ("FROM python:3.11-slim@sha256:" + "e" * 63 + "\n", 1),
     ("FROM alpine:3.24@sha256:" + "2" * 64 + "\nCOPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/\n", 1),
     ("FROM alpine:3.24@sha256:" + "2" * 64 + "\nRUN --mount=type=bind,from=ghcr.io/x/y:1,source=/a,target=/b true\n", 1),
+    # A global ARG's default picks an earlier stage, or a pinned image; otherwise it is unpinned.
+    ("ARG SOURCE=fetch\nFROM python:3.12-slim@sha256:" + "e" * 64 + " AS assets-fetch\nFROM assets-${SOURCE} AS assets\n", 0),
+    ("ARG SOURCE=image\nFROM python:3.12-slim@sha256:" + "e" * 64 + " AS assets-fetch\nFROM assets-${SOURCE} AS assets\n", 1),
+    ("ARG BASE=python:3.12-slim@sha256:" + "e" * 64 + "\nFROM $BASE AS base\n", 0),
+    ("ARG BASE=python:3.12-slim\nFROM ${BASE}\n", 1),
+    ("FROM ${UNDECLARED}\n", 1),
     ("FROM node:24@sha256:" + "4" * 64 + " AS node\nFROM alpine:3.24@sha256:" + "2" * 64
      + "\nCOPY --from=node \\\n  /usr/local/bin/node /usr/local/bin/node\n", 0),
 ])

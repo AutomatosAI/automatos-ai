@@ -1,0 +1,11 @@
+/* PRD-261 A-12e: the missions-data hello theme's one stylesheet. Every rule sits under
+   html.hello-a12e, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12e .hello-a12e-frame {
+  min-height: 100vh;
+  background: var(--hello-a12e-ground);
+  color: var(--hello-a12e-ink);
+}
+
+html.hello-a12e .hello-a12e-page {
+  padding: 24px;
+}

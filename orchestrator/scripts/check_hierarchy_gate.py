@@ -83,7 +83,7 @@ ALLOW_LIST: Set[str] = {
     "platform_execute_playbook",
     # F147: workspace-scoped, no agent target.
     "platform_remove_member",              # destructive + confirmation (admin grant); never the owner
-    "platform_update_widget_config",       # fail-closed whitelist of three public widget keys
+    "platform_update_widget_config",       # fail-closed whitelist of the public widget keys
     "platform_update_mission_plan",        # edits a plan still awaiting the owner's approval
     "platform_update_onboarding",          # the workspace's own onboarding state
     # F151: a mission's own lifecycle — approving needs a person under

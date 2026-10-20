@@ -10,6 +10,8 @@
  *   calls the retry route; a missed post offers Reschedule and Publish now.
  * - A 409 says the post changed and reloads it, as approve does.
  * - apiClient calls publish-now and retry with POST.
+ * - PRD-264 EUAI-05: every channel's receipt states its AI label decision, in the
+ *   backend's words (GET /ai-labels): the receipt never decides it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -24,7 +26,9 @@ const api = vi.hoisted(() => ({
   retrySocialPost: vi.fn(),
   getSocialPostMedia: vi.fn(async () => []),
   listSocialPosts: vi.fn(async () => ({ posts: [], total: 0 })),
+  get: vi.fn(),
 }))
+const NO_AI_MEDIA = { carries: false, footage: [], stills: [], voice: null, own: [], recorded: false }
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api, default: api }))
@@ -74,6 +78,7 @@ beforeEach(() => {
   for (const fn of [api.scheduleSocialPost, api.unscheduleSocialPost, api.publishSocialPostNow, api.retrySocialPost]) {
     fn.mockReset().mockResolvedValue(post())
   }
+  api.get.mockReset().mockResolvedValue({ ai_media: NO_AI_MEDIA, targets: [] })
   vi.mocked(toast.error).mockReset()
 })
 afterEach(() => cleanup())
@@ -99,17 +104,52 @@ describe('an approved post', () => {
     await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('p1'))
   })
 
-  it('shows the privacy level and AI label a TikTok target will publish with', () => {
+  it('shows the privacy level and the AI label a TikTok target will publish with', async () => {
+    api.get.mockResolvedValueOnce({
+      ai_media: { ...NO_AI_MEDIA, carries: true, voice: 'kokoro', recorded: true },
+      targets: [{ id: 't-tiktok', toolkit: 'tiktok', post_kind: 'video', at_publish: false,
+        ai_label: "TikTok's AI-generated label is on: the post carries a synthetic voice (Kokoro)." }],
+    })
     renderDetail(post({
       targets: [target('tiktok', { post_kind: 'video', options: { privacy_level: 'FOLLOWER_OF_CREATOR' } })],
-      footage: { hook: { prompt: 'A harvest table', status: 'done' } } as SocialPost['footage'],
     }))
     const receipt = screen.getByTestId('socials-receipt-tiktok-video')
     // Publish uses the choice only when the account allows it (US-304's choice form).
     expect(receipt.textContent).toContain(
       'Privacy: FOLLOWER_OF_CREATOR if the account allows it, else the most private level the account allows.',
     )
-    expect(receipt.textContent).toContain('AI-generated label: on')
+    expect(await screen.findByTestId('socials-ai-label-tiktok-video')).toHaveTextContent(
+      "TikTok's AI-generated label is on: the post carries a synthetic voice (Kokoro).",
+    )
+    expect(api.get).toHaveBeenCalledWith('/api/socials/posts/p1/ai-labels')
+  })
+
+  it('states the AI label decision on every channel, not only TikTok', async () => {
+    const youtube = "This video carries AI footage, and YouTube's upload takes no AI label. " +
+      "Set 'Altered or synthetic content' in YouTube Studio for this video."
+    const caption = (name: string) => `This post carries AI footage, and ${name} takes no AI label through its API, ` +
+      'so the caption carries the disclosure: start it with "AI-generated."'
+    api.get.mockResolvedValueOnce({
+      ai_media: { ...NO_AI_MEDIA, carries: true, footage: ['hook'], recorded: true },
+      targets: [
+        { id: 't-youtube', toolkit: 'youtube', post_kind: 'video', ai_label: youtube, at_publish: false },
+        { id: 't-linkedin', toolkit: 'linkedin', post_kind: 'text', ai_label: caption('LinkedIn'), at_publish: false },
+        { id: 't-twitter', toolkit: 'twitter', post_kind: 'text', ai_label: caption('X'), at_publish: false },
+      ],
+    })
+    renderDetail(post({ targets: [target('youtube', { post_kind: 'video' }), target('linkedin'), target('twitter')] }))
+    expect(await screen.findByTestId('socials-ai-label-youtube-video')).toHaveTextContent(youtube)
+    expect(screen.getByTestId('socials-ai-label-linkedin-text')).toHaveTextContent(caption('LinkedIn'))
+    expect(screen.getByTestId('socials-ai-label-twitter-text')).toHaveTextContent(caption('X'))
+  })
+
+  it('never decides the AI label itself: a done footage slot alone says nothing', () => {
+    renderDetail(post({
+      targets: [target('tiktok', { post_kind: 'video' })],
+      footage: { hook: { prompt: 'A harvest table', status: 'done' } } as SocialPost['footage'],
+    }))
+    expect(screen.getByTestId('socials-receipt-tiktok-video').textContent).not.toContain('AI-generated label')
+    expect(screen.queryByTestId('socials-ai-label-tiktok-video')).toBeNull()
   })
 })
 
@@ -149,6 +189,16 @@ describe('receipts', () => {
     expect(screen.getByTestId('socials-receipt-twitter-text').textContent).toContain('429 Too Many Requests')
     fireEvent.click(screen.getByRole('button', { name: 'Retry the failed channels' }))
     await waitFor(() => expect(api.retrySocialPost).toHaveBeenCalledWith('p1'))
+  })
+
+  it('a published target shows the AI label its publish used', async () => {
+    const used = 'No AI media in this post: no AI label is needed.'
+    api.get.mockResolvedValueOnce({
+      ai_media: NO_AI_MEDIA,
+      targets: [{ id: 't-linkedin', toolkit: 'linkedin', post_kind: 'text', ai_label: used, at_publish: true }],
+    })
+    renderDetail(post({ status: 'published', targets: [target('linkedin', { status: 'published' })] }))
+    expect(await screen.findByTestId('socials-ai-label-linkedin-text')).toHaveTextContent(used)
   })
 
   it('a published post offers no retry, and a skipped step is noted', () => {

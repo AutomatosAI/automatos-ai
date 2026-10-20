@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.media_render_bundle import build_bundle
 from core.social_templates import SOCIAL_IMAGE
-from modules.socials import channel_sizes
+from modules.socials import ai_media, channel_sizes
 from modules.socials.render import EXECUTION_PREFIX
 
 ORIGINAL = "original"
@@ -89,11 +89,15 @@ def crop_sizes(post: Any) -> List[str]:
 
 def crop_bundles(post: Any) -> List[Dict[str, Any]]:
     """Each size's render bundle: the composition's one slot shows the picture, whose file
-    joins the bundle as the render starts (``render.with_slot_files``)."""
+    joins the bundle as the render starts (``render.with_slot_files``). The picture is the
+    person's own, so no input is AI-made (PRD-264 EUAI-06a, ``ai_media.own_file_inputs``)."""
     return [
-        build_bundle(
-            workspace_id=post.workspace_id, reference=f"{EXECUTION_PREFIX}{post.id}", blocks=CROP_BLOCKS, values={},
-            brand_kit={}, size=size, keep_slots=(CROP_SLOT,), fmt=SOCIAL_IMAGE,
-        )
+        {
+            **build_bundle(
+                workspace_id=post.workspace_id, reference=f"{EXECUTION_PREFIX}{post.id}", blocks=CROP_BLOCKS, values={},
+                brand_kit={}, size=size, keep_slots=(CROP_SLOT,), fmt=SOCIAL_IMAGE,
+            ),
+            ai_media.INPUTS: ai_media.own_file_inputs(),
+        }
         for size in crop_sizes(post)
     ]

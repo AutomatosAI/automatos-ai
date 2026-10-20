@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, TypeVar
 
+from .espeak_build import LANGUAGES
 from .media_urls import UrlPrefix, parse_prefixes
 
 # The image switches these off (Dockerfile ENV) and boot refuses to start
@@ -66,6 +67,8 @@ class Settings:
     hyperframes_bin: str
     ffmpeg_bin: str
     ffprobe_bin: str
+    # PRD-264 EUAI-06a (D14): the XMP writer and reader of the AI mark (provenance.py).
+    exiftool_bin: str
     render_quality: str
     render_fps: int
     render_workers: str
@@ -74,6 +77,7 @@ class Settings:
     mix_timeout_seconds: int
     probe_timeout_seconds: int
     fetch_timeout_seconds: int
+    mark_timeout_seconds: int
     # Where jobs stage their compositions and keep their outputs until they expire.
     work_dir: str
     # The music library (US-112): manifest.json plus the tracks it names.
@@ -184,6 +188,7 @@ def _image(env: _Env) -> Dict[str, Any]:
         "hyperframes_bin": env.text("MEDIA_RENDER_HYPERFRAMES_BIN", "hyperframes"),
         "ffmpeg_bin": env.text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
         "ffprobe_bin": env.text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
+        "exiftool_bin": env.text("MEDIA_RENDER_EXIFTOOL_BIN", "exiftool"),
         "work_dir": env.text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
         "music_dir": env.text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
     }
@@ -214,6 +219,7 @@ def _rendering(env: _Env) -> Dict[str, Any]:
         "mix_timeout_seconds": env.positive_int("MEDIA_RENDER_MIX_TIMEOUT_SECONDS", 120),
         "probe_timeout_seconds": env.positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
         "fetch_timeout_seconds": env.positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
+        "mark_timeout_seconds": env.positive_int("MEDIA_RENDER_MARK_TIMEOUT_SECONDS", 60),
     }
 
 
@@ -260,7 +266,14 @@ def _voice(env: _Env) -> Dict[str, Any]:
             lambda v: 0.5 <= v <= 2.0,
             "a speed between 0.5 and 2.0",
         ),
-        "kokoro_lang": env.text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
+        # PRD-262 US-052: the image's espeak-ng data speaks these alone (espeak_build.py).
+        "kokoro_lang": _parse(
+            "MEDIA_RENDER_KOKORO_LANG",
+            env.text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
+            str,
+            lambda v: v in LANGUAGES,
+            "one of " + ", ".join(LANGUAGES),
+        ),
         "voice_max_tempo": _parse(
             "MEDIA_RENDER_VOICE_MAX_TEMPO",
             env.text("MEDIA_RENDER_VOICE_MAX_TEMPO", "1.25"),

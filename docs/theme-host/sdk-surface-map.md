@@ -29,10 +29,11 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
-## 1. The core modules Play's folders import (64: 61 in §0, plus W-A1's three)
+## 1. The core modules Play's folders import (74: 61 in §0, W-A1's three, the rows W-A2 added and PRD-264's one)
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
+| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | host-only | — | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label. The host keeps it; once Play is a package, the SDK's chat area pauses its composer the same way (see "Host-owned AI label" below). |
 | `@/components/chatbot/mission-created-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionCreatedCard` | The host's card for the Mission the chat created. |
 | `@/components/chatbot/mission-suggestion-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionSuggestionCard` | The host's card offering a Mission. |
 | `@/components/chatbot/task-card` | c/play/chat/reply-cards.tsx | SDK | `cards.TaskCard` | The host's task card. |
@@ -43,6 +44,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/components/local/first-run-nudge` | c/play/chat/play-chat.tsx | SDK | `cards.FirstRunNudge` | The local edition's first-run nudge. |
 | `@/components/onboarding/trial-exhausted-banner` | c/play/chat/turn-end.tsx | SDK | `cards.TrialExhaustedBanner` | The host's trial banner. |
 | `@/components/shared/markdown-view` | c/play/chat/play-markdown.tsx, c/play/deliverables/deliverable-content.tsx | SDK | `cards.MarkdownView` | The host's sanitising Markdown renderer; a theme never renders untrusted Markdown itself. |
+| `@/components/settings/themes/theme-labels` | c/looks/play-only-route.tsx | host-only | — | The same note: its Switch to Play skips an install of Play's package that is turned off (`isDisabled`), as the host's theme menu does (A-02c). A theme never lists or picks installs. |
 | `@/components/shared/page-header` | c/looks/play-only-route.tsx | host-only | — | Only the "Looks are part of Play" note uses it; that note is the host's plain `/looks` page under Classic and Studio (PA-14, A-04b). |
 | `@/components/ui/button` | c/looks/play-only-route.tsx | host-only | — | Same note as the row above; a theme's own buttons are its own. |
 | `@/components/widgets/FileWidget/FilePreview` | c/play/deliverables/deliverable-content.tsx, c/play/deliverables/shelf-card.tsx | SDK | `deliverables.useAuthenticatedBlobUrl` | A file the backend serves only with the caller's token, as a blob URL; a theme cannot send the token. The preview component itself is `cards.FilePreview`. |
@@ -72,7 +74,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/hooks/use-shelf-mascot` | c/play/deliverables/play-shelf.tsx | copied into Play | — | Play's own mascot code; its reads go through `context.useHealth` and `deliverables.useDeliverables`. |
 | `@/hooks/use-start-chat` | c/play/conversations/play-conversations.tsx, c/play/deliverables/shelf-body.tsx, c/play/shell/play-sidebar.tsx | SDK | `chat.useStartChat` | New chat: a fresh draft in the host's chat session, then the chat page. |
 | `@/hooks/use-stopped-reply` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | Stop keeps the partial reply (FX-30); the controller owns it (A-11a). |
-| `@/hooks/use-studio-theme` | c/play/play-route-switch.tsx, c/play/conversations/play-conversations.tsx, c/play/edges/not-found-view.tsx, c/looks/play-only-route.tsx | host-only | — | The host renders a theme's pages and slots only when the layout is `theme` (ThemeSlot, A-04b); a theme never branches on the layout or the width. |
+| `@/hooks/use-studio-theme` | c/play/conversations/play-conversations.tsx, c/looks/play-only-route.tsx | host-only | — | The host renders a theme's pages and slots only when the layout is `theme` (ThemeSlot, A-04b); a theme never branches on the layout or the width. play-route-switch.tsx and not-found-view.tsx, which also read it, are gone: A-04b moved their job into ThemeSlot, host code. |
 | `@/lib/auth-edition` | c/play/shell/play-nav.ts, c/play/edges/asleep-gate.tsx | SDK | `context.useEdition`, `navigation.useCoreNav` | `isLocal` is `useEdition() === 'local'`; the edition's nav filters run inside `useCoreNav`. |
 | `@/lib/auth-hooks` | c/looks/account-look-scope.tsx | host-only | — | Whose looks to show is the host look runtime's job (A-13c); a theme reads the active look with `looks.useLook`. |
 | `@/lib/chat-controller/*` | c/play/chat/play-chat-view.tsx, hooks/use-play-conversation.ts, hooks/use-play-turn.ts | SDK | `chat.useChatController` | The controller itself (A-11a); a theme reaches it only through the SDK (A-11b). |
@@ -91,10 +93,13 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/lib/nav-exposure` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav` | The plan-tier filter runs inside `useCoreNav`. |
 | `@/lib/page-context` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | The controller sends the page's context with each turn; a theme does not build it. |
 | `@/lib/studio-menu` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav`, `navigation.resolveActiveNavId` | The Studio menu after the host's filters, without icons (`StudioMenuItem` is the SDK's `CoreNavItem`). |
-| `@/lib/text/plain-line` | l/play/draft.ts, l/looks/validate.ts | copied into Play | — | Pure text helpers (`oneLine`). `UNSAFE_TEXT` is read by `lib/looks/validate.ts`, which A-13a moves into core's `lib/look-kit`. |
+| `@/lib/text/plain-line` | l/play/draft.ts | copied into Play | — | Pure text helpers (`oneLine`). `UNSAFE_TEXT` is read by the look runtime's `lib/look-kit/validate.ts` (moved out of `lib/looks` by A-13a). |
 | `@/lib/theme-host/boot-sanitize` | l/looks/tone.ts | host-only | — | The boot data's tone parser; the host applies the tone before first paint (A-03). |
 | `@/lib/theme-host/boot-types` | l/looks/prepaint.ts | host-only | — | Builtin Play's first-paint tables (A-03, PA-7); an installed theme ships them as data in its package, not code. |
 | `@/lib/theme-host/builtin/play-entry` | c/looks/look-provider.tsx, c/looks/play-only-route.tsx | host-only | — | Builtin Play's registry entry (PA-7); deleted at A-19. |
+| `@/lib/theme-host/choice-sync` | c/looks/play-only-route.tsx | host-only | — | The same note: Switch to Play is the theme menu's pick (`useChooseStyle`: stored on the server, put back when refused, PA-12) and asks for the workspace's installs (`useWantInstalledThemes`, `packageIdOfBuiltin`), A-02c. A theme never chooses the workspace's theme. |
+| `@/lib/theme-host/registry` | c/looks/play-only-route.tsx | host-only | — | The same note: the style an install of Play's package is picked by (`themeStyleOf`); the registry of themes is the host's. |
+| `@/lib/theme-host/registry-types` | c/looks/play-only-route.tsx | host-only | — | The same note: types only (`UiStyle`), the host's style axis (A-02a). |
 | `@/lib/ticket-links` | c/play/*, c/looks/*, l/play/draft.ts, l/chat/deliverables.ts, l/chat-controller/view-model.ts | SDK | `navigation.CHAT_HREF`, `navigation.chatHref`, `navigation.DELIVERABLES_HREF`, `navigation.DELIVERABLE_PARAM`, `navigation.LOOKS_HREF`, `navigation.LOOK_STYLE_HREF` | Core's route builders. |
 | `@/lib/trial` | c/play/chat/turn-end.tsx | SDK | `chat.useChatController`, `context.useTrial` | A turn that ends on an exhausted trial says so on the view model (today `errorCode === TRIAL_EXHAUSTED_CODE`); the ledger is `useTrial`. |
 | `@/lib/ui-style` | l/looks/tone.ts | host-only | — | The tone cookie's age; the host owns the cookie (PA-12) and forces the tone. |
@@ -113,7 +118,7 @@ the move lands.
 | `@/stores/play-chat-store` | hooks/use-start-chat.ts, hooks/use-play-conversation.ts | SDK | `chat.useStartChat` | "Show a fresh chat" is part of New chat. |
 | `@/hooks/use-celebrate-new` | hooks/use-shelf-mascot.ts | copied into Play | — | Play's own code in core's `hooks/` (§0); it moves with Play. |
 | `@/hooks/use-idle-timeout` | hooks/use-auto-mascot.ts | copied into Play | — | A pure timer the mascot driver uses; it moves with it. |
-| `@/lib/look-kit/*` | `lib/looks`, `components/looks` after A-13a | copied into Play | — | The look runtime is core-owned in Phase A and the kit vendors it by version (PA-9); the active look and saving are `looks.useLook` and `looks.saveLook`. |
+| `@/lib/look-kit/*` | `lib/looks` (`engine.ts` binds Play's catalogue, prefix and look spec; the pure helpers directly), `components/looks` through `lib/looks/engine` after A-13a | copied into Play | — | The look runtime is core-owned in Phase A and the kit vendors it by version (PA-9); the active look and saving are `looks.useLook` and `looks.saveLook`. |
 | `@/lib/theme-host/builtin/*` | `lib/looks` after A-09b | host-only | — | Builtin Play's registration files (PA-7: `play-look-keys.ts`, `play-boot.ts` and the rest); deleted at A-19. |
 | `@/components/theme-host/*` | Play's frame and cards after A-12c, A-13c | host-only | — | The host's own components (slots, the protected-surface guard, the look runtime); a theme gets the cards through `cards.*`. |
 | `@/lib/api-client` | Play's tests today; `lib/looks/store.ts` if A-09b reads the server directly | host-only | — | A theme never holds the backend client (PRD §4.3 item 7); every call it needs is an SDK hook (looks: `looks.listLooks`, `looks.saveLook`, A-13c). |
@@ -146,7 +151,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 |---|---|---|---|---|
 | `react` | every component | shared module | — | The host's React, through the import map; a theme never bundles its own. |
 | `next/link` | c/play/*, c/looks/* | SDK | `navigation.HostLink` | The host's client-side link; an https href opens in a new tab. |
-| `next/navigation` | c/play/conversations/play-conversations.tsx, c/play/deliverables/play-shelf.tsx, c/play/play-route-switch.tsx, c/play/shell/play-sidebar.tsx | SDK | `navigation.useHostRouter`, `navigation.useHostPathname`, `navigation.useHostSearchParams` | The App Router, the path and the query string; play-route-switch is host code once ThemeSlot replaces it (A-04b). |
+| `next/navigation` | c/play/conversations/play-conversations.tsx, c/play/deliverables/play-shelf.tsx, c/play/shell/play-sidebar.tsx | SDK | `navigation.useHostRouter`, `navigation.useHostPathname`, `navigation.useHostSearchParams` | The App Router, the path and the query string; play-route-switch read it too, before A-04b made it host code (ThemeSlot, components/theme-host/theme-slot.tsx) and deleted the file. |
 | `next/dynamic` | c/play/*-lazy.tsx | host-only | — | It needs Next's compiler; a theme splits its own bundle with `React.lazy` and `import()`. |
 | `lucide-react` | c/play/shell/play-frame.tsx, c/play/shell/play-sidebar.tsx | copied into Play | — | Icons are bundled into the theme's package. |
 | `@tanstack/react-query` | c/looks/account-look-scope.tsx | host-only | — | A theme has no query client; account-look-scope is host code from A-13c, and every query a theme needs is an SDK hook. |
@@ -164,3 +169,38 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | `cards.CorePage`, `cards.FilePreview` | Wrapping core's own page inside a theme's page; the host's file preview. |
 | `looks.useLook`, `looks.saveLook`, `looks.listLooks`, `looks.exportLook`, `looks.importLook` | The active look and the saved looks; Play's own `lib/looks` store is the look runtime the host mounts from A-13c (PA-9). |
 | `assets.assetUrl` | The URL of a file in the theme's package (Play's mascot clips move from `public/auto` into it, A-16b). |
+
+## Host-owned AI label (PRD-264 EUAI-11a, EUAI-11b)
+
+EU AI Act Art. 50(1) and (5): a person chatting in the app is told, at first exposure and for the whole
+session, that they are talking to an AI. The host draws that notice; no theme draws it, moves it or turns it
+off, and no manifest field, SDK name or setting does either.
+
+- **Where the host draws it.** `app/chat/layout.tsx` wraps `ThemeSlot` (the theme's page slot) in
+  `AiLabelGate` (`frontend/components/ai-label/ai-label.tsx`), which renders the label after it, outside it. So
+  the default chat (with Mission Mode), Play's chat and any theme's `/chat` show it, once. Every `/x/` theme
+  route (`app/x/[...path]/page.tsx`, Play's Conversations among them) renders the same gate around
+  `MainLayout`, on the left (Auto's widget takes the bottom right), so the label sits outside the theme's frame
+  and route. Every theme route gets it: a manifest's `uses` is checked (`lib/theme-host/package-manifest.ts`)
+  but not handed to the host, so the host can't yet tell which routes use the `chat` area.
+  `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there. Auto's floating
+  widget, which `MainLayout` draws on every page but `/chat` (theme-drawn pages among them), carries its own
+  label inside its panel (`WidgetAiLabelFrame`, `frontend/components/ai-label/widget-ai-label.tsx`), checked
+  the same way; while it is hidden, the widget's input and starter chips are disabled.
+- **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
+  (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
+- **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
+  `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
+  seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
+  (`frontend/lib/ai-label/visibility.ts`). While it isn't, every composer inside `AiLabelFence` is disabled
+  (the default chat's input through `FencedMultimodalInput`, Play's message box) and the chat says "This theme
+  hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps the composer only, never a
+  whole chat screen, so the approval cards in a reply stay clickable (they are protected surfaces).
+- **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:
+  a theme's composer built on `chat.useChatController` must pause the same way while the label is hidden, and
+  the chat stream must not start until the host's label is mounted. A-11b's tests prove both.
+- **Proof.** `frontend/lib/theme-host/__tests__/ai-label.test.ts` renders the chat layout with the default chat,
+  builtin Play's chat and a fixture theme that owns `/chat`, then with hostile fixture sheets that set
+  `display:none`, `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label: in each
+  hiding case the input is disabled. `frontend/lib/theme-host/__tests__/ai-label-widget.test.tsx` does the
+  same for Auto's floating widget.

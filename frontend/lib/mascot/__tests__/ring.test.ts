@@ -10,7 +10,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { ACCENTS, ERROR_COLOUR, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
-import { duskOf } from '@/lib/looks/css'
+import { duskOf } from '@/lib/looks/engine'
 import { AURORA, EMBER } from '@/lib/looks/presets'
 import type { Look } from '@/lib/looks/types'
 import { RING_VARS, ringColour, ringTone, type RingTone } from '@/lib/mascot/ring'

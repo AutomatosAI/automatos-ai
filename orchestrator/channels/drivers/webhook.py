@@ -18,6 +18,8 @@ from typing import Any, Mapping, Optional
 
 import httpx
 
+from modules.policy import ai_disclosure as disclosure
+
 from . import register_driver
 from .base import (
     ChannelDriver,
@@ -32,8 +34,19 @@ logger = logging.getLogger(__name__)
 _HTTP_TIMEOUT = 15.0
 
 
+def _payload(text: str, ai_disclosure: Optional[str]) -> dict[str, Any]:
+    """The JSON body: the text, the Art. 50(2) mark, and the notice when due."""
+    body: dict[str, Any] = {"text": text, "message": text, disclosure.AI_GENERATED_FIELD: True}
+    if ai_disclosure:
+        return {**body, disclosure.AI_DISCLOSURE_FIELD: ai_disclosure}
+    return body
+
+
 class WebhookDriver(ChannelDriver):
     display_name = "Webhook URL"
+    # PRD-264 EUAI-03: the receiver is a system, so the AI notice travels as
+    # payload fields (ai_generated, ai_disclosure), not as a text prefix.
+    AI_NOTICE_IN_PAYLOAD = True
     # Webhook here is a misnomer for "outbound HTTP POST" — we keep the
     # mode label so the UI treats it like the other webhook channels
     # (no polling to start).
@@ -57,7 +70,10 @@ class WebhookDriver(ChannelDriver):
         config: Mapping[str, Any],
         target: Optional[str],
         text: str,
+        ai_disclosure: Optional[str] = None,
     ) -> SendResult:
+        """POST ``text`` as JSON, marked ``ai_generated: true``; the AI notice,
+        when the channel sender says one is due, rides as ``ai_disclosure``."""
         url = str(target or config.get("webhook_url") or "").strip()
         if not url:
             raise DriverNotConfigured("Webhook driver requires webhook_url in config or target")
@@ -67,7 +83,7 @@ class WebhookDriver(ChannelDriver):
             async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
                 resp = await client.post(
                     url,
-                    json={"text": text, "message": text},
+                    json=_payload(text, ai_disclosure),
                     headers={"Content-Type": "application/json"},
                 )
         except Exception as exc:  # noqa: BLE001

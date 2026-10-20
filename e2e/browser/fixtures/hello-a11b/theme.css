@@ -1,0 +1,44 @@
+/* PRD-261 A-11b: the SDK-chat hello theme's one stylesheet. Every rule sits under html.hello-a11b,
+   the theme's own class, and its colours come from the preset's variables. It never names the
+   approval card: the host draws that (a protected surface, A-12c). */
+html.hello-a11b .hello-a11b-frame {
+  min-height: 100vh;
+  background: var(--hello-a11b-ground);
+  color: var(--hello-a11b-ink);
+}
+
+html.hello-a11b .hello-a11b-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 960px;
+  padding: 24px;
+}
+
+html.hello-a11b .hello-a11b-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.hello-a11b .hello-a11b-message[data-role='user'] {
+  align-self: flex-end;
+}
+
+html.hello-a11b .hello-a11b-composer {
+  display: flex;
+  gap: 8px;
+}
+
+html.hello-a11b .hello-a11b-composer textarea {
+  flex: 1;
+  min-height: 48px;
+}
+
+html.hello-a11b .hello-a11b-composer button {
+  border: 1px solid var(--hello-a11b-accent);
+  padding: 8px 12px;
+}

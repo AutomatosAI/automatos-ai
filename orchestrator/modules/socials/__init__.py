@@ -39,4 +39,7 @@ the calendar and published through the workspace's own Composio connections.
   way a post leaves Automatos (the approval guard first, then a compare-and-set
   claim), and :mod:`modules.socials.publishing`, the one engine that publishes
   every channel's targets through Composio from the adapter data (Wave 3, US-301).
+- :mod:`modules.socials.ai_media`: whether a post carries AI media (AI footage, AI
+  stills, a synthetic voice), read from its render record, and the AI label each
+  channel gets at publish (PRD-264 EUAI-05, EU AI Act Art. 50).
 """

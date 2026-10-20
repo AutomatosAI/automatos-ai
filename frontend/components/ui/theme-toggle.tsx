@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useId } from 'react'
+import { useState, useEffect, useId, useMemo } from 'react'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { Sun, Moon, Monitor, BookOpen, LayoutTemplate, Sparkles, Palette } from 'lucide-react'
@@ -17,7 +17,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useUiStyle } from '@/contexts/ui-style-context'
 import { useThemeLayout } from '@/hooks/use-studio-theme'
-import { BUILTIN_THEMES, themeStyleOf } from '@/lib/theme-host/registry'
+import {
+  themeChoiceEntries,
+  useChooseStyle,
+  useWantInstalledThemes,
+  type ThemeChoiceEntry,
+} from '@/lib/theme-host/choice-sync'
 import type { ThemeTonePolicy } from '@/lib/theme-host/registry-types'
 import { LOOKS_HREF } from '@/lib/ticket-links'
 import { isUiStyle } from '@/lib/ui-style'
@@ -66,14 +71,18 @@ function CustomiseLookItem() {
   )
 }
 
-/** PRD-261 A-02b: the theme registry's entries, after Classic and Studio, in the registry's order. */
-function ThemeStyleItems() {
+/**
+ * PRD-261 A-02b, A-02c: the theme registry's entries after Classic and Studio, then the workspace's
+ * installed themes (`theme:install:<id>`), each install that nobody reviewed noted as such.
+ */
+function ThemeStyleItems({ entries }: { entries: readonly ThemeChoiceEntry[] }) {
   return (
     <>
-      {BUILTIN_THEMES.map((entry) => (
-        <DropdownMenuRadioItem key={entry.ref} value={themeStyleOf(entry.ref)}>
+      {entries.map((entry) => (
+        <DropdownMenuRadioItem key={entry.style} value={entry.style}>
           <Sparkles className="mr-2 h-4 w-4" />
           {entry.name}
+          {entry.note && <span className="ml-auto pl-3 text-xs text-muted-foreground">{entry.note}</span>}
         </DropdownMenuRadioItem>
       ))}
     </>
@@ -83,12 +92,15 @@ function ThemeStyleItems() {
 /**
  * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | the registry's themes, PRD-261
  * A-02b) and Tone (Light | Dark | System). Picking on one axis never changes the other.
+ * PRD-261 A-02c: a style pick is stored on the server as the member's choice (choice-sync.ts).
  */
 export function ThemeToggle() {
   const { setTheme: setStoredTone, theme: storedTone, forcedTheme } = useTheme()
   // The tone in effect: under a theme's look the look forces one and keeps the stored one for later.
   const theme = forcedTheme ?? storedTone
-  const { style, setStyle, activeTheme } = useUiStyle()
+  const { style, activeTheme, installedThemes } = useUiStyle()
+  const chooseStyle = useChooseStyle()
+  const themeEntries = useMemo(() => themeChoiceEntries(installedThemes, style), [installedThemes, style])
   // PRD-260 K4: the look paints at every width, so it sets the tone at every width; its
   // editor, /looks, opens only where the theme's layout renders (D7), so 'Customise look…' shows only there.
   const layout = useThemeLayout()
@@ -96,6 +108,9 @@ export function ThemeToggle() {
   const toneLocked = toneNote !== null
   const offersLookEditor = activeTheme !== null && layout === 'theme'
   const [mounted, setMounted] = useState(false)
+  // The workspace's installs are fetched only once the menu is first opened (choice-sync.ts).
+  const [menuOpen, setMenuOpen] = useState(false)
+  useWantInstalledThemes(menuOpen)
   const toneNoteId = useId()
   // Under the lock the Tone group has no handler at all, so no pick reaches the stored tone.
   const setTheme = toneLocked ? undefined : setStoredTone
@@ -116,7 +131,7 @@ export function ThemeToggle() {
   const ToneIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="hover:bg-secondary/80" aria-label="Appearance">
           <ToneIcon className="h-4 w-4" />
@@ -124,7 +139,7 @@ export function ThemeToggle() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[160px]">
         <DropdownMenuLabel>Style</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={style} onValueChange={(v) => { if (isUiStyle(v)) setStyle(v) }}>
+        <DropdownMenuRadioGroup value={style} onValueChange={(v) => { if (isUiStyle(v)) chooseStyle(v) }}>
           <DropdownMenuRadioItem value="classic">
             <LayoutTemplate className="mr-2 h-4 w-4" />
             Classic
@@ -133,7 +148,7 @@ export function ThemeToggle() {
             <BookOpen className="mr-2 h-4 w-4" />
             Studio
           </DropdownMenuRadioItem>
-          <ThemeStyleItems />
+          <ThemeStyleItems entries={themeEntries} />
         </DropdownMenuRadioGroup>
         {offersLookEditor && <CustomiseLookItem />}
         <DropdownMenuSeparator />
