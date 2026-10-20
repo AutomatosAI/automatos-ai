@@ -8,6 +8,8 @@
 - [orchestrator/services/harness_runs.py](orchestrator/services/harness_runs.py)
 - [orchestrator/services/harness_metrics.py](orchestrator/services/harness_metrics.py)
 - [orchestrator/services/harness_diagnose.py](orchestrator/services/harness_diagnose.py)
+- [orchestrator/services/harness_grants.py](orchestrator/services/harness_grants.py)
+- [orchestrator/services/harness_cards.py](orchestrator/services/harness_cards.py)
 - [orchestrator/core/stats/harness_verdicts.py](orchestrator/core/stats/harness_verdicts.py)
 - [orchestrator/core/models/harness.py](orchestrator/core/models/harness.py)
 - [orchestrator/api/harness.py](orchestrator/api/harness.py)
@@ -20,7 +22,7 @@
 
 </details>
 
-HARNESS is the weekly review of a workspace's agents. Once a week it reads what each agent actually did, judges each agent against its own recent weeks, and files an audit report from Auto. It is **report only**: it changes no agent setting, creates no Task and raises no approval. Its suggestions are lines of the report, and acting on them is the owner's call (PRD-263).
+HARNESS is the weekly review of a workspace's agents. Once a week it reads what each agent actually did, judges each agent against its own recent weeks, and files an audit report from Auto. By default it is **report only**: it changes no agent setting, creates no Task and raises no approval. Its suggestions are lines of the report, and acting on them is the owner's call (PRD-263). A workspace set to **Propose** gets its suggested changes as Approvals cards instead, and a change applies only on the owner's click (see [Propose: Approvals cards](#propose-approvals-cards)).
 
 Sources:
 - [orchestrator/services/harness_service.py]()
@@ -34,7 +36,7 @@ The only per-workspace HARNESS control is its mode, under **Settings > Orchestra
 |---|---|
 | **Report only** (the default) | Runs every week, files the audit report, changes nothing. |
 | **Disabled** | Does not run for this workspace. A manual trigger answers that HARNESS is disabled. |
-| **Propose** (arrives in PRD-263 phase 3) | Will raise each suggested change as an approval for the owner's click. Until then a stored `propose` runs exactly like Report only. |
+| **Propose** | Raises each change HARNESS suggests as an Approvals card, and changes nothing until the owner approves it. Cards appear only while the installation setting `HARNESS_SELF_MANAGEMENT_ENABLED` is on; with it off, a Propose workspace runs exactly like Report only. |
 
 There is no on/off switch and no schedule select. A value stored before PRD-263 is read, never rewritten: `full_auto` and `manual` read as Report only, and the retired `disabled: true` or `enabled: false` reads as Disabled ([orchestrator/services/harness_mode.py]()). The Settings API accepts only `report_only`, `propose` and `disabled`.
 
@@ -52,7 +54,7 @@ Sources:
 1. **Dormancy.** A workspace with fewer than three active agents is `dormant_insufficient_agents`, and the run stops there.
 2. **Collect.** One workspace-bound read of the tables that record each agent's work (Tasks done and failed, model usage, heartbeat outcomes, Mission steps, production tool calls) returns raw weekly counts for the judged week and the weeks before it. An agent with no rows has n = 0, never 0% ([orchestrator/services/harness_metrics.py]()).
 3. **Diagnose.** Each agent and metric is judged against a clean reference: the `HARNESS_REF_DAYS` before the judged week, less weeks already flagged and weeks after a change. Every threshold is a `HARNESS_*` setting in `config.py`, with Benjamini-Hochberg across the run.
-4. **Suggest.** One registry defines every kind of change HARNESS may suggest ([orchestrator/services/harness_changes.py]()). Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". An enabled heartbeat that rarely met its objective in the judged week (at least `HARNESS_HEARTBEAT_MIN_RUNS` runs with an outcome, and even allowing for chance fewer than `HARNESS_HEARTBEAT_MAX_MET` of them met it; runs that reported nothing to judge are not counted) gets a suggestion to double its interval, up to 1,440 minutes. A suggestion that is invalid, or that names the workspace's Auto, is dropped and its reason kept on the run's row. Suggestions are report lines only.
+4. **Suggest.** One registry defines every kind of change HARNESS may suggest ([orchestrator/services/harness_changes.py]()). Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". An enabled heartbeat that rarely met its objective in the judged week (at least `HARNESS_HEARTBEAT_MIN_RUNS` runs with an outcome, and even allowing for chance fewer than `HARNESS_HEARTBEAT_MAX_MET` of them met it; runs that reported nothing to judge are not counted) gets a suggestion to double its interval, up to 1,440 minutes. A suggestion that is invalid, or that names the workspace's Auto, is dropped and its reason kept on the run's row. Suggestions are report lines; in a Propose workspace a change HARNESS may apply also becomes an Approvals card (below).
 5. **Report.** Auto files the audit report ("HARNESS Weekly Org Review — Run #n") in Reports, with the coverage, each agent's verdicts and the suggested changes under "Suggested changes (reported only; nothing was changed)".
 
 ### The four verdicts
@@ -99,8 +101,11 @@ graph TD
     D -- no --> DA[dormant_insufficient_agents]
     D -- yes --> C[Collect raw weekly counts]
     C --> G[Diagnose: verdicts, coverage, convergence]
-    G --> S[Suggest: report lines only]
-    S --> P[Auto files the audit report]
+    G --> S[Suggest: report lines]
+    S --> AC{Propose, with proposals on?}
+    AC -- yes --> K[Approvals cards and one evidence ticket]
+    AC -- no --> P
+    K --> P[Auto files the audit report]
     P --> CO[completed]
 ```
 
@@ -118,6 +123,25 @@ Sources:
 - [orchestrator/modules/tools/discovery/handlers_harness.py]()
 - [orchestrator/core/services/auto_cadence.py]()
 - [orchestrator/api/harness.py]()
+
+## Propose: Approvals cards
+
+In a workspace set to **Propose**, while the installation setting `HARNESS_SELF_MANAGEMENT_ENABLED` is on (it is off by default), each valid change of a kind HARNESS may apply becomes an **Approvals card**: a heartbeat interval doubled, a tool taken from an agent, or the undoing of an earlier HARNESS change. Every other suggestion stays a line of the report. HARNESS never proposes a change to the workspace's Auto, and raises no second card for an agent and kind while one is still waiting.
+
+- **Where it appears.** The card is in Command Center > Governance > Approvals and inside the run's **evidence ticket**, and an `approval_pending` notification announces it. The evidence ticket is one board card per run, filed in Review with no agent: it lists each proposal with its numbers and its card. No agent picks it up; approving or cancelling it on the board only closes it.
+- **What it says.** Five parts, in order: the change (agent, setting, before → after); why (the counts behind it and how many agents HARNESS judged); what approving does; how a change that goes wrong is undone; and when the card expires.
+- **What approving does.** The owner's click runs `platform_harness_apply`, which makes the change as the workspace's Auto, and only if the approval is still live and the setting still reads its value from when HARNESS proposed it. Otherwise nothing changes and the card says why. A second click changes nothing.
+- **24 hour expiry.** A card expires 24 hours (`APPROVAL_GRANT_TTL_SECONDS`) after it is raised. After that, approving does nothing, and the daily sweep closes the card within a day. If the evidence still holds, the next run raises a fresh card.
+- **Rollback cards.** HARNESS compares a changed agent's next weeks with the weeks before the change, and sends a separate card to undo the change if its Tasks or tool errors get worse. A rollback is never itself rolled back.
+- **A Blocked evidence ticket.** Dragging the evidence ticket to Blocked stops its cards: approving one changes nothing, and its proposal is recorded as failed ("evidence card was blocked; nothing changed").
+- **No memory.** Approving or declining a HARNESS card writes no decision memory: the HARNESS ledger and the audit rows are the record.
+
+Every proposal's ledger row ends in one recorded state: `applied`, `failed`, `denied`, `expired`, `drifted`, `withdrawn`, `raise_failed` or `rolled_back`.
+
+Sources:
+- [orchestrator/services/harness_grants.py]()
+- [orchestrator/services/harness_cards.py]()
+- [orchestrator/services/click_memory.py]()
 
 ## Idle-in-Transaction Prevention
 

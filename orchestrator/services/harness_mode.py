@@ -5,8 +5,10 @@ HARNESS switch:
 
 * ``report_only`` (the default): the weekly run writes its audit report and changes
   nothing;
-* ``propose``: an owner's opt-in that behaves exactly like ``report_only`` until
-  proposals exist (US-054);
+* ``propose``: an owner's opt-in. While the installation's
+  HARNESS_SELF_MANAGEMENT_ENABLED is on, each change HARNESS proposes comes to the
+  owner as an Approvals card (services.harness_grants, US-054); off, it runs like
+  ``report_only``;
 * ``disabled``: HARNESS does not run for the workspace.
 
 The Settings API accepts only HARNESS_MODES, and every reader goes through
