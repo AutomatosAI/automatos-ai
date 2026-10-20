@@ -6,7 +6,8 @@
  * The hooks are the host's own (hooks/use-deliverables-api.ts, hooks/use-api-file-download.ts,
  * FilePreview's useAuthenticatedBlobUrl), so every read goes through the backend client with the
  * workspace and the token, which a theme never holds. Each hands back react-query's result typed as
- * the SDK's read-only view of it (DeliverablesQuery, DeliverableQuery). The constants are frozen
+ * the SDK's read-only view of it (DeliverablesQuery, DeliverableQuery); useDeliverable answers an id
+ * that is not a Deliverable's with a frozen, settled failure of the same shape. The constants are frozen
  * copies, so a theme cannot change the host's own. The types are declared again for themes in
  * packages/theme-sdk/areas/deliverables.d.ts.
  */
@@ -174,12 +175,31 @@ function askableId(id: unknown): string | null {
   return typeof id === 'string' && isDeliverableId(id) ? id : null
 }
 
+/** The error of useDeliverable's answer for an id that is not a Deliverable's. */
+const NOT_A_DELIVERABLE_ID = 'Not a Deliverable id'
+
 /**
- * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null,
- * and for an id that is not a Deliverable's, which never reaches the backend.
+ * useDeliverable's answer for an id that is not a Deliverable's: settled at once as a failure, so a
+ * theme can tell it from a load (the host's hook, given null, stays idle: loading, never an error).
+ */
+const REFUSED_DELIVERABLE: DeliverableQuery = Object.freeze({
+  data: undefined,
+  isLoading: false,
+  isError: true,
+  error: Object.freeze(new Error(NOT_A_DELIVERABLE_ID)),
+  refetch: async () => undefined,
+})
+
+/**
+ * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null.
+ * An id that is not a Deliverable's never reaches the backend: the answer is REFUSED_DELIVERABLE.
+ * The host's hook runs on every render either way (with null for a refused id), so the hook order
+ * never changes when the id does.
  */
 export function useDeliverable(id: string | null, includeContent = false): DeliverableQuery {
-  return useHostDeliverable(askableId(id), includeContent)
+  const askable = askableId(id)
+  const query = useHostDeliverable(askable, includeContent)
+  return id !== null && askable === null ? REFUSED_DELIVERABLE : query
 }
 
 /** Downloads an API file with the caller's token; a failed download shows `failedMessage` as a notice. */

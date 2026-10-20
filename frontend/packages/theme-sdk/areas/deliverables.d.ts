@@ -122,9 +122,11 @@ export declare const DELIVERABLE_TAB_LABELS: Readonly<Record<DeliverableTab, str
 export declare function useDeliverables(filters?: DeliverableFilters, options?: DeliverablesOptions): DeliverablesQuery
 
 /**
- * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null,
- * and for an id that is not a Deliverable's (letters, digits, `-` and `_`, 1 to 128 of them): a
- * ?deliverable= value handed over as it came that is not one never reaches the backend.
+ * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null.
+ * An id that is not a Deliverable's (letters, digits, `-` and `_`, 1 to 128 of them), such as a
+ * ?deliverable= value handed over as it came, never reaches the backend: the answer is settled at
+ * once as a failure (no `data`, `isLoading` false, `isError` true, `error` an Error whose message is
+ * 'Not a Deliverable id'), so the theme can show "not found" instead of loading forever.
  */
 export declare function useDeliverable(id: string | null, includeContent?: boolean): DeliverableQuery
 

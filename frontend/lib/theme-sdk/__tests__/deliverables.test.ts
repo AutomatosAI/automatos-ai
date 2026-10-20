@@ -3,7 +3,9 @@
  * workspace and the token through the backend client), given the theme's arguments as a copy the
  * host may keep; the filters and the tab labels are frozen copies of the host's; the URL and name
  * helpers are the host's own functions; a kind's label is the host's, and a kind it has no name for
- * is named as it is. The host's hooks are stood in for here, recording what they were given.
+ * is named as it is; an id that is not a Deliverable's is never handed to the host's hook, and the
+ * theme gets a settled failure for it at once. The host's hooks are stood in for here, recording
+ * what they were given.
  */
 import { renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -92,17 +94,37 @@ describe('PRD-261 A-12a — the Deliverables hooks', () => {
     const { result } = renderHook(() => useDeliverable('d-1', true))
     expect(lastCall('useDeliverable')).toEqual(['d-1', true])
     expect(result.current).toBe(host.detailResult)
-    renderHook(() => useDeliverable(null))
+    const { result: idle } = renderHook(() => useDeliverable(null))
     expect(lastCall('useDeliverable')).toEqual([null, false])
+    expect(idle.current).toBe(host.detailResult)
   })
 
   it.each(['../../admin?x=1', 'd laptop', 'd/1', '', 'x'.repeat(129)])(
-    'useDeliverable(%j) leaves the host idle: a value that is not a Deliverable id is never asked for',
-    (id) => {
-      renderHook(() => useDeliverable(id, true))
+    'useDeliverable(%j) never asks the host for it, and answers a settled, frozen failure at once',
+    async (id) => {
+      const { result } = renderHook(() => useDeliverable(id, true))
       expect(lastCall('useDeliverable')).toEqual([null, true])
+      const refused = result.current
+      expect(refused).not.toBe(host.detailResult)
+      expect([refused.data, refused.isLoading, refused.isError]).toEqual([undefined, false, true])
+      expect(refused.error).toBeInstanceOf(Error)
+      expect((refused.error as Error).message).toBe('Not a Deliverable id')
+      expect(Object.isFrozen(refused)).toBe(true)
+      await expect(refused.refetch()).resolves.toBeUndefined()
     },
   )
+
+  it('useDeliverable calls the host hook on every render, so the hook order holds when the id changes', () => {
+    const { result, rerender } = renderHook(({ id }: { readonly id: string | null }) => useDeliverable(id), {
+      initialProps: { id: 'd-1' as string | null },
+    })
+    rerender({ id: '../../admin?x=1' })
+    expect(result.current.isError).toBe(true)
+    rerender({ id: 'd-2' })
+    expect(result.current).toBe(host.detailResult)
+    const asked = host.calls.filter((entry) => entry.hook === 'useDeliverable').map((entry) => entry.args[0])
+    expect(asked).toEqual(['d-1', null, 'd-2'])
+  })
 
   it("useFileDownload and useAuthenticatedBlobUrl are the host's, with the theme's arguments", () => {
     const { result: downloader } = renderHook(() => useFileDownload('Try again'))
