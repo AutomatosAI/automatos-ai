@@ -12,6 +12,7 @@ Design Principles:
 - Separate: Capabilities are semantic affordances, NOT risk levels
 """
 
+import re
 from typing import Dict, List, Optional, Set
 
 
@@ -397,6 +398,30 @@ INTENT_TO_CAPABILITIES: Dict[str, List[str]] = {
 }
 
 
+# F459 (night 18): "Email Quay Coffee House the new terms" uses 'email' as the verb, an order to
+# send one, and no keyword above read it so: the words mapped to the creates of 'new' (or, for
+# "Email Saskia at Northgate asking where the Guji shipment is", to a query), and the intent gate
+# refused GMAIL_SEND_EMAIL before the owner's approval card could be raised (rows 290, 401, 551,
+# 589, 764). 'email' is the verb where a clause, a quote or a request ('please', 'can you',
+# 'and', 'then', 'want to') starts it and a recipient or object follows. A noun ('my email', 'the
+# email from Saskia', 'the email address', 'an email draft') is not, and neither is "don't email".
+# A draft is covered by a send (intent_match.DRAFT_COVERED_BY).
+EMAIL_VERB_CAPABILITIES = ["email.send"]
+_EMAIL_VERB = re.compile(
+    r"(?:^|[.!?;:\n(\"'\u201c\u2018]|\b(?:and|then|also|please|pls|just|now|you|you to|want to|need to|"
+    r"like to|have to)\b)\s*e-?mail\s+"
+    r"(?!(?:address(?:es)?|drafts?|threads?|inbox(?:es)?|accounts?|lists?|signatures?|templates?|from|of|is|was|"
+    r"has|says|said|and|or)\b)\w",
+    re.IGNORECASE,
+)
+
+
+def emails_someone(intent: Optional[str]) -> bool:
+    """Whether the words use 'email' as the verb, an order to send one (F459): "Email Quay the
+    new terms", "can you email Zara", "please email Kit"; not "check my email"."""
+    return bool(_EMAIL_VERB.search(intent or ""))
+
+
 def get_capabilities_for_intent(intent: str) -> List[str]:
     """
     Extract capability tags from a user intent string.
@@ -413,6 +438,8 @@ def get_capabilities_for_intent(intent: str) -> List[str]:
     for keyword, capabilities in INTENT_TO_CAPABILITIES.items():
         if keyword in intent_lower:
             matched_caps.update(capabilities)
+    if emails_someone(intent):
+        matched_caps.update(EMAIL_VERB_CAPABILITIES)
 
     # If no matches, return general capabilities
     if not matched_caps:

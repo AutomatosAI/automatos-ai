@@ -30,7 +30,7 @@ from modules.tools.registry import ToolCategory, get_tool_registry as registry_g
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.execution.card_raised import holds_the_signal, signals_unless_it_asked, the_model_reads_the_card
 from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
-from modules.tools.execution.owner_reasons import OWNER_REASON, intent_refused
+from modules.tools.execution.owner_reasons import OWNER_REASON, intent_gate_error, intent_refused
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
@@ -2109,7 +2109,7 @@ async def execute_tool_with_validation(
                 )
                 return {
                     "success": False,
-                    "error": f"Action not allowed for this intent: {reason}",
+                    "error": intent_gate_error(action_id, reason),  # F459: the gate's, never the app's
                     "error_type": "validation_blocked", "blocked_by": "capability_validation",
                     OWNER_REASON: intent_refused(action_id),  # P256-FIX-N17-10 (F449): what the owner reads
                     "action_id": action_id, "intent": original_intent[:100],
