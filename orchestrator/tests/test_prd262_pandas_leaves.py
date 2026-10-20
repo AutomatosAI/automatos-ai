@@ -210,7 +210,7 @@ def test_an_enabled_service_binds_pandas_for_its_insights(monkeypatch, tmp_path)
              "pandasai_litellm": litellm_pkg, "pandasai_litellm.litellm": litellm}
     for name, fake in fakes.items():
         monkeypatch.setitem(sys.modules, name, fake)
-    monkeypatch.setattr(config, "PANDASAI_API_KEY", "prd262-placeholder")
+    monkeypatch.setattr(config, "PANDASAI_API_KEY", "fake-key")
     monkeypatch.setattr(config, "PANDASAI_OUTPUT_DIR", str(tmp_path / "charts"))
     module = _fresh_service_module()
     assert module.pd is None, "loading the module binds nothing"
