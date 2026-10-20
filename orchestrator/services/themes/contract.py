@@ -2,8 +2,8 @@
 
 One place for the host and SDK versions a package's ``engines`` is checked against, the
 names no package may take, the slots and pages a package may fill, and the files a cloned
-page is tracked against. It also holds the error shape every check returns and the JSON
-and plain-text rules they share.
+page is tracked against, and the lists theme.json's ``mobile`` block is checked against (M-01).
+It also holds the error shape every check returns and the JSON and plain-text rules they share.
 
 This module uses the standard library only, on purpose:
 
@@ -30,6 +30,33 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
 THEME_HOST_VERSION = "1.1.0"
 SDK_VERSION = "1.1.0"
+
+# PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
+# theme from (services/themes/mobile_manifest.py checks it; frontend/lib/theme-host/mobile-manifest.ts is
+# its twin, and validator-parity.test.ts reads every MOBILE_* name below as text). The tokens are the 24
+# Studio tokens lib/look-kit/studio-tokens.ts lookToStudioTokens writes as 'H S% L%' triplets, never its
+# eight pre-wrapped aliases; a scheme needs MOBILE_REQUIRED_TOKENS. MOBILE_CONTRAST_PAIRS are
+# (text or mark, fill, kind): a "text" pair is measured against MOBILE_AA_TEXT, a "ui" pair against
+# MOBILE_AA_UI (WCAG 2.x). A theme with a block must not admit a host below MOBILE_MIN_HOST.
+MOBILE_TOKEN_NAMES: Tuple[str, ...] = (
+    "--background", "--foreground", "--card", "--card-foreground", "--popover", "--popover-foreground",
+    "--primary", "--primary-foreground", "--secondary", "--secondary-foreground", "--muted", "--muted-foreground",
+    "--accent", "--accent-foreground", "--destructive", "--destructive-foreground", "--border", "--input", "--ring",
+    "--background-gradient-from", "--background-gradient-to", "--glass-border-hover", "--cc-hover", "--cc-hover-border",
+)
+MOBILE_REQUIRED_TOKENS: Tuple[str, ...] = ("--background", "--foreground")
+MOBILE_FONT_ROLES: Tuple[str, ...] = ("sans", "serif", "mono")
+MOBILE_MASCOT_MODES: Tuple[str, ...] = ("clips", "stills", "none")
+MOBILE_CONTRAST_PAIRS: Tuple[Tuple[str, str, str], ...] = (
+    ("--foreground", "--background", "text"), ("--card-foreground", "--card", "text"),
+    ("--popover-foreground", "--popover", "text"), ("--secondary-foreground", "--secondary", "text"),
+    ("--muted-foreground", "--muted", "text"), ("--primary-foreground", "--primary", "text"),
+    ("--accent-foreground", "--accent", "text"), ("--destructive-foreground", "--destructive", "text"),
+    ("--primary", "--background", "ui"), ("--ring", "--background", "ui"),
+)
+MOBILE_AA_TEXT = 4.5
+MOBILE_AA_UI = 3.0
+MOBILE_MIN_HOST = "1.1.0"
 
 MANIFEST_SCHEMA = "automatos-theme/v1"
 LOOK_SCHEMA_SCHEMA = "automatos-look-schema/v1"

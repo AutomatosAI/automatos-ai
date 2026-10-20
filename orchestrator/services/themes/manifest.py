@@ -12,7 +12,8 @@ file's sha256; host-owned pages refused); ``routes`` (theme-only pages at ``/x/<
 ``nav`` (``{id, label, path}``, a ``/x/`` path naming a declared route); ``uses`` (SDK areas);
 ``pricing`` (a label only, Q12); ``previews`` and ``fonts`` (package files); ``brand``
 (``{name?, wordmark?}``); ``look`` (the default preset's id); ``mascot`` (``null`` or
-``{states}``). Every other field is refused.
+``{states}``); ``mobile`` (M-01, host 1.1.0: the data a phone draws the theme from, checked by
+``services/themes/mobile_manifest.py``; its fonts are package files). Every other field is refused.
 
 The TypeScript twin (``frontend/lib/theme-host/package-manifest.ts``, A-06b) is held to the
 same corpus (``tests/fixtures/themes/cases.json``, ``manifests``).
@@ -28,19 +29,21 @@ from services.themes.contract import (
     PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS, RESERVED_HTML_CLASSES, SDK_VERSION, THEME_BASES,
     THEME_HOST_VERSION, THEME_TONES, ThemeError, echo, is_whole_number, plain_text_problem, theme_error,
 )
+from services.themes.mobile_manifest import mobile_errors, mobile_font_files
 
 MANIFEST_ERROR_CODES: Tuple[str, ...] = (
     "NOT_AN_OBJECT", "UNKNOWN_FIELD", "MISSING_FIELD", "BAD_SCHEMA", "BAD_ID", "BAD_TEXT", "BAD_VERSION",
     "BAD_ENGINES", "ENGINES_MISMATCH", "BAD_HTML_CLASS", "RESERVED_HTML_CLASS", "BAD_BASE", "BAD_MIN_WIDTH",
     "BAD_TONE", "BAD_SLOTS", "UNKNOWN_SLOT", "MISSING_SLOT", "BAD_PAGE", "BAD_PAGE_MODE", "BAD_KEEP_CORE_PAGE",
     "BAD_CLONED_FROM", "CLONED_FROM_OUT_OF_SCOPE", "PAGE_OUT_OF_SCOPE", "HOST_OWNED_PAGE", "BAD_ROUTES", "BAD_NAV",
-    "BAD_USES", "BAD_ASSET_PATH", "BAD_BRAND", "BAD_LOOK_ID", "BAD_MASCOT",
+    "BAD_USES", "BAD_ASSET_PATH", "BAD_BRAND", "BAD_LOOK_ID", "BAD_MASCOT", "BAD_MOBILE",
 )
 REQUIRED_FIELDS: Tuple[str, ...] = (
     "schema", "id", "name", "version", "engines", "base", "htmlClass", "minWidth", "tone", "slots",
 )
 OPTIONAL_FIELDS: Tuple[str, ...] = (
     "description", "pages", "routes", "nav", "uses", "pricing", "previews", "fonts", "brand", "look", "mascot",
+    "mobile",
 )
 ENGINE_FIELDS: Tuple[str, ...] = ("automatos", "sdk")
 PAGE_FIELDS: Tuple[str, ...] = ("mode", "keepCorePage", "clonedFrom")
@@ -311,6 +314,7 @@ def _extra_errors(document: Mapping[str, Any]) -> List[ThemeError]:
     if "look" in document and (not isinstance(look, str) or LOOK_ID_PATTERN.fullmatch(look) is None):
         errors += _error("BAD_LOOK_ID", "look", '"look" must be the id of one of the theme\'s presets.')
     errors += _brand_errors(document["brand"]) if "brand" in document else []
+    errors += mobile_errors(document) if "mobile" in document else []
     return errors + _mascot_errors(document.get("mascot"))
 
 
@@ -331,6 +335,7 @@ def validate_manifest(document: Any) -> ManifestResult:
 
 
 def referenced_files(manifest: Mapping[str, Any]) -> List[str]:
-    """The package files a checked manifest names: its previews, fonts and wordmark."""
+    """The package files a checked manifest names: its previews, fonts, wordmark and mobile fonts (M-01)."""
     wordmark = (manifest.get("brand") or {}).get("wordmark")
-    return [*manifest.get("previews", []), *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
+    named = [*manifest.get("previews", []), *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
+    return [*named, *mobile_font_files(manifest)]
