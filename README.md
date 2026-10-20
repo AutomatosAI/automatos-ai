@@ -38,7 +38,7 @@ Most agent frameworks give you a library. Automatos gives you the whole machine:
 | A task manager | **Command Center** — the board, the calendar, live agent status and reports |
 | A file system | **Deliverables** and **Knowledge** — RAG over your documents plus a Knowledge Graph |
 | Drivers | **1,000+ tool integrations** through Composio and **400+ models** through one provider registry |
-| An app store | **Marketplace** — ready-made agents, a library of 140 skills and one-click workspace templates |
+| An app store | **Marketplace** — ready-made agents, Playbooks, packages, skills and plugins: 100+ agents, 20+ Playbooks, 400+ skills and 70+ plugins in the hosted Studio marketplace; 14 agent templates, 5 Playbooks and 3 packages in a fresh local install, plus the open library of 140+ skills to import |
 
 ## One codebase, two editions
 
@@ -67,7 +67,7 @@ One chat, routed to the right agent. The conversation stays where you left it ac
 
 ## Manage your AI workforce
 
-Ready-made agents in the built-in marketplace — install what you need, when you need it. Code Reviewer, QA Engineer, Sentinel, Scribe, researcher and marketer roles, Shopify specialists, and more. Each agent has its own model route, capabilities, persona, and performance metrics. An agent is either an **API agent** (a model route you installed) or a **session agent** (your own Claude Code, Codex or GitHub Copilot CLI on your machine, below); you mix them freely on the same board.
+A fresh local install starts with five agents: Auto, a Brand Designer and a starter team of Researcher, Writer and Analyst. A new hosted workspace starts with Auto and a Brand Designer; Auto builds the rest of your team during onboarding, from a package or from scratch. More ready-made agents wait in the built-in marketplace — install what you need, when you need it: a fresh local install seeds 14 agent templates (12 Shopify specialists, a Social Media Director and a Brand Designer), and the hosted Studio marketplace holds 100+. Each agent has its own model route, capabilities, persona, and performance metrics. An agent is either an **API agent** (a model route you installed) or a **session agent** (your own Claude Code, Codex or GitHub Copilot CLI on your machine, below); you mix them freely on the same board.
 
 <p align="center">
   <img src="docs/assets/02-Agents.png" alt="Agent Management" width="800">
@@ -106,15 +106,15 @@ Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, Hu
 
 ## Tools chosen by meaning, not by menu
 
-An agent with a hundred and eighty platform actions cannot be handed all of them on every turn. Before the prompt is assembled, the platform embeds your message and ranks the action catalogue by semantic similarity, so the model is offered the handful of tools that fit what you asked — one ranking per turn, shared by every surface that needs it, cached, and never replaced by the full list when the embedding is slow. Selections and outcomes feed the Intent Graph, the learned layer that ranks by what worked for phrasings like yours; it is seeded from example utterances so it is useful on day one, and a measured uplift gate decides whether it is allowed to route.
+An agent with 200+ built-in platform actions cannot be handed all of them on every turn. Before the prompt is assembled, the platform embeds your message and ranks the action catalogue by semantic similarity, so the model is offered the handful of tools that fit what you asked — one ranking per turn, shared by every surface that needs it, cached, and never replaced by the full list when the embedding is slow. Selections and outcomes feed the Intent Graph, the learned layer that ranks by what worked for phrasings like yours; it is seeded from example utterances so it is useful on day one, and a measured uplift gate decides whether it is allowed to route.
 
-## Workspace templates — entire teams in one click
+## Packages — a ready-made team in one install
 
-Packaged bundles install a full operations team in a single step — agents, skills, playbooks, and dashboard widgets pre-wired together. Example: the **Shopify package** ships with 12 specialised agents, 32 Shopify skills, and a widget set for store ops, inventory, merchandising, SEO, campaigns, and customer support. Install it once, and your workspace goes from empty to a running e-commerce back office.
+A package installs a team in a single step: its agents, each with its skills, tools and model, plus the Playbooks and report templates it needs. Three ship in every edition: **Socials** (a Social Media Director and a Brand Designer with five Playbooks), and two Shopify packages, **Shopify Management** (4 agents) and **Shopify Development** (3), drawn from 12 Shopify agent templates. The open skills library adds 21 Shopify skills.
 
 ## Reusable skills
 
-Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. The open [automatos-skills](https://github.com/AutomatosAI/automatos-skills) library holds 140 of them. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive. For a session agent the same skills are rendered into its Claude Code session.
+Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. The open [automatos-skills](https://github.com/AutomatosAI/automatos-skills) library holds 140+ of them, ready to import, and 12 ship built in; the hosted Studio marketplace has 400+. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive. For a session agent the same skills are rendered into its Claude Code session.
 
 ## Paid, free, or on your subscription — one router
 
@@ -171,13 +171,13 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 
 | Capability | What it does |
 |---|---|
-| **Universal Router** | Multi-tier routing (cache, rules, semantic, LLM) sends messages to the right agent every time |
+| **Universal Router** | Five-tier routing (your override, cache, rules, semantic similarity, LLM) sends each message to the best-matching agent or workflow |
 | **Semantic tool selection** | Ranks the action catalogue against each message before the prompt is built; the Intent Graph learns from outcomes |
 | **Session mode** | Your own Claude Code sessions as agents — tickets, persona, skills, Deliverables, approvals, and a Canvas terminal (local edition) |
 | **Provider registry** | One registry of model providers; models installed per route with per-route prices; paid, free and subscription side by side |
 | **Playbooks & Missions** | Multi-step automation with scheduling, triggers, and inter-agent coordination |
 | **Calendar & board** | The board is the work queue; the calendar shows routines, deadlines and scheduled tickets |
-| **Prompt Optimisation** | A/B test and score prompts against live traffic, automatically improve agent performance |
+| **Prompt Optimisation** | Score system prompt versions against live traffic, generate an optimised candidate, and activate or roll back a version yourself (hosted edition) |
 | **Workspace Execution** | Sandboxed environments where agents run code, manage files, and interact with Git repos |
 | **Cost analytics** | Every call tagged with provider and billing; cost by provider, lane, agent and route |
 | **Multi-Tenancy** | Full workspace isolation in the hosted edition — each team gets their own agents, data, and configuration |

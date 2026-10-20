@@ -84,7 +84,7 @@
         "docLink": "/agents/roster"
       },
       "create_button": {
-        "text": "Create a new agent. Choose from templates (Code Reviewer, Sentinel, etc.) or start from scratch.",
+        "text": "Create a new agent. Start from a persona preset or from scratch.",
         "docLink": "/agents/creating"
       }
     },
@@ -248,7 +248,7 @@
     },
     "quick_actions": {
       "code": {
-        "text": "Start a coding task. Routes to code-focused agents like Code Reviewer or QA Engineer.",
+        "text": "Start a coding task. Routes to a code-focused agent in your workspace, for example one using the Code Reviewer persona preset.",
         "docLink": "/chat/quick-actions"
       },
       "create_agent": {
@@ -280,7 +280,7 @@
         "docLink": "/tools"
       },
       "available": {
-        "text": "Total integrations available through Composio. 500+ apps across all categories.",
+        "text": "Total integrations available through Composio. 1,000+ apps across all categories.",
         "docLink": "/tools"
       }
     },
@@ -584,7 +584,7 @@
     },
     "models": {
       "default_model": {
-        "text": "The fallback model used when an agent doesn't specify one. OpenRouter gives access to 100+ models through one key.",
+        "text": "The fallback model used when an agent doesn't specify one. OpenRouter gives access to 400+ models through one key.",
         "docLink": "/settings/models"
       },
       "embedding_model": {
@@ -622,7 +622,7 @@
     },
     "llm": {
       "provider": {
-        "text": "The AI company whose models power your orchestrator. OpenRouter recommended — gives access to 100+ models from all providers through a single API key.",
+        "text": "The AI company whose models power your orchestrator. OpenRouter recommended — gives access to 400+ models from all providers through a single API key.",
         "docLink": "/settings/models"
       },
       "model": {
@@ -722,7 +722,7 @@
     },
     "embedding": {
       "provider": {
-        "text": "Service that converts text into vector embeddings for semantic search. OpenRouter recommended — access to 20+ models through one API key with parallel batch processing.",
+        "text": "Service that converts text into vector embeddings for semantic search. OpenRouter recommended — access to 20+ embedding models through one API key with parallel batch processing.",
         "docLink": "/settings/embeddings",
         "example": "OpenRouter (best value) | OpenAI (direct) | HuggingFace Local (free, slow)"
       },
