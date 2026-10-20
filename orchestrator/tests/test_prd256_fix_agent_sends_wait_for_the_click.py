@@ -107,6 +107,15 @@ def _click(desk, grant):
     desk.db.flush()
 
 
+def _told(desk, body):
+    """``body`` as an agent's send carries it (PRD-264 EUAI-07): the AI line, naming the workspace's
+    public name (FR-15), on top."""
+    from core.public_principal import workspace_principal_name
+    from modules.policy.ai_disclosure import send_notice, with_send_notice
+
+    return with_send_notice(body, send_notice(workspace_principal_name(desk.db, desk.ws)), False)
+
+
 def _park(desk):
     from services.cli_host_service import _park_for_answer
 
@@ -355,7 +364,8 @@ def test_the_card_shows_every_recipient_the_click_sends_to(desk, send, where):
     assert not any(line.startswith("- parameters:") for line in card)
     _click(desk, desk.db.get(ApprovalGrant, reply["grant_id"]))
     assert _Composio.sent == ["GMAIL_SEND_EMAIL"]
-    assert _Composio.carried == [{**SEND["params"], "bcc": "x@other.test"}]   # the call the card showed
+    told = {**SEND["params"], "body": _told(desk, SEND["params"]["body"])}   # PRD-264 EUAI-07: the AI line on top
+    assert _Composio.carried == [{**told, "bcc": "x@other.test"}]   # the call the card showed
 
 
 def test_an_explicit_param_wins_over_the_one_beside_it_on_the_card_and_the_send(desk):

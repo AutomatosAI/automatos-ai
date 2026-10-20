@@ -16,7 +16,7 @@ import {
   type JsonRecord, type ThemeError,
 } from './css-value'
 import { satisfiesSdkRange } from './engines'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 import { SDK_VERSION } from './sdk'
 
 /** PA-2: the host contract's version (slots, pages, routes, boot data). */
@@ -52,10 +52,10 @@ export const PAGE_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   '/command-center': ['app/command-center/page.tsx', 'components/command-center/command-center-shell.tsx'],
   '/': ['app/page.tsx'],
 })
-/** PRD §4.4: pages that are always the host's. */
+/** PRD §4.4: pages that are always the host's. PRD-264 EUAI-10: /verify, the public AI-content check. */
 export const HOST_OWNED_ROUTES: readonly string[] = [
   '/sign-in', '/sign-up', '/auth', '/sso-callback', '/reset-password', '/accept-invitation', '/settings', '/team',
-  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev',
+  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev', '/verify',
 ]
 
 export const MANIFEST_ERROR_CODES: readonly string[] = [
@@ -80,12 +80,13 @@ const BRAND_FIELDS: readonly string[] = ['name', 'wordmark']
 const MASCOT_FIELDS: readonly string[] = ['states']
 const MANIFEST_OWNER = 'theme.json'
 
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
+/** A theme's id, `<publisher>/<name>`: the one its looks are kept under (installed-entry.ts reads it too). */
+export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
 const VERSION_PATTERN = /^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/
 const RANGE_PATTERN = /^\^?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/
-const ROUTE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}(?:\/[a-z0-9][a-z0-9-]{0,31}){0,3}$/
-const NAV_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
-const NAV_PATH_PATTERN = /^\/(?:[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63}){0,7})?$/
+export const ROUTE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}(?:\/[a-z0-9][a-z0-9-]{0,31}){0,3}$/
+export const NAV_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+export const NAV_PATH_PATTERN = /^\/(?:[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63}){0,7})?$/
 const PARAM_PATTERN = /^[a-z][A-Za-z0-9_-]{0,31}$/
 const USES_PATTERN = /^[a-z][A-Za-z0-9.-]{0,63}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
@@ -95,12 +96,12 @@ const FONT_PATTERN = /^assets\/fonts\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.woff2$/
 const WORDMARK_PATTERN = /^assets\/brand\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|webp)$/
 const X_ROUTE_PREFIX = '/x/'
 
-const NAME_MAX = 60
+export const NAME_MAX = 60
 const DESCRIPTION_MAX = 280
-const LABEL_MAX = 40
-const MIN_WIDTH_MAX = 3840
-const MAX_ROUTES = 16
-const MAX_NAV = 16
+export const LABEL_MAX = 40
+export const MIN_WIDTH_MAX = 3840
+export const MAX_ROUTES = 16
+export const MAX_NAV = 16
 const MAX_KEEP = 16
 const MAX_USES = 64
 const MAX_FILES_LISTED = 16

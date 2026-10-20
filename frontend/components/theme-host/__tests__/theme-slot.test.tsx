@@ -17,7 +17,9 @@
  * (its chat comes through its lazy slot, so it arrives a moment after the first render: findBy*).
  * A-04d: an installed theme's page draws full bleed inside MainLayout (the theme's frame, stood in
  * for here); builtin Play's pages draw MainLayout themselves, so ThemeSlot never frames them, and
- * a slot is drawn where it is placed, never framed.
+ * a slot is drawn where it is placed, never framed. A-12a: a page entry hands the core page down
+ * to the theme's page, so the theme's `cards.CorePage` (re-exported from host-cards/core-page)
+ * draws the real core page there; a slot has none, so CorePage in it draws its own children.
  */
 import React, { Suspense, useEffect } from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
@@ -48,7 +50,8 @@ vi.mock('@/hooks/use-studio-theme', () => ({
   useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
 }))
-vi.mock('@/components/play/chat/play-chat', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
+// Builtin Play's /chat slot, which draws Play's chat in its frame (PRD-261 A-14a: MainLayout moved out of Play's chat into it).
+vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <div data-testid="discussion-bar" /> }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
@@ -60,6 +63,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 
 import ChatLayout from '@/app/chat/layout'
 import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { CorePage } from '@/lib/theme-sdk/host-cards/core-page'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
 import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-context'
@@ -392,6 +396,58 @@ describe('ThemeSlot keeps the core page in one place: it mounts once (P260-FX-25
     view.rerender()
     shows('page')
     expect(state.mounts).toBe(1)
+  })
+})
+
+describe("ThemeSlot hands the core page down to the theme's page (A-12a cards.CorePage)", () => {
+  function ThemeKeepsCore() {
+    return (
+      <div data-testid="theme">
+        <CorePage>
+          <div data-testid="own-fallback">The theme's own fallback</div>
+        </CorePage>
+      </div>
+    )
+  }
+
+  function ThemeLostKeepsCore() {
+    return (
+      <div data-testid="theme">
+        <CorePage>
+          <div data-testid="own-fallback">The theme's own 404</div>
+        </CorePage>
+      </div>
+    )
+  }
+
+  it("renders the real core page where the theme's page places CorePage, not the theme's fallback", () => {
+    underInstalledTheme()
+    host = { ...installedHost(), pages: new Map<string, unknown>([['/chat', ThemeKeepsCore]]) }
+    renderPage()
+    expect(screen.getByTestId('theme')).toContainElement(screen.getByTestId('page'))
+    expect(screen.queryByTestId('own-fallback')).toBeNull()
+  })
+
+  it("draws the handed-down core page inside the installed theme's frame, once (A-04d)", () => {
+    underInstalledTheme()
+    host = { ...installedHost(), pages: new Map<string, unknown>([['/chat', ThemeKeepsCore]]) }
+    renderPage()
+    expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId('page'))
+    expect(screen.getAllByTestId('page')).toHaveLength(1)
+  })
+
+  it('renders CorePage\'s own children in a slot, which has no core page to hand down', () => {
+    underInstalledTheme()
+    host = { ...installedHost(), slots: new Map<SlotId, unknown>([['notFound@1', ThemeLostKeepsCore]]) }
+    render(
+      <ThemeHostContext.Provider value={host}>
+        <ThemeSlot slot="notFound@1">
+          <div data-testid="page">The core 404</div>
+        </ThemeSlot>
+      </ThemeHostContext.Provider>,
+    )
+    expect(screen.getByTestId('own-fallback')).toBeInTheDocument()
+    expect(screen.queryByTestId('page')).toBeNull()
   })
 })
 

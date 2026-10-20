@@ -11,7 +11,11 @@ every workspace that worker served, reset on each restart. It now:
   iteration_count, coverage and the INSUFFICIENT_DATA, WATCH and REGRESSION
   counts) and the workspace's HARNESS mode, counts only;
 * counts ``signals_7d`` from this workspace's production tool_execution_logs rows
-  of the last 7 days.
+  of the last 7 days;
+* returns the ``pending``, ``applied``, ``denied`` and ``expired`` counts of the
+  workspace's HARNESS ledger (US-058), a pending row by its effective state (US-053:
+  a declined, withdrawn or lapsed card reads as reconciliation will record it), and
+  writes nothing.
 """
 from __future__ import annotations
 
@@ -55,6 +59,8 @@ def _sweep(new_session, workspaces) -> None:
     s = new_session.sweep()
     for ws in workspaces:
         for sql in ("DELETE FROM tool_execution_logs WHERE workspace_id = CAST(:id AS uuid)",
+                    "DELETE FROM harness_task_ledger WHERE workspace_id = CAST(:id AS uuid)",
+                    "DELETE FROM approval_grants WHERE workspace_id = CAST(:id AS uuid)",
                     "DELETE FROM harness_runs WHERE workspace_id = CAST(:id AS uuid)",
                     "DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"):
             s.execute(text(sql), {"id": str(ws)})
@@ -131,7 +137,7 @@ def test_reads_harness_runs(workspaces, new_session):
     assert out == {
         "workspace_id": str(ws), "status": "completed", "iteration_count": 2, "coverage": 0.5,
         "insufficient_data": 2, "watch": 1, "regression": 0, "mode": "propose", "signals_7d": 0,
-        "unavailable": [],
+        "pending": 0, "applied": 0, "denied": 0, "expired": 0, "unavailable": [],
     }
 
 
@@ -156,6 +162,46 @@ def test_signal_count_is_workspace_scoped(workspaces, new_session):
 
     assert _read(new_session, ws)["signals_7d"] == 3
     assert _read(new_session, other)["signals_7d"] == 4
+
+
+def _seed_ledger(new_session, ws: UUID) -> list:
+    """Ledger rows in every state the tile counts, and some it does not; returns the ids
+    of the rows still stored as pending."""
+    from tests import helpers_harness_grants as hgx
+
+    s = new_session()
+    pending = []
+    for n, (status, expires_in) in enumerate([("pending", hgx.LIVE), ("pending", hgx.LIVE),
+                                              ("pending", hgx.LAPSED), ("denied", hgx.LIVE)], 1):
+        rx = f"rx-1-{n:03d}"
+        pending.append(hgx.ledger(s, str(ws), rx, 1, hgx.grant(s, str(ws), rx, status, expires_in=expires_in)))
+    for n, state in enumerate(["applied", "expired", "denied", "failed", "drifted"], 10):
+        hgx.ledger(s, str(ws), f"rx-2-{n:03d}", 1, None, state=state)
+    s.commit()
+    s.close()
+    return pending
+
+
+def test_ledger_counts(workspaces, new_session):
+    ws, other = workspaces({"orchestrator": {"harness": {"mode": "propose"}}}), workspaces()
+    still_pending = _seed_ledger(new_session, ws)
+    _seed_ledger(new_session, other)
+
+    out = _read(new_session, ws)
+
+    # Two live cards wait; the lapsed one reads expired and the declined one denied,
+    # beside the rows stored applied, expired and denied. Failed and drifted are not shown.
+    assert {state: out[state] for state in ("pending", "applied", "denied", "expired")} == {
+        "pending": 2, "applied": 1, "denied": 2, "expired": 2}
+    s = new_session()
+    try:
+        stored = s.execute(text("SELECT state FROM harness_task_ledger WHERE id = ANY(:ids)"),
+                           {"ids": still_pending}).scalars().all()
+        lapsed = s.execute(text("SELECT count(*) FROM approval_grants WHERE workspace_id = CAST(:ws AS uuid) "
+                                "AND status = 'pending'"), {"ws": str(ws)}).scalar()
+    finally:
+        s.close()
+    assert stored == ["pending"] * 4 and lapsed == 3        # the read wrote nothing
 
 
 def _route():

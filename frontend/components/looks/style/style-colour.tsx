@@ -1,6 +1,6 @@
-import { colourStyle } from '@/components/looks/swatch-style'
-import { colourSwatches, contrastChecks, formatRatio, type ContrastCheck } from '@/lib/looks/style'
-import type { Look } from '@/lib/looks/types'
+import { colourSwatches, contrastChecks, formatRatio, type ContrastCheck } from '../../../lib/looks/style'
+import type { Look } from '../../../lib/looks/types'
+import { colourStyle } from '../swatch-style'
 
 import styles from './style.module.css'
 

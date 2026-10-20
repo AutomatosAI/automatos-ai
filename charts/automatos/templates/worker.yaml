@@ -23,11 +23,11 @@ spec:
       serviceAccountName: {{ include "automatos.serviceAccountName" . }}
       automountServiceAccountToken: false
       # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
-      # volume's ownership, then drops to the `worker` user (uid 1000) with gosu.
+      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv.
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
-          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.worker.image) }}
           env:
             - name: WORKSPACE_VOLUME_PATH
               value: /workspaces

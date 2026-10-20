@@ -442,6 +442,12 @@ _RESET_ACCESS_SURVIVOR_TABLES: frozenset[str] = frozenset({"workspace_members"})
 # ``workspace_id`` and CASCADEs from ``credentials`` automatically.
 _CREDENTIAL_TABLES: frozenset[str] = frozenset({"user_api_keys", "credentials"})
 
+# The record of files Automatos marked as AI-generated (PRD-264 EUAI-10). Those files
+# are already out in the world; wiping the rows would make the public check answer
+# "no" for content the workspace published. Only full erasure (``purge_workspace_sync``,
+# GDPR ``erase_workspace``) deletes them.
+_RESET_RECORD_SURVIVOR_TABLES: frozenset[str] = frozenset({"content_provenance"})
+
 # Row-level survivor filter for the ``agents`` table: onboarding builds the
 # workspace's ordinary agents, but the platform's system agents and the hidden
 # onboarding-role agents (VOYAGER/BLUEPRINT/SCRIBE/FORGE) are seeded, not built —
@@ -480,7 +486,8 @@ def purge_built_artifacts(db: Session, workspace_id: UUID, *, wipe_s3: bool = Tr
     """Delete what onboarding BUILT in one workspace, sparing survivors.
 
     Reuses :func:`_delete_rows` (dynamic discovery + FK-safe multi-pass) with:
-      * the identity/access + credential tables excluded (survivors), and
+      * the identity/access, credential and provenance-record tables excluded
+        (survivors), and
       * the ``agents`` table filtered to non-system, non-onboarding rows.
     Then wipes the workspace's S3 document prefix via :func:`_purge_s3_prefix`.
     Never touches the workspace row, users, membership, or Clerk. Does NOT commit
@@ -489,7 +496,7 @@ def purge_built_artifacts(db: Session, workspace_id: UUID, *, wipe_s3: bool = Tr
     rows = _delete_rows(
         db,
         workspace_id,
-        skip_tables=_RESET_ACCESS_SURVIVOR_TABLES | _CREDENTIAL_TABLES,
+        skip_tables=_RESET_ACCESS_SURVIVOR_TABLES | _CREDENTIAL_TABLES | _RESET_RECORD_SURVIVOR_TABLES,
         row_predicates={"agents": _AGENT_SURVIVOR_SQL},
         ref_predicates={"agents": _AGENT_SURVIVOR_SQL},
     )

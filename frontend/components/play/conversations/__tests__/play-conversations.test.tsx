@@ -9,9 +9,10 @@
  * "Now" is pinned to a local date, so it passes in any time zone.
  * P260-FX-24 (M22): one status line under the search box, there for the
  * page's life, says the search's result (the count, or that nothing matches).
- * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here;
- * play-layout-phone.test.tsx runs the real one); while it isn't known (the
- * server, hydration) the page shows nothing, sends nowhere and asks for nothing.
+ * P260-FX-25 (M69): the width comes from the SDK's useThemeLayout, which wraps
+ * the host's (hooks/use-studio-theme.ts, stood in for here, so it reaches the page
+ * through the SDK; play-layout-phone.test.tsx runs the real one); while it isn't
+ * known (the server, hydration) the page shows nothing, sends nowhere and asks for nothing.
  */
 import React from 'react'
 import { cleanup, render, screen, within } from '@testing-library/react'

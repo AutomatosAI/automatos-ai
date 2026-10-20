@@ -1,0 +1,24 @@
+/* PRD-261 A-12a: the host-cards hello theme's one stylesheet. Every rule sits under
+   html.hello-a12a, the theme's own class, and its colours come from the preset's variables. It
+   styles the theme's own elements only: the host's cards keep the host's look. */
+html.hello-a12a .hello-a12a-frame {
+  min-height: 100vh;
+  background: var(--hello-a12a-ground);
+  color: var(--hello-a12a-ink);
+}
+
+html.hello-a12a .hello-a12a-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 2px solid var(--hello-a12a-accent);
+}
+
+html.hello-a12a .hello-a12a-route {
+  display: grid;
+  gap: 16px;
+  max-width: 480px;
+  padding: 24px;
+}

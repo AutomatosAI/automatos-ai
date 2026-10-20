@@ -82,6 +82,7 @@ from consumers.chatbot.waiting_asks_turn import reads_the_waiting_asks  # F439 (
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
     about_a_document, full_path_for_documents, with_document_actions,
 )
+from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
 
@@ -543,6 +544,7 @@ _BASE64_IMG_RE = re.compile(
 
 
 @a_saved_reply_is_on_brand  # F337 (night 10): the saved reply's placeholder company and sign-off are filled
+@reply_images_are_marked  # PRD-264 EUAI-09: each image it saves carries the AI mark and a provenance row
 async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
     """Find base64 image markdown in text, upload to S3, replace with URLs."""
     matches = list(_BASE64_IMG_RE.finditer(text))
@@ -1120,7 +1122,7 @@ class StreamingChatService:
         _cto_prompt = CtoPromptBuilder.build(
             soul_document=_soul,
             architecture_context=_arch_ctx,
-            user_name=None,
+            db_session=self.db, workspace_id=self.workspace_id, widget_mode=self.widget_mode,  # PRD-264 FR-15
             msg_count=len(messages),
             memories=_cto_memories,
             tool_names=[t.get("function", {}).get("name", "") for t in (use_tools or []) if isinstance(t, dict)],

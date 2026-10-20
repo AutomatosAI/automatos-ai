@@ -114,9 +114,16 @@ class _Session:
         pass
 
 
-def test_a_channel_never_runs_another_workspaces_agent(cafes):
-    from channels.base import BaseChannelAdapter
+def test_a_channel_never_runs_another_workspaces_agent(cafes, monkeypatch):
+    import channels.ai_notice as ai_notice
+    from channels.base import NO_ROUTE_REPLY, BaseChannelAdapter
     from core.models.routing import RoutingDecision
+    from core.public_principal import workspace_principal_name
+    from modules.policy.ai_disclosure import channel_notice, prepend_notice
+
+    # PRD-264 EUAI-03: the fallback is the first reply, so it carries the AI notice.
+    monkeypatch.setattr(ai_notice, "_get_redis", lambda: None)
+    noticed = prepend_notice(channel_notice(workspace_principal_name(cafes.db, cafes.ours)), NO_ROUTE_REPLY)
 
     class _Till(BaseChannelAdapter):
         async def start(self): ...
@@ -137,7 +144,8 @@ def test_a_channel_never_runs_another_workspaces_agent(cafes):
             patch("modules.agents.factory.agent_factory.AgentFactory") as factory:
         asyncio.run(_Till("c-1", str(cafes.ours), {}).handle_message({"channel_id": "till", "text": "menu?"}))
     factory.assert_not_called()
-    assert sent == ["I'm not sure how to handle that request. Please try rephrasing."]
+    assert NO_ROUTE_REPLY == "I'm not sure how to handle that request. Please try rephrasing."
+    assert sent == [noticed]
 
 
 def test_a_webhook_never_runs_another_workspaces_agent(cafes):

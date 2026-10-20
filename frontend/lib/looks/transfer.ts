@@ -1,6 +1,6 @@
 import { freshLookId } from './editor'
+import { validateLook } from './engine'
 import { LOOK_FIELDS, type Look, type ValidationResult } from './types'
-import { validateLook } from './validate'
 
 /**
  * PRD-260 — looks as files: what Export writes and what Import accepts. A file

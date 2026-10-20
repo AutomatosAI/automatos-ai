@@ -2,8 +2,8 @@
 
 import { useState, useSyncExternalStore } from 'react'
 
-import { useLook } from '@/components/looks/look-provider'
-import { MOTION_NOTES } from '@/lib/looks/style'
+import { MOTION_NOTES } from '../../../lib/looks/style'
+import { usePlayLook } from '../use-play-look'
 
 import gallery from './gallery.module.css'
 import styles from './style.module.css'
@@ -56,7 +56,7 @@ function MotionDemos({ playing }: { readonly playing: boolean }) {
 
 export function StyleMotion() {
   const mounted = useMounted()
-  const reducedMotion = useLook().reducedMotion && mounted
+  const reducedMotion = usePlayLook().reducedMotion && mounted
   const [wantsPlay, setWantsPlay] = useState(false)
   const playing = wantsPlay && !reducedMotion
 

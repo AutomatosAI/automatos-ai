@@ -376,18 +376,34 @@ async def _image_from_model(workspace_id: UUID, full_prompt: str, context: str) 
             "Cover image generation returned no image data | %s | content_len=%d", context, len(content),
         )
         raise ImageNotMade("Image model did not return base64 image data — try a clearer prompt")
-    return extracted
+    return _ai_marked(*extracted, context=context)
+
+
+def _ai_marked(mime: str, b64: str, context: str) -> tuple:
+    """PRD-264 EUAI-09: the model's image with the AI mark, before anything keeps it.
+    One that cannot be read to mark it is not kept: :class:`ImageNotMade`."""
+    from modules.documents.marked_images import marked_model_image
+
+    try:
+        return marked_model_image(mime, b64)
+    except ValueError as e:
+        logger.warning("Cover image could not be marked as AI-generated | %s | %s", context, e)
+        raise ImageNotMade("The image model returned an image that could not be read — try again") from e
 
 
 async def _saved_image(workspace_id: UUID, mime: str, b64: str) -> str:
-    """The image store's id for the image; raises :class:`ImageNotMade`."""
+    """The image store's id for the image (its provenance row recorded once it is kept,
+    PRD-264 EUAI-09); raises :class:`ImageNotMade`."""
     from core.services.image_store import get_image_store
+    from modules.documents.marked_images import record_model_image
 
     try:
-        return await get_image_store().save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
+        image_id = await get_image_store().save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
     except Exception as e:
         logger.error("Image store save failed: %s", e, exc_info=True)
         raise ImageNotMade(f"Image upload failed: {str(e)[:_ERROR_DETAIL_CHARS]}") from e
+    record_model_image(workspace_id, mime, b64)  # PRD-264 EUAI-09: the kept image's provenance row
+    return image_id
 
 
 def _image_url(image_id: str) -> str:

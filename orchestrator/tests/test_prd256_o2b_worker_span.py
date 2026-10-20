@@ -4,7 +4,9 @@ The platform's HTTP client sends ``traceparent`` with every call to the worker
 (O2a). With ``OTEL_ENABLED`` on in the worker, each request is a server span
 that continues that trace: one trace from the API's request, through its client
 span, into the worker. Off: nothing is imported and the app is as it was.
-Spans go to an in-memory exporter.
+Spans go to an in-memory exporter. PRD-262 (row 36): the worker serves through
+Starlette now, so the span is an ASGI middleware; these tests are the aiohttp ones,
+ported to Starlette's TestClient.
 """
 from __future__ import annotations
 
@@ -45,12 +47,12 @@ def _worker():
 def test_off_imports_nothing_and_leaves_the_app_as_it_was():
     script = (
         "import sys\n"
-        "from aiohttp import web\n"
+        "from starlette.applications import Starlette\n"
         "import worker_otel\n"
-        "app = web.Application()\n"
-        "before = (list(app.middlewares), list(app.on_cleanup))\n"
+        "app = Starlette()\n"
+        "before = (list(app.user_middleware), app.router.lifespan_context)\n"
         "worker_otel.attach(app)\n"
-        "assert (list(app.middlewares), list(app.on_cleanup)) == before\n"
+        "assert (list(app.user_middleware), app.router.lifespan_context) == before\n"
         "loaded = [m for m in sys.modules if m.startswith('opentelemetry')]\n"
         "assert not loaded, loaded\n"
     )
@@ -93,17 +95,14 @@ def _server_spans(exporter):
 
 
 def test_a_worker_request_continues_the_callers_trace(traced_worker):
-    from aiohttp.test_utils import TestClient, TestServer
+    from starlette.testclient import TestClient
 
     worker_http, exporter = traced_worker
 
-    async def run():
-        async with TestClient(TestServer(worker_http.build_app(_worker()))) as client:
-            files = await client.get(f"/workspaces/{WS}/files?path=.", headers={"traceparent": CALLER})
-            assert files.status == 200
-            assert (await client.get("/health")).status == 200
-
-    asyncio.run(run())
+    with TestClient(worker_http.build_app(_worker())) as client:
+        files = client.get(f"/workspaces/{WS}/files?path=.", headers={"traceparent": CALLER})
+        assert files.status_code == 200
+        assert client.get("/health").status_code == 200
     spans = _server_spans(exporter)
     assert [s.name for s in spans] == ["GET /workspaces/{workspace_id}/files"]   # /health is never traced
     span = spans[0]
@@ -150,15 +149,12 @@ def test_the_api_and_the_worker_are_one_trace(traced_worker, monkeypatch, tmp_pa
 
 
 def test_a_handler_error_is_recorded_on_the_span_and_still_answered(traced_worker):
-    from aiohttp.test_utils import TestClient, TestServer
+    from starlette.testclient import TestClient
 
     worker_http, exporter = traced_worker
 
-    async def run():
-        async with TestClient(TestServer(worker_http.build_app(_worker()))) as client:
-            assert (await client.get("/no/such/route")).status == 404
-
-    asyncio.run(run())
+    with TestClient(worker_http.build_app(_worker())) as client:
+        assert client.get("/no/such/route").status_code == 404
     spans = _server_spans(exporter)
     assert [(s.name, s.attributes.get("http.status_code")) for s in spans] == [("GET unmatched", 404)]
 
@@ -166,8 +162,8 @@ def test_a_handler_error_is_recorded_on_the_span_and_still_answered(traced_worke
 def test_a_handler_failure_leaves_its_type_not_its_message(traced_worker):
     """#1107: an exception's message and stack trace can name a workspace file, so the
     span carries only its type; a 404 is the caller's mistake, not a server error."""
-    from aiohttp.test_utils import TestClient, TestServer
     from opentelemetry.trace import StatusCode
+    from starlette.testclient import TestClient
 
     worker_http, exporter = traced_worker
     secret = "SECRET-VALUE-7"
@@ -176,14 +172,11 @@ def test_a_handler_failure_leaves_its_type_not_its_message(traced_worker):
     async def explode(request):
         raise OSError(f"/workspaces/{WS}/{secret}.txt: permission denied")
 
-    app.router.add_get("/explode", explode)
+    app.add_route("/explode", explode, methods=["GET"])
 
-    async def run():
-        async with TestClient(TestServer(app)) as client:
-            assert (await client.get("/explode")).status == 500
-            assert (await client.get("/no/such/route")).status == 404
-
-    asyncio.run(run())
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.get("/explode").status_code == 500
+        assert client.get("/no/such/route").status_code == 404
     failed, missing = _server_spans(exporter)
     assert failed.status.status_code == StatusCode.ERROR and failed.status.description == "OSError"
     assert failed.attributes["error.type"] == "OSError" and failed.events == ()

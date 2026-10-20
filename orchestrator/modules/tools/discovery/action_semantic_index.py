@@ -272,7 +272,8 @@ class ActionSemanticIndex:
             model_key = self._cache_model_key()
             text_by_name = {a.name: self._build_embedding_text(a) for a in missing}
             texts = list(text_by_name.values())
-            cached = self._cache.get_embeddings_batch(texts, model=model_key)
+            # Redis round trips and JSON decoding of every vector: off the loop (PRD-262 US-034).
+            cached = await asyncio.to_thread(self._cache.get_embeddings_batch, texts, model=model_key)
             misses_by_text: Dict[str, str] = {
                 text: name for name, text in text_by_name.items() if not cached.get(text)
             }
@@ -286,7 +287,7 @@ class ActionSemanticIndex:
                         f"{len(miss_texts)} texts; index would silently drop entries"
                     )
                 new_embeddings = dict(zip(miss_texts, vectors))
-                self._cache.set_embeddings_batch(new_embeddings, model=model_key)
+                await asyncio.to_thread(self._cache.set_embeddings_batch, new_embeddings, model=model_key)
             for name, text in text_by_name.items():
                 vec = cached.get(text) or new_embeddings.get(text)
                 if vec is not None:
@@ -376,9 +377,21 @@ class ActionSemanticIndex:
             overdue = self._overdue = set()
         return overdue
 
+    def _prepare(self) -> None:
+        """warm()'s synchronous set-up, for a worker thread: the embedding provider
+        (a settings read on first use) and the utterance corpus (its YAML, read from
+        disk once per process), which the build then finds loaded."""
+        from .utterance_corpus import corpus_hash
+
+        self._cache_model_key()
+        corpus_hash()
+
     async def warm(self) -> None:
         """Build the index ahead of the first turn (#927), from the boot seeds,
-        through the same shared build a turn would wait on."""
+        through the same shared build a turn would wait on. PRD-262 US-034: the boot
+        warms while the server serves, so the synchronous set-up runs in a worker
+        thread first, and the build's Redis reads and writes run in threads too."""
+        await asyncio.to_thread(self._prepare)
         await self._index_build()
 
     def _embed_timeout_s(self) -> Optional[float]:

@@ -84,7 +84,7 @@ from sqlalchemy import func, or_, update
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
-from modules.socials import post_text, text_search
+from modules.socials import ai_media, post_text, text_search
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
@@ -329,19 +329,8 @@ def _content_of(post: Any) -> Dict[str, Any]:
     targets = post_targets.target_set(post)
     if not targets:
         return content
-    generated = footage_generated(getattr(post, "footage", None))
+    generated = ai_media.footage_generated(getattr(post, "footage", None))  # PRD-264: the voice stays outside
     return {**content, TARGETS: targets, "title": getattr(post, "title", None) or "", "generated": generated}
-
-
-def footage_generated(footage: Any) -> bool:
-    """Whether a render recorded footage an AI toolkit made for one of the post's
-    slots (D12): what a channel's AI label says (``$generated``). The person's own
-    picture in a photo slot (an upload or a Library file) is not AI-made."""
-    slots = footage.values() if isinstance(footage, Mapping) else ()
-    return any(
-        isinstance(slot, Mapping) and slot.get("status") == FOOTAGE_DONE and slot.get("toolkit") not in OWN_FILE_TOOLKITS
-        for slot in slots
-    )
 
 
 def compute_content_hash(post: Any) -> str:

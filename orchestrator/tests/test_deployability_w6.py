@@ -37,8 +37,9 @@ def _restore_config_module():
 
     The F089 tests below ``importlib.reload(config)`` with S3_ENDPOINT_URL set /
     unset. Without a restore, the mutated config singleton + swept env bleed into
-    downstream suites co-run after this file (test_harness_commands,
-    test_prd143_concierge_journey). Snapshot os.environ and the config module
+    downstream suites co-run after this file (test_prd143_concierge_journey; the
+    other one named here, test_harness_commands, was deleted with the handler it
+    tested by PRD-263 US-047). Snapshot os.environ and the config module
     reference at setup; restore both at teardown so nothing leaks past this file.
     """
     env_snapshot = dict(os.environ)

@@ -1,11 +1,12 @@
 /**
  * Saving text the page already holds as a file from the browser: a Blob URL on
- * a throwaway link. The one helper (PRD-260 P260-FX-27, M88) behind a look's
- * Export (components/looks/look-manager.tsx) and a knowledge document's
+ * a throwaway link (PRD-260 P260-FX-27, M88), behind a knowledge document's
  * markdown download (DocumentWidget's downloadMarkdownFile), ported from
- * Automatos Play's components/looks/download.ts. The URL is let go a moment
- * later, once the browser has started the download: Safari needs it to live
- * that long.
+ * Automatos Play's components/looks/download.ts. Play's look Export uses its
+ * own copy since PRD-261 A-14d (components/looks/download-text.ts: Play imports
+ * no core module), which components/looks/__tests__/copied-helpers.test.tsx
+ * holds to this one. The URL is let go a moment later, once the browser has
+ * started the download: Safari needs it to live that long.
  */
 
 /** How long the Blob URL outlives the click. */

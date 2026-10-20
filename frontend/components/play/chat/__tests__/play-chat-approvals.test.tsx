@@ -45,7 +45,12 @@ vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connec
 // PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
 // It also asks the history again when a turn ends (P260-FX-10, proved in play-chat.test.tsx); no history list here.
-vi.mock('@/hooks/use-refresh-history-on-turn-end', () => ({ useRefreshHistoryOnTurnEnd: vi.fn() }))
+// Keep the real module (the SDK's chat area builds its history query keys from CHAT_HISTORY_QUERY_PREFIX
+// when it loads); only the hook is replaced.
+vi.mock('@/hooks/use-refresh-history-on-turn-end', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-refresh-history-on-turn-end')>()),
+  useRefreshHistoryOnTurnEnd: vi.fn(),
+}))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))

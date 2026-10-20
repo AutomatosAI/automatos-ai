@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from modules.documents.url_fetcher import _safe_url_fetcher  # PRD-156 S4: the SSRF guard
 from config import config
-from core.media_render_bundle import build_bundle
+from core.media_render_bundle import build_bundle, with_template_inputs
 from core.media_render_client import MediaRenderClient
 from core.media_render_quota import book_render_seconds, declared_seconds, release_render, reserve_render, sessions_for
 from core.music_credit import MusicCredit, credit_for_render
@@ -50,11 +50,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.legacy_jinja import legacy_brand, with_document_filters
 from modules.documents.blocks import (
-    legacy_render_data,
-    collect_variable_paths,
-    render_document_docx,
-    render_document_html,
-    validate_blocks,
+    legacy_render_data, collect_variable_paths, render_document_docx, render_document_html, validate_blocks,
 )
 from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
@@ -68,6 +64,7 @@ from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
 from modules.documents.workspace_documents import copy_when_registered
 from modules.documents.kit_dates import dates_follow_the_kit  # F383: ISO dates print in the kit's style
+from modules.documents.marked_documents import ai_documents_are_marked, marked_before_it_is_kept  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +121,7 @@ class DocumentGenerationService:
     # Public dispatch
     # ------------------------------------------------------------------
 
+    @ai_documents_are_marked  # PRD-264 EUAI-09: an agent's document carries the AI mark (none named a person)
     @the_parties_are_remembered  # F354: who the document is for rides to its Deliverable
     @unpriced_amounts_are_said  # F367: amounts that print with no currency sign (the kit has none) are named
     @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
@@ -523,7 +521,7 @@ class DocumentGenerationService:
         sessions = sessions_for(self.db)
         reservation = await reserve_render(sessions, workspace, declared_seconds(blocks, format), execution_id=reference)
         try:
-            bundle = build_bundle(
+            bundle = with_template_inputs(build_bundle(  # PRD-264 EUAI-06a: it says which inputs are AI-made
                 workspace_id=workspace_id,
                 reference=reference,
                 blocks=blocks,
@@ -531,7 +529,7 @@ class DocumentGenerationService:
                 brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
                 fallback_name=getattr(workspace, "name", None) or "",
                 fmt=format,
-            )
+            ))
             output_path = Path(self._output_path(workspace_id, title, file_type))
             music = await self._render_social_file(bundle, output_path, workspace_id, reference)
         finally:
@@ -755,6 +753,7 @@ class DocumentGenerationService:
         os.makedirs(directory, exist_ok=True)
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
+    @marked_before_it_is_kept  # PRD-264 EUAI-09: marked and recorded after its last write, before upload
     def _build_result(
         self,
         path: str,

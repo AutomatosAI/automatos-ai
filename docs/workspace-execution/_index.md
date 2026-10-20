@@ -38,7 +38,7 @@ The `workspace-worker` is an independent service implemented as an ARQ-style Red
 *   **Lifecycle**: Includes a heartbeat reporter for monitoring and a graceful shutdown handler that waits for active tasks to complete [services/workspace-worker/main.py:118-144]().
 *   **Worker ID**: Each worker instance generates a unique identifier using its PID and timestamp for tracking [services/workspace-worker/main.py:82]().
 *   **Canvas Integration**: The worker manages headless Claude Agent SDK sessions, persisting state and transcripts to the workspace volume [services/workspace-worker/canvas_session_service.py:4-17]().
-*   **Toolchain**: The worker Docker image includes essential development tools like `git`, `curl`, Node.js 24 with `npm` and `corepack`, `pnpm` (pinned exactly), and `uv` for Python package management [services/workspace-worker/Dockerfile:1-45](). It also conditionally installs headless Chromium for the `workspace_html_to_png` tool [services/workspace-worker/Dockerfile]().
+*   **Toolchain**: The worker Docker image includes essential development tools like `git`, `curl`, Node.js 24 with `npm` and `corepack`, `pnpm` (pinned exactly), and `uv` for Python package management [services/workspace-worker/Dockerfile:1-45](). `build-essential` brings `gcc`, `g++` and `make`, which build and link dynamically; the image leaves out gcc's sanitizer runtimes and the static `libc.a` and `libstdc++.a` (PRD-262 §3-D5), so `-fsanitize`, `-static` and `-static-libstdc++` builds do not link. It also conditionally installs headless Chromium for the `workspace_html_to_png` tool [services/workspace-worker/Dockerfile]().
 
 For details, see [Workspace Worker Architecture](#21.1).
 

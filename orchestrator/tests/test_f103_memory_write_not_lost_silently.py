@@ -15,8 +15,8 @@ import uuid
 
 import httpx
 import pytest
-from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
+from core.qdrant.errors import ResponseHandlingException, UnexpectedResponse
 from modules.memory import durable_store as ds
 
 FACT = "Declan's wholesale orders ship on Thursdays."

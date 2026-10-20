@@ -8,9 +8,12 @@
  * The grammar is deliberately small: the characters colours, lengths, numbers, font stacks and
  * filter lists need, and only the functions in CSS_VALUE_FUNCTIONS, so no url(), image() or
  * expression() and no ';', '{', '}', quote, '<', '!' or '@' can reach a declaration.
+ *
+ * An installed theme's registry entry data (W-A6b) passes installed-entry.ts's own check.
  */
 import { HTML_CLASS_PATTERN } from './constants'
 import { sanitizeIntegrity } from './import-map'
+import { sanitizeInstalledEntry } from './installed-entry'
 import type { ThemeTonePolicy } from './registry-types'
 import type {
   PrepaintNumericRule,
@@ -38,7 +41,12 @@ export const CSS_VALUE_FUNCTIONS: ReadonlySet<string> = new Set([
 const KNOB_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
 const OPTION_KEY_MAX_LENGTH = 64
 const RGB_LIST = /^\d{1,3},\d{1,3},\d{1,3}$/
-const STORAGE_KEY = /^[A-Za-z0-9._:-]{1,128}$/
+/**
+ * A look storage key: builtin Play's `automatos-play.look.current`, and an installed theme's
+ * `automatos-theme.<publisher>/<name>.look.current` (play-look-storage.ts installedLookKeys, W-A6b
+ * gap G2), whose theme id holds a '/' and may be 102 characters long.
+ */
+const STORAGE_KEY = /^[A-Za-z0-9._:/-]{1,160}$/
 const GUARD_MAX_LENGTH = 128
 /** Caps are alphas. */
 const CAP_MIN = 0
@@ -228,5 +236,6 @@ export function sanitizeThemeBoot(boot: ThemeBoot): ThemeBoot {
     lookStorage: sanitizeLookStorage(boot.lookStorage),
     lookGuard: sanitizeLookGuard(boot.lookGuard),
     integrity: sanitizeIntegrity(boot.integrity),
+    entry: sanitizeInstalledEntry(boot.entry),
   }
 }

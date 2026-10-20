@@ -1,12 +1,12 @@
 /**
- * Settings > Orchestrator, section 4: HARNESS (PRD-121; PRD-263 US-017).
+ * Settings > Orchestrator, section 4: HARNESS (PRD-121; PRD-263 US-017, US-054).
  *
  * The mode is the only HARNESS control: one select, always shown, with no on/off
  * switch and no schedule (the weekly run's day and hour are an installation
- * setting). In P1 it offers the two modes that exist: Report only and Disabled.
- * US-054 adds Propose when proposals can exist. A stored value this list does
- * not offer (a legacy mode, or Propose before US-054) shows as Report only, which
- * is how HARNESS runs it.
+ * setting). It offers the three modes that exist: Report only, Propose (each
+ * suggested change comes as an Approvals card, while proposals are switched on
+ * for the installation) and Disabled. A stored value this list does not offer (a
+ * legacy mode) shows as Report only, which is how HARNESS runs it.
  */
 
 import React, { useState } from 'react'

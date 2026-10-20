@@ -170,6 +170,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
     harness_history,
+    harness_apply,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
 from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
@@ -1479,6 +1480,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_harness_status": harness_status,
     "platform_harness_trigger": harness_trigger,
     "platform_harness_history": harness_history,
+    "platform_harness_apply": harness_apply,  # PRD-263 US-052: an owner-approved HARNESS change
     # PRD-142 Wave 4 (W4-S6): routing-rule creation
     "platform_create_routing_rule": create_routing_rule,
     # PRD-142 Wave 4 (W4-S5): workspace power-mode knob

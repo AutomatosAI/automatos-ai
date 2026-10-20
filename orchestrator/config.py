@@ -658,6 +658,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
+    # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
+    # takes no account, so each client IP gets this many checks a minute (at least one).
+    PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
@@ -940,10 +943,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
-    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
-    # The weekly run is report_only and applies nothing whatever its value
-    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
+    # PRD-263 US-054: the installation's switch that allows HARNESS to raise approval
+    # grants. HIGH RISK — default OFF. Only while it is on does a ``propose`` workspace
+    # get an Approvals card per proposed change (services.harness_grants), applied only
+    # on the owner's click; off, every workspace runs report_only and gets no card.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
@@ -977,6 +980,24 @@ class Config:
     # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
     # connection failures is reported as "reconnect <app>", never as a bad tool.
     HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
+    # PRD-263 US-050 (section 11-Q10 defaults): HARNESS suggests doubling an enabled heartbeat's
+    # interval (clamped to 5-1440 minutes, as the heartbeat handler clamps it) only when its
+    # judged week has at least HARNESS_HEARTBEAT_MIN_RUNS runs with an outcome (a run whose
+    # objective_met is None is not counted) and the Wilson upper bound (95%) of the share
+    # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
+    HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
+    HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
+    # PRD-263 US-053 (section 11-Q7 default): a HARNESS proposal granted, or being applied,
+    # longer than HARNESS_RECONCILE_GRACE_MINUTES ago with no outcome is closed as failed.
+    # The daily sweep of HARNESS grants runs on HARNESS_GRANT_SWEEP_CRON, read in UTC
+    # (default 09:00 every day; services.harness_grants).
+    HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
+    HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
+    # PRD-263 US-056: each change HARNESS applied is judged week by week against the
+    # HARNESS_REF_DAYS before it (services.harness_post_change). A metric waits for a week
+    # of at least HARNESS_MIN_SAMPLES for up to HARNESS_POST_CHANGE_MAX_WEEKS weeks after
+    # the change; otherwise the report says it was not judged.
+    HARNESS_POST_CHANGE_MAX_WEEKS: int = int(os.getenv("HARNESS_POST_CHANGE_MAX_WEEKS", "4"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1246,6 +1267,11 @@ class Config:
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    # PRD-264 EUAI-03 (EU AI Act Art. 50(1)): a channel bot's reply carries "AI
+    # assistant for {principal}." on first contact with a person and again once
+    # this many hours have passed since the last notice. The last-notice time
+    # lives in Redis with this TTL (channels/ai_notice.py). No setting turns it off.
+    AI_DISCLOSURE_IDLE_HOURS: int = int(os.getenv("AI_DISCLOSURE_IDLE_HOURS", "24"))
     # SEMANTIC_TOOL_ROUTING (default ON) and TOOL_ROUTING_GRAPH (default OFF, below)
     # gate DIFFERENT surfaces — PRD-232 US-002 split them after C2 found the
     # inversion. SEMANTIC_TOOL_ROUTING gates EMBEDDING narrowing everywhere:
@@ -1705,7 +1731,6 @@ class Config:
     # =============================================================================
     AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
-    GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
     # F353: draw a document Deliverable's first page for its card, after it is made.
     DOCUMENT_THUMBNAILS_ENABLED: bool = os.getenv("DOCUMENT_THUMBNAILS_ENABLED", "true").lower() == "true"
@@ -1955,6 +1980,17 @@ class Config:
     VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
         "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
     )
+    # PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto Live speaks first, and its
+    # opening line says it is an AI. A greeting that is empty or lacks the AI
+    # term for VOICE_LIVE_LANGUAGE ("AI", "IA", "KI") is never spoken; the
+    # default is (modules/policy/ai_disclosure.py). No setting silences it.
+    VOICE_AI_GREETING: str = os.getenv(
+        "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant."
+    )
+    # Every this many minutes of call time, and after an automatic reconnect,
+    # the next response opens with "Just so you know, I'm an AI assistant."
+    # (Guidelines ¶37). 0 or less reminds on every response; it never turns off.
+    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "10"))
     # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
     # AND re-applied on every one-click re-arm. Pinning the language stops
     # multilingual STT from hallucinating confident nonsense; background-speech

@@ -1,13 +1,12 @@
 'use client'
 
-import Link from 'next/link'
 import { useState } from 'react'
+import { HostLink, LOOKS_HREF } from '@automatos/theme-sdk'
 
-import { useLook } from '@/components/looks/look-provider'
-import { PLAY_ONLY_HEADING } from '@/components/looks/play-only-route'
-import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
-import { rootBlock } from '@/lib/looks/style'
-import { LOOKS_HREF } from '@/lib/ticket-links'
+import { rootBlock } from '../../../lib/looks/style'
+import { PLAY_ONLY_HEADING } from '../screen-heading'
+import { type Told, useNoticeSeq } from '../use-notice-seq'
+import { usePlayLook } from '../use-play-look'
 
 import { StyleColour } from './style-colour'
 import { StyleComponents } from './style-components'
@@ -22,7 +21,7 @@ import styles from './style.module.css'
  * mocks ember-12 and -13), ported from Automatos Play's
  * components/looks/style/StyleScreen.tsx: the active look's colours with live
  * contrast, its type, the spacing and radii, the motion, the components and
- * Auto's 12 states. Everything is computed from useLook().look, so it redraws
+ * Auto's 12 states. Everything is computed from usePlayLook().look, so it redraws
  * as soon as the look changes anywhere in the app. Copy tokens puts the look's
  * variables on the clipboard as a :root block. app/looks/style/page.tsx shows
  * it through PlayOnlyRoute: under Play at >= 1024 px only, full bleed.
@@ -50,7 +49,7 @@ type CopyOutcome =
 type CopyNotice = Told<CopyOutcome>
 
 function useCopyTokens() {
-  const { look } = useLook()
+  const { look } = usePlayLook()
   const block = rootBlock(look)
   const [notice, setNotice] = useState<CopyNotice | null>(null)
   const stamp = useNoticeSeq()
@@ -88,7 +87,7 @@ function CopyResult({ notice }: { readonly notice: CopyNotice | null }) {
 }
 
 export function StyleScreen() {
-  const { look, loaded } = useLook()
+  const { look, loaded } = usePlayLook()
   const { notice, copy } = useCopyTokens()
 
   return (
@@ -106,9 +105,9 @@ export function StyleScreen() {
         </div>
         {loaded && (
           <div className={styles.actions}>
-            <Link href={LOOKS_HREF} className={styles.linkButton}>
+            <HostLink href={LOOKS_HREF} className={styles.linkButton}>
               {BACK_TO_LOOKS}
-            </Link>
+            </HostLink>
             <button type="button" className={styles.copyButton} onClick={() => void copy()}>
               {COPY_TOKENS}
             </button>

@@ -40,6 +40,12 @@ agent-week-run, agent-week-app-class) and its own trap filters, and a fixed set
 keeps each filter readable and separately tested. The count never depends on the
 roster size (no per-agent loop hits the database).
 
+COLLECT's read also lists each agent's app links (PRD-263 US-057): the apps assigned
+to it, and the apps a Playbook or an active Mission that routes to it needs, so a
+failing tool is proposed for removal only when nothing depends on it. The
+post-change check (US-056) reads the same counts between any two moments
+(:func:`span_window`), for a change's frozen reference.
+
 Read only: no write, no platform action, no model call.
 """
 
@@ -51,7 +57,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from operator import itemgetter
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 from uuid import UUID
@@ -60,7 +66,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from core.models.orchestration_enums import TaskState
+from core.models.orchestration_enums import TERMINAL_RUN_STATES, TaskState
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +75,7 @@ logger = logging.getLogger(__name__)
 REF_WEEKS = 4
 # How the heartbeat service reads an agent's interval when its configuration has none.
 DEFAULT_HEARTBEAT_INTERVAL_MINUTES = 60
+DAYS_PER_WEEK = 7
 
 # One agent-week row. DIAGNOSE reads rows only through these names (US-014, US-015).
 AGENT_ROW_FIELDS: Tuple[str, ...] = (
@@ -86,6 +93,14 @@ AGENT_ROW_FIELDS: Tuple[str, ...] = (
 )
 # One agent-week-app-status-class row of production tool runs.
 TOOL_ROW_FIELDS: Tuple[str, ...] = ("agent_id", "iso_week", "app_name", "status", "error_class", "calls")
+# One agent-app link (US-057): the app (upper-cased, as the assignment handlers store it),
+# how it is linked (LINK_*), and the Playbook's name or the Mission's goal that needs it.
+APP_LINK_FIELDS: Tuple[str, ...] = ("agent_id", "app_name", "link", "source")
+LINK_ASSIGNED = "assigned"
+LINK_PLAYBOOK = "playbook"
+LINK_MISSION = "mission"
+# How much of a Mission's goal names it in a link.
+MISSION_GOAL_CHARS = 80
 
 _IDENTITY_FIELDS = frozenset({
     "agent_id", "agent_name", "model_id", "heartbeat_enabled", "heartbeat_interval_minutes", "iso_week",
@@ -310,6 +325,65 @@ _TOOLS_SQL = text("""
     GROUP BY 1, 2, 3, 4, 5, 6
 """)
 
+# A Composio action is named <APP>_<ACTION> (api/recipe_executor.py, _is_composio_action).
+ACTION_SEPARATOR = "_"
+
+# PRD-263 US-057: each roster agent's app links, from existing tables only. Assigned: an
+# active agent_app_assignments row. Playbook (workflow_recipes; a Playbook has no status
+# column, so every Playbook of the workspace counts): a step routed to the agent while the
+# Playbook lists the app in required_tools, or a run (recipe_executions) started since the
+# read window began, in which the agent's step called one of the app's actions (only those
+# runs are unnested, so the read does not grow with a workspace's whole run history).
+# Mission: a run not yet ended (orchestration_runs.state) with a task assigned or pinned
+# to the agent, while one of its tasks lists the app in input_context.required_tools. Each
+# cast sits inside a CASE, as in _HEARTBEAT_SQL.
+_APP_LINKS_SQL = text("""
+    WITH links AS (
+        SELECT aa.agent_id, aa.app_name, :assigned AS link, NULL AS source
+        FROM agent_app_assignments aa
+        WHERE aa.agent_id = ANY(:agent_ids) AND aa.is_active IS TRUE
+      UNION
+        SELECT CASE WHEN s.step ->> 'agent_id' ~ :agent_id_pattern
+                    THEN CAST(s.step ->> 'agent_id' AS bigint) END,
+               t.app, :playbook, r.name
+        FROM workflow_recipes r
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.steps) = 'array'
+                                                     THEN r.steps ELSE CAST('[]' AS jsonb) END) AS s(step)
+        CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.required_tools) = 'array'
+                                                          THEN r.required_tools ELSE CAST('[]' AS jsonb) END) AS t(app)
+        WHERE r.workspace_id = CAST(:workspace_id AS uuid)
+      UNION
+        SELECT aa.agent_id, aa.app_name, :playbook, r.name
+        FROM agent_app_assignments aa
+        JOIN recipe_executions e ON e.workspace_id = CAST(:workspace_id AS uuid) AND e.started_at >= :start
+        JOIN workflow_recipes r ON r.id = e.recipe_id AND r.workspace_id = CAST(:workspace_id AS uuid)
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.step_results) = 'array'
+                                                     THEN e.step_results ELSE CAST('[]' AS jsonb) END) AS s(step)
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(s.step -> 'tool_calls_summary') = 'array'
+                 THEN s.step -> 'tool_calls_summary' ELSE CAST('[]' AS jsonb) END) AS c(call)
+        WHERE aa.agent_id = ANY(:agent_ids) AND aa.is_active IS TRUE
+          AND s.step ->> 'agent_id' = CAST(aa.agent_id AS text)
+          AND left(upper(c.call), length(aa.app_name) + 1) = upper(aa.app_name) || :action_separator
+      UNION
+        SELECT COALESCE(routed.assigned_agent_id,
+                        CASE WHEN routed.input_context ->> 'pinned_agent_id' ~ :agent_id_pattern
+                             THEN CAST(routed.input_context ->> 'pinned_agent_id' AS bigint) END),
+               t.app, :mission, left(r.goal, :goal_chars)
+        FROM orchestration_runs r
+        JOIN orchestration_tasks routed ON routed.run_id = r.id
+        JOIN orchestration_tasks needing ON needing.run_id = r.id
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(needing.input_context -> 'required_tools') = 'array'
+                 THEN needing.input_context -> 'required_tools' ELSE CAST('[]' AS jsonb) END) AS t(app)
+        WHERE r.workspace_id = CAST(:workspace_id AS uuid)
+          AND r.state <> ALL(:ended_states)
+    )
+    SELECT DISTINCT agent_id, upper(btrim(app_name)) AS app_name, link, source
+    FROM links
+    WHERE agent_id = ANY(:agent_ids) AND btrim(app_name) <> ''
+""")
+
 
 @dataclass(frozen=True)
 class Window:
@@ -328,12 +402,14 @@ class Window:
 
 @dataclass(frozen=True)
 class HarnessMetrics:
-    """One workspace's raw counts: a row per roster agent per week, and its tool runs."""
+    """One workspace's raw counts: a row per roster agent per week, and its tool runs; and,
+    from COLLECT's read, each agent's app links."""
 
     workspace_id: str
     window: Window
     agent_rows: Tuple[Dict[str, Any], ...]  # keys: AGENT_ROW_FIELDS
     tool_rows: Tuple[Dict[str, Any], ...]   # keys: TOOL_ROW_FIELDS
+    app_links: Tuple[Dict[str, Any], ...] = ()  # keys: APP_LINK_FIELDS
 
 
 def iso_week_label(day: date) -> str:
@@ -364,14 +440,35 @@ def build_window(cur_week: str, ref_weeks: int = REF_WEEKS) -> Window:
     )
 
 
+def _naive_utc(moment: datetime) -> datetime:
+    """A moment as the naive UTC the statements compare (a naive one is taken as UTC)."""
+    return moment.astimezone(timezone.utc).replace(tzinfo=None) if moment.tzinfo else moment
+
+
+def span_window(start: datetime, end: datetime) -> Window:
+    """A window read between exactly ``start`` and ``end``, whatever the weekday: every ISO
+    week the span touches gets its row, each counting only the part of it inside the span.
+    The post-change check reads a change's frozen reference this way (PRD-263 US-056).
+    ValueError when ``end`` is not after ``start``."""
+    start, end = _naive_utc(start), _naive_utc(end)
+    if end <= start:
+        raise ValueError(f"a span must end after it starts, got {start} to {end}")
+    first, last = start.date(), (end - timedelta(microseconds=1)).date()
+    monday = first - timedelta(days=first.weekday())
+    weeks = tuple(iso_week_label(monday + timedelta(weeks=i))
+                  for i in range((last - monday).days // DAYS_PER_WEEK + 1))
+    return Window(cur_week=weeks[-1], ref_weeks=weeks[:-1], start=start, end=end)
+
+
 def _week_of(week_start: Any) -> str:
     """The ISO week of a ``date_trunc('week', ...)`` bucket (always a Monday)."""
     day = week_start.date() if isinstance(week_start, datetime) else week_start
     return iso_week_label(day)
 
 
-def _interval_minutes(heartbeat: Mapping[str, Any], agent_id: int) -> int:
-    """The interval the heartbeat service would use: ``interval_minutes``, else 60."""
+def heartbeat_interval(heartbeat: Mapping[str, Any], agent_id: int) -> int:
+    """The interval the heartbeat service would use: ``interval_minutes``, else 60. The
+    change registry reads a heartbeat's prior value through it too (PRD-263 US-050)."""
     raw = heartbeat.get("interval_minutes", DEFAULT_HEARTBEAT_INTERVAL_MINUTES)
     try:
         return int(float(raw))
@@ -381,7 +478,7 @@ def _interval_minutes(heartbeat: Mapping[str, Any], agent_id: int) -> int:
         return DEFAULT_HEARTBEAT_INTERVAL_MINUTES
 
 
-def _heartbeat_config(raw: Any, agent_id: int) -> Dict[str, Any]:
+def heartbeat_setting(raw: Any, agent_id: int) -> Dict[str, Any]:
     """``configuration -> 'heartbeat'`` as a dict. psycopg2 decodes JSON itself, so
     anything else here (a string such as ``"on"``, a list) is a setting that is not an
     object: it reads as no heartbeat, as the heartbeat service skips it, and is logged
@@ -395,17 +492,17 @@ def _heartbeat_config(raw: Any, agent_id: int) -> Dict[str, Any]:
 
 def _roster(db: Session, workspace_id: str) -> List[Dict[str, Any]]:
     """Active, non-system agents of this workspace (Auto is the workspace's system agent:
-    every candidate ``HarnessService._resolve_auto_agent`` can return is one)."""
+    every candidate ``harness_grants.resolve_auto_agent`` can return is one)."""
     rows = db.execute(_ROSTER_SQL, {"workspace_id": workspace_id, "active_status": ACTIVE_AGENT_STATUS})
     roster = []
     for row in rows:
-        heartbeat = _heartbeat_config(row.heartbeat, row.agent_id)
+        heartbeat = heartbeat_setting(row.heartbeat, row.agent_id)
         roster.append({
             "agent_id": row.agent_id,
             "agent_name": row.agent_name,
             "model_id": row.model_id,
             "heartbeat_enabled": bool(heartbeat.get("enabled")),
-            "heartbeat_interval_minutes": _interval_minutes(heartbeat, row.agent_id),
+            "heartbeat_interval_minutes": heartbeat_interval(heartbeat, row.agent_id),
         })
     return roster
 
@@ -548,16 +645,25 @@ def _agent_rows(roster: List[Dict[str, Any]], window: Window,
     return tuple(rows)
 
 
-def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
-              *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
-    """Read one workspace's raw per-agent counts for ``cur_week`` and the weeks before it.
+def _app_links(db: Session, params: Mapping[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    """Each roster agent's app links (US-057; _APP_LINKS_SQL), sorted."""
+    extra = {
+        "assigned": LINK_ASSIGNED, "playbook": LINK_PLAYBOOK, "mission": LINK_MISSION,
+        "agent_id_pattern": AGENT_ID_PATTERN, "action_separator": ACTION_SEPARATOR,
+        "goal_chars": MISSION_GOAL_CHARS, "ended_states": sorted(state.value for state in TERMINAL_RUN_STATES),
+    }
+    links = [dict(zip(APP_LINK_FIELDS, (r.agent_id, r.app_name, r.link, r.source)))
+             for r in db.execute(_APP_LINKS_SQL, {**params, **extra})]
+    return tuple(sorted(links, key=lambda link: (link["agent_id"], link["app_name"], link["link"],
+                                                 link["source"] or "")))
 
-    The synchronous core (tests call it on a real session); async callers use
-    :func:`read`. Every statement is bound to ``workspace_id``. A database error is
-    logged and raised, never turned into zeros.
-    """
+
+def read_window(db: Session, workspace_id: Union[UUID, str], window: Window,
+                *, app_links: bool = False) -> HarnessMetrics:
+    """Read one workspace's raw per-agent counts for every week of ``window``, and with
+    ``app_links`` each agent's app links. Every statement is bound to ``workspace_id``. A
+    database error is logged and raised, never turned into zeros."""
     workspace = str(UUID(str(workspace_id)))
-    window = build_window(cur_week, ref_weeks)
     try:
         roster = _roster(db, workspace)
         if not roster:
@@ -566,23 +672,35 @@ def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
         tools = _tool_rows(db, params)
         sources = (_ticket_counts(db, params), _mission_counts(db, params), _heartbeat_counts(db, params),
                    _usage_counts(db, params), _tool_totals(tools))
+        links = _app_links(db, params) if app_links else ()
     except SQLAlchemyError:
         logger.exception("[HARNESS] metrics read failed for workspace %s, week %s", workspace, window.cur_week)
         raise
     rows = _agent_rows(roster, window, sources)
-    logger.info("[HARNESS] metrics read: workspace %s, week %s, %d agents x %d weeks, %d tool rows",
-                workspace, window.cur_week, len(roster), len(window.weeks), len(tools))
-    return HarnessMetrics(workspace_id=workspace, window=window, agent_rows=rows, tool_rows=tools)
+    logger.info("[HARNESS] metrics read: workspace %s, week %s, %d agents x %d weeks, %d tool rows, %d app links",
+                workspace, window.cur_week, len(roster), len(window.weeks), len(tools), len(links))
+    return HarnessMetrics(workspace_id=workspace, window=window, agent_rows=rows, tool_rows=tools, app_links=links)
+
+
+def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
+              *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
+    """COLLECT's read: one workspace's raw per-agent counts for ``cur_week`` and the
+    ``ref_weeks`` weeks before it, with each agent's app links.
+
+    The synchronous core (tests call it on a real session); async callers use :func:`read`.
+    """
+    return read_window(db, workspace_id, build_window(cur_week, ref_weeks), app_links=True)
 
 
 async def read(db: Session, workspace_id: Union[UUID, str], cur_week: str,
                *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
-    """:func:`read_sync` on a worker thread, so the six statements never hold the event loop."""
+    """:func:`read_sync` on a worker thread, so the seven statements never hold the event loop."""
     return await asyncio.to_thread(read_sync, db, workspace_id, cur_week, ref_weeks=ref_weeks)
 
 
 __all__ = [
     "AGENT_ROW_FIELDS",
+    "APP_LINK_FIELDS",
     "HarnessMetrics",
     "RECONNECT_CLASSES",
     "RECONNECT_CODES",
@@ -591,7 +709,11 @@ __all__ = [
     "Window",
     "build_window",
     "classify_tool_error",
+    "heartbeat_interval",
+    "heartbeat_setting",
     "iso_week_label",
     "read",
     "read_sync",
+    "read_window",
+    "span_window",
 ]

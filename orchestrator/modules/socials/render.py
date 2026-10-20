@@ -100,7 +100,7 @@ from modules.socials.post_fields import resolved_fields
 from core.social_templates import (
     SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, validate_social_blocks,
 )
-from modules.socials import channel_sizes, notify, service, spoken_fields
+from modules.socials import ai_media, channel_sizes, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -229,7 +229,7 @@ def bundle_for(
         raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
     if resolved.invalid:
         raise NotRenderable("; ".join(resolved.invalid))
-    return build_bundle(
+    bundle = build_bundle(
         workspace_id=post.workspace_id,
         reference=f"{EXECUTION_PREFIX}{post.id}",
         blocks=blocks,
@@ -241,6 +241,7 @@ def bundle_for(
         size=size,
         story_safe=is_story(post),
     )
+    return ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
 
 
 def is_story(post: Any) -> bool:
@@ -701,9 +702,9 @@ def _finish(
             return None
         if failure is None:
             try:
-                service.finish_render(
-                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits,
-                    keep=job.keep_media,
+                service.finish_render(  # PRD-264 EUAI-05: the report carries the render record (ai_media.py)
+                    post, job.actor, media or {}, summary=_summary(media or {}), credits=credits, keep=job.keep_media,
+                    report=ai_media.with_record(report, post, job.bundle, media or {}),
                 )
             except service.InvalidPost as exc:
                 failure = RenderFailure("bad_output", f"The rendered files could not be recorded: {exc}")

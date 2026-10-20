@@ -1,9 +1,10 @@
-import { ringColour, ringTone, type RingTone } from '@/lib/mascot/ring'
-import { MASCOT_STATES, type MascotName } from '@/lib/mascot/types'
+import { AA_TEXT, contrastRatio, relativeLuminance } from '../look-kit/contrast'
+import type { CssVars } from '../look-kit/css'
+import { ringColour, ringTone, type RingTone } from '../mascot/ring'
+import { MASCOT_STATES, type MascotName } from '../mascot/types'
 
 import { ACCENTS, ERROR_COLOUR, GROUNDS, TYPE_STYLES } from './catalogue'
-import { AA_TEXT, contrastRatio, relativeLuminance } from './contrast'
-import { lookToCssVars, type CssVars } from './css'
+import { lookToCssVars } from './engine'
 import type { Look } from './types'
 
 /**
@@ -12,12 +13,12 @@ import type { Look } from './types'
  * contrast, its type, the spacing and radii, the motion notes and Auto's 12
  * states. Pure: every value is computed from the catalogue and the look it is
  * given, so the sheet redraws whenever the active look changes. The names are
- * the core's --pl-* variables (K2): lib/looks/css.ts sets them, and
+ * the core's --pl-* variables (K2): lib/look-kit/css.ts sets them, and
  * app/play-theme.css holds the tokens the type and scale are read from.
  */
 
 export interface ColourToken {
-  /** A look variable from lib/looks/css.ts. */
+  /** A look variable from lib/look-kit/css.ts. */
   readonly name: string
   readonly role: string
 }

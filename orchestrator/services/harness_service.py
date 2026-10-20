@@ -5,8 +5,9 @@ HARNESS Service (PRD-121)
 Self-Optimizing Organization Loop.  Runs weekly, invisible to users.
 Reads each agent's real weekly counts, judges them against a clean reference
 (services.harness_diagnose, PRD-263), lists the configuration changes it would
-suggest with their risk scores, and submits the audit report. It changes nothing:
-every workspace is report_only through beta (PRD-263 D2, services.harness_mode).
+suggest (services.harness_changes) and submits the audit report. It changes
+nothing (services.harness_mode): in a propose workspace, with proposals switched
+on, each change becomes an owner's Approvals card (services.harness_grants).
 
 Registered at server startup alongside HeartbeatService / CoordinatorService.
 """
@@ -14,9 +15,7 @@ Registered at server startup alongside HeartbeatService / CoordinatorService.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -24,13 +23,14 @@ from uuid import UUID
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
-from sqlalchemy import text
 
 from core.models.harness import RUN_COMPLETED, RUN_DORMANT_AGENTS, RUN_FAILED, RUN_RUNNING, HarnessRun
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from core.models.workspaces import Workspace
+    from services.harness_changes import Prescribed
     from services.harness_metrics import HarnessMetrics
 
 logger = logging.getLogger(__name__)
@@ -54,33 +54,10 @@ DISABLED_MESSAGE = (
     "Choose Report only in Settings > Orchestrator to turn it back on."
 )
 
-# Sentinel proposed_value meaning "a human must supply the real value". PRESCRIBE
-# emitted it (model, description) until PRD-263 PR-1D, so [HARNESS] cards filed
-# before then can still carry it. The apply layer MUST refuse it: writing it
-# literally would set an agent's model/description to the string "review_needed".
-# _auto_apply_prescription refuses it; an owner's /approve (api.harness_commands,
-# until PRD-263 US-047) is the one path left that applies a change.
-_PLACEHOLDER_PROPOSED_VALUE = "review_needed"
-# PRD-263 US-019: a "reconnect <app>" suggestion changes no agent setting (the owner
-# reconnects the app), so it carries the lowest risk score.
-RECONNECT_RISK = 1
-
-# F156: the ledger file kept before the move to the database, and the one card
-# that says when it cannot be read (_file_unreadable_ledger_card).
-LEGACY_LEDGER_FILE = "harness/applied_tasks.json"
-UNREADABLE_LEDGER_TAG = "harness-ledger-unreadable"
-UNREADABLE_LEDGER_TITLE = "[HARNESS] Self-management is paused: its old ledger can't be read"
-UNREADABLE_LEDGER_TEXT = (
-    "HARNESS keeps a record of which [HARNESS] changes it has applied. This workspace's older record is "
-    f"the file {LEGACY_LEDGER_FILE} on its volume, which is read once to move it into the database, and it "
-    "can't be read (it isn't valid JSON, or it can't be opened). Without it, a change applied before could "
-    "be applied twice, so HARNESS applies no change here.\n\n"
-    "To restart it, make the file valid JSON again: {\"applied_task_ids\": [...], "
-    "\"needs_approve_task_ids\": [...]}, listing the board task ids of the [HARNESS] changes already "
-    "applied and of those waiting for /approve. HARNESS reads it at the next /approve. Deleting the file "
-    "restarts HARNESS too, but then every done [HARNESS] task counts as not "
-    "yet applied, and the changes they describe can be applied again."
-)
+# The weekly audit report, written straight through ReportService and attributed to
+# Auto (PRD-263 US-048): its title (also the report's heading) and its report type.
+AUDIT_REPORT_TITLE = "HARNESS Weekly Org Review — Run #{iteration}"
+AUDIT_REPORT_TYPE = "audit"
 
 
 class HarnessService:
@@ -95,8 +72,10 @@ class HarnessService:
     # ------------------------------------------------------------------
 
     async def start(self, scheduler: Optional[AsyncIOScheduler] = None) -> None:
-        """Register the weekly sweep for all active workspaces."""
+        """Register the weekly sweep for all active workspaces, and the daily sweep of
+        HARNESS approval grants (services.harness_grants, PRD-263 US-053)."""
         from config import config
+        from services import harness_grants
 
         if scheduler:
             self._scheduler = scheduler
@@ -108,6 +87,7 @@ class HarnessService:
             self._owns_scheduler = True
 
         await self._register_workspace_jobs()
+        harness_grants.schedule_sweep(self._scheduler)
         logger.info("[HARNESS] Service started (cron: %s UTC)", config.HARNESS_SWEEP_CRON)
 
     async def _register_workspace_jobs(self) -> None:
@@ -284,10 +264,11 @@ class HarnessService:
 
     async def _run_locked(self, workspace_id: UUID, sweep: bool) -> None:
         """Holding the lock: skip a disabled workspace (sweep and trigger_now
-        alike), close interrupted runs, apply the weekly skip, then run the
+        alike), close interrupted runs, reconcile the ledger's open proposals with
+        their grants (ORG-2, PRD-263 US-053), apply the weekly skip, then run the
         pipeline on its own harness_runs row."""
         from core.database.database import SessionLocal
-        from services import harness_runs
+        from services import harness_grants, harness_runs
 
         db = SessionLocal()
         try:
@@ -296,6 +277,7 @@ class HarnessService:
                 return
             cur_window = harness_runs.last_complete_iso_week()
             harness_runs.close_interrupted(db, workspace_id)
+            harness_grants.reconcile(db, workspace_id)
             if sweep and harness_runs.week_is_settled(db, workspace_id, cur_window):
                 logger.info("[HARNESS] %s already has a run for %s, skipping", workspace_id, cur_window)
                 return
@@ -339,9 +321,8 @@ class HarnessService:
     ) -> Dict[str, Any]:
         """The dormancy check, then the four phases; returns the row's closing fields.
 
-        Report only (PRD-263 US-016): PRESCRIBE's suggestions become lines of the
-        audit report, and nothing is applied or queued. ``propose`` runs exactly
-        like ``report_only`` until proposals exist (US-054).
+        PRESCRIBE's suggestions become lines of the audit report and nothing is
+        applied (PRD-263 US-016); a propose workspace also gets Approvals cards (US-054).
         """
         from core.database.database import end_open_transaction
         from services import harness_diagnose, harness_runs
@@ -363,15 +344,15 @@ class HarnessService:
         end_open_transaction(db)
         diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
         end_open_transaction(db)
-        prescriptions = await self._phase_prescribe(workspace_id, diagnosis, run_id)
+        prescribed = await self._phase_prescribe(workspace_id, metrics, diagnosis, run_id, db)
         end_open_transaction(db)
         report_md, report_status = await self._phase_report(
-            workspace_id, diagnosis, prescriptions, db, iteration,
+            workspace_id, diagnosis, list(prescribed.valid), db, iteration,
         )
-        counts = {**diagnosis["counts"], "prescriptions": len(prescriptions)}
+        counts = {**diagnosis["counts"], "prescriptions": len(prescribed.valid)}
         return {
             "status": RUN_COMPLETED, "iteration": iteration, "coverage": diagnosis["coverage"], "counts": counts,
-            "verdicts": harness_diagnose.stored_verdicts(diagnosis), "prescriptions": prescriptions,
+            "verdicts": harness_diagnose.stored_verdicts(diagnosis), "prescriptions": prescribed.recorded(),
             "report_md": report_md, "report_status": report_status,
         }
 
@@ -458,14 +439,14 @@ class HarnessService:
     async def _phase_diagnose(
         self, workspace_id: UUID, metrics: "HarnessMetrics", db: "Session"
     ) -> Dict[str, Any]:
-        """Judge each agent x metric on its real counts (US-014a) against the clean
-        reference, with the week-by-week verdict history (US-014b).
+        """Judge each agent x metric on its real counts (US-014a) against the clean reference
+        and verdict history (US-014b), and each applied change against its frozen one (US-056).
 
         The history is the workspace's completed harness_runs rows; post-change
         weeks come from harness_task_ledger. Each agent's tool failures in the
         judged week, from its production tool logs, are issues (US-019).
         """
-        from services import harness_diagnose, harness_runs
+        from services import harness_diagnose, harness_post_change, harness_runs
 
         window = metrics.window
         logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s, week %s", workspace_id, window.cur_week)
@@ -474,55 +455,33 @@ class HarnessService:
         settings = harness_diagnose.settings_from_config()
         diagnosis = harness_diagnose.diagnose(metrics, history, changes, settings)
         issues = harness_diagnose.tool_failure_issues(metrics, settings)
-        logger.info(
-            "[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
-            diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues),
-        )
-        return {**diagnosis, "issues": issues}
+        post_change = await harness_post_change.check(db, workspace_id, window.cur_week)
+        logger.info("[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
+                    diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues))
+        return {**diagnosis, "issues": issues, harness_post_change.KEY: post_change}
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
     # ------------------------------------------------------------------
 
     async def _phase_prescribe(
-        self, workspace_id: UUID, diagnosis: Dict[str, Any], run_id: int
-    ) -> List[Dict[str, Any]]:
-        """Generate prioritized, risk-scored configuration change suggestions for
-        the audit report; nothing is applied or queued (PRD-263 US-016).
+        self, workspace_id: UUID, metrics: "HarnessMetrics", diagnosis: Dict[str, Any], run_id: int, db: "Session"
+    ) -> "Prescribed":
+        """Run every change kind's detector over the run's evidence and validate each
+        suggestion (services.harness_changes, PRD-263 US-049); a dropped one keeps its
+        reason on the run's row, and none targets the workspace's Auto. Ids are
+        ``rx-<run_id>-<seq>``. Nothing is applied (US-016): in a propose workspace with
+        proposals on, each valid apply-kind change becomes an Approvals card (US-054)."""
+        from services import harness_changes, harness_grants
 
-        Ids are ``rx-<run_id>-<seq>``: the run's harness_runs id keeps two runs on
-        one day apart. "Reconnect <app>" is the one suggestion left (US-019). The
-        heartbeat, cost and description rules read list_agents fields and
-        week-over-week deltas that never existed; they went with those inputs
-        (PRD-263 PR-1D), and the change-kind registry brings real detectors
-        (US-049, US-050).
-        """
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
-        prescriptions = self._prescribe_reconnects(diagnosis.get("issues", []), run_id)
-        logger.info("[HARNESS] PRESCRIBE done — %d prescriptions generated", len(prescriptions))
-        return prescriptions
-
-    @staticmethod
-    def _prescribe_reconnects(issues: List[Dict[str, Any]], run_id: int) -> List[Dict[str, Any]]:
-        """A "reconnect <app>" suggestion for each reconnect_app issue (PRD-263 US-019): a
-        line of the audit report for the owner, applied by nothing. Its id is
-        ``rx-<run_id>-<seq>``, from the run's harness_runs row. A tool failure gets no
-        removal suggestion; tool-removal proposals come with US-049 and US-057."""
-        from services.harness_diagnose import RECONNECT_APP
-
-        reconnects = [issue for issue in issues if issue.get("root_cause") == RECONNECT_APP]
-        return [{
-            "prescription_id": f"rx-{run_id}-{seq:03d}",
-            "target_type": "agent",
-            "target_id": int(issue["agent_id"]),
-            "target_name": issue["agent_name"],
-            "change_type": RECONNECT_APP,
-            "current_value": {"app_name": issue["app_name"]},
-            "proposed_value": {"app_name": issue["app_name"]},
-            "risk_score": RECONNECT_RISK,
-            "expected_improvement": f"{issue['agent_name']}'s {issue['app_name']} calls stop failing",
-            "rationale": issue["detail"],
-        } for seq, issue in enumerate(reconnects, 1)]
+        auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
+        evidence = harness_changes.Evidence(metrics, diagnosis, harness_changes.settings_from_config())
+        prescribed = harness_changes.prescribe(evidence, run_id, auto_agent["id"] if auto_agent else None)
+        raised = harness_grants.raise_cards(db, workspace_id, run_id, prescribed.valid, diagnosis)
+        logger.info("[HARNESS] PRESCRIBE done — %d suggested, %d dropped, %d Approvals cards",
+                    len(prescribed.valid), len(prescribed.dropped), raised.pending)
+        return prescribed
 
     # ------------------------------------------------------------------
     # Phase 4: REPORT
@@ -545,14 +504,12 @@ class HarnessService:
         "failed: <reason>", both stored on the run's row. Nothing is written to
         the workspace volume: the run's row is its record (PRD-263 FR-2).
         """
-        from modules.tools.discovery.platform_executor import PlatformActionExecutor
         from services import harness_diagnose
 
         logger.info("[HARNESS] Phase 4 REPORT — workspace %s", workspace_id)
-        executor = PlatformActionExecutor(db=db, workspace_id=workspace_id)
         report_content = self._build_changelog_markdown(iteration, diagnosis, prescriptions)
         report_status = await self._submit_audit_report(
-            executor, db, workspace_id, iteration, report_content,
+            db, workspace_id, iteration, report_content,
             warning=harness_diagnose.needs_attention(diagnosis) or bool(diagnosis.get("issues")),
         )
         logger.info(
@@ -563,7 +520,6 @@ class HarnessService:
 
     async def _submit_audit_report(
         self,
-        executor: "PlatformActionExecutor",
         db: "Session",
         workspace_id: UUID,
         iteration: int,
@@ -572,10 +528,18 @@ class HarnessService:
     ) -> str:
         """Submit HARNESS audit report attributed to Auto.
 
+        One ReportService.create_report call, the write the platform_submit_report
+        handler makes, without the platform action executor (PRD-263 US-048, FR-12).
+        The PRD-248 shadow triage still wraps create_report, and runs only when the
+        decision engine's report_triage_mode dial is on (FR-28).
+
         Returns "ok" or "failed: <reason>", which the tick stores as the run's
         report_status and get_status() reports.
         """
-        auto_agent = self._resolve_auto_agent(db, workspace_id)
+        from services import harness_grants
+        from services.report_service import ReportService
+
+        auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
         if auto_agent is None:
             msg = "no system agent (Auto) found in workspace — report not attributable"
             logger.error(
@@ -585,22 +549,22 @@ class HarnessService:
             return f"failed: {msg}"
 
         try:
-            result = await executor.execute("platform_submit_report", {
-                "title": f"HARNESS Weekly Org Review — Run #{iteration}",
-                "content": report_content,
-                "report_type": "audit",
-                "status": "warning" if warning else "ok",
-                "_agent_id": auto_agent["id"],
-                "_agent_name": auto_agent["name"],
-            })
+            result = await ReportService(db, workspace_id).create_report(
+                agent_id=auto_agent["id"],
+                agent_name=auto_agent["name"],
+                title=AUDIT_REPORT_TITLE.format(iteration=iteration),
+                content=report_content,
+                report_type=AUDIT_REPORT_TYPE,
+                status="warning" if warning else "ok",
+            )
         except Exception as exc:
             logger.error("[HARNESS] Failed to submit report: %s", exc, exc_info=True)
             return f"failed: {exc}"
 
-        # Surface handler-level failures (the handler returns dicts, not raises)
-        if isinstance(result, dict) and result.get("success") is False:
+        # Surface create_report's failures (it returns dicts, not raises)
+        if result.get("success") is False:
             err = result.get("error", "unknown")
-            logger.error("[HARNESS] platform_submit_report returned failure: %s", err)
+            logger.error("[HARNESS] The audit report was not created: %s", err)
             return f"failed: {err}"
 
         return "ok"
@@ -609,401 +573,6 @@ class HarnessService:
     # Private helpers
     # ==================================================================
 
-    @staticmethod
-    def _resolve_auto_agent(
-        db: "Session", workspace_id: UUID
-    ) -> Optional[Dict[str, str]]:
-        """Resolve the workspace's canonical reporting agent.
-
-        Fallback chain:
-          1. Agent.slug == "auto-{workspace_id}" + is_system_agent
-          2. Any system agent named "Auto" in workspace
-          3. Any system agent in workspace
-        Returns {"id": str, "name": str} or None.
-        """
-        from core.models import Agent
-
-        slug = f"auto-{workspace_id}"
-
-        candidates = [
-            (Agent.slug == slug, Agent.is_system_agent.is_(True)),
-            (Agent.is_system_agent.is_(True), Agent.name == "Auto"),
-            (Agent.is_system_agent.is_(True),),
-        ]
-
-        for clauses in candidates:
-            agent = (
-                db.query(Agent)
-                .filter(Agent.workspace_id == workspace_id, *clauses)
-                .first()
-            )
-            if agent is not None:
-                return {"id": str(agent.id), "name": agent.name}
-        return None
-
-    def _extract_agents_list(self, metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract flat agent list from metrics."""
-        agents_raw = metrics.get("agents")
-        if not agents_raw:
-            return []
-        if isinstance(agents_raw, dict):
-            return agents_raw.get("data", agents_raw.get("agents", []))
-        if isinstance(agents_raw, list):
-            return agents_raw
-        return []
-
-    async def _auto_apply_prescription(
-        self,
-        executor: "PlatformActionExecutor",
-        rx: Dict[str, Any],
-        caller_context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Execute a single auto-apply prescription.
-
-        ``caller_context`` names the person the change is made for: an owner's
-        or admin's explicit /approve passes theirs (F151), so an admin_only
-        action applies as that person. HARNESS's own ticks pass none — a lane
-        acting for nobody, which the executor's admin gate refuses.
-        """
-        change_type = rx.get("change_type", "")
-        target_id = rx.get("target_id")
-        proposed = rx.get("proposed_value", {})
-
-        if isinstance(proposed, dict) and _PLACEHOLDER_PROPOSED_VALUE in proposed.values():
-            return {
-                "success": False,
-                "error": (
-                    f"proposed_value is a placeholder ('{_PLACEHOLDER_PROPOSED_VALUE}') "
-                    "requiring human input — not auto-applicable"
-                ),
-            }
-
-        try:
-            if change_type == "heartbeat_tune":
-                result = await executor.execute("platform_configure_agent_heartbeat", {
-                    "agent_id": target_id,
-                    "interval_minutes": proposed.get("interval_minutes"),
-                }, caller_context)
-            elif change_type == "temperature_adjust":
-                # update_agent reads temperature as a top-level param (it folds it
-                # into model_config itself); a nested model_config is ignored.
-                result = await executor.execute("platform_update_agent", {
-                    "agent_id": target_id,
-                    "temperature": proposed.get("temperature"),
-                }, caller_context)
-            elif change_type in ("tag_update", "description_update"):
-                update_params = {"agent_id": target_id}
-                if change_type == "tag_update":
-                    update_params["tags"] = proposed.get("tags", [])
-                else:
-                    update_params["description"] = proposed.get("description", "")
-                result = await executor.execute("platform_update_agent", update_params, caller_context)
-            elif change_type == "model_change_same_tier":
-                # update_agent reads the new model as the top-level model_id param
-                # (a nested model_config is ignored). The prescription carries it
-                # under "model", so map model -> model_id here.
-                result = await executor.execute("platform_update_agent", {
-                    "agent_id": target_id,
-                    "model_id": proposed.get("model"),
-                }, caller_context)
-            elif change_type == "tool_assignment_add":
-                # Verified against actions_assignments.py: the param is app_name
-                # (the Composio app identifier), NOT tool_name. Idempotent —
-                # re-activates a previously deactivated assignment.
-                result = await executor.execute("platform_assign_tool_to_agent", {
-                    "agent_id": target_id,
-                    "app_name": proposed.get("app_name"),
-                }, caller_context)
-            elif change_type == "tool_assignment_remove":
-                # Deactivates the assignment (is_active=False) by default, keeping
-                # the audit trail. app_name is accepted by both assign/unassign.
-                result = await executor.execute("platform_unassign_tool_from_agent", {
-                    "agent_id": target_id,
-                    "app_name": proposed.get("app_name"),
-                }, caller_context)
-            elif change_type == "routing_rule_add":
-                # routing_rules is read by the UniversalRouter at Tier 2a
-                # (core/routing/engine.py); the rule is workspace-scoped by the
-                # executor context. The target is a routing rule, not an agent, so
-                # target_id is unused here. (PRD-142 Wave 4, W4-S6.)
-                result = await executor.execute("platform_create_routing_rule", {
-                    "source_pattern": proposed.get("source_pattern"),
-                    "source_channel": proposed.get("source_channel"),
-                    "intent_keywords": proposed.get("intent_keywords", []),
-                    "target_agent_id": proposed.get("target_agent_id"),
-                    "target_workflow_id": proposed.get("target_workflow_id"),
-                    "priority": proposed.get("priority", 0),
-                }, caller_context)
-            elif change_type in ("power_mode_upgrade", "power_mode_downgrade"):
-                # Sets the workspace default power mode (workspace.settings['power_mode']),
-                # which a Mission run inherits when its run_config doesn't pin one
-                # (coordinator_service._workspace_power_mode_default). Workspace-scoped
-                # by the executor context; target_id is unused (this is a workspace
-                # knob, not an agent attribute). (PRD-142 Wave 4, W4-S5.)
-                result = await executor.execute("platform_set_power_mode", {
-                    "power_mode": proposed.get("power_mode"),
-                }, caller_context)
-            else:
-                # routing_rule_add (W4-S6) and power_mode_* (W4-S5) are handled above.
-                return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}
-            return result if isinstance(result, dict) else {"success": True}
-        except Exception as exc:
-            logger.error("[HARNESS] Auto-apply failed for %s: %s", rx.get("prescription_id"), exc)
-            return {"success": False, "error": str(exc)}
-
-    async def _resolve_agents_by_name(
-        self, executor: "PlatformActionExecutor"
-    ) -> Dict[str, Any]:
-        """Build a {agent_name: agent_id} map for resolving board-task targets."""
-        try:
-            result = await executor.execute("platform_list_agents", {})
-        except Exception as exc:
-            logger.warning("[HARNESS] Failed to list agents for self-management: %s", exc)
-            return {}
-        agents = self._extract_agents_list({"agents": result})
-        return {
-            a.get("name"): a.get("id")
-            for a in agents
-            if isinstance(a, dict) and a.get("name") and a.get("id") is not None
-        }
-
-    def _snapshot_current_value(self, rx: Dict[str, Any]) -> Dict[str, Any]:
-        """Capture the value an approved change is about to overwrite.
-
-        Uses the prescription's parsed current_value — the producer wrote it in
-        the same shape _auto_apply_prescription consumes, so it round-trips
-        exactly with no agent-schema coupling. Recorded as current_value_before
-        with the change. The baseline rollback that read it back went in PRD-263
-        PR-1D; US-056 rebuilds rollback on the ledger.
-        """
-        current = rx.get("current_value")
-        if isinstance(current, dict):
-            return current
-        # Reaching here means a non-dict slipped through (e.g. a mis-parsed board
-        # task). The change stays safe — it just records no prior value — but log
-        # it so the dropped snapshot is visible rather than silent.
-        if current is not None:
-            logger.warning(
-                "[HARNESS] prescription %s has non-dict current_value (%s); "
-                "recording an empty snapshot",
-                rx.get("prescription_id"), type(current).__name__,
-            )
-        return {}
-
-    @staticmethod
-    def _read_applied_tasks(db: Any, workspace_id: UUID) -> Optional[Dict[str, Any]]:
-        """The task ledger: the done [HARNESS] board tasks already applied, and
-        those held for an owner's or admin's /approve (F156: harness_task_ledger,
-        written only by this service — no workspace tool reaches it).
-
-        None when it cannot be read, and callers then apply nothing: not every
-        change re-applies harmlessly (a routing rule is added again), and a
-        human may have reverted one since. A workspace with nothing in the
-        table has its pre-F156 file imported first (_import_legacy_ledger).
-        """
-        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
-
-        try:
-            with db.begin_nested():
-                rows = db.execute(
-                    text("SELECT board_task_id, state FROM harness_task_ledger WHERE workspace_id = CAST(:ws AS uuid)"),
-                    {"ws": str(workspace_id)},
-                ).fetchall()
-        except Exception:  # noqa: BLE001 — unreadable: apply nothing (see the docstring)
-            logger.error("[HARNESS] Task ledger unreadable for %s — nothing is applied", workspace_id, exc_info=True)
-            return None
-        if not rows:
-            rows = HarnessService._import_legacy_ledger(db, workspace_id)
-            if rows is None:
-                return None
-        return {
-            "applied_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_APPLIED),
-            "needs_approve_task_ids": sorted(str(task) for task, state in rows if state == LEDGER_HELD),
-        }
-
-    @staticmethod
-    def _import_legacy_ledger(db: Any, workspace_id: UUID) -> Optional[List[Any]]:
-        """F156, once per workspace: the ledger it kept in
-        harness/applied_tasks.json on the workspace volume before the move to
-        the database. Its applied tasks (with their entries) and held tasks are
-        written to harness_task_ledger when the table has none for the
-        workspace, so nothing applied before the move is applied again.
-
-        Returns the (task id, state) pairs it found: [] when there is no file,
-        None when the file cannot be read (callers then apply nothing).
-        """
-        import os
-
-        from config import config
-        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
-
-        path = os.path.join(config.WORKSPACE_VOLUME_PATH, str(workspace_id), LEGACY_LEDGER_FILE)
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r") as f:
-                data = json.load(f)
-            applied = [str(int(task)) for task in data.get("applied_task_ids") or []]
-            held = [str(int(task)) for task in data.get("needs_approve_task_ids") or [] if str(int(task)) not in applied]
-            entries = {str(e.get("task_id")): e for e in data.get("entries") or [] if isinstance(e, dict)}
-        except Exception:  # noqa: BLE001 — unreadable: apply nothing until it is fixed or removed
-            logger.error("[HARNESS] The pre-F156 ledger for %s cannot be read; nothing is applied until it is "
-                         "fixed or removed (%s)", workspace_id, path, exc_info=True)
-            HarnessService._file_unreadable_ledger_card(db, workspace_id)
-            return None
-        HarnessService._write_applied_tasks(
-            db, workspace_id, [{**entries.get(task, {}), "task_id": task} for task in applied], held,
-        )
-        logger.info("[HARNESS] Imported the pre-F156 ledger for %s: %d applied, %d held",
-                    workspace_id, len(applied), len(held))
-        return [(int(task), LEDGER_APPLIED) for task in applied] + [(int(task), LEDGER_HELD) for task in held]
-
-    @staticmethod
-    def _file_unreadable_ledger_card(db: Any, workspace_id: UUID) -> None:
-        """F156: the one blocked [HARNESS] card saying why self-management
-        applies nothing in this workspace and how to restart it. Filed once per
-        workspace, never again; best-effort (a card that cannot be filed is
-        logged, and nothing is applied either way)."""
-        from datetime import datetime, timezone
-
-        from core.models.core import BoardTask
-
-        try:
-            # One card whoever gets here first: a concurrent caller (an /approve
-            # during the weekly tick, another worker) waits on this lock, then
-            # finds the card. The lock ends with the transaction.
-            db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                       {"key": f"{UNREADABLE_LEDGER_TAG}:{workspace_id}"})
-            if db.query(BoardTask.id).filter(BoardTask.workspace_id == workspace_id,
-                                             BoardTask.tags.contains([UNREADABLE_LEDGER_TAG])).first():
-                db.commit()  # the lock goes with it
-                return
-            with db.begin_nested():
-                db.add(BoardTask(
-                    workspace_id=workspace_id, title=UNREADABLE_LEDGER_TITLE, description=UNREADABLE_LEDGER_TEXT,
-                    status="blocked", blocked_at=datetime.now(timezone.utc),
-                    blocked_reason=f"{LEGACY_LEDGER_FILE} can't be read", priority="high", review_mode="human",
-                    created_by_type="system", created_by_id="harness", tags=["harness", UNREADABLE_LEDGER_TAG],
-                ))
-            db.commit()
-        except Exception:  # noqa: BLE001
-            db.rollback()
-            logger.warning("[HARNESS] Could not file the unreadable-ledger card for %s", workspace_id, exc_info=True)
-
-    @staticmethod
-    def _write_applied_tasks(
-        db: Any,
-        workspace_id: UUID,
-        newly_applied: List[Dict[str, Any]],
-        newly_held: List[str],
-    ) -> None:
-        """Record newly applied tasks (each with its entry: the value it
-        replaced) and newly held ones. A held task that is later applied
-        becomes applied; an applied one never goes back to held."""
-        from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
-
-        rows = [(entry.get("task_id"), LEDGER_APPLIED, json.dumps(entry, default=str)) for entry in newly_applied]
-        rows += [(task_id, LEDGER_HELD, None) for task_id in newly_held]
-        try:
-            with db.begin_nested():
-                for task_id, state, entry in rows:
-                    db.execute(
-                        text(
-                            "INSERT INTO harness_task_ledger (workspace_id, board_task_id, state, entry) "
-                            "VALUES (CAST(:ws AS uuid), :task, :state, CAST(:entry AS jsonb)) "
-                            "ON CONFLICT (workspace_id, board_task_id) DO UPDATE SET "
-                            "state = CASE WHEN harness_task_ledger.state = :applied THEN :applied "
-                            "ELSE EXCLUDED.state END, "
-                            "entry = COALESCE(EXCLUDED.entry, harness_task_ledger.entry), updated_at = now()"
-                        ),
-                        {"ws": str(workspace_id), "task": int(task_id), "state": state, "entry": entry,
-                         "applied": LEDGER_APPLIED},
-                    )
-            db.commit()
-        except Exception as exc:  # noqa: BLE001 — the next tick finds the tasks again
-            logger.warning("[HARNESS] Failed to record the task ledger for %s: %s", workspace_id, exc)
-
-    def _parse_harness_task(
-        self,
-        task: Dict[str, Any],
-        agents_by_name: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Reconstruct a prescription from an approved [HARNESS] board task.
-
-        Inverse of the [HARNESS] card the weekly tick filed until PRD-263
-        US-016 deleted that path; an owner's /approve still reads one. Parses the
-        '[HARNESS] {change_type} for {target_name}' title and the
-        '**Current:** {json}' / '**Proposed:** {json}' description sections,
-        and resolves target_id from target_name via agents_by_name (name -> id).
-        Returns None for any task that is not a well-formed HARNESS task.
-
-        target_id is None when the name cannot be resolved — callers MUST treat
-        an unresolved (None) target as non-applicable and skip it, never apply a
-        change to a guessed/null target.
-        """
-        title = (task.get("title") or "").strip()
-        prefix = "[HARNESS] "
-        if not title.startswith(prefix):
-            return None
-
-        # change_type is a space-free snake_case identifier, so partitioning on
-        # the first " for " cleanly splits it from target_name (which may itself
-        # contain spaces or even " for ").
-        change_type, sep, target_name = title[len(prefix):].partition(" for ")
-        change_type = change_type.strip()
-        target_name = target_name.strip()
-        if not sep or not change_type or not target_name:
-            return None
-
-        description = task.get("description") or ""
-        agents_by_name = agents_by_name or {}
-
-        return {
-            "prescription_id": f"rx-task-{task.get('id')}",
-            "target_type": "agent",
-            "target_id": agents_by_name.get(target_name),
-            "target_name": target_name,
-            "change_type": change_type,
-            "current_value": self._extract_json_section(description, "Current"),
-            "proposed_value": self._extract_json_section(description, "Proposed"),
-            "risk_score": self._extract_risk_score(description, task.get("tags")),
-            "rationale": self._extract_text_section(description, "Rationale"),
-            "expected_improvement": self._extract_text_section(description, "Expected Improvement"),
-        }
-
-    @staticmethod
-    def _extract_json_section(description: str, label: str) -> Dict[str, Any]:
-        """Pull a single-line '**{label}:** {json}' section and json.loads it."""
-        match = re.search(rf"\*\*{re.escape(label)}:\*\*\s*(.+)", description)
-        if not match:
-            return {}
-        try:
-            value = json.loads(match.group(1).strip())
-        except (ValueError, TypeError):
-            return {}
-        return value if isinstance(value, dict) else {}
-
-    @staticmethod
-    def _extract_text_section(description: str, label: str) -> str:
-        """Pull the trailing text of a '**{label}:** {text}' section."""
-        match = re.search(rf"\*\*{re.escape(label)}:\*\*\s*(.+)", description)
-        return match.group(1).strip() if match else ""
-
-    @staticmethod
-    def _extract_risk_score(description: str, tags: Optional[List[str]]) -> int:
-        """Recover the risk score from the description, falling back to a
-        'risk-{n}' tag. Unknown -> 5 (max risk; never qualifies for auto-apply)."""
-        match = re.search(r"\*\*Risk Score:\*\*\s*(\d+)", description)
-        if match:
-            return int(match.group(1))
-        for tag in (tags or []):
-            if isinstance(tag, str) and tag.startswith("risk-"):
-                try:
-                    return int(tag.split("-", 1)[1])
-                except ValueError:
-                    continue
-        return 5
-
     def _build_changelog_markdown(
         self,
         iteration: int,
@@ -1011,16 +580,17 @@ class HarnessService:
         prescriptions: List[Dict[str, Any]],
     ) -> str:
         """Build the human-readable audit report: coverage and every agent's verdict
-        with its n first (services.harness_diagnose.report_lines), then the issues
-        and the changes HARNESS suggests, each a report line and nothing more
-        (PRD-263 US-016). It never calls an unjudged agent stable (PRD-263 FR-7)."""
-        from services import harness_diagnose
+        with its n first (services.harness_diagnose.report_lines), how each applied change
+        is doing (US-056), then the issues and the changes HARNESS suggests, each a report
+        line and nothing more (PRD-263 US-016). It never calls an unjudged agent stable (FR-7)."""
+        from services import harness_diagnose, harness_post_change
 
         lines = [
-            f"# HARNESS Weekly Org Review — Run #{iteration}",
+            f"# {AUDIT_REPORT_TITLE.format(iteration=iteration)}",
             f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
             *harness_diagnose.report_lines(diagnosis),
             "",
+            *harness_post_change.report_lines(diagnosis),
         ]
 
         # Issues

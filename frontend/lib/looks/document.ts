@@ -1,5 +1,6 @@
-import { LOOK_VAR_NAMES, applyCssVars, lookToCssVars, type CssVars } from './css'
-import { STUDIO_TOKEN_NAMES, lookToStudioTokens } from './studio-tokens'
+import { applyCssVars, type CssVars } from '../look-kit/css'
+
+import { LOOK_VAR_NAMES, STUDIO_TOKEN_NAMES, lookToCssVars, lookToStudioTokens } from './engine'
 import type { Look } from './types'
 
 /**

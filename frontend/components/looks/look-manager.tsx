@@ -2,18 +2,18 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
-import { downloadText } from '@/lib/download-text'
-import { asDuplicate, baseLook, isEdited, isSavedLook } from '@/lib/looks/editor'
-import { DEFAULT_LOOK } from '@/lib/looks/presets'
-import { LOOK_FILE_TYPE, lookFileName, lookJson } from '@/lib/looks/transfer'
-import type { Look } from '@/lib/looks/types'
-import { copyToClipboard } from '@/lib/utils'
+import { asDuplicate, baseLook, isEdited, isSavedLook } from '../../lib/looks/editor'
+import { DEFAULT_LOOK } from '../../lib/looks/presets'
+import { LOOK_FILE_TYPE, lookFileName, lookJson } from '../../lib/looks/transfer'
+import type { Look } from '../../lib/looks/types'
 
+import { copyToClipboard } from './clipboard'
+import { downloadText } from './download-text'
 import { DeleteConfirm, RenameForm } from './look-manage-forms'
 import { LookNotice, type Notice, failed, storedNotice } from './look-notice'
-import { useLook } from './look-provider'
 import styles from './manage.module.css'
+import { type Told, useNoticeSeq } from './use-notice-seq'
+import { usePlayLook } from './use-play-look'
 
 /**
  * PRD-260 — 'This look' on the Looks page, ported from Automatos Play's
@@ -22,7 +22,7 @@ import styles from './manage.module.css'
  * can only be duplicated (or kept with 'Save as new look' in the editor).
  * Duplicate, Export and Copy JSON take the active look as it is now, edits
  * included; Save writes those edits over the saved look it was picked from;
- * Rename and Delete act on that saved look. Everything goes through useLook(),
+ * Rename and Delete act on that saved look. Everything goes through usePlayLook(),
  * so every page follows at once. When the control just used leaves the page
  * (Save, Save name, Cancel, Keep it, Delete look), focus goes to a toolbar
  * button that stays, never to <body> (P260-FX-22, M20).
@@ -109,7 +109,7 @@ function useTransfer(look: Look, tell: Tell) {
  * a delete to Duplicate, the one button every look has.
  */
 function useManage(tell: Tell, closeForm: () => void, returnFocus: ReturnFocus) {
-  const { look, saved, setLook, saveLook, deleteLook, renameLook } = useLook()
+  const { look, saved, setLook, saveLook, deleteLook, renameLook } = usePlayLook()
 
   const save = (edited: Look) => {
     const result = saveLook(edited)
@@ -134,7 +134,7 @@ function useManage(tell: Tell, closeForm: () => void, returnFocus: ReturnFocus) 
     tell(from.id, storedNotice(`Renamed to ${result.look.name}.`))
   }
 
-  // Deleting the active look takes Play back to the default (lib/looks/store.ts).
+  // Deleting the active look takes Play back to the default (lib/theme-host/builtin/play-look-state.ts).
   const remove = (from: Look) => {
     deleteLook(from.id)
     closeForm()
@@ -146,7 +146,7 @@ function useManage(tell: Tell, closeForm: () => void, returnFocus: ReturnFocus) 
 }
 
 export function LookManager() {
-  const { look, saved } = useLook()
+  const { look, saved } = usePlayLook()
   const [mode, setMode] = useState<Mode | null>(null)
   const [notice, setNotice] = useState<ForLook<Told<Notice>> | null>(null)
   const [shownFor, setShownFor] = useState(look.id)

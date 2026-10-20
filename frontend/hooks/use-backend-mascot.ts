@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useReducer } from 'react'
 
-import type { BackendConnection } from '@/hooks/use-backend-health'
-import { INITIAL_MASCOT, mascotReducer } from '@/lib/mascot/reducer'
-import type { MascotName, MascotState } from '@/lib/mascot/types'
+import type { HostHealth } from '@automatos/theme-sdk'
+
+import { INITIAL_MASCOT, mascotReducer } from '../lib/mascot/reducer'
+import type { MascotName, MascotState } from '../lib/mascot/types'
 
 /**
  * PRD-260 §4, D6 — Auto on the asleep screen, driven by Play's reducer from the
- * backend's connection (useBackendHealth, GET /health): backend-down when the
+ * backend's connection (the SDK's useHealth, GET /health): backend-down when the
  * connection is down, so he sleeps; backend-up when it answers again, so he
  * wakes to idle. Play's frame keeps this mounted across both, so it sees the
  * whole nap (components/play/edges/asleep-gate.tsx). It starts from the
@@ -16,6 +17,9 @@ import type { MascotName, MascotState } from '@/lib/mascot/types'
  * down, Auto is asleep on the first render, so the gate never mounts its page
  * (and that page's requests) before the asleep screen.
  */
+
+/** The backend's connection as the SDK's useHealth reports it ('checking' | 'connected' | 'down'). */
+type BackendConnection = HostHealth['connection']
 
 export interface BackendMascot {
   /** The state to show: AutoMascot's `state`. */
