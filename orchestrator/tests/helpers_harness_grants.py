@@ -31,9 +31,10 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def team(db, ws: str) -> SimpleNamespace:
-    """The workspace's Auto and Scout, whose heartbeat runs every PRIOR minutes."""
-    auto = hdx.auto(db, ws)
+def team(db, ws: str, *, with_auto: bool = True) -> SimpleNamespace:
+    """The workspace's Auto (None when ``with_auto`` is False) and Scout, whose heartbeat
+    runs every PRIOR minutes."""
+    auto = hdx.auto(db, ws) if with_auto else None
     scout = hdx.agent(db, ws, "Scout", configuration={"heartbeat": {"enabled": True, "interval_minutes": PRIOR}})
     return SimpleNamespace(ws=ws, auto=auto, scout=scout)
 

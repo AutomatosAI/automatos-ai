@@ -46,6 +46,9 @@ APPLY_UNKNOWN = "This workspace has no HARNESS change {rx_id}; nothing changed"
 APPLY_FAILED = "The change could not be made ({error}); nothing changed"
 APPLY_UNAVAILABLE = "The HARNESS change could not be applied. Try again shortly."
 APPLIED_MESSAGE = "Applied the approved HARNESS change {rx_id} ({kind}) to agent #{agent_id}."
+# The inner change ran, but its row had already left ``applying``: the card must not say
+# "nothing changed", nor report the row ``applied``.
+APPLY_UNRECORDED = "The change was made, but its HARNESS ledger entry could not be marked applied"
 NO_AUTO = "this workspace has no Auto to make it"
 INNER_RAISED = "the change raised an error"
 # How much of a failed inner call's error the ledger and the card keep.
@@ -209,8 +212,11 @@ async def _apply_as_auto(
     result = await _run_inner(db, workspace_id, call, auto["id"])
     if result.get("success") is not True:
         return _failed(db, row, str(result.get("error") or harness_grants.NO_OUTCOME)[:ERROR_CHARS])
-    harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING,
-                        applied_at=datetime.now(timezone.utc), value_at_apply=current)
+    if not harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING,
+                               applied_at=datetime.now(timezone.utc), value_at_apply=current):
+        logger.error("[HARNESS] Change %s in %s ran, but ledger row %s was no longer applying",
+                     row.rx_id, workspace_id, row.id)
+        return {"success": False, "error": APPLY_UNRECORDED}
     return {
         "success": True,
         "rx_id": row.rx_id,

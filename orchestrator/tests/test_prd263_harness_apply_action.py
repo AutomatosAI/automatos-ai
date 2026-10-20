@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 
 from tests import helpers_harness_diagnose as hdx
 from tests import helpers_harness_grants as hgx
@@ -42,6 +43,9 @@ RX = "rx-1-001"
 EXPIRED = "This approval expired; nothing changed"
 DRIFTED = "This setting changed since the proposal; nothing changed"
 NOT_GRANTED = "This change has no granted approval on its Approvals card; nothing changed"
+NO_AUTO = "this workspace has no Auto to make it"
+# What an inner handler's exception says that no owner should read.
+INTERNAL_DETAIL = "server closed the connection unexpectedly (pool worker 7)"
 
 
 @pytest.fixture
@@ -209,6 +213,69 @@ def test_an_inner_call_that_fails_records_failed_and_changes_nothing(db_session,
     row = hgx.row(db_session, ledger_id)
     assert row["state"] == "failed" and row["entry"] == {"reason": "Agent 'Scout' could not be updated"}
     assert hgx.interval(db_session, crew.scout) == hgx.PRIOR
+
+
+def test_a_workspace_with_no_auto_records_failed_and_changes_nothing(db_session, seed_workspace, decisions):
+    crew = hgx.team(db_session, seed_workspace(name="harness-apply-no-auto"), with_auto=False)
+    ledger_id, _ = hgx.proposal(db_session, crew)
+
+    reply = _apply(db_session, crew)
+
+    assert reply == {"success": False, "error": f"The change could not be made ({NO_AUTO}); nothing changed"}
+    row = hgx.row(db_session, ledger_id)
+    assert row["state"] == "failed" and row["entry"] == {"reason": NO_AUTO}
+    assert hgx.interval(db_session, crew.scout) == hgx.PRIOR
+    assert decisions == []
+
+
+def test_an_inner_call_that_raises_records_failed_from_pending_without_its_detail(db_session, crew, monkeypatch):
+    """The executor answers a raising handler with its own message and rolls the session
+    back, the uncommitted ``pending → applying`` move with it: the row still ends
+    ``failed`` (moved from ``pending``), and the exception's text reaches neither the card
+    nor the ledger, only the server log."""
+    from modules.tools.discovery import platform_executor
+
+    async def raises(db, workspace_id, params):
+        raise RuntimeError(INTERNAL_DETAIL)
+
+    ledger_id, _ = hgx.proposal(db_session, crew)
+
+    def rollback():  # what the real rollback does to this row: its applying move is undone
+        db_session.execute(text("UPDATE harness_task_ledger SET state = 'pending' WHERE id = :id"),
+                           {"id": ledger_id})
+
+    monkeypatch.setattr(platform_executor, "configure_agent_heartbeat", raises)
+    monkeypatch.setattr(db_session, "rollback", rollback)
+
+    reply = _apply(db_session, crew)
+
+    raised = "Action 'platform_configure_agent_heartbeat' failed"
+    assert reply == {"success": False, "error": f"The change could not be made ({raised}); nothing changed"}
+    row = hgx.row(db_session, ledger_id)
+    assert row["state"] == "failed" and row["entry"] == {"reason": raised}
+    assert INTERNAL_DETAIL not in f"{reply} {row['entry']}"
+    assert hgx.interval(db_session, crew.scout) == hgx.PRIOR
+
+
+def test_a_made_change_whose_row_left_applying_is_never_reported_applied(db_session, crew, monkeypatch):
+    """Should the row leave ``applying`` while the inner change runs, the card says the
+    change was made, the server log names the row, and nothing records it ``applied``."""
+    from services import harness_grants
+
+    real_move = harness_grants.move
+
+    def row_gone(db, row, to_state, **kwargs):
+        return False if to_state == "applied" else real_move(db, row, to_state, **kwargs)
+
+    monkeypatch.setattr(harness_grants, "move", row_gone)
+    ledger_id, _ = hgx.proposal(db_session, crew)
+
+    reply = _apply(db_session, crew)
+
+    assert reply == {"success": False,
+                     "error": "The change was made, but its HARNESS ledger entry could not be marked applied"}
+    assert hgx.row(db_session, ledger_id)["state"] == "applying"
+    assert hgx.interval(db_session, crew.scout) == hgx.PROPOSED
 
 
 # ── the inner change runs only inside platform_harness_apply ─────────────────
