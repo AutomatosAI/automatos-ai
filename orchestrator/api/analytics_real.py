@@ -1408,8 +1408,6 @@ async def get_sla_compliance(ctx: RequestContext = Depends(get_request_context_h
                 "compliance_rate": round(min(120.0 / max(avg_exec_sec, 0.01) * 100, 100), 1) if avg_exec_sec > 0 else 100,
                 "status": "good" if avg_exec_sec <= 120 else "warning",
             },
-            "uptime": {"sla_target": 99.9, "current_uptime": "N/A", "compliance_rate": "N/A", "status": "N/A"},
-            "support_response": {"sla_target": 15, "current_average": "N/A", "compliance_rate": "N/A", "status": "N/A"},
         }
 
         # Overall compliance from metrics that have real data

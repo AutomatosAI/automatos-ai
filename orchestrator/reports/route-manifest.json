@@ -1,5 +1,5 @@
 {
-  "route_count": 942,
+  "route_count": 943,
   "routes": [
     {
       "method": "GET",
@@ -628,6 +628,10 @@
     {
       "method": "POST",
       "path": "/api/blog/posts/{post_id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts/{post_id}/review"
     },
     {
       "method": "POST",

@@ -445,8 +445,9 @@ there is also what embeddings use (`PLATFORM_KEY_WORKSPACE_ID` in
 document uploads index with it; without any embedding provider an upload is
 accepted but its processing ends `failed`.
 
-**Skills.** A fresh install ships with no skills in the marketplace. Start with
-the free baseline library: in **Marketplace → Capabilities** press *Import from
+**Skills.** A fresh install ships the platform's 12 built-in skills (Auto's
+platform skill and the Socials and design skills). For more, start with the free
+baseline library of 140+ skills: in **Marketplace → Capabilities** press *Import from
 GitHub* (the local operator is the instance's super admin, so the button is
 there) and import `https://github.com/AutomatosAI/automatos-skills` — the
 modal offers it as *Use baseline repo*. Every `SKILL.md` in the repo becomes a
@@ -713,7 +714,7 @@ the Composio catalogue) run through Composio. In the local edition that is a
 4. To pull the catalogue on demand instead of waiting for a boot, press
    **Sync** on **Marketplace → Tools** (or `POST /api/tools/sync?sync_type=full`).
    It fetches every toolkit and its actions into the cache; a full catalogue is
-   several hundred apps, so it takes a few minutes. Without a valid key the
+   over 1,000 apps, so it takes a few minutes. Without a valid key the
    request returns 400 with the reason rather than reporting a sync of 0 apps.
 
 Without a key the platform is honest rather than empty:
@@ -902,7 +903,8 @@ Every boot in the local edition runs an idempotent first-run seed
 (`orchestrator/core/seeds/seed_local_first_run.py`), scoped to the local
 workspace:
 
-- **Auto**, the assistant, through the same seeder the hosted edition uses.
+- **Auto**, the assistant, through the same seeder the hosted edition uses,
+  and the workspace's **Brand Designer**, which that seeder adds alongside it.
 - **A starter roster** on the Agents page — *Researcher* (Research Analyst),
   *Writer* (Content Writer) and *Analyst* (Business Analyst). They use native
   platform tools only, so they run with nothing but your LLM key.
@@ -1153,9 +1155,9 @@ your own Clerk instance.
 
 There is **one codebase**. The edition is a runtime flag:
 
-| | Local edition (this guide) | Hosted edition (automatos.app) | Enterprise |
+| | Local edition (this guide) | Hosted edition (Automatos Studio, beta opens November 2026) | Enterprise |
 |---|---|---|---|
-| Flag | `AUTH_EDITION=local` (backend) / `NEXT_PUBLIC_AUTH_EDITION=local` (frontend), set by `envs/*.defaults` | `AUTH_EDITION=saas` — the code default; the boot guard then **requires** Clerk (`CLERK_JWKS_URL`, `CLERK_SECRET_KEY`) and fails fast without it, so a hosted boot can never fall through to the anonymous local identity | Parked. No `ee/` directory, no license keys, nothing built. |
+| Flag | `AUTH_EDITION=local` (backend) / `NEXT_PUBLIC_AUTH_EDITION=local` (frontend), set by `envs/*.defaults` | `AUTH_EDITION=saas` — the code default; the boot guard then **requires** Clerk (`CLERK_JWKS_URL`, `CLERK_SECRET_KEY`) and fails fast without it, so a hosted boot can never fall through to the anonymous local identity | Coming soon · [contact Automatos](https://automatos.app/contact). A Helm chart exists and is tested in CI; no `ee/` directory or licence keys yet. |
 | Identity | one operator, no login | Clerk accounts, workspaces, teams, plans | — |
 | Configuration | `docker-compose.yml` + `envs/*.defaults` + `.env` | Railway sets each service's environment itself and **never reads** the compose file or `envs/*` — local defaults cost the hosted edition nothing | — |
 | Storage / RAG | MinIO + pgvector | AWS S3 + S3 Vectors | — |
