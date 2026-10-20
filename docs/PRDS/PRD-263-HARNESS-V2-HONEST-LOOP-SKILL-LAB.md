@@ -196,7 +196,7 @@ Each P1 and P3 PR is one story group, aimed at AGENTS.md's ~400 changed lines ex
   | Q25 non-Haiku check | US-079 | default |
   | Q27 US-020 | US-020 | default: keep |
   | Q28 legacy mode values | US-016 | default: read-time mapping |
-  | Q29 unpriced usage | US-035 | default: refuse until priced |
+  | Q29 unpriced usage | US-035 | answered 20 Oct: (c), embeddings allowed and reported |
   | Q30 blocked evidence card | US-053, US-054 | default: reconcile to failed |
   | Q31 US-062 timing | US-062, US-073 | default: PR-3I merges early in P3; P5 waits for PR-3I only |
 
@@ -738,7 +738,13 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 **Acceptance criteria:**
 - [ ] Every run directory since 9 Oct that holds `rows.jsonl` (11 at 18 Oct) is rescored; directories without `rows.jsonl` (3 aborted runs on 9 Oct) are listed as not rescorable. A local table lists run, date, old pass count, new pass count, `claim_backed` delta, ungraded count and whether the run saved receipts.
 - [ ] Only aggregate counts are copied into this PRD (§10); no row contents.
-- [ ] No model calls are made ($0).
+- [x] No model calls are made ($0).
+- [x] **Rescored 20 Oct 2026 (build session HARNESS).**
+  - 11 runs were rescored. The 3 aborted runs of 9 Oct are not rescorable.
+  - 0 rows are ungraded.
+  - c1's `llm_usage` row count was 237,436 before and after, so the rescore cost $0.
+  - Passed rows per run, old → new: 40→50, 37→43, 44→46, 50→50, 48→47, 51→48, 52→50, 61→61, 60→59, 59→58 and 60→60.
+  - `claim_backed` changes, run by run: +3, −1, 0, −1, −3, −6, −3, 0, −1, 0, +1.
 
 **LOCAL-6: preflight and night signal** (US-041, US-042; no D7)
 
@@ -777,7 +783,12 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 - [ ] Rows from F385–F449 (nights 12–17), plus F382–F383 (night 11) if they carry a customer ask, are authored by Gerard or by a row-author session separate from improver sessions (§11-Q4: about 30 rows). Code-scanning and infrastructure findings (for example F384) are excluded. Each row passes the row-validity check (US-034).
 - [ ] `split.json` groups by `f_id` and stratifies by category at about 60/40. A fixed list of held-out-only categories, recorded in `make_split.py` (local), is never placed in train. Held-out has at least 35 rows. The seed and mapping stay local, and the split sha goes into the fingerprint.
 - [ ] The rotation rule (held-out retires into train after 5 gate decisions and is replaced by rows chosen by the local split tooling) is recorded with the split tooling.
-- [ ] Nothing from auto-eval is committed to automatos-ai or automatos-skills (`git status` of both).
+- [x] Nothing from auto-eval is committed to automatos-ai or automatos-skills (`git status` of both).
+- [x] **Done 20 Oct 2026.**
+  - The build session HARNESS wrote 32 rows, at Gerard's direction, from the findings F383–F449. It left out infrastructure, CodeQL, pricing and agent-run-only findings, and any ask that would delete real c1 data.
+  - Every row passes the row-validity check against the live action registry.
+  - Two existing rows, F351-a and F351-b, lost a forbidden pattern that named a removed action; nothing else in them changed.
+  - `split.json` is sealed: 97 rows, 51 train and 46 held-out. It is grouped by finding, and held-out-only categories are never in train. The seed stays local.
 
 #### US-044: Calibration: six passes on one pinned build (Gerard's run)
 **Description:** As Gerard, I want reset passes on one pinned build, with and without the complexity-key flush, so I have the per-row flake table, the noise floor, the ATOM share, the late-write margin and the real cost factor before any gate is trusted.
@@ -1539,7 +1550,7 @@ Taken on 18 Oct: D1–D4 answer the design's open questions 6 (auto-apply delete
 26. **PRD-212's HARNESS stories (new).** PRD-212 (draft, 24 Jul) plans a HARNESS rebuild in S1–S3: baselines to the DB, a GEPA/DSPy proposer, an honest tile. *Recommendation: mark PRD-212 S1–S3 superseded by PRD-263 (`harness_runs`, statistics instead of an LLM proposer, the honest tile); its notifications and observability stories are unaffected.*
 27. **US-020's pagination (new).** It paginates the `/approve` lookup that PR-3A deletes a week or so later; US-016 already deleted the card-to-Done reader. *Recommendation: keep it (about 20 lines); it covers any workspace where the legacy flag is on until P3. If PR-3A were ever to merge before PR-1F, US-020 has nothing left to paginate and is recorded as not built.*
 28. **Legacy mode values (US-001, US-016; new).** Stored `full_auto`/`manual` and `enabled: false`/`disabled: true` are mapped at read time in one function (`harness_mode.py`), which is a compatibility branch AGENTS.md:44 discourages. Alternatively, convert stored values once under the US-001 issue (an existing-data change: a script or migration over `workspaces.settings`), then drop the mapping. Separately, `manual` (all changes need approval) maps to `report_only`, not `propose`. *Recommendation: the read-time mapping for beta, recorded on US-001; `manual` → `report_only`, because `propose` is an opt-in under the new meaning.*
-29. **Unpriced usage rows (US-035; new).** Embedding rows are booked at $0 when no price is known (`core/llm/usage_tracker.py:344-347`; the 15 Oct measurement found embeddings at $0), so the refuse-on-unpriced rule stops every paid pass until they are priced. (a) Add the embedding model's price where `resolve_price` reads prices (a small automatos-ai PR that also corrects booked night figures); (b) the operator passes `--price <model>=<usd per 1M tokens>` at launch, no default; (c) exempt embeddings and report their tokens only (the spend stop then undercounts). *Recommendation: (a), with (b) as the bridge until it merges.*
+29. **Unpriced usage rows (US-035; new).** Embedding rows are booked at $0 when no price is known (`core/llm/usage_tracker.py:344-347`; the 15 Oct measurement found embeddings at $0), so the refuse-on-unpriced rule stops every paid pass until they are priced. (a) Add the embedding model's price where `resolve_price` reads prices (a small automatos-ai PR that also corrects booked night figures); (b) the operator passes `--price <model>=<usd per 1M tokens>` at launch, no default; (c) exempt embeddings and report their tokens only (the spend stop then undercounts). *Recommendation: (a), with (b) as the bridge until it merges.* **Answered, Gerard, 20 Oct 2026: (c).** Unpriced embedding rows are allowed and reported (each pass's meter counts their calls and tokens); every other unpriced usage still refuses.
 30. **Evidence card dragged to Blocked (US-053, US-054; new).** The approval API re-queues a Blocked board task linked to a grant instead of running the call (`api/approval_grants.py:625-660`, `:735-748`). (a) Accept it: the card goes to `assigned` with no agent, so nothing dispatches it; nothing changes; the ledger ends `failed` with the reason; the next tick raises a fresh card if the evidence still holds. (b) A maintainer issue to make `_resume_tool_call` skip the re-queue for `platform_harness_apply` (a guardrail edit). *Recommendation: (a).*
 31. **US-062's PR and the P5 start (US-062, US-073; new).** Under D3, US-062 is its own PR, PR-3I, which depends on no other PRD-263 PR. P5 is planned from 31 Oct, and US-073 requires US-062 merged before any Lab spend. When should PR-3I merge? *Recommendation: early in P3, ahead of the `harness_service.py` chain, so P5 waits only for PR-3I and can start on 31 Oct; if PR-3I slips past 31 Oct, P5 starts later and has fewer days before the 6 Nov freeze (§13).*
 
