@@ -33,7 +33,8 @@
  * looks, as before. While the host loads or runs an installed theme, a LookProvider that paints no
  * look leaves <html> as the root layout's boot painted it (W-A6: the theme's prepaint table), so
  * the theme keeps its first-paint look after hydration. A failed load, safe mode and every other
- * style clear as before.
+ * style clear as before: the runtime stops for an installed theme the moment the host stops running
+ * it, without waiting for the host to release its entry.
  */
 import { useEffect, type ReactNode } from 'react'
 
@@ -71,17 +72,26 @@ function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | unde
 }
 
 /**
- * Whether a LookProvider that paints no look leaves <html> as the root layout's first paint: only
- * while the host loads or runs an installed theme (it is off under Classic, Studio and builtin Play).
+ * Whether the host loads or runs an installed theme. A LookProvider that paints no look then leaves
+ * <html> as the root layout's first paint (it is off under Classic, Studio and builtin Play).
  */
-function useKeepsFirstPaint(): boolean {
+function useHostRunsTheme(): boolean {
   const status = useThemeHost()?.status ?? null
   return status !== null && THEME_HOST_RUNNING_STATUSES.includes(status)
 }
 
+/**
+ * Whether the active theme gets the look runtime: it declares looks and, for an installed one, the
+ * host still loads or runs it. The host's release reaches the style context one commit after it
+ * enters safe mode or fails, and the runtime must not repaint the look the host just took off.
+ */
+function runsLooks(theme: ThemeEntry | null, hostRunsTheme: boolean): boolean {
+  return declaresLooks(theme) && (theme?.kind !== 'installed' || hostRunsTheme)
+}
+
 export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimeProps) {
-  const mounted = declaresLooks(useActiveTheme())
-  const keepFirstPaint = useKeepsFirstPaint()
+  const keepFirstPaint = useHostRunsTheme()
+  const mounted = runsLooks(useActiveTheme(), keepFirstPaint)
   useToneReleased(mounted, onToneChange)
   // One shape for both values of `mounted`: a different tree here would remount every page (M69).
   return (

@@ -164,6 +164,19 @@ describe('PRD-261 W-A6b — an installed theme with its registry entry (gap G1)'
     expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK))
   })
 
+  it.each<ThemeHostStatus>(['safe-mode', 'failed'])(
+    "Play's package, host %s before it released the entry: no look runtime, nothing repainted, no tone forced",
+    async (status) => {
+      paintFirstFrame()
+      // The host's release reaches the style context a commit later; here the entry still stands.
+      render(<Appearance style={INSTALLED_PLAY_STYLE} status={status} entry={play}><Probe /></Appearance>)
+      expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+      expect(lookNamesLeft()).toEqual([])
+      expect(screen.getByText('Tone: not forced')).toBeInTheDocument()
+      expect(toneCookie()).toBeUndefined()
+    },
+  )
+
   it("a theme with looks whose class isn't Play's: no looks from Play's runtime, the first paint kept, no tone forced", async () => {
     paintFirstFrame()
     render(<Appearance style={INSTALLED_HELLO_STYLE} status="active" entry={hello}><Probe /></Appearance>)
