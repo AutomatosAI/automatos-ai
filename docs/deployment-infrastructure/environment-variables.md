@@ -273,6 +273,16 @@ The `CliHost` model stores `capabilities` (e.g., available CLIs, models) and `st
 
 **Sources:** [orchestrator/.env.example:48-55]()
 
+### Automatos Go store duties (PRD-266 W3)
+
+| Variable | Service | Purpose | Default |
+| :--- | :--- | :--- | :--- |
+| `MODERATION_WEBHOOK_URL` | API (`orchestrator`) | The Automatos moderation inbox for content reports (`POST /api/v1/reports`). SaaS only: a local install posts nothing even when it is set, so a self-hosted install's reports stay with its operator. An `https://` URL; any other value is ignored (logged once, without the value). | (none: nothing is posted) |
+
+`MODERATION_WEBHOOK_URL` is a credential: set it on the hosted API service only, never in a committed file, and never log it. Leave it unset on self-hosted installs: nothing leaves the install. Each new report (never a duplicate) is posted after the response through the generic webhook driver (`channels/drivers/webhook.py`) as JSON `{text, message, ai_generated: true}`. The `text` holds the report id, the workspace id, the target type and id, the reason, an excerpt of the reported content (at most 200 characters) and the reporter's note (at most 200 characters). It never holds the reporter's name, email or id, or the workspace's name. The excerpt and the note are user and AI content: each is sent on one line with `&`, `<` and `>` as entities (so Slack cannot read a mention or a link in them), and the receiving inbox must still treat them as untrusted. Which inbox receives it and who answers is PRD-266 open question 2.
+
+**Sources:** [orchestrator/config.py]() (`MODERATION_WEBHOOK_URL`), [orchestrator/services/content_reports/moderation.py]()
+
 ---
 
 ## Gitignore and Sensitive Files

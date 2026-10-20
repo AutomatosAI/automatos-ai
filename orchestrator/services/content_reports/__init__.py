@@ -8,7 +8,8 @@ This module holds the report contract only, so the router, the target resolver a
 the service share one set of names without importing each other:
 
 * ``targets`` finds the reported content in the caller's workspace;
-* ``service`` files the report: rate limit, target, duplicate check, audit row, notice.
+* ``service`` files the report: rate limit, target, duplicate check, audit row, notice;
+* ``moderation`` posts a new report's summary to the Automatos inbox (SaaS only).
 """
 
 from __future__ import annotations

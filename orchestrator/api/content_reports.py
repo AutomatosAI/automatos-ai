@@ -3,7 +3,9 @@
 A member reports an Auto message or a Deliverable of their workspace. The report is
 one audit row (action ``content_reported``) and an in-app notice to the workspace's
 owner (``services.content_reports.service``); the owner reads reports in the
-existing audit view (Command Center -> Governance).
+existing audit view (Command Center -> Governance). On SaaS, a new report's summary
+goes to the Automatos moderation inbox after the response
+(``services.content_reports.moderation``); a local install posts nothing.
 
 This router adds no public route. The one route is authenticated and gated by
 ``require_workspace_permission("members:read")``, which every workspace role holds,
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -31,6 +33,7 @@ from services.content_reports import (
     REPORT_TARGET_TYPES,
     TARGET_ID_MAX_CHARS,
 )
+from services.content_reports.moderation import moderation_summary, post_to_moderation
 from services.content_reports.service import (
     ReportNeedsAPerson,
     ReportNotRecorded,
@@ -71,12 +74,15 @@ class ReportRequest(BaseModel):
 async def report_content(
     body: ReportRequest,
     response: Response,
+    background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """File a report: 201 for a new one, 200 for one this member already made.
 
-    ``async def``: it awaits the rate limiter and the notice dispatcher.
+    ``async def``: it awaits the rate limiter and the notice dispatcher. A new
+    report's moderation post runs after the response, from its summary text alone
+    (never this request's session); a duplicate posts nothing.
     """
     try:
         filed = await file_report(
@@ -96,6 +102,10 @@ async def report_content(
     if filed.duplicate:
         response.status_code = status.HTTP_200_OK
         return {"report_id": filed.report_id, "status": STATUS_ALREADY_RECEIVED}
+    background_tasks.add_task(
+        post_to_moderation, moderation_summary(filed),
+        report_id=filed.report_id, workspace_id=filed.workspace_id,
+    )
     return {"report_id": filed.report_id, "status": STATUS_RECEIVED}
 
 
