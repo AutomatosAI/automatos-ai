@@ -303,7 +303,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # relink); the guard follows it.
     relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
     assert 'down_revision = "prd264_blog_review"' in relinks
-    assert 'EXPECTED_HEAD = "clerk_user_relinks_20261019"' in guard
+    # 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto it —
+    # theme_revocations.origin and the single-row theme_revocation_sync table; the guard
+    # follows it.
+    revocation_feed = (versions / "prd261_revocation_feed.py").read_text()
+    assert 'down_revision = "clerk_user_relinks_20261019"' in revocation_feed
+    assert 'EXPECTED_HEAD = "prd261_revocation_feed"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

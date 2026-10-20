@@ -21,7 +21,7 @@ from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .marketplace_packages import *  # PRD-230: Marketplace Packages
-from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, installs, choices, looks)
+from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, installs, choices, looks, revocations)
     THEME_INSTALL_ROLE_DEFAULT,
     THEME_OWNER_TYPES,
     THEME_PACKAGE_STATUS_DEFAULT,
@@ -29,6 +29,10 @@ from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, in
     THEME_PRIVATE_UPLOAD_VALUES,
     THEME_REVIEW_EVENTS,
     THEME_REVOCATION_LEVELS,
+    THEME_REVOCATION_ORIGIN_FEED,
+    THEME_REVOCATION_ORIGIN_LOCAL,
+    THEME_REVOCATION_ORIGINS,
+    THEME_REVOCATION_SYNC_ROW_ID,
     THEME_SCAN_VERDICT_DEFAULT,
     THEME_SCAN_VERDICTS,
     ThemeChoice,
@@ -39,6 +43,7 @@ from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, in
     ThemePublisher,
     ThemeReviewEvent,
     ThemeRevocation,
+    ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
 from .personas import *  # PRD-42: Agent Personas

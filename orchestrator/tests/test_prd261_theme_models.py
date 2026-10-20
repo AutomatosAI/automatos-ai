@@ -1,25 +1,31 @@
-"""PRD-261 A-05 — the nine theme tables: the models and the ONE migration, held together.
+"""PRD-261 A-05 and C-05f — the ten theme tables: the models and the two migrations, held together.
 
 Two writers build these tables: the model layer (``create_all``: the fresh path and
-the unit tests) and the ``prd261_themes`` migration (existing databases). A table that
-differs between them is how a column goes missing on one path, so this file pins:
+the unit tests) and the migrations (existing databases): ``prd261_themes`` (A-05, the
+nine tables) and ``prd261_revocation_feed`` (C-05f: ``theme_revocations.origin`` and
+``theme_revocation_sync``). A table that differs between them is how a column goes
+missing on one path, so this file pins:
 
-* ``prd261_themes`` chains onto the head pinned before the wave and sits under the one
+* each migration chains onto the head pinned before its wave and sits under the one
   Alembic head (which revision IS the head stays with the two pins AGENTS.md names);
 * model columns equal DDL columns, table by table: type, nullability, primary key,
   server default, foreign key and ON DELETE; the CHECKs and the indexes too, read
-  from the migration's constants with ast (the migration is never imported here);
+  from the migrations' constants with ast (no migration is imported here);
 * the plan's shape (§2.6 A-05): ``digest`` has a plain index, never a global unique;
   the four partial uniques; ``previous_package_id``, ``pending_package_id`` and
-  ``pinned_version`` on the installation;
+  ``pinned_version`` on the installation; and (§2.6 C-05f) ``origin VARCHAR(16) NOT
+  NULL DEFAULT 'local'`` with its CHECK, and the single-row ``theme_revocation_sync``;
 * under SQLite (``create_all``): the partial uniques refuse duplicates, two workspaces
-  may hold the same digest, and a workspace row and a Marketplace row may too;
+  may hold the same digest, and a workspace row and a Marketplace row may too; a
+  revocation reads ``local`` unless the feed wrote it, and the sync table holds one row;
 * on real Postgres (``@integration``, inside a rolled-back transaction; skipped when no
-  Postgres is reachable, run by test.yml): on a ``create_all`` database the migration
-  changes nothing; in an empty schema it builds exactly the model's schema (columns,
-  defaults, constraints, index definitions) and a second run changes nothing; and the
-  partial uniques hold there. The downgrade is pinned by reading it, not run, so the
-  test never takes an exclusive lock on ``workspaces`` or ``users``.
+  Postgres is reachable, run by test.yml): on a ``create_all`` database the migrations
+  change nothing; in an empty schema they build exactly the model's schema (columns,
+  defaults, constraints, index definitions) and a second run changes nothing; a row
+  from before C-05f reads ``local`` and the feed's downgrade restores the schema before
+  it; and the partial uniques hold there. ``prd261_themes``' downgrade is pinned by
+  reading it, not run, so the test never takes an exclusive lock on ``workspaces`` or
+  ``users``; the feed's downgrade runs in the empty schema and locks only its tables.
 """
 from __future__ import annotations
 
@@ -54,6 +60,8 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from core.models.themes import (  # noqa: E402
+    THEME_REVOCATION_ORIGINS,
+    THEME_REVOCATION_SYNC_ROW_ID,
     ThemeChoice,
     ThemeInstallation,
     ThemeLook,
@@ -62,23 +70,34 @@ from core.models.themes import (  # noqa: E402
     ThemePublisher,
     ThemeReviewEvent,
     ThemeRevocation,
+    ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
 
 VERSIONS = _ORCH / "alembic" / "versions"
 MIGRATION = VERSIONS / "prd261_themes.py"
+FEED_MIGRATION = VERSIONS / "prd261_revocation_feed.py"
+MIGRATIONS = (MIGRATION, FEED_MIGRATION)  # in chain order
 # The single head on the base this wave was cut from (origin/main 0d9f0ac59).
 HEAD_BEFORE_WAVE = "prd258_voice_timings"
+# The single head on the base W-C3 was cut from (origin/main 7ae677b52).
+HEAD_BEFORE_C3 = "clerk_user_relinks_20261019"
 MODELS = (
     ThemePackage, ThemePublisher, ThemeInstallation, ThemeChoice, ThemeLook,
-    ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation, ThemeReviewEvent,
+    ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation, ThemeReviewEvent, ThemeRevocationSync,
 )
 TABLES = {model.__tablename__: model.__table__ for model in MODELS}
-# Plan §2.6 A-05 / PA-4: the nine tables of Phase A and C.
-PLANNED_TABLES = {
+# Plan §2.6 A-05 / PA-4: the nine tables of Phase A and C, all in prd261_themes.
+PHASE_A_TABLES = {
     "theme_packages", "theme_publishers", "theme_installations", "theme_choices", "theme_looks",
     "theme_opt_ins", "theme_workspace_settings", "theme_revocations", "theme_review_events",
 }
+# Plan §2.6 C-05f: the table prd261_revocation_feed adds.
+FEED_TABLES = {"theme_revocation_sync"}
+PLANNED_TABLES = PHASE_A_TABLES | FEED_TABLES
+SYNC_COLUMNS = (
+    "id", "last_attempt_at", "last_success_at", "feed_generated_at", "last_error", "revoked_key_ids", "updated_at",
+)
 PARTIAL_UNIQUES = {
     "uq_theme_packages_workspace_version": (("workspace_id", "theme_id", "version"), "owner_type = 'workspace'"),
     "uq_theme_packages_workspace_digest": (("workspace_id", "digest"), "owner_type = 'workspace'"),
@@ -86,6 +105,10 @@ PARTIAL_UNIQUES = {
     "uq_theme_packages_marketplace_digest": (("digest",), "owner_type = 'marketplace'"),
 }
 DIGEST = "a" * 64
+KEY_ID = "ed25519:0123456789abcdef"
+# The feed migration's guarded ALTERs (inside its DO block).
+ADDED_COLUMN = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (.+);")
+ADDED_CHECK = re.compile(r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+) CHECK \((.+)\);")
 
 
 def _pg_type(column: sa.Column) -> str:
@@ -97,10 +120,10 @@ def _where(index: sa.Index):
     return None if where is None else str(where)
 
 
-def _migration_constants() -> dict:
-    """The migration's module-level literal constants, read with ast (never imported)."""
+def _migration_constants(path: Path = MIGRATION) -> dict:
+    """A migration's module-level literal constants, read with ast (never imported)."""
     found = {}
-    for node in ast.parse(MIGRATION.read_text(encoding="utf-8")).body:
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             try:
                 found[node.targets[0].id] = ast.literal_eval(node.value)
@@ -110,7 +133,26 @@ def _migration_constants() -> dict:
 
 
 def _create_sql() -> dict:
-    return dict(_migration_constants()["_TABLES"])
+    """CREATE TABLE of every theme table, from the migration that creates it."""
+    found = {}
+    for path in MIGRATIONS:
+        found.update(dict(_migration_constants(path)["_TABLES"]))
+    return found
+
+
+def _feed_alters() -> str:
+    return _migration_constants(FEED_MIGRATION)["_ADD_ORIGIN"]
+
+
+def _added_columns(table_name: str) -> dict:
+    """Column DDL the feed migration adds to an existing table, by column name."""
+    found = ADDED_COLUMN.findall(_feed_alters())
+    return {line.split(" ", 1)[0]: line for table, line in found if table == table_name}
+
+
+def _added_checks(table_name: str) -> dict:
+    """CHECKs the feed migration adds to an existing table: name -> body."""
+    return {name: body for table, name, body in ADDED_CHECK.findall(_feed_alters()) if table == table_name}
 
 
 def _column_lines(create_sql: str) -> dict:
@@ -121,14 +163,14 @@ def _column_lines(create_sql: str) -> dict:
     return by_name
 
 
-def _function_source(name: str) -> str:
-    source = MIGRATION.read_text(encoding="utf-8")
+def _function_source(name: str, path: Path = MIGRATION) -> str:
+    source = path.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == name)
     return ast.get_source_segment(source, node)
 
 
 # ---------------------------------------------------------------------------
-# One head; the nine tables
+# One head; the ten tables
 # ---------------------------------------------------------------------------
 
 
@@ -159,24 +201,38 @@ def _ancestors_and_self(revisions: dict, rev: str) -> set:
     return seen
 
 
+def _single_head(revisions: dict) -> str:
+    parents = {down for downs in revisions.values() for down in _down_revisions(downs)}
+    heads = [rev for rev in revisions if rev not in parents]
+    assert len(heads) == 1, heads
+    return heads[0]
+
+
 def test_one_head_and_prd261_themes_chains_onto_the_head_before_the_wave():
     # Which revision is the head is pinned only by the two pins AGENTS.md names
     # (test_prd209 EXPECTED_HEAD, test_prd236), so a later migration moves those two
     # and this test keeps passing while prd261_themes stays under the one head.
     revisions = _revisions()
-    parents = {down for downs in revisions.values() for down in _down_revisions(downs)}
-    heads = [rev for rev in revisions if rev not in parents]
-    assert len(heads) == 1, heads
-    assert "prd261_themes" in _ancestors_and_self(revisions, heads[0])
+    assert "prd261_themes" in _ancestors_and_self(revisions, _single_head(revisions))
     assert revisions["prd261_themes"] == HEAD_BEFORE_WAVE
     assert [rev for rev, down in revisions.items() if down == HEAD_BEFORE_WAVE] == ["prd261_themes"]
 
 
-def test_the_nine_tables_are_the_models_and_the_migrations():
+def test_one_head_and_the_feed_migration_chains_onto_the_head_before_w_c3():
+    revisions = _revisions()
+    assert FEED_MIGRATION.stem in _ancestors_and_self(revisions, _single_head(revisions))
+    assert revisions[FEED_MIGRATION.stem] == HEAD_BEFORE_C3
+    assert [rev for rev, down in revisions.items() if down == HEAD_BEFORE_C3] == [FEED_MIGRATION.stem]
+    assert "prd261_themes" in _ancestors_and_self(revisions, FEED_MIGRATION.stem)
+
+
+def test_the_ten_tables_are_the_models_and_the_migrations():
     assert set(TABLES) == PLANNED_TABLES
     order = [name for name, _sql in _migration_constants()["_TABLES"]]
-    assert set(order) == PLANNED_TABLES and len(order) == len(PLANNED_TABLES)
+    assert set(order) == PHASE_A_TABLES and len(order) == len(PHASE_A_TABLES)
     assert order[0] == "theme_packages", "theme_packages is created before the tables that refer to it"
+    feed = [name for name, _sql in _migration_constants(FEED_MIGRATION)["_TABLES"]]
+    assert feed == sorted(FEED_TABLES)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +261,9 @@ def test_model_columns_equal_ddl_columns(table_name):
     table = TABLES[table_name]
     create_sql = _create_sql()[table_name]
     assert create_sql.strip().startswith(f"CREATE TABLE IF NOT EXISTS {table_name} (")
-    lines = _column_lines(create_sql)
+    created, added = _column_lines(create_sql), _added_columns(table_name)
+    assert not set(created) & set(added), "a column is both created and added"
+    lines = {**created, **added}
     assert set(lines) == set(table.columns.keys())
     for column in table.columns:
         _assert_column_matches(column, lines[column.name])
@@ -214,10 +272,10 @@ def test_model_columns_equal_ddl_columns(table_name):
 @pytest.mark.parametrize("table_name", sorted(PLANNED_TABLES))
 def test_model_checks_equal_ddl_checks(table_name):
     checks = {c.name: str(c.sqltext) for c in TABLES[table_name].constraints if isinstance(c, sa.CheckConstraint)}
-    create_sql = _create_sql()[table_name]
-    assert create_sql.count("CONSTRAINT ") == len(checks)
+    create_sql, added = _create_sql()[table_name], _added_checks(table_name)
+    assert create_sql.count("CONSTRAINT ") + len(added) == len(checks)
     for name, sqltext in checks.items():
-        assert f"CONSTRAINT {name} CHECK ({sqltext})" in create_sql
+        assert f"CONSTRAINT {name} CHECK ({sqltext})" in create_sql or added.get(name) == sqltext, name
 
 
 def test_model_indexes_equal_ddl_indexes():
@@ -229,7 +287,8 @@ def test_model_indexes_equal_ddl_indexes():
             where = _where(index)
             tail = f" WHERE {where};" if where else ";"
             expected.append(f"CREATE {kind} IF NOT EXISTS {index.name} ON {table_name} ({columns}){tail}")
-    assert sorted(expected) == sorted(_migration_constants()["_INDEXES"])
+    declared = [sql for path in MIGRATIONS for sql in _migration_constants(path).get("_INDEXES", ())]
+    assert sorted(expected) == sorted(declared)
 
 
 def test_the_plan_shape_digest_partial_uniques_and_install_columns():
@@ -256,6 +315,54 @@ def test_every_create_is_if_not_exists_and_nothing_is_altered():
 def test_the_downgrade_drops_the_tables_in_reverse_order():
     downgrade = _function_source("downgrade")
     assert "reversed(_TABLES)" in downgrade and "DROP TABLE IF EXISTS" in downgrade
+
+
+def test_the_c05f_shape_origin_and_the_one_sync_row():
+    origin = ThemeRevocation.__table__.c.origin
+    assert (_pg_type(origin), origin.nullable, origin.server_default.arg) == ("VARCHAR(16)", False, "local")
+    assert THEME_REVOCATION_ORIGINS == ("local", "feed")
+    sync = ThemeRevocationSync.__table__
+    assert tuple(sync.columns.keys()) == SYNC_COLUMNS
+    assert [c.name for c in sync.primary_key.columns] == ["id"] and sync.c.id.autoincrement is False
+    timestamps = ("last_attempt_at", "last_success_at", "feed_generated_at", "updated_at")
+    assert all(sync.c[name].type.timezone for name in timestamps)
+    assert not sync.c.revoked_key_ids.nullable and sync.c.revoked_key_ids.server_default.arg == "[]"
+    assert THEME_REVOCATION_SYNC_ROW_ID == 1 and not sync.indexes
+
+
+def test_the_feed_migration_adds_only_what_the_table_lacks():
+    constants = _migration_constants(FEED_MIGRATION)
+    for _name, sql in constants["_TABLES"]:
+        assert re.match(r"\s*CREATE TABLE IF NOT EXISTS ", sql), sql
+        assert "ALTER" not in sql.upper() and "DROP" not in sql.upper()
+    alters = constants["_ADD_ORIGIN"]
+    columns, checks = ADDED_COLUMN.findall(alters), ADDED_CHECK.findall(alters)
+    assert [(table, line.split(" ", 1)[0]) for table, line in columns] == [("theme_revocations", "origin")]
+    assert [(table, name) for table, name, _body in checks] == [("theme_revocations", "ck_theme_revocations_origin")]
+    # Every ALTER sits behind its own IF NOT EXISTS, asked of the table the name resolves to.
+    assert alters.count("ALTER TABLE ") == len(columns) + len(checks) == alters.count("IF NOT EXISTS (")
+    assert "attrelid = 'theme_revocations'::regclass AND attname = 'origin' AND NOT attisdropped" in alters
+    assert "conrelid = 'theme_revocations'::regclass AND conname = 'ck_theme_revocations_origin'" in alters
+    assert re.search(r"\bDROP\b", alters, re.I) is None
+    assert "op.create_table" not in FEED_MIGRATION.read_text(encoding="utf-8")
+    upgrade = _function_source("upgrade", FEED_MIGRATION)
+    assert "op.execute(_ADD_ORIGIN)" in upgrade and "_TABLES" in upgrade
+
+
+def test_the_feed_downgrade_undoes_the_upgrade_in_reverse_order():
+    constants = _migration_constants(FEED_MIGRATION)
+    alters = constants["_ADD_ORIGIN"]
+    tables = [f"DROP TABLE IF EXISTS {name};" for name, _sql in reversed(constants["_TABLES"])]
+    checks = [
+        f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name};"
+        for table, name, _body in reversed(ADDED_CHECK.findall(alters))
+    ]
+    columns = [
+        f"ALTER TABLE {table} DROP COLUMN IF EXISTS {line.split(' ', 1)[0]};"
+        for table, line in reversed(ADDED_COLUMN.findall(alters))
+    ]
+    assert list(constants["_DOWNGRADE"]) == tables + checks + columns
+    assert "_DOWNGRADE" in _function_source("downgrade", FEED_MIGRATION)
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +482,46 @@ def test_a_revocation_names_a_digest_or_a_theme(session):
     _refused(session, ThemeRevocation(digest=DIGEST, level="block", reason="unknown level"))
 
 
+def test_a_revocation_reads_local_unless_the_feed_wrote_it(session):
+    session.add_all([
+        ThemeRevocation(digest=DIGEST, level="disable", reason="written here"),
+        ThemeRevocation(id=uuid.uuid4(), theme_id="acme/ink", level="warn", reason="pulled", origin="feed"),
+    ])
+    session.commit()
+    assert {row.reason: row.origin for row in session.query(ThemeRevocation)} == {
+        "written here": "local", "pulled": "feed",
+    }
+    # A row that names no origin (one written before the column existed) reads 'local'.
+    session.execute(
+        sa.text("INSERT INTO theme_revocations (id, digest, level, reason) VALUES (:id, :digest, 'warn', 'raw')"),
+        {"id": uuid.uuid4().hex, "digest": "b" * 64},
+    )
+    raw = session.execute(sa.text("SELECT origin FROM theme_revocations WHERE reason = 'raw'")).scalar()
+    assert raw == "local"
+    session.commit()
+    _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="unknown origin", origin="hosted"))
+    _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="no origin", origin=None))
+
+
+def test_the_sync_table_holds_one_row(session):
+    session.add(ThemeRevocationSync())
+    session.commit()
+    stored = session.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
+    assert (stored.last_attempt_at, stored.last_success_at, stored.feed_generated_at, stored.last_error) == (
+        None, None, None, None,
+    )
+    assert stored.revoked_key_ids == [] and stored.updated_at is not None
+    stored.revoked_key_ids = [KEY_ID]
+    stored.last_success_at = datetime.now(timezone.utc)
+    session.commit()
+    session.expunge_all()  # read back from the database, and the next rows' keys reach it too
+    assert session.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID).revoked_key_ids == [KEY_ID]
+    session.expunge_all()
+    _refused(session, ThemeRevocationSync())
+    _refused(session, ThemeRevocationSync(id=THEME_REVOCATION_SYNC_ROW_ID + 1))
+    assert session.query(ThemeRevocationSync).count() == 1
+
+
 def test_one_settings_row_per_workspace_with_the_defaults(session):
     workspace = uuid.uuid4()
     session.add(ThemeWorkspaceSettings(workspace_id=workspace))
@@ -435,16 +582,21 @@ def pg_conn(pg_engine):
             trans.rollback()
 
 
-def _run_migration(conn, step: str) -> None:
-    spec = importlib.util.spec_from_file_location("prd261_themes_migration", MIGRATION)
+def _run_migration(conn, step: str, path: Path = MIGRATION) -> None:
+    spec = importlib.util.spec_from_file_location(f"{path.stem}_migration", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     with Operations.context(MigrationContext.configure(conn)):
         getattr(module, step)()
 
 
+def _upgrade_chain(conn) -> None:
+    for path in MIGRATIONS:
+        _run_migration(conn, "upgrade", path)
+
+
 def _pg_schema(conn) -> dict:
-    """Columns, index definitions and constraints of the nine tables in the current schema, schema name removed."""
+    """Columns, index definitions and constraints of the ten tables in the current schema, schema name removed."""
     schema = conn.execute(sa.text("SELECT current_schema()")).scalar()
     names = sorted(TABLES)
     snapshot = {}
@@ -462,30 +614,87 @@ def _tables_in(conn, schema: str) -> set:
     return {row[0] for row in rows} & PLANNED_TABLES
 
 
+def _enter_empty_schema(conn) -> str:
+    """A new, empty schema first on the search path (users and workspaces stay reachable)."""
+    empty = f"prd261_a05_{uuid.uuid4().hex[:12]}"
+    conn.execute(sa.text(f"CREATE SCHEMA {empty}"))
+    conn.execute(sa.text(f"SET LOCAL search_path TO {empty}, public"))
+    assert _tables_in(conn, empty) == set()
+    return empty
+
+
 @pytest.mark.integration
-def test_on_a_create_all_database_the_migration_changes_nothing(pg_conn):
+def test_on_a_create_all_database_the_migrations_change_nothing(pg_conn):
     schema = pg_conn.execute(sa.text("SELECT current_schema()")).scalar()
     assert _tables_in(pg_conn, schema) == PLANNED_TABLES
     before = _pg_schema(pg_conn)
-    _run_migration(pg_conn, "upgrade")
+    _upgrade_chain(pg_conn)
     assert _pg_schema(pg_conn) == before
 
 
 @pytest.mark.integration
-def test_on_an_empty_database_the_migration_builds_the_model_schema(pg_conn):
-    # The model's schema, as create_all built it; then the migration alone, in an empty schema
-    # of the same database (users and workspaces stay reachable through the search path), so
-    # no existing table is dropped or locked exclusively. The transaction is rolled back.
+def test_on_an_empty_database_the_migrations_build_the_model_schema(pg_conn):
+    # The model's schema, as create_all built it; then the migrations alone, in an empty schema
+    # of the same database, so no existing table is dropped or locked exclusively. The
+    # transaction is rolled back.
     model_schema = _pg_schema(pg_conn)
-    empty = f"prd261_a05_{uuid.uuid4().hex[:12]}"
-    pg_conn.execute(sa.text(f"CREATE SCHEMA {empty}"))
-    pg_conn.execute(sa.text(f"SET LOCAL search_path TO {empty}, public"))
-    assert _tables_in(pg_conn, empty) == set()
-    _run_migration(pg_conn, "upgrade")
+    empty = _enter_empty_schema(pg_conn)
+    _upgrade_chain(pg_conn)
     assert _tables_in(pg_conn, empty) == PLANNED_TABLES
     assert _pg_schema(pg_conn) == model_schema
-    _run_migration(pg_conn, "upgrade")  # a second run changes nothing
+    _upgrade_chain(pg_conn)  # a second run changes nothing
     assert _pg_schema(pg_conn) == model_schema
+
+
+_INSERT_REVOCATION = sa.text(
+    "INSERT INTO theme_revocations (id, digest, level, reason) VALUES (CAST(:id AS uuid), :digest, 'warn', :reason)"
+)
+
+
+def _pg_origin(conn, revocation_id: str):
+    return conn.execute(
+        sa.text("SELECT origin FROM theme_revocations WHERE id = CAST(:id AS uuid)"), {"id": revocation_id},
+    ).scalar()
+
+
+@pytest.mark.integration
+def test_the_feed_migration_reads_old_rows_local_and_its_downgrade_restores_the_schema(pg_conn):
+    model_schema = _pg_schema(pg_conn)
+    empty = _enter_empty_schema(pg_conn)
+    _run_migration(pg_conn, "upgrade")  # prd261_themes alone: the schema before C-05f
+    before = _pg_schema(pg_conn)
+    old = str(uuid.uuid4())
+    pg_conn.execute(_INSERT_REVOCATION, {"id": old, "digest": DIGEST, "reason": "before C-05f"})
+    _run_migration(pg_conn, "upgrade", FEED_MIGRATION)
+    assert _tables_in(pg_conn, empty) == PLANNED_TABLES
+    assert _pg_schema(pg_conn) == model_schema
+    assert _pg_origin(pg_conn, old) == "local"
+    _run_migration(pg_conn, "downgrade", FEED_MIGRATION)
+    assert _tables_in(pg_conn, empty) == PHASE_A_TABLES
+    assert _pg_schema(pg_conn) == before
+    assert pg_conn.execute(sa.text("SELECT count(*) FROM theme_revocations")).scalar() == 1  # no row deleted
+    _run_migration(pg_conn, "upgrade", FEED_MIGRATION)
+    assert _pg_schema(pg_conn) == model_schema
+
+
+@pytest.mark.integration
+def test_the_origin_check_and_the_single_row_hold_on_postgres(pg_conn):
+    _enter_empty_schema(pg_conn)  # the migrations' own tables: no row another test wrote, no lock on public
+    _upgrade_chain(pg_conn)
+    set_origin = sa.text("UPDATE theme_revocations SET origin = :origin WHERE id = CAST(:id AS uuid)")
+    local, feed = str(uuid.uuid4()), str(uuid.uuid4())
+    pg_conn.execute(_INSERT_REVOCATION, {"id": local, "digest": DIGEST, "reason": "written here"})
+    pg_conn.execute(_INSERT_REVOCATION, {"id": feed, "digest": "b" * 64, "reason": "pulled"})
+    pg_conn.execute(set_origin, {"id": feed, "origin": "feed"})
+    assert (_pg_origin(pg_conn, local), _pg_origin(pg_conn, feed)) == ("local", "feed")
+    _pg_refused(pg_conn, set_origin, {"id": local, "origin": "hosted"})
+    _pg_refused(pg_conn, set_origin, {"id": local, "origin": None})
+    insert_sync = sa.text("INSERT INTO theme_revocation_sync (id) VALUES (:id)")
+    pg_conn.execute(insert_sync, {"id": THEME_REVOCATION_SYNC_ROW_ID})
+    stored = pg_conn.execute(sa.text("SELECT revoked_key_ids, updated_at FROM theme_revocation_sync")).one()
+    assert stored.revoked_key_ids == [] and stored.updated_at is not None
+    _pg_refused(pg_conn, insert_sync, {"id": THEME_REVOCATION_SYNC_ROW_ID})
+    _pg_refused(pg_conn, insert_sync, {"id": THEME_REVOCATION_SYNC_ROW_ID + 1})
 
 
 _INSERT_PACKAGE = sa.text(
