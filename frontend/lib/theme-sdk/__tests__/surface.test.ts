@@ -25,8 +25,10 @@ const SURFACE_DIR = path.join(SDK_DIR, 'surface')
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
+/** A story id: Phase A's (`A-13c`) or the E area's (`E3b`, plan §2.6). */
+const STORY_ID = /^(?:A-\d+[a-z]?|E\d+[a-z]?)$/
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
-/** The stubbed areas whose lanes have landed since: W-A4 (A-11b, A-12a, A-13c) and W-A4P (A-12d to A-12h). */
+/** The areas built after A-10a: W-A4 (A-11b, A-12a, A-13c), W-A4P (A-12d to A-12h) and W-E3 (E3b, storage). */
 const BUILT_BY_LATER_LANES = [
   'chat',
   'deliverables',
@@ -38,6 +40,7 @@ const BUILT_BY_LATER_LANES = [
   'pages/documents',
   'pages/playbooks',
   'pages/command-center',
+  'storage',
 ]
 /** A stub's body: an area still calling it is not built. */
 const STUB_CALL = /\bnotInThisBuild\(/
@@ -59,6 +62,7 @@ const AREA_MODULES: Readonly<Record<string, ModuleLoader>> = {
   'pages/documents': () => import('../pages/documents'),
   'pages/playbooks': () => import('../pages/playbooks'),
   'pages/command-center': () => import('../pages/command-center'),
+  storage: () => import('../storage'),
 }
 
 const SURFACE_FILES = readdirSync(SURFACE_DIR).filter((file) => file.endsWith('.json')).sort()
@@ -104,10 +108,15 @@ describe('PRD-261 A-10a — the surface files', () => {
 
   it.each(SURFACES.map(areaCase))('%s lists sorted, distinct identifiers', (_area, surface) => {
     expect(STATUSES).toContain(surface.status)
-    expect(surface.story).toMatch(/^A-\d+[a-z]?$/)
+    expect(surface.story).toMatch(STORY_ID)
     expect(surface.names.length).toBeGreaterThan(0)
     expect(surface.names.filter((name) => !IDENTIFIER.test(name))).toEqual([])
     expect([...surface.names]).toEqual([...new Set(surface.names)].sort())
+  })
+
+  it("reads Phase A's story ids and the E area's, and no other kind", () => {
+    expect(['A-10a', 'A-13c', 'E3b', 'E4'].filter((story) => !STORY_ID.test(story))).toEqual([])
+    expect(['B-05a', 'e3b', 'A13c', 'E-3b', 'E3bc', ''].filter((story) => STORY_ID.test(story))).toEqual([])
   })
 
   it('never plans one name in two areas (export * would drop it)', () => {
