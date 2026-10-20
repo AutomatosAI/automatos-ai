@@ -3,7 +3,9 @@
 Packages are the hello fixture, read by ``read_theme_package`` and then changed one way each
 (seeded bad packages), so each one fails at its own check. The LLM is a fake answering as the
 Messages API would; the SDK's names are a small test surface, so these tests don't depend on the
-generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/).
+generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/),
+except E3d's storage tests, which review on this host's own list: they prove the SDK's storage area
+is one this host's review accepts.
 The routes that run the stage are covered in ``test_prd261_theme_import.py`` (private upload) and
 by C-01a's submit tests.
 """
@@ -140,6 +142,34 @@ def test_a_namespace_import_is_a_warning_and_its_names_are_found_in_the_text():
 
     assert uses["level"] == "warning" and uses["wideImport"] is True
     assert uses["usedAreas"] == ["chat", "theme"] and uses["unknownNames"] == []
+
+
+STORAGE_IMPORT = "defineTheme, readThemeState, writeThemeState"
+STORAGE_AREA = "storage"
+
+
+def _review_on_this_host(entry: str, **manifest):
+    """The review with no test surface: the SDK names are this host's ``data/sdk-surface.json``."""
+    checked, size = _checked(entry, **manifest)
+    return run_review_stage(checked, size, llm_call=_llm())
+
+
+def test_an_sdk_storage_call_declared_in_uses_passes_on_this_hosts_sdk():
+    report = _review_on_this_host(_entry_importing(STORAGE_IMPORT), uses=["theme", STORAGE_AREA])
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert STORAGE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert {"readThemeState", "writeThemeState"} <= set(uses["usedNames"])
+
+
+def test_an_sdk_storage_call_without_storage_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(STORAGE_IMPORT))
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [STORAGE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=STORAGE_AREA)]
 
 
 def test_without_the_sdk_name_list_the_uses_check_is_a_warning(monkeypatch):

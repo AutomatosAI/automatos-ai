@@ -123,7 +123,7 @@ Respond with ONLY a JSON object in this exact format:
 
 If this part is clean, return: {"risk_score": 0, "findings": [], "summary": "No security issues found."}
 
-Be fair: rendering, styling, animation, React hooks, SDK calls and same-origin asset loads are what themes are for. Report real threats and suspicious patterns, not ordinary UI code."""
+Be fair: rendering, styling, animation, React hooks, SDK calls and same-origin asset loads are what themes are for. The SDK's storage area (readThemeState, writeThemeState, removeThemeState, subscribeThemeState, useThemeState) is expected for the theme's own UI state, such as a paused mascot or which items a member has seen; storing tokens, cookies or foreign data through it (anything taken from the session, the page or another theme) is still category 1. Report real threats and suspicious patterns, not ordinary UI code."""
 
 
 class Chunk(NamedTuple):

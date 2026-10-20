@@ -5,6 +5,9 @@ A workspace member submits a ``.autotheme`` for review:
 1. the Marketplace switch ``THEMES_MARKETPLACE`` must be on, else 403 with a plain sentence;
 2. the package is read and checked as a private upload is (``services/themes/package.py``:
    zip, manifest, engines, htmlClass, sizes, CSS scope, looks): 413 over the cap, 400 with codes;
+   then it must ship ``source/`` (C-06p4, QB-12), else 422 ``SOURCE_REQUIRED``: the review's
+   reproducible-build check rebuilds ``dist/`` from it and fails without it, so such a package is
+   refused before any review slot, token hold, LLM call or row;
 3. in SaaS the caller must resolve to a person (a publisher has an owner), else 403;
 4. publisher ownership, Q9 and the version rules (``services/themes/submissions.py``), read
    first so the stage never runs for a refused package, and again under a row lock at save: a
@@ -52,6 +55,8 @@ from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from services.themes.contract import theme_error
+from services.themes.llm_stage import SOURCE_PREFIX
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
 from services.themes import review_limits
@@ -76,6 +81,11 @@ SUBMIT_PATH = THEME_SUBMIT_ROUTE[len(router.prefix):]
 SUBMIT_REFUSED = "This theme can't be submitted."
 STORE_FAILED = "The theme's files couldn't be stored. Try again."
 BUSY = "This theme is being submitted already. Try again in a moment."
+SOURCE_REQUIRED_CODE = "SOURCE_REQUIRED"
+SOURCE_REQUIRED_STATUS = 422
+SOURCE_REQUIRED = (
+    "A Marketplace theme ships its source: pack it with a source/ folder, from which the review rebuilds dist/."
+)
 LOCAL_EDITION = "local"
 CLAIM_SCOPE = "marketplace"
 
@@ -113,6 +123,20 @@ def _read_upload(file: UploadFile) -> Tuple[CheckedThemePackage, int]:
         status = 413 if exc.too_large else 400
         logger.info("[Themes] Submission refused (%d): %s", status, [error["code"] for error in exc.errors])
         raise HTTPException(status_code=status, detail={"message": SUBMIT_REFUSED, "errors": exc.errors}) from exc
+
+
+def ships_source(checked: CheckedThemePackage) -> bool:
+    """True when the package holds at least one file under ``source/``."""
+    return any(path.startswith(SOURCE_PREFIX) for path in checked.files)
+
+
+def _require_source(checked: CheckedThemePackage) -> None:
+    """422 ``SOURCE_REQUIRED`` for a package with no ``source/`` (C-06p4), in the package checks' shape."""
+    if ships_source(checked):
+        return
+    logger.info("[Themes] Submission of %s refused (%d): no source/", checked.manifest["id"], SOURCE_REQUIRED_STATUS)
+    error = theme_error(SOURCE_REQUIRED_CODE, SOURCE_PREFIX, SOURCE_REQUIRED)
+    raise HTTPException(status_code=SOURCE_REQUIRED_STATUS, detail={"message": SOURCE_REQUIRED, "errors": [error]})
 
 
 def _submitter(db: Session, ctx: RequestContext) -> Submitter:
@@ -246,6 +270,7 @@ def submit_theme(
 ) -> Dict[str, Any]:
     """Submit a .autotheme for Marketplace review; returns the pending submission and its stage verdict."""
     checked, package_bytes = _read_upload(file)
+    _require_source(checked)
     submitter = _submitter(db, ctx)
     saved = _save(db, checked, submitter, stage, package_bytes)
     if not saved.created:
