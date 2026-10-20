@@ -1,5 +1,5 @@
 {
-  "route_count": 946,
+  "route_count": 951,
   "routes": [
     {
       "method": "GET",
@@ -2932,6 +2932,26 @@
     {
       "method": "DELETE",
       "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mobile/devices"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/devices"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/mobile/devices/{device_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/mobile/devices/{device_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/devices/{device_id}/rotate"
     },
     {
       "method": "POST",

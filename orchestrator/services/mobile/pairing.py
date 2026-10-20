@@ -11,9 +11,10 @@ SHA-256 is kept and the token itself is returned exactly once.
 * An unknown, expired or used code answers ``None`` and changes nothing, so a wrong guess
   never spends or locks the code the person is about to type.
 * A phone that pairs again (same workspace, person and ``install_id``) keeps its EXISTING
-  row: the new token, name, platform and version land on it, its old tokens die, a revoked
-  row is active again, its audit keeps its history plus ``enrolled``, and the pending row the
-  new code made is deleted. One phone is always one row
+  row: the new token, name, platform and version land on it, its old tokens and its push key
+  die (its next ``POST /devices`` is a first registration again), a revoked row is active
+  again, its audit keeps its history plus ``enrolled``, and the pending row the new code made
+  is deleted. One phone is always one row
   (``uq_mobile_devices_workspace_user_install``) and its device id never changes.
 * Minting a code first deletes the caller's own pending codes that have expired, so a dead
   code's row (and its hash) does not linger.
@@ -178,7 +179,7 @@ def _same_phone(db: Session, pending: MobileDevice, install_id: str) -> Optional
 
 def _paired_fields(device: MobileDevice, *, token_hash: str, install_id: str, name: Optional[str],
                    platform: str, app_version: Optional[str], now: datetime) -> Dict[str, Any]:
-    """Every column pairing writes, as a new mapping: active, the new token only, no code."""
+    """Every column pairing writes, as a new mapping: active, the new token only, no code or push key."""
     return {
         "kind": MobileDeviceKind.PAIRED.value,
         "status": MobileDeviceStatus.ACTIVE.value,
@@ -190,6 +191,8 @@ def _paired_fields(device: MobileDevice, *, token_hash: str, install_id: str, na
         "token_rotated_at": None,
         "prev_token_hash": None,
         "prev_token_valid_until": None,
+        "push_key": None,
+        "push_disabled_reason": None,
         "pairing_code_hash": None,
         "pairing_expires_at": None,
         "paired_at": now,
