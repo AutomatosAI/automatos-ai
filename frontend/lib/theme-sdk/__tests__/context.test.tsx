@@ -3,10 +3,13 @@
  * provider value (never the webhook key, plan limits or settings), answers "unknown" outside a
  * provider instead of throwing, and keeps its answer's identity while nothing it reads changes.
  * useThemeLayout is the host's width source (hooks/use-studio-theme.ts, stood in for here; its own
- * tests run the real one).
+ * tests run the real one). useTrial reads the host's billing summary (useBillingSummary, stood in
+ * for here; hooks/__tests__/use-billing-summary.test.tsx runs the real one).
  */
 import { renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import type { BillingSummary } from '@/hooks/use-billing-summary'
 
 const host = vi.hoisted(() => ({
   workspace: null as unknown,
@@ -16,6 +19,7 @@ const host = vi.hoisted(() => ({
   health: { connection: 'connected', checking: false, check: () => undefined } as Record<string, unknown>,
   healthOptions: [] as unknown[],
   layout: 'fallback' as string,
+  billing: undefined as unknown,
 }))
 
 vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => host.workspace }))
@@ -29,6 +33,7 @@ vi.mock('@/hooks/use-backend-health', () => ({
     return host.health
   },
 }))
+vi.mock('@/hooks/use-billing-summary', () => ({ useBillingSummary: () => ({ data: host.billing }) }))
 
 import {
   useEdition,
@@ -52,7 +57,25 @@ const PROVIDER_WORKSPACE = {
   webhookUrl: 'https://hooks.example.test/acme',
   webhookKey: 'not-for-themes',
   settings: { integrations: {} },
-  onboarding: { stage: 'completed', trial: { granted_usd: 5, spent_usd: 1.25, state: 'warned' } },
+  onboarding: { stage: 'completed' },
+}
+
+/** The billing summary of a workspace on its trial: 375 of 500 credits left, running low. */
+const ON_TRIAL: BillingSummary = {
+  plan: 'basic',
+  plan_name: 'Own keys',
+  price_usd: 9,
+  price_label: 'beta',
+  billing_open: false,
+  status: 'active',
+  renewal_date: null,
+  balance: { trial: 375, monthly: 0, topup: 0, spendable: 375 },
+  trial_credits: 500,
+  platform_ai: false,
+  metered: true,
+  paused: false,
+  low: true,
+  own_keys: false,
 }
 
 afterEach(() => {
@@ -63,6 +86,7 @@ afterEach(() => {
   host.health = { connection: 'connected', checking: false, check: () => undefined }
   host.healthOptions.length = 0
   host.layout = 'fallback'
+  host.billing = undefined
 })
 
 describe('PRD-261 A-10a — useWorkspace', () => {
@@ -134,11 +158,37 @@ describe('PRD-261 A-10a — edition, trial, health, media and tone', () => {
     expect(renderHook(() => useEdition()).result.current).toBe(authEdition)
   })
 
-  it("reads the workspace's trial ledger, or null", () => {
-    host.workspace = { workspace: PROVIDER_WORKSPACE, isLoading: false, canEdit: true }
-    expect(renderHook(() => useTrial()).result.current).toEqual({ state: 'warned', grantedUsd: 5, spentUsd: 1.25 })
-    host.workspace = { workspace: { ...PROVIDER_WORKSPACE, onboarding: { stage: 'completed', trial: null } }, isLoading: false, canEdit: true }
+  it("reads the workspace's trial off its credits (1 credit = 1 US cent), or null", () => {
+    host.billing = ON_TRIAL
+    const trial = renderHook(() => useTrial()).result.current
+    expect(trial).toEqual({ state: 'warned', grantedUsd: 5, spentUsd: 1.25 })
+    expect(Object.isFrozen(trial)).toBe(true)
+    host.billing = undefined // the local edition, or still loading
     expect(renderHook(() => useTrial()).result.current).toBeNull()
+    host.billing = { ...ON_TRIAL, plan: 'enterprise', metered: false, balance: { ...ON_TRIAL.balance, spendable: null } }
+    expect(renderHook(() => useTrial()).result.current).toBeNull()
+  })
+
+  it('names the trial converted on own keys, exhausted while work is paused, active otherwise', () => {
+    const stateOf = (billing: BillingSummary) => {
+      host.billing = billing
+      return renderHook(() => useTrial()).result.current?.state
+    }
+    const spent = { ...ON_TRIAL.balance, trial: 0, spendable: 0 }
+    expect(stateOf({ ...ON_TRIAL, low: false })).toBe('active')
+    expect(stateOf({ ...ON_TRIAL, low: false, paused: true, balance: spent })).toBe('exhausted')
+    expect(stateOf({ ...ON_TRIAL, low: false, paused: true, own_keys: true, balance: spent })).toBe('converted')
+    host.billing = { ...ON_TRIAL, low: false, paused: true, balance: spent }
+    expect(renderHook(() => useTrial()).result.current).toEqual({ state: 'exhausted', grantedUsd: 5, spentUsd: 5 })
+  })
+
+  it('keeps the same trial across renders while the credits are the same', () => {
+    host.billing = ON_TRIAL
+    const { result, rerender } = renderHook(() => useTrial())
+    const first = result.current
+    host.billing = { ...ON_TRIAL, balance: { ...ON_TRIAL.balance } }
+    rerender()
+    expect(result.current).toBe(first)
   })
 
   it("hands over a frozen copy of the host's backend health, passing poll through", () => {

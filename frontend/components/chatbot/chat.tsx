@@ -29,9 +29,9 @@ import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
 import { OnboardingConnectCards } from '@/components/onboarding/onboarding-connect-cards'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
-import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+// PRD-265: the paused code is credits-based. Chat keeps its local name until it is split under the code-shape limit.
+import { CREDITS_EXHAUSTED_CODE as TRIAL_EXHAUSTED_CODE } from '@/lib/credits'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -1046,14 +1046,10 @@ export function Chat({
   // last send returned. Either owns the callout slot; the standalone power-up
   // card steps aside so the workspace never sees two credential cards at once.
   const trialExhausted =
-    workspace?.onboarding?.trial?.state === 'exhausted' ||
     errorCode === TRIAL_EXHAUSTED_CODE
 
   return (
     <>
-      {/* PRD-222 US-014: the trial balance pill — visible on the chat surface
-          while a trial is active/warned/exhausted, hidden once converted. */}
-      <TrialBalancePill className="absolute top-3 right-4 z-30" />
       {/* PRD-222 US-014: deterministic exhausted banner (embeds the power-up
           card, no model call). Renders on the exhausted snapshot OR the typed
           trial_exhausted error from the last send. */}

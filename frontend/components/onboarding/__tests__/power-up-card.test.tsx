@@ -35,16 +35,9 @@ vi.mock('next/link', () => ({
 
 import { PowerUpCard } from '../power-up-card'
 
-function mockWorkspace(
-  stage: string,
-  trial: { granted_usd: number; spent_usd: number; state: string } | null = {
-    granted_usd: 5,
-    spent_usd: 1.6,
-    state: 'active',
-  },
-) {
+function mockWorkspace(stage: string) {
   useWorkspaceMock.mockReturnValue({
-    workspace: { onboarding: { stage, trial } },
+    workspace: { onboarding: { stage } },
     refreshWorkspace: refreshMock,
   })
 }
@@ -65,7 +58,7 @@ describe('PowerUpCard (US-013)', () => {
     sessionStorage.clear()
   })
 
-  it('renders at the powerup stage with the continuation framing + trial balance', () => {
+  it('renders at the powerup stage with the continuation framing', () => {
     mockWorkspace('powerup')
     render(<PowerUpCard />)
 
@@ -78,7 +71,8 @@ describe('PowerUpCard (US-013)', () => {
       'href',
       'https://openrouter.ai/keys',
     )
-    expect(screen.getByTestId('power-up-trial')).toHaveTextContent('$3.40 of $5.00')
+    // PRD-265: the trial is credits now, shown by the header's balance chip, not in this card.
+    expect(screen.queryByTestId('power-up-trial')).toBeNull()
     expect(screen.getByTestId('power-up-settings-link')).toHaveAttribute(
       'href',
       '/settings',

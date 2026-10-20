@@ -67,7 +67,12 @@ vi.mock('@/components/layout/main-layout', async () => {
   }
 })
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
-// T-005b: the chat shows the core's trial banner off the workspace snapshot; no snapshot here unless a test sets one.
+// PRD-265: the credits the paused banner and the SDK's useTrial read: none here (play-chat-turn.test.tsx covers them).
+vi.mock('@/hooks/use-billing-summary', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-billing-summary')>()),
+  useBillingSummary: () => ({ data: undefined }),
+}))
+// The workspace the chat session is scoped to (and the core banner's power-up card reads); none here unless a test sets one.
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: null }),
   useWorkspaceOptional: () => scope.workspace,

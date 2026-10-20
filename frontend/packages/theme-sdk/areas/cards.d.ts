@@ -182,7 +182,7 @@ export interface MadeByProps {
 }
 
 export interface TrialExhaustedBannerProps {
-  /** The typed error a blocked request returned (`trial_exhausted`), before the workspace's snapshot catches up. */
+  /** The typed error a refused request returned (`credits_exhausted`), before the workspace's balance catches up. */
   readonly errorCode?: string | null
 }
 
@@ -229,13 +229,19 @@ export declare function MarkdownView(props: MarkdownViewProps): ReactElement
 /** Who made a Deliverable, as the host's cards say it. */
 export declare function MadeBy(props: MadeByProps): ReactElement
 
-/** The host's banner for an exhausted trial; it draws nothing while the trial is not exhausted. */
+/**
+ * The host's banner for used-up credits (work on Automatos's AI keys paused), with its way out (add a key);
+ * it draws nothing while work runs. The name predates billing in credits.
+ */
 export declare function TrialExhaustedBanner(props: TrialExhaustedBannerProps): ReactElement
 
 /** The local edition's first-run nudge; it draws nothing in SaaS, once dismissed, or once a key exists. */
 export declare function FirstRunNudge(): ReactElement
 
-/** The host's header utilities: Help, notifications, the theme menu and the account. Every frame renders it. */
+/**
+ * The host's header utilities: the credit balance (hosted edition), Help, notifications, the theme menu and the
+ * account. Every frame renders it.
+ */
 export declare function HeaderUtilities(): ReactElement
 
 /**

@@ -64,6 +64,8 @@ vi.mock('@/components/ui/theme-toggle', () => ({ ThemeToggle: () => <button type
 vi.mock('@/components/notifications/notification-bell', () => ({ NotificationBell: () => <button type="button">Notifications</button> }))
 vi.mock('@/components/auth/profile-menu', () => ({ ProfileMenu: () => <button type="button">Profile</button> }))
 vi.mock('@/components/auth/user-profile-button', () => ({ UserProfileButton: () => <button type="button">Profile</button> }))
+// PRD-265 US-008: the credit balance in the utilities (its own test covers what it says).
+vi.mock('@/components/billing/credit-balance-pill', () => ({ CreditBalancePill: () => <span data-testid="credit-balance-pill" /> }))
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
@@ -96,9 +98,10 @@ describe('MainLayout under Play at desktop width', () => {
     expect(screen.queryByTestId('fallback-header')).toBeNull()
   })
 
-  it("keeps the core's header utilities: the theme menu, notifications, profile and Help", async () => {
+  it("keeps the core's header utilities: the credit balance, the theme menu, notifications, profile and Help", async () => {
     renderLayout()
     const header = await screen.findByRole('banner')
+    expect(within(header).getByTestId('credit-balance-pill')).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Toggle theme' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Notifications' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Profile' })).toBeInTheDocument()

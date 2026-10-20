@@ -1,21 +1,23 @@
 /**
  * PRD-222 US-016 (W1·S10 / D9) — the dev onboarding-reset console.
  *
- * Pure/mocked: Clerk, navigation, the workspace provider, and fetch are stubbed.
- * Covers: renders stage + trial; the wipe_credentials-without-reset_trial
- * warning; the plain "disabled" state on a 404; and that a successful reset
- * sweeps residual legacy tour/onboarding browser flags (real jsdom localStorage)
- * and redirects to /chat.
+ * Pure/mocked: Clerk, navigation, the workspace provider, the billing summary and
+ * fetch are stubbed. Covers: renders the stage and the trial's credits (PRD-265:
+ * the trial is credits, read off the billing summary); the
+ * wipe_credentials-without-reset_trial warning; the plain "disabled" state on a
+ * 404; and that a successful reset sweeps residual legacy tour/onboarding browser
+ * flags (real jsdom localStorage) and redirects to /chat.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-const { useWorkspaceMock, pushMock, getAuthHeadersMock, refreshWorkspaceMock } =
+const { useWorkspaceMock, pushMock, getAuthHeadersMock, refreshWorkspaceMock, billing } =
   vi.hoisted(() => ({
     useWorkspaceMock: vi.fn(),
     pushMock: vi.fn(),
     getAuthHeadersMock: vi.fn(async () => ({})),
     refreshWorkspaceMock: vi.fn(async () => {}),
+    billing: { data: undefined as unknown },
   }))
 
 vi.mock('@clerk/nextjs', () => ({
@@ -28,6 +30,10 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => useWorkspaceMock(),
+}))
+
+vi.mock('@/hooks/use-billing-summary', () => ({
+  useBillingSummary: () => billing,
 }))
 
 vi.mock('@/lib/api-client', () => ({
@@ -49,6 +55,16 @@ function mockWorkspace(onboarding: any) {
   })
 }
 
+/** The billing summary's trial: `trial` of 500 credits left. */
+function mockTrialCredits(trial: number, paused = false) {
+  billing.data = {
+    metered: true,
+    paused,
+    trial_credits: 500,
+    balance: { trial, monthly: 0, topup: 0, spendable: trial },
+  }
+}
+
 describe('ResetOnboardingPage (US-016)', () => {
   beforeEach(() => {
     useWorkspaceMock.mockReset()
@@ -57,19 +73,33 @@ describe('ResetOnboardingPage (US-016)', () => {
     getAuthHeadersMock.mockClear()
     localStorage.clear()
     vi.restoreAllMocks()
+    billing.data = undefined
   })
 
-  it('renders the current stage and trial state from the workspace provider', () => {
-    mockWorkspace({ stage: 'boom', trial: { state: 'warned', spent_usd: 4.5, granted_usd: 5 } })
+  it("renders the current stage from the workspace provider and the trial's credits from the billing summary", () => {
+    mockWorkspace({ stage: 'boom' })
+    mockTrialCredits(50)
     render(<ResetOnboardingPage />)
 
     expect(screen.getByTestId('reset-stage')).toHaveTextContent('boom')
-    expect(screen.getByTestId('reset-trial')).toHaveTextContent('warned')
-    expect(screen.getByTestId('reset-trial')).toHaveTextContent('$4.50 of $5.00')
+    expect(screen.getByTestId('reset-trial')).toHaveTextContent('50 of 500 credits')
+    expect(screen.getByTestId('reset-trial')).not.toHaveTextContent('paused')
+  })
+
+  it('says when the trial is spent and work is paused, and "none" when nothing is metered', () => {
+    mockWorkspace({ stage: 'boom' })
+    mockTrialCredits(0, true)
+    const view = render(<ResetOnboardingPage />)
+    expect(screen.getByTestId('reset-trial')).toHaveTextContent('0 of 500 credits · paused')
+    view.unmount()
+
+    billing.data = undefined
+    render(<ResetOnboardingPage />)
+    expect(screen.getByTestId('reset-trial')).toHaveTextContent('none')
   })
 
   it('warns when wipe_credentials is on while reset_trial is off', () => {
-    mockWorkspace({ stage: 'completed', trial: null })
+    mockWorkspace({ stage: 'completed' })
     render(<ResetOnboardingPage />)
 
     // Not shown until credentials wipe is toggled on.
@@ -84,7 +114,7 @@ describe('ResetOnboardingPage (US-016)', () => {
   })
 
   it('renders the plain disabled state when the endpoint 404s', async () => {
-    mockWorkspace({ stage: 'questions', trial: null })
+    mockWorkspace({ stage: 'questions' })
     localStorage.setItem(LEGACY_KEY, 'completed')
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, ok: false })) as any)
     render(<ResetOnboardingPage />)
@@ -98,7 +128,8 @@ describe('ResetOnboardingPage (US-016)', () => {
   })
 
   it('on success sweeps residual legacy tour/onboarding flags and redirects to /chat', async () => {
-    mockWorkspace({ stage: 'boom', trial: { state: 'exhausted', spent_usd: 5, granted_usd: 5 } })
+    mockWorkspace({ stage: 'boom' })
+    mockTrialCredits(0, true)
     localStorage.setItem(LEGACY_KEY, 'completed')
     localStorage.setItem('automatos-onboarding-completed:user_dev_1', 'true')
     // A key for a different user must survive (scoping).
