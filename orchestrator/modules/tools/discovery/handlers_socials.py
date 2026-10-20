@@ -642,6 +642,21 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+async def get_social_plan_slots(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """P256-FIX-SOC-5 (F436): why a plan's slots are empty, one line a slot, and each plan's current
+    batch (``social_plan_slots``); every active or paused plan when none is named. Read-only."""
+    from modules.tools.discovery.social_plan_slots import SlotsRefused, slot_lines
+
+    _, refusal = _open(db, workspace_id)
+    if refusal:
+        return refusal
+    try:
+        chosen = [_plan(db, workspace_id, params["plan_id"])] if params.get("plan_id") else None
+        return slot_lines(db, workspace_id, chosen, params.get("from"), params.get("days"))
+    except (_Refused, SlotsRefused) as exc:
+        return _refused(str(exc))
+
+
 def _nothing_added(refused: List[Dict[str, str]]) -> str:
     """F383 (night 11): why no topic was added, each refusal first, then how to fix it."""
     reasons = "; ".join(f'"{r["title"] or "topic " + r["index"]}": {r["reason"]}' for r in refused)

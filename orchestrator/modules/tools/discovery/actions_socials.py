@@ -2,7 +2,8 @@
 
 Five tools over the Socials post lifecycle: create, update, submit, get and
 list; two over a plan's content bank (PRD-251B B8, US-B204): read a plan, and
-add researched topics to its bank; and one over the workspace's history
+add researched topics to its bank; one over a plan's slots (P256-FIX-SOC-5, F436):
+why a slot is empty and which batch makes it; and one over the workspace's history
 (PRD-251C C5, US-C103): what it already posted, so research repeats nothing.
 Their handlers (``handlers_socials.py``) run the flows the /api/socials routes
 run. None of them approves, schedules or publishes, and no parameter does (D6,
@@ -30,6 +31,10 @@ FACT_SOURCE_KINDS = ["knowledge", "deliverable", "web", "github", "note"]
 TOPICS_MAX_PER_CALL = 30
 FACTS_MAX_PER_TOPIC = 12
 
+# modules/tools/discovery/social_plan_slots.py DEFAULT_DAYS and MAX_DAYS: the days a slots read covers.
+SLOTS_DEFAULT_DAYS = 7
+SLOTS_MAX_DAYS = 14
+
 # modules/socials/history.py MAX_DAYS and MAX_LIMIT: the most platform_get_social_history reads.
 HISTORY_MAX_DAYS = 365
 HISTORY_MAX_LIMIT = 200
@@ -43,6 +48,7 @@ def register_socials_actions(registry: ActionRegistry) -> None:
     _register_get_social_post(registry)
     _register_list_social_posts(registry)
     _register_plan_actions(registry)
+    _register_plan_slots_action(registry)
     _register_history_action(registry)
 
 
@@ -238,6 +244,43 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
         permission_level="write",
         tags=["socials", "plan", "content bank", "research", "topics"],
         examples=["add these topics to the content bank", "save the researched ideas to the Socials plan"],
+    ))
+
+
+def _register_plan_slots_action(registry: ActionRegistry) -> None:
+    """P256-FIX-SOC-5 (F436): a plan's slots, one line each: made, waiting for its batch, building,
+    stalled or late, and why; with no plan named, every active or paused plan."""
+    registry.register(ActionDefinition(
+        name="platform_get_social_plan_slots",
+        description=(
+            "Read a Socials plan's slots, one line each in the plan's timezone, and where its current batch "
+            "stands: made (with its post's state, and what it waits for or why its render failed), waiting "
+            "(which batch makes it, and when), building, stalled (why: Socials is off, the plan is paused, "
+            "the day's limit, no unused topic suits its format), late, or skipped (why). Use it when asked "
+            "why a slot is empty or when the plan makes a post. Asked about one day, pass that day as from "
+            "with days 1, so its line is never left out. With no plan_id it reads every active or paused "
+            "plan."
+        ),
+        category="socials",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "description": "The plan's id; leave it out to read every active or paused plan."},
+                "from": {"type": "string", "description": "The first day to read, YYYY-MM-DD (today in each plan's timezone when left out)."},
+                "days": {
+                    "type": "integer", "minimum": 1, "maximum": SLOTS_MAX_DAYS,
+                    "description": f"How many days to read from that day ({SLOTS_DEFAULT_DAYS} when left out).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["socials", "plan", "slots", "empty slot", "batch", "calendar"],
+        examples=[
+            "why is Thursday empty in the plan?",
+            "when will the plan make Friday's post?",
+            "which planned posts are still to be made this week?",
+        ],
     ))
 
 

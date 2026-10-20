@@ -637,12 +637,12 @@ _PLATFORM_KEYWORDS = {
     ],
     # PRD-251 US-116 (S4.1): Socials drafts. Agents draft; a person approves in the Socials tab.
     "platform_create_social_post": [
-        "draft a social post", "create a social post", "new social post",
-        "social media post about", "draft a linkedin post",
+        "draft a social post", "create a social post", "new social post", "social media post about", "draft a linkedin post",
     ],
     "platform_list_social_posts": [  # F379: the queue, as the owner asks for it
         "list social posts", "show social posts", "social posts awaiting approval", "posts waiting for approval",
     ],
+    "platform_get_social_plan_slots": ["plan slots", "empty slot", "slot is empty", "when will the plan make"],  # P256-FIX-SOC-5
     # PRD-82A: Missions
     "platform_create_mission": [
         "launch a mission", "start a mission", "create a mission",
