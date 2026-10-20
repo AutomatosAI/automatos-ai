@@ -468,10 +468,10 @@ class HarnessService:
         suggestion (services.harness_changes, PRD-263 US-049); a dropped one keeps its
         reason on the run's row, and none targets the workspace's Auto. Nothing is
         applied or queued (US-016). Ids are ``rx-<run_id>-<seq>``."""
-        from services import harness_changes
+        from services import harness_changes, harness_grants
 
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
-        auto_agent = self._resolve_auto_agent(db, workspace_id)
+        auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
         evidence = harness_changes.Evidence(metrics, diagnosis, harness_changes.settings_from_config())
         prescribed = harness_changes.prescribe(evidence, run_id, auto_agent["id"] if auto_agent else None)
         logger.info(
@@ -532,9 +532,10 @@ class HarnessService:
         Returns "ok" or "failed: <reason>", which the tick stores as the run's
         report_status and get_status() reports.
         """
+        from services import harness_grants
         from services.report_service import ReportService
 
-        auto_agent = self._resolve_auto_agent(db, workspace_id)
+        auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
         if auto_agent is None:
             msg = "no system agent (Auto) found in workspace — report not attributable"
             logger.error(
@@ -567,38 +568,6 @@ class HarnessService:
     # ==================================================================
     # Private helpers
     # ==================================================================
-
-    @staticmethod
-    def _resolve_auto_agent(
-        db: "Session", workspace_id: UUID
-    ) -> Optional[Dict[str, Any]]:
-        """Resolve the workspace's canonical reporting agent.
-
-        Fallback chain:
-          1. Agent.slug == "auto-{workspace_id}" + is_system_agent
-          2. Any system agent named "Auto" in workspace
-          3. Any system agent in workspace
-        Returns {"id": int, "name": str} or None.
-        """
-        from core.models import Agent
-
-        slug = f"auto-{workspace_id}"
-
-        candidates = [
-            (Agent.slug == slug, Agent.is_system_agent.is_(True)),
-            (Agent.is_system_agent.is_(True), Agent.name == "Auto"),
-            (Agent.is_system_agent.is_(True),),
-        ]
-
-        for clauses in candidates:
-            agent = (
-                db.query(Agent)
-                .filter(Agent.workspace_id == workspace_id, *clauses)
-                .first()
-            )
-            if agent is not None:
-                return {"id": agent.id, "name": agent.name}
-        return None
 
     def _build_changelog_markdown(
         self,
