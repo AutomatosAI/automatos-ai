@@ -339,25 +339,22 @@ graph LR
 
 ## Worker HTTP Server
 
-The worker runs an `aiohttp` web server on port 8081 (configurable via `WORKER_HEALTH_PORT`) with file operation endpoints.
+The worker runs a Starlette app on uvicorn, port 8081 (configurable via `WORKER_HEALTH_PORT`), with file operation endpoints. It moved from aiohttp in PRD-262 with no change to any route, method, status or JSON answer, and keeps aiohttp's 1 MiB request body limit and 3630 s keep-alive. One header differs: a download whose file name a header cannot carry as it is (non-ASCII, a quote) is named with RFC 5987's `filename*=`.
 
 ### Authentication
 
-Requests must include `X-Internal-Token` header if `WORKER_INTERNAL_TOKEN` is configured. Health endpoint is always public.
+Requests must include `X-Internal-Token` header if `WORKER_INTERNAL_TOKEN` is configured. Health endpoint is always public. The token is compared in constant time.
 
 ```python
-@web.middleware
-async def internal_auth_middleware(request, handler):
-    if request.path == "/health":
-        return await handler(request)
-    if internal_token:
-        req_token = request.headers.get("X-Internal-Token", "")
-        if req_token != internal_token:
-            return web.json_response({"error": "Unauthorized"}, status=401)
-    return await handler(request)
+class InternalAuthMiddleware:
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] == HEALTH_PATH or _token_accepted(scope):
+            await self.app(scope, receive, send)
+            return
+        await json_response({"error": "Unauthorized"}, status=401)(scope, receive, send)
 ```
 
-**Sources:** [services/workspace-worker/main.py:502-512]()
+**Sources:** [services/workspace-worker/worker_http.py]()
 
 ### Language Detection
 

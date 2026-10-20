@@ -17,7 +17,7 @@ which this image can't import:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from worker_config import (otel_enabled, otel_endpoint, otel_headers, otel_sampler_ratio,
                            otel_service_name)
@@ -112,15 +112,24 @@ async def flush_tracing(_app: Any = None) -> None:
         logger.exception("[otel] batched spans not flushed")
 
 
-def _route_of(request: Any) -> str:
-    """The route template (``/workspaces/{workspace_id}/files``), never the URL."""
-    resource = getattr(getattr(request.match_info, "route", None), "resource", None)
-    return getattr(resource, "canonical", None) or "unmatched"
+def _route_of(scope: Any) -> Tuple[str, Dict[str, Any]]:
+    """(the route template, its path parameters) for a request, never the URL.
+
+    The router matches only after the middleware runs, so the span's name is read here
+    the way the router will read it: the route that fully matches, or "unmatched" for a
+    404 or a 405, as aiohttp's resource lookup gave it (PRD-262, row 36)."""
+    from starlette.routing import Match
+
+    for route in scope["app"].routes:
+        match, child = route.matches(scope)
+        if match == Match.FULL:
+            return route.path, child.get("path_params", {})
+    return "unmatched", {}
 
 
-def _span_attributes(request: Any) -> Dict[str, Any]:
-    attributes = {"http.method": request.method, "http.route": _route_of(request)}
-    workspace_id = request.match_info.get("workspace_id")
+def _span_attributes(method: str, route: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    attributes = {"http.method": method, "http.route": route}
+    workspace_id = params.get("workspace_id")
     return {**attributes, ATTR_WORKSPACE_ID: workspace_id} if workspace_id else attributes
 
 
@@ -134,29 +143,55 @@ def _failed(span: Any, exc: BaseException) -> None:
     span.set_status(Status(StatusCode.ERROR, type(exc).__qualname__))
 
 
-async def _traced(request: Any, handler: Any) -> Any:
-    """Run ``handler`` inside a server span that continues the caller's trace."""
-    from aiohttp import web
+class _StatusRecorder:
+    """The ASGI ``send`` of a request, passed on, keeping the response's status."""
+
+    def __init__(self, send: Any) -> None:
+        self.send = send
+        self.status: Any = None
+
+    async def __call__(self, message: Dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            self.status = message["status"]
+        await self.send(message)
+
+
+async def _traced(app: Any, scope: Any, receive: Any, send: Any) -> None:
+    """Run the request inside a server span that continues the caller's trace."""
     from opentelemetry import propagate, trace
     from opentelemetry.trace import SpanKind
+    from starlette.datastructures import Headers
 
+    route, params = _route_of(scope)
+    recorder = _StatusRecorder(send)
     tracer = trace.get_tracer(TRACER_NAME)
-    name = f"{request.method} {_route_of(request)}"
-    with tracer.start_as_current_span(name, context=propagate.extract(request.headers), kind=SpanKind.SERVER,
-                                      attributes=_span_attributes(request), record_exception=False,
-                                      set_status_on_exception=False) as span:
+    with tracer.start_as_current_span(f"{scope['method']} {route}", context=propagate.extract(Headers(scope=scope)),
+                                      kind=SpanKind.SERVER, attributes=_span_attributes(scope["method"], route, params),
+                                      record_exception=False, set_status_on_exception=False) as span:
         try:
-            response = await handler(request)
-        except web.HTTPException as exc:
-            span.set_attribute("http.status_code", exc.status)
-            if exc.status >= 500:
-                _failed(span, exc)
-            raise
+            await app(scope, receive, recorder)
         except Exception as exc:
             _failed(span, exc)
             raise
-        span.set_attribute("http.status_code", response.status)
-        return response
+        if recorder.status is not None:   # None: the client left before an answer started
+            span.set_attribute("http.status_code", recorder.status)
+
+
+class TracingMiddleware:
+    """A server span per request, outermost; never for the probes (/health, /metrics).
+
+    A 404 or 405 is an answer, not a failure: the router's own HTTPException becomes
+    its response inside the app, so the span records the status. A handler that raises
+    marks the span failed with the error's type, and the error goes on to the 500."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope["path"] in UNTRACED_PATHS:
+            await self.app(scope, receive, send)
+            return
+        await _traced(self.app, scope, receive, send)
 
 
 class TraceIdsFilter(logging.Filter):
@@ -182,25 +217,31 @@ def _log_trace_ids() -> None:
         handler.addFilter(log_filter)
 
 
+def _flush_on_shutdown(app: Any) -> None:
+    """Flush the batched spans when the app's lifespan ends (uvicorn's shutdown)."""
+    from contextlib import asynccontextmanager
+
+    lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def flushing_lifespan(lifespan_app: Any):
+        async with lifespan(lifespan_app) as state:
+            yield state
+        await flush_tracing()
+
+    app.router.lifespan_context = flushing_lifespan
+
+
 def attach(app: Any) -> None:
     """With ``OTEL_ENABLED``: this process's provider, a server span per request (the
     outermost middleware), the trace IDs in the logs (O5) and a flush when the app
     stops. Off: the app and the logs are untouched."""
     if not otel_enabled() or not start_tracing():
         return
-    from aiohttp import web
-
     _log_trace_ids()
-
-    @web.middleware
-    async def tracing_middleware(request, handler):
-        if request.path in UNTRACED_PATHS:
-            return await handler(request)
-        return await _traced(request, handler)
-
-    app.middlewares.insert(0, tracing_middleware)
-    app.on_cleanup.append(flush_tracing)
+    app.add_middleware(TracingMiddleware)
+    _flush_on_shutdown(app)
 
 
-__all__ = ["ATTR_WORKSPACE_ID", "UNTRACED_PATHS", "TraceIdsFilter", "attach", "build_provider", "flush_tracing",
-           "otlp_headers", "sampler_ratio", "start_tracing"]
+__all__ = ["ATTR_WORKSPACE_ID", "UNTRACED_PATHS", "TraceIdsFilter", "TracingMiddleware", "attach", "build_provider",
+           "flush_tracing", "otlp_headers", "sampler_ratio", "start_tracing"]
