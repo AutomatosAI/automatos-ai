@@ -22,6 +22,10 @@ BUILDER = REPO_ROOT / "orchestrator" / "tests" / "fixtures" / "themes" / "build.
 VARIANT = "hello"
 THEME_ID = "automatos-e2e/hello-c03b"
 THEME_NAME = "Hello review queue (C-03b)"
+# The Marketplace refuses a submission with no source/ (C-06p4, 422 SOURCE_REQUIRED); A-06a's
+# hello package has none, so this fixture adds one minimal source file.
+SOURCE_FILE = "source/src/index.tsx"
+SOURCE_BYTES = b"export default {}\n"
 
 
 def load_builder() -> ModuleType:
@@ -35,11 +39,12 @@ def load_builder() -> ModuleType:
 
 
 def build_review_package() -> bytes:
-    """The hello package with this fixture's theme id and name."""
+    """The hello package with this fixture's theme id and name, and one ``source/`` file."""
     builder = load_builder()
     manifest = json.loads(builder.hello_members(VARIANT)[builder.MANIFEST])
     renamed = {**manifest, "id": THEME_ID, "name": THEME_NAME}
-    return builder.build_package(VARIANT, replace={builder.MANIFEST: builder.manifest_bytes(renamed)})
+    replace = {builder.MANIFEST: builder.manifest_bytes(renamed), SOURCE_FILE: SOURCE_BYTES}
+    return builder.build_package(VARIANT, replace=replace)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
