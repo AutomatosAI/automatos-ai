@@ -8,7 +8,7 @@
 FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
 
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.3@sha256:bee0a2a458fd956c5df7b8b4c5fed2257b0af34866e3da7b51db0be3acb375d1 AS uv
 
 # PRD-262 US-044: requirements.lock in two parts, claude-agent-sdk alone and
 # everything else (the SDK's own dependencies included). The production stage
