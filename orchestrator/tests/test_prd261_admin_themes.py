@@ -14,7 +14,9 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
   an RFC 8032 public key, whose published seed signs the request's canonical text here); one no
   active key verifies is a 400 and nothing is stored; the ``signed`` event and the report carry
   ``verified`` and the keyId from ``signature_verify``; a stored signature an active key still
-  verifies refuses another (409), one that no longer does takes an active key's (QB-28);
+  verifies refuses another (409), one that no longer does takes an active key's (QB-28); a keys
+  file that does not load reads ``invalid`` in the report (200) and the paste is a 503 with its
+  plain message, nothing stored;
 * the reviewer's isolated-job note is stored and gates approval on the hosted edition;
 * reject needs a reason; deactivate writes a ``disable`` revocation of the digest;
 * every route refuses a non-admin, and a workspace's private upload is 404 here;
@@ -461,6 +463,31 @@ def test_a_signature_stored_before_c05b_checked_takes_one_an_active_key_verifies
     assert resp.status_code == 200, resp.text
     [signed] = _events(api.db, package, signing.EVENT_SIGNED)
     assert (signed.detail["keyId"], signed.detail["replaces"]) == (key_id, {"state": "invalid", "keyId": None})
+
+
+def test_a_keys_file_that_does_not_load_reads_invalid_in_the_report_and_the_paste_is_a_503(
+        api, monkeypatch, tmp_path):
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, good = request["requestId"], _signed(request["canonical"])
+    broken = tmp_path / "signing-keys-broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    resp = _signature(api, package, request_id, good)
+    assert resp.status_code == 503 and resp.json()["detail"] == signature_verify.NOT_JSON, resp.text
+    api.db.refresh(package)
+    assert package.signature is None and _events(api.db, package, signing.EVENT_SIGNED) == []
+
+    _keys(monkeypatch, tmp_path)
+    assert _signature(api, package, request_id, good).status_code == 200
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    report = api.client.get(f"{BASE}/{package.id}/report")
+    assert report.status_code == 200, report.text
+    assert (report.json()["signatureVerified"], report.json()["keyId"], report.json()["signed"]) == (False, None, True)
+    resp = _signature(api, package, request_id, good)  # a signed version: checking the stored one needs the keys
+    assert resp.status_code == 503 and resp.json()["detail"] == signature_verify.NOT_JSON, resp.text
+    api.db.refresh(package)
+    assert package.signature == good and len(_events(api.db, package, signing.EVENT_SIGNED)) == 1
 
 
 # --- gates, shape and the no-key rule ----------------------------------------------------
