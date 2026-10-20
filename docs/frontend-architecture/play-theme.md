@@ -72,6 +72,7 @@ The following files were used as context for this page:
 - [frontend/lib/mascot/types.ts](frontend/lib/mascot/types.ts)
 - [frontend/lib/mascot/reducer.ts](frontend/lib/mascot/reducer.ts)
 - [frontend/lib/mascot/events.ts](frontend/lib/mascot/events.ts)
+- [frontend/lib/mascot/data-events.ts](frontend/lib/mascot/data-events.ts)
 - [frontend/lib/mascot/player.ts](frontend/lib/mascot/player.ts)
 - [frontend/lib/mascot/media.ts](frontend/lib/mascot/media.ts)
 - [frontend/lib/mascot/ring.ts](frontend/lib/mascot/ring.ts)
@@ -397,7 +398,7 @@ Auto is a state machine ported from Play (`frontend/lib/mascot/`), fed from the 
 
 ```mermaid
 graph LR
-    Chat["useChatWithReceipts<br/>(lib/chat/use-chat-with-receipts.ts)"] -->|"onData parts"| Events["lib/mascot/events.ts<br/>mascotEventsFromData"]
+    Chat["useChatWithReceipts<br/>(lib/chat/use-chat-with-receipts.ts)"] -->|"onData parts"| Events["lib/mascot/data-events.ts<br/>mascotEventsFromData"]
     Chat -->|"status, errorCode"| Status["mascotEventsFromStatus"]
     Chat -->|"messages: the newest reply"| Reply["mascotEventsFromReply"]
     Page["Play's screens<br/>(focus, blur, first open, Stop)"] --> Driver
@@ -435,7 +436,7 @@ graph LR
 | no key, pointer, wheel or touch input for 3 minutes (`useIdleTimeout`, `IDLE_MS`) / the next input | `idle-timeout` / `wake` | sleeping (a nap, not during a turn) / idle |
 | the shelf loads after a failure (`useShelfMascot`, M47) | `request-ok` | oops outside a turn settles to rest |
 
-The core's `useChat` hands its data callback no per-word event: it writes the words, and the model's reasoning, onto the reply. So the start of the answer is read from the reply itself. `replyProgress(messages)` (`lib/chat/message-text.ts`) gives the newest message when it is a reply (none while a turn still awaits its reply, so the previous turn's words never count), whether its words have started, how much reasoning it holds, whether one of its tool calls runs and whether a cap ended it; `mascotEventsFromReply` turns those into `text`, `reasoning` and `limit_reached` events. Words or reasoning that start while a tool runs change nothing: the tool's state wins, and its end settles Auto. Every part is checked field by field in `lib/mascot/events.ts`; a part that isn't what it says maps to nothing.
+The core's `useChat` hands its data callback no per-word event: it writes the words, and the model's reasoning, onto the reply. So the start of the answer is read from the reply itself. `replyProgress(messages)` (`lib/chat/message-text.ts`) gives the newest message when it is a reply (none while a turn still awaits its reply, so the previous turn's words never count), whether its words have started, how much reasoning it holds, whether one of its tool calls runs and whether a cap ended it; `mascotEventsFromReply` turns those into `text`, `reasoning` and `limit_reached` events. Words or reasoning that start while a tool runs change nothing: the tool's state wins, and its end settles Auto. Every part is checked field by field in `lib/mascot/data-events.ts` (the receipts frame through the SDK's `chat.liveReceiptsOf`); a part that isn't what it says maps to nothing.
 
 `toolActivity` matches exact names first (`SEARCHING_TOOLS`, `READING_TOOLS`, `WORKING_TOOLS`; `platform_acknowledge_report` is working, though its name holds "knowledge", M103), then the patterns `/web_|browse_marketplace/` (searching) and `/document|knowledge|memor|semantic|graph/` (reading); anything else is working. It is the only place in the frontend that knows tool names.
 
@@ -458,7 +459,7 @@ The 36 files are committed under `frontend/public/auto/`: each state as `<state>
 - Conversations: idle in the mascot column.
 - The style sheet (all 12 states as specimens), the 404 (lost) and the asleep screen (sleeping), below.
 
-**Sources:** [frontend/lib/mascot/types.ts](), [frontend/lib/mascot/reducer.ts](), [frontend/lib/mascot/events.ts](), [frontend/lib/mascot/tools.ts](), [frontend/lib/mascot/player.ts](), [frontend/lib/mascot/media.ts](), [frontend/lib/mascot/ring.ts](), [frontend/lib/mascot/session.ts](), [frontend/hooks/use-auto-mascot.ts](), [frontend/hooks/use-mascot-player.ts](), [frontend/hooks/use-idle-timeout.ts](), [frontend/hooks/use-media-preferences.ts](), [frontend/components/mascot/auto-mascot.tsx](), [frontend/next.config.js]()
+**Sources:** [frontend/lib/mascot/types.ts](), [frontend/lib/mascot/reducer.ts](), [frontend/lib/mascot/events.ts](), [frontend/lib/mascot/data-events.ts](), [frontend/lib/mascot/tools.ts](), [frontend/lib/mascot/player.ts](), [frontend/lib/mascot/media.ts](), [frontend/lib/mascot/ring.ts](), [frontend/lib/mascot/session.ts](), [frontend/hooks/use-auto-mascot.ts](), [frontend/hooks/use-mascot-player.ts](), [frontend/hooks/use-idle-timeout.ts](), [frontend/hooks/use-media-preferences.ts](), [frontend/components/mascot/auto-mascot.tsx](), [frontend/next.config.js]()
 
 ---
 
