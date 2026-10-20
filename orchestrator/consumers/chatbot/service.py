@@ -214,15 +214,14 @@ def resolve_known_user_name(db, user_id: Optional[int]) -> Optional[str]:
 
 
 def atom_identity_clause(user_name: Optional[str]) -> str:
-    """The ATOM prompt's "who am I talking to" clause (PRD-233 S6).
-
-    Mirrors the full path's personality wording ("You're talking to <name>",
-    consumers/chatbot/personality.py) so both lanes greet from ONE source —
-    ``ConversationState.user_name``. Empty (prompt byte-identical) when the
-    name is unknown.
+    """The ATOM prompt's "who am I talking to" clause (PRD-233 S6): the full path's personality
+    wording ("You're talking to <name>", and F460's ``owner_is_you``), so both lanes greet from ONE
+    source, ``ConversationState.user_name``. Empty (prompt byte-identical) when the name is unknown.
     """
+    from consumers.chatbot.owner_is_you import owner_is_you
+
     name = user_name.strip() if isinstance(user_name, str) else ""
-    return f" You're talking to {name}." if name else ""
+    return f" You're talking to {name}. {owner_is_you(name)}" if name else ""
 
 
 def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
