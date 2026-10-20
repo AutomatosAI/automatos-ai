@@ -30,6 +30,9 @@ export interface BlogPost {
   view_count: number
   created_at: string
   updated_at: string
+  // PRD-264 EUAI-08b: an agent wrote it and no person has marked it reviewed yet.
+  ai_generated: boolean
+  reviewed_at: string | null
 }
 
 export interface BlogListResponse {
@@ -115,6 +118,26 @@ export function useUnpublishPost() {
     },
     onError: (error) => {
       toast.error(error.message || 'Failed to unpublish post')
+    },
+  })
+}
+
+/**
+ * PRD-264 EUAI-08b: the caller reviewed the post and takes editorial responsibility for it,
+ * so it is no longer labelled AI-generated. Editing the post afterwards clears the review.
+ */
+export function useMarkPostReviewed() {
+  const queryClient = useQueryClient()
+
+  return useMutation<BlogPost, Error, string>({
+    mutationFn: (postId) =>
+      apiClient.request<BlogPost>(`/api/blog/posts/${postId}/review`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: blogQueryKeys.all })
+      toast.success('Post marked as reviewed')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to mark the post as reviewed')
     },
   })
 }

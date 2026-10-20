@@ -939,10 +939,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5. HIGH RISK — default OFF. Nothing reads it from PRD-263
-    # US-047, which deleted the owner's /approve it gated, until US-054 redefines
-    # it as the switch for approval grants. The weekly run is report_only and
-    # applies nothing whatever its value (PRD-263 US-016).
+    # PRD-263 US-054: the installation's switch that allows HARNESS to raise approval
+    # grants. HIGH RISK — default OFF. Only while it is on does a ``propose`` workspace
+    # get an Approvals card per proposed change (services.harness_grants), applied only
+    # on the owner's click; off, every workspace runs report_only and gets no card.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
@@ -983,6 +983,17 @@ class Config:
     # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
     HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
     HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
+    # PRD-263 US-053 (section 11-Q7 default): a HARNESS proposal granted, or being applied,
+    # longer than HARNESS_RECONCILE_GRACE_MINUTES ago with no outcome is closed as failed.
+    # The daily sweep of HARNESS grants runs on HARNESS_GRANT_SWEEP_CRON, read in UTC
+    # (default 09:00 every day; services.harness_grants).
+    HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
+    HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
+    # PRD-263 US-056: each change HARNESS applied is judged week by week against the
+    # HARNESS_REF_DAYS before it (services.harness_post_change). A metric waits for a week
+    # of at least HARNESS_MIN_SAMPLES for up to HARNESS_POST_CHANGE_MAX_WEEKS weeks after
+    # the change; otherwise the report says it was not judged.
+    HARNESS_POST_CHANGE_MAX_WEEKS: int = int(os.getenv("HARNESS_POST_CHANGE_MAX_WEEKS", "4"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:

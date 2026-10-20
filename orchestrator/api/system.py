@@ -579,12 +579,6 @@ async def get_performance_baseline(ctx: RequestContext = Depends(get_request_con
                 "memory_usage": "2.1GB",
                 "disk_io": "50MB/s"
             },
-            "performance_targets": {
-                "response_time_target": "< 200ms",
-                "throughput_target": "> 800 requests/minute",
-                "error_rate_target": "< 1%",
-                "uptime_target": "> 99.9%"
-            },
             "timestamp": datetime.utcnow().isoformat()
         }
         

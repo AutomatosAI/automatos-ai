@@ -22,7 +22,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
-from core.services.blog_post_view import post_view  # PRD-264 EUAI-09: ai_generated
+from core.services.blog_post_view import post_view, read_post_view  # PRD-264 EUAI-09/08b: ai_generated
 from core.services.blog_service import BlogService
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ async def create_post(
         seo_title=body.seo_title,
         seo_description=body.seo_description,
     )
-    return post_view(post, include_content=True)
+    return await read_post_view(svc, post, include_content=True)
 
 
 @router.get("/posts")
@@ -117,7 +117,7 @@ async def list_posts(
         per_page=per_page,
     )
     return {
-        "posts": [post_view(p, include_content=False) for p in result["posts"]],
+        "posts": [await read_post_view(svc, p, include_content=False) for p in result["posts"]],
         "total": result["total"],
         "page": result["page"],
         "per_page": result["per_page"],
@@ -136,9 +136,8 @@ async def get_post(
     post = svc.get_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    data = post_view(post, include_content=False)
-    data["content"] = await svc.get_content(post)
-    return data
+    content = await svc.get_content(post)
+    return {**post_view(post, include_content=False, current_text=content), "content": content}
 
 
 @router.put("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:update"))])
@@ -154,7 +153,7 @@ async def update_post(
     post = await svc.update_post(post_id, **updates)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post_view(post, include_content=True)
+    return await read_post_view(svc, post, include_content=True)
 
 
 @router.delete("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
@@ -181,7 +180,7 @@ async def publish_post(
     post = svc.publish_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post_view(post, include_content=False)
+    return await read_post_view(svc, post, include_content=False)
 
 
 @router.post("/posts/{post_id}/unpublish", dependencies=[Depends(require_workspace_permission("documents:update"))])
@@ -195,7 +194,35 @@ async def unpublish_post(
     post = svc.unpublish_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post_view(post, include_content=False)
+    return await read_post_view(svc, post, include_content=False)
+
+
+def _reviewer(ctx: RequestContext) -> str:
+    """The person marking a post reviewed: their user id, else their email. 401 without either."""
+    user = getattr(ctx, "user", None)
+    reviewer = getattr(user, "id", None) or getattr(user, "email", None)
+    if not reviewer:
+        raise HTTPException(status_code=401, detail="A signed-in user is required")
+    return str(reviewer)
+
+
+@router.post("/posts/{post_id}/review", dependencies=[Depends(require_workspace_permission("documents:update"))])
+async def mark_post_reviewed(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Mark a post reviewed by the caller, who takes editorial responsibility (PRD-264 EUAI-08b).
+
+    Records who, when and the hash of the text they reviewed; the post then reads
+    ``ai_generated: false`` while its text is unchanged and until an edit clears the
+    review. Only the caller's own workspace's posts are found (404 otherwise).
+    """
+    svc = BlogService(db, ctx.workspace_id)
+    post = await svc.mark_reviewed(post_id, _reviewer(ctx))
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return await read_post_view(svc, post, include_content=False)
 
 
 # ---------------------------------------------------------------------------

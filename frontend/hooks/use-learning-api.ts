@@ -14,9 +14,9 @@ export const learningQueryKeys = {
   selfLearningHealth: ['learning', 'self-learning-health'] as const,
 }
 
-// PRD-263 US-021: the sections of GET /api/harness/self-learning; one that failed
-// to load on the backend is named in `unavailable`.
-export type SelfLearningSection = 'harness' | 'signals'
+// PRD-263 US-021, US-058: the sections of GET /api/harness/self-learning; one that
+// failed to load on the backend is named in `unavailable`.
+export type SelfLearningSection = 'harness' | 'signals' | 'ledger'
 
 // PRD-263 US-021: shape of GET /api/harness/self-learning. Counts, coverage and
 // mode only (any workspace member reads it; never grant text). A figure the
@@ -35,6 +35,14 @@ export interface SelfLearningHealthData {
   mode: string | null
   /** This workspace's production tool calls over the last 7 days. */
   signals_7d: number | null
+  /** PRD-263 US-058: HARNESS's proposals (its Approvals cards) waiting for the owner's click. */
+  pending: number | null
+  /** Proposals the owner approved and HARNESS applied. */
+  applied: number | null
+  /** Proposals the owner declined. */
+  denied: number | null
+  /** Proposals whose card lapsed before a click. */
+  expired: number | null
   unavailable: SelfLearningSection[]
 }
 
@@ -61,8 +69,8 @@ export function useLearningEffectivenessReport() {
 }
 
 // Get self-learning health for the Command Center tile (the latest HARNESS run's
-// status, coverage and verdict counts, the workspace's mode, and its 7-day
-// production tool calls). Uses the generic request path — the endpoint is
+// status, coverage and verdict counts, the workspace's mode, its 7-day production
+// tool calls, and its HARNESS proposals' counts). Uses the generic request path — the endpoint is
 // workspace-scoped server-side via the auth context.
 export function useSelfLearningHealth() {
   return useQuery<SelfLearningHealthData>({

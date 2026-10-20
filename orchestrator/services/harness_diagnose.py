@@ -13,9 +13,10 @@ statistics in ``core.stats.harness_verdicts`` (design section 5.1, ORG-4 and ORG
 * **Clean reference.** The ISO weeks of ``HARNESS_REF_DAYS`` before the judged
   week, less each week already flagged for that agent and metric (so a bad week
   is never absorbed into the reference) and less the weeks from a change HARNESS
-  applied to that agent (``harness_task_ledger``, state ``applied``) onwards. A
-  change older than the reference leaves it whole: every week in it is then the
-  agent as it now stands.
+  applied to that agent (``harness_task_ledger``, state ``applied`` or
+  ``rolled_back``) onwards; services.harness_post_change judges the change itself
+  against the weeks before it. A change older than the reference leaves it whole:
+  every week in it is then the agent as it now stands.
 * **Verdicts.** n below ``HARNESS_MIN_SAMPLES`` in the week or the reference is
   INSUFFICIENT_DATA. Benjamini-Hochberg at ``HARNESS_FDR_Q`` runs across every test
   of the run. A first flag is WATCH; REGRESSION needs a flag in the previous ISO
@@ -242,16 +243,20 @@ def verdict_history(runs: Iterable[Tuple[str, Any]]) -> Dict[str, Dict[str, Dict
     return history
 
 
+# A governed change (PRD-263 US-051) names its agent in target_agent_id and its moment in
+# applied_at; an F156 row has neither, only entry.target_id and created_at. A change later
+# rolled back still changed the agent from that week on.
 _APPLIED_CHANGES_SQL = text("""
     WITH changes AS (
-        SELECT CASE WHEN l.entry ->> 'target_id' ~ :agent_id_pattern
-                    THEN CAST(l.entry ->> 'target_id' AS bigint) END AS agent_id,
-               l.created_at AT TIME ZONE :tz AS changed_at
+        SELECT COALESCE(l.target_agent_id,
+                        CASE WHEN l.entry ->> 'target_id' ~ :agent_id_pattern
+                             THEN CAST(l.entry ->> 'target_id' AS bigint) END) AS agent_id,
+               COALESCE(l.applied_at, l.created_at) AT TIME ZONE :tz AS changed_at
         FROM harness_task_ledger l
         WHERE l.workspace_id = CAST(:workspace_id AS uuid)
-          AND l.state = :applied
-          AND (l.created_at AT TIME ZONE :tz) >= :start
-          AND (l.created_at AT TIME ZONE :tz) < :end
+          AND l.state IN (:applied, :rolled_back)
+          AND (COALESCE(l.applied_at, l.created_at) AT TIME ZONE :tz) >= :start
+          AND (COALESCE(l.applied_at, l.created_at) AT TIME ZONE :tz) < :end
     )
     SELECT agent_id, MIN(changed_at) AS changed_at
     FROM changes
@@ -262,12 +267,13 @@ _APPLIED_CHANGES_SQL = text("""
 
 def applied_change_weeks(db: Session, workspace_id: Union[UUID, str], window: Window) -> Dict[int, str]:
     """agent id -> the ISO week of the first change HARNESS applied to it inside the
-    weeks read (the ledger's ``applied`` rows: the agent from ``entry.target_id``, the
-    moment from ``created_at``, until US-051 adds ``applied_at``)."""
-    from core.models.harness import LEDGER_APPLIED
+    weeks read (the ledger's ``applied`` and ``rolled_back`` rows, by ``target_agent_id``
+    and ``applied_at``, or an F156 row's ``entry.target_id`` and ``created_at``)."""
+    from core.models.harness import LEDGER_APPLIED, LEDGER_ROLLED_BACK
 
     params = {
-        "workspace_id": str(UUID(str(workspace_id))), "applied": LEDGER_APPLIED, "tz": UTC_ZONE,
+        "workspace_id": str(UUID(str(workspace_id))), "applied": LEDGER_APPLIED,
+        "rolled_back": LEDGER_ROLLED_BACK, "tz": UTC_ZONE,
         "agent_id_pattern": AGENT_ID_PATTERN, "start": window.start, "end": window.end,
     }
     return {row.agent_id: iso_week_label(row.changed_at.date()) for row in db.execute(_APPLIED_CHANGES_SQL, params)}
@@ -460,7 +466,8 @@ def _tool_issue(name: str, agent_id: int, app: str, counts: Tuple[int, int, int]
                 settings: DiagnoseSettings) -> Dict[str, Any]:
     """One flagged agent-app pair. It is "reconnect <app>" when the sign-in and connection
     failures carry the flag (the other failures alone would not flag) and the app has a
-    connection; otherwise a tool failure. Neither proposes removing the tool (US-049, US-057)."""
+    connection; otherwise a tool failure. A reconnect never proposes removing the tool; a tool
+    failure does only through the removal gate (services.harness_changes, US-057)."""
     calls, failed, reconnect = counts
     reconnects = app not in PLATFORM_APPS and reconnect > 0 and not _fails(failed - reconnect, calls, settings)
     if reconnects:

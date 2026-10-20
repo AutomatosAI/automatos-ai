@@ -13,7 +13,8 @@ edit could quietly undo:
   never NodeSource; the C headers never copied; production last. The worker copies
   npm and corepack too; media-render the node binary alone, because Hyperframes
   comes from its js stage's npm ci (US-053). A file may come through a stage built
-  FROM `node` (PRD-262 #22: media-render's `node-stripped` strips the binary,
+  FROM `node`: `node-stripped`, the same stage in both, strips the binary (PRD-262
+  #21 in the worker, test_prd262_worker_diet.py pins it; #22 in media-render,
   test_prd262_media_render_node_strip.py pins it);
 - the worker's pnpm pinned exactly, its npm cache cleaned in the same RUN;
 - every Dockerfile that runs Node takes it through a named stage, never a bare
@@ -59,7 +60,7 @@ NODE_DOCKERFILES = (
 DIGEST = r"@sha256:[0-9a-f]{64}"
 NODE_INSTALL = "/usr/local/"  # where the official image keeps node, npm and corepack
 # The node-stripped stage's tree, copied to /: Node's binary alone, at its own path
-# (test_prd262_media_render_node_strip.py).
+# (test_prd262_worker_diet.py, test_prd262_media_render_node_strip.py).
 NODE_LAYER = {"/node-layer/": "/usr/local/bin/node"}
 BUILD_TOOLS = {"python3", "make", "g++", "curl"}
 

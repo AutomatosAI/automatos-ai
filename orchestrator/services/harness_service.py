@@ -5,9 +5,9 @@ HARNESS Service (PRD-121)
 Self-Optimizing Organization Loop.  Runs weekly, invisible to users.
 Reads each agent's real weekly counts, judges them against a clean reference
 (services.harness_diagnose, PRD-263), lists the configuration changes it would
-suggest with their risk scores (services.harness_changes, the change-kind
-registry), and submits the audit report. It changes nothing:
-every workspace is report_only through beta (PRD-263 D2, services.harness_mode).
+suggest (services.harness_changes) and submits the audit report. It changes
+nothing (services.harness_mode): in a propose workspace, with proposals switched
+on, each change becomes an owner's Approvals card (services.harness_grants).
 
 Registered at server startup alongside HeartbeatService / CoordinatorService.
 """
@@ -72,8 +72,10 @@ class HarnessService:
     # ------------------------------------------------------------------
 
     async def start(self, scheduler: Optional[AsyncIOScheduler] = None) -> None:
-        """Register the weekly sweep for all active workspaces."""
+        """Register the weekly sweep for all active workspaces, and the daily sweep of
+        HARNESS approval grants (services.harness_grants, PRD-263 US-053)."""
         from config import config
+        from services import harness_grants
 
         if scheduler:
             self._scheduler = scheduler
@@ -85,6 +87,7 @@ class HarnessService:
             self._owns_scheduler = True
 
         await self._register_workspace_jobs()
+        harness_grants.schedule_sweep(self._scheduler)
         logger.info("[HARNESS] Service started (cron: %s UTC)", config.HARNESS_SWEEP_CRON)
 
     async def _register_workspace_jobs(self) -> None:
@@ -261,10 +264,11 @@ class HarnessService:
 
     async def _run_locked(self, workspace_id: UUID, sweep: bool) -> None:
         """Holding the lock: skip a disabled workspace (sweep and trigger_now
-        alike), close interrupted runs, apply the weekly skip, then run the
+        alike), close interrupted runs, reconcile the ledger's open proposals with
+        their grants (ORG-2, PRD-263 US-053), apply the weekly skip, then run the
         pipeline on its own harness_runs row."""
         from core.database.database import SessionLocal
-        from services import harness_runs
+        from services import harness_grants, harness_runs
 
         db = SessionLocal()
         try:
@@ -273,6 +277,7 @@ class HarnessService:
                 return
             cur_window = harness_runs.last_complete_iso_week()
             harness_runs.close_interrupted(db, workspace_id)
+            harness_grants.reconcile(db, workspace_id)
             if sweep and harness_runs.week_is_settled(db, workspace_id, cur_window):
                 logger.info("[HARNESS] %s already has a run for %s, skipping", workspace_id, cur_window)
                 return
@@ -316,9 +321,8 @@ class HarnessService:
     ) -> Dict[str, Any]:
         """The dormancy check, then the four phases; returns the row's closing fields.
 
-        Report only (PRD-263 US-016): PRESCRIBE's suggestions become lines of the
-        audit report, and nothing is applied or queued. ``propose`` runs exactly
-        like ``report_only`` until proposals exist (US-054).
+        PRESCRIBE's suggestions become lines of the audit report and nothing is
+        applied (PRD-263 US-016); a propose workspace also gets Approvals cards (US-054).
         """
         from core.database.database import end_open_transaction
         from services import harness_diagnose, harness_runs
@@ -435,14 +439,14 @@ class HarnessService:
     async def _phase_diagnose(
         self, workspace_id: UUID, metrics: "HarnessMetrics", db: "Session"
     ) -> Dict[str, Any]:
-        """Judge each agent x metric on its real counts (US-014a) against the clean
-        reference, with the week-by-week verdict history (US-014b).
+        """Judge each agent x metric on its real counts (US-014a) against the clean reference
+        and verdict history (US-014b), and each applied change against its frozen one (US-056).
 
         The history is the workspace's completed harness_runs rows; post-change
         weeks come from harness_task_ledger. Each agent's tool failures in the
         judged week, from its production tool logs, are issues (US-019).
         """
-        from services import harness_diagnose, harness_runs
+        from services import harness_diagnose, harness_post_change, harness_runs
 
         window = metrics.window
         logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s, week %s", workspace_id, window.cur_week)
@@ -451,11 +455,10 @@ class HarnessService:
         settings = harness_diagnose.settings_from_config()
         diagnosis = harness_diagnose.diagnose(metrics, history, changes, settings)
         issues = harness_diagnose.tool_failure_issues(metrics, settings)
-        logger.info(
-            "[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
-            diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues),
-        )
-        return {**diagnosis, "issues": issues}
+        post_change = await harness_post_change.check(db, workspace_id, window.cur_week)
+        logger.info("[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
+                    diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues))
+        return {**diagnosis, "issues": issues, harness_post_change.KEY: post_change}
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
@@ -466,17 +469,18 @@ class HarnessService:
     ) -> "Prescribed":
         """Run every change kind's detector over the run's evidence and validate each
         suggestion (services.harness_changes, PRD-263 US-049); a dropped one keeps its
-        reason on the run's row, and none targets the workspace's Auto. Nothing is
-        applied or queued (US-016). Ids are ``rx-<run_id>-<seq>``."""
+        reason on the run's row, and none targets the workspace's Auto. Ids are
+        ``rx-<run_id>-<seq>``. Nothing is applied (US-016): in a propose workspace with
+        proposals on, each valid apply-kind change becomes an Approvals card (US-054)."""
         from services import harness_changes, harness_grants
 
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
         auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
         evidence = harness_changes.Evidence(metrics, diagnosis, harness_changes.settings_from_config())
         prescribed = harness_changes.prescribe(evidence, run_id, auto_agent["id"] if auto_agent else None)
-        logger.info(
-            "[HARNESS] PRESCRIBE done — %d suggested, %d dropped", len(prescribed.valid), len(prescribed.dropped),
-        )
+        raised = harness_grants.raise_cards(db, workspace_id, run_id, prescribed.valid, diagnosis)
+        logger.info("[HARNESS] PRESCRIBE done — %d suggested, %d dropped, %d Approvals cards",
+                    len(prescribed.valid), len(prescribed.dropped), raised.pending)
         return prescribed
 
     # ------------------------------------------------------------------
@@ -576,16 +580,17 @@ class HarnessService:
         prescriptions: List[Dict[str, Any]],
     ) -> str:
         """Build the human-readable audit report: coverage and every agent's verdict
-        with its n first (services.harness_diagnose.report_lines), then the issues
-        and the changes HARNESS suggests, each a report line and nothing more
-        (PRD-263 US-016). It never calls an unjudged agent stable (PRD-263 FR-7)."""
-        from services import harness_diagnose
+        with its n first (services.harness_diagnose.report_lines), how each applied change
+        is doing (US-056), then the issues and the changes HARNESS suggests, each a report
+        line and nothing more (PRD-263 US-016). It never calls an unjudged agent stable (FR-7)."""
+        from services import harness_diagnose, harness_post_change
 
         lines = [
             f"# {AUDIT_REPORT_TITLE.format(iteration=iteration)}",
             f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
             *harness_diagnose.report_lines(diagnosis),
             "",
+            *harness_post_change.report_lines(diagnosis),
         ]
 
         # Issues

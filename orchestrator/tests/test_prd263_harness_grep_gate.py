@@ -23,6 +23,14 @@ grep ``review_needed`` in orchestrator/services returns 0 (section 11-Q9).
 US-052 and US-053 add services.harness_grants (the apply rail's ledger moves, then
 reconciliation and the daily grant sweep), which joins GATED: it reads and moves ledger
 rows and grants, and applies nothing.
+
+US-054 raises the owner's Approvals cards from services.harness_grants (the grants, their
+ledger rows and the evidence ticket) with their text from services.harness_cards, which
+joins GATED: raising a card applies nothing and calls no model.
+
+US-056 judges each applied change against its frozen reference in
+services.harness_post_change, which joins GATED: it suggests a rollback, which becomes its
+own Approvals card, and applies nothing.
 """
 from __future__ import annotations
 
@@ -40,6 +48,8 @@ GATED = (
     HARNESS_SERVICE,
     "services/harness_changes.py",
     "services/harness_grants.py",
+    "services/harness_cards.py",
+    "services/harness_post_change.py",
 )
 EXECUTORS = re.compile(r"\b(PlatformActionExecutor|UnifiedToolExecutor|execute_tool)\b")
 # An import of any of these modules, or of these names, is an LLM client import.

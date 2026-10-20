@@ -24,7 +24,7 @@ from core.local_projects_mount import worker_workspace_for
 logger = logging.getLogger(__name__)
 
 # A binary file goes to the worker's /files/write a piece at a time: base64 grows a piece by a
-# third, so each request stays under the worker's 1 MB body limit (aiohttp's default).
+# third, so each request stays under the worker's 1 MiB body limit (worker_http.MAX_BODY_BYTES).
 BINARY_PIECE_BYTES = 600 * 1024
 PART_SUFFIX = ".part"
 

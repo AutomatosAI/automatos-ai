@@ -139,8 +139,9 @@ def test_params_and_rollback_builders_name_the_inner_call():
 
 
 def test_kinds_with_no_evidence_wired_detect_nothing():
-    """A rollback comes from the post-change check (US-056) and a tool removal waits for its
-    dependency gate (US-057); the report kinds that were placeholders have no detector."""
+    """With no tool failure (US-057) and no rollback from the post-change check (US-056) in
+    the evidence, neither kind detects anything; the report kinds that were placeholders
+    have no detector."""
     evidence = hcx.evidence(hcx.agent_row(SCOUT, "Scout", **RARELY_MET), issues=[hcx.reconnect_issue(SCOUT, "Scout")])
     detected = {name for name, kind in hc.KINDS.items() if kind.detector(evidence)}
     assert detected == {"heartbeat_tune", "reconnect_app"}

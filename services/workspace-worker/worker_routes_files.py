@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import mimetypes
 
-from aiohttp import web
+from starlette.responses import FileResponse
 
-from worker_http import WORKER_HTTP, open_workspace
+from worker_http import json_response, open_workspace, read_json, worker_http_of
 from workspace_manager import SecurityError, is_sensitive_name
 
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
@@ -43,28 +43,28 @@ async def list_files_handler(request):
     clients see the default folder structure (reports/, content/, etc.)
     even before any mission has run.
     """
-    volume_path = request.app[WORKER_HTTP].volume_path
+    volume_path = worker_http_of(request).volume_path
     from pathlib import Path as P
 
     ws_manager, refused = open_workspace(request)
     if refused is not None:
         return refused
-    rel_path = request.query.get("path", ".")
+    rel_path = request.query_params.get("path", ".")
     ws_dir = P(volume_path) / ws_manager.workspace_id
 
     try:
         target = ws_manager.resolve_safe_path(rel_path)
     except SecurityError as exc:
-        return web.json_response({"error": str(exc)}, status=403)
+        return json_response({"error": str(exc)}, status=403)
 
     # Block access to sensitive paths
     if ws_manager.is_sensitive_path(target):
-        return web.json_response({"error": "Access denied"}, status=403)
+        return json_response({"error": "Access denied"}, status=403)
 
     if not target.exists():
-        return web.json_response({"error": "Path not found"}, status=404)
+        return json_response({"error": "Path not found"}, status=404)
     if not target.is_dir():
-        return web.json_response({"error": "Path is not a directory"}, status=400)
+        return json_response({"error": "Path is not a directory"}, status=400)
 
     entries = []
     truncated = False
@@ -88,9 +88,9 @@ async def list_files_handler(request):
                 "modified_at": stat.st_mtime,
             })
     except PermissionError:
-        return web.json_response({"error": "Permission denied"}, status=403)
+        return json_response({"error": "Permission denied"}, status=403)
 
-    return web.json_response({
+    return json_response({
         "path": rel_path,
         "entries": entries,
         "truncated": truncated,
@@ -101,9 +101,9 @@ async def file_content_handler(request):
     """GET /workspaces/{workspace_id}/files/content?path=file.py — file content."""
     import mimetypes
 
-    rel_path = request.query.get("path")
+    rel_path = request.query_params.get("path")
     if not rel_path:
-        return web.json_response({"error": "path query param required"}, status=400)
+        return json_response({"error": "path query param required"}, status=400)
 
     ws_manager, refused = open_workspace(request)
     if refused is not None:
@@ -112,20 +112,20 @@ async def file_content_handler(request):
     try:
         target = ws_manager.resolve_safe_path(rel_path)
     except SecurityError as exc:
-        return web.json_response({"error": str(exc)}, status=403)
+        return json_response({"error": str(exc)}, status=403)
 
     # Block access to sensitive paths
     if ws_manager.is_sensitive_path(target):
-        return web.json_response({"error": "Access denied"}, status=403)
+        return json_response({"error": "Access denied"}, status=403)
 
     if not target.exists():
-        return web.json_response({"error": "File not found"}, status=404)
+        return json_response({"error": "File not found"}, status=404)
     if not target.is_file():
-        return web.json_response({"error": "Path is not a file"}, status=400)
+        return json_response({"error": "Path is not a file"}, status=400)
 
     file_size = target.stat().st_size
     if file_size > MAX_FILE_SIZE:
-        return web.json_response(
+        return json_response(
             {"error": f"File too large ({file_size} bytes, max {MAX_FILE_SIZE})"},
             status=413,
         )
@@ -133,11 +133,11 @@ async def file_content_handler(request):
     try:
         content = target.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
-        return web.json_response({"error": "Unable to read file as text"}, status=422)
+        return json_response({"error": "Unable to read file as text"}, status=422)
 
     mime_type, _ = mimetypes.guess_type(target.name)
 
-    return web.json_response({
+    return json_response({
         "path": rel_path,
         "name": target.name,
         "content": content,
@@ -156,22 +156,22 @@ async def write_file_handler(request):
         return refused
 
     try:
-        body = await request.json()
+        body = await read_json(request)
     except Exception:  # noqa: BLE001 — any unreadable body is a 400, as before the move (O2b)
-        return web.json_response({"error": "Invalid JSON body"}, status=400)
+        return json_response({"error": "Invalid JSON body"}, status=400)
 
     path = body.get("path", "").strip()
     content = body.get("content")
     if not path:
-        return web.json_response({"error": "path is required"}, status=400)
+        return json_response({"error": "path is required"}, status=400)
     if content is None:
-        return web.json_response({"error": "content is required"}, status=400)
+        return json_response({"error": "content is required"}, status=400)
 
     executor = WorkspaceToolExecutor(ws_manager)
     result = await executor.write_file(path, content)
     if result.get("error"):
-        return web.json_response(result, status=400)
-    return web.json_response(result)
+        return json_response(result, status=400)
+    return json_response(result)
 
 
 async def grep_handler(request):
@@ -182,13 +182,13 @@ async def grep_handler(request):
     if refused is not None:
         return refused
 
-    pattern = request.query.get("pattern", "").strip()
+    pattern = request.query_params.get("pattern", "").strip()
     if not pattern:
-        return web.json_response({"error": "pattern query param required"}, status=400)
+        return json_response({"error": "pattern query param required"}, status=400)
 
-    search_path = request.query.get("path", ".")
-    include = request.query.get("include", "")
-    max_results = min(int(request.query.get("max_results", "50")), 200)
+    search_path = request.query_params.get("path", ".")
+    include = request.query_params.get("include", "")
+    max_results = min(int(request.query_params.get("max_results", "50")), 200)
 
     executor = WorkspaceToolExecutor(ws_manager)
 
@@ -206,7 +206,7 @@ async def grep_handler(request):
     try:
         ws_manager.resolve_safe_path(search_path)   # refuses a path outside the workspace
     except SecurityError:
-        return web.json_response({"error": "Invalid search path"}, status=403)
+        return json_response({"error": "Invalid search path"}, status=403)
 
     result = await executor.execute_command(cmd, timeout=30, cwd=search_path)
 
@@ -226,7 +226,7 @@ async def grep_handler(request):
                 })
 
     total = len(result.get("stdout", "").splitlines()) if result.get("stdout") else 0
-    return web.json_response({
+    return json_response({
         "matches": matches,
         "total": total,
         "truncated": total > max_results,
@@ -240,34 +240,35 @@ async def download_file_handler(request):
     if refused is not None:
         return refused
 
-    rel_path = request.query.get("path", "").strip()
+    rel_path = request.query_params.get("path", "").strip()
     if not rel_path:
-        return web.json_response({"error": "path parameter required"}, status=400)
+        return json_response({"error": "path parameter required"}, status=400)
 
     # The same traversal and sensitive-name guards as the listing and
     # content routes (F178: download served .ssh/, .canvas/ and the rest).
     try:
         target = ws_manager.resolve_safe_path(rel_path)
     except SecurityError:
-        return web.json_response({"error": "Path traversal denied"}, status=403)
+        return json_response({"error": "Path traversal denied"}, status=403)
     if ws_manager.is_sensitive_path(target):
-        return web.json_response({"error": "Access denied"}, status=403)
+        return json_response({"error": "Access denied"}, status=403)
     if not target.is_file():
-        return web.json_response({"error": "File not found"}, status=404)
+        return json_response({"error": "File not found"}, status=404)
 
     max_download_size = 100 * 1024 * 1024  # 100 MB
     file_size = target.stat().st_size
     if file_size > max_download_size:
-        return web.json_response(
+        return json_response(
             {"error": f"File too large ({file_size} bytes, max {max_download_size})"},
             status=413,
         )
 
     mime_type, _ = mimetypes.guess_type(target.name)
-    return web.FileResponse(
+    # Starlette writes the attachment header: filename="…" for a plain name, as before,
+    # and RFC 5987's filename*= for one HTTP headers cannot carry as it is.
+    return FileResponse(
         target,
-        headers={
-            "Content-Disposition": f'attachment; filename="{target.name}"',
-            "Content-Type": mime_type or "application/octet-stream",
-        },
+        headers={"Content-Type": mime_type or "application/octet-stream"},
+        filename=target.name,
+        content_disposition_type="attachment",
     )

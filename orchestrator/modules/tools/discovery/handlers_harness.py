@@ -41,6 +41,7 @@ TRIGGERED_MESSAGE = (
 APPLY_EXPIRED = "This approval expired; nothing changed"
 APPLY_DRIFTED = "This setting changed since the proposal; nothing changed"
 APPLY_NOT_GRANTED = "This change has no granted approval on its Approvals card; nothing changed"
+APPLY_BLOCKED = "This change's evidence ticket is Blocked; nothing changed"
 APPLY_DECIDED = "This change is already {state}; nothing changed"
 APPLY_UNKNOWN = "This workspace has no HARNESS change {rx_id}; nothing changed"
 APPLY_FAILED = "The change could not be made ({error}); nothing changed"
@@ -151,7 +152,8 @@ async def harness_apply(
 ) -> Dict[str, Any]:
     """Make one HARNESS change its owner approved (PRD-263 US-052), the only HARNESS path that
     changes an agent setting (FR-11). The ledger row of ``rx_id`` must be ``pending``, its
-    card's grant granted and unexpired (else ``expired``) and the setting still its
+    card's grant granted and unexpired (else ``expired``), its evidence ticket not Blocked
+    (else ``failed``, US-054) and the setting still its
     ``prior_value`` (else ``drifted``); ``pending → applying`` is a guarded UPDATE, so a
     second call changes nothing; the change runs as the workspace's Auto and the row ends
     ``applied`` or ``failed``. A grant never granted changes nothing (reconciliation records
@@ -183,6 +185,9 @@ async def _apply(db: Session, workspace_id: UUID, rx_id: str) -> Dict[str, Any]:
     grant = harness_grants.grant_of(db, row)
     if grant is None or grant.status not in APPROVED_OR_LAPSED:
         return _nothing_changed(APPLY_NOT_GRANTED)
+    if harness_grants.evidence_blocked(db, grant):  # PRD-263 US-054: the owner stopped the evidence ticket
+        harness_grants.move(db, row, LEDGER_FAILED, reason=harness_grants.CARD_BLOCKED)
+        return _nothing_changed(APPLY_BLOCKED)
     if not is_authorising(grant):
         harness_grants.move(db, row, LEDGER_EXPIRED)
         return _nothing_changed(APPLY_EXPIRED)
@@ -199,8 +204,10 @@ async def _apply_as_auto(
     db: Session, workspace_id: UUID, row: "HarnessTaskLedger", current: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Run the change kind's inner action as the workspace's Auto, resolved here and
-    never from the caller's ``_agent_id``, and record ``applied`` or ``failed``."""
-    from services import harness_changes, harness_grants
+    never from the caller's ``_agent_id``, and record ``applied`` or ``failed``. An applied
+    change keeps its frozen reference for the post-change check (PRD-263 US-056); an applied
+    rollback moves the change it undoes to ``rolled_back``."""
+    from services import harness_changes, harness_grants, harness_post_change
 
     auto = harness_grants.resolve_auto_agent(db, workspace_id)
     if auto is None:
@@ -212,11 +219,15 @@ async def _apply_as_auto(
     result = await _run_inner(db, workspace_id, call, auto["id"])
     if result.get("success") is not True:
         return _failed(db, row, str(result.get("error") or harness_grants.NO_OUTCOME)[:ERROR_CHARS])
-    if not harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING,
-                               applied_at=datetime.now(timezone.utc), value_at_apply=current):
+    applied_at = datetime.now(timezone.utc)
+    ref_start, ref_end = harness_post_change.frozen_reference(applied_at)
+    if not harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING, applied_at=applied_at,
+                               value_at_apply=current, frozen_ref_start=ref_start, frozen_ref_end=ref_end):
         logger.error("[HARNESS] Change %s in %s ran, but ledger row %s was no longer applying",
                      row.rx_id, workspace_id, row.id)
         return {"success": False, "error": APPLY_UNRECORDED}
+    if row.kind == harness_changes.ROLLBACK:
+        harness_post_change.close_rolled_back(db, row)
     return {
         "success": True,
         "rx_id": row.rx_id,

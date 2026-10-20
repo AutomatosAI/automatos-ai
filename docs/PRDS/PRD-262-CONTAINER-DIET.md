@@ -1,6 +1,6 @@
 # PRD-262: Container diet: smaller images and a self-host first run that pulls instead of builds
 
-**Status, 20 Oct 2026:** shipped on main, except the worker cuts (#1220, waiting for Dave's review). §0 has the outcome. The 16 Oct status below is kept as written.
+**Status, 20 Oct 2026:** W0–W8 and the 19 Oct cuts are shipped on main. The worker cuts (#1220) merge with Gerard's approval on 20 Oct, and Dave reviews after merge. W9, W10, US-050 and the open §9 questions wait until after WebSummit (§0.1). §0 has the outcome. The 16 Oct status below is kept as written.
 
 **Status:** Approved to build, 16 Oct 2026 (Gerard: "get it built"). §3 D1–D6 and the §9 questions are taken at their recommendations, and §9 records each answer. Dave confirms D1–D6 in PR review. The answers that shape the waves: US-006 locks `agent-opt-worker` down, because the FutureAGI account could not be checked (§9-Q4); W9 is held until after WebSummit (§9-Q11); TESTER's constraints from §9-Q1 are in §2. §9-Q14, added in review, is open. · **Owner:** Gerard (Dave confirms D1–D6 in PR review) · **Written:** 16 Oct 2026, grounded on `main @ 73f18f175` and on registry and CI measurements taken the same day (`edge` = `sha-73f18f1`). Revised the same day after reviewers fact-checked the draft.
 **Source:** the 15 Oct engineering brief *Shrinking the Automatos containers* (claude.ai/artifact/JUEs6PmWZ4H2Fy1ErsEJo3). On 16 Oct, ten survey agents re-checked every claim against main, each checked by a second agent that tried to refute it. Where main or the numbers have moved since the brief, this PRD uses the 16 Oct figure.
@@ -16,8 +16,8 @@
 - The 19 Oct media-render cuts (#1219, e7b7d8839).
 - W7 and the 19 Oct frontend cuts (#1168, 469ca5975), with the CodeQL follow-up (#1222, 9ec43ac6e).
 - W2–W5 and the 19 Oct API cuts (#1226, 0fc14dae9).
-
-**Open:** the 19 Oct worker cuts and the §3-D5 trims (#1220), waiting for Dave's review.
+- The four blocking scan findings (#1242, 275e7018a): litellm 1.80.0 → 1.91.5 in agent-opt-worker (two KEVs), and media-render's esbuild 0.25.12 rebuilt from source on Go 1.26.10 (two Critical in Go 1.23.12's stdlib).
+- The 19 Oct worker cuts and the §3-D5 trims (#1220): merged with Gerard's approval on 20 Oct, before Dave's review.
 
 **Published images on main 0fc14dae9.** Compressed size in the registry (the sum of the manifest's layers), against §8's bars:
 
@@ -47,10 +47,70 @@
   - W9 and W10.
 - Dependabot stays on for media-render. `test_prd262_media_render_venv_trim.py` fails a lock that brings protobuf or flatbuffers back.
 
+**§8 acceptance on main, 20 Oct.** Main's CI: images 39399292631, smoke-images 39399862308, smoke-fresh-clone 39395329721, test 39399292434. The scan row is from #1242's runs. Two-arch rows are amd64 / arm64.
+
+| §8 row | 16 Oct | 20 Oct | Bar | Verdict |
+|---|---|---|---|---|
+| Images built by the default `make up` | 3 | 0 | 0 | met |
+| Default first pull, unique app layers | 1,330 / 1,284 MB | 707 / 693 MB | ≤ 1,000 MB | met |
+| API image, amd64 | 520.5 MB | 250.2 MB | ≤ 320 MB | met |
+| Worker image, amd64 | 506.6 MB | 418.0 MB (before #1220) | ≤ 420 MB | met, with a 2 MB margin |
+| Frontend image, amd64 | 93.8 MB | 68.5 MB | ≤ 75 MB | met |
+| media-render, on disk | 1.81 GB | 1,296 MB (#1242's media-render.yml run) | ≤ 1.30 GB | met, with a 4 MB margin |
+| Code-only update: API / frontend | 14.7 / 38.2 MB | API passes its bar; frontend not measured | ≤ 6 / ≤ 8 MB | API met; frontend open (§0.1) |
+| Clone to working UI | about 6–7 min, estimated | 59.5 / 52.1 s | ≤ 150 s | met |
+| Backend fresh boot | 30–50 s | 26.7 / 23.2 s | ≤ 30 s | met |
+| Backend warm restart | not measured in CI | 8.3 / 7.0 s | ≤ 15 s | met |
+| Datastores healthy after start | 5.5–6.1 s | about 1.04 s (redis, minio) | ≤ 2 s | met |
+| alembic runs per boot, fresh / warm | 2 / 2 | 0 / 0 | ≤ 1 / 0 | met |
+| Heavy modules after `import main` | 5 | 0 | 0 | met |
+| Boot with egress refused / blackholed | fails or hangs | healthy in 14.4 / 17.4 s | healthy | met |
+| Fixable Critical / unallowlisted KEV | api 6, worker 8, frontend 7 / 1 KEV | 0 / 0 in all five images we build (#1242) | 0 / 0 | met |
+
+Gerard decided on 20 Oct (US-004) that the budgets stay `warn` and the scan policy stays `report` while the bars are tested over time. So a regression past a bar warns but doesn't fail a build yet.
+
 **Known after merge:**
 - **smoke-images' core-stack step** is red on Linux runners. When a deliverables folder belongs to a uid other than 1000, the worker (uid 1000) can't write it. This is old behaviour, first exercised by this PRD's smoke. The fix is staged as P256-FIX-WRK-1 (branch `fix/prd-262-worker-deliverables-owner`), to land with F452's `--no-new-privs` and #1220 as one change to the worker entrypoint.
 - **Dependabot's media-render pip update job failed on 20 Oct, after #1226.** Its resolver can't find `kokoro-onnx==0.6.1`, which `requirements.in` pins: it lists only 0.1.x, so its Python is probably older than the package's `Requires-Python`. This isn't from this PRD's lock changes. Any media-render pip bump it does open still has to recompile the lock with `requirements.in`'s command (`--no-emit-package`).
 - **For Gerard:** `POST /api/missions/upload` answers 500 when no embedding provider is set, and leaves a failed document row behind. `/api/documents/upload` answers 200 with the processing error instead. #1226's US-021 smoke now proves object storage through attachments.
+
+## 0.1 Remaining work (after WebSummit unless marked)
+
+**Stories not built** (deferred by Gerard on 19 Oct):
+- **US-050**, the fp16 voice (§3-D4, about 162 MB of media-render). It needs Gerard's blind listen of #1144's samples. Skip int8.
+- **W9, one image to production (§9-Q11):**
+  - US-055: publish, sign and scan the Railway variants;
+  - US-056: Railway deploys the digest CI built;
+  - US-057: migrations run before the deploy, never inside the serving container.
+- **W10, bases and budgets:**
+  - US-058: the API on Python 3.12, sharing the worker's base;
+  - US-059: start-up and health check in Python;
+  - US-060: zstd layers (§9-Q2);
+  - US-061: the frontend on a hardened Node base (§3-D3);
+  - US-062: final budgets, and dive in CI.
+
+**Open cut decisions** (rows of the 19 Oct ranked breakdown):
+- **§9-Q14: fetch the bundled Claude CLI on first canvas use.** 267 MB of the worker, the biggest single cut left. Pin it, verify its checksum and keep it in the worker volume.
+- **§9-Q20: git and Perl.** About 52 MB of the worker, and dulwich for the API.
+- **§9-Q7: the boot bytecode.** `bytecode-experiment.yml` runs; read its result and keep the boot `.pyc` only if a new container reaches `/health` at least 2 s sooner.
+- **§9-Q12: public files that database rows may name** (`public/images`, `favicon_io`, `modal-fix.js`). Needs a production database check first.
+- **Trade-off rows not taken:** #6 (a custom ffmpeg), #10, #15 (English-only ICU), #23 (no OCR), #26, #32, #39, #41, #42 and #46.
+
+**Small gaps, any time:**
+- **§8 code-only update bar for the frontend (≤ 8 MB) is not wired.** `.github/image-budgets.json`'s `updates` block has only `api.code-only`, so `image_report.py budget` passes the frontend unchecked. Add a `frontend.code-only` entry.
+- **agent-opt-worker is about 11 MB over its 150 MB budget** since #1242 (litellm 1.91.5 needs openai 2.x). Raise the budget with that reason, or trim.
+- **Tight margins:** worker 418 MB against 420 (before #1220) and media-render 1,296 MB against 1,300. Any growth in either needs a cut first.
+
+**Fixes in the next fix wave (owned outside this PRD):**
+- **P256-FIX-WRK-1:** on Linux, the uid-1000 worker can't write a deliverables folder that another uid owns. smoke-images' core-stack step is red until this lands. Branch `fix/prd-262-worker-deliverables-owner` has a fix, plus the security review's three acceptance criteria (no gid 0; never adopt an id `getent` knows; one `stat`).
+- **F452:** the worker drops privileges without `--no-new-privs`, and the chart has no capability drop.
+
+Both land with #1220's `setpriv` as one change to `services/workspace-worker/entrypoint.sh`.
+
+**Watch:**
+- **Dependabot's media-render pip job can't resolve `kokoro-onnx==0.6.1`.** It lists only 0.1.x, so its Python is probably older than the package's `Requires-Python`.
+- **The local backend restarted once during night 18 on 0fc14dae9.** SQLAlchemy's QueuePool (10 + 20) was exhausted, then the process shut down. It isn't linked to W4's boot changes yet; it was reported to TESTER on 20 Oct.
+- **`POST /api/missions/upload` answers 500 when no embedding provider is set** and leaves a failed row behind. This is Gerard's product call.
 
 ## 1. Introduction
 
