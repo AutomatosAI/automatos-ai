@@ -33,6 +33,8 @@ HEALTH_URL="http://localhost:${API_PORT:-8000}/health"
 CONTAINER="automatos_backend"
 STACK_NAME_PATTERN='^automatos_'
 ORDER=(with without without with)
+# The core stack's override, where the backend mounts the workspaces volume writable.
+CORE_OVERRIDE="docker-compose.core.yml"
 
 compose() {
   docker compose -f docker-compose.yml -f "$OVERRIDE" "$@"
@@ -64,6 +66,17 @@ services:
 YAML
 }
 
+# Every backend here runs without the workspace worker, on a fresh workspaces volume. Its
+# read-only mount of that volume, with your deliverables folder nested in it at
+# /workspaces/<DEFAULT_WORKSPACE_ID>, needs that mount point to exist in the volume:
+# Docker cannot create it on a read-only mount and refuses to start the container. In the
+# default stack the worker, which mounts the volume writable and starts first, creates it.
+# Here a one-off backend under docker-compose.core.yml (the volume writable, as in the core
+# stack) creates it and exits; the boots keep the read-only mounts of the override.
+make_workspace_mountpoint() {
+  compose -f "$CORE_OVERRIDE" run --rm -T --no-deps --entrypoint true backend
+}
+
 # $1 = the build (with, without; empty for a boot that is not measured), $2 = the label.
 boot() {
   export BYTECODE_IMAGE="${REPO}:${1:-with}"
@@ -92,6 +105,7 @@ main() {
   export BYTECODE_IMAGE="${REPO}:with"
   trap finish EXIT
   compose up -d --wait --no-build postgres redis minio
+  make_workspace_mountpoint
   boot "" seed
   boot "" settle
   for variant in "${ORDER[@]}"; do

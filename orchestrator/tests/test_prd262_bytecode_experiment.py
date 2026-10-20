@@ -14,7 +14,8 @@ boots and reports the outcome. This suite checks:
 - the workflow builds the four images the way images.yml builds the API, strips and
   restores the checkout between them, and reports even when a boot fails; the boot
   script recreates containers (never `restart`) with one worker, in the order
-  with, without, without, with.
+  with, without, without, with, after creating the local workspace's mount point in
+  the fresh workspaces volume.
 
 Pure file reads and stand-ins: no Docker, no registry.
 """
@@ -243,3 +244,21 @@ def test_the_boots_are_new_containers_with_one_worker_in_a_balanced_order():
     assert "compose up -d --wait --no-build postgres redis minio" in SHELL
     assert 'boot "" seed' in SHELL and 'boot "" settle' in SHELL
     assert "volumes: !override" in SHELL and "./orchestrator:/app" not in SHELL
+
+
+def test_the_local_workspaces_mount_point_exists_before_the_first_boot():
+    """The boots mount the workspaces volume read-only with a folder nested in it, and run
+    without the worker that creates that mount point in the default stack: on the fresh
+    volume Docker refused the first one (CI, 20 Oct: "read-only file system"). A one-off
+    backend under the core override, where the volume is writable, creates it first."""
+    assert 'CORE_OVERRIDE="docker-compose.core.yml"' in SHELL
+    step = re.search(r"^make_workspace_mountpoint\(\) \{\n(.*?)^\}", SHELL, re.M | re.S)
+    assert step, "bytecode-experiment.sh has no make_workspace_mountpoint() function"
+    assert 'compose -f "$CORE_OVERRIDE" run --rm -T --no-deps --entrypoint true backend' in step.group(1)
+    main = SHELL[SHELL.index("\nmain() {"):]
+    order = [main.index(call) for call in ("compose up -d --wait --no-build postgres redis minio",
+                                           "make_workspace_mountpoint", 'boot "" seed')]
+    assert order == sorted(order)
+    core = yaml.safe_load((ROOT / "docker-compose.core.yml").read_text(encoding="utf-8"))
+    assert {"type": "volume", "source": "workspaces_data", "target": "/workspaces",
+            "read_only": False} in core["services"]["backend"]["volumes"]

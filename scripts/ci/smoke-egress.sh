@@ -69,6 +69,8 @@ BACKEND_CONTAINER="automatos_backend"
 # A datastore's container: the network it is on is the one the backend joins.
 NETWORK_PROBE_CONTAINER="automatos_postgres"
 DATASTORES=(postgres redis minio)
+# The core stack's override, where the backend mounts the workspaces volume writable.
+CORE_OVERRIDE="docker-compose.core.yml"
 # PRD-262 §8: a backend's fresh boot, container start to /health 200.
 FRESH_BOOT_BAR_SECONDS=30
 # How long past the bar the new container is still polled, so a slow boot shows its time.
@@ -199,6 +201,19 @@ build_backend() {
 start_datastores() {
   echo "Starting the datastores (${DATASTORES[*]})..."
   compose up -d --wait "${DATASTORES[@]}" || fail "the datastores did not start healthy"
+}
+
+# Every backend container here runs without the workspace worker. docker-compose.yml's
+# backend mounts the workspaces volume read-only, with your deliverables folder nested in
+# it at /workspaces/<DEFAULT_WORKSPACE_ID>. Docker must create that mount point inside the
+# volume, which it cannot do on a read-only mount: on a fresh volume it refuses to start
+# the container ("read-only file system"). In the default stack the worker, which mounts
+# the volume writable and starts before the backend, creates it. Here a one-off backend
+# under docker-compose.core.yml, where the backend mounts the volume writable as the core
+# stack does, creates it and exits.
+make_workspace_mountpoint() {
+  compose -f "$CORE_OVERRIDE" run --rm -T --no-deps --entrypoint true backend \
+    || fail "could not create the local workspace's mount point in the workspaces volume (${CORE_OVERRIDE})"
 }
 
 # The refused mode: every backend container this script starts reads the override.
@@ -371,6 +386,7 @@ main() {
   build_backend
   start_event_log
   start_datastores
+  make_workspace_mountpoint
   cut_egress
   boot_first
   boot_new_container

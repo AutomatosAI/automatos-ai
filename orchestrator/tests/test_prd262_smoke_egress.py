@@ -12,7 +12,10 @@ The lane runs only in CI, against a real stack. These tests hold its parts:
   ``iptables -I DOCKER-USER -s <subnet> ! -d <subnet> -p tcp -j DROP`` for the stack's
   subnet, and deletes it again on exit. It proves the cut is the kind it says before the
   backend starts, holds a new container to the 30 s fresh-boot bar, and loads the
-  tokenizer inside it with names core.context_guard defines;
+  tokenizer inside it with names core.context_guard defines. Before any backend container,
+  a one-off backend under docker-compose.core.yml creates the local workspace's mount
+  point in the workspaces volume, which the read-only mount of docker-compose.yml's
+  backend cannot do on a fresh volume and the absent worker would have done;
 * ``smoke-fresh-clone.yml``'s ``egress-boot`` job runs it once per way and uploads the
   records.
 
@@ -46,6 +49,9 @@ SUBNET = "172.18.0.0/16"
 NETWORK = "automatos_network"
 RULE = f"DOCKER-USER -s {SUBNET} ! -d {SUBNET} -p tcp -j DROP"
 ENCODING_URL = "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
+# The one-off backend under the core override that creates the local workspace's mount point.
+MOUNTPOINT = ("docker compose -f docker-compose.yml -f docker-compose.core.yml "
+              "run --rm -T --no-deps --entrypoint true backend")
 
 
 def _load(name: str):
@@ -169,9 +175,33 @@ def test_the_tokenizer_check_imports_what_the_context_guard_defines():
 def test_the_script_checks_the_host_before_it_sets_the_teardown_trap():
     main = _function(_script(), "main")
     calls = ["check_mode", "refuse_existing_stack", "trap finish EXIT", "build_backend", "start_datastores",
-             "cut_egress", "boot_first", "boot_new_container", "check_tokenizer"]
+             "make_workspace_mountpoint", "cut_egress", "boot_first", "boot_new_container", "check_tokenizer"]
     positions = [re.search(rf"^[ \t]+{re.escape(call)}$", main, re.M).start() for call in calls]
     assert positions == sorted(positions)
+
+
+def _backend_volumes(path: Path) -> list:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["services"]["backend"]["volumes"]
+
+
+def test_a_backend_booted_without_the_worker_first_gets_the_local_workspaces_mount_point():
+    """docker-compose.yml's backend mounts the workspaces volume read-only, with a folder
+    nested in it; on a fresh volume Docker cannot create that mount point and refuses the
+    container (CI, 20 Oct: "mkdirat .../workspaces/<id>: read-only file system"). The
+    smoke has no worker to create it, so a one-off backend under the core override, which
+    mounts the volume writable, does."""
+    base = _backend_volumes(_REPO / "docker-compose.yml")
+    assert "workspaces_data:/workspaces:ro" in base
+    assert any(isinstance(entry, str) and ":/workspaces/${DEFAULT_WORKSPACE_ID" in entry for entry in base)
+    core = [entry for entry in _backend_volumes(_REPO / "docker-compose.core.yml")
+            if isinstance(entry, dict) and entry.get("target") == "/workspaces"]
+    assert core == [{"type": "volume", "source": "workspaces_data", "target": "/workspaces", "read_only": False}]
+
+    text = _script()
+    assert re.search(r'^CORE_OVERRIDE="docker-compose\.core\.yml"$', text, re.M)
+    step = _function(text, "make_workspace_mountpoint")
+    assert 'compose -f "$CORE_OVERRIDE" run --rm -T --no-deps --entrypoint true backend' in step
+    assert "|| fail " in step
 
 
 # --------------------------------------------------------------------------- the script, run on fakes
@@ -249,9 +279,10 @@ def test_refused_egress_reaches_every_backend_container_through_the_override(tmp
 
     with_override = f"docker compose -f docker-compose.yml -f {override}"
     datastores = _index(calls, "up -d --wait postgres redis minio")
+    mountpoint = calls.index(MOUNTPOINT)
     probe = _index(calls, f"{with_override} run --rm -T --no-deps --entrypoint curl backend")
     backend = _index(calls, f"{with_override} up -d --no-build --no-deps backend")
-    assert datastores < probe < backend
+    assert datastores < mountpoint < probe < backend
     assert ENCODING_URL in calls[probe] and "--max-time 10" in calls[probe]
     assert calls[-1] == f"{with_override} down -v"
     assert not any(call.startswith("sudo") for call in calls), "the refused way changes no firewall"
@@ -265,13 +296,14 @@ def test_blackholed_egress_drops_the_stack_subnet_between_the_datastores_and_the
     code, calls, out = _run_script(tmp_path, SMOKE_EGRESS="blackholed", CI="true", FAKE_CURL_EXIT="28")
     assert code == 1, out  # the fake backend never starts
     datastores = _index(calls, "up -d --wait postgres redis minio")
+    mountpoint = calls.index(MOUNTPOINT)
     drop = calls.index(f"sudo iptables -I {RULE}")
     dns = _index(calls, "--entrypoint getent backend ahosts openaipublic.blob.core.windows.net")
     probe = _index(calls, "--entrypoint curl backend")
     backend = _index(calls, "up -d --no-build --no-deps backend")
     restore = calls.index(f"sudo iptables -D {RULE}")
     assert datastores < _index(calls, "network inspect -f {{range .IPAM.Config}}") < drop
-    assert drop < dns < probe < backend < restore
+    assert datastores < mountpoint < dns and drop < dns < probe < backend < restore
     assert calls[-1] == "docker compose -f docker-compose.yml down -v"
     assert "-f " + str(tmp_path / "smoke-egress-proxy.yml") not in " ".join(calls), "no proxy in this way"
 
