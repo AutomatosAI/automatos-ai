@@ -324,7 +324,9 @@ def _pem(env: _Env, name: str) -> str:
     """A PEM setting: a value pasted on one line, its newlines written ``\\n``, is unfolded."""
     raw = (env.source.get(name) or "").strip()
     if ESCAPED_NEWLINE in raw and "\n" not in raw:
-        raw = raw.replace(ESCAPED_NEWLINE, "\n")
+        # Trim again: a one-line value that ended in an escaped newline would
+        # otherwise keep it and gain a second one below.
+        raw = raw.replace(ESCAPED_NEWLINE, "\n").strip()
     return raw + "\n" if raw else ""
 
 
