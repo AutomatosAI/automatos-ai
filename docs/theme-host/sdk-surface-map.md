@@ -150,6 +150,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
 | `react` | every component | shared module | — | The host's React, through the import map; a theme never bundles its own. |
+| `@automatos/theme-sdk` | every Play module W-A5 ports (A-14a–f) | shared module | — | The SDK itself: the host's own instance through the import map (lib/theme-host/shared-modules.json); core code reaches it by the tsconfig and vitest alias. |
 | `next/link` | c/play/*, c/looks/* | SDK | `navigation.HostLink` | The host's client-side link; an https href opens in a new tab. |
 | `next/navigation` | c/play/conversations/play-conversations.tsx, c/play/deliverables/play-shelf.tsx, c/play/shell/play-sidebar.tsx | SDK | `navigation.useHostRouter`, `navigation.useHostPathname`, `navigation.useHostSearchParams` | The App Router, the path and the query string; play-route-switch read it too, before A-04b made it host code (ThemeSlot, components/theme-host/theme-slot.tsx) and deleted the file. |
 | `next/dynamic` | c/play/*-lazy.tsx | host-only | — | It needs Next's compiler; a theme splits its own bundle with `React.lazy` and `import()`. |

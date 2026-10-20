@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import Link from 'next/link'
+import { HostLink, chatHref } from '@automatos/theme-sdk'
 
 import {
   type ConversationGroup,
@@ -9,17 +9,16 @@ import {
   lastActive,
   previewLine,
   relativeTime,
-} from '@/lib/play/conversations'
-import { chatHref } from '@/lib/ticket-links'
-
+} from '../../../lib/play/conversations'
 import styles from './conversations.module.css'
 
 /**
  * PRD-260 §4 — the grouped list (Ember mock 03), ported from Automatos Play's
  * components/conversations/ConversationList.tsx: Today, This week, Earlier,
  * each a region named by its heading; a row is the title, the time and the
- * newest line, and opens the conversation in the chat (chatHref: the deep link
- * the core chat page and Play's chat both honour).
+ * newest line, and opens the conversation in the chat (the SDK's chatHref: the
+ * deep link the core chat page and Play's chat both honour; HostLink is the
+ * host's client-side link).
  */
 
 export interface ConversationListProps {
@@ -59,7 +58,7 @@ function Row({ chat, now }: { readonly chat: ConversationSummary; readonly now: 
   const active = lastActive(chat)
   const preview = previewLine(chat)
   return (
-    <Link href={chatHref(chat.id)} className={styles.row}>
+    <HostLink href={chatHref(chat.id)} className={styles.row}>
       <span className={styles.rowTop}>
         <span className={styles.rowTitle}>{conversationTitle(chat)}</span>
         {active && (
@@ -69,6 +68,6 @@ function Row({ chat, now }: { readonly chat: ConversationSummary; readonly now: 
         )}
       </span>
       {preview && <span className={styles.preview}>{preview}</span>}
-    </Link>
+    </HostLink>
   )
 }

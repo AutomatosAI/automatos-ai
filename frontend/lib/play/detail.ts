@@ -1,7 +1,4 @@
-import { UNTITLED } from '@/lib/chat/deliverables'
-import { MADE_BY_SOURCE } from '@/components/workspace/gallery-view/made-by'
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { deliverableFileUrl } from '@/lib/deliverables/download'
+import { type Deliverable, deliverableFileUrl } from '@automatos/theme-sdk'
 
 import { kindOf, shelfDate } from './shelf'
 
@@ -12,6 +9,13 @@ import { kindOf, shelfDate } from './shelf'
  * date and "Made by" lines, where it came from, what it was made from (its
  * sources), and the words "Ask Auto about this" puts in a new chat's message
  * box. "Now" is always passed in.
+ *
+ * PRD-261 A-14c: Play reads the core only through '@automatos/theme-sdk' (its
+ * Deliverable type and deliverableFileUrl). The untitled name and the three
+ * "Made by" words are Play's own copies of the core's wording (UNTITLED in
+ * lib/chat/deliverables.ts, MADE_BY_SOURCE in components/workspace/gallery-view/
+ * made-by.ts); lib/__tests__/prd261-port-conversations.test.ts fails when they
+ * drift apart.
  */
 
 /** File types read as markdown; any other text file shows verbatim in a code block. */
@@ -45,16 +49,24 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
 }
 /** The longest title "Ask Auto about this" quotes. */
 export const ASK_TITLE_CHARS = 120
+/** A Deliverable with no title: the core's own name for one (UNTITLED, lib/chat/deliverables.ts). */
+export const UNTITLED_DELIVERABLE = 'Your Deliverable'
 const MADE_BY_DEFAULT = 'Auto'
 /**
  * Sources Auto didn't make (the owner's uploads, documents made in Templates,
- * Socials posts), with the line under the title. "Made by" takes the core's own
- * word for them (made-by.ts, the Deliverables cards'): never "Auto".
+ * Socials posts): "Made by" takes the core's own word for them (MADE_BY_SOURCE,
+ * made-by.ts, the Deliverables cards'), never "Auto".
  */
+export const MADE_ELSEWHERE_WORDS: Readonly<Record<string, string>> = {
+  upload: 'Uploaded',
+  document: 'Templates',
+  social_post: 'Socials',
+}
+/** The line under the title for each of them. */
 const MADE_ELSEWHERE_LINES: Readonly<Record<string, string>> = {
-  upload: MADE_BY_SOURCE.upload,
-  document: `Made in ${MADE_BY_SOURCE.document}`,
-  social_post: `Made in ${MADE_BY_SOURCE.social_post}`,
+  upload: MADE_ELSEWHERE_WORDS.upload,
+  document: `Made in ${MADE_ELSEWHERE_WORDS.document}`,
+  social_post: `Made in ${MADE_ELSEWHERE_WORDS.social_post}`,
 }
 /** The most sources the side panel lists (extra.sources is off the wire: any length). */
 export const SOURCES_SHOWN_MAX = 20
@@ -126,7 +138,7 @@ export function unsupportedMessage(kind: string): string {
 }
 
 export function detailTitle(deliverable: Pick<Deliverable, 'title'>): string {
-  return deliverable.title?.trim() || UNTITLED
+  return deliverable.title?.trim() || UNTITLED_DELIVERABLE
 }
 
 function twoDigits(value: number): string {
@@ -159,7 +171,7 @@ function madeElsewhere(sourceType: string | null | undefined): string | null {
  */
 export function madeBy(agentName: string | null | undefined, sourceType?: string | null): string {
   const elsewhere = madeElsewhere(sourceType)
-  return agentOf(agentName) ?? (elsewhere ? MADE_BY_SOURCE[elsewhere] : MADE_BY_DEFAULT)
+  return agentOf(agentName) ?? (elsewhere ? MADE_ELSEWHERE_WORDS[elsewhere] : MADE_BY_DEFAULT)
 }
 
 /**
