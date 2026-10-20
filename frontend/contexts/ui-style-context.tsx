@@ -116,16 +116,26 @@ function activeThemeOf(style: UiStyle, installed: ThemeEntry | null, released: U
   return findThemeEntry(style, [installed])
 }
 
-/** The active theme's entry, and the host's way to release an installed one it cannot run. */
+/**
+ * The active theme's entry, and the host's way to release an installed one it cannot run. The
+ * installed entry is the one the page loaded with, held for the provider's life as `style` is: a
+ * server re-render (router.refresh) builds the boot again and may hand in another entry or none
+ * (a boot that timed out, another tab's style cookie), but this document still runs the theme it
+ * loaded, and a switch to another installed theme always reloads (PA-13).
+ */
 function useActiveThemeEntry(style: UiStyle, installed: ThemeEntry | null) {
+  const [installedAtLoad] = useState(installed)
   const [released, releaseInstalledTheme] = useState<UiStyle | null>(null)
-  const activeTheme = useMemo(() => activeThemeOf(style, installed, released), [style, installed, released])
+  const activeTheme = useMemo(() => activeThemeOf(style, installedAtLoad, released), [style, installedAtLoad, released])
   return { activeTheme, releaseInstalledTheme }
 }
 
 interface UiStyleProviderProps {
   initialStyle?: UiStyle
-  /** PRD-261 W-A6b: the installed theme's entry the root layout built from its boot; null for every other style. */
+  /**
+   * PRD-261 W-A6b: the installed theme's entry the root layout built from its boot; null for every
+   * other style. Read once, at mount: a later server re-render never changes the active theme.
+   */
   installedTheme?: ThemeEntry | null
   /** How a switch to an installed theme reloads the page (PA-13); tests pass their own. */
   reloadPage?: () => void

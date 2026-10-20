@@ -16,7 +16,13 @@ import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS, UI_STYLE_COOKIE, UI_STYLE_STORAGE_KEY } from '@/lib/ui-style'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
-import { INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY } from '@/lib/theme-host/__tests__/installed-entry-fixture'
+import {
+  HELLO_PACKAGE_ENTRY,
+  INSTALLED_HELLO_STYLE,
+  INSTALLED_PLAY_STYLE,
+  PLAY_PACKAGE_ENTRY,
+} from '@/lib/theme-host/__tests__/installed-entry-fixture'
+import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 
 /** A browser that has already been moved to the current defaults. */
 const seenDefaults = () => window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -149,6 +155,27 @@ describe('PRD-261 W-A6b — an installed theme as the active theme (gap G1)', ()
     expect(screen.getByTestId('theme').textContent).toBe('none')
     act(() => { screen.getByText('runs again').click() })
     expect(screen.getByTestId('theme').textContent).toBe('Play')
+  })
+
+  it('keeps the entry the page loaded with when a server re-render (router.refresh) hands in another entry or none', () => {
+    seenDefaults()
+    const seen: Array<ThemeEntry | null> = []
+    function Seen() {
+      seen.push(useUiStyle().activeTheme)
+      return null
+    }
+    const page = (entry: ThemeEntry | null) => (
+      <UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} installedTheme={entry}><Probe /><Seen /></UiStyleProvider>
+    )
+    const { rerender } = render(page(INSTALLED_PLAY))
+    rerender(page(null))
+    expect(screen.getByTestId('ref').textContent).toBe(INSTALLED_PLAY?.ref)
+    rerender(page(installedThemeEntry(INSTALLED_HELLO_STYLE, HELLO_PACKAGE_ENTRY)))
+    expect(screen.getByTestId('ref').textContent).toBe(INSTALLED_PLAY?.ref)
+    rerender(page(installedThemeEntry(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)))
+    expect(screen.getByTestId('theme').textContent).toBe('Play')
+    // The same object every render: the context value never changes identity for a refresh alone.
+    expect(seen.filter((entry) => entry !== INSTALLED_PLAY)).toEqual([])
   })
 
   it('leaves builtin themes to the registry: Play in place is builtin Play, whatever installed entry came with the page', () => {
