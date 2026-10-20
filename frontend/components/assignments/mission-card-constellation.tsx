@@ -278,7 +278,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
               Mission
             </h3>
             <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
-              Big, complex work. 6&ndash;9 agents, field memory, parallel reasoning.
+              Big, complex work. A team of agents, field memory, parallel reasoning.
             </p>
             <div className="hidden sm:flex items-center gap-2 mt-3 font-mono text-[10.5px] text-muted-foreground/80">
               <span>Researcher</span>
