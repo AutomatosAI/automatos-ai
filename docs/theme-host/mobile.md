@@ -21,14 +21,17 @@ never loads a theme's `dist/entry.js` or `dist/theme.css`: an app may not downlo
 |---|---|
 | `tokens` or `fromLooks` | Exactly one. `fromLooks` is only ever `true`. |
 | `tokens.light`, `tokens.dark` | `light` is required, `dark` optional. Keys are Studio's 24 colour tokens (`MOBILE_TOKEN_NAMES` in `services/themes/contract.py`), spelled with the leading `--`, and must include `--background` and `--foreground`. Each value is `H S% L%` (such as `0 0% 100%`) or `#rrggbb`. |
-| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults` must give `--background` and `--foreground`. |
+| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground`. Defaults that don't fit the table paint nothing, on the web or the phone. |
 | `fonts` | Any of `sans`, `serif`, `mono`; each a different `assets/fonts/mobile/<name>.ttf` or `.otf` in the package (one sfnt face, at most 400 KB). |
 | `mascot` | `clips`, `stills` or `none` (absent means `none`). `clips` needs each state of the top-level `mascot.states` to have `assets/mascot/<state>.mp4` and `.png`; `stills` needs the `.png`. |
 | `engines.automatos` | Must not admit a host older than 1.1.0. |
 
 The review measures AA contrast for the block (4.5:1 for text on its fill, 3:1 for `--primary` and
-`--ring` on `--background`), per scheme for `tokens` and per preset for `fromLooks`. A pair under its
-minimum blocks the listing.
+`--ring` on `--background`) on exactly what the answer below can serve: per scheme for `tokens`; for
+`fromLooks`, the table's `defaults` (listed as `defaults`, named `boot/prepaint.json#defaults`: what
+every member with no saved look gets) and then each preset, each painted as the web paints it. A pair
+under its minimum blocks the listing, and so does a scheme or painting that gives no `--background` or
+`--foreground` (a phone can't draw it).
 
 ## The answer: `GET /api/themes/mobile/{install_id}`
 
@@ -56,16 +59,51 @@ phone app copies it.
   the phone follows the device's light or dark setting. A scheme the block leaves out is null.
 - **`fromLooks` source.** The member's active look for that theme in the install's workspace (the
   looks the look editor saves on the server, carried to the theme's current look schema), or the
-  prepaint table's `defaults` when the member has saved none. The look is projected through
-  `boot/prepaint.json` as the web's first-paint script walks it, keeping Studio's colour tokens
-  only, and placed under the look's tone (the table's tone rule, else `theme.json`'s fixed `light`
-  or `dark`, else `light`). The other scheme is null.
+  prepaint table's `defaults` when the member has saved none. The look is painted exactly as the
+  web's first paint paints it (next section), keeping Studio's colour tokens only, and placed under
+  its tone (the table below). The other scheme is null. A saved look whose painting gives no
+  `--background` or `--foreground` is not served: the phone gets the defaults (logged on the
+  server), the same rule the import check and the review hold.
 - **Token values** are `H S% L%` or `#rrggbb`, as the theme wrote them; the phone turns them into
   colours with look-kit's `hsl.ts`.
 - **`mobile` is null** when the theme has no `mobile` block, when the member may not run it
   (a workspace's own or unreviewed theme the member has not opted in to), when it is revoked, or
   when a `fromLooks` theme's prepaint table can't be read (logged on the server).
 - **Headers.** `Cache-Control: private, no-store`: the answer follows the member's look.
+
+## Painting a look: the web's first paint
+
+The phone shows exactly what the web paints before React runs (`frontend/lib/theme-host/boot.ts`,
+`THEME_BOOT_SCRIPT`, over the table `boot-sanitize.ts` `sanitizePrepaint` lets through). The server
+side is `services/themes/mobile_tokens.py` `paint_look`, shared by the import check, the review and
+the answer:
+
+1. **The table the web gets.** Knobs whose name is a look field (a letter, then letters, digits or
+   `_`, at most 32), option keys of 1 to 64 characters, and in each option the variables whose name
+   and value pass the boot's own gate (smaller than the import check's: no `color-mix()` or
+   gradients); pair tables whose two knobs are look fields; numeric rules with every field
+   (`template` `rgba-alpha`, a true/false `integer`, `min` <= `max`, `scale` > 0, `capTable` null or
+   two knobs); `defaults` with text or number values. If the defaults don't fit what is left, the
+   web drops the whole table and paints nothing from it.
+2. **Fits.** A look fits when it names an option of every knob table and a cell of every pair table,
+   and every numeric rule's knob is a number in its range (whole when `integer`). A look that doesn't
+   fit is painted as the table's `defaults`, whole: never the look's own values mixed with the
+   defaults.
+3. **The walk.** Every knob table's entry, then every pair table's, a later one overwriting. A
+   numeric rule paints its variable last with `rgba()`, which is no phone colour, so the phone gets
+   no value for it. Only Studio's colour tokens whose final value is `H S% L%` or `#rrggbb` are
+   kept.
+
+The tone the tokens go under, by `theme.json` `tone`:
+
+| `tone` | On the web | On the phone |
+|---|---|---|
+| `light`, `dark` | Fixed. | That tone, whatever the look. |
+| `from-look` | The look's tone (the look runtime's cookie, for a theme it runs). | The table's tone rule at the painted look's value; with no rule (or one the web drops), the painted ground's tone. |
+| `user` (or absent) | The member's own light or dark setting. | The painted ground's tone: the phone has no member tone cookie. |
+
+The painted ground's tone is look-kit's `isDarkGround`: `dark` when `--background` is darker (by
+WCAG relative luminance) than `--foreground`, else `light`.
 
 ## What the phone may load
 

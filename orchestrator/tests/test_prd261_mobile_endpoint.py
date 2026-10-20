@@ -71,13 +71,20 @@ PREPAINT = {
         },
         "accent": {"sea": {"--primary": "#1d6fd8", "--ring": "#1d6fd8"}, "ember": {"--primary": "16 85% 55%"}},
     },
-    "pairs": [{"a": "ground", "b": "accent", "table": {"ink": {"ember": {"--primary-foreground": "0 0% 100%"}}}}],
+    # boot.ts fits (:159): a pair table needs a cell for every pair of values a painted look names, or the web
+    # paints the defaults instead (and drops the whole table when the defaults have none, boot-sanitize.ts :231).
+    "pairs": [{"a": "ground", "b": "accent", "table": {
+        "paper": {"sea": {}, "ember": {}}, "ink": {"sea": {}, "ember": {"--primary-foreground": "0 0% 100%"}},
+    }}],
     "numeric": [],
     "defaults": {"ground": "paper", "accent": "sea"},
     "tone": {"knob": "ground", "values": {"paper": "light", "ink": "dark"}},
 }
-# The defaults (paper, sea) painted: Studio tokens only, as the table writes them.
+# The defaults (paper, sea) painted: Studio tokens only, as the table writes them; and Alice's night (ink, ember).
 DEFAULT_LIGHT = {"--background": "0 0% 100%", "--foreground": "222 47% 11%", "--primary": "#1d6fd8", "--ring": "#1d6fd8"}
+INK_EMBER = {
+    "--background": "222 47% 8%", "--foreground": "#F4F4F5", "--primary": "16 85% 55%", "--primary-foreground": "0 0% 100%",
+}
 FROM_LOOKS = {"fromLooks": True, "fonts": {"sans": SANS, "mono": MONO}, "mascot": "clips"}
 LIGHT_ONLY = {"--background": "0 0% 100%", "--foreground": "#14181c", "--primary": "221 83% 53%"}
 TOKENS = {"tokens": {"light": LIGHT_ONLY}, "mascot": "stills"}
@@ -123,8 +130,9 @@ def world(monkeypatch):
         engine.dispose()
 
 
-def _manifest(mobile):
+def _manifest(mobile, tone=None):
     extra = {"engines": {"automatos": "^1.1.0", "sdk": "^1.1.0"}, "mascot": {"states": list(STATES)}}
+    extra = {**extra, **({"tone": tone} if tone else {})}
     manifest = {**build.hello_manifest(), **extra, **({"mobile": mobile} if mobile is not None else {})}
     assert validate_manifest(manifest).errors == []
     return manifest
@@ -145,8 +153,8 @@ def _files(manifest, prepaint):
     }
 
 
-def _package(world, mobile=FROM_LOOKS, owner="marketplace", workspace=None, reviewed=True, prepaint=PREPAINT):
-    manifest = _manifest(mobile)
+def _package(world, mobile=FROM_LOOKS, owner="marketplace", workspace=None, reviewed=True, prepaint=PREPAINT, tone=None):
+    manifest = _manifest(mobile, tone)
     files = _files(manifest, prepaint)
     listing = file_manifest(files)
     digest = digest_of_manifest(listing)
@@ -228,9 +236,7 @@ def test_from_looks_answers_the_callers_stored_active_look_under_its_tone(world)
     }
     mobile = body["mobile"]
     assert (mobile["source"], mobile["tone"]) == ("fromLooks", "dark")
-    assert mobile["tokens"] == {"light": None, "dark": {
-        "--background": "222 47% 8%", "--foreground": "#F4F4F5", "--primary": "16 85% 55%", "--primary-foreground": "0 0% 100%",
-    }}
+    assert mobile["tokens"] == {"light": None, "dark": INK_EMBER}
 
 
 def test_with_no_stored_look_the_tables_defaults_paint_and_each_member_gets_their_own(world):
@@ -243,6 +249,63 @@ def test_with_no_stored_look_the_tables_defaults_paint_and_each_member_gets_thei
     paper_ember = {"--background": "0 0% 100%", "--foreground": "222 47% 11%", "--primary": "16 85% 55%"}
     assert carol["tokens"] == {"light": paper_ember, "dark": None}
     assert _mobile(world, _person("alice"), install.id).json()["mobile"]["tone"] == "dark"
+
+
+def _knobs(ground=None, accent=None):
+    """PREPAINT with its ground or accent table replaced (the pair table keeps every cell)."""
+    knobs = PREPAINT["knobs"]
+    return {**PREPAINT, "knobs": {"ground": ground or knobs["ground"], "accent": accent or knobs["accent"]}}
+
+
+def test_a_stored_look_that_does_not_fit_the_table_is_painted_as_the_defaults_whole(world):
+    # Ember is a choice the look schema allows but this table lacks: boot.ts :164 paints the whole default look.
+    no_ember = _knobs(accent={"sea": PREPAINT["knobs"]["accent"]["sea"]})
+    install = _install(world, _package(world, prepaint=no_ember))
+    _store_looks(world, ALICE, _look("night", "ink", "ember"))
+    mobile = _mobile(world, _person("alice"), install.id).json()["mobile"]
+    assert (mobile["tone"], mobile["tokens"]) == ("light", {"light": DEFAULT_LIGHT, "dark": None})
+
+
+@pytest.mark.parametrize("tone, user, scheme, tokens", [
+    ("light", "alice", "light", INK_EMBER), ("dark", "dan", "dark", DEFAULT_LIGHT),
+])
+def test_a_fixed_theme_tone_wins_over_the_look_and_the_tokens_go_under_it(world, tone, user, scheme, tokens):
+    install = _install(world, _package(world, tone=tone))
+    _store_looks(world, ALICE, _look("night", "ink", "ember"))
+    mobile = _mobile(world, _person(user), install.id).json()["mobile"]
+    other = "dark" if scheme == "light" else "light"
+    assert (mobile["tone"], mobile["tokens"][scheme], mobile["tokens"][other]) == (scheme, tokens, None)
+
+
+@pytest.mark.parametrize("policy, rule, tone", [
+    ("from-look", {"paper": "dark", "ink": "light"}, "light"),  # the rule, even one that reads the ground wrong
+    ("user", {"paper": "dark", "ink": "light"}, "dark"),  # the painted ground: the phone has no tone cookie
+    ("from-look", None, "dark"),  # no rule: the painted ground
+])
+def test_from_look_takes_the_tone_rule_and_otherwise_the_painted_ground(world, policy, rule, tone):
+    prepaint = {key: value for key, value in PREPAINT.items() if key != "tone"}
+    prepaint = {**prepaint, "tone": {"knob": "ground", "values": rule}} if rule else prepaint
+    install = _install(world, _package(world, prepaint=prepaint, tone=policy))
+    _store_looks(world, ALICE, _look("night", "ink", "ember"))
+    mobile = _mobile(world, _person("alice"), install.id).json()["mobile"]
+    assert (mobile["tone"], mobile["tokens"][tone]) == (tone, INK_EMBER)
+
+
+def test_a_stored_look_that_paints_no_ground_is_never_served_the_defaults_are(world, caplog):
+    # The rule the reader (M-02) and the review (M-03) hold: a phone needs --background and --foreground.
+    ground = PREPAINT["knobs"]["ground"]
+    install = _install(world, _package(world, prepaint=_knobs(ground={**ground, "ink": {"--foreground": "#F4F4F5"}})))
+    _store_looks(world, ALICE, _look("night", "ink", "ember"))
+    mobile = _mobile(world, _person("alice"), install.id).json()["mobile"]
+    assert (mobile["tone"], mobile["tokens"]) == ("light", {"light": DEFAULT_LIGHT, "dark": None})
+    assert "stored look paints no ground or text for a phone" in caplog.text
+
+
+def test_defaults_that_paint_no_ground_answer_mobile_null(world, caplog):
+    bare = {name: {"--foreground": "#F4F4F5"} for name in PREPAINT["knobs"]["ground"]}
+    install = _install(world, _package(world, prepaint=_knobs(ground=bare)))
+    assert _mobile(world, _person("alice"), install.id).json()["mobile"] is None
+    assert "defaults paint no ground or text for a phone" in caplog.text
 
 
 def test_an_unreadable_look_store_paints_the_defaults_and_an_unreadable_table_answers_null(world, caplog):

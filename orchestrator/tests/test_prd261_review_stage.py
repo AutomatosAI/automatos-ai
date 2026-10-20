@@ -97,8 +97,8 @@ def test_contrast_is_listed_per_preset_as_not_measured_and_never_moves_the_verdi
 
 
 # M-03 (PB-35): a theme with a mobile block has its ten colour pairs measured (test_prd261_mobile_contrast.py
-# holds the measuring itself). hello's two presets painted for the phone: default (paper, blue) reads, night
-# (ink, green) puts white text on a green at 3.41:1.
+# holds the measuring itself), for the table's defaults and then each preset. hello's two presets painted for
+# the phone: default (paper, blue) reads, night (ink, green) puts white text on a green at 3.41:1.
 MOBILE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.0.0"}
 WHITE, INK_TEXT, GREEN = "0 0% 100%", "#14181c", "#2e9e5b"
 LOOK_TABLE = {
@@ -149,9 +149,33 @@ def test_from_looks_a_preset_under_aa_blocks_and_is_named():
     contrast = report["checks"]["contrast"]
 
     assert (report["verdict"], contrast["level"], contrast["source"]) == ("blocked", "error", "fromLooks")
-    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [("default", "pass"), ("night", "fail")]
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("defaults", "pass"), ("default", "pass"), ("night", "fail"),
+    ]
     assert contrast["problems"] == [
         'Preset "night": --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.',
+    ]
+
+
+def test_from_looks_defaults_under_aa_block_while_every_preset_passes():
+    # The answer serves the table's defaults to every member with no stored look, so the review measures them too.
+    table = {**LOOK_TABLE, "defaults": {"accent": "green", "ground": "paper", "radius": 6}}
+    night = {
+        "schema": "automatos-e2e-hello-look/v1", "id": "night", "name": "Night", "sub": "",
+        "accent": "blue", "ground": "ink", "radius": 0,
+    }
+    report = _review_mobile({"fromLooks": True}, {
+        "boot/prepaint.json": json.dumps(table).encode("utf-8"),
+        "looks/presets/night.look.json": json.dumps(night).encode("utf-8"),
+    })
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"]) == ("blocked", "error")
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("defaults", "fail"), ("default", "pass"), ("night", "pass"),
+    ]
+    assert contrast["problems"] == [
+        "boot/prepaint.json#defaults: --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.",
     ]
 
 

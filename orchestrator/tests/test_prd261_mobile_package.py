@@ -6,8 +6,10 @@ Plan §2.2.11, package rules (host 1.1.0):
   at ``FONT_MAX_BYTES``, each one sfnt face: ``00 01 00 00``, ``true`` or ``OTTO`` (a ``ttcf``
   collection refused), 1 to 64 tables, the table directory and every table inside the file; anything
   else is ``BAD_FILE_TYPE`` with the reason. A .woff2 in that folder and a .ttf outside it match no kind;
-* ``fromLooks`` paints from ``boot/prepaint.json``: no table, or a table whose ``defaults`` look paints
-  no ``--background`` or ``--foreground``, is ``MOBILE_CANNOT_PAINT``;
+* ``fromLooks`` paints from ``boot/prepaint.json``: no table, or a table whose ``defaults`` look, painted
+  as the web paints it (``mobile_tokens.paint_look``), gives no ``--background`` or ``--foreground``, is
+  ``MOBILE_CANNOT_PAINT``; defaults that don't fit the table paint nothing (boot-sanitize.ts drops the
+  whole table, :231), so they can't paint either;
 * ``clips`` needs every state's ``assets/mascot/<state>.mp4`` and ``.png`` (PB-36), ``stills`` its
   ``.png``, ``none`` nothing; a missing file is ``MISSING_FILE`` naming it.
 
@@ -221,6 +223,25 @@ def test_a_ground_value_that_is_not_a_mobile_colour_paints_nothing():
     message = _only_error(_looks_package(_table({"ground": {"paper": paper}}, {"ground": "paper"})),
                           "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
     assert "paints no --background," in message
+
+
+ACCENT = {"blue": {"--primary": "#2f6fed"}}
+
+
+@pytest.mark.parametrize("defaults, pairs, numeric", [
+    ({"ground": "paper", "accent": "violet"}, (), ()),  # a value the accent table lacks
+    ({"ground": "paper", "accent": "blue"}, ({"a": "ground", "b": "accent", "table": {"ink": {"blue": {}}}},), ()),
+    ({"ground": "paper", "accent": "blue", "glow": 40}, (), (
+        {"var": "--hello-glow", "knob": "glow", "min": 0, "max": 30, "integer": True, "scale": 100, "capTable": None,
+         "template": "rgba-alpha", "color": {"knob": "accent", "rgb": {"blue": "47,111,237"}}},
+    )),
+])
+def test_defaults_that_do_not_fit_the_table_paint_nothing_and_cannot_paint(defaults, pairs, numeric):
+    # paper alone paints the ground and its text, but the web paints nothing from a table its defaults don't fit
+    table = json.loads(_table({"ground": GROUND, "accent": ACCENT}, defaults, pairs))
+    message = _only_error(_looks_package(json.dumps({**table, "numeric": list(numeric)}).encode("utf-8")),
+                          "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
+    assert "the web paints nothing from the table" in message and '"mobile.tokens"' in message
 
 
 @pytest.mark.parametrize("table, code", [(b"{", "BAD_JSON"), (b"[]", "BAD_PREPAINT")])

@@ -20,8 +20,9 @@ with a code, the path and a plain sentence:
   ``!important`` or ``@import`` (``css_scope.py``); a preview, font, wordmark or mobile font the
   manifest names that is not in the package;
 * M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
-  code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look paints
-  no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
+  code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look, painted as
+  the web paints it (``mobile_tokens.paint_look``: nothing when the defaults don't fit the table),
+  gives no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
   mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``).
 
 The result carries every file with its checked type, the file manifest
@@ -41,7 +42,7 @@ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tup
 from config import config
 from modules.documents.brand_fonts import BrandFontError, check_woff2
 from services.themes.contract import (
-    CAP_SETTINGS, KB, MANIFEST_PATH, MB, MOBILE_REQUIRED_TOKENS, ThemeError, echo, parse_json, theme_error,
+    CAP_SETTINGS, KB, MANIFEST_PATH, MB, ThemeError, echo, parse_json, theme_error,
 )
 from services.themes.css_scope import STYLE_PATH, css_scope_errors
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
@@ -49,7 +50,7 @@ from services.themes.digest import digest_of_manifest, file_manifest
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
-from services.themes.mobile_tokens import project_look
+from services.themes.mobile_tokens import boot_table, missing_tokens, paint_look
 
 THEME_IMPORT_ROUTE = "/api/themes/import"
 PACKAGE_ERROR_CODES: Tuple[str, ...] = (
@@ -443,14 +444,25 @@ def _paint_errors(block: Mapping[str, Any], files: Mapping[str, ThemeFile]) -> L
     table, error = parse_json(files[PREPAINT_PATH].data, PREPAINT_PATH)
     if error is not None or not isinstance(table, dict):
         return []
-    painted = project_look(table, table.get(PREPAINT_DEFAULTS))
-    missing = [name for name in MOBILE_REQUIRED_TOKENS if name not in painted]
+    # No stored look: the web paints the defaults (boot.ts :164), and nothing at all from a table they don't fit.
+    missing = missing_tokens(paint_look(table, None))
     if not missing:
         return []
-    return [theme_error(MOBILE_CANNOT_PAINT, f"{PREPAINT_PATH}#{PREPAINT_DEFAULTS}", (
+    return [theme_error(MOBILE_CANNOT_PAINT, f"{PREPAINT_PATH}#{PREPAINT_DEFAULTS}", _cannot_paint(table, missing))]
+
+
+def _cannot_paint(table: Mapping[str, Any], missing: List[str]) -> str:
+    """Why the defaults paint no phone: they don't fit the table (the web drops it whole), or they lack tokens."""
+    if boot_table(table) is None:
+        return (
+            f'{PREPAINT_PATH}: "{PREPAINT_DEFAULTS}" doesn\'t name an option of every knob table and a cell of every '
+            'pair table, with every number rule\'s value in range, so the web paints nothing from the table and a '
+            'phone can\'t draw the theme. Fix the defaults, or give "mobile.tokens" instead.'
+        )
+    return (
         f'{PREPAINT_PATH}: the default look paints no {" or ".join(missing)}, so a phone can\'t draw the theme '
         'from its looks. Give the default choices those tokens, or give "mobile.tokens" instead.'
-    ))]
+    )
 
 
 def _mascot_file_errors(

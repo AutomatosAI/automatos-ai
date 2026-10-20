@@ -20,11 +20,15 @@ draw the theme a member chose without loading any of its code::
   ``#rrggbb``; the phone converts them with look-kit's ``hsl.ts``), and ``tone`` null: the phone
   follows the device. A scheme the block leaves out is null.
 * **``fromLooks``.** The member's active look for the theme in the install's workspace
-  (``looks.read_looks``, carried to the current schema), else the prepaint table's ``defaults`` (the
-  web boot script's fallback), projected through the table (``mobile_tokens.project_look``: Studio
-  token names only, values as the table writes them) and placed under the look's tone
-  (``mobile_tokens.look_tone``); the other scheme is null. A look store that can't be read paints
-  the defaults and is logged, as the boot paints the default look.
+  (``looks.read_looks``, carried to the current schema), painted exactly as the web's first paint
+  paints it (``mobile_tokens.paint_look``: the look when it fits the table, else the table's
+  ``defaults`` whole; Studio token names only, values as the table writes them), placed under the
+  tone ``mobile_tokens.look_tone`` gives it (theme.json's fixed tone first); the other scheme is
+  null. No stored look, or a look store that can't be read (logged), paints the defaults, as the
+  boot does. A stored look whose painting gives no ``--background`` or ``--foreground``
+  (``mobile_tokens.missing_tokens``, the rule the reader and the review hold too) is not served: the
+  phone gets the defaults (logged). Defaults that paint neither (a package imported before the
+  reader held this rule) give ``mobile`` null (logged).
 * **Files.** Font and mascot URLs are ``serve.module_url(digest, path)``, served by
   ``GET /api/themes/files/...`` under the same membership. A URL is given only for a path the
   package's file manifest lists, never for a JS or CSS file. A mascot clip is the state's ``.mp4``
@@ -43,7 +47,7 @@ from services.themes.look_schema import SCHEMA_PATH as LOOK_SCHEMA_PATH
 from services.themes.looks import LooksError, read_looks, resolve_look_source
 from services.themes.membership import Membership
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD, MOBILE_SCHEMES
-from services.themes.mobile_tokens import look_tone, project_look
+from services.themes.mobile_tokens import look_tone, missing_tokens, paint_look
 from services.themes.revocations import is_disabled
 from services.themes.serve import BootTarget, FileReader, ThemeFileMissing, may_run, module_url, theme_prepaint
 
@@ -124,8 +128,18 @@ def _stored_active_look(db: Any, membership: Membership, target: BootTarget) -> 
     return active if isinstance(active, dict) else None
 
 
+def _phone_look(table: Mapping[str, Any], stored: Optional[Dict[str, Any]], target: BootTarget) -> Optional[Dict[str, Any]]:
+    """The stored look when its painting gives a phone its ground and text, else None (the defaults; logged)."""
+    if stored is None or not missing_tokens(paint_look(table, stored)):
+        return stored
+    logger.error(
+        "Install %s's stored look paints no ground or text for a phone: the phone gets the default look", target.install.id,
+    )
+    return None
+
+
 def _look_colours(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Optional[Dict[str, Any]]:
-    """A ``fromLooks`` block's colours: the active look (else the defaults) projected under its tone."""
+    """A ``fromLooks`` block's colours: the active look (else the defaults) painted as the web paints it, under its tone."""
     package = target.package
     try:
         table = theme_prepaint(package, reader)
@@ -134,9 +148,13 @@ def _look_colours(db: Any, membership: Membership, target: BootTarget, reader: F
     if table is None:
         logger.error("Package %s's mobile block paints from looks, but it has no %s", package.id, PREPAINT_PATH)
         return None
-    look = _stored_active_look(db, membership, target) or _object(table.get("defaults"))
+    look = _phone_look(table, _stored_active_look(db, membership, target), target)
+    painted = paint_look(table, look)
+    if missing_tokens(painted):
+        logger.error("Package %s's %s defaults paint no ground or text for a phone: nothing to paint", package.id, PREPAINT_PATH)
+        return None
     tone = look_tone(table, look, (package.manifest or {}).get("tone"))
-    tokens = {scheme: (project_look(table, look) if scheme == tone else None) for scheme in MOBILE_SCHEMES}
+    tokens = {scheme: (painted if scheme == tone else None) for scheme in MOBILE_SCHEMES}
     return {"source": SOURCE_LOOKS, "tone": tone, "tokens": tokens}
 
 

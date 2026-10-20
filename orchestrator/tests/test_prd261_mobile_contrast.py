@@ -4,9 +4,13 @@
   the hexes ``mobile_tokens.parse_colour`` reads (``frontend/lib/look-kit/__tests__/contrast-parity.test.ts``
   holds look-kit's ``contrastRatio`` and ``tripletToHex`` to the same cases);
 * ``measure_mobile`` measures the block's ten pairs (eight text pairs at 4.5:1, two UI pairs at 3:1) per
-  scheme of ``mobile.tokens``, or under ``fromLooks`` per preset painted through ``boot/prepaint.json``: a
-  pair under its minimum fails, named by its scheme or preset, both tokens and the ratio; a pair whose two
-  tokens are not both set is not measured; a manifest without the block is left to the review (None).
+  scheme of ``mobile.tokens``, or under ``fromLooks`` for the prepaint table's defaults (what the answer
+  serves a member with no stored look) and each preset, each painted as the web's first paint paints it
+  (``mobile_tokens.paint_look``: a look that doesn't fit the table is the defaults whole, boot.ts :164): a
+  pair under its minimum fails, named by its scheme, the defaults or its preset, both tokens and the ratio;
+  a subject that gives no ``--background`` or ``--foreground`` fails, naming what it lacks; any other pair
+  whose two tokens are not both set is not measured; a manifest without the block is left to the review
+  (None).
 
 The level and the verdict the review gives these outcomes are ``test_prd261_review_stage.py``'s.
 """
@@ -164,8 +168,8 @@ def test_from_looks_measures_every_preset_and_names_the_failing_one():
     measured = measure_mobile({"mobile": {"fromLooks": True}}, files)
     presets = {preset["id"]: preset for preset in measured["presets"]}
 
-    assert (measured["source"], measured["status"], list(presets)) == ("fromLooks", "fail", ["default", "night"])
-    assert (presets["default"]["status"], presets["night"]["status"]) == ("pass", "fail")
+    assert (measured["source"], measured["status"], list(presets)) == ("fromLooks", "fail", ["defaults", "default", "night"])
+    assert [presets[key]["status"] for key in ("defaults", "default", "night")] == ["pass", "pass", "fail"]
     assert _pairs(presets["night"])[("--foreground", "--background")]["ratio"] == 16.57  # ink's own text
     assert measured["problems"] == [
         'Preset "night": --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.',
@@ -173,18 +177,55 @@ def test_from_looks_measures_every_preset_and_names_the_failing_one():
     assert "schemes" not in measured
 
 
-def test_from_looks_a_knob_value_the_table_lacks_is_painted_from_the_defaults():
-    files = _look_files(odd={"accent": "violet", "ground": "paper"})
-    odd = measure_mobile({"mobile": {"fromLooks": True}}, files)["presets"][0]
-    assert odd["status"] == "pass" and _pairs(odd)[("--primary", "--background")]["ratio"] == 5.17  # blue, the default
+def test_from_looks_measures_the_defaults_as_their_own_subject_and_fails_on_them_alone():
+    green_defaults = {**TABLE, "defaults": {"accent": "green", "ground": "paper", "radius": 6}}
+    files = _look_files(green_defaults, default={"accent": "blue", "ground": "paper"}, night={"accent": "blue", "ground": "ink"})
+    measured = measure_mobile({"mobile": {"fromLooks": True}}, files)
+    assert [(subject["id"], subject["status"]) for subject in measured["presets"]] == [
+        ("defaults", "fail"), ("default", "pass"), ("night", "pass"),
+    ]
+    assert measured["status"] == "fail" and measured["problems"] == [
+        "boot/prepaint.json#defaults: --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.",
+    ]
 
 
-def test_from_looks_with_no_table_measures_nothing_and_never_raises():
+def test_from_looks_a_preset_that_does_not_fit_the_table_is_painted_as_the_defaults_whole():
+    files = _look_files(odd={"accent": "violet", "ground": "ink"})
+    defaults, odd = measure_mobile({"mobile": {"fromLooks": True}}, files)["presets"]
+    # boot.ts :164: the web paints the whole default look (paper and blue), never ink with the default accent
+    assert odd["status"] == "pass" and odd["pairs"] == defaults["pairs"]
+    assert _pairs(odd)[("--foreground", "--background")]["ratio"] == _pairs(defaults)[("--foreground", "--background")]["ratio"]
+    assert _pairs(odd)[("--primary", "--background")]["ratio"] == 5.17  # blue on paper's white
+
+
+def test_from_looks_a_preset_that_paints_no_ground_fails_naming_what_it_lacks():
+    no_ground = {**TABLE, "knobs": {**TABLE["knobs"], "ground": {**TABLE["knobs"]["ground"], "ink": {"--foreground": DARK_TEXT}}}}
+    files = _look_files(no_ground, default={"accent": "blue", "ground": "paper"}, night={"accent": "blue", "ground": "ink"})
+    measured = measure_mobile({"mobile": {"fromLooks": True}}, files)
+    night = measured["presets"][2]
+    assert (measured["status"], night["id"], night["status"], night["missing"]) == ("fail", "night", "fail", ["--background"])
+    assert measured["problems"] == ['Preset "night": gives no --background, so a phone can\'t draw it.']
+    assert measured["reason"].startswith("1 of the mobile block's colour sets give no --background or --foreground")
+    assert [subject["missing"] for subject in measured["presets"][:2]] == [[], []]
+
+
+def test_a_scheme_that_gives_no_text_colour_fails_rather_than_going_unmeasured():
+    measured = measure_mobile(_tokens(light={"--background": WHITE}, dark=PASSING_LIGHT), {})
+    assert [(scheme["id"], scheme["status"], scheme["missing"]) for scheme in measured["schemes"]] == [
+        ("light", "fail", ["--foreground"]), ("dark", "pass", []),
+    ]
+    assert measured["problems"] == ["mobile.tokens.light: gives no --foreground, so a phone can't draw it."]
+
+
+def test_from_looks_with_no_table_paints_nothing_so_every_subject_fails_and_never_raises():
     measured = measure_mobile({"mobile": {"fromLooks": True}}, _look_files(table=None, default={"ground": "paper"}))
-    assert measured["status"] == "not_measured" and measured["presets"][0]["status"] == "not_measured"
-    assert measured["reason"].startswith("Not measured") and measured["problems"] == []
+    assert measured["status"] == "fail"
+    assert [(subject["id"], subject["status"], subject["missing"]) for subject in measured["presets"]] == [
+        ("defaults", "fail", ["--background", "--foreground"]), ("default", "fail", ["--background", "--foreground"]),
+    ]
+    assert measured["reason"].startswith("2 of the mobile block's colour sets give no --background or --foreground")
     broken = {**_look_files(default={"ground": "paper"}), PREPAINT: b"{not json"}
-    assert measure_mobile({"mobile": {"fromLooks": True}}, broken)["status"] == "not_measured"
+    assert measure_mobile({"mobile": {"fromLooks": True}}, broken)["status"] == "fail"
 
 
 def test_a_manifest_without_the_block_is_left_to_the_review():
