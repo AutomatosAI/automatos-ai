@@ -7,8 +7,9 @@
  * and receipt names, the live receipts on a stream part (liveReceiptsOf, W-A5) included. The browser proof is e2e/browser/specs/sdk-chat.spec.ts (fixtures/hello-a11b).
  */
 import { renderHook } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { PAGE_AI_LABEL, WIDGET_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { LIVE_KEY, liveReceiptsFromToolData } from '@/lib/chat/receipts'
 import type { ChatMessage, Receipt } from '@/types'
 
@@ -139,7 +140,13 @@ function openChat(core: unknown = coreView(), options: Options = {}) {
   return { conversation, ...renderHook(() => useChatController(conversation, options)) }
 }
 
+// The host's AI label is on screen, as on /chat and every /x/ route (PRD-264): the chat may start a turn.
+beforeEach(() => {
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [PAGE_AI_LABEL] })
+})
+
 afterEach(() => {
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
   host.onScreen = { view: null, adopt: () => undefined, draft: null, takeDraft: () => undefined }
   host.conversationOptions.length = 0
   host.controllerOptions.length = 0
@@ -304,6 +311,55 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
       initialProps: { open: false },
     })
     expect(() => rerender({ open: true })).toThrow('for the life of a component')
+  })
+})
+
+describe("PRD-264 EUAI-11b — useChatController(conversation) starts no turn unless the host's AI label is on screen", () => {
+  function expectRefused(core: ReturnType<typeof coreView>, chat: { send: (text: string) => boolean; retry: () => boolean }) {
+    expect(chat.send('Hello')).toBe(false)
+    expect(chat.retry()).toBe(false)
+    expect(core.send).not.toHaveBeenCalled()
+    expect(core.retry).not.toHaveBeenCalled()
+  }
+
+  it('refuses Send and Try again when no label is mounted (a chat in a frame on a page without one)', () => {
+    useAiLabelStore.setState({ shownLabels: [] })
+    const core = coreView()
+    expectRefused(core, openChat(core).result.current)
+  })
+
+  it("refuses while the page's label is hidden, still stops, and sends again once the label is seen", () => {
+    const core = coreView()
+    const { result } = openChat(core)
+    useAiLabelStore.getState().setHidden(PAGE_AI_LABEL, true)
+    expectRefused(core, result.current)
+    result.current.stop()
+    expect(core.stop).toHaveBeenCalledTimes(1)
+    useAiLabelStore.getState().setHidden(PAGE_AI_LABEL, false)
+    expect(result.current.send('Hello')).toBe(true)
+    expect(core.send).toHaveBeenCalledWith('Hello')
+  })
+
+  it('asks at call time: a Send the theme kept from a render while the label was shown is refused once its gate goes', () => {
+    const core = coreView()
+    const { send, retry } = openChat(core).result.current
+    useAiLabelStore.getState().releaseLabel(PAGE_AI_LABEL)
+    expectRefused(core, { send, retry })
+  })
+
+  it("is cleared by the page's label only, never by Auto's floating widget's", () => {
+    useAiLabelStore.setState({ shownLabels: [WIDGET_AI_LABEL] })
+    const core = coreView()
+    expectRefused(core, openChat(core).result.current)
+  })
+
+  it("keeps the controller's own refusal while a turn runs, with the label shown", () => {
+    const core = coreView({ send: vi.fn(() => false), retry: vi.fn(() => false) })
+    const { result } = openChat(core)
+    expect(result.current.send('Hello')).toBe(false)
+    expect(result.current.retry()).toBe(false)
+    expect(core.send).toHaveBeenCalledWith('Hello')
+    expect(core.retry).toHaveBeenCalledTimes(1)
   })
 })
 

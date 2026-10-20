@@ -26,6 +26,9 @@
  * error. Only a conversation the first call handed out opens a stream (it carries the host's own
  * state under a private symbol); a hand-made object is refused. Everything returned is a frozen,
  * theme-neutral copy: no store, no query client, no raw core message.
+ *
+ * Send and Try again start no turn unless the host's AI label is on screen (PRD-264 EUAI-11b,
+ * internal/ai-label-gate.ts): they return false, as while a turn runs.
  */
 import { useMemo, useRef } from 'react'
 
@@ -48,6 +51,7 @@ import { useMissionStore } from '@/stores/mission-store'
 import { usePlayChatStore } from '@/stores/play-chat-store'
 
 import type { WithdrawOffer } from './host-cards/chat-cards'
+import { gatedByAiLabel } from './internal/ai-label-gate'
 import {
   type OpenedConversation,
   hostApproval,
@@ -263,9 +267,9 @@ export interface HostChatController {
   readonly looseApprovals: readonly HostChatApproval[]
   /** A card still waits for the owner. */
   readonly approvalWaiting: boolean
-  /** Sends the words; false (nothing sent) while a turn runs. */
+  /** Sends the words; false (nothing sent) while a turn runs, or while the host's AI label isn't on screen (PRD-264). */
   readonly send: (text: string) => boolean
-  /** Asks the owner's last message again; false while a turn runs. */
+  /** Asks the owner's last message again; false while a turn runs, or while the host's AI label isn't on screen. */
   readonly retry: () => boolean
   /** Keeps the reply being written, then stops the turn (here and on the server). */
   readonly stop: () => void
@@ -342,7 +346,9 @@ function useOpenConversation(
   })
   const planningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const { shown, looseApprovals } = useHostTurn(core, opened.view)
-  const { status, streaming, errorCode, suggestion, send, retry, stop } = core
+  const { status, streaming, errorCode, suggestion, stop } = core
+  const send = useMemo(() => gatedByAiLabel(core.send), [core.send])
+  const retry = useMemo(() => gatedByAiLabel(core.retry), [core.retry])
   const approvalWaiting = core.approvals.waiting
   return useMemo(
     () =>

@@ -21,7 +21,8 @@ import { useAiLabelCheck } from './use-ai-label-check'
  *
  * No theme can hide it: the label checks it can be seen (use-ai-label-check.ts) and publishes
  * the answer (lib/ai-label/store.ts). While it can't be seen, every chat composer's fence
- * (ai-label-fence.tsx) disables the input, and the gate says why (AI_LABEL_PAUSED_TEXT). No
+ * (ai-label-fence.tsx) disables the input, the theme SDK's chat starts no turn (EUAI-11b), and the
+ * gate says why (AI_LABEL_PAUSED_TEXT). No
  * prop, manifest field or setting turns the label off. Auto's floating widget, which MainLayout
  * draws on every page but /chat, carries its own label in its panel (widget-ai-label.tsx).
  */
@@ -92,9 +93,10 @@ export interface AiLabelGateProps {
 export function AiLabelGate({ children, placement = 'bottom-right' }: AiLabelGateProps) {
   const hidden = useAiLabelPaused(PAGE_AI_LABEL)
   const setHidden = useAiLabelStore((state) => state.setHidden)
+  const releaseLabel = useAiLabelStore((state) => state.releaseLabel)
   const setPageHidden = useCallback((labelHidden: boolean) => setHidden(PAGE_AI_LABEL, labelHidden), [setHidden])
-  // A gate that goes takes its pause with it; the next one checks its own label as it mounts.
-  useEffect(() => () => setPageHidden(false), [setPageHidden])
+  // A gate that goes takes its pause, and its leave to chat, with it; the next one checks its own label as it mounts.
+  useEffect(() => () => releaseLabel(PAGE_AI_LABEL), [releaseLabel])
   return (
     <>
       {children}
