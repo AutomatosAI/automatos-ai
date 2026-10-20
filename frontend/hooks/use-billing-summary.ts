@@ -54,7 +54,7 @@ export interface BillingSummary {
   platform_ai: boolean
   /** Credits pay for platform-funded work; false for an allowance plan (enterprise). */
   metered: boolean
-  /** Platform-funded work is paused: not enough credits for one ask. Own-key calls still run. */
+  /** Platform-funded work is paused: no credits left. Own-key calls still run. */
   paused: boolean
   /** The balance is running low (and not yet paused). */
   low: boolean

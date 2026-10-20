@@ -766,7 +766,8 @@ def test_a_healthy_renderer_is_checked_before_the_render_starts(env, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# The quota (owner, 2026-09-23): Basic 10, Pro 60, Business 240; none locally
+# The quota (owner, 2026-09-23; PRD-265 US-001 gave Own keys Pro's 60): Own keys 60,
+# Pro 60, Business 240; none locally
 # ---------------------------------------------------------------------------
 
 
@@ -774,10 +775,10 @@ def test_the_plan_tiers_carry_the_owners_render_quotas():
     from config import PLAN_TIERS
 
     assert {plan: PLAN_TIERS[plan]["render_minutes_month"] for plan in ("basic", "pro", "business")} == {
-        "basic": 10, "pro": 60, "business": 240,
+        "basic": 60, "pro": 60, "business": 240,
     }
     assert "render_minutes_month" not in PLAN_TIERS["enterprise"]
-    for plan, minutes in (("basic", 10), ("pro", 60), ("business", 240)):
+    for plan, minutes in (("basic", 60), ("pro", 60), ("business", 240)):
         assert plan_tiers.plan_limits_for_tier(plan)["render_minutes_month"] == minutes
 
 
@@ -798,12 +799,12 @@ def test_a_plan_change_rewrites_the_quota():
 @pytest.mark.parametrize(
     "plan, limits, expected",
     [
-        ("basic", {}, 10.0),
+        ("basic", {}, 60.0),
         ("pro", {}, 60.0),
         ("business", {}, 240.0),
         ("enterprise", {}, None),
-        (None, {}, 10.0),                          # no plan: the entry tier
-        ("starter", {}, 10.0),                     # a stray plan string: the entry tier
+        (None, {}, 60.0),                          # no plan: the entry tier
+        ("starter", {}, 60.0),                     # a stray plan string: the entry tier
         ("basic", {"render_minutes_month": 30}, 30.0),  # the assigned value wins
         ("basic", {"render_minutes_month": 0}, None),   # 0 = no quota, as for max_agents
         ("basic", {"render_minutes_month": -1}, None),
@@ -838,25 +839,25 @@ def test_minutes_used_are_this_months_render_units_on_the_media_lane(env):
 
     workspace = env.session.get(Workspace, WS)
     reading = render_quota.render_quota(env.session, workspace, now)
-    assert reading.used_seconds == 390 and reading.quota_minutes == 10.0 and not reading.exhausted
-    assert reading.to_dict()["used_minutes"] == 6.5 and reading.to_dict()["remaining_minutes"] == 3.5
+    assert reading.used_seconds == 390 and reading.quota_minutes == 60.0 and not reading.exhausted
+    assert reading.to_dict()["used_minutes"] == 6.5 and reading.to_dict()["remaining_minutes"] == 53.5
 
     body = env.client.get("/api/socials/usage").json()["render_minutes"]
-    assert body["used_minutes"] == 6.5 and body["used_seconds"] == 390 and body["quota_minutes"] == 10.0
+    assert body["used_minutes"] == 6.5 and body["used_seconds"] == 390 and body["quota_minutes"] == 60.0
     assert body["exhausted"] is False and body["period_start"] == start.isoformat()
 
 
 def test_a_render_past_the_quota_is_refused_before_any_call_to_media_render(env, monkeypatch):
     post = _renderable(env)
     calls = _real_renderer_check(monkeypatch)                # any call to media-render fails the test
-    env.session.add(_usage_row(WS, 600))                     # Basic: 10 minutes, all used
+    env.session.add(_usage_row(WS, 3600))                    # Own keys: 60 minutes, all used
     env.session.commit()
 
     resp = env.client.post(f"/api/socials/posts/{post['id']}/render")
 
     assert resp.status_code == 429
     detail = resp.json()["detail"]
-    assert "used 10.0 of its 10 render minutes this month on the Basic plan" in detail
+    assert "used 60.0 of its 60 render minutes this month on the Own keys plan" in detail
     assert "Rendering resumes on 1 " in detail
     assert calls == [] and env.launched == []
     assert _post(env, post["id"]).status == "draft"
@@ -864,13 +865,14 @@ def test_a_render_past_the_quota_is_refused_before_any_call_to_media_render(env,
 
 def test_a_render_with_minutes_left_starts(env):
     post = _renderable(env)
-    env.session.add(_usage_row(WS, 599))
+    env.session.add(_usage_row(WS, 3599))
     env.session.commit()
     assert env.client.post(f"/api/socials/posts/{post['id']}/render").status_code == 202
 
 
-def test_a_bigger_plan_has_room_where_basic_has_none(env):
-    env.session.add_all([_usage_row(WS, 600), _usage_row(WS_PRO, 600)])
+def test_a_pro_workspace_with_minutes_left_renders_where_another_has_none(env):
+    # PRD-265: Own keys has Pro's 60 minutes, so the room is per workspace, not per tier.
+    env.session.add_all([_usage_row(WS, 3600), _usage_row(WS_PRO, 600)])
     env.session.commit()
     env.ctx = _ctx(WS_PRO, "member-pro")
     post = _create(env, template_id=str(_template(env, workspace_id=WS_PRO)))

@@ -30,6 +30,7 @@ OVERHEAD_PURPOSES = frozenset({
     "decision_adapter",       # core/llm/decisions — typed routing decisions
     "digest",                 # services/digest_service
     "entity_extraction",      # modules/search — knowledge-graph entities
+    "generation_guard",       # core/generation_guard — the Art. 5 check before any image/video/voice
     "graph_community_title",  # modules/knowledge/community_reports
     "graph_extraction",       # modules/knowledge — graph build
     "memory_distill",         # consumers/chatbot/smart_memory
@@ -42,6 +43,7 @@ OVERHEAD_PURPOSES = frozenset({
 CUSTOMER_PURPOSES = frozenset({
     "blog_cover_gen",         # modules/tools/discovery/handlers_blog
     "brand_style_read",       # modules/documents/brand_style
+    "cover_image",            # modules/tools/discovery/handlers_blog — a post's cover image
     "clarification",          # services/orchestrator_answers — answers a worker mid-run
     "heartbeat",              # services/heartbeat_service — one ask per tick
     "jira_triage",            # modules/workflows/recipes/jira_bug_triage

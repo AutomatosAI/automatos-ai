@@ -879,7 +879,7 @@ class LLMManager:
                     cache_write_tokens=counts.cache_write_tokens,
                     reported_cost=counts.reported_cost,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — usage tracking never breaks the call it records
             logger.debug(f"Usage tracking failed: {e}")
 
     # ------------------------------------------------------------------
