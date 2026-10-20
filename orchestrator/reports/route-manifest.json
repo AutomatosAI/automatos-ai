@@ -1,5 +1,5 @@
 {
-  "route_count": 944,
+  "route_count": 946,
   "routes": [
     {
       "method": "GET",
@@ -2932,6 +2932,14 @@
     {
       "method": "DELETE",
       "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/pair"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/pairing-codes"
     },
     {
       "method": "GET",

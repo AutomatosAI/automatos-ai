@@ -64,6 +64,11 @@ PUBLIC_BY_DESIGN = {
     # Verifies the Clerk JWT directly; the invitee may not be a member of any
     # workspace yet (api/team.py public_router, dossier §B).
     ("POST", "/api/team/accept-invitation"),
+    # PRD-266 §4.3 (AGENTS.md exception 1, approved 20 Oct 2026, #1253): a phone has no
+    # account yet, so the one-time code a workspace admin minted is its only credential.
+    # 404 unless AUTH_EDITION=local and LOCAL_REMOTE_ACCESS=paired; rate-limited per IP
+    # before the code is read (api/mobile_devices.py).
+    ("POST", "/api/v1/mobile/pair"),
 }
 
 # (d) Own non-hybrid auth. Structurally enforced below: none of these may

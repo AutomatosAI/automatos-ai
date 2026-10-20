@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # Default tenant UUID for single-tenant deployments
 DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
+# The hosted product's API host: PUBLIC_API_HOST's default. A local install still on it
+# has not named its own host, so it never advertises this one (PRD-266 K15).
+HOSTED_PUBLIC_API_HOST = "api.automatos.app"
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -2080,9 +2084,28 @@ class Config:
     # injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_API_HOST overrides it (the local
     # tunnel's domain, set in the compose override). No trailing slash.
     PUBLIC_API_HOST: str = (
-        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
-        or "api.automatos.app"
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", HOSTED_PUBLIC_API_HOST))
+        or HOSTED_PUBLIC_API_HOST
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-266 Automatos Go: pairing a phone (or a browser) with a local install
+    # =============================================================================
+    # LOCAL_REMOTE_ACCESS (local edition, §4.3): 'off' (the default) keeps today's
+    # loopback-only posture; 'paired' opens POST /api/v1/mobile/pair and every caller
+    # needs a device token; 'open' keeps the anonymous lane on a published install. An
+    # unknown value reads as 'off'. The boot check on the publish addresses is US-005a's.
+    _LOCAL_REMOTE_ACCESS_RAW = (os.getenv("LOCAL_REMOTE_ACCESS", "off") or "off").strip().lower()
+    LOCAL_REMOTE_ACCESS: str = (
+        _LOCAL_REMOTE_ACCESS_RAW if _LOCAL_REMOTE_ACCESS_RAW in ("off", "paired", "open") else "off"
+    )
+    # A paired device is asked to rotate its token this many days after it was issued
+    # (``rotate_after`` in the pairing answer), at least one.
+    MOBILE_TOKEN_ROTATE_DAYS: int = max(1, int(os.getenv("MOBILE_TOKEN_ROTATE_DAYS", "30")))
+    # After a rotation the previous token keeps working this long (§4.2: ten minutes).
+    MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
+        0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
+    )
 
     # =============================================================================
     # PRD-251 Socials
