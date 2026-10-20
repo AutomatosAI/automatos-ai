@@ -3,7 +3,7 @@
  * the modules that build a theme's prepaint table (lib/theme-host/builtin/play-prepaint.ts) can name the types
  * without loading the boot resolver. lib/theme-host/boot.ts re-exports every one of them.
  */
-import type { ThemeTonePolicy, UiStyle } from './registry-types'
+import type { SlotId, ThemeBase, ThemeNavItem, ThemeTonePolicy, UiStyle } from './registry-types'
 
 /** The tone next-themes is forced to from the first paint, when the theme sets one. */
 export type ThemeTone = 'light' | 'dark'
@@ -70,6 +70,29 @@ export interface ThemeLookGuard {
   readonly iface: string
 }
 
+/**
+ * PRD-261 W-A6b (gap G1) — what the theme registry needs of an installed theme that runs, as the
+ * backend's boot route answers it from the theme's checked theme.json (serve.py theme_entry).
+ * lib/theme-host/installed-entry.ts checks it (sanitizeInstalledEntry) and makes it the theme's
+ * registry entry (installedThemeEntry).
+ */
+export interface InstalledThemeEntryData {
+  /** The theme's id (theme.json `id`), which its looks are kept under, in this browser and on the server (W-A6b, G2). */
+  readonly themeId: string
+  readonly name: string
+  readonly base: ThemeBase
+  readonly htmlClass: string
+  /** The theme's own; in Phase A the host draws an installed theme from INSTALLED_FRAME_MIN_WIDTH_PX up. */
+  readonly minWidth: number
+  readonly tone: ThemeTonePolicy
+  readonly reviewed: boolean
+  /** The core pages the theme draws (its theme.json `pages`). */
+  readonly ownsPages: readonly string[]
+  readonly routes: readonly string[]
+  readonly nav: readonly ThemeNavItem[]
+  readonly slots: readonly SlotId[]
+}
+
 export interface ThemeBoot {
   readonly addClasses: readonly string[]
   readonly removeClasses: readonly string[]
@@ -79,6 +102,8 @@ export interface ThemeBoot {
   readonly lookGuard: ThemeLookGuard | null
   /** Module URL → 'sha256-<base64>' for every module of the active theme (PA-13; filled by A-08c). */
   readonly integrity: Readonly<Record<string, string>> | null
+  /** An installed theme that runs: its registry entry's data (W-A6b). Null for every other boot. */
+  readonly entry: InstalledThemeEntryData | null
 }
 
 /** A theme compiled into the app: its first-paint data, server-safe (no CSS, no client code). */

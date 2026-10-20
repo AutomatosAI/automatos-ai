@@ -140,43 +140,6 @@ export function describeParity(title: string, body: (variant: PlayVariant) => vo
   }
 }
 
-/**
- * Core gap G1. An installed theme has no registry entry: contexts/ui-style-context.tsx sets
- * activeTheme to findThemeEntry(style) with no installed entries, so under `theme:install:*`
- * useActiveTheme() is null. ThemeLookRuntime (components/theme-host/theme-look-runtime.tsx) then
- * never mounts the look runtime: the SDK's looks area answers `available: false`, so Make it yours
- * can neither pick, save, rename nor delete a look, and no look forces the tone; the theme menu
- * (components/ui/theme-toggle.tsx) shows no "Set by your look" and no Customise look….
- * What the package does keep is the look the root layout's boot painted (the default look, G2): the
- * switched-off LookProvider used to clear it on hydration, leaving every --pl-color-* invalid; W-A6
- * made it leave the boot's first paint alone while the host loads or runs an installed theme
- * (ThemeLookRuntime keepFirstPaint, theme-look-runtime-installed.test.tsx), so the specs that read
- * the default look's colours run under the package unmarked.
- */
-export const GAP_INSTALLED_THEME_HAS_NO_ENTRY =
-  'Core gap G1: under theme:install:* useActiveTheme() is null (ui-style-context.tsx findThemeEntry gets no installed entries), so no look runtime mounts for the package (no look picked, saved or renamed, no forced tone, no "Set by your look")'
-
-/**
- * Core gap G2. An installed theme's first paint never paints a stored look: the backend's boot
- * (orchestrator/services/themes/serve.py theme_boot, through _boot) sends lookStorage and lookGuard
- * as null, the root layout reads no tone cookie for an installed boot (lib/theme-host/boot.ts
- * builtinThemeBoot reads it for builtin themes only), and an installed theme's look keys
- * (`automatos-theme.<publisher>/<name>.*`, play-look-storage.ts installedLookKeys) hold a '/' that
- * boot-sanitize.ts STORAGE_KEY refuses. The look runtime (G1) also keeps every theme's looks under
- * builtin Play's keys.
- */
-export const GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK =
-  'Core gap G2 (with G1): the installed boot carries no lookStorage, lookGuard or tone (serve.py _boot), so a stored look and its tone are not painted before first paint'
-
-/**
- * Core gap G3. Switch to Play picks the workspace's install of Play's package when there is one
- * (lib/theme-host/builtin/play-only-route.tsx playStyleFor), and a switch to an installed theme
- * reloads the page (PA-13, contexts/ui-style-context.tsx setStyle). The reload drops what
- * ThemeSlotPage remembered, so focus is not handed to the screen's heading (P260-FX-22, M21).
- */
-export const GAP_SWITCH_TO_PACKAGE_RELOADS =
-  'Core gap G3: Switch to Play onto an install reloads the page (PA-13), so focus does not reach the screen heading after the swap (P260-FX-22)'
-
 /** Marks the running test fixme for the package only, naming the core gap; builtin Play runs it. */
 export function knownPackageGap(variant: PlayVariant, gap: string): void {
   test.fixme(variant.id === 'package', gap)

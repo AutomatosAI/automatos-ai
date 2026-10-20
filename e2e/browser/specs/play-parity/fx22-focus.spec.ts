@@ -5,11 +5,9 @@ import { ask, autoReplies, messageBox, openPlayChat } from '../../support/play-c
 import {
   APP_URL,
   describeParity,
-  GAP_INSTALLED_THEME_HAS_NO_ENTRY,
-  GAP_SWITCH_TO_PACKAGE_RELOADS,
-  knownPackageGap,
   openPlay,
   PARITY_TAG,
+  THEME_LOAD_TIMEOUT_MS,
 } from '../../support/play-parity'
 
 // PRD-261 A-17b (@parity), P260-FX-22 (M20, M21): keyboard focus survives what Play unmounts and
@@ -21,7 +19,10 @@ import {
 //    GET /health is answered 503 here until Check again.
 // 3. M20: in Make it yours, This look's toolbar keeps focus through Rename, Save name, Delete,
 //    Keep it and Delete look.
-// 4. M21: Switch to Play on Studio's /looks note hands focus to the screen's heading.
+// 4. M21: Switch to Play on Studio's /looks note hands focus to the screen's heading. Onto the
+//    package the switch reloads the page (PA-13); the note leaves word for the next load in
+//    sessionStorage (lib/theme-host/switch-focus.ts, G3), and the heading takes focus once the
+//    host has loaded the package, so the wait is the package's cold load.
 
 const ASK = 'Find me a laptop under 1,000 euros'
 const ANSWER = 'Here is your laptop shortlist.'
@@ -89,7 +90,6 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
   })
 
   test("This look's toolbar keeps focus through Rename, Delete and Keep it", { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     await openPlay(page, request, variant, LOOKS_PATH)
     await page.getByRole('complementary', { name: 'Edit the look', exact: true }).getByRole('button', { name: 'Save as new look', exact: true }).click()
 
@@ -111,7 +111,6 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
   })
 
   test("Switch to Play on Studio's note hands focus to the screen's heading", { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_SWITCH_TO_PACKAGE_RELOADS)
     await variant.makeAvailable(request)
     await chooseStyle(page, STUDIO, APP_URL)
     const installs = page.waitForResponse((response) => new URL(response.url()).pathname === INSTALLED_PATH && response.request().method() === 'GET')
@@ -121,7 +120,7 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
     await installs
 
     await note.getByRole('button', { name: SWITCH_TO_PLAY }).click()
-    await expect(page.getByRole('heading', { name: LOOKS_HEADING, level: 1 })).toBeFocused()
+    await expect(page.getByRole('heading', { name: LOOKS_HEADING, level: 1 })).toBeFocused({ timeout: THEME_LOAD_TIMEOUT_MS })
     await expect(page.locator('html')).toHaveClass(/\bplay\b/)
   })
 })

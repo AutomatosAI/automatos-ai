@@ -25,12 +25,16 @@
  * lib/looks/engine.ts, lib/looks/transfer.ts for files); PRD-261 A-14d moved its files out of Play's
  * folders (./account-look-scope.tsx, lib/theme-host/builtin/play-look-{provider,store,bridge}).
  *
- * PRD-261 W-A6: an installed theme gets no look runtime yet (its style has no registry entry, so
- * useActiveTheme() is null: gap G1 of e2e/browser/parity-checklist.md). While the host loads or
- * runs one, the switched-off LookProvider leaves <html> as the root layout's boot painted it (the
- * theme's prepaint table, under the same names as Play's look), so the installed theme keeps its
- * first-paint look after hydration instead of losing every look variable. A failed load, safe mode
- * and every other style clear as before.
+ * PRD-261 W-A6b (gap G1 of e2e/browser/parity-checklist.md): an installed theme that runs has a
+ * registry entry (from the root layout's boot, lib/theme-host/installed-entry.ts), so it gets the
+ * look runtime too when it declares looks, exactly as builtin Play does. The one runtime the host
+ * has paints Play's looks, so it paints and forces a tone only under the theme whose <html> class is
+ * Play's (Play's package); under any other installed theme it paints nothing and hands the SDK no
+ * looks, as before. While the host loads or runs an installed theme, a LookProvider that paints no
+ * look leaves <html> as the root layout's boot painted it (W-A6: the theme's prepaint table), so
+ * the theme keeps its first-paint look after hydration. A failed load, safe mode and every other
+ * style clear as before: the runtime stops for an installed theme the moment the host stops running
+ * it, without waiting for the host to release its entry.
  */
 import { useEffect, type ReactNode } from 'react'
 
@@ -39,16 +43,13 @@ import type { ThemeTone } from '@/lib/theme-host/boot'
 import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
 import { clearPlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 import type { SlotId, ThemeEntry } from '@/lib/theme-host/registry-types'
-import type { ThemeHostStatus } from '@/lib/theme-host/types'
+import { THEME_HOST_RUNNING_STATUSES } from '@/lib/theme-host/types'
 
 import { AccountLookScope } from './account-look-scope'
 import { useThemeHost } from './theme-host-context'
 
 /** The slot a theme with looks fills (PA-14: every installable theme ships one). */
 const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
-
-/** The host's states in which an installed theme owns <html>'s first paint: it is loading or running. */
-const HOST_RUNS_INSTALLED_THEME: readonly ThemeHostStatus[] = ['loading', 'active']
 
 export interface ThemeLookRuntimeProps {
   readonly children: ReactNode
@@ -71,17 +72,26 @@ function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | unde
 }
 
 /**
- * With no look runtime, whether <html> keeps the root layout's first paint: only while the host
- * loads or runs an installed theme (it is off under Classic, Studio and builtin Play).
+ * Whether the host loads or runs an installed theme. A LookProvider that paints no look then leaves
+ * <html> as the root layout's first paint (it is off under Classic, Studio and builtin Play).
  */
-function useKeepsFirstPaint(mounted: boolean): boolean {
+function useHostRunsTheme(): boolean {
   const status = useThemeHost()?.status ?? null
-  return !mounted && status !== null && HOST_RUNS_INSTALLED_THEME.includes(status)
+  return status !== null && THEME_HOST_RUNNING_STATUSES.includes(status)
+}
+
+/**
+ * Whether the active theme gets the look runtime: it declares looks and, for an installed one, the
+ * host still loads or runs it. The host's release reaches the style context one commit after it
+ * enters safe mode or fails, and the runtime must not repaint the look the host just took off.
+ */
+function runsLooks(theme: ThemeEntry | null, hostRunsTheme: boolean): boolean {
+  return declaresLooks(theme) && (theme?.kind !== 'installed' || hostRunsTheme)
 }
 
 export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimeProps) {
-  const mounted = declaresLooks(useActiveTheme())
-  const keepFirstPaint = useKeepsFirstPaint(mounted)
+  const keepFirstPaint = useHostRunsTheme()
+  const mounted = runsLooks(useActiveTheme(), keepFirstPaint)
   useToneReleased(mounted, onToneChange)
   // One shape for both values of `mounted`: a different tree here would remount every page (M69).
   return (
