@@ -406,52 +406,30 @@ def download_document(
         media_type=media_type_for(requested_path),
     )
 
-@router.get("/content")
-async def get_document_content_by_path(
-    path: str = Query(..., description="Full path to document"),
+@router.get("/content", dependencies=[Depends(require_workspace_permission("documents:read"))])
+def get_document_content_by_path(
+    path: str = Query(..., description="Full path to a document in this workspace's folder"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
-    Get document content as text for artifact viewer.
-    
-    Args:
-        path: Full path to document (e.g., /var/automatos/documents/filename.md)
-    
+    Get a document's content as text for the artifact viewer, from this workspace's own
+    folder under the documents root (F453, as ``/download``): before, any signed-in caller
+    read any workspace's file there. A path anywhere else answers 404 like a missing file.
+    A plain ``def``: the read is synchronous (threadpool).
+
     Returns:
         JSON with document content
     """
+    requested_path = workspace_file(path, ctx.workspace_id)
+    if requested_path is None:
+        raise HTTPException(status_code=404, detail="Document not found")
     try:
-        # Security: Only allow files from /var/automatos/documents/
-        allowed_base = Path("/var/automatos/documents").resolve()
-        requested_path = Path(path).resolve()
-
-        try:
-            requested_path.relative_to(allowed_base)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
-        
-        # Check if file exists
-        if not os.path.exists(requested_path):
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Read file content
-        with open(requested_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        filename = os.path.basename(requested_path)
-        logger.info(f"Serving content for: {filename}")
-        
-        return {
-            "filename": filename,
-            "content": content,
-            "path": str(requested_path)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error reading document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        content = requested_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.exception("Could not read document %s", requested_path.name)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+    logger.info("Serving content for: %s", requested_path.name)
+    return {"filename": requested_path.name, "content": content, "path": str(requested_path)}
 
 
 # PRD-164: rows the flywheel ingests from agent runs (mission synthesis, reports,
