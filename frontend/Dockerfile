@@ -2,10 +2,11 @@
 # Automatos AI - Frontend Dockerfile (Multi-stage)
 # =============================================================================
 # Stages:
-#   - base: Node 24 on Alpine, with the package files
+#   - base: Node 24 on Alpine, with the locked dependencies installed (npm ci)
 #   - development: Hot-reload development server
 #   - builder: Production build
-#   - production: Alpine, the node binary and the standalone build
+#   - node-strip: base's node binary without its symbol table and debug sections
+#   - production: Alpine, the stripped node binary and the standalone build
 # =============================================================================
 
 # =============================================================================
@@ -21,17 +22,20 @@ FROM node:24-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba
 
 WORKDIR /app
 
-# Copy package files (Dockerfile is in frontend/, so copy from current dir)
-COPY package*.json ./
+# No Next.js usage telemetry from the build or the dev server.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# PRD-262 US-047: install once, from the lock and the install config alone (.npmrc sets
+# legacy-peer-deps, as it does for frontend-ci), so no source or public-setting change
+# reinstalls the dependencies. No BuildKit cache mount: Railway builds this file and
+# fails a cache mount whose id lacks the frontend service's id, which is not known yet.
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --no-audit --no-fund
 
 # =============================================================================
 # Development Stage - Hot Reload
 # =============================================================================
 FROM base AS development
-
-# Install all dependencies (including devDependencies)
-# Use npm install instead of npm ci for development (more forgiving with lock file)
-RUN npm install --legacy-peer-deps
 
 # Copy source code (Dockerfile is in frontend/, so copy from current dir)
 COPY . .
@@ -51,7 +55,18 @@ CMD ["npm", "run", "dev"]
 # =============================================================================
 FROM base AS builder
 
-# Accept build arguments for environment variables
+# Cache bust marker — bump this value (or pass --build-arg FRONTEND_CACHE_BUST=...)
+# to force a clean rebuild of the COPY + npm run build layers. Used when
+# Railway's Docker layer cache produces stale or inconsistent output, e.g.
+# .next/static missing chunks the standalone server HTML references.
+ARG FRONTEND_CACHE_BUST=2026-05-28T13-00-00Z
+RUN echo "Frontend cache bust: $FRONTEND_CACHE_BUST"
+
+# Copy source code (Dockerfile is in frontend/, so copy from current dir)
+COPY . .
+
+# Accept build arguments for environment variables. PRD-262 US-047: they come after the
+# install and the source copy, so changing one rebuilds only the bundle.
 # NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
 # API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
 ARG NEXT_PUBLIC_API_URL
@@ -84,27 +99,35 @@ ENV NEXT_PUBLIC_MEDIA_ORIGINS=${NEXT_PUBLIC_MEDIA_ORIGINS}
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 
-# Install ALL dependencies (including devDependencies for build)
-RUN npm install --legacy-peer-deps
+# Build application (NEXT_PUBLIC_* vars will be baked into the bundle). The same RUN deletes
+# webpack's cache, which would otherwise ride in this layer (and the CI layer cache) until a
+# .next/cache mount can replace it, once Railway's frontend service id is known.
+# PRD-262 US-048: it also moves the dependencies Next traced out of the standalone output, so
+# the runtime copies them as a layer of their own. Here the move is a rename; in a later RUN
+# it could copy them into another builder layer. PRD-262 #47: it deletes the build's trace
+# files (*.nft.json), which only deploy tooling reads, never the standalone server.
+RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules .next/standalone-node_modules && find .next/standalone/.next -name '*.nft.json' -delete
 
-# Cache bust marker — bump this value (or pass --build-arg FRONTEND_CACHE_BUST=...)
-# to force a clean rebuild of the COPY + npm run build layers. Used when
-# Railway's Docker layer cache produces stale or inconsistent output, e.g.
-# .next/static missing chunks the standalone server HTML references.
-ARG FRONTEND_CACHE_BUST=2026-05-28T13-00-00Z
-RUN echo "Frontend cache bust: $FRONTEND_CACHE_BUST"
-
-# Copy source code (Dockerfile is in frontend/, so copy from current dir)
-COPY . .
-
-# Build application (NEXT_PUBLIC_* vars will be baked into the bundle)
-RUN npm run build
+# =============================================================================
+# Node Strip Stage - the runtime's node binary, stripped
+# =============================================================================
+# PRD-262 #24: the official binary carries a symbol table and debug sections (18.8 MB on
+# arm64) that nothing loads. strip --strip-all keeps .dynsym, so JS stack traces, the V8
+# snapshot and the exported symbols stay; native frames in a crash report lose their names.
+# -p keeps the file's dates, so a rerun makes the same layer. binutils stays in this stage,
+# and the build fails if readelf still lists a symbol table or a debug section.
+FROM base AS node-strip
+RUN apk add --no-cache binutils && \
+    strip --strip-all -p /usr/local/bin/node && \
+    if readelf -S --wide /usr/local/bin/node | grep -E '] \.(symtab|strtab|debug_)'; then exit 1; fi && \
+    node -v
 
 # =============================================================================
 # Production Stage - Optimized (Next.js standalone)
 # =============================================================================
 # PRD-262 US-007: plain Alpine plus the one file the standalone server needs from
-# Node, /usr/local/bin/node. No npm, yarn, corepack, C headers or curl.
+# Node, /usr/local/bin/node (stripped by node-strip, PRD-262 #24). No npm, yarn,
+# corepack, C headers or curl.
 # libstdc++ (which brings libgcc) is the binary's only library beyond musl.
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS production
 
@@ -115,16 +138,27 @@ WORKDIR /app
 RUN apk upgrade --no-cache && \
     apk add --no-cache libstdc++
 
-COPY --from=base /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-strip /usr/local/bin/node /usr/local/bin/node
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
 
-# Copy standalone build (includes only traced dependencies — no full node_modules)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# PRD-262 US-048: the app goes in as four layers, the one that changes least often first, so
+# an update downloads only the layers whose files changed. BuildKit keys a COPY on its files'
+# content, not their mtimes: a layer whose files and every layer below it are unchanged is
+# reused, digest and all.
+#   1. node_modules: only the dependencies Next traced, which change with the lock.
+#   2. public/: the builder's copy, which is the build context's public/ plus any file the
+#      build writes there, such as the theme-sdk shims (generated, never committed:
+#      frontend/.gitignore). A copy from the build context would leave those out.
+#   3. .next/static: the client bundle.
+#   4. The server: server.js, package.json and .next, which every code change moves.
+# frontend/scripts/check-layer-reuse.sh relies on these being the stage's last four layers.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone-node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
 USER nextjs
 

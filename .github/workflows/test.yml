@@ -85,9 +85,11 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image.
+          # manifests and the frontend's install config (.npmrc, PRD-262 US-047), the
+          # frontend edition literal, the worker image; and the scripts that check the
+          # frontend builds (PRD-262 US-046, US-048).
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-(standalone-image|layer-reuse)\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract), and
           # PRD-261's theme corpus, host contract and the validators lib/theme-host's
           # validator-parity.test.ts reads as text.
@@ -910,8 +912,10 @@ jobs:
   # three Dockerfiles with NO build args (railway.json: DOCKERFILE; the last
   # stage, production), so this lane builds exactly that and checks what got baked:
   # the frontend's edition literal, the backend's graph extras, the worker's
-  # browser. Non-required like the other lanes; the required flip is the repo
-  # admin's call.
+  # browser. The one arg the frontend gets is a dummy Clerk publishable key, which
+  # Railway passes for real; the local edition is built too, with images.yml's args,
+  # and both frontends are booted (PRD-262 US-046). Non-required like the other
+  # lanes; the required flip is the repo admin's call.
   prod-image-parity:
     name: Prod images built with default args carry production behaviour (non-required)
     needs: changes
@@ -920,9 +924,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Frontend — edition baked with no args must be saas
+      # PRD-262 US-046: no CI build passes Clerk keys, and clerkMiddleware and ClerkProvider
+      # throw without them, so the build gets a format-valid production-instance publishable
+      # key, made here and never committed. The edition is still the Dockerfile's default.
+      - name: Frontend — edition baked with no edition arg must be saas
         run: |
-          docker build --target production -t parity-fe frontend/
+          pk="pk_live_$(printf 'clerk.example.com$' | base64)"
+          echo "PARITY_CLERK_PK=${pk}" >> "$GITHUB_ENV"
+          start=$SECONDS
+          docker build --target production --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$pk" -t parity-fe frontend/
+          # PRD-262 US-047: the build time goes to the run summary, report-only (§7).
+          { echo "### Frontend parity builds (report-only)"
+            echo "- SaaS build, no layer cache: $((SECONDS - start)) s (the whole step: 336-370 s before PRD-262 US-047)"
+          } >> "$GITHUB_STEP_SUMMARY"
           # lib/auth-edition.ts compiles to `"local"===<INLINED>.trim().toLowerCase()?"local":"saas"`
           # (Next folds the `|| ''` away), so the baked edition is the literal on the right.
           LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"local\".trim()" .next 2>/dev/null | wc -l')
@@ -947,28 +961,78 @@ jobs:
             fi
           done
           exit "$bad"
-      # PRD-262 US-009: the lock records each native build's C library, so the Alpine
-      # builder installs, and Next traces, only the musl sharp, at the lock's release.
-      - name: Frontend — sharp at the lock's release, and no glibc build
+      # PRD-262 US-046: the SaaS build, run with no network and a dummy secret key (made here,
+      # never committed: gitleaks' Stripe rule matches sk_live_…), answers /sign-in with 200
+      # and carries no sharp, libvips or TypeScript (frontend/scripts/check-standalone-image.sh).
+      - name: Frontend — the SaaS build serves /sign-in with no network, without sharp, libvips or TypeScript
         run: |
+          sk="sk_live_$(openssl rand -hex 16)"
+          bash frontend/scripts/check-standalone-image.sh parity-fe /sign-in -e CLERK_SECRET_KEY="$sk"
+      # PRD-262 US-009: the lock records each native build's C library, so the Alpine
+      # builder installs only the musl sharp, at the lock's release. US-046 keeps sharp out of
+      # the runtime image, so this looks in the builder stage, a cache hit of the build above.
+      - name: Frontend — the builder's sharp at the lock's release, and no glibc build
+        run: |
+          docker build --target builder --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$PARITY_CLERK_PK" -t parity-fe-builder frontend/
           want=$(jq -r '.packages["node_modules/sharp"].version' frontend/package-lock.json)
-          builds=$(docker run --rm parity-fe sh -c 'ls node_modules/@img 2>/dev/null')
+          builds=$(docker run --rm parity-fe-builder sh -c 'ls node_modules/@img 2>/dev/null')
           echo "node_modules/@img:" $builds
           bad=0
-          if docker run --rm parity-fe sh -c 'test -d node_modules/sharp'; then
-            got=$(docker run --rm parity-fe node -p 'require("/app/node_modules/sharp/package.json").version')
-            echo "sharp $got (lock: $want)"
-            if [ "$got" != "$want" ]; then echo "::error::the image's sharp $got is not the lock's $want"; bad=1; fi
-          else
-            echo "::notice::sharp is not in the standalone trace"
-          fi
+          got=$(docker run --rm parity-fe-builder node -p 'require("/app/node_modules/sharp/package.json").version') || got="none"
+          echo "sharp $got (lock: $want)"
+          if [ "$got" != "$want" ]; then echo "::error::the builder's sharp $got is not the lock's $want"; bad=1; fi
           for build in $builds; do
             case "$build" in
-              sharp-linux-*|sharp-libvips-linux-*) echo "::error::the Alpine image carries the glibc build @img/$build"; bad=1 ;;
-              sharp-wasm32) echo "::warning::the image carries @img/sharp-wasm32, the WebAssembly fallback" ;;
+              sharp-linux-*|sharp-libvips-linux-*) echo "::error::the Alpine builder installed the glibc build @img/$build"; bad=1 ;;
+              sharp-wasm32) echo "::warning::the builder installed @img/sharp-wasm32, the WebAssembly fallback" ;;
             esac
           done
           exit "$bad"
+      # PRD-262 US-046: the local edition, built with the args images.yml publishes it with,
+      # answers /chat with 200 with no network and carries no sharp, libvips or TypeScript.
+      - name: Frontend — the local build serves /chat with no network, without sharp, libvips or TypeScript
+        run: |
+          set -o pipefail
+          start=$SECONDS
+          docker build --progress=plain --target production \
+            --build-arg NEXT_PUBLIC_AUTH_EDITION=local \
+            --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 \
+            --build-arg NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws \
+            --build-arg NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000 \
+            -t parity-fe-local frontend/ 2>&1 | tee "$RUNNER_TEMP/parity-fe-local.log"
+          echo "- Local build, after the SaaS one: $((SECONDS - start)) s" >> "$GITHUB_STEP_SUMMARY"
+          bash frontend/scripts/check-standalone-image.sh parity-fe-local /chat
+      # PRD-262 US-047: the local build differs from the SaaS one only in its build args, which
+      # the Dockerfile reads after the install, so BuildKit reuses the npm ci layer (CACHED).
+      - name: Frontend — a build that changes only build args reuses the npm ci layer
+        run: |
+          log="$RUNNER_TEMP/parity-fe-local.log"
+          step=$(grep -m1 -oE '^#[0-9]+ \[[^]]* [0-9]+/[0-9]+\] RUN npm ci( |$)' "$log" | cut -d' ' -f1 || true)
+          if [ -z "$step" ]; then echo "::error::the local build's log shows no npm ci step"; exit 1; fi
+          if ! grep -qx "$step CACHED" "$log"; then
+            grep -E "^$step " "$log" | tail -n 5
+            echo "::error::npm ci ran again for a build that changed only build args"; exit 1
+          fi
+          echo "npm ci: CACHED ($step)"
+      # PRD-262 US-048: the runtime's app layers go node_modules, public, .next/static, server,
+      # and BuildKit keys a COPY on its files' content. The local build has the SaaS build's lock
+      # and public/ files and a different bundle, so it reuses every layer up to public and makes
+      # its own server layer (frontend/scripts/check-layer-reuse.sh).
+      - name: Frontend — the local build reuses the SaaS build's node_modules and public layers
+        run: bash frontend/scripts/check-layer-reuse.sh parity-fe parity-fe-local
+      # PRD-262 US-048: frontend/.dockerignore keeps tests, docs and tsconfig.tsbuildinfo out of
+      # the build context. The development stage is the install plus `COPY . .`, so its /app
+      # outside node_modules is the context exactly as the builder copies it. The listing runs
+      # from /app (`find .`), so `find /app` stays the backend ownership step's own (US-016).
+      - name: Frontend — the build context leaves out tests, docs and tsconfig.tsbuildinfo
+        run: |
+          docker build --target development -t parity-fe-context frontend/
+          found=$(docker run --rm -w /app parity-fe-context sh -c 'find . -path ./node_modules -prune -o \( -name __tests__ -o -name "*.test.*" -o -name "*.md" -o -name tsconfig.tsbuildinfo \) -print')
+          if [ -n "$found" ]; then
+            echo "$found" | head -n 20
+            echo "::error::the frontend build context carries files frontend/.dockerignore leaves out"; exit 1
+          fi
+          echo "no tests, docs or tsconfig.tsbuildinfo in the build context"
       - name: Backend — graph extras present with no args
         run: |
           docker build --target production -t parity-be orchestrator/
@@ -1258,10 +1322,6 @@ jobs:
   # NON-REQUIRED at introduction (the workflow's established posture); flip to a
   # required check in branch protection once it has run green — that flip is the
   # repo admin's call (see S5 / F057 in the PRD).
-  #
-  # Install uses `npm install`, not `npm ci`: the committed package-lock.json is
-  # out of sync with package.json today (missing entries), which makes `npm ci`
-  # fail on install. `npm install` reconciles the lockfile so the lane can run.
   frontend-ci:
     name: Frontend CI (tsc baselined, vitest, eslint, route-contract) (non-required)
     needs: changes
@@ -1284,8 +1344,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # PRD-262 US-047: npm ci, as the Dockerfile runs it, with the same frontend/.npmrc, so
+      # a lock out of step with package.json fails here too, and both install the same tree.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       # HARD gate — the real enforcement win. Must stay green.
       - name: Vitest
@@ -1313,6 +1375,14 @@ jobs:
           git fetch --no-tags --unshallow origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}" \
             || git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
           node scripts/check-changed-lines-eslint.js "origin/${GITHUB_BASE_REF:-main}"
+
+      # PRD-262 US-049: HARD gate. public/ ships in the frontend image, so it stays within
+      # scripts/public-budget.json, and every file under public/logos is a real PNG or SVG by
+      # its magic bytes, at most 256 px. Plain Node, no install needed, so it reports even
+      # when an earlier step failed.
+      - name: public/ within its budget, and every logo a real PNG or SVG
+        if: ${{ !cancelled() }}
+        run: node scripts/check-public-assets.js
 
   # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
   # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)

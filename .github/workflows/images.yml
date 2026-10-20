@@ -110,6 +110,7 @@ on:
       - "frontend/csp-sources.js"
       - "frontend/.npmrc"
       - "frontend/public/**"
+      - "frontend/scripts/check-standalone-image.sh"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
       - "services/media-render/**"
@@ -218,7 +219,8 @@ jobs:
                "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
                           "frontend/package.json", "frontend/package-lock.json",
                           "frontend/next.config.js", "frontend/csp-sources.js",
-                          "frontend/.npmrc", "frontend/public/**"]},
+                          "frontend/.npmrc", "frontend/public/**",
+                          "frontend/scripts/check-standalone-image.sh"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
                "build_args": ["INSTALL_BROWSER=false"],
                "cache_mode": "max", "no_cache_filters": ["production"],
@@ -511,6 +513,21 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
           python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
             --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-262 (US-046 and the cuts after it): the frontend image this job pushed, on this
+      # arch, boots with no network, serves /chat, and carries nothing the trimmed build leaves
+      # out (frontend/scripts/check-standalone-image.sh lists each check). It pulls the digest,
+      # from the job's registry on a pull request, and runs whenever the build pushed one, even
+      # after a failed check above, so one red step never hides this one. test.yml's
+      # prod-image-parity runs the same script on the SaaS and the local builds, on amd64 only.
+      - name: The frontend image serves with no network, without what its build leaves out
+        if: ${{ !cancelled() && matrix.name == 'frontend' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          bash frontend/scripts/check-standalone-image.sh "${IMAGE}@${DIGEST}" /chat
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
