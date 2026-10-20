@@ -125,9 +125,7 @@ def _can_run(db: Session, workspace_id: Any, agents: List[Any]) -> List[Any]:
     from services.agent_last_run import read_last_runs, with_last_run
 
     listed = [a for a in agents if isinstance(a, dict)]
-    reasons = _reasons(db, workspace_id, [
-        {"id": a.get("id"), "configuration": {"runtime": a.get("runtime"), "provider": a.get("provider")}}
-        for a in listed])
+    reasons = _reasons(db, workspace_id, _as_configured(listed))
     ran = read_last_runs(db, workspace_id, [a.get("id") for a in listed])
 
     def one(agent: Any) -> Any:
@@ -136,6 +134,18 @@ def _can_run(db: Session, workspace_id: Any, agents: List[Any]) -> List[Any]:
         why = {"why": reasons[agent["id"]]} if agent.get("id") in reasons else {}
         return with_last_run({**agent, "can_run": agent.get("id") not in reasons, **why}, ran)
     return [one(a) for a in agents]
+
+
+def _as_configured(listed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Each listed agent as ``why_unavailable`` reads it: its runtime and, for a session agent,
+    the CLI its configuration names (``cli_provider``, agent_made_by), never the listing's
+    ``provider`` (N17-8, F440: WRITER, on claude, was refused for a route to Anthropic that a
+    session agent never uses). A session agent whose CLI could not be read is left out: no reason
+    is better than a wrong one."""
+    from core.cli_runtime import RUNTIME_CLI
+
+    return [{"id": a.get("id"), "configuration": {"runtime": a.get("runtime"), "provider": a.get("cli_provider")}}
+            for a in listed if a.get("runtime") != RUNTIME_CLI or a.get("cli_provider")]
 
 
 def with_unavailable(endpoint: Callable[..., Awaitable[List[Any]]]) -> Callable[..., Awaitable[List[Any]]]:

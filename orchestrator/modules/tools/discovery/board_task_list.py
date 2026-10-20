@@ -46,8 +46,9 @@ def _page(params: Dict[str, Any]) -> Tuple[int, int]:
 def _envelope(rows: List[Dict[str, Any]], total: int, offset: int, limit: int) -> Dict[str, Any]:
     """One page and where it sits: ``total`` is the filter's, never the page's."""
     after = offset + len(rows)
-    return {"success": True, "tasks": rows, "total": total, "offset": offset, "limit": limit,
-            "returned": len(rows), "next_offset": after if after < total else None}
+    # F442: where the page sits before its rows, so a cut answer never loses total and next_offset.
+    return {"success": True, "total": total, "offset": offset, "limit": limit, "returned": len(rows),
+            "next_offset": after if after < total else None, "tasks": rows}
 
 
 def _agent_filter(db: Session, workspace_id: UUID, name: str) -> Optional[int]:
@@ -77,7 +78,7 @@ def _filtered(query: Any, params: Dict[str, Any]) -> Any:
     tags = [tags] if isinstance(tags, str) else tags
     if isinstance(tags, list) and tags:
         query = query.filter(BoardTask.tags.contains(tags))
-    return _named(query, params.get("search"))
+    return named_filter(query, params.get("search"))
 
 
 def _on_card(pattern: str) -> Any:
@@ -92,9 +93,10 @@ def _on_card(pattern: str) -> Any:
     ))
 
 
-def _named(query: Any, raw: Any) -> Any:
+def named_filter(query: Any, raw: Any) -> Any:
     """F426: the cards whose title, or a Deliverable on them, holds every word of ``raw``.
-    A widget turn holds tasks:read, not the Deliverables: it searches titles only."""
+    A widget turn holds tasks:read, not the Deliverables: it searches titles only. P256-FIX-N17-10
+    (F449): the work the owner describes is found by this same search (``described_work``)."""
     from core.models.core import BoardTask
 
     titles_only = _widget_turn()
@@ -104,7 +106,8 @@ def _named(query: Any, raw: Any) -> Any:
     return query
 
 
-def _agent_names(db: Session, tasks: List[Any]) -> Dict[int, str]:
+def agent_names(db: Session, tasks: List[Any]) -> Dict[int, str]:
+    """The name of each card's agent, by the agent's id."""
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
     if not agent_ids:
         return {}
@@ -151,5 +154,5 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     tasks = query.order_by(BoardTask.created_at.desc(), BoardTask.id.desc()).offset(offset).limit(limit).all()
     if _widget_turn():
         return _envelope([task_visitor_view(t) for t in tasks], total, offset, limit)
-    agents = _agent_names(db, tasks)
+    agents = agent_names(db, tasks)
     return _envelope([_owner_row(t, agents) for t in tasks], total, offset, limit)

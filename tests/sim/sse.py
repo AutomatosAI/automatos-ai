@@ -13,6 +13,10 @@ Automatos bends two of them: ``d:`` carries its typed events (``chat-id``
 first, then tool-start/tool-end/usage/finish), and a failed turn ends with
 ``e:{"message", "code"}`` — the platform's turn error, not an SDK finish step.
 
+P256-FIX-N17-11 (F443): the turn's thinking rides ``d:`` as ``reasoning`` deltas, and
+``tool_frames`` keeps each tool frame's kind, call id and tool in the order they came (a
+result read before or after the next call is what a night's record could not tell).
+
 Two typed events change what the owner sees (PRD-256 FX-002): ``receipts``
 carries the receipts block and the honesty lines that sit above the reply
 (``above``), and ``narration`` with ``retracted: true`` takes a nudged draft
@@ -53,6 +57,7 @@ class ChatTurn:
     data: tuple[Any, ...] = ()
     frames: int = 0
     unparsed: int = 0
+    tool_frames: tuple[dict[str, Any], ...] = ()
 
     @property
     def tool_names(self) -> tuple[str, ...]:
@@ -78,6 +83,7 @@ class _Acc:
     chat_id: str | None = None
     frames: int = 0
     unparsed: int = 0
+    tool_frames: list[dict[str, Any]] = field(default_factory=list)
 
 
 def find_chat_id(payload: Any) -> str | None:
@@ -140,6 +146,8 @@ _D_TOOL_END = "tool-end"
 _D_USAGE = "usage"
 _D_FINISH = "finish"
 _D_ERROR = "error"
+_D_REASONING = "reasoning"   # consumers/chatbot/streaming.py format_aisdk_reasoning
+_TOOL_FRAMES = ("tool-start", "tool-result", "tool-end")
 _D_RECEIPTS = "receipts"     # consumers/chatbot/receipts.py FRAME
 _D_NARRATION = "narration"   # consumers/chatbot/streaming.py format_aisdk_narration
 ABOVE = "above"              # consumers/chatbot/receipts.py ABOVE
@@ -182,6 +190,8 @@ def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
         kind = payload.get("type")
     data = payload.get("data")
     data = data if isinstance(data, dict) else {}
+    if kind in _TOOL_FRAMES:
+        acc.tool_frames.append({"frame": kind, "toolCallId": data.get("toolCallId"), "toolName": data.get("toolName")})
 
     if kind == _D_CHAT_ID:
         # The backend's id IS the conversation: an id it does not know — the
@@ -217,6 +227,8 @@ def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
         acc.finish = {**(acc.finish or {}), "finishReason": payload.get("finishReason")}
     elif kind == _D_ERROR:
         acc.errors.append(json.dumps(payload))
+    elif kind == _D_REASONING and isinstance(data.get("delta"), str):
+        acc.reasoning.append(data["delta"])
     elif kind is None and "finishReason" in payload:
         # The AI SDK's own untyped finish message, {finishReason, usage}.
         usage = payload.get("usage")
@@ -275,4 +287,5 @@ def parse_data_stream(body: str, header_chat_id: str | None = None) -> ChatTurn:
         receipts=tuple(acc.receipts), above=tuple(acc.above), tool_calls=tuple(acc.tool_calls),
         tool_results=tuple(acc.tool_results), errors=tuple(acc.errors), finish=acc.finish,
         reasoning="".join(acc.reasoning), data=tuple(acc.data), frames=acc.frames, unparsed=acc.unparsed,
+        tool_frames=tuple(acc.tool_frames),
     )

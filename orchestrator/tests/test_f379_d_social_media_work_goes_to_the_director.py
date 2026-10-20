@@ -220,3 +220,38 @@ def test_the_director_is_the_packages_clone_then_the_agent_of_that_name(pg_engin
         clone.status = "paused"
         session.flush()
         assert lane.find_social_media_director(session, ws) is None
+
+
+# ---------------------------------------------------------------------------
+# PRD-256 F430: the ticket names both spellings, and a Director whose sessions
+# cannot make posts is said to the owner
+# ---------------------------------------------------------------------------
+
+def _directors_note(said="Draft an Instagram post for the October Harvest Club box."):
+    async def turn():
+        await lane.hands_off(_tiers)(_Brain(), said)
+        return lane.turn_note(object(), WS, lane.the_turn([said]), no_template_named=False)
+
+    return asyncio.run(turn())
+
+
+def test_the_ticket_names_the_session_spellings_too(director):
+    note = _directors_note()
+    assert "platform_create_social_post (create_social_post in a CLI session)" in note
+    assert "platform_list_templates, or list_templates in a session" in note
+    assert "runs as a CLI session" not in note          # DIRECTOR has no configuration: as before
+
+
+def test_a_cli_director_without_socials_is_said_to_the_owner(monkeypatch):
+    cli = NS(id=348, name="Social Media Director",
+             configuration={"runtime": "cli", "session_tool_groups": ["documents"]})
+    monkeypatch.setattr(lane, "find_social_media_director", lambda db, workspace_id: cli)
+    note = _directors_note()
+    assert note.endswith(lane.DIRECTOR_CANNOT_POST.format(name="Social Media Director"))
+    assert "its sessions cannot make posts: tell the owner" in note and "offer to make the post yourself" in note
+
+
+def test_a_cli_director_on_the_default_groups_can_post_and_nothing_is_added(monkeypatch):
+    cli = NS(id=348, name="Social Media Director", configuration={"runtime": "cli"})
+    monkeypatch.setattr(lane, "find_social_media_director", lambda db, workspace_id: cli)
+    assert "runs as a CLI session" not in _directors_note()

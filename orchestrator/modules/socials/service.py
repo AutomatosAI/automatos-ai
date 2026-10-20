@@ -672,6 +672,11 @@ def with_credits(copy: Any, lines: Iterable[str]) -> Any:
 
 
 # ── the lifecycle ───────────────────────────────────────────────────────────
+def _validated(**fields: Any) -> Dict[str, Any]:
+    """Each content field as its validator (``_VALIDATORS``) returns it, checked in the order given."""
+    return {name: _VALIDATORS[name](value) for name, value in fields.items()}
+
+
 def create_draft(
     db: Any,
     *,
@@ -690,28 +695,19 @@ def create_draft(
     length_seconds: Optional[int] = None,
     agent: Optional[str] = None,
     music: Optional[Mapping[str, Any]] = None,
+    targets: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
 
     ``agent`` names the agent drafting it (US-116): ``review_log`` then opens
-    with a ``draft`` entry by ``created_by`` that names it.
+    with a ``draft`` entry by ``created_by`` that names it. ``targets`` are its
+    channels, resolved by the caller (P256-FIX-SOC-4: an agent's tool sets them
+    with the post, so its render sizes for them).
     """
-    fields = {
-        "title": title,
-        "brief": brief,
-        "copy": copy,
-        "format": format,
-        "template_id": template_id,
-        "variables": variables,
-        "sources": sources,
-        "media": media,
-        "voice": voice,
-        "footage": footage,
-        "length_seconds": length_seconds,
-        "music": music,
-    }
-    clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
+    clean = _validated(title=title, brief=brief, copy=copy, format=format, template_id=template_id,
+                       variables=variables, sources=sources, media=media, voice=voice, footage=footage,
+                       length_seconds=length_seconds, music=music)
     post = SocialPost(
         id=uuid4(),
         workspace_id=workspace_id,
@@ -721,6 +717,8 @@ def create_draft(
         override_unsourced=False,
         **clean,
     )
+    if targets:
+        post_targets.replace_targets(post, validate_targets(targets))
     post.content_hash = compute_content_hash(post)
     if agent:  # PRD-251C US-C406: what the agent wrote is kept with it, the voice examples' draft
         _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent, **draft_entry(post.copy))

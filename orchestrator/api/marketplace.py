@@ -25,6 +25,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, Skill, User as UserModel, WorkflowTemplate as WorkflowRecipe
+from api.agent_session_tools import with_session_tool_gaps  # PRD-256 F430
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +410,7 @@ async def get_item(
     try:
         item = _find_marketplace_item(db, type, item_id, approved_only=True)
         if type == "agent":
-            return _build_agent_detail(item, db)
+            return with_session_tool_gaps(_build_agent_detail(item, db), item)  # F430: a CLI copy's gaps
         return _build_recipe_detail(item, db)
 
     except HTTPException:

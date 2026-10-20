@@ -11,6 +11,7 @@ import {
   useInstallMarketplaceDetailItem,
   useMarketplaceItemDetail,
 } from './marketplace-item-sections'
+import { ItemSessionGapsSection } from './marketplace-session-gaps'
 
 interface MarketplaceItemModalProps {
   itemId: number
@@ -71,6 +72,7 @@ export function MarketplaceItemModal({ itemId, itemType, onClose }: MarketplaceI
           <ItemModelSection item={item} />
           <ItemSkillsSection skills={skills} />
           <ItemToolsSection item={item} />
+          <ItemSessionGapsSection item={item} />
         </div>
       </DialogContent>
     </Dialog>

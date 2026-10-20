@@ -6,17 +6,21 @@ it; platform_get_agent gave neither who made it nor its runtime. Both now carry 
 in words (a chat's platform_create_agent, the Agents page, the agent factory) beside
 ``created_at`` and ``tags``, and platform_get_agent its ``runtime`` ('cli' or 'api'). They are
 read in one query over the agents the answer already holds, in the caller's workspace; a public
-widget turn's answer (which names no id) is left as it is.
+widget turn's answer (which names no id) is left as it is. That query also gives a session agent's
+``cli_provider`` and ``cli_model`` (its configuration's, what the CLI host runs), which the can-run
+check reads (PRD-256 N17-8, F440: never the model route the listing once named).
 """
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 Handler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
+# (created_by in words, runtime, a session agent's CLI, the CLI's model): both None for an api agent.
+Made = Tuple[str, str, Optional[str], Optional[str]]
 
 # Agent.created_by as each path that makes an agent writes it, in words for the model.
 MADE_BY = {
@@ -34,19 +38,28 @@ def made_by(raw: Any) -> str:
     return MADE_BY.get(str(raw), str(raw))
 
 
-def _made(db: Any, workspace_id: Any, ids: List[int]) -> Dict[int, Tuple[str, str]]:
-    """Each agent's (created_by in words, runtime), for ``ids`` in this workspace."""
-    from core.cli_runtime import runtime_kind_of
+def _made(db: Any, workspace_id: Any, ids: List[int]) -> Dict[int, Made]:
+    """Each agent's ``Made``, for ``ids`` in this workspace."""
     from core.models import Agent
 
     rows = (db.query(Agent.id, Agent.created_by, Agent.configuration)
             .filter(Agent.workspace_id == workspace_id, Agent.id.in_(ids)).all())
-    return {row.id: (made_by(row.created_by),
-                     runtime_kind_of(row.configuration if isinstance(row.configuration, dict) else {}))
-            for row in rows}
+    return {row.id: (made_by(row.created_by), *_how_it_runs(row.configuration)) for row in rows}
 
 
-def _read(db: Any, workspace_id: Any, ids: List[int]) -> Dict[int, Tuple[str, str]]:
+def _how_it_runs(configuration: Any) -> Tuple[str, Optional[str], Optional[str]]:
+    """(runtime, the CLI, the CLI's model) from an agent's configuration: for a session agent
+    ``configuration.provider`` (``claude`` when unset, ``session_cli``) and ``.model``."""
+    from core.cli_runtime import CONFIG_MODEL_KEY, RUNTIME_CLI, runtime_kind_of, session_cli
+
+    config = configuration if isinstance(configuration, dict) else {}
+    runtime = runtime_kind_of(config)
+    if runtime != RUNTIME_CLI:
+        return runtime, None, None
+    return runtime, session_cli(config), config.get(CONFIG_MODEL_KEY) or None
+
+
+def _read(db: Any, workspace_id: Any, ids: List[int]) -> Dict[int, Made]:
     """``_made``, or nothing when it can't be read: the answer stands either way."""
     if not ids:
         return {}
@@ -57,11 +70,12 @@ def _read(db: Any, workspace_id: Any, ids: List[int]) -> Dict[int, Tuple[str, st
         return {}
 
 
-def _with_made(agent: Any, made: Dict[int, Tuple[str, str]]) -> Any:
+def _with_made(agent: Any, made: Dict[int, Made]) -> Any:
     if not isinstance(agent, dict) or agent.get("id") not in made:
         return agent
-    created_by, runtime = made[agent["id"]]
-    return {**agent, "created_by": created_by, "runtime": agent.get("runtime") or runtime}
+    created_by, runtime, cli, cli_model = made[agent["id"]]
+    told = {**agent, "created_by": created_by, "runtime": agent.get("runtime") or runtime}
+    return {**told, "cli_provider": cli, "cli_model": cli_model} if cli else told
 
 
 def says_who_made_it(handler: Handler) -> Handler:

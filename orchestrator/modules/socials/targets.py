@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from core.models.socials import SOCIAL_TARGET_POST_KINDS, SocialPost, SocialPostTarget
@@ -42,6 +42,17 @@ TARGETS_MAX = 50  # channel kinds per post
 # (sp:{post}:{toolkit}:{kind}) fits social_post_targets.idempotency_key's 128.
 TOOLKIT_MAX_CHARS = 64
 TOOLKIT_NAME = re.compile(rf"^[a-z][a-z0-9_]{{0,{TOOLKIT_MAX_CHARS - 1}}}$")
+
+# The post kinds a post format publishes as, most fitting first (the composer's order). The plan
+# maker's slots and an agent's channels (P256-FIX-SOC-4) pick a channel's kind with it (``kind_for``).
+FORMAT_KINDS: Mapping[str, Tuple[str, ...]] = {
+    "video": ("video", "reel", "short"),
+    "image": ("image",),
+    "carousel": ("carousel", "image"),
+    "fact_card": ("image",),
+    "infographic": ("image",),
+    "text": ("text",),
+}
 
 # An option is text, a number, true or false, or a list of text (YouTube's tags).
 OPTION_NAME = re.compile(r"^[a-z][a-z0-9_]*$")  # as the adapter data's $option.<name>
@@ -74,6 +85,15 @@ def approved_set(targets: Any) -> List[Dict[str, Any]]:
 def target_set(post: Any) -> List[Dict[str, Any]]:
     """The post's channels as an approval covers them (``approved_set``)."""
     return approved_set(getattr(post, TARGETS, None))
+
+
+def kind_for(channel: Any, post_format: Optional[str], row_kind: Optional[str] = None) -> Optional[str]:
+    """The kind a channel (``capabilities.SocialChannel``) posts a post of ``post_format`` as: a
+    story row's story (PRD-251C), else the format's most fitting kind the channel offers now;
+    None when it offers none of them."""
+    available = [kind.kind for kind in channel.post_kinds if kind.available]
+    wanted = (row_kind,) if row_kind else FORMAT_KINDS.get(post_format or "", ())
+    return next((kind for kind in wanted if kind in available), None)
 
 
 # ---- a replacement set, checked --------------------------------------------

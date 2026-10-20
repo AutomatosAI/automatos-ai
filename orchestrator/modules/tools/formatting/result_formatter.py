@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from modules.tools.formatting import document_brand_note, generated_document_summary, tickets_by_number
+from modules.tools.formatting import board_page, document_brand_note, generated_document_summary, tickets_by_number
 from modules.tools.formatting.card_digest import carries_the_question, shown_on_the_card
 
 logger = logging.getLogger(__name__)
@@ -845,6 +845,7 @@ class ToolResultFormatter:
     @document_brand_note.the_documents_brand_check_is_read  # brand kit at generation: banned words, last
     @generated_document_summary.summarises_generated_documents
     @tickets_by_number.names_tickets_by_number  # 7 Oct: the model reads a ticket by its board number only
+    @board_page.reads_a_board_page_whole  # F442: a board page the chat would cut, as whole lines
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
         """
         Format tool result for LLM context (truncated summary).

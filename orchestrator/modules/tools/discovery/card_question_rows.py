@@ -31,6 +31,7 @@ TASK_FIELDS: Tuple[Tuple[str, str], ...] = (
     ("title", "title"), ("description", "description"), ("priority", "priority"),
     ("review_mode", "review_mode"), ("tags", "tags"), ("status", "status"),
 )
+STATUS = "status"
 NOTE_FIELD = "note"
 # P256-FIX-RVW-17: platform_update_task gives its card to the agent its ask bound (agent_binding).
 AGENT_FIELD = "agent"
@@ -76,10 +77,12 @@ def tool_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) 
     return [change_line(TOOLS_FIELD, now, after)]
 
 
-def task_lines(db: Any, workspace_id: Any, params: Dict[str, Any], *, gives_the_card: bool = False) -> List[str]:
+def task_lines(db: Any, workspace_id: Any, params: Dict[str, Any], *, gives_the_card: bool = False,
+               rebriefs: bool = False) -> List[str]:
     """Each field the call changes on its ticket; a bulk move, one line per ticket.
     ``gives_the_card``: the call gives the ticket to the agent of its ``agent_id`` too
-    (platform_update_task), 'agent: <now> → <name> (agent #id)'."""
+    (platform_update_task), 'agent: <now> → <name> (agent #id)'. ``rebriefs``: a new brief
+    is the board's Re-brief of a worked ticket (platform_update_task, P256-FIX-N17-1)."""
     refs = [params["task_id"]] if params.get("task_id") not in (None, "") else []
     listed = params.get("task_ids") if isinstance(params.get("task_ids"), list) else []
     refs = [*refs, *listed][:MAX_CARDS_LISTED]
@@ -87,7 +90,8 @@ def task_lines(db: Any, workspace_id: Any, params: Dict[str, Any], *, gives_the_
     given = _given_to(db, workspace_id, params) if gives_the_card else None
 
     def changes(ticket: Any) -> List[str]:
-        return [*_ticket_changes(ticket, params), *_agent_change(db, workspace_id, ticket, given)]
+        rebriefed = rebriefs and _rebriefed(ticket, params)
+        return [*_ticket_changes(ticket, params, rebriefed=rebriefed), *_agent_change(db, workspace_id, ticket, given)]
 
     if len(tickets) == 1:
         return changes(tickets[0])
@@ -103,8 +107,9 @@ def _given_to(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[An
 
 
 def _agent_change(db: Any, workspace_id: Any, ticket: Any, given: Optional[Any]) -> List[str]:
-    """'agent: 'ROASTER' (agent #45) → OPS (agent #267)', or nothing when no agent is given."""
-    if given is None:
+    """'agent: 'ROASTER' (agent #45) → OPS (agent #267)', or nothing when no agent is given, or
+    the one given is the ticket's own (N17-1: never 'HARBOUR LOG → HARBOUR LOG')."""
+    if given is None or given.id == getattr(ticket, "assigned_agent_id", None):
         return []
     from core.models import Agent
 
@@ -116,19 +121,29 @@ def _agent_change(db: Any, workspace_id: Any, ticket: Any, given: Optional[Any])
     return [change_line(AGENT_FIELD, held, AGENT_NAMED.format(name=given.name, id=given.id))]
 
 
-def _ticket_changes(ticket: Any, params: Dict[str, Any]) -> List[str]:
+def _ticket_changes(ticket: Any, params: Dict[str, Any], *, rebriefed: bool = False) -> List[str]:
+    """Each field's 'from → to'; a Re-brief (``rebriefed``) shows no status, which it drops
+    (FX-013), and says the ticket goes back to its agent."""
     lines = [change_line(column, getattr(ticket, column), _new_value(param, params[param]))
-             for param, column in TASK_FIELDS if params.get(param) is not None]
-    if params.get("send_back"):
+             for param, column in TASK_FIELDS if params.get(param) is not None and not (rebriefed and param == STATUS)]
+    if params.get("send_back") or rebriefed:
         lines.append(SEND_BACK)
     if params.get(NOTE_FIELD):
         lines.append(said_line(NOTE_FIELD, params[NOTE_FIELD]))
     return lines
 
 
+def _rebriefed(ticket: Any, params: Dict[str, Any]) -> bool:
+    """Whether the call's new brief is the board's Re-brief of ``ticket``: a card its agent
+    has worked on, not a mission's own (``ticket_edits.briefs_like_the_board``)."""
+    from modules.tools.discovery.ticket_edits import WORKED, new_brief
+
+    return bool(new_brief(params)) and ticket.status in WORKED and ticket.source_type != MISSION_CARD
+
+
 def _new_value(param: str, value: Any) -> Any:
     """A status as the board will set it ("approved" is Done, call_effects.STATUS_WORDS)."""
-    if param != "status":
+    if param != STATUS:
         return value
     from modules.tools.execution.call_effects import STATUS_WORDS
 

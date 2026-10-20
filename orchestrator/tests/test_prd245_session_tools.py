@@ -48,7 +48,9 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
     names = st.tool_names()
     assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
                      "ask_human", "composio_execute", "search_knowledge",
-                     "search_documents", "record_memory",       # night-1 95f261a1f: document + memory parity
+                     "search_documents",                        # night-1 95f261a1f: document + memory parity
+                     "read_document",                           # F448: a file the brief names, read whole
+                     "record_memory",
                      "read_step_file",                          # F161: a later step reads an earlier step's file
                      "query_database", "query_graph",           # F329: the owner's database and the graph
                      "generate_document",                       # #942: the owner-chosen groups' tools,
@@ -59,7 +61,10 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
                      "save_approved_brand_kit",                 # and the save of what the owner approved
                      "list_playbooks", "get_playbook", "run_playbook",   # in the groups' display order
                      "get_latest_report",
-                     "list_missions", "get_mission", "search_mission_findings")
+                     "list_missions", "get_mission", "search_mission_findings",
+                     "create_social_post", "update_social_post",   # PRD-256 F430: the Socials group,
+                     "submit_social_post", "get_social_post",      # last in the display order
+                     "list_social_posts")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)

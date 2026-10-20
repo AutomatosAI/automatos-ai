@@ -96,8 +96,9 @@ from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_cuts import cut_to_length, slots_cut_out
 from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
+from modules.socials.post_fields import resolved_fields
 from core.social_templates import (
-    SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
+    SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, validate_social_blocks,
 )
 from modules.socials import ai_media, channel_sizes, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
@@ -223,12 +224,7 @@ def bundle_for(
         raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]))
     if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
         blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
-    supplied = {
-        name: spec.get("value")
-        for name, spec in (getattr(post, "variables", None) or {}).items()
-        if isinstance(spec, dict)
-    }
-    resolved = resolve_variables(blocks["variables_schema"], supplied)
+    resolved = resolved_fields(blocks, post)
     if resolved.missing:
         raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
     if resolved.invalid:

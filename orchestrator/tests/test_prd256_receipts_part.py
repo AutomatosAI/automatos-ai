@@ -49,6 +49,22 @@ def test_a_store_memory_only_turn_has_one_write_receipt_and_nothing_on_the_board
     assert _on_the_board([only]) == []          # the block says "No actions on the board."
 
 
+def test_a_store_that_is_not_the_owners_rule_says_so_on_its_receipt():
+    """P256-FIX-N17-4 (F447): 'memory saved' over a store the owner's words did not hold read as
+    their rule saved; a store with no rule note is still 'memory saved'."""
+    from modules.tools.discovery.memory_write import NOT_THE_OWNERS_RULE
+    from modules.tools.execution.call_effects import NOT_A_STANDING_RULE, result_effects
+
+    kept = {"success": True, "standing_rule": False, "rule_note": NOT_THE_OWNERS_RULE}
+    params = {"content": "The autumn tier launches on 4 November 2026."}
+    assert receipt("platform_store_memory", params, kept)["effect"] == "saved as a memory, not a standing rule"
+    assert receipt("platform_store_memory", params, {"success": True, "raw_result": kept})["effect"] == (
+        "saved as a memory, not a standing rule")                              # inside the chat's envelope
+    assert receipt("platform_store_memory", params, {"success": True, "standing_rule": True})["effect"] == "memory saved"
+    assert receipt("platform_store_memory", params, {"success": True, "standing_rule": False})["effect"] == "memory saved"
+    assert result_effects(kept) == (NOT_A_STANDING_RULE,)
+
+
 def test_a_turn_with_no_calls_has_no_receipts():
     assert build_receipts(ToolExecutionTracker()) == []
     assert build_receipts(None) == []

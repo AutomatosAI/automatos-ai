@@ -288,6 +288,32 @@ def test_a_chats_composio_send_checked_against_the_intent_asks_the_owner(desk, m
     assert len(_grants(desk)) == 1
 
 
+def test_a_step_meeting_the_card_a_chat_raised_still_waits_and_its_run_is_not_failed(desk):
+    """P256-FIX-N17-3 (F439): the owner's chat raised the card for this exact post, then a step of
+    Auto's run makes the same call. A step is no chat turn: it waits on that card (never replaces
+    it, never 'already waiting'), so the step reads '(waiting)' and the run does not fail."""
+    from api import recipe_executor as rex
+    import modules.tools.tool_router as tr
+
+    asyncio.run(tr.ToolRouter().execute_and_format(
+        tool_name="composio_execute", tool_args={"action": LINKEDIN_POST, "params": IMAGES},
+        agent_id=desk.poster.id, workspace_id=desk.ws, original_intent="post the launch",
+        caller_context={"driving_user_id": "7", "conversation_id": str(uuid4()), "turn_id": "t-1"},
+    ))
+    (chats,) = _grants(desk)
+
+    call = _run_step(desk, _auto_run(desk))
+
+    desk.linkedin.assert_not_called()
+    assert call["result"].startswith("Card raised: ") and call["success"] is False and call[WAITING] is True
+    (grant,) = _grants(desk)
+    assert grant.id == chats.id and grant.status == "pending" and grant.details[AGENT_SEND]["lane"] == "playbook"
+    calls = rex._normalize_tool_calls([call])
+    assert rex.step_failure(calls, {}) is None
+    compact = rex._build_compact_step_result({"order": 2, "status": "completed", "tool_calls": calls})
+    assert compact["tool_calls_summary"] == [f"{LINKEDIN_POST} (waiting)"]
+
+
 # ── The seams ───────────────────────────────────────────────────────────────────────
 
 def test_a_composio_call_checked_against_the_intent_keeps_the_callers_context(monkeypatch):

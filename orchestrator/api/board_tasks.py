@@ -42,6 +42,7 @@ from services.brand_hooks import a_cards_answer_is_on_brand  # brand kit at gene
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
+from services.session_capability_gaps import card_assignment_warning  # F430: what a CLI agent cannot call
 from services.ticket_numbers import ticket_label, ticket_number, title_or_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
@@ -57,6 +58,7 @@ from api.board_mission_card import (  # F291: a mission's card waiting for its p
 )
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
+from services.send_back_rules import send_back_refusal  # N17-2 (F444): the Reject's rule
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
 from services.claims_taken_out import a_cards_claims_taken_out_are_noted  # N15-CI
@@ -320,7 +322,7 @@ async def create_task(
         db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return created_ticket_answer(db, task)
+    return {**created_ticket_answer(db, task), **card_assignment_warning(db, task)}
 
 
 @router.get("")
@@ -563,8 +565,9 @@ async def update_task(
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     said = moved.get("message") if moved else None
+    warned = card_assignment_warning(db, task) if "assigned_agent_id" in body else {}
     # F276: the ticket as the board lists it, its number included
-    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {})}
+    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {}), **warned}
 
 
 @router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
@@ -800,9 +803,8 @@ async def approve_task(
     }
 
 
-# F092 (night 3): a finished ticket can be sent back, and a re-run says what it
-# replaces. Night 3's #484 re-run overwrote the only evidence of F093.
-SENDABLE_BACK = ("review", "done")
+# F092 (night 3): a finished ticket can be sent back (services.send_back_rules), and a
+# re-run says what it replaces. Night 3's #484 re-run overwrote the only evidence of F093.
 FINISHED = ("done", "failed", "cancelled", "review")
 PREVIOUS_RUNS_KEPT = 5
 PREVIOUS_RESULT_CHARS = 4000
@@ -887,16 +889,9 @@ def send_back(db: Session, ctx: Any, task: BoardTask, feedback: Any, *, by: str)
     same card. Refused with an HTTPException before anything changes. ``ctx``
     carries the workspace (and the person, for a playbook's redo). The feedback
     as kept."""
-    if task.status not in SENDABLE_BACK:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
-        )
-    refused = redo_refusal(db, task)  # F243: a redo that can't run on this card is refused before anything changes
+    refused = send_back_refusal(db, task)  # N17-2 (F444): one rule, read by the chat's card before it asks
     if refused:
-        raise HTTPException(status_code=409, detail=refused)
-    if not task.assigned_agent_id and not takes_its_own_redo(task):
-        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
+        raise HTTPException(status_code=refused[0], detail=refused[1])
 
     feedback = str(feedback or "").strip()[:MAX_REVIEW_FEEDBACK_CHARS]
     seen = task.status

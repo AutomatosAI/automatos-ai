@@ -32,6 +32,7 @@ from core.models.approval_grants import (
     KIND_QUESTION,
     SUBJECT_BOARD_TASK,
 )
+from api.approval_grant_lapses import the_card_can_run
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
 from services.click_memory import APPROVED, DECLINED, remembers_the_decision
@@ -180,8 +181,7 @@ async def grant_approval(
     # completion path (a yes/no can't stand in for a free-text decision).
     if grant.kind == KIND_QUESTION:
         raise HTTPException(status_code=422, detail=question_not_approval(grant))
-    if grant.status != GrantStatus.PENDING.value:
-        raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
+    the_card_can_run(db, grant)  # P256-FIX-N17-3: not pending, replaced or expired: 422, nothing runs
 
     # F193: two approvals at once (a double click, two admins) both read PENDING
     # and both resumed the call. The flip is a compare-and-set: only the approval
