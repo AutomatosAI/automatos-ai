@@ -22,6 +22,11 @@ edit tool gives the card in the same call counts.
 
 A bulk move leaves off only the cards that cannot go back, and its ask says which; a call
 whose own card cannot go back, or none of whose cards can, raises no card at all.
+
+F457 (night 18): a card its agent is working on, taken back to Assigned or the Inbox
+(``board_takes_back``), is not the Reject's: it is read against the board's own rule for
+any move (``ticket_moves.board_refusal``), so a card whose run is still going is refused
+before any card ("wait for its result, or cancel it"), as the board would refuse the click.
 """
 from __future__ import annotations
 
@@ -78,6 +83,17 @@ def board_sends_back(db: Any, workspace_id: Any, action: str, params: Any) -> Li
             if sends_it_back(card, new_status, params)]
 
 
+def board_takes_back(db: Any, workspace_id: Any, action: str, params: Any) -> List[Any]:
+    """F457: the cards this call takes off the agent working on them (In progress, sent back
+    to Assigned or the Inbox), in this workspace; the Reject takes none of them."""
+    from modules.tools.discovery.owner_only import AT_WORK_STATUSES, CARD_MOVES
+    from modules.tools.discovery.send_backs import cards_sent_back
+
+    if action not in CARD_MOVES or not isinstance(params, dict):
+        return []
+    return [card for card in cards_sent_back(db, workspace_id, action, params) if card.status in AT_WORK_STATUSES]
+
+
 def sendable_back(db: Any, workspace_id: Any, action: str,
                   params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], List[Dict[str, str]]]:
     """(the call with only the cards that can go back, the refusal when the card it names
@@ -85,7 +101,7 @@ def sendable_back(db: Any, workspace_id: Any, action: str,
     The card is raised for send-backs only: a bulk move whose send-backs all fail is
     refused whole, saying its other cards (an Inbox card given to its agent) move once
     it is called again without them."""
-    sent = board_sends_back(db, workspace_id, action, params)
+    sent = [*board_sends_back(db, workspace_id, action, params), *board_takes_back(db, workspace_id, action, params)]
     refusals = {card.id: _refused(db, action, params, card) for card in sent}
     failed = {task_id: why for task_id, why in refusals.items() if why is not None}
     if not failed:
@@ -104,12 +120,15 @@ def left_off(left_out: Iterable[Dict[str, str]]) -> str:
 
 def _refused(db: Any, action: str, params: Dict[str, Any], card: Any) -> Optional[_Refused]:
     """Why the board's Reject would not take ``card`` from this call, or None."""
+    from modules.tools.discovery.owner_only import AT_WORK_STATUSES
     from modules.tools.discovery.send_backs import EDIT_ACTION
     from services.send_back_rules import NO_AGENT, send_back_refusal
     from services.ticket_numbers import ticket_label, ticket_number
 
     number = ticket_number(db, card) or str(card.id)
     named = f"{ticket_label(card, number, capital=True)} ('{card.title}')"
+    if card.status in AT_WORK_STATUSES:
+        return _at_work_refused(db, action, params, card, (number, named))
     if _for_the_owners_approval(card):
         return _approval_refused(card, number, named)
     refused = send_back_refusal(db, _as_given(params, card) if action == EDIT_ACTION else card)
@@ -117,6 +136,21 @@ def _refused(db: Any, action: str, params: Dict[str, Any], card: Any) -> Optiona
         return None
     detail = refused[1].rstrip(".")
     return _Refused(number, named, CANNOT_GO_BACK.format(detail=detail), NAME_THE_AGENT if detail == NO_AGENT else "")
+
+
+def _at_work_refused(db: Any, action: str, params: Dict[str, Any], card: Any, said: Tuple[str, str]
+                     ) -> Optional[_Refused]:
+    """F457: why the board would not take ``card``, which its agent is working on, off it (a
+    run still going waits for its result or is cancelled), or None. ``said``: (number, named)."""
+    from modules.tools.discovery.send_backs import moved_to
+    from modules.tools.discovery.ticket_moves import board_refusal
+
+    refused = board_refusal(db, card, moved_to(action, params))
+    if refused is None:
+        return None
+    number, named = said
+    why = CANNOT_GO_BACK.format(detail=refused.rstrip("."))
+    return _Refused(number, named, why, TURN_IT_DOWN.format(number=number))
 
 
 def _approval_refused(card: Any, number: str, named: str) -> _Refused:
@@ -186,4 +220,4 @@ def _refusal_text(failed: List[_Refused], *, others: bool = False) -> str:
     return text + (OTHERS_NOT_MOVED if others else "")
 
 
-__all__ = ["LEFT_OUT", "board_sends_back", "left_off", "sendable_back"]
+__all__ = ["LEFT_OUT", "board_sends_back", "board_takes_back", "left_off", "sendable_back"]

@@ -27,7 +27,7 @@ A card's kind is read from its own brief, with the detectors the platform alread
 * a card filed for the owner's decision (P256-FIX-N14-7, ``approval_cards``) asks for nothing:
   the owner's approval is what it is for, and no agent works it.
 
-``missing_artifact`` is the ONE rule: Auto's status tool (``ticket_moves._refusal``), the
+``missing_artifact`` is the ONE rule: Auto's status tool (``ticket_moves.board_refusal``), the
 board's Approve, its drag and its PATCH all ask it. A refusal names what is missing in
 plain words; the card is left where it is.
 """

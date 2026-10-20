@@ -246,7 +246,8 @@ def test_an_agents_own_send_back_is_unchanged(desk):
 @pytest.mark.parametrize("card_status, new_status, sent_back", [
     ("review", "assigned", True), ("review", "in_progress", True), ("review", "inbox", True),
     ("done", "assigned", True), ("done", "in_progress", True), ("done", "inbox", True),
-    ("inbox", "assigned", False), ("assigned", "in_progress", False), ("in_progress", "assigned", False),
+    ("inbox", "assigned", False), ("assigned", "in_progress", False),
+    ("in_progress", "assigned", True), ("in_progress", "inbox", True),   # F457: a card at work, taken back
     ("review", "done", False), ("review", "blocked", False), ("blocked", "assigned", False),
 ])
 def test_sends_back_reads_a_worked_card_moved_back_for_rework(card_status, new_status, sent_back):

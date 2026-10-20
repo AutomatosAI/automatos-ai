@@ -76,6 +76,9 @@ CLOSING_STATUSES = frozenset({"done", "cancelled", "closed"})
 # P256-FIX-T3 (Gerard, 11 Oct): a card its agent has worked on, moved back for rework, is a send-back.
 WORKED_STATUSES = frozenset({"review", "done"})
 REWORK_STATUSES = frozenset({"assigned", "in_progress", "inbox"})
+# F457 (night 18, ask 837): a card its agent is working on, taken back to Assigned or the Inbox
+# ("turn #1836 down"), is a send-back too: the board's dispatcher starts it over.
+AT_WORK_STATUSES = frozenset({"in_progress"})
 # D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
 # a slug with one of these words and no read word, split on any non-alphanumeric ('gmail-send-email').
 COMPOSIO_SEND_WORDS = frozenset(word.upper() for word in LEAVES_THE_WORKSPACE)
@@ -201,8 +204,12 @@ def closing_status(params: Dict[str, Any]) -> Optional[str]:
 
 
 def sends_back(card_status: Any, new_status: Any) -> bool:
-    """Whether moving a card from ``card_status`` to ``new_status`` sends its agent's work back for rework."""
-    return card_status in WORKED_STATUSES and new_status in REWORK_STATUSES
+    """Whether moving a card from ``card_status`` to ``new_status`` sends its agent's work back for
+    rework: a worked card (Review, Done) moved back, or (F457) a card its agent is working on taken
+    back to Assigned or the Inbox. In progress to In progress moves nothing."""
+    if card_status in WORKED_STATUSES:
+        return new_status in REWORK_STATUSES
+    return card_status in AT_WORK_STATUSES and new_status in REWORK_STATUSES - AT_WORK_STATUSES
 
 
 def _sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> bool:
@@ -617,5 +624,5 @@ def _without_a_signer(params: Any) -> Any:
     return params
 
 
-__all__ = ["CLICKED_BY", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send", "asks_the_owner_first",
-           "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]
+__all__ = ["AT_WORK_STATUSES", "CLICKED_BY", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send",
+           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]

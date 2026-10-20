@@ -16,6 +16,13 @@ sends the card back to its agent whatever status the call names (FX-013 drops th
 the Re-brief is the move: platform_update_task {description} on a Review card is a send-back and
 waits for the click. Before, a new brief was read as no move at all, and "get it rewritten and
 bring it back" re-ran #1713 with no card. A description made only of status orders is no new brief.
+
+F457 (night 18, ask 837): a card its agent is working on (In progress), taken back to Assigned or
+the Inbox, is a send-back too. "Turn #1836 down" moved an In progress card to Assigned with no card,
+and the board's dispatcher started it over. A card whose run is still going is refused before any
+card, in the board's words (``send_back_checks``): the board would refuse the move after the click.
+A new brief on an In progress card is no send-back: the board's Re-brief refuses every In progress
+card (``api.board_task_rebrief``), so the handler refuses that call at once, and no card is raised.
 """
 from __future__ import annotations
 
@@ -62,7 +69,7 @@ def rebriefs(action: str, params: Dict[str, Any]) -> bool:
 
 
 def sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> bool:
-    """Whether the move sends back a card its agent has worked on (``owner_only.sends_back``),
+    """Whether the move sends back a card its agent has worked on or is working on (``owner_only.sends_back``),
     each card's status read from this workspace's board. Without the board (no session), no."""
     return bool(cards_sent_back(db, workspace_id, action, params))
 
@@ -85,16 +92,23 @@ def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any
 
 
 def cards_sent_back(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[Any]:
-    """The worked cards this move sends back, in this workspace; a mission's own card is
-    decided on the mission's page, never here."""
+    """The worked or at-work cards this move sends back, in this workspace; a mission's own
+    card is decided on the mission's page, never here."""
     from api.board_tasks import MISSION_CARD_SOURCE
-    from modules.tools.discovery.owner_only import sends_back
 
     new_status = moved_to(action, params)
     if db is None or new_status is None:
         return []
+    rebrief = rebriefs(action, params) and not params.get(SEND_BACK_FLAG)
     return [card for card in _cards(db, workspace_id, params)
-            if sends_back(card.status, new_status) and card.source_type != MISSION_CARD_SOURCE]
+            if _goes_back(card.status, new_status, rebrief) and card.source_type != MISSION_CARD_SOURCE]
+
+
+def _goes_back(card_status: Any, new_status: str, rebrief: bool) -> bool:
+    """``owner_only.sends_back``, less a Re-brief of an In progress card (F457): the board refuses that."""
+    from modules.tools.discovery.owner_only import AT_WORK_STATUSES, sends_back
+
+    return sends_back(card_status, new_status) and not (rebrief and card_status in AT_WORK_STATUSES)
 
 
 def _cards(db: Any, workspace_id: Any, params: Dict[str, Any]) -> List[Any]:
