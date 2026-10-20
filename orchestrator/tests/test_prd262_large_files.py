@@ -107,6 +107,7 @@ def test_a_file_already_over_the_limit_may_change_or_go(repo, base):
 
 
 def test_a_renamed_large_file_counts_as_newly_tracked_at_its_new_path(repo, base):
+    (repo / "moved").mkdir()  # git mv needs the destination directory to exist
     _git(repo, "mv", "moves-large.bin", "moved/large.bin")
     head = _commit(repo, {})
     assert _paths(check.large_files(base, head, LIMIT, repo)) == {"moved/large.bin": True}
