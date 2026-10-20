@@ -531,7 +531,7 @@ SOCIALS_PACKAGE: Dict[str, Any] = {
     "description": (
         "On-brand social posts from your own work: short videos, image cards, carousels and "
         "infographics, drafted with their sources and approved by you before anything goes out. A "
-        "Social Media Director and a Brand Designer, with four Playbooks to set up and keep posting."
+        "Social Media Director and a Brand Designer, with five Playbooks to set up and keep posting."
     ),
     "vertical_tags": ["socials", "social-media", "marketing", "content"],
     "matching": {
