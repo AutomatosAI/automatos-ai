@@ -466,7 +466,8 @@ def _tool_issue(name: str, agent_id: int, app: str, counts: Tuple[int, int, int]
                 settings: DiagnoseSettings) -> Dict[str, Any]:
     """One flagged agent-app pair. It is "reconnect <app>" when the sign-in and connection
     failures carry the flag (the other failures alone would not flag) and the app has a
-    connection; otherwise a tool failure. Neither proposes removing the tool (US-049, US-057)."""
+    connection; otherwise a tool failure. A reconnect never proposes removing the tool; a tool
+    failure does only through the removal gate (services.harness_changes, US-057)."""
     calls, failed, reconnect = counts
     reconnects = app not in PLATFORM_APPS and reconnect > 0 and not _fails(failed - reconnect, calls, settings)
     if reconnects:

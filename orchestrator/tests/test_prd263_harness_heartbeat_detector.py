@@ -32,7 +32,8 @@ def _proposals(*rows):
 
 
 def test_the_thresholds_are_the_prd_defaults():
-    assert hc.settings_from_config() == hc.ChangeSettings(heartbeat_min_runs=20, heartbeat_max_met=0.2)
+    assert hc.settings_from_config() == hc.ChangeSettings(
+        heartbeat_min_runs=20, heartbeat_max_met=0.2, min_samples=20, tool_fail_wilson_min=0.5)
 
 
 def test_25_runs_with_an_outcome_and_1_met_propose_twice_the_interval():
