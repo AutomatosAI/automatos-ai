@@ -12,14 +12,14 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { LookProvider, useLook } from '@/components/looks/look-provider'
+import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { MOTION_ATTRIBUTE, MOTION_VAR, lookDocumentVars } from '@/lib/looks/document'
 import { SAVED_SUB, asNewLook } from '@/lib/looks/editor'
 import { DAYLIGHT, DEFAULT_LOOK, OBSIDIAN } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
-import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
@@ -235,7 +235,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     expect(src).toContain('forcedTheme={playTone}')
     expect(src).toContain('<ThemeLookRuntime onToneChange={setPlayTone}>')
     expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
-    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted}>')
+    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {
@@ -252,7 +252,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     ])
     inOrder(readFileSync(LOOK_RUNTIME, 'utf8'), [
       '<AccountLookScope enabled={mounted}>',
-      '<LookProvider onToneChange={onToneChange} enabled={mounted}>',
+      '<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>',
       '</LookProvider>',
       '</AccountLookScope>',
     ])

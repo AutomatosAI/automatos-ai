@@ -9,10 +9,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { PAUSE_AUTO } from '@/components/mascot/mascot-pause-button'
-import { PAUSE_KEY } from '@/lib/mascot/pause'
-import { CLIP_MS } from '@/lib/mascot/player'
+import { AutoMascot } from '../auto-mascot'
+import { PAUSE_AUTO } from '../mascot-pause-button'
+import { PAUSE_KEY } from '../../../lib/mascot/pause'
+import { CLIP_MS } from '../../../lib/mascot/player'
 
 const CHROME =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'

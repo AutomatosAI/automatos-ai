@@ -506,10 +506,10 @@ const PLAY_REGISTRATIONS = 'lib/theme-host/builtin/play-slots.tsx'
  * registers there (its frame, its chat and Deliverables pages, its 404, its route Conversations).
  */
 const SEAM_SLOTS: ReadonlyArray<readonly [string, string, string]> = [
-  ['components/layout/main-layout.tsx', 'components/theme-host/theme-frame-slot.tsx', 'components/play/shell/play-frame-lazy.tsx'],
-  ['app/chat/layout.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/chat/play-chat-lazy.tsx'],
-  ['app/deliverables/layout.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/deliverables/play-shelf-lazy.tsx'],
-  ['app/not-found.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/edges/lost-screen-lazy.tsx'],
+  ['components/layout/main-layout.tsx', 'components/theme-host/theme-frame-slot.tsx', 'lib/theme-host/builtin/play-frame-lazy.tsx'],
+  ['app/chat/layout.tsx', 'components/theme-host/theme-slot.tsx', 'lib/theme-host/builtin/play-chat-lazy.tsx'],
+  ['app/deliverables/layout.tsx', 'components/theme-host/theme-slot.tsx', 'lib/theme-host/builtin/play-shelf-lazy.tsx'],
+  ['app/not-found.tsx', 'components/theme-host/theme-slot.tsx', 'lib/theme-host/builtin/play-lost-screen-lazy.tsx'],
   [THEME_ROUTE_PAGE, 'components/theme-host/theme-slot-route.tsx', 'components/play/conversations/play-conversations-lazy.tsx'],
 ]
 const MODULE_SUFFIXES = ['', '.tsx', '.ts', '/index.tsx', '/index.ts']

@@ -10,6 +10,9 @@
  * A-04c: the theme's own failures are recorded per theme; the third within ten minutes sends the
  * member back to Studio (the server choice, the cookie, the style, a notice that outlives the
  * host's), `auth` never counts, and /safe-mode is safe mode.
+ *
+ * W-A6b (gap G1): the host releases the installed theme's registry entry (the style context's
+ * releaseInstalledTheme) when it cannot run the theme, and holds it while it loads or runs it.
  */
 import React, { useEffect, useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
@@ -29,12 +32,15 @@ const mocks = vi.hoisted(() => ({
   style: { current: 'studio' as string | null },
   loadThemeForStyle: vi.fn(),
   setStyle: vi.fn(),
+  releaseInstalledTheme: vi.fn(),
   putThemeChoice: vi.fn(),
   toast: Object.assign(vi.fn(), { error: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }),
 }))
 
 vi.mock('@/contexts/ui-style-context', () => ({
-  useUiStyleOptional: () => (mocks.style.current === null ? null : { style: mocks.style.current, setStyle: mocks.setStyle }),
+  useUiStyleOptional: () => (mocks.style.current === null
+    ? null
+    : { style: mocks.style.current, setStyle: mocks.setStyle, releaseInstalledTheme: mocks.releaseInstalledTheme }),
 }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { putThemeChoice: mocks.putThemeChoice } }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
@@ -142,6 +148,7 @@ beforeEach(() => {
   mocks.style.current = INSTALLED_STYLE
   mocks.loadThemeForStyle.mockReset()
   mocks.setStyle.mockReset()
+  mocks.releaseInstalledTheme.mockReset()
   mocks.putThemeChoice.mockReset()
   mocks.putThemeChoice.mockResolvedValue({ choice: 'studio', theme: null })
   mocks.toast.mockReset()
@@ -319,6 +326,53 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     unmount()
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(hostStatus()).toBeNull()
+  })
+})
+
+describe("PRD-261 W-A6b — the installed theme's registry entry stands only while the host runs the theme", () => {
+  function lastRelease(): unknown {
+    const calls = mocks.releaseInstalledTheme.mock.calls
+    return calls.length === 0 ? undefined : calls[calls.length - 1][0]
+  }
+
+  it('holds it while the theme loads and once it runs', async () => {
+    const pending = deferred<ThemeLoadResult>()
+    mocks.loadThemeForStyle.mockReturnValue(pending.promise)
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('loading'))
+    expect(mocks.releaseInstalledTheme).toHaveBeenCalledWith(null)
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+    await act(async () => pending.resolve(okResult()))
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(lastRelease()).toBeNull()
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+  })
+
+  it('releases it when the load fails', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: 'load', detail: 'refused' })
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it in safe mode', async () => {
+    window.history.replaceState(null, '', '/agents?safe_mode=themes')
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it when the server names no theme to run for the install', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: null, detail: 'no active install' })
+    render(app())
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('names nothing under a style with no installed theme', async () => {
+    mocks.style.current = 'studio'
+    render(app())
+    await act(async () => undefined)
+    expect(lastRelease()).toBeNull()
   })
 })
 

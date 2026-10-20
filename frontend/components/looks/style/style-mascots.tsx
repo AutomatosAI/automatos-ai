@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 
-import { useLook } from '@/components/looks/look-provider'
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { SHELLS } from '@/lib/looks/catalogue'
-import { mascotSlots } from '@/lib/looks/style'
-import type { Look } from '@/lib/looks/types'
+import { SHELLS } from '../../../lib/looks/catalogue'
+import { mascotSlots } from '../../../lib/looks/style'
+import type { Look } from '../../../lib/looks/types'
+import { AutoMascot } from '../../mascot/auto-mascot'
+import { usePlayLook } from '../use-play-look'
 
 import gallery from './gallery.module.css'
 import styles from './style.module.css'
@@ -29,7 +29,7 @@ export const MASCOT_LABEL = 'Mascot slot · 12 states · ring drawn by the page'
 export const PLAY_STATES = "Play Auto's states"
 
 export function StyleMascots({ look }: { readonly look: Look }) {
-  const { reducedMotion } = useLook()
+  const { reducedMotion } = usePlayLook()
   const [wantsPlay, setWantsPlay] = useState(false)
   const playing = wantsPlay && !reducedMotion
 

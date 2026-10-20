@@ -19,11 +19,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from modules.tools.discovery.owner_only import (
-    CLICKED_BY, OWNER_ONLY_ACTIONS, OWNERS_OWN_DECISION, asks_before_a_send, is_owner_only,
+    CLICKED_BY, OWNER_ONLY_ACTIONS, asks_before_a_send, is_owner_only,
 )
 
 CLICKER = "user:clicker-7"
 CANCEL = "platform_update_task_status"
+# The caller-context key the HARNESS's /approve once set to skip the ask (PRD-263 US-047).
+RETIRED_BYPASS_KEY = "owners_own_decision"
 
 
 # ── The list: Decision D1 ───────────────────────────────────────────────────────────
@@ -176,11 +178,15 @@ def test_an_agent_run_a_playbook_step_or_a_heartbeat_is_unchanged(board, lane):
     board.handler.assert_called_once()
 
 
-def test_the_harness_approve_is_the_admins_own_decision(board):
+def test_no_caller_context_key_skips_the_click(board):
+    """Replaces test_the_harness_approve_is_the_admins_own_decision (PRD-263 US-047,
+    maintainer issue #1150). The HARNESS's /approve set ``owners_own_decision`` so an
+    owner-only change it applied was not asked about; that route and the key are gone,
+    and a person's turn carrying the key now waits for the click like any other."""
     reply = _call(board, {"task_id": board.number, "status": "cancelled"},
-                  {"driving_user_id": "7", OWNERS_OWN_DECISION: True})
-    assert reply["success"] is True
-    board.handler.assert_called_once()
+                  {**_owners_chat(), RETIRED_BYPASS_KEY: True})
+    assert reply["success"] is False and reply["requires_confirmation"] is True and reply["owner_only"] is True
+    board.handler.assert_not_called()
 
 
 def _unworked(board):

@@ -2,8 +2,8 @@
 
 import { type SyntheticEvent, useEffect, useRef, useState } from 'react'
 
-import { atClipBoundary, CLIP_MS, clipBoundary, jumpTo, retarget, startPlayer } from '@/lib/mascot/player'
-import { type MascotName, ONE_SHOTS } from '@/lib/mascot/types'
+import { atClipBoundary, CLIP_MS, clipBoundary, jumpTo, retarget, startPlayer } from '../lib/mascot/player'
+import { type MascotName, ONE_SHOTS } from '../lib/mascot/types'
 
 /**
  * PRD-260 D6 — drives Auto's <video> from the reducer's target state, ported

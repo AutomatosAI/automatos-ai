@@ -1,6 +1,6 @@
 """
-PRD-263 US-023: import the HARNESS history on tenant volumes into harness_runs
-==============================================================================
+PRD-263 US-023, US-059: import the HARNESS history on tenant volumes into harness_runs
+=====================================================================================
 
 Before PRD-263 a HARNESS run kept its outcome in files on the workspace volume:
 ``<WORKSPACE_VOLUME_PATH>/<ws>/harness/baselines/<day>.json`` (one per completed run,
@@ -24,17 +24,26 @@ that is not a workspace id, or names no workspace, is skipped and counted; a
 symbolic link, to a file or to a directory under ``harness/``, is never followed (a
 workspace's tools write to its volume).
 
-It reads files and never writes or deletes one (removing them is US-059, after a
-verified import). It writes nothing unless given ``--apply``; the default is a dry
-run. Output is per-workspace counts; ``--summary-only`` prints totals with no
-workspace id, name or slug, for pasting into a public issue. Run it where the API
-runs (it reads the same volume and database)::
+It never writes a file. ``--remove-files`` (US-059) deletes a workspace's HARNESS
+JSON files, every regular ``*.json`` under its ``harness/`` directory, and only once
+that workspace's import count verifies: every ISO week its files hold has a
+harness_runs row, read again after the import committed. A workspace that does not
+verify keeps its files and is counted; that count must be 0. A file the import
+cannot use holds nothing it could import, so it goes with the rest. A symbolic
+link, and anything under a linked directory, is neither followed nor removed.
+
+It writes and removes nothing unless given ``--apply``; the default is a dry run.
+Output is per-workspace counts; ``--summary-only`` prints totals with no workspace
+id, name or slug, for pasting into a public issue. Run it where the API runs (it
+reads the same volume and database)::
 
     cd orchestrator
     python scripts/harness_backfill_runs.py                       # dry run, per workspace
     python scripts/harness_backfill_runs.py --summary-only        # dry run, totals only
     python scripts/harness_backfill_runs.py --apply               # insert the missing rows
     python scripts/harness_backfill_runs.py --apply --workspace-id <uuid>
+    python scripts/harness_backfill_runs.py --remove-files        # dry run: what would go
+    python scripts/harness_backfill_runs.py --apply --remove-files --summary-only
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ import dataclasses
 import json
 import logging
 import os
+import stat
 import sys
 from datetime import datetime, timedelta, timezone
 from functools import reduce
@@ -71,6 +81,8 @@ HARNESS_DIR = "harness"
 BASELINES_DIR = "baselines"
 BASELINE_LATEST = "baseline_latest.json"
 LAST_RUN = os.path.join("runs", "last_run.json")
+# What --remove-files deletes under a verified workspace's harness directory.
+JSON_SUFFIX = ".json"
 # The statuses last_run.json held (HarnessService._write_last_run before PRD-263).
 LAST_RUN_STATUSES = frozenset({RUN_COMPLETED, RUN_FAILED, RUN_DORMANT_AGENTS, RUN_DORMANT_DATA})
 # The changelog lists a baseline kept, and the counts key each one's length goes under.
@@ -92,13 +104,17 @@ SUFFICIENCY_KEYS = ("active_agents", "min_required_agents", "heartbeat_days_avai
 class Tally:
     """One workspace's outcome. ``weeks`` is the ISO weeks its files hold a run for:
     each is either ``inserted`` (on a dry run, would be) or ``present`` (already in
-    harness_runs), so weeks == inserted + present once a run has gone through."""
+    harness_runs), so weeks == inserted + present once a run has gone through. With
+    --remove-files, ``removed`` is the files deleted (on a dry run, that would be) and
+    ``unverified`` is 1 for a workspace whose import count does not verify."""
 
     files: int = 0
     unusable: int = 0
     weeks: int = 0
     inserted: int = 0
     present: int = 0
+    removed: int = 0
+    unverified: int = 0
 
     def plus(self, other: "Tally") -> "Tally":
         return Tally(*(a + b for a, b in zip(dataclasses.astuple(self), dataclasses.astuple(other))))
@@ -270,6 +286,36 @@ def plan_inserts(rows: Sequence[Dict[str, Any]], recorded: AbstractSet[str]) -> 
     return list(chosen.values())
 
 
+def _raise(error: OSError) -> None:
+    raise error
+
+
+def remove_json_files(harness_dir: Path, apply: bool) -> int:
+    """How many regular ``*.json`` files lie under the harness directory, removed with ``apply``.
+
+    os.fwalk opens each directory without following a link (a linked directory, or a
+    harness directory swapped for a link, is not entered) and the file is checked and
+    unlinked by directory descriptor, so a link swapped in meanwhile cannot send the
+    removal to another workspace's files. A linked file is left alone. A directory
+    that cannot be read stops the run instead of being skipped unseen. A linked
+    directory is pruned before os.fwalk opens it: opening one opens its target, and a
+    target the script cannot read would stop every run.
+    """
+    removed = 0
+    for _path, dirs, names, dir_fd in os.fwalk(harness_dir, onerror=_raise, follow_symlinks=False):
+        # In place, as os.fwalk reads the list back to choose what to descend into.
+        dirs[:] = [name for name in dirs if stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)]
+        for name in names:
+            if not name.endswith(JSON_SUFFIX):
+                continue
+            if not stat.S_ISREG(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+                continue
+            if apply:
+                os.unlink(name, dir_fd=dir_fd)
+            removed += 1
+    return removed
+
+
 # ---------------------------------------------------------------------- the database
 
 
@@ -304,20 +350,34 @@ def _workspace_exists(db: "Session", workspace_id: UUID) -> bool:
     return db.query(Workspace.id).filter(Workspace.id == workspace_id).first() is not None
 
 
-def backfill_workspace(db: "Session", workspace_id: UUID, harness_dir: Path, apply: bool) -> Tally:
-    """Read one workspace's files and, with ``apply``, insert the weeks harness_runs lacks."""
+def _removal(db: "Session", workspace_id: UUID, harness_dir: Path, weeks: AbstractSet[str], apply: bool) -> Tally:
+    """US-059: the workspace's files go (with ``apply``) only when its import count
+    verifies: every week its files hold has a harness_runs row, read again here, after
+    record_imported_runs committed. Otherwise nothing is removed."""
+    if weeks - harness_runs.recorded_windows(db, workspace_id):
+        return Tally(unverified=1)
+    return Tally(removed=remove_json_files(harness_dir, apply))
+
+
+def backfill_workspace(
+    db: "Session", workspace_id: UUID, harness_dir: Path, apply: bool, remove: bool = False
+) -> Tally:
+    """Read one workspace's files and, with ``apply``, insert the weeks harness_runs lacks;
+    with ``remove`` too, then delete its files once the import count verifies."""
     rows, files, unusable = read_workspace_runs(harness_dir)
     recorded = harness_runs.recorded_windows(db, workspace_id)
     to_insert = plan_inserts(rows, recorded)
     if apply and to_insert:
         harness_runs.record_imported_runs(db, workspace_id, to_insert)
     weeks = {row["cur_window"] for row in rows}
-    return Tally(files=files, unusable=unusable, weeks=len(weeks), inserted=len(to_insert),
-                 present=len(weeks & recorded))
+    tally = Tally(files=files, unusable=unusable, weeks=len(weeks), inserted=len(to_insert),
+                  present=len(weeks & recorded))
+    return tally.plus(_removal(db, workspace_id, harness_dir, weeks, apply)) if remove else tally
 
 
 def backfill(
-    session_factory: Callable[[], "Session"], volume: Path, only: Optional[UUID], apply: bool
+    session_factory: Callable[[], "Session"], volume: Path, only: Optional[UUID], apply: bool,
+    remove: bool = False,
 ) -> Tuple[List[Tuple[UUID, Tally]], int]:
     """Each workspace's tally, and how many harness directories name no workspace."""
     dirs, skipped = workspace_dirs(volume, only)
@@ -327,32 +387,45 @@ def backfill(
             if not _workspace_exists(db, workspace_id):
                 skipped += 1
                 continue
-            results.append((workspace_id, backfill_workspace(db, workspace_id, harness_dir, apply)))
+            results.append((workspace_id, backfill_workspace(db, workspace_id, harness_dir, apply, remove)))
     return results, skipped
 
 
 # ---------------------------------------------------------------------- output
 
 
-def _line(label: str, tally: Tally, verb: str) -> str:
-    return (f"{label}: {tally.files} files ({tally.unusable} unusable), {tally.weeks} weeks, "
-            f"{verb} {tally.inserted}, already in harness_runs {tally.present}")
+def _removal_text(tally: Tally, apply: bool, total: bool) -> str:
+    """The --remove-files part of a line: files removed, and whether (in the totals, in
+    how many workspaces) the import count did not verify, so the files were kept."""
+    removed = f", {'removed' if apply else 'would remove'} {tally.removed} JSON files"
+    if total:
+        return removed + f", import count not verified in {tally.unverified} workspaces (files kept)"
+    return removed + (", import count not verified (files kept)" if tally.unverified else "")
 
 
-def report_lines(results: Sequence[Tuple[UUID, Tally]], skipped: int, apply: bool, summary_only: bool) -> List[str]:
+def _line(label: str, tally: Tally, apply: bool, remove: bool, total: bool = False) -> str:
+    line = (f"{label}: {tally.files} files ({tally.unusable} unusable), {tally.weeks} weeks, "
+            f"{'inserted' if apply else 'would insert'} {tally.inserted}, already in harness_runs {tally.present}")
+    return line + (_removal_text(tally, apply, total) if remove else "")
+
+
+def report_lines(
+    results: Sequence[Tuple[UUID, Tally]], skipped: int, apply: bool, summary_only: bool, remove: bool = False
+) -> List[str]:
     """Per-workspace lines (none with ``summary_only``), then the totals, which name no workspace."""
-    verb = "inserted" if apply else "would insert"
-    lines = [] if summary_only else [_line(f"workspace {ws}", tally, verb) for ws, tally in results]
+    lines = [] if summary_only else [_line(f"workspace {ws}", tally, apply, remove) for ws, tally in results]
     total = reduce(Tally.plus, (tally for _ws, tally in results), Tally())
-    lines.append(_line(f"total over {len(results)} workspaces", total, verb))
+    lines.append(_line(f"total over {len(results)} workspaces", total, apply, remove, total=True))
     lines.append(f"skipped {skipped} harness directories that name no workspace")
     if not apply:
-        lines.append("Dry run: nothing was written. Pass --apply to insert the missing weeks.")
+        lines.append("Dry run: nothing was written or removed. Pass --apply to insert the missing weeks"
+                     + (" and remove the files of each workspace whose import verifies." if remove else "."))
     return lines
 
 
 def _args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Import HARNESS run history from tenant volumes (PRD-263 US-023)")
+    parser = argparse.ArgumentParser(
+        description="Import HARNESS run history from tenant volumes, then remove the files (PRD-263 US-023, US-059)")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", dest="apply", action="store_false", help="Count what would be inserted (default)")
     mode.add_argument("--apply", dest="apply", action="store_true", help="Insert the missing weeks")
@@ -360,6 +433,8 @@ def _args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     parser.add_argument("--summary-only", action="store_true",
                         help="Print totals only, with no workspace id (safe for a public issue)")
     parser.add_argument("--workspace-id", type=UUID, default=None, help="Only this workspace (UUID)")
+    parser.add_argument("--remove-files", action="store_true",
+                        help="Delete a workspace's harness/**/*.json once its import count verifies (with --apply)")
     return parser.parse_args(argv)
 
 
@@ -373,8 +448,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from config import config
     from core.database.database import SessionLocal
 
-    results, skipped = backfill(SessionLocal, Path(config.WORKSPACE_VOLUME_PATH), args.workspace_id, args.apply)
-    for line in report_lines(results, skipped, args.apply, args.summary_only):
+    results, skipped = backfill(SessionLocal, Path(config.WORKSPACE_VOLUME_PATH), args.workspace_id, args.apply,
+                                args.remove_files)
+    for line in report_lines(results, skipped, args.apply, args.summary_only, args.remove_files):
         print(line)
     return 0
 

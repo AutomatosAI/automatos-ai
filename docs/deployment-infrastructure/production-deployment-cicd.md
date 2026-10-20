@@ -15,7 +15,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/.importlinter](orchestrator/.importlinter)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_import_contract_present.py](orchestrator/tests/test_import_contract_present.py)
 - [orchestrator/tests/test_no_mem0_residue.py](orchestrator/tests/test_no_mem0_residue.py)
@@ -111,8 +111,8 @@ The codebase utilizes multi-stage Docker builds to ensure development agility an
 
 ### Backend Dockerfile (`orchestrator/Dockerfile`)
 The backend build is split into multiple stages:
-1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and Python packages from `requirements.txt`. This stage is responsible for building wheels and installing `graphifyy[leiden]` if `INSTALL_GRAPH_EXTRAS` is `true` (default for production) [orchestrator/Dockerfile:19-58]().
-2.  **base**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `ghostscript`, `libpango-1.0-0`, `libcairo2`, `libgdk-pixbuf-2.0-0` [orchestrator/Dockerfile:63-81](). It copies the installed Python packages from the `pybuild` stage [orchestrator/Dockerfile:83]().
+1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked (PRD-262 US-022). Production installs the same lock as every other build: the Knowledge Graph's Leiden clustering runs on `graspologic-native`, which the lock pins (PRD-262 US-027) [orchestrator/Dockerfile]().
+2.  **base**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:63-107](). It copies the installed Python packages from the `pybuild` stage [orchestrator/Dockerfile:83]().
 3.  **development**: Includes hot-reload via `--reload` and mounts source code for active development [orchestrator/Dockerfile:91-131]().
 4.  **production**: An optimized stage that copies only necessary application code, creates directories, and sets up the entrypoint for production execution [orchestrator/Dockerfile:136-150]().
 
@@ -230,17 +230,17 @@ This workflow runs the `pytest` suite for the `orchestrator` service.
     - **Coverage Ratchet**: A `python scripts/check_coverage_baseline.py` script enforces a minimum code coverage. The baseline is stored in `orchestrator/.coverage-baseline`. If the measured coverage drops below this baseline, the build fails [.github/workflows/test.yml:135-144]().
 - **NL2SQL Evaluation**: A separate, non-required job runs NL2SQL regression evaluations against an in-memory SQLite database [.github/workflows/test.yml:150-153]().
 
-Sources: [.github/workflows/test.yml:1-166](), [orchestrator/requirements.txt:63-64]()
+Sources: [.github/workflows/test.yml:1-166](), [orchestrator/requirements.in:63-64]()
 
 #### Import Linter (`.github/workflows/import-linter.yml`)
 This workflow enforces architectural boundaries within the Python codebase.
 - **Purpose**: Prevents unintended lateral coupling between feature modules, ensuring the modular monolith architecture is maintained [orchestrator/.importlinter:9-18]().
 - **Configuration**: The `orchestrator/.importlinter` file defines an `independence` contract, specifying that feature modules under `orchestrator/modules/*` should not import each other directly, except through `modules.tools` or the `api` package [orchestrator/.importlinter:28-30]().
 - **Ratchet Mechanism**: Existing lateral imports are explicitly listed in `ignore_imports` to allow the contract to be green initially. Any *new* lateral import will cause the CI check to fail, acting as a ratchet [orchestrator/.importlinter:19-22]().
-- **Implementation**: Uses the `import-linter` tool, pinned in `orchestrator/requirements.txt` [orchestrator/requirements.txt:66-70]().
+- **Implementation**: Uses the `import-linter` tool, pinned in `orchestrator/requirements-dev.txt` with the other test tools, which only CI installs [orchestrator/requirements-dev.txt]().
 - **Tests**: `orchestrator/tests/test_import_contract_present.py` verifies the presence and validity of the `.importlinter` configuration [orchestrator/tests/test_import_contract_present.py:1-84](). `orchestrator/tests/test_no_mem0_residue.py` ensures that old `mem0` service references are completely removed and not reintroduced, locking the "un-split" to an in-process Qdrant solution [orchestrator/tests/test_no_mem0_residue.py:1-78]().
 
-Sources: [.github/workflows/import-linter.yml:1-20](), [orchestrator/.importlinter:1-85](), [orchestrator/requirements.txt:66-70](), [orchestrator/tests/test_import_contract_present.py:1-84](), [orchestrator/tests/test_no_mem0_residue.py:1-78]()
+Sources: [.github/workflows/import-linter.yml:1-20](), [orchestrator/.importlinter:1-85](), [orchestrator/requirements-dev.txt](), [orchestrator/tests/test_import_contract_present.py:1-84](), [orchestrator/tests/test_no_mem0_residue.py:1-78]()
 
 ### Railway Manifest Topology (`infrastructure/railway-manifest.json`)
 The `railway-manifest.json` defines the production deployment topology on Railway.

@@ -17,6 +17,7 @@
 #   assets  the Kokoro files and the music tracks, in the media assets image's layout
 #   kokoro  the model and voices, checked against kokoro/SHA256SUMS; the voices
 #           cut to the catalogue's (PRD-262 US-052)
+#   esbuild the locked esbuild's binary, built from its source with a patched Go
 #   js      Hyperframes and GSAP, `npm ci` from js/package-lock.json
 #   chrome  chrome-headless-shell, built FROM js
 #   py      the Python packages, from requirements.lock with every hash checked;
@@ -95,6 +96,22 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
     && python /build/voices/voices_build.py /build/voices/voices.json voices-v1.0.bin \
     && rm SHA256SUMS
 
+# esbuild's binary, built from the source of the version js/package-lock.json locks.
+# Hyperframes requires esbuild ^0.25.12, and npm's 0.25.12 binary was built with Go
+# 1.23.12, whose standard library carries GO-2026-4337 (crypto/tls, fixed in 1.24.13,
+# 1.25.7 and 1.26) and GO-2026-6612 (net/http, fixed in 1.26.9). No esbuild release
+# is built with Go 1.26.9 or later yet (0.28.2, the newest, ships Go 1.26.5), so the
+# same 0.25.12 source is built here with esbuild's own release flags (its Makefile:
+# no cgo, -trimpath, -s -w, no build id or VCS stamp) on Go's patched 1.26 line,
+# the line esbuild itself builds on. `go install` checks every module against the
+# Go checksum database. The js stage puts the binary where npm put its own and
+# fails the build unless esbuild's JavaScript API accepts it, which it does only
+# when the binary's version is the locked package's.
+FROM golang:1.26.10-trixie@sha256:9ba7dc6d09ebf6e9317263973174bbf44e15bdf58cb0103747d7376f7cfa2d2f AS esbuild
+RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install -trimpath -buildvcs=false \
+        -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.25.12 \
+    && /out/esbuild --version
+
 # Hyperframes pinned EXACTLY (Apache-2.0), and GSAP for each composition's one
 # paused timeline, from js/package-lock.json: `npm ci` installs exactly the locked
 # tree, so Hyperframes' caret-range dependencies are pinned too. playwright-core is
@@ -113,6 +130,11 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
 
 WORKDIR /opt/media-render/js
 COPY js/package.json js/package-lock.json js/prune.txt ./
+COPY --from=esbuild /out/esbuild /tmp/esbuild
+# The esbuild stage's binary replaces the one npm installed for this platform, and
+# esbuild/bin/esbuild is hard-linked to it again, as esbuild's install script links
+# it, so the tree holds one copy. A transform through esbuild's JavaScript API
+# proves the binary starts and carries the locked version.
 # gsap.min.js is staged into every render from /opt/media-render/vendor.
 # PRD-262 #7: then what render, check and snapshot never load goes (about 75 MB):
 # the paths js/prune.txt lists (`rm -r`, so a path a bump moved fails the build),
@@ -120,6 +142,10 @@ COPY js/package.json js/package-lock.json js/prune.txt ./
 # notices, and the .bin links left pointing at nothing. media-render.yml traces
 # Node's module loading through a render, a check and a snapshot to prove it.
 RUN npm ci --omit=dev --no-fund --no-audit \
+    && native="node_modules/@esbuild/linux-$(node -p process.arch)/bin/esbuild" \
+    && cp --remove-destination /tmp/esbuild "$native" \
+    && ln -f "$native" node_modules/esbuild/bin/esbuild \
+    && node -e 'require("esbuild").transformSync("let a = 1")' \
     && mkdir -p /opt/media-render/vendor \
     && cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js \
     && sed -e 's/#.*//' -e '/^[[:space:]]*$/d' prune.txt | (cd node_modules && xargs rm -r --) \

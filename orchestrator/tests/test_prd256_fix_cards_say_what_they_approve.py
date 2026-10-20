@@ -303,16 +303,20 @@ BCC = "x@other.test"
     {"action": "GMAIL_SEND_EMAIL", "parameters": {"recipient_email": SUPPLIER, "subject": "Hi", "bcc": BCC}},
 ], ids=["bcc-beside-params", "under-parameters"])
 def test_a_send_card_lists_a_recipient_passed_beside_params_or_under_parameters(monkeypatch, call):
+    from modules.policy.ai_disclosure import send_notice
     from modules.tools.execution.composio_params import sent_params
 
     reply, stored, tools = _ask_for(monkeypatch, None, call)
+    explicit = "params" if "params" in call else "parameters"
+    told = {**call, explicit: {**call[explicit], "body": send_notice(None)}}   # PRD-264 EUAI-07: the AI line
 
     asked = reply["question_md"].splitlines()
     assert f"- to: {SUPPLIER}" in asked and f"- bcc: {BCC}" in asked
     assert not any(line.startswith("- parameters:") for line in asked)
     assert stored["question_md"] == reply["question_md"] and tools.ran == []    # nothing sent before the click
-    assert stored["params"] == call                                              # the click runs this call...
-    assert sent_params(call) == {"recipient_email": SUPPLIER, "subject": "Hi", "bcc": BCC}   # ...sending what it shows
+    assert stored["params"] == told                                              # the click runs this call...
+    assert sent_params(told) == {"recipient_email": SUPPLIER, "subject": "Hi", "bcc": BCC,   # ...sending what it shows
+                                 "body": send_notice(None)}
 
 
 def test_an_unreadable_recipient_beside_params_is_refused_before_any_grant(monkeypatch):

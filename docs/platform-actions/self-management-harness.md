@@ -52,7 +52,7 @@ Sources:
 1. **Dormancy.** A workspace with fewer than three active agents is `dormant_insufficient_agents`, and the run stops there.
 2. **Collect.** One workspace-bound read of the tables that record each agent's work (Tasks done and failed, model usage, heartbeat outcomes, Mission steps, production tool calls) returns raw weekly counts for the judged week and the weeks before it. An agent with no rows has n = 0, never 0% ([orchestrator/services/harness_metrics.py]()).
 3. **Diagnose.** Each agent and metric is judged against a clean reference: the `HARNESS_REF_DAYS` before the judged week, less weeks already flagged and weeks after a change. Every threshold is a `HARNESS_*` setting in `config.py`, with Benjamini-Hochberg across the run.
-4. **Suggest.** Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". Suggestions are report lines only.
+4. **Suggest.** One registry defines every kind of change HARNESS may suggest ([orchestrator/services/harness_changes.py]()). Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". An enabled heartbeat that rarely met its objective in the judged week (at least `HARNESS_HEARTBEAT_MIN_RUNS` runs with an outcome, and even allowing for chance fewer than `HARNESS_HEARTBEAT_MAX_MET` of them met it; runs that reported nothing to judge are not counted) gets a suggestion to double its interval, up to 1,440 minutes. A suggestion that is invalid, or that names the workspace's Auto, is dropped and its reason kept on the run's row. Suggestions are report lines only.
 5. **Report.** Auto files the audit report ("HARNESS Weekly Org Review — Run #n") in Reports, with the coverage, each agent's verdicts and the suggested changes under "Suggested changes (reported only; nothing was changed)".
 
 ### The four verdicts
@@ -83,7 +83,7 @@ Every run is one `harness_runs` row: its judged week, start and finish, status, 
 - `scheduled_not_run_yet`: no run yet, with `next_scheduled_run`;
 - `completed`: with `iteration_count`, `cur_window`, coverage, convergence, the INSUFFICIENT_DATA, WATCH and REGRESSION counts, `last_run_at` and `artifacts.audit_report`.
 
-History from before PRD-263, kept as JSON files under `<WORKSPACE_VOLUME_PATH>/<ws>/harness`, is imported once by `scripts/harness_backfill_runs.py`, which Gerard runs. It inserts one row per workspace and week that has none, defaults to a dry run (`--apply` writes), never writes or deletes a file, and `--summary-only` prints totals that name no workspace. Imported rows carry no coverage or verdicts: the old loop's judgement is not something DIAGNOSE reads.
+History from before PRD-263, kept as JSON files under `<WORKSPACE_VOLUME_PATH>/<ws>/harness`, is imported once by `scripts/harness_backfill_runs.py`, which Gerard runs. It inserts one row per workspace and week that has none, defaults to a dry run (`--apply` writes), never writes a file, and `--summary-only` prints totals that name no workspace. Imported rows carry no coverage or verdicts: the old loop's judgement is not something DIAGNOSE reads. Once the history is in, `--remove-files` (with `--apply`) deletes each workspace's `harness/` JSON files, and only when that workspace's import count verifies: every ISO week its files hold has a `harness_runs` row, read back after the import. A workspace that does not verify keeps its files and is counted; that count must be 0. Symbolic links are never followed or removed.
 
 ### Status diagram
 
@@ -109,6 +109,7 @@ graph TD
 - **`platform_harness_status`** returns the state above. Auto never calls an unjudged agent stable.
 - **`platform_harness_history`** lists past runs, newest first, from `harness_runs`: the week judged, status, iteration, coverage, convergence, the verdict counts, how many changes each report suggested and how many the run applied itself (0 for every report-only run; a run imported from before PRD-263 shows what the old loop applied).
 - **`platform_harness_trigger`** starts a run now, or says the workspace is disabled.
+- **`platform_harness_apply`** makes one HARNESS change its owner approved on the change's Approvals card, and it is the only HARNESS code that changes an agent setting. It acts only while that approval is granted and unexpired, and only if the setting still reads the value it had when HARNESS proposed the change; otherwise the change's ledger row ends `expired` or `drifted` and nothing changes. A call with no granted approval, from chat or a heartbeat, changes nothing. The change runs as the workspace's Auto, so the hierarchy check, the rate limit and the destructive backstop run on it.
 - **The Weekly HARNESS Review** cadence (opt-in, on Auto's heartbeat) tells Auto to read the status, wait when this week's run has not happened yet (`scheduled_not_run_yet`, or a `cur_window` other than the week it names), pull the audit report and send the owner a short summary: coverage and the INSUFFICIENT_DATA, WATCH and REGRESSION counts. It names no day or time.
 - **The Command Center Self-Learning tile** reads `GET /api/harness/self-learning`: the latest run's status, iteration, coverage and verdict counts, the workspace's mode, and this workspace's production tool calls over the last 7 days. Any member of the workspace may read it; it returns counts only, never grant text. A figure the backend does not have shows "—".
 
@@ -117,10 +118,6 @@ Sources:
 - [orchestrator/modules/tools/discovery/handlers_harness.py]()
 - [orchestrator/core/services/auto_cadence.py]()
 - [orchestrator/api/harness.py]()
-
-## The /approve routes (removed in PRD-263 phase 3)
-
-`POST /api/harness/prescriptions/{rx_id}/approve` and `/reject` remain until PRD-263 phase 3 removes them (US-047). The weekly run files no Task, so they act only on a [HARNESS] Task filed before PRD-263, and only while `HARNESS_SELF_MANAGEMENT_ENABLED` is on (default off).
 
 ## Idle-in-Transaction Prevention
 
