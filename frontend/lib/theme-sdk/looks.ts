@@ -12,8 +12,15 @@
  * Outside a look runtime (Classic, Studio, a theme without looks, an isolated mount) `useLook()`
  * answers `available: false` with no look, `listLooks()` is empty, `exportLook()` is null, and
  * `saveLook()` and `importLook()` refuse in plain words. None of them throws.
+ *
+ * `useLookScope()` (W-A5's seam owner) is whose looks these are: the scope the host's
+ * AccountLookScope provides (components/theme-host/look-scope.ts; the signed-in user in this
+ * workspace, PRD-260 F5), so a theme keeps what it remembers per account in this browser (builtin
+ * Play: its seen Deliverables record) as the host keeps the looks.
  */
 import { useContext } from 'react'
+
+import { useLookScope as useHostLookScope } from '@/components/theme-host/look-scope'
 
 import { currentLookRuntime, LookRuntimeContext } from './internal/look-runtime'
 
@@ -103,4 +110,13 @@ export function exportLook(look: HostLook): HostLookFile | null {
 /** Pasted or read text as a look ready to save (under a fresh id), or why it is refused. Size-checked first. */
 export function importLook(text: string): HostLookResult {
   return currentLookRuntime()?.importLook(text) ?? NOT_AVAILABLE
+}
+
+/**
+ * Whose looks these are: the signed-in user in this workspace, as one opaque string to key what the theme
+ * keeps per account in this browser. Null until the account and the workspace are known (keep nothing
+ * then); outside the host's AccountLookScope (an isolated mount) the host's default scope.
+ */
+export function useLookScope(): string | null {
+  return useHostLookScope()
 }

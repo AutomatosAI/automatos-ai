@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import type { Deliverable } from '@automatos/theme-sdk'
-
-// PRD-261 W-A5 seam item: the scope is the host's (it fills it), and the SDK has no name for it yet
-// (context.useWorkspace carries no user). lib/__tests__/prd261-port-deliverables.test.ts allows
-// exactly this import in exactly this file, and fails when the allowance outlives the import.
-import { useLookScope } from '@/components/theme-host/look-scope'
+import { type Deliverable, useLookScope } from '@automatos/theme-sdk'
 
 import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '../lib/play/seen'
 
@@ -21,7 +16,7 @@ interface ScopedSeen {
  * PRD-260 §4 — Auto celebrates once when Play's shelf shows a Deliverable this
  * account hasn't seen in this browser (lib/play/seen.ts decides what counts as
  * new), ported from Automatos Play's hooks/useCelebrateNew.ts. The record is
- * the signed-in user's in this workspace (F5, useLookScope): nothing is read
+ * the signed-in user's in this workspace (F5, the SDK's useLookScope): nothing is read
  * or remembered until they are known, and another account starts its own.
  * Returns the newest one that set it off, for the caption ("Your report is ready").
  */
