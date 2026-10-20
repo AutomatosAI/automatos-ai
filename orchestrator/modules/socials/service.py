@@ -25,14 +25,13 @@
   checked. So an edit another worker commits mid-request is never approved,
   an approval never lands on copy nobody reviewed, and a stale copy of
   ``review_log`` never overwrites entries another writer committed.
-* **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry
-  in ``sources``. ``approve`` refuses unsourced claims unless the approver
-  overrides, and the override is stored and named in ``review_log``. Wave 1
-  (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``):
-  a claim whose source no longer resolves, a deleted Deliverable say, counts as
-  unsourced, and the approval record names why.
-* **The publish guard.** ``assert_publishable`` passes only an approved or
-  scheduled post whose approval matches its content as it is NOW.
+* **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry in ``sources``. ``approve``
+  refuses unsourced claims unless the approver overrides, and the override is stored and named in
+  ``review_log``. Wave 1 (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``): a
+  claim whose source no longer resolves, a deleted Deliverable say, counts as unsourced, and the approval record names why.
+* **The publish guard.** ``assert_publishable`` passes only an approved or scheduled post
+  whose approval matches its content as it is NOW and whose rendered video shows the
+  AI-generated label as the post sets it (PRD-264 EUAI-08a, ``ai_media.label_mismatch``).
 * **Rendered media (D6).** A finished render writes ``media`` as
   ``{aspect: [file records]}``, each with its Deliverable id and the sha256 of
   its bytes, so the content hash (and an approval) binds to the exact files.
@@ -831,19 +830,19 @@ def approve(
 ) -> SocialPost:
     """needs_approval → approved, bound to the content the approver saw (D6).
 
-    ``content_hash`` is the hash of the version the approver was shown. When the
-    post's content is not that version any more, :class:`StaleContent` (with the
-    current hash) and the post is unchanged. Refuses unsourced claims (D7)
-    unless ``override_unsourced``; an override is stored on the post and names
-    the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the
-    sources the caller found missing from the workspace (S1.4): their claims
-    count as unsourced, and an override records why.
+    ``content_hash`` is the hash of the version the approver was shown; when the post is not that version
+    any more, :class:`StaleContent` (with the current hash) and the post is unchanged. A video whose label
+    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a).
+    Refuses unsourced claims (D7) unless ``override_unsourced``; an override is stored on the post and names
+    the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the sources the caller found
+    missing from the workspace (S1.4): their claims count as unsourced, and an override records why.
     """
     target = _target(post, ACTION_APPROVE)
     comment = _validate_comment(comment, required=False, what="comment")
     current = compute_content_hash(post)
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
+    ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video shows the label as the post sets it
     unsourced = unsourced_claims(post, unresolved_sources)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced, unresolved_sources)
@@ -1058,8 +1057,8 @@ def fail_render(
 
 # ── the publish guard ───────────────────────────────────────────────────────
 def assert_publishable(post: Any) -> None:
-    """Pass only an approved or scheduled post whose approval matches its
-    content as it is NOW. Every publish path calls this first."""
+    """Pass only an approved or scheduled post whose approval matches its content as it is NOW, and
+    whose video shows the AI-generated label as the post sets it (PRD-264). Every publish path calls this first."""
     if post.status not in PUBLISHABLE_STATUSES:
         raise NotPublishable(f"a post that is {post.status} cannot be published")
     approved_hash = getattr(post, "approved_hash", None)
@@ -1067,6 +1066,7 @@ def assert_publishable(post: Any) -> None:
         raise NotPublishable("the post has no approval")
     if approved_hash != getattr(post, "content_hash", None) or approved_hash != compute_content_hash(post):
         raise NotPublishable("the content changed after it was approved")
+    ai_media.assert_label_rendered(post)  # EUAI-08a: approved before the label was switched, or rendered before it existed
 
 
 # ── the write guard ─────────────────────────────────────────────────────────

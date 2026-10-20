@@ -47,9 +47,11 @@ env = harness.env
 SHA = "c" * 64
 RENDERED = {"9:16": [{"deliverable_id": "d-video-1", "name": "video-9x16.mp4", "sha256": SHA, "bytes": 99,
                       "content_type": "video/mp4"}]}
-SPOKE_ONLY = {"footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [SHA]}
+# PRD-264 EUAI-08a: a render of AI media burned the AI-generated label in (on by default), or the
+# video is not published (test_prd264_euai08a_label_guard.py); one of the person's own files needs none.
+SPOKE_ONLY = {"footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [SHA], "labelled": True}
 OWN_FILES_ONLY = {"footage": [], "stills": [], "own": ["photo"], "voice": None, "files": [SHA]}
-AI_FOOTAGE = {"footage": ["hook"], "stills": [], "own": [], "voice": "kokoro", "files": [SHA]}
+AI_FOOTAGE = {"footage": ["hook"], "stills": [], "own": [], "voice": "kokoro", "files": [SHA], "labelled": True}
 YOUTUBE_SCHEMA = {"title", "description", "categoryId", "privacyStatus", "tags", "videoFilePath"}
 STUDIO = "Set 'Altered or synthetic content' in YouTube Studio for this video."
 WHAT = "AI footage and a synthetic voice (Kokoro)"

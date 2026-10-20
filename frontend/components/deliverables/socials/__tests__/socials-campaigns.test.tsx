@@ -243,6 +243,7 @@ describe('why a series approval left a post', () => {
     expect(SERIES_LEFT_LABELS).toEqual({
       changed: 'Changed since you saw it', unsourced: 'Unsourced claims to confirm', not_waiting: 'Not waiting for approval',
       not_in_campaign: 'Not in this campaign', not_shown: 'Not shown to you', not_in_batch: 'Not in this batch',
+      render_again: 'Render the video again',
     })
   })
 })

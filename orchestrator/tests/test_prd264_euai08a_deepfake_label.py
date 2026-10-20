@@ -324,7 +324,7 @@ def test_the_receipt_shows_the_setting():
     assert off["line"] == f"{name}: off for this post. You are responsible for disclosing deep fakes."
     assert off["reason"] == "You are responsible for disclosing deep fakes."
     stale = deepfake_label.summary(_post_of(log=[_switched(False)]), True, True)
-    assert stale["line"].endswith("The video was rendered with the label on: render it again before it is approved.")
+    assert stale["line"].endswith("The video was rendered with the label on: render it again before it is approved or published.")
 
     targets = [SimpleNamespace(id=uuid.uuid4(), toolkit="twitter", post_kind="text", options={}, action_plan={})]
     answer = ai_media.labels_for(_post_of(targets=targets))

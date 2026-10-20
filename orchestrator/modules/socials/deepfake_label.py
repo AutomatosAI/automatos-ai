@@ -21,7 +21,9 @@ as any content edit does. A post nobody set hashes as before.
   its first ``SOCIALS_AI_LABEL_SECONDS`` and again every
   ``SOCIALS_AI_LABEL_INTERVAL_SECONDS``: media-render burns it in
   (``services/media-render/media_render/ai_label.py``). The render record keeps whether it
-  did (``ai_media.render_record``). A still and a carousel carry the caption label only;
+  did (``ai_media.render_record``); a video whose label disagrees with the setting is neither
+  approved nor published until it is rendered again (``ai_media.label_mismatch``). A still
+  and a carousel carry the caption label only;
 * every channel's caption starts with "AI-generated." in the post's language
   (:data:`CAPTION_LABELS`, :func:`caption_for`), fitted to the channel's limit
   (``copy_limits``) so the label is never the part cut off;
@@ -94,7 +96,7 @@ AUDIO_ONLY_FORMATS: FrozenSet[str] = frozenset({"audio"})
 ON_LINE = '{name}: on. The caption starts with "{label}".'
 OFF_LINE = "{name}: off for this post. You are responsible for disclosing deep fakes."
 VIDEO_LINE = ' The video shows "{text}" for its first {seconds:g} s and again every {interval:g} s.'
-RENDER_AGAIN = " The video was rendered with the label {was}: render it again before it is approved."
+RENDER_AGAIN = " The video was rendered with the label {was}: render it again before it is approved or published."
 
 
 def _service() -> Any:
@@ -257,12 +259,11 @@ def with_label(bundle: Mapping[str, Any], post: Any) -> Dict[str, Any]:
 
 # ── the receipt ─────────────────────────────────────────────────────────────
 def _video_note(post: Any, on: bool, labelled: Optional[bool]) -> str:
-    """The receipt's word on a video: what it shows, or that its render disagrees with the setting."""
-    if getattr(post, "format", None) != VIDEO_FORMAT:
-        return ""
+    """The receipt's word on a video: that its render disagrees with the setting (``labelled``:
+    whether the rendered video shows the label, ``None`` when there is none), or what it shows."""
     if labelled is not None and labelled != on:
         return RENDER_AGAIN.format(was="on" if labelled else "off")
-    if not on:
+    if getattr(post, "format", None) != VIDEO_FORMAT or not on:
         return ""
     text = video_label(channel_copy(getattr(post, "copy", None), ""))
     return VIDEO_LINE.format(
@@ -272,8 +273,8 @@ def _video_note(post: Any, on: bool, labelled: Optional[bool]) -> str:
 
 def summary(post: Any, carries: bool, labelled: Optional[bool] = None) -> Dict[str, Any]:
     """The setting as the composer and the receipt show it. ``carries``: the post carries AI
-    media (the default); ``labelled``: whether its last render burned the label in (``None``:
-    no render record says)."""
+    media (the default); ``labelled``: whether its rendered video shows the label (``None``: it
+    carries no rendered video; ``ai_media.burned_label``)."""
     setting = setting_of(post)
     on = is_on(setting, carries)
     label = caption_label(channel_copy(getattr(post, "copy", None), ""))

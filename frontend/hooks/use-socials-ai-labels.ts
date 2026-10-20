@@ -59,7 +59,7 @@ export interface SocialPostDeepfakeLabel {
   label: string
   /** Why switching it off is the customer's call. */
   reason: string
-  /** Whether the post's last render burned the label into its video; null when no render says. */
+  /** Whether the post's rendered video shows the label (a render from before the label counts as none); null when it carries no rendered video. */
   video_labelled: boolean | null
   /** The setting as the receipt states it. */
   line: string

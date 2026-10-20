@@ -45,7 +45,10 @@ there. media-render marks each file it makes from it (IPTC DigitalSourceType in 
 the post carries AI media. The render record keeps whether the render burned it into the
 video (``labelled``); a caption channel's receipt says the caption label was added while
 it is on, and asks the person to add it while it is off; the AI-labels answer carries the
-setting (``deepfake_label.summary``).
+setting (``deepfake_label.summary``). A rendered video whose burned-in label disagrees with
+the post's label (switched after the render, or rendered before ``labelled`` existed, which
+counts as no label) is neither approved nor published until it is rendered again
+(:func:`label_mismatch`, read by ``service.approve`` and every publish guard).
 
 Pure: no database, no Composio.
 """
@@ -67,8 +70,14 @@ LABEL = "ai_label"  # a target's action_plan key: the AI label line its last pub
 RENDER_DONE = "render_done"  # service.ACTION_RENDER_DONE (the service imports this module)
 VIDEO_FORMAT = "video"  # a post's format whose render speaks its script
 IMAGE_TYPE = "image/"
+VIDEO_TYPE = "video/"  # a rendered file record's content_type when the file is a video
 FOOTAGE, STILLS, OWN, VOICE, FILES = "footage", "stills", "own", "voice", "files"
 LABELLED = "labelled"  # the render record's: the render burned the AI-generated label in (EUAI-08a)
+# PRD-264 EUAI-08a: why a video whose burned-in label disagrees with the post's label is not approved or published.
+LABEL_MISMATCH = (
+    "This video was rendered with the AI-generated label {was}, and the post's label is {now}: "
+    "render it again before it is approved or published."
+)
 INPUTS = AI_INPUTS  # a render bundle's key: which inputs are AI-made (media-render's bundle.py)
 
 # How each channel shows a post's AI label through Composio (the schemas above).
@@ -347,14 +356,51 @@ def _render_record_of(post: Any) -> Optional[Mapping[str, Any]]:
     return _record_for(getattr(post, "review_log", None), carried) if carried else None
 
 
+def _has_video(media: Any) -> bool:
+    """Whether ``media`` (``{aspect: [records]}``) holds a rendered video file."""
+    groups = media.values() if isinstance(media, Mapping) else ()
+    return any(
+        isinstance(record, Mapping) and str(record.get("content_type") or "").startswith(VIDEO_TYPE)
+        for records in groups if isinstance(records, (list, tuple)) for record in records
+    )
+
+
+def burned_label(post: Any) -> Optional[bool]:
+    """Whether the post's rendered video shows the AI-generated label (PRD-264 EUAI-08a), by the
+    render record of the files it carries; ``None`` when it carries no rendered video. A record
+    that does not say (a render from before the label existed, or before the record did) shows none."""
+    if not _has_video(getattr(post, "media", None)):
+        return None
+    record = _render_record_of(post)
+    return record is not None and record.get(LABELLED) is True
+
+
+def label_mismatch(post: Any) -> Optional[str]:
+    """Why the post's rendered video can't be approved or published as it is: it shows the
+    AI-generated label while the post's label is off, or shows none while it is on (the label
+    publish reads, ``publish_sources.context_for``). ``None`` when they agree, or with no video."""
+    burned = burned_label(post)
+    if burned is None:
+        return None
+    on = deepfake_label.is_on(deepfake_label.setting_of(post), for_post(post).carries)
+    if burned == on:
+        return None
+    return LABEL_MISMATCH.format(was="on" if burned else "off", now="on" if on else "off")
+
+
+def assert_label_rendered(post: Any) -> None:
+    """``service.NotPublishable`` with :func:`label_mismatch`'s reason: the video is rendered again first."""
+    reason = label_mismatch(post)
+    if reason is not None:
+        raise _service().NotPublishable(reason)
+
+
 def labels_for(post: Any) -> Dict[str, Any]:
     """The post's AI media, its AI-generated label setting (PRD-264 EUAI-08a,
     ``deepfake_label.summary``) and each target's AI label: the line its publish used, for
     a target a publish attempt ran, else the line its publish will use."""
     ai = for_post(post)
-    record = _render_record_of(post)
-    labelled = record.get(LABELLED) if record is not None and isinstance(record.get(LABELLED), bool) else None
-    setting = deepfake_label.summary(post, ai.carries, labelled)
+    setting = deepfake_label.summary(post, ai.carries, burned_label(post))
     targets = sorted(getattr(post, "targets", None) or (), key=lambda t: (t.toolkit, t.post_kind))
     return {
         "ai_media": ai.to_dict(), "deepfake_label": setting,
