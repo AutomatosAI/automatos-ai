@@ -191,7 +191,8 @@ def store_theme_signature(
     package_id: UUID, body: SignatureBody,
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Store the Ed25519 signature the kit's sign workflow returned (not verified until C-05)."""
+    """Store the Ed25519 signature the kit's sign workflow returned, once an active Automatos key
+    verifies it (``signature_verify``, C-05b); otherwise 400 and nothing is stored."""
     _require_admin(ctx)
     actor = resolve_user_pk(db, ctx)
     return _run(db, lambda: review.sign(db, package_id, body.requestId, body.signature, actor), commit=True)

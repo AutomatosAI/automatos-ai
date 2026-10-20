@@ -12,11 +12,18 @@ with the REAL workspace-permission gate (only the caller's workspace role is stu
 * the detail carries previews per preset, publisher, version, ``uses`` and the versions map,
   and install takes the newest version this host can run;
 * install answers the same install again (200), refuses another version or a private upload
-  of the theme (409), and is gated by manage, "who may install", the switch and step-up.
+  of the theme (409), and is gated by manage, "who may install", the switch and step-up;
+* (C-05b, QB-21) ``publisher.official`` is true only for a reserved publisher whose shown
+  version's signature an active key verifies (the keys path points at an RFC 8032 public key,
+  whose published seed signs here); a local operator's own approval of ``automatos/x`` is never
+  Official; the card, the detail and every versions-map entry carry ``signature {state, keyId}``.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import inspect
+import json
 import os
 import sys
 import time
@@ -25,6 +32,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -48,7 +56,8 @@ import api.themes_install as install_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 import services.themes.listings as listings_mod  # noqa: E402
-from services.themes import review  # noqa: E402
+from services.themes import review, signature_verify, signing  # noqa: E402
+from services.themes.digest import package_digest  # noqa: E402
 from services.themes.listing_updates import offer_listed_update  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import step_up  # noqa: E402
@@ -82,6 +91,9 @@ FUTURE_ENGINES = {"automatos": "^2.0.0", "sdk": "^1.0.0"}
 PRESETS = ("ember", "ember-dark")
 PREVIEWS = ("assets/previews/ember.png", "assets/previews/ember-chat.png",
             "assets/previews/ember-dark-chat.png", "assets/previews/team.png")
+VECTOR = json.loads((_ORCH / "tests" / "fixtures" / "themes" / "signing-vector.json").read_text(encoding="utf-8"))
+RFC_KEY, OTHER_RFC_KEY = VECTOR["ed25519"]["cases"][:2]
+UNSIGNED = {"state": "unsigned", "keyId": None}
 
 
 def _ctx(workspace_id=WS_A, fva=(1, -1)):
@@ -374,7 +386,8 @@ def test_the_detail_shows_previews_per_preset_publisher_uses_and_versions(api):
     detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}").json()
     assert detail["listingId"] == PLAY_LISTING and detail["themeId"] == PLAY
     assert detail["version"] == "1.1.0" and detail["packageId"] == str(newer.id) and detail["latest"] == "1.1.0"
-    assert detail["publisher"] == {"name": "automatos", "official": True}
+    assert detail["publisher"] == {"name": "automatos", "official": False}  # reserved, but unsigned (QB-21)
+    assert detail["signature"] == UNSIGNED and detail["versions"]["1.0.0"]["signature"] == UNSIGNED
     assert detail["uses"] == ["chat", "looks"] and detail["pricing"] == "Pro" and detail["compatible"] is True
     url = lambda path: module_url(newer.digest, path)  # noqa: E731
     assert detail["presets"] == [
@@ -398,6 +411,116 @@ def test_an_unclaimed_publisher_is_not_official_and_the_price_label_defaults_to_
     card = _listings(api)["acme.ink"]
     assert card["publisher"] == {"name": "acme", "official": False}
     assert card["pricing"] == listings_mod.FREE_LABEL
+
+
+# ---------------------------------------------------------------------------
+# Official needs a verified signature (C-05b, QB-21)
+# ---------------------------------------------------------------------------
+
+
+def _keys(monkeypatch, tmp_path, status="active"):
+    """Point the verifier at a keys file holding the RFC 8032 TEST 1 public key."""
+    entry = {"keyId": RFC_KEY["keyId"], "spki": RFC_KEY["spki"], "status": status, "added": "2026-10-20"}
+    path = tmp_path / f"signing-keys-{status}.json"
+    path.write_text(json.dumps({"schema": 1, "keys": [entry]}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", path)
+    return RFC_KEY["keyId"]
+
+
+def _signable(db, version="1.0.0", theme_id=PLAY, **extra):
+    """A version whose file hashes add up to its digest, so it can be signed (and approved)."""
+    row = _package(db, version, theme_id, **extra)
+    entry = {**row.file_manifest["dist/entry.js"], "sha256": hashlib.sha256(f"{theme_id}@{version}".encode()).hexdigest()}
+    row.file_manifest = {**row.file_manifest, "dist/entry.js": entry}
+    row.digest = package_digest({path: item["sha256"] for path, item in row.file_manifest.items()})
+    db.commit()
+    return row
+
+
+def _sign(db, package, case=None):
+    """Store the RFC seed's signature of the version's canonical text, as the paste route stores it."""
+    seed = Ed25519PrivateKey.from_private_bytes(bytes.fromhex((case or RFC_KEY)["seed"]))
+    text = signing.canonical_text(signing.signing_payload(package))
+    package.signature = base64.b64encode(seed.sign(text.encode("ascii"))).decode("ascii")
+    db.commit()
+
+
+def test_a_reserved_publisher_is_official_only_while_the_shown_version_verifies(api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
+    signed = _signable(api.db, "1.0.0")
+    _sign(api.db, signed)
+    verified = {"state": "verified", "keyId": key_id}
+    card = _listings(api)[PLAY_LISTING]
+    assert card["publisher"] == {"name": "automatos", "official": True} and card["signature"] == verified
+    detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}").json()
+    assert detail["publisher"]["official"] is True and detail["signature"] == verified
+    assert detail["versions"]["1.0.0"]["signature"] == verified
+
+    _signable(api.db, "1.1.0")  # newer and unsigned: the card shows it, so it isn't Official
+    detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}").json()
+    assert detail["version"] == "1.1.0" and detail["publisher"]["official"] is False
+    assert detail["signature"] == UNSIGNED
+    assert {v: e["signature"]["state"] for v, e in detail["versions"].items()} == {"1.0.0": "verified", "1.1.0": "unsigned"}
+
+
+@pytest.mark.parametrize("why", ["another key", "retired key", "revoked key", "tampered files"])
+def test_a_signature_that_does_not_verify_is_never_official(api, monkeypatch, tmp_path, why):
+    _keys(monkeypatch, tmp_path)
+    play = _signable(api.db)
+    _sign(api.db, play, OTHER_RFC_KEY if why == "another key" else None)
+    key_out_of_use = why in ("retired key", "revoked key")
+    if key_out_of_use:
+        _keys(monkeypatch, tmp_path, status=why.split()[0])
+    if why == "tampered files":
+        play.file_manifest = {**play.file_manifest, "README.md": _file("99")}
+        api.db.commit()
+    card = _listings(api)[PLAY_LISTING]
+    assert card["publisher"]["official"] is False and card["signature"]["state"] == "invalid"
+    assert card["signature"]["keyId"] == (RFC_KEY["keyId"] if key_out_of_use else None)  # the key that signed
+
+
+def test_a_publisher_marked_reserved_needs_the_signature_too_and_an_unreserved_one_never_is_official(
+        api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
+    api.db.add(ThemePublisher(publisher="acme", owner_user_id=None, reserved=True))
+    api.db.commit()
+    ink = _signable(api.db, theme_id="acme/ink")
+    assert _listings(api)["acme.ink"]["publisher"] == {"name": "acme", "official": False}
+    _sign(api.db, ink)
+    assert _listings(api)["acme.ink"]["publisher"] == {"name": "acme", "official": True}
+    nib = _signable(api.db, theme_id="nibco/nib")
+    _sign(api.db, nib)
+    card = _listings(api)["nibco.nib"]
+    assert card["publisher"] == {"name": "nibco", "official": False}
+    assert card["signature"] == {"state": "verified", "keyId": key_id}
+
+
+def test_a_keys_file_that_does_not_load_fails_closed_and_the_listings_still_answer(api, monkeypatch, tmp_path):
+    _keys(monkeypatch, tmp_path)
+    play = _signable(api.db)
+    _sign(api.db, play)
+    assert _listings(api)[PLAY_LISTING]["publisher"]["official"] is True
+    broken = tmp_path / "signing-keys-broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    card = _listings(api)[PLAY_LISTING]  # 200, not a 500 for every workspace
+    assert card["publisher"]["official"] is False and card["signature"] == {"state": "invalid", "keyId": None}
+    detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["publisher"]["official"] is False
+    assert detail.json()["versions"]["1.0.0"]["signature"]["state"] == "invalid"
+
+
+def test_a_local_operator_who_approves_automatos_x_unsigned_is_not_official(api, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    submitted = _signable(api.db, theme_id="automatos/x", status="pending")  # as the operator's submission is
+    approved = review.approve(api.db, submitted.id, OPERATOR_PK)  # the local edition needs no isolated job
+    api.db.commit()
+    assert approved["status"] == "approved" and approved["signatureRequest"]["requestId"]
+    card = _listings(api)["automatos.x"]
+    assert card["publisher"] == {"name": "automatos", "official": False} and card["signature"] == UNSIGNED
+    detail = api.client.get("/api/marketplace/themes/automatos.x").json()
+    assert detail["publisher"]["official"] is False and detail["versions"]["1.0.0"]["signature"] == UNSIGNED
 
 
 def test_install_takes_the_newest_version_this_host_runs(api):
