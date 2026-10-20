@@ -2,17 +2,19 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
+import { useLookScope } from '@/components/looks/look-scope'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
 import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
-import { BUILTIN_PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
-import { clearPlayToneCookie, toneOfGround, writePlayToneCookie, type PlayTone } from '@/lib/looks/tone'
+import { toneOfGround, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
-import { useLookScope } from './look-scope'
-import { useLookStore, type LookStore } from './use-look-store'
+import { BUILTIN_PLAY_HTML_CLASS } from './play-entry'
+import { LookRuntimeBridge } from './play-look-bridge'
+import { useLookStore, type LookStore } from './play-look-store'
+import { clearPlayToneCookie, writePlayToneCookie } from './play-tone-cookie'
 
 /**
  * PRD-260 K3, K4 — the active look for the whole app, applied only while the
@@ -33,7 +35,14 @@ import { useLookStore, type LookStore } from './use-look-store'
  * (useLookScope, from account-look-scope.tsx); another account in this
  * browser reads its own, and under Play the pre-paint script is pointed at
  * this account's active look for the next page load. M25: a change made in
- * another tab arrives here (use-look-store.ts), and the tone follows it.
+ * another tab arrives here (./play-look-store.ts), and the tone follows it.
+ *
+ * PRD-261 A-13c, A-14d: this is the host's look runtime (PA-9), mounted by
+ * ThemeLookRuntime (components/theme-host/theme-look-runtime.tsx); it lives
+ * with builtin Play's registrations, out of Play's folders, since it reads the
+ * host's style and storage. It hands itself to the SDK's `looks` area
+ * (./play-look-bridge.tsx) for everything below it, which is how Play's look
+ * editor reads it (components/looks/use-play-look.ts).
  */
 
 export interface LookContextValue extends Omit<LookStore, 'scope'> {
@@ -163,5 +172,11 @@ export function LookProvider({ children, storage = browserStorage, onToneChange,
     [look, saved, loaded, persisted, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook],
   )
 
-  return <LookContext.Provider value={value}>{children}</LookContext.Provider>
+  return (
+    <LookContext.Provider value={value}>
+      <LookRuntimeBridge value={value} enabled={enabled}>
+        {children}
+      </LookRuntimeBridge>
+    </LookContext.Provider>
+  )
 }

@@ -15,7 +15,7 @@ import type { Look } from './types'
  * PRD-261 A-09b: the looks also belong to one theme (`themeId`, the id the
  * server keeps them under), and `served` takes the server's copy: the server
  * is the truth, but never over a change the user made since the last read,
- * which the store sends to the server instead (use-look-store.ts).
+ * which the store sends to the server instead (lib/theme-host/builtin/play-look-store.ts).
  */
 
 export interface LookState {

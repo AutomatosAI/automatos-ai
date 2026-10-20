@@ -14,7 +14,7 @@ import type { Look } from './types'
  * Play's are its PRD-260 keys (lib/theme-host/builtin/play-look-keys.ts), the
  * default here, so no existing look moves before A-18. The server keeps the
  * looks (GET/PUT /api/themes/looks/{themeId}); this copy is its write-through
- * cache (components/looks/use-look-store.ts), and what Play runs on when the
+ * cache (lib/theme-host/builtin/play-look-store.ts), and what Play runs on when the
  * server can't be reached. localStorage may be missing, blocked or full: then
  * Play runs in Ember, nothing is kept, and the read and write helpers say so
  * (StoredLooks.persisted, the writes' boolean) so the Looks page can tell the
