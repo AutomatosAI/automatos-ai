@@ -123,6 +123,17 @@ CAP_SETTINGS: Dict[str, CapSetting] = {
     "clip": CapSetting("THEME_MAX_CLIP_KB", 1024, KB),
 }
 
+# PRD-261 A-19c (host 1.1.0, plan §2.2.3): boot/prepaint.json may carry a tone rule under this key,
+# {"knob": <a choice knob of the table>, "values": {<every choice of it>: "light" | "dark"}}, so a
+# generic look runtime sets a look's tone from data (css_value.py checks it; css-value.ts is its twin).
+TONE_RULE_KEY = "tone"
+TONE_RULE_FIELDS: Tuple[str, ...] = ("knob", "values")
+TONE_RULE_TONES: Tuple[str, ...] = ("light", "dark")
+# The running boot's looks (serve.py boot_looks): at most this many presets, each file at most
+# BOOT_PRESET_MAX_BYTES (4 KB). frontend/lib/theme-host/boot-sanitize.ts holds the same two numbers.
+BOOT_PRESETS_MAX = 12
+BOOT_PRESET_MAX_BYTES = 4096
+
 # ---------------------------------------------------------------------------
 # The error shape every check returns
 # ---------------------------------------------------------------------------

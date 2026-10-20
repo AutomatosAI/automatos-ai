@@ -10,7 +10,15 @@
  * expression() and no ';', '{', '}', quote, '<', '!' or '@' can reach a declaration.
  *
  * An installed theme's registry entry data (W-A6b) passes installed-entry.ts's own check.
+ *
+ * PRD-261 A-19c (host 1.1.0): a prepaint table's tone rule is kept only when it names a choice
+ * knob of what is left of the table and gives every one of its choices 'light' or 'dark' (else
+ * the rule alone is dropped); the boot's presets (`looks`) are kept at most BOOT_PRESETS_MAX, each
+ * a flat look document of at most BOOT_PRESET_MAX_BYTES with a look id, the default first. The
+ * server checked both already (css_value.py, serve.py boot_looks); this gate never trusts it.
  */
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
+
 import { HTML_CLASS_PATTERN } from './constants'
 import { sanitizeIntegrity } from './import-map'
 import { sanitizeInstalledEntry } from './installed-entry'
@@ -20,8 +28,11 @@ import type {
   PrepaintPair,
   PrepaintPairTable,
   PrepaintTable,
+  PrepaintToneRule,
   PrepaintVars,
   ThemeBoot,
+  ThemeBootLooks,
+  ThemeBootPreset,
   ThemeLookGuard,
   ThemeLookStorage,
   ThemeTone,
@@ -51,6 +62,13 @@ const GUARD_MAX_LENGTH = 128
 /** Caps are alphas. */
 const CAP_MIN = 0
 const CAP_MAX = 1
+/**
+ * contract.py BOOT_PRESETS_MAX and BOOT_PRESET_MAX_BYTES (validator-parity.test.ts holds them
+ * equal). A preset is measured here as its JSON text's length, which is never more than the
+ * file's bytes, so the browser is never stricter than the server.
+ */
+export const BOOT_PRESETS_MAX = 12
+export const BOOT_PRESET_MAX_BYTES = 4096
 
 type UnknownRecord = Readonly<Record<string, unknown>>
 
@@ -176,6 +194,26 @@ function sanitizeDefaults(defaults: unknown): Readonly<Record<string, string | n
   )
 }
 
+/**
+ * A tone rule over what is left of the table: its knob a choice knob (never a numeric rule's) and
+ * every one of that knob's choices given 'light' or 'dark'; null otherwise. Only the knob's own
+ * choices are kept.
+ */
+export function sanitizeToneRule(rule: unknown, table: PrepaintTable): PrepaintToneRule | null {
+  if (!isRecord(rule)) return null
+  const knob = rule.knob
+  const values = rule.values
+  if (typeof knob !== 'string' || !isRecord(values) || !hasKey(table.knobs, knob)) return null
+  if (table.numeric.some((numeric) => numeric.knob === knob)) return null
+  const choices = Object.keys(table.knobs[knob])
+  const mapped = choices.flatMap((choice): [string, ThemeTone][] => {
+    const tone = hasKey(values, choice) ? parseThemeTone(values[choice]) : null
+    return tone === null ? [] : [[choice, tone]]
+  })
+  if (choices.length === 0 || mapped.length !== choices.length) return null
+  return { knob, values: Object.fromEntries(mapped) }
+}
+
 export function sanitizePrepaint(prepaint: unknown): PrepaintTable | null {
   if (!isRecord(prepaint)) return null
   const knobs = Object.fromEntries(
@@ -190,39 +228,39 @@ export function sanitizePrepaint(prepaint: unknown): PrepaintTable | null {
     numeric: list(prepaint.numeric).map(sanitizeNumericRule).filter((rule): rule is PrepaintNumericRule => rule !== null),
     defaults: sanitizeDefaults(prepaint.defaults),
   }
-  return lookFitsPrepaint(table, table.defaults) ? table : null
+  if (!lookFitsPrepaint(table, table.defaults)) return null
+  const tone = sanitizeToneRule(prepaint.tone, table)
+  return tone === null ? table : { ...table, tone }
 }
 
-export function sanitizeLookStorage(storage: unknown): ThemeLookStorage | null {
-  if (!isRecord(storage)) return null
-  const { pointerKey, scopedPrefix, fallbackKey } = storage
-  const isKey = (key: unknown): key is string => typeof key === 'string' && STORAGE_KEY.test(key)
-  return isKey(pointerKey) && isKey(scopedPrefix) && isKey(fallbackKey) ? { pointerKey, scopedPrefix, fallbackKey } : null
+function isPresetEntry(entry: [string, unknown]): entry is [string, string | number] {
+  return typeof entry[1] === 'string' || isFiniteNumber(entry[1])
 }
 
-export function sanitizeLookGuard(guard: unknown): ThemeLookGuard | null {
-  if (!isRecord(guard)) return null
-  const { schema, iface } = guard
-  const fits = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= GUARD_MAX_LENGTH
-  return fits(schema) && fits(iface) ? { schema, iface } : null
+/** One preset: a flat look document (text and numbers only) with a look id, within the size cap; a copy. */
+function sanitizePreset(preset: unknown): ThemeBootPreset | null {
+  if (!isRecord(preset)) return null
+  const id = preset.id
+  if (typeof id !== 'string' || !LOOK_ID_PATTERN.test(id)) return null
+  const entries = Object.entries(preset)
+  const kept = entries.filter(isPresetEntry)
+  if (kept.length !== entries.length || JSON.stringify(preset).length > BOOT_PRESET_MAX_BYTES) return null
+  return Object.freeze(Object.fromEntries(kept))
 }
 
-const TONE_POLICIES: readonly ThemeTonePolicy[] = ['from-look', 'user', 'light', 'dark']
-const TONES: readonly ThemeTone[] = ['light', 'dark']
-/** A boot whose tone is not one of the above leaves the tone to the user. */
-const FALLBACK_TONE: ThemeBoot['tone'] = { policy: 'user', value: null }
-
-/** A tone, strictly: 'light' or 'dark', anything else → none. */
-export function parseThemeTone(value: unknown): ThemeTone | null {
-  return TONES.find((tone) => tone === value) ?? null
-}
-
-/** The tone as a strict pair: a known policy, and 'light', 'dark' or null. */
-export function sanitizeTone(tone: unknown): ThemeBoot['tone'] {
-  if (!isRecord(tone)) return FALLBACK_TONE
-  const policy = TONE_POLICIES.find((known) => known === tone.policy)
-  if (policy === undefined) return FALLBACK_TONE
-  return { policy, value: parseThemeTone(tone.value) }
+/**
+ * The boot's presets (A-19c): of the first BOOT_PRESETS_MAX, the ones that pass, each id once;
+ * null when none passes or the default look is not the first of them (the server puts it first).
+ */
+export function sanitizeBootLooks(looks: unknown): ThemeBootLooks | null {
+  if (!isRecord(looks)) return null
+  const list = looks.presets
+  const defaultLook = looks.defaultLook
+  if (!Array.isArray(list) || typeof defaultLook !== 'string') return null
+  const passed = list.slice(0, BOOT_PRESETS_MAX).map(sanitizePreset).filter((preset): preset is ThemeBootPreset => preset !== null)
+  const presets = passed.filter((preset, index) => passed.findIndex((other) => other.id === preset.id) === index)
+  if (presets.length === 0 || presets[0].id !== defaultLook) return null
+  return { defaultLook, presets }
 }
 
 /** The boot as it may be written into the page: every part checked, anything failing dropped. */
@@ -237,5 +275,6 @@ export function sanitizeThemeBoot(boot: ThemeBoot): ThemeBoot {
     lookGuard: sanitizeLookGuard(boot.lookGuard),
     integrity: sanitizeIntegrity(boot.integrity),
     entry: sanitizeInstalledEntry(boot.entry),
+    looks: sanitizeBootLooks(boot.looks),
   }
 }

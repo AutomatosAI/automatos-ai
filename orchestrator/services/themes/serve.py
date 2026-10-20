@@ -43,6 +43,14 @@ the theme's active look under (``look_storage``, the frontend's ``installedLookK
 header of the theme's checked ``looks/schema.json``, so only a look of this theme's format paints.
 A package with no readable schema gets neither: its default look paints. The entry carries the
 theme id (``themeId``), the one the host's look store and the looks API key the looks by.
+
+PRD-261 A-19c (host 1.1.0, plan §2.2.3): the boot of a theme that runs also carries ``looks``,
+``{defaultLook, presets}``, so a generic look runtime runs a theme's looks from data alone
+(``boot_looks``). The presets are ``looks/presets/*.look.json``, each re-hashed and checked
+against the theme's checked ``looks/schema.json``: the default look first, the rest in file-name
+order, at most ``BOOT_PRESETS_MAX`` of at most ``BOOT_PRESET_MAX_BYTES`` each. A preset that is
+too big, unreadable or fails the schema is dropped and logged. ``prepaint`` may carry the tone
+rule (``css_value.tone_rule_errors``), checked again with the rest of the table on read.
 """
 
 from __future__ import annotations
@@ -59,10 +67,13 @@ from config import config
 from core.models.themes import ThemeInstallation, ThemePackage
 from core.storage import get_s3_client
 from services.themes.choices import is_private
-from services.themes.contract import HTML_CLASS_OWNERS, parse_json
+from services.themes.contract import BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, HTML_CLASS_OWNERS, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import sha256_hex
-from services.themes.look_schema import SCHEMA_PATH as LOOK_SCHEMA_PATH, LookSchema, validate_look_schema
+from services.themes.look_schema import (
+    PRESET_SUFFIX, PRESETS_DIR, SCHEMA_PATH as LOOK_SCHEMA_PATH, LookSchema, preset_paths, validate_look,
+    validate_look_schema,
+)
 from services.themes.membership import Membership
 from services.themes.optin import has_opted_in
 from services.themes.revocations import is_disabled
@@ -101,8 +112,8 @@ INSTALLED_LOOK_KEY_PREFIX = "automatos-theme."
 ACTIVE_LOOK_SUFFIX = ".look"
 LOOK_POINTER_SUFFIX = ".current"
 LOOK_SCOPE_SEPARATOR = ":"
-# The boot fields theme_looks answers.
-LOOK_BOOT_FIELDS = ("lookStorage", "lookGuard")
+# The boot fields theme_looks answers (``looks``: A-19c, host 1.1.0).
+LOOK_BOOT_FIELDS = ("lookStorage", "lookGuard", "looks")
 
 # (storage prefix, package path) -> the stored bytes, or None when the object is gone.
 FileReader = Callable[[str, str], Optional[bytes]]
@@ -286,6 +297,7 @@ def _boot(add_classes: List[str], extra_remove: Tuple[str, ...], policy: str) ->
         "prepaint": None,
         "lookStorage": None,
         "lookGuard": None,
+        "looks": None,
         "integrity": None,
         "entry": None,
     }
@@ -350,17 +362,81 @@ def theme_look_schema(package: ThemePackage, reader: FileReader) -> Optional[Loo
     return schema
 
 
+def _preset_id(path: str) -> str:
+    """A preset's id: its file name (``look_schema.preset_ids``)."""
+    return path[len(PRESETS_DIR):-len(PRESET_SUFFIX)]
+
+
+def _boot_preset_order(package: ThemePackage) -> List[str]:
+    """The package's preset paths: the manifest's default look first, the rest in file-name order."""
+    default = (package.manifest or {}).get("look")
+    paths = preset_paths(package.file_manifest or {})
+    return [path for path in paths if _preset_id(path) == default] + [path for path in paths if _preset_id(path) != default]
+
+
+def _checked_preset(schema: LookSchema, path: str, data: bytes) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """One stored preset's look document, or why it can't ride the boot."""
+    if len(data) > BOOT_PRESET_MAX_BYTES:
+        return None, f"it is over {BOOT_PRESET_MAX_BYTES} bytes"
+    document, error = parse_json(data, path)
+    errors = [error] if error is not None else validate_look(schema, document)
+    if errors:
+        return None, errors[0]["message"]
+    if document.get("id") != _preset_id(path):
+        return None, "its id is not its file name"
+    return document, None
+
+
+def _boot_preset(package: ThemePackage, schema: LookSchema, path: str, reader: FileReader) -> Optional[Dict[str, Any]]:
+    """One preset as the boot carries it (the stored look document), or None, logged, when it can't ride."""
+    listed = (package.file_manifest or {}).get(path)
+    size = listed.get("size") if isinstance(listed, dict) else None
+    if isinstance(size, int) and size > BOOT_PRESET_MAX_BYTES:
+        logger.error("Package %s's preset %s is over %d bytes: its boot leaves it out", package.id, path, BOOT_PRESET_MAX_BYTES)
+        return None
+    try:
+        data, _type, _sha = verified_file(package, path, reader)
+    except ThemeFileMissing:
+        logger.error("Package %s's preset %s can't be read: its boot leaves it out", package.id, path)
+        return None
+    document, problem = _checked_preset(schema, path, data)
+    if problem is not None:
+        logger.error("Package %s's preset %s fails its check on read (%s): its boot leaves it out", package.id, path, problem)
+    return document
+
+
+def boot_looks(package: ThemePackage, schema: LookSchema, reader: FileReader) -> Optional[Dict[str, Any]]:
+    """The boot's ``looks``: ``{defaultLook, presets}``, or None when no preset survives its check.
+
+    The default look is the manifest's ``look`` when its preset survives, else the first preset
+    that does (``looks.package_default_look``'s rule: a theme without ``look`` starts on its first
+    preset by file name). Presets past ``BOOT_PRESETS_MAX`` are left out and logged.
+    """
+    presets: List[Dict[str, Any]] = []
+    for path in _boot_preset_order(package):
+        if len(presets) == BOOT_PRESETS_MAX:
+            logger.error("Package %s has more than %d presets: its boot carries the first %d", package.id, BOOT_PRESETS_MAX, BOOT_PRESETS_MAX)
+            break
+        preset = _boot_preset(package, schema, path, reader)
+        if preset is not None:
+            presets.append(preset)
+    if not presets:
+        return None
+    return {"defaultLook": presets[0]["id"], "presets": presets}
+
+
 def theme_looks(package: ThemePackage, reader: FileReader) -> Dict[str, Any]:
-    """The boot's ``lookStorage`` and ``lookGuard``: where the stored look is, and the format it must have.
+    """The boot's ``lookStorage``, ``lookGuard`` and ``looks``: where the stored look is, its format, the presets.
 
     The guard is the schema's look header; one with no interface has no guard (the boot script checks
     both), so any stored look that fits the prepaint table paints, as the keys are this theme's own.
+    ``looks`` is ``boot_looks``' answer (A-19c).
     """
     schema = theme_look_schema(package, reader)
     if schema is None:
         return dict.fromkeys(LOOK_BOOT_FIELDS)
     guard = {"schema": schema.look_schema, "iface": schema.interface} if schema.interface else None
-    return {"lookStorage": look_storage(_theme_id(package)), "lookGuard": guard}
+    return {"lookStorage": look_storage(_theme_id(package)), "lookGuard": guard, "looks": boot_looks(package, schema, reader)}
 
 
 def theme_entry(package: ThemePackage) -> Dict[str, Any]:
@@ -419,7 +495,7 @@ def install_boot(db: Any, membership: Membership, target: BootTarget, reader: Fi
 
 __all__ = [
     "BootTarget", "FileReader", "ThemeFileMissing", "ThemeStorageUnavailable", "authorised_package", "base_boot",
-    "belongs_to_install", "boot_target", "file_cache_seconds", "install_boot", "integrity_value", "is_private",
+    "belongs_to_install", "boot_looks", "boot_target", "file_cache_seconds", "install_boot", "integrity_value", "is_private",
     "look_storage", "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_entry",
     "theme_look_schema", "theme_looks", "theme_prepaint", "verified_file",
 ]

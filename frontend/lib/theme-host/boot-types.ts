@@ -44,15 +44,28 @@ export interface PrepaintNumericRule {
 }
 
 /**
+ * PRD-261 A-19c (host 1.1.0) — the tone each choice of one choice knob gives a look
+ * (boot/prepaint.json `tone`), so a look runtime sets the tone from the look alone (A-19d2).
+ * The server refuses a rule whose knob is not a choice knob of the table or that leaves a
+ * choice without 'light' or 'dark' (css_value.py tone_rule_errors; css-value.ts toneRuleErrors).
+ */
+export interface PrepaintToneRule {
+  readonly knob: string
+  readonly values: Readonly<Record<string, ThemeTone>>
+}
+
+/**
  * Everything the boot script may paint for a look, keyed the way it reads a stored look: each
  * knob's table, the pair tables, the numeric rules, and the default look painted when nothing
- * valid is stored.
+ * valid is stored. `tone` (A-19c) is absent when the table sets no tone; the boot script never
+ * reads it.
  */
 export interface PrepaintTable {
   readonly knobs: Readonly<Record<string, PrepaintKnobTable>>
   readonly pairs: readonly PrepaintPair[]
   readonly numeric: readonly PrepaintNumericRule[]
   readonly defaults: Readonly<Record<string, string | number>>
+  readonly tone?: PrepaintToneRule
 }
 
 /** Where the boot script finds the cached active look (Play: lib/theme-host/builtin/play-look-storage.ts). */
@@ -68,6 +81,23 @@ export interface ThemeLookStorage {
 export interface ThemeLookGuard {
   readonly schema: string
   readonly iface: string
+}
+
+/**
+ * PRD-261 A-19c — one preset as the boot carries it: a look document of the theme's format
+ * (`{schema, interface?, id, name, sub, <every knob>}`), checked by the server against the
+ * theme's looks/schema.json.
+ */
+export type ThemeBootPreset = Readonly<Record<string, string | number>>
+
+/**
+ * PRD-261 A-19c (host 1.1.0, plan §2.2.3) — a theme's presets, from its looks/presets/*.look.json:
+ * the default look first (`defaultLook` is its id), the rest in file-name order, at most
+ * BOOT_PRESETS_MAX of at most BOOT_PRESET_MAX_BYTES each (boot-sanitize.ts).
+ */
+export interface ThemeBootLooks {
+  readonly defaultLook: string
+  readonly presets: readonly ThemeBootPreset[]
 }
 
 /**
@@ -104,6 +134,11 @@ export interface ThemeBoot {
   readonly integrity: Readonly<Record<string, string>> | null
   /** An installed theme that runs: its registry entry's data (W-A6b). Null for every other boot. */
   readonly entry: InstalledThemeEntryData | null
+  /**
+   * An installed theme that runs, with looks: its presets (A-19c). sanitizeThemeBoot always sets
+   * it, null for every other boot; a boot built in the app may leave it out.
+   */
+  readonly looks?: ThemeBootLooks | null
 }
 
 /** A theme compiled into the app: its first-paint data, server-safe (no CSS, no client code). */

@@ -280,7 +280,7 @@ def test_a_member_who_has_not_opted_in_gets_404_for_files_and_the_base_boot(worl
     assert boot.status_code == 200
     assert boot.json() == {
         "addClasses": ["studio"], "removeClasses": ["hello", "play"], "tone": {"policy": "user", "value": None},
-        "prepaint": None, "lookStorage": None, "lookGuard": None, "integrity": None, "entry": None,
+        "prepaint": None, "lookStorage": None, "lookGuard": None, "looks": None, "integrity": None, "entry": None,
     }
 
 
@@ -304,6 +304,9 @@ def test_the_boot_of_a_theme_that_runs_names_its_own_look_keys(world):
         "fallbackKey": "automatos-theme.automatos-e2e/hello.look",
     }
     assert boot["lookGuard"] is None  # the hello schema's looks name no interface
+    # A-19c: its presets ride the boot too, the default look first (test_prd261_boot_looks.py has the rest).
+    assert [preset["id"] for preset in boot["looks"]["presets"]] == ["default", "night"]
+    assert boot["looks"]["defaultLook"] == "default"
 
 
 def test_the_look_keys_are_the_ones_the_frontend_look_store_uses():
@@ -337,11 +340,11 @@ def test_a_look_schema_that_cant_be_read_or_fails_its_check_gives_no_look_keys(c
     row, stored = _schema_package({"schema": "automatos-look-schema/v1", "look": {}, "knobs": {}})
     tampered = {key: b'{"schema": "changed"}' for key in stored}
     with caplog.at_level(logging.ERROR, logger="services.themes.serve"):
-        assert serve.theme_looks(row, lambda prefix, path: stored.get((prefix, path))) == {"lookStorage": None, "lookGuard": None}
-        assert serve.theme_looks(row, lambda prefix, path: tampered.get((prefix, path))) == {"lookStorage": None, "lookGuard": None}
+        assert serve.theme_looks(row, lambda prefix, path: stored.get((prefix, path))) == {"lookStorage": None, "lookGuard": None, "looks": None}
+        assert serve.theme_looks(row, lambda prefix, path: tampered.get((prefix, path))) == {"lookStorage": None, "lookGuard": None, "looks": None}
     assert sum(LOOK_SCHEMA_PATH in record.getMessage() for record in caplog.records) >= 2
     no_schema = ThemePackage(theme_id="acme/ink", manifest={"id": "acme/ink"}, file_manifest={}, storage_prefix="p/")
-    assert serve.theme_looks(no_schema, lambda prefix, path: None) == {"lookStorage": None, "lookGuard": None}
+    assert serve.theme_looks(no_schema, lambda prefix, path: None) == {"lookStorage": None, "lookGuard": None, "looks": None}
 
 
 def test_the_entry_lists_the_pages_a_theme_draws_and_its_review(world):

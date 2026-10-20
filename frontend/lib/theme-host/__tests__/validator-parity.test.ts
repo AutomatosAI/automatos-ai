@@ -8,13 +8,20 @@
  * scope check). The host's promises (the reserved classes, the page scope and sources, the slots,
  * the host and SDK versions, the error codes) are read from the Python sources as text and must
  * equal the TypeScript ones, so neither side can change one alone.
+ *
+ * PRD-261 A-19c: the prepaint section carries the tone rule's cases, and the ones with `messages`
+ * pin the exact sentences, which the server gives too; the tone rule's names and the boot's
+ * preset caps equal contract.py's.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
+import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX } from '../boot-sanitize'
 import { HTML_CLASS_PATTERN } from '../constants'
-import { cssValueProblem, PREPAINT_ERROR_CODES, prepaintErrors, type ThemeError } from '../css-value'
+import {
+  cssValueProblem, PREPAINT_ERROR_CODES, prepaintErrors, TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, type ThemeError,
+} from '../css-value'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
 import {
   HOST_OWNED_ROUTES, HTML_CLASS_OWNERS, KNOWN_SLOTS, MANIFEST_ERROR_CODES, PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS,
@@ -35,6 +42,8 @@ interface CorpusCase {
   readonly set?: Readonly<Record<string, unknown>>
   readonly unset?: readonly string[]
   readonly document?: unknown
+  /** A-19c: the exact sentences both languages give, in order. */
+  readonly messages?: readonly string[]
 }
 
 interface CorpusSection {
@@ -117,6 +126,10 @@ function expectVerdict(errors: readonly ThemeError[], code: string | null, known
   }
 }
 
+function isToneCase(document: unknown): boolean {
+  return typeof document === 'object' && document !== null && !Array.isArray(document) && TONE_RULE_KEY in document
+}
+
 function helloLookSchema(): LookSchema {
   const { schema, errors } = validateLookSchema(CORPUS.looks.schema)
   expect(errors).toEqual([])
@@ -143,7 +156,17 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
   })
 
   it.each([...CORPUS.prepaint.cases])('prepaint: $name', (testCase) => {
-    expectVerdict(prepaintErrors(testCase.document), testCase.code, PREPAINT_ERROR_CODES)
+    const errors = prepaintErrors(testCase.document)
+    expectVerdict(errors, testCase.code, PREPAINT_ERROR_CODES)
+    if (testCase.messages !== undefined) expect(errors.map((error) => error.message)).toEqual(testCase.messages)
+  })
+
+  it('has a valid tone rule and pins the sentence of each kind of refusal (A-19c)', () => {
+    const toneCases = CORPUS.prepaint.cases.filter((testCase) => isToneCase(testCase.document))
+    expect(toneCases.some((testCase) => testCase.code === null)).toBe(true)
+    const pinned = toneCases.flatMap((testCase) => testCase.messages ?? [])
+    expect(pinned.length).toBeGreaterThanOrEqual(8)
+    pinned.forEach((message) => expect(message.startsWith('boot/prepaint.json#tone')).toBe(true))
   })
 
   it.each([...CORPUS.cssValues.valid])('CSS value %j passes', (value) => {
@@ -215,6 +238,15 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(strings('PAGE_SCOPE')).toEqual([...PAGE_SCOPE])
     expect(pythonTupleDict(pythonValue(PYTHON.contract, 'PAGE_SOURCES'))).toEqual(PAGE_SOURCES)
     expect(strings('HOST_OWNED_ROUTES')).toEqual([...HOST_OWNED_ROUTES])
+  })
+
+  it('has the same tone rule names and boot preset caps (A-19c, plan §2.2.3)', () => {
+    expect(strings('TONE_RULE_KEY')).toEqual([TONE_RULE_KEY])
+    expect(strings('TONE_RULE_FIELDS')).toEqual([...TONE_RULE_FIELDS])
+    expect(strings('TONE_RULE_TONES')).toEqual([...TONE_RULE_TONES])
+    expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESETS_MAX'))).toBe(BOOT_PRESETS_MAX)
+    expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESET_MAX_BYTES'))).toBe(BOOT_PRESET_MAX_BYTES)
+    expect([BOOT_PRESETS_MAX, BOOT_PRESET_MAX_BYTES]).toEqual([12, 4096])
   })
 
   it('knows the same error codes as each Python validator', () => {
