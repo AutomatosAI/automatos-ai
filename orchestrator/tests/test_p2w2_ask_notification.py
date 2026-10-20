@@ -22,9 +22,7 @@ Loop hygiene pinned here too:
 from __future__ import annotations
 
 import asyncio
-import importlib.util as _ilu
 import os
-import sys as _sys
 import uuid
 
 import pytest
@@ -35,18 +33,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from modules.tools.execution import tool_grants
 

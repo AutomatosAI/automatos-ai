@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 
-import { ACCENTS, GROUNDS, LIGHTS, TYPE_STYLES, type TypeStyleKey } from '@/lib/looks/catalogue'
-import type { Look } from '@/lib/looks/types'
+import { ACCENTS, GROUNDS, LIGHTS, TYPE_STYLES, type TypeStyleKey } from '../../lib/looks/catalogue'
+import type { Look } from '../../lib/looks/types'
 
 /**
  * PRD-260 — the Looks page shows options that aren't the active look, so each

@@ -12,6 +12,7 @@ import { RoleProvider } from '../contexts/role-context'
 import { UiStyleProvider, useUiStyle } from '../contexts/ui-style-context'
 import type { UiStyle } from '@/lib/ui-style'
 import type { ThemeTone } from '@/lib/theme-host/boot'
+import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import { BUILTIN_THEME_CLIENTS } from '@/lib/theme-host/builtin/clients'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
@@ -89,9 +90,11 @@ interface ProvidersProps {
   initialUiStyle?: UiStyle
   /** PRD-260 K4, PRD-261 A-03: the boot's tone (a theme whose tone follows its look), forced from the first paint. */
   initialTone?: ThemeTone
+  /** PRD-261 W-A6b: an installed theme's registry entry, from its boot (lib/theme-host/installed-entry.ts); null otherwise. */
+  initialTheme?: ThemeEntry | null
 }
 
-export function Providers({ children, initialUiStyle, initialTone }: ProvidersProps) {
+export function Providers({ children, initialUiStyle, initialTone, initialTheme = null }: ProvidersProps) {
   // PRD-260 K4, PRD-261 A-13c: under a theme whose tone follows its look, the look's ground
   // sets the tone (the look runtime hands it up). forcedTheme forces it without overwriting
   // the user's stored tone, which returns when they leave the theme; it starts from the
@@ -120,7 +123,7 @@ export function Providers({ children, initialUiStyle, initialTone }: ProvidersPr
           disableTransitionOnChange
           forcedTheme={playTone}
         >
-          <UiStyleProvider initialStyle={initialUiStyle}>
+          <UiStyleProvider initialStyle={initialUiStyle} installedTheme={initialTheme}>
           <BuiltinThemeClient />
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>

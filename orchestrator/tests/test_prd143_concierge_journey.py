@@ -40,11 +40,8 @@ No DB, no network, no real LLM.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import json
 import os
-import sys
-import types
 import uuid
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
@@ -60,19 +57,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-# Lean-venv shim: the chatbot service import chain pulls modules.rag's
-# ingestion stack (camelot at module top). Stub the missing leaf only when
-# truly absent (mirrors S8).
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 # CI collection-order guard: earlier-collected tests stub modules.*/consumers.*
 # in sys.modules (bare ModuleType, no __spec__). On Linux collection order the

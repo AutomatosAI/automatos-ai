@@ -8,10 +8,11 @@ of each app in the judged ISO week (services.harness_metrics) and flags a pair o
 n of at least HARNESS_MIN_SAMPLES and a Wilson lower bound of the failure rate of at
 least HARNESS_TOOL_FAIL_WILSON_MIN (services.harness_diagnose.tool_failure_issues, FR-8).
 Failures ``classify_tool_error`` reads as auth or connection give "reconnect <app>",
-never a removal; tool-removal proposals come with US-049 and US-057.
+never a removal; tool_assignment_remove is a registry kind (US-049) that PRESCRIBE
+detects only with its dependency gate (US-057).
 
 Replaces test_harness_tool_failure_signal.py. Each case runs the real pipeline on the
-transactional ``db_session`` with the platform actions faked
+transactional ``db_session`` with the audit report faked
 (helpers_harness_diagnose.judge); the judged week is 2026-W42.
 """
 from __future__ import annotations
@@ -85,7 +86,7 @@ def test_18_of_20_non_auth_errors_flag_as_a_tool_failure(db_session, ws):
     assert ("- **Scout**: GMAIL failed 18 of 20 calls this week (a failure rate of at least 70%) "
             "(root cause: tool_failure)") in run["report_md"]
     assert "reconnect" not in run["report_md"].lower()
-    assert run["prescriptions"] == []  # no removal is proposed before US-049 and US-057
+    assert run["prescriptions"] == []  # no removal is proposed before its gate (US-057)
     _no_removal(run)
 
 

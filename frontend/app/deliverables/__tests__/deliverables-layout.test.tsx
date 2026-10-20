@@ -44,6 +44,11 @@ vi.mock('@/hooks/use-studio-theme', async () => {
   }
 })
 vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
+// PRD-261 A-14b: the frame moved out of Play's shelf into its slot (lib/theme-host/builtin/play-shelf-lazy.tsx),
+// which draws MainLayout around the shelf as before; it stands in here as it did inside the mocked shelf.
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}))
 vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
   DeliverableDeepLink: () => <div data-testid="deep-link" />,
 }))

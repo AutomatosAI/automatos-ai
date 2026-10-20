@@ -17,9 +17,9 @@ disagree, the file wins — open an issue.
 
 | Need | Notes |
 |---|---|
-| Docker Desktop (macOS / Windows) or Docker Engine (Linux) | with the Compose v2 plugin — the `docker compose` subcommand. The compose file uses v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. |
-| Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
-| Git | to clone and to pull updates. |
+| Docker Engine 25 or later with Docker Compose 2.24.4 or later: Docker Desktop (macOS / Windows) or Docker Engine (Linux) | Check with `docker version --format '{{.Server.Version}}'` and `docker compose version --short`. The compose file probes each service every second while it starts (healthcheck `start_interval`), which Compose refuses on an engine older than 25, and it uses Compose v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. `make up` checks both versions first and stops, naming this floor, on an older Docker. A Linux distribution's own `docker.io` package can be older: install from Docker's repository (docs.docker.com/engine/install). |
+| Disk | The first `make up` downloads about 1.33 GB of images on amd64 and 1.28 GB on arm64, compressed: the API 521 MB, the workspace worker 507 MB and the web app 94 MB (CI's measurement, 16 Oct 2026), Postgres 159 MB, MinIO 64 MB and Redis 16 MB (the digests `docker-compose.yml` pins), less about 30 MB of base layers the API and the worker share. Docker unpacks what it downloads, so the images take more disk than that; `make status` shows the figure on your machine. `make up CORE=1` leaves out the worker and its image (§1b). Your data volumes come on top and grow with use. |
+| Git | to clone and to pull updates. `git clone --depth 1` fetches only the current commit, under 80 MB, where the full history is about 700 MB; `git pull` updates a shallow clone as usual, and `git fetch --unshallow` fetches the history if you ever want it. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
 | Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode runs inside WSL2, or natively on Windows 10 1809 or later (§1a). |
 
@@ -106,7 +106,7 @@ Desktop (the *Docker Desktop, native Windows* row in the table below).
    this distro works too. With Docker Engine inside the distro, the containers
    stop whenever the distro stops (step 7).
 4. **Clone inside the distro,** in your Linux home: `cd ~` and then
-   `git clone https://github.com/AutomatosAI/automatos-ai.git`. Not under
+   `git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git`. Not under
    `/mnt/c`: file access across the Windows drive is slow, and session file
    paths stop lining up with Deliverables → Explorer.
 5. **Create `.env`** with the three secrets (§2), then set the paths and ports
@@ -167,25 +167,43 @@ what each target runs, from the repository root. On native Windows, run the
 the repository when it is not set.
 
 ```bash
-# make up: build if needed, start, then tidy up
+# make env: the Docker floor, then .env with the three secrets (section 2). make up, make build and
+# make dev run it first.
+sh scripts/stack_docker_floor.sh     # stops unless Docker Engine is 25 or later and Compose 2.24.4 or later
+sh scripts/stack_env.sh              # creates .env from .env.example; fills the three while empty or CHANGE_ME,
+                                     # before the first start only
+
+# make up: the published images for this checkout, then start and tidy up
 mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory -Force <deliverables>\projects
-docker compose up -d --build --remove-orphans
+python3 scripts/stack_images.py up   # picks the tag (below), gets the images, writes AUTOMATOS_IMAGE_TAG to .env
+docker compose up -d --no-build --remove-orphans
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
-# make up-images: the published images, no build
-docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
-docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build --remove-orphans
+# make up CORE=1: the core five (postgres, redis, minio, backend, frontend), without the
+# workspace worker. Every compose command reads docker-compose.core.yml too, through COMPOSE_FILE.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.core.yml   # PowerShell: $env:COMPOSE_FILE="docker-compose.yml;docker-compose.core.yml"
+python3 scripts/stack_images.py up   # the same tag; gets the backend and frontend images only
+docker compose -f docker-compose.yml rm --stop --force workspace-worker   # one an earlier make up started
+docker compose up -d --no-build --remove-orphans
+# The plain command, without make or the tag picker:
+docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
 
-# make dev: hot reload from your source
+# make build: the three app images built from your checkout instead, as local-<sha7>
+python3 scripts/stack_images.py build   # writes AUTOMATOS_IMAGE_TAG=local-<sha7> to .env
+docker compose up -d postgres redis minio   # first, so they start while the images build
+docker compose build backend frontend workspace-worker
+docker compose up -d --no-build --remove-orphans
+
+# make dev: for editing the code (the development stages, your source mounted, hot reload)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 
 # make down: stop, keep your data
 docker compose down --remove-orphans
 
-# make clean: dangling images and unused build cache, never your data
+# make clean: dangling images and build cache unused for a week, never your data
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
 # make status: what is running, and the disk it uses
 docker compose ps
@@ -199,11 +217,132 @@ docker compose logs -f --tail=200 $(s)
 docker compose down -v --remove-orphans
 ```
 
-`make up` and `make up-images` do three more things. They move a
+`make env` first runs `scripts/stack_docker_floor.sh` (POSIX sh and the `docker`
+CLI), so it is the first thing `make up`, `make build` and `make dev` check. It
+stops when Docker does not answer, or when it is older than the floor in §1:
+the engine's API older than 1.44 (Docker Engine 25), or Compose older than
+2.24.4. Without it, check the two by hand:
+`docker version --format '{{.Server.Version}}'` prints 25 or later, and
+`docker compose version --short` prints 2.24.4 or later.
+
+Then `make env` runs `scripts/stack_env.sh` (POSIX sh, `openssl` and the `docker`
+CLI). Without it, the same by hand, from the repository root:
+
+```bash
+[ -f .env ] || { cp .env.example .env && chmod 600 .env; }
+# Only before the first start: once the automatos_postgres_data volume exists, skip this
+# (Postgres keeps its first password; section 2 says how to rotate one).
+docker volume inspect automatos_postgres_data > /dev/null 2>&1 || for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
+  if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=$(openssl rand -hex 24)|" .env && rm -f .env.bak
+  fi
+done
+```
+
+In PowerShell, without a POSIX shell: `Copy-Item .env.example .env`, then
+replace each of the three `CHANGE_ME_…` values in `.env` with the output of
+`$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`,
+one run per secret. A key missing from `.env` gets a line of its own.
+
+`make build` starts `postgres`, `redis` and `minio` before it builds, so their
+image pull happens first and their first-run initialisation and health checks
+pass while the app images build; the backend still waits for all three to be
+healthy. If the build fails, those three keep running until `make down`.
+
+`make up` and `make build` do three more things. They move a
 deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
 does this too); a fresh install never needs it. They print `make status`. And
 they tell a running session host to pick up the new code
-(`make cli-host-nudge`, below).
+(`make cli-host-nudge`, below). `make up`, `make build` and `make dev` also pass
+`AUTOMATOS_REVISION` (`git rev-parse HEAD`, with `-dirty` when `orchestrator`,
+`frontend` or `services/workspace-worker` has uncommitted changes) to compose,
+which stamps it on every image it builds as `org.opencontainers.image.revision`,
+the label CI's images carry too. A build without it is stamped `unknown`.
+
+**The core stack, five containers.** `make up CORE=1` runs postgres, redis,
+minio, the backend and the frontend, and leaves out the workspace worker and
+its image: `docker-compose.core.yml` puts the worker behind a profile of its
+own, and `make` passes that file to every compose command through
+`COMPOSE_FILE`. Without the worker, agents' workspace tools, the Deliverables
+file browser and Code Canvas answer *Workspace worker not running*; the rest
+works as before. A worker an earlier `make up` started is stopped and removed,
+and its files stay in the `automatos_workspaces_data` volume. To start it
+later, name it with the same two files:
+`docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker`,
+or run `make up` without `CORE=1`, which brings back all six. Plain
+`docker compose up` always runs six, whatever your `.env` holds: no key turns the
+worker off. `make build CORE=1` still builds all three images and then runs
+five; `make dev` always runs six.
+
+### The tag `make up` picks
+
+The three app images run one tag, `AUTOMATOS_IMAGE_TAG`: `backend` is
+`ghcr.io/automatosai/automatos-api`, `frontend` is
+`ghcr.io/automatosai/automatos-frontend` and `workspace-worker` is
+`ghcr.io/automatosai/automatos-workspace-worker`. `make up` prints the tag it
+picked and why, by this rule (`scripts/stack_images.py`, Python 3.9 or later,
+nothing to install):
+
+1. **A tag you set** in the shell or on the command line
+   (`AUTOMATOS_IMAGE_TAG=sha-1a2b3c4 make up`) is used as given. An official tag
+   that is neither on this machine nor on GHCR stops `make up`; a `local-*` tag
+   that is not on this machine is built. `AUTOMATOS_IMAGE_TAG=edge make up`
+   follows `edge` and pulls it on every call. The line `make up` writes to `.env`
+   is not a pin: it is rewritten on every run.
+2. **On a clean checkout** (`git status --porcelain -- orchestrator frontend
+   services/workspace-worker` prints nothing): `edge`, pulled first because
+   compose never re-pulls a tag it already has, when `edge`'s images are a build
+   of this very commit (their `org.opencontainers.image.revision` label is
+   `git rev-parse HEAD`), such as the weekly rebuild with fresh OS packages.
+   Otherwise `sha-<7>`, the first seven characters of `git rev-parse HEAD`, when
+   CI has published it. A `sha-*` or `tree-*` image already on this machine
+   counts as published, so a machine that has its images starts offline.
+3. **Otherwise** `local-<sha7>`, or `local-<sha7>-dirty` when one of those
+   folders has uncommitted changes. Each image whose folder is unchanged and
+   whose `tree-<12>` CI has published (the first twelve characters of
+   `git rev-parse HEAD:<folder>`; CI publishes one per tree) is pulled and
+   re-tagged; the others are built here, and `make up` names them. That covers a
+   `[skip ci]` merge and the few minutes before CI publishes a new commit.
+
+The web app has its addresses built in: the published one is the local edition,
+calling the API at `http://localhost:8000` and loading media from
+`http://localhost:9000`. When `.env` sets `NEXT_PUBLIC_API_URL`,
+`NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`, `NEXT_PUBLIC_AUTH_EDITION` or
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to anything else, `make up` builds the
+frontend here (under step 3's tag, with the other two re-tagged) and says why.
+A moved `API_PORT` or `MINIO_PORT` whose `NEXT_PUBLIC_*` values still point at
+8000 or 9000 stops `make up` before it starts anything: set them as SETUP.md
+step 3 shows.
+
+Without `make` or Python, do the same by hand. For a clean checkout of a main
+commit CI has published:
+
+```bash
+tag=sha-$(git rev-parse HEAD | cut -c1-7)
+docker manifest inspect ghcr.io/automatosai/automatos-api:$tag > /dev/null && echo published
+# make keeps exactly one such line at the end of .env, and replaces it each run
+echo "AUTOMATOS_IMAGE_TAG=$tag" >> .env
+docker compose up -d --no-build --remove-orphans
+```
+
+For `edge`, run `docker compose pull backend frontend workspace-worker` before
+`up`. For a `local-<sha7>` tag, re-tag each published tree and build the rest:
+
+```bash
+docker pull ghcr.io/automatosai/automatos-api:tree-<first 12 of git rev-parse HEAD:orchestrator>
+docker tag ghcr.io/automatosai/automatos-api:tree-<…> ghcr.io/automatosai/automatos-api:local-<sha7>
+AUTOMATOS_IMAGE_TAG=local-<sha7> AUTOMATOS_REVISION=$(git rev-parse HEAD) docker compose build frontend
+```
+
+Plain `docker compose up` without `make` runs the tag in `.env`, or `edge` when
+`.env` has none, and builds an image only when it cannot pull it. Running your
+own unmerged code next to it, as a retest stack does:
+`AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d --build` builds the
+production stages under a tag no pull ever replaces (no `local-*` tag is
+published). Image names are shared by every stack on one Docker engine, so a
+second stack sets its own `local-<ref>` in its own `.env`, not only in the shell.
+A plain `docker compose up --build` with no tag at all names its build `:edge`,
+which the next `make up` that picks `edge` pulls over.
 
 The session-host targets run Python 3.9 or later, with nothing to install, on
 macOS, Linux, WSL2 or Windows 10 1809 and later (there, type `py` for `python3`
@@ -242,15 +381,48 @@ empty value stops `docker compose up` with the message shown:
 
 **Channels (Settings → Channels).** Available in the local edition. Telegram runs in *polling* mode by default here, so a bot works — and answers agent questions from Telegram replies (PRD-225) — with no public URL. Slack, Discord and WhatsApp receive inbound messages only through webhooks, so their inbound needs a public URL in front of the orchestrator (a tunnel); outbound delivery works for every platform without one.
 
-Any non-empty values work on a private machine. They have no defaults on
-purpose: a public repository must not ship known passwords.
+`make up` writes them for you. Its first step, `make env` (§1b), creates `.env`
+from `.env.example` and gives each of the three a random value
+(`openssl rand -hex 24`) while it is empty or still the `CHANGE_ME_…` placeholder
+`.env.example` ships. It does that only before the first start, while the
+`automatos_postgres_data` volume does not exist, because Postgres keeps the
+password it was created with; it never changes any other value, nor one you
+export in the shell. So the whole install is:
 
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env      # fill in section 1 (the three secrets)
-docker compose up
+make up
 ```
+
+Your own values work too: set them in `.env` before the first `make up`. Keep
+`.env` with your data: the database opens only with the `POSTGRES_PASSWORD` it
+was created with.
+
+**No install runs on a placeholder.** The values in `.env.example` are public, so
+the backend refuses to start a command while any of the three starts with
+`CHANGE_ME`, and `make env` stops on an install that has already started with
+one. Both print the same message: which secrets, and how to rotate them. An
+unset or empty value passes the backend's check (Helm and Railway set
+`DATABASE_URL` and `REDIS_URL` instead of the two passwords); compose's own
+`${VAR:?}` stops an empty one. To rotate on an install whose data you keep:
+
+- `POSTGRES_PASSWORD`: change it in Postgres first, then put the same value in
+  `.env`:
+
+  ```bash
+  new=$(openssl rand -hex 24)
+  docker compose exec postgres psql -U postgres -d orchestrator_db -c "ALTER USER postgres PASSWORD '$new'"
+  sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$new|" .env && rm -f .env.bak
+  ```
+
+- `REDIS_PASSWORD` and `API_KEY`: a new value in `.env` alone
+  (`openssl rand -hex 24`). Both are read at every start
+  (`redis-server --requirepass`, and the backend's environment).
+
+Then `make up` (or `docker compose up -d`) restarts what changed. An install with
+no data to keep can start over instead: `docker compose down -v` deletes its
+volumes, and the next `make up` generates all three.
 
 **One model key** makes the agents think. The platform boots and serves without
 one, but chat, agents and embeddings have no model to call until you set one of
@@ -282,41 +454,55 @@ marketplace skill you can enable per agent; re-import later to pick up updates.
 
 ## 3. What runs where
 
-`docker compose up` starts the default profile. Nothing in it needs the
-internet after the images are built, except the LLM provider you chose (and
-Composio, if you add a key).
+`make up` and plain `docker compose up` start the default stack: six
+long-running containers, and `minio-volume-owner`, a one-shot that runs before
+MinIO and exits. Nothing in it needs the internet after the images are pulled,
+except the LLM provider you chose (and Composio, if you add a key).
 
 | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|
 | `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store the local RAG leg searches (`S3_VECTORS_ENABLED=false`). |
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
-| `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
-| `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
-| `backend` | `automatos_backend` | built from `./orchestrator` (`development` target) | 8000 (`API_PORT`) | The FastAPI API. Source is bind-mounted and served by `uvicorn --reload`. |
-| `frontend` | `automatos_frontend` | built from `./frontend` (`development` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (`npm run dev`, source bind-mounted). Starts once the backend health check passes. |
-| `workspace-worker` | `automatos_workspace_worker` | built from `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
+| `minio-volume-owner` | `automatos_minio_volume_owner` | `redis:7-alpine`, the same image as `redis` | none, and no network | One-shot, before MinIO starts: when root owns MinIO's volume, as on an install made while MinIO still ran as root, it re-owns the volume to uid 65532 once, says so in its log and exits; otherwise it exits at once. It runs as root with only the capabilities `chown` needs. MinIO starts only after it succeeds. |
+| `minio` | `automatos_minio` | `cgr.dev/chainguard/minio` (Chainguard's maintained MinIO build) | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. Runs as the image's own user, uid 65532, never root. The backend creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and the others the first time it uses them. |
+| `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
+| `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
+| `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
-`docker compose --profile all up` adds two more:
+**The core stack.** An override file runs the default stack without the
+workspace worker, five containers instead of six (§1b, §5):
 
-| Service | Host port (variable) | What it does |
-|---|---|---|
-| `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
-| `gotenberg` | 3001 (`GOTENBERG_PORT`) | DOCX/XLSX → PDF conversion. The backend reaches it at `http://gotenberg:3000`; without the profile, document conversions that need it fail, everything else is unaffected. |
+| Override | Command | Leaves out | Profile that brings it back |
+|---|---|---|---|
+| `docker-compose.core.yml` | `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d` | `workspace-worker` | `workspace`: name the service with the same two files (`... up -d workspace-worker`), or run `make up` without `CORE=1` |
 
-`docker compose --profile media up -d media-render` adds the Socials renderer:
+**Optional profiles.** Each profile adds its services to the default stack:
+`docker compose --profile <profile> up -d`, or name the service, as below. All
+but `media` pull a published image.
 
-| Service | Host port | What it does |
-|---|---|---|
-| `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
+| Profile | Service | Container | Image / build | Host port (variable) | What it does |
+|---|---|---|---|---|---|
+| `all` | `adminer` | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
+| `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
+| `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
+| `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
+
+Every third-party image above is pinned by digest in `docker-compose.yml`, and
+Dependabot moves the pins once a week. The CI test
+`orchestrator/tests/test_prd262_self_host_docs.py` holds these three tables to
+`docker compose config --services`, profile by profile and with the core
+override.
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
 `automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
 and `backend_data`, which holds the auto-generated credential-encryption key
-(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`). Your workspace's directory is a
-**bind mount** of a host folder, not a volume (§5). `automatos_workspaces_data`
-holds the files of every other workspace on the stack (a second or a test
-workspace), so they survive `docker compose up --build`; `make reset` removes
-it with the rest.
+(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`), uploaded documents and the local
+copy of generated documents (object storage keeps theirs). The `memory` profile
+adds `automatos_qdrant_data`, the `search` profile `searxng_cache`. Your
+workspace's directory is a **bind mount** of a host folder, not a volume (§5).
+`automatos_workspaces_data` holds the files of every other workspace on the
+stack (a second or a test workspace), so they survive recreating the
+containers; `make reset` removes it with the rest.
 
 ### Where configuration lives
 
@@ -332,13 +518,27 @@ You should not need to open the last three for a standard install.
 
 ## 4. First boot — what happens and how long it takes
 
-1. **Image builds.** Backend (Python dependencies plus system libraries for
-   OCR and PDF rendering), frontend (`npm install`), workspace-worker (Node,
-   Claude Code CLI, Python tooling, Chromium). This is the slow part and only
-   happens once per dependency change.
+1. **Images.** `make up` pulls the app images CI built, scanned and published
+   for your commit (§1b). The whole default stack is about 1.33 GB compressed on
+   amd64 and 1.28 GB on arm64 (measured 16 Oct 2026; the target is under 1 GB),
+   so the download is the slow part: about a minute at 200 Mbit/s, three to four
+   at 50 Mbit/s, plus unpacking. CI times `make up` to a working UI on every
+   main publish against a 150-second bar. A later update downloads only the
+   layers that changed. `make build` builds the images from your checkout
+   instead (Python dependencies plus system libraries for OCR and PDF
+   rendering, `npm ci`, the worker's Node and Claude Code CLI), which takes
+   several minutes.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
-   (see §10). MinIO starts and `minio-init` creates the documents bucket.
+   (see §10). `minio-volume-owner` checks MinIO's volume and exits (§3), then
+   MinIO starts; the backend creates the documents bucket the first time it
+   stores a file.
+   While a service starts, Docker probes its health every second
+   (`start_interval: 1s` in `docker-compose.yml`, Docker Engine 25 or later), so
+   a service that waits on another starts within a second or two of it being
+   ready; CI holds Redis and MinIO to 2 s from start to healthy. Postgres's
+   probe goes over TCP (`pg_isready -h 127.0.0.1`), so on a fresh volume it passes
+   only once the real server runs, after initdb's temporary one has stopped.
 3. **Backend entrypoint** (`docker-entrypoint.sh`), in order, each step
    fail-closed unless noted:
    - wait for Postgres, verify the connection;
@@ -361,8 +561,18 @@ You should not need to open the last three for a standard install.
      Workspace*) and the operator user exist;
    - start `uvicorn`. The application then runs its own boot stages,
      including the Composio catalogue bootstrap (§7).
-4. **Frontend** starts after the backend's health check passes (the check
-   allows 40 s of start-up and probes every 30 s).
+4. **Frontend** starts after the backend's health check passes. The check
+   probes every second while the backend starts, so the backend turns healthy
+   about a second after it first answers `/health`, and compose starts the
+   frontend about a second after that (CI holds this to 3 s). The check allows
+   up to 300 s of start-up for a first boot (F228), then probes every 30 s.
+
+**How long, measured.** On CI's runners on 16 Oct 2026, before the one-second
+probes of step 2, the datastores turned healthy 5.5 to 6.1 s after they started,
+and the backend's first boot on an empty database took 30 to 50 s from its start
+to `/health` 200, 45 s at the median. A laptop can take longer: one Mac took
+147 s (F228), which is why the frontend's wait allows 300 s. The targets are 2 s
+for the datastores and 30 s for the backend's first boot.
 
 Readiness, not liveness, is the signal that it is usable:
 
@@ -431,11 +641,21 @@ profile and its files live **on your machine**:
   no key, because the terminal it shows is your own Claude Code, launched by
   the host on your machine.
 - **Linux ownership note.** The worker process runs as uid 1000 (`worker`).
-  Its entrypoint `chown -R`s the mounted directory to that uid whenever it is
-  owned by anyone else, so on a Linux host the files under
-  `AUTOMATOS_WORKSPACE_DIR` end up owned by uid 1000. If that is not your
-  user, expect to need `sudo` to edit or delete them, or pre-create the
-  directory owned by uid 1000.
+  Its entrypoint re-owns everything under `/workspaces` to that uid, except
+  `projects/`, whenever the volume's root belongs to anyone else, and that
+  includes your files under `AUTOMATOS_WORKSPACE_DIR`. On this stack it does not
+  happen: a new `automatos_workspaces_data` volume takes the owner of the
+  directory it is first mounted on, and both the worker's image and the
+  backend's give `/workspaces` to uid 1000, so the volume is uid 1000 whichever
+  starts first (the core stack, below, starts the backend without the worker).
+  A volume created root-owned some other way would trigger it; then expect to
+  need `sudo` to edit or delete those files, or pre-create the directory owned by
+  uid 1000.
+- **Running without it.** `make up CORE=1` (or
+  `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
+  the five other containers and not the worker (§1b). Code Canvas, the
+  Deliverables file browser and agents' workspace tools then answer *Workspace
+  worker not running*.
 - Limits and knobs: the service is capped at 2 CPUs and 2 GB;
   `WORKER_CONCURRENCY` (default 3) and `WORKSPACE_DEFAULT_QUOTA_GB` (default
   5) are overridable in `.env`. `WORKER_INTERNAL_TOKEN` is an optional shared
@@ -569,6 +789,9 @@ docker compose --profile media up -d media-render
 ```
 
 Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` / `docker compose up -d`.
+No registry publishes this image, and `make up` starts the stack with `--no-build`, so
+it never builds it: run the command above once first, and again with `--build` after a
+`git pull` that changes `services/media-render` (§10).
 
 - **Wiring.** The backend already points at it: `SOCIALS_RENDER_URL=http://media-render:8090`
   in `envs/api.defaults`. An optional shared secret, `SOCIALS_RENDER_TOKEN` in `.env`,
@@ -732,30 +955,40 @@ Deliverable feature that exists in the code runs locally.
 ## 10. Updating
 
 ```bash
-docker compose stop backend                  # 1. stop the API before the code changes
 git pull
-docker compose up -d --build                 # 2. rebuild; migrations run as the backend boots
-docker compose exec backend alembic current  # 3. one revision, marked (head)
+make up                                      # 1. the new commit's images; migrations run as the new backend boots
+docker compose exec backend alembic current  # 2. one revision, marked (head)
 ```
 
-**Stop the backend before you pull.** The backend runs in reload mode with
-`./orchestrator` bind-mounted, so a pull under a running backend loads the
-new code at once, and its startup `create_all` builds any new tables before
-the new migrations run. Migrations are written to survive that
-([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first keeps the
-order they expect: migrations first, then the code that uses them.
+The default stack runs the published images, with the code inside them, so a
+pull changes nothing until `make up` fetches the new commit's images (§1b) and
+recreates the containers; the new backend migrates before it serves.
 
-`--build` rebuilds the images when dependencies or Dockerfiles changed.
+**OS security fixes.** Every Monday CI rebuilds the images with fresh Debian and
+Alpine packages (`weekly-<yyyymmdd>`) and moves `edge` to that rebuild once it
+boots. A checkout keeps the OS packages its `sha-<7>` was built with;
+`git pull && make up` picks up the weekly fixes, because `make up` then runs
+`edge` when it is a rebuild of your commit, or the newer commit's `sha-<7>`,
+which CI built on the fresh packages. `AUTOMATOS_IMAGE_TAG=edge make up` follows
+`edge` and pulls it on every call; `AUTOMATOS_IMAGE_TAG=sha-<7> make up` pins one
+build.
 
-**Running the published images** (`make up-images`, see
-[QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
-with `make up-images` again: it pulls the newer `edge` (or the
-`AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
-bind-mounted from your checkout, so there's no reload-mode ordering to worry
-about; migrations run as the new backend boots. Every Monday CI also rebuilds
-the images with fresh Debian and Alpine packages and moves `edge` to that
-rebuild (`weekly-<yyyymmdd>`) once it boots, so updating on `edge` picks up
-OS security fixes; a pinned `sha-<7>` keeps the packages it was built with.
+**Under `make dev`, stop the backend before you pull.** That stack runs the
+backend in reload mode with `./orchestrator` bind-mounted, so a pull under a
+running backend loads the new code at once, and its startup `create_all`
+builds any new tables before the new migrations run. Migrations are written to
+survive that ([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first
+keeps the order they expect: migrations first, then the code that uses them.
+
+```bash
+docker compose stop backend   # under make dev: stop the API before the code changes
+git pull
+make dev
+```
+
+Building from source (`make build`)? Update with `git pull && make build`.
+Nothing is bind-mounted from your checkout outside `make dev`, so there's no
+reload-mode ordering to worry about; migrations run as the new backend boots.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
@@ -764,6 +997,42 @@ rendering, rebuild that service as well:
 Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
+
+### The first update of an install that built its own images
+
+Before `make up` pulled the published images, it built the three app images from
+your checkout and ran the backend from your source. The first `git pull && make up`
+after that change differs in four ways. Your data stays where it is.
+
+- **`make up` pulls instead of building.** It downloads the images CI published
+  for your commit (§1b; about 1.33 GB the first time, §1) and builds only one CI
+  has not published. The images your checkout built stay on disk under their old
+  names, `<folder>-backend`, `<folder>-frontend` and `<folder>-workspace-worker`,
+  where `<folder>` is the directory you cloned into; with the default name,
+  `docker image rm automatos-ai-backend automatos-ai-frontend automatos-ai-workspace-worker`
+  removes them (`docker image ls` lists them). `make up-images` is gone: `make up`
+  does what it did. `make build` builds from your checkout, as `make up` used to.
+- **The source mount moves to `make dev`.** `make up` and plain `docker compose up`
+  run the code inside the images, so an edit in your checkout changes nothing
+  there; `make dev` runs the development stages with your source mounted and
+  reloading (§13). Generated documents now live on the `backend_data` volume: the
+  files the old backend wrote into `orchestrator/documents` in your checkout are
+  no longer read, and a download falls back to MinIO's copy of a document that
+  is not on the volume.
+- **`.env` gains one line,** `AUTOMATOS_IMAGE_TAG=…`: the tag the last `make up` or
+  `make build` ran, so later plain `docker compose` commands run the same images.
+  `make` owns that line, rewrites it on every run and changes no other value in
+  `.env`. Pin a tag in the shell or on the command line instead (§1b).
+- **MinIO's volume is re-owned, once.** MinIO now runs as uid 65532, not root.
+  On the first start `minio-volume-owner` finds the volume owned by root, changes
+  its owner to 65532, logs
+  `minio-volume-owner: /data was owned by 0:0; re-owned it to 65532:65532`
+  (`docker compose logs minio-volume-owner`) and exits; every later start, it exits
+  at once. Your buckets and objects stay as they were. Plain `docker compose up`
+  does the same, so it needs no `make`.
+
+An `.env` written before the change still runs all six containers; `make up CORE=1`
+runs five (§3).
 
 ## 11. Stopping and resetting
 
@@ -786,6 +1055,22 @@ two together.
 missing or empty. `.env` must sit next to `docker-compose.yml`; a value of
 nothing counts as unset.
 
+**`Placeholder secrets: … Each still starts with CHANGE_ME`** from `make env`, or
+in the backend's log with the backend restarting. `.env` still holds a
+placeholder from `.env.example`, on an install that has already started, so
+nothing generated a value for it. Rotate it as §2 shows, or, with no data to
+keep, `docker compose down -v` and `make up` again. `make env` changes nothing
+on its own once the database volume exists.
+
+**`Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later`**
+from `make up` (or `make env`, `make build`, `make dev`), or **`can't set
+healthcheck.start_interval as feature require Docker Engine v25 or later`**
+from plain `docker compose up`. This Docker is older than the floor (§1): the
+compose file probes each service every second while it starts, which needs
+Engine 25. Update Docker Desktop, or on Linux install Docker Engine and its
+compose plugin from Docker's repository (docs.docker.com/engine/install); a
+distribution's `docker.io` package can be older. Your data volumes are kept.
+
 **Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
 service). The same with plain compose: `docker compose logs -f backend` (boot
 steps, migrations, seeds), `docker compose logs -f workspace-worker`,
@@ -802,11 +1087,13 @@ the repository root:
 git ls-files --eol orchestrator/docker-entrypoint.sh services/workspace-worker/entrypoint.sh
 ```
 
-If either reports `w/crlf`, change its line-ending setting to LF in your editor
-and save, preserving any local edits. Then run
-`docker compose up -d --build backend workspace-worker`. Rebuilding alone
-cannot repair the backend script: Compose bind-mounts the host's copy over
-the image's entrypoint.
+The published images that `make up` pulls carry CI's copies, so this hits only
+images built from your checkout (`make build`, `make dev`). If either reports
+`w/crlf`, change its line-ending setting to LF in your editor and save,
+preserving any local edits. Then run `make build` (or `make dev`) again.
+Rebuilding alone cannot repair the backend script: the build copies your
+checkout's file into the image, and `make dev` also mounts it over the image's
+copy.
 
 **`password authentication failed for user "postgres"` after changing
 `POSTGRES_PASSWORD`.** Postgres applies the password only when it initialises
@@ -878,21 +1165,37 @@ The same CI gates both: every change is compose-only, fresh-clone-only, or
 guarded by `AUTH_EDITION`, and the fresh-clone smoke lane boots this exact
 stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ### Keeping it small
 
-Rebuilding leaves the previous image untagged and grows the build cache, and
-Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
-of disk. `make up` and `make dev` clean up after themselves, so this stays flat
-on its own. To reclaim at any time:
+Rebuilding (`make build`, `make dev`) leaves the previous image untagged and
+grows the build cache, and Docker keeps both until something prunes them, so a
+source-built install grows on disk with every rebuild. `make up`, `make build`
+and `make dev` clean up after themselves, so this stays bounded on its own. To
+reclaim at any time:
 
 ```bash
-make clean     # or: docker image prune -f && docker builder prune -f
+make clean     # or: docker image prune -f && docker builder prune -f --filter until=168h
 ```
 
-`make clean` removes only untagged images and unused build cache. It never
-prunes volumes: a stopped stack's database volume looks "unused" to Docker, so
-`docker volume prune` would delete your data. Only `make reset` removes data,
-and it asks first.
+`make clean` removes only untagged images and the build cache nothing has used
+for a week. The week is deliberate: the dependency installs (the web app's
+`npm install`, the API's `pip install`) run in build stages no image keeps, so
+a plain `docker builder prune -f` deletes them, and the next `make build` or
+`make dev` after a `git pull` would install every dependency again (several
+minutes). Kept, a rebuild after a code change reuses them. A week of frequent
+dependency changes can hold a few copies; `docker builder prune -f` reclaims
+all of it, at the price of that reinstall. `make up` on published images builds
+nothing, so it has no build cache to keep.
+
+`make clean` never prunes volumes: a stopped stack's database volume looks
+"unused" to Docker, so `docker volume prune` would delete your data. Only
+`make reset` removes data, and it asks first.
+
+On a small machine, `make up CORE=1` runs five containers instead of six and
+never downloads the workspace worker's image; Code Canvas, the Deliverables
+file browser and agents' workspace tools need the worker (§1b, §5).
 
 **Docker Desktop's own cache limit.** Docker garbage-collects the build cache
 only once it passes `defaultKeepStorage` — 20 GB by default, so in practice it
@@ -905,29 +1208,31 @@ Docker Engine:
 
 ### Working on the code instead of with it
 
-The default stack runs the shipped production images — the Next.js standalone
-build and a compiler-free Python runtime — because that is what a user installs.
-For hot reload while editing:
+The default stack (`make up`, plain `docker compose up`) runs the published
+production images, pulled from GHCR: the Next.js standalone build and a
+compiler-free Python runtime, with the code inside them, because that is what a
+user installs. Nothing is mounted over the code and nothing reloads. To edit the
+code, run `make dev`:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+make dev    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 ```
 
-That swaps the frontend and backend to their development stages and mounts your
-source. It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
+That builds the frontend's and the backend's development stages from your
+checkout and mounts your source over `/app`: the backend runs `uvicorn
+--reload` and the frontend the Next.js dev server, so edits reload live. The
+backend's entrypoint and healthcheck scripts are mounted from the checkout too.
+It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
 
-Two things are opt-in to keep the default install small:
+One thing is opt-in to keep the default install small:
 
 ```bash
 # headless Chromium for the workspace_html_to_png tool (+1.2 GB)
 docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
-
-# Leiden clustering for the Knowledge Graph (+660 MB; without it the graph
-# still clusters, using networkx's Louvain — lower partition quality)
-docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ```
 
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+The Knowledge Graph's Leiden clustering is in every install: it runs on
+graspologic-native, about 1 MB, so it needs no build option (PRD-262 US-027).
 
 ## Session mode — your own Claude Code sessions, managed (PRD-234)
 

@@ -30,9 +30,7 @@ mocked rate limiter, muted notification seam. No DB / network / Redis.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
-import sys as _sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
@@ -45,18 +43,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from core.models.approval_grants import ApprovalGrant, GrantStatus
 from core.services.approval_grants import deny_grant, grant_grant, revoke_grant

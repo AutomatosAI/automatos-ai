@@ -6,8 +6,9 @@ This suite runs in the required orchestrator job and pins the definitions a late
 edit could quietly undo:
 
 - the frontend: the base stage on node:24-alpine3.24 with no apk build tools; the
-  runtime on the same Alpine release with only the node binary copied in (no npm,
-  yarn, corepack, C headers or curl); a busybox wget health check on /favicon.ico;
+  runtime on the same Alpine release with only the node binary copied in, from the
+  node-strip stage built on base (no npm, yarn, corepack, C headers or curl); a busybox
+  wget health check on /favicon.ico;
 - the worker and media-render: Node from a stage named `node`, pinned as tag@digest,
   never NodeSource; the C headers never copied; production last. The worker copies
   npm and corepack too; media-render the node binary alone, because Hyperframes
@@ -128,7 +129,12 @@ def test_the_frontend_runtime_is_alpine_plus_only_the_node_binary():
     assert alpine, "the base stage names no Alpine release"
     assert re.fullmatch(rf"alpine:{re.escape(alpine.group(1))}{DIGEST}", image), image
     body = _stage_body(FRONTEND, "production")
-    assert _copies_from(body, "base") == ["/usr/local/bin/node"]
+    # PRD-262 #24: base's binary, stripped in a stage built on base, so the Node pin stays base's.
+    assert _stage_images(FRONTEND)["node-strip"] == "base"
+    assert _copies_from(body, "node-strip") == ["/usr/local/bin/node"]
+    assert [line for line in body if re.match(r"COPY\s.*--from=", line) and "--from=builder" not in line] == [
+        "COPY --from=node-strip /usr/local/bin/node /usr/local/bin/node"
+    ]
     assert _apk_packages(body) == ["libstdc++"]
     code = "\n".join(body)
     for absent in ("npm", "yarn", "corepack", "curl"):

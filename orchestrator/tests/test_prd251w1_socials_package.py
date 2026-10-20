@@ -562,13 +562,17 @@ def test_the_render_step_runs_under_the_stamp():
 
 
 def test_boot_seeds_the_socials_marketplace_after_the_builtin_skills_and_before_the_packages():
-    source = (_ORCH / "main.py").read_text(encoding="utf-8")
-    skills = source.index("seed_builtin_skills(db)")
-    socials = source.index("seed_socials_marketplace(db)")
-    packages = source.index("seed_packages(db, create_only=True)")
+    # Since PRD-262 US-031 the boot leader's seeds run as core/seeds/leader_stage.py's
+    # SECTIONS, in order; main.py runs that stage.
+    source = (_ORCH / "core" / "seeds" / "leader_stage.py").read_text(encoding="utf-8")
+    skills = source.index('("Built-in skills", _seed_builtin_skills)')
+    socials = source.index('("Socials package", _seed_socials_package)')
+    packages = source.index('("Marketplace packages", _seed_packages_create_only)')
     assert skills < socials < packages
-    block = source[source.rindex("try:", 0, socials): source.index("except Exception", socials)]
+    block = source[source.index("def _seed_socials_package"): source.index("def _seed_packages_create_only")]
     assert "from core.seeds.seed_socials_package import seed_socials_marketplace" in block
+    assert "seed_socials_marketplace(db)" in block
+    assert "from core.seeds.leader_stage import run_leader_seeds" in (_ORCH / "main.py").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

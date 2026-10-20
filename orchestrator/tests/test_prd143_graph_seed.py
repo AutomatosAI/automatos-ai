@@ -35,7 +35,7 @@ from types import SimpleNamespace
 import pytest
 
 # Dummy creds satisfy the lazy engine config at import time (the established
-# idiom from test_harness_self_management.py); no connection is ever opened.
+# idiom from test_harness_routing_rule.py); no connection is ever opened.
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")

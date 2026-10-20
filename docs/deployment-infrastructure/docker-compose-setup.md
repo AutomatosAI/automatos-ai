@@ -21,7 +21,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
 - [orchestrator/core/seeds/seed_local_first_run.py](orchestrator/core/seeds/seed_local_first_run.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
 - [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
@@ -212,21 +212,21 @@ Sources: [orchestrator/Dockerfile:131](), [frontend/Dockerfile:129](), [docker-c
 
 ### Backend (Orchestrator)
 The backend uses a multi-stage Dockerfile [orchestrator/Dockerfile:1-8]().
-- **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and Python packages from `requirements.txt` [orchestrator/Dockerfile:19-59](). It conditionally installs `graphifyy[leiden]` based on `INSTALL_GRAPH_EXTRAS` build argument [orchestrator/Dockerfile:38-58]().
-- **`base` stage**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `ghostscript`, `libpango-1.0-0`, `libcairo2`, `libgdk-pixbuf-2.0-0` [orchestrator/Dockerfile:70-81]().
-- **`development` stage**: Includes hot-reload capabilities and debugging tools. The entrypoint `docker-entrypoint.sh` is mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
-- **`production` stage**: Optimized and minimal, copying only necessary application code and running `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
+- **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked and installed in two layers (PRD-262 US-022) [orchestrator/Dockerfile](). Every build installs that one lock, Railway's included: the Knowledge Graph's Leiden clustering runs on `graspologic-native`, which the lock pins, so no build argument adds `graphifyy[leiden]` (PRD-262 US-027) [orchestrator/Dockerfile]().
+- **`base` stage**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:70-107]().
+- **`development` stage**: Includes hot-reload capabilities and debugging tools; `make dev` runs it through `docker-compose.dev.yml`. The source and the entrypoint `docker-entrypoint.sh` are mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
+- **`production` stage**: Optimized and minimal, copying only necessary application code. The default compose stack runs it, with nothing mounted over the code (PRD-262 US-035), and so does Railway. It runs `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
 
-Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.txt:1-142]()
+Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.in:1-142]()
 
 ### Frontend
 The frontend uses a multi-stage Dockerfile for a Next.js standalone build [frontend/Dockerfile:1-9]().
-- **`base` stage**: Installs Node.js and common build tools [frontend/Dockerfile:14-26]().
-- **`development` stage**: Installs all dependencies and runs the Next.js development server with hot-reload [frontend/Dockerfile:30-48]().
-- **`builder` stage**: Accepts `NEXT_PUBLIC_*` build arguments which are embedded into the client bundle. It performs the `npm run build` step [frontend/Dockerfile:53-98]().
-- **`production` stage**: Copies only the `.next/standalone`, `.next/static`, and `public` folders for a minimal image. It runs the `node server.js` command [frontend/Dockerfile:103-132]().
+- **`base` stage**: Node 24 on Alpine, with no build tools. It installs every dependency once with `npm ci`, from `package.json`, `package-lock.json` and `.npmrc` alone [frontend/Dockerfile:11-32]().
+- **`development` stage**: Runs the Next.js development server with hot-reload on the base stage's install [frontend/Dockerfile:34-50]().
+- **`builder` stage**: Copies the source, then accepts the `NEXT_PUBLIC_*` build arguments, which are embedded into the client bundle, so changing one reuses the install. It performs the `npm run build` step and moves the dependencies Next traced out of the standalone output [frontend/Dockerfile:52-107]().
+- **`production` stage**: Alpine plus the node binary. It copies the traced `node_modules`, `public`, `.next/static` and the standalone server as four layers, the one that changes least often first, and runs the `node server.js` command [frontend/Dockerfile:109-163]().
 
-Sources: [frontend/Dockerfile:1-132]()
+Sources: [frontend/Dockerfile:1-163]()
 
 ---
 
@@ -250,14 +250,15 @@ Sources: [docker-compose.yml:42,72,102,131,249](), [orchestrator/Dockerfile:108]
 ## Deployment and Setup
 
 ### Prerequisites
-1. Copy `.env.example` to `.env` and set required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`) [docker-compose.yml:14-15]().
-2. Ensure Docker and Docker Compose are installed.
+1. Docker Engine 25 or later with Docker Compose 2.24.4 or later (`make up` checks both).
+2. `.env` with the required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`): `make up` creates it from `.env.example` and generates the three ([self-hosting.md §2](../getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)).
 
 ### Launch Commands
 
-- **Standard (Core Only)**: `docker compose up --build` [docker-compose.yml:9]().
+- **Standard (six containers)**: `make up`, which pulls the images CI published for the commit and starts the stack; plain `docker compose up -d` runs the tag in `.env` ([self-hosting.md §1b](../getting-started/self-hosting.md#1b-the-commands-behind-make)).
+- **Core (five containers, no workspace worker)**: `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`.
 - **With Qdrant (Memory Profile)**: `docker compose --profile memory up -d` [docker-compose.yml:118]().
-- **Development Mode**: Uses the `development` target in the Dockerfile for hot-reloading [orchestrator/Dockerfile:91-131]().
+- **Development Mode**: `make dev` (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`) uses the `development` target in the Dockerfile for hot-reloading, with the source mounted [orchestrator/Dockerfile:91-131]().
 
 ### `docker-entrypoint.sh`
 

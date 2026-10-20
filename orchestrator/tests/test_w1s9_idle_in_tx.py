@@ -32,12 +32,6 @@ ORCH_ROOT = Path(__file__).resolve().parent.parent
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
-# The heartbeat tool loop imports consumers.chatbot.personality, whose package
-# __init__ eagerly pulls the chatbot stack → RAG → camelot, an optional PDF dep
-# not installed in the unit-test env. Stub it so the import chain resolves.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
-
 def _stub(name, **attrs):
     """Register a stub module in sys.modules (only if absent) with attrs set."""
     if name in sys.modules:
@@ -511,6 +505,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     monkeypatch.setattr(dbmod, "SessionLocal", lambda: _HarnessDB(ws, events))
 
+    from services.harness_changes import Prescribed
     from services.harness_service import HarnessService
 
     svc = HarnessService()
@@ -545,9 +540,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("diagnose")
         return {"coverage": None, "convergence": "insufficient_data", "counts": {}, "agents": {}, "issues": []}
 
-    async def _prescribe(_ws, _diag, _run_id):
+    async def _prescribe(_ws, _metrics, _diag, _run_id, _db):
         events.append("prescribe")
-        return []
+        return Prescribed(valid=(), dropped=())
 
     async def _report(_ws, _diag, _prescriptions, _db, _iteration):
         events.append("report")

@@ -2,19 +2,19 @@
 /**
  * PRD-260 D5, D6 — the core chat as Auto's events: each of useChat's onData
  * parts (lib/chat/hooks.ts, the receipts frame as useChatWithReceipts reads it)
- * and each status change maps as lib/mascot/events.ts says, unknown parts map to
- * nothing, the reply's words starting end thinking (T-003b), its reasoning
- * thinks and a cap plays oops (P260-FX-16), and whole turns built from those
- * parts play the states Play's spec expects.
+ * and each status change maps as lib/mascot/data-events.ts and events.ts say,
+ * unknown parts map to nothing, the reply's words starting end thinking
+ * (T-003b), its reasoning thinks and a cap plays oops (P260-FX-16), and whole
+ * turns built from those parts play the states Play's spec expects.
  */
 import { describe, expect, it } from 'vitest'
 
 import { LIVE_KEY } from '@/lib/chat/receipts'
+import { mascotEventsFromData } from '@/lib/mascot/data-events'
 import {
   BLOCKED_TURN,
   type ChatStatus,
   FAILED_TURN,
-  mascotEventsFromData,
   mascotEventsFromReply,
   mascotEventsFromStatus,
   NO_REPLY,

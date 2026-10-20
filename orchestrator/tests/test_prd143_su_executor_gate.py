@@ -17,16 +17,14 @@ Idiom mirrors tests/security/test_w3_full_autonomy_gate.py.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
-import sys as _sys
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
-# tests/test_harness_self_management.py) — with one twist: the port points
+# tests/test_harness_routing_rule.py) — with one twist: the port points
 # at nothing. The modules.tools import chain attempts a fail-soft DB connect
 # at import time; a CLOSED port refuses instantly, while a wedged local
 # postgres proxy can hang the handshake forever. CI exports real POSTGRES_*
@@ -37,21 +35,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-# Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which pulls
-# modules.rag's ingestion chain (camelot at module top). Stub the missing *leaf* only
-# when truly absent — never the modules.rag package. Blessed pattern, see W2-S7.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from modules.tools.discovery.action_registry import ActionDefinition
 from modules.tools.discovery.platform_executor import PlatformActionExecutor

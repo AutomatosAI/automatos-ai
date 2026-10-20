@@ -50,7 +50,8 @@ vi.mock('@/hooks/use-studio-theme', () => ({
   useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
 }))
-vi.mock('@/components/play/chat/play-chat', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
+// Builtin Play's /chat slot, which draws Play's chat in its frame (PRD-261 A-14a: MainLayout moved out of Play's chat into it).
+vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <div data-testid="discussion-bar" /> }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (

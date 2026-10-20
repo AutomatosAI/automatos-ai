@@ -12,15 +12,18 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   updater reads FROM lines only, so Node comes through a named ``FROM … AS node``
   stage (US-007);
 * every third-party compose image is ``name:tag@sha256:<digest>``; only this
-  repository's published images follow ``AUTOMATOS_IMAGE_TAG``;
+  repository's own images are not: the published ones follow ``AUTOMATOS_IMAGE_TAG``,
+  and make dev's local build names (``automatos-<name>:dev``) are never pulled. The
+  docker-compose updater ignores both (PRD-262 US-036);
 * .github/dependabot.yml: docker covers exactly the directories that hold a
   tracked Dockerfile, docker-compose every compose file, github-actions the
   workflows; every entry is weekly and puts every dependency in a group; docker
   and compose ignore tag moves (semver major and minor), so the digest is what
   moves;
 * every Python lock file has an updater, or is listed below with the reason
-  Dependabot cannot update it. A new lock (US-022, US-044) fails here until one
-  or the other is true.
+  Dependabot cannot update it. A new lock (US-044) fails here until one or the
+  other is true; US-022's API locks (two since US-027 removed Railway's [leiden]
+  lock) and the frozen reference locks of US-023, US-026 and US-027 are listed.
 
 Pure file reads: no Docker, no network.
 """
@@ -38,7 +41,10 @@ DEPENDABOT = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
 
 # name:tag@sha256:<64 hex>; the name may carry a registry host and port.
 PINNED = re.compile(r"^[^\s@]+:[\w][\w.-]{0,127}@sha256:[0-9a-f]{64}$")
-FIRST_PARTY = re.compile(r"^ghcr\.io/automatosai/automatos-[a-z-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}$")
+# This repository's own images: the published ones (docker-compose.yml) and make dev's local
+# build names (docker-compose.dev.yml), which are never pulled (PRD-262 US-036).
+FIRST_PARTY = re.compile(r"^(?:ghcr\.io/automatosai/automatos-[a-z-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}"
+                         r"|automatos-[a-z-]+:dev)$")
 # The same file names test_prd262_production_last_stage.py and test_prd234_s1a_compose_bind.py read.
 DOCKERFILE_NAME = re.compile(
     r"(?:^|/)(?:Dockerfile(?:\.(?!md$|txt$|dockerignore$)[\w-]+)?|[\w.-]+\.[Dd]ockerfile)$"
@@ -72,6 +78,35 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "(dependabot-core python/shared_file_fetcher.rb, read 18 Oct 2026), and this "
         "lock is compiled with -c requirements.lock, which neither updater passes. "
         "How it is kept current is open for Gerard and Dave (PRD-262 US-012, US-044)."
+    ),
+    **dict.fromkeys(
+        ("orchestrator/requirements.lock", "orchestrator/requirements-dev.lock"),
+        "Dependabot's pip and uv updaters fetch only *.txt and *.in files (and uv.lock), so "
+        "they never see these locks (dependabot-core uv/lib/dependabot/uv/file_fetcher.rb, "
+        "read 19 Oct 2026). Pointed at /orchestrator they would bump requirements.in alone, "
+        "which test_prd262_api_locks.py then fails because the lock no longer satisfies it. "
+        "A bump is an edit to the input plus the compile command at the top of each lock "
+        "(PRD-262 US-022); which updater keeps them current is open for Gerard and Dave.",
+    ),
+    "scripts/ci/reference/requirements-pdf-tables.lock": (
+        "Frozen on purpose: the PDF table extractor the API ran before PRD-262 US-023, at "
+        "the versions its W2 lock installed, which test.yml's reference-goldens job runs "
+        "in a throwaway venv to re-record the grids pdfplumber is judged against. A bump "
+        "would change the reference, not fix anything that ships; no image installs it."
+    ),
+    "scripts/ci/reference/requirements-text-splitters.lock": (
+        "Frozen on purpose: the text splitters the API ran before PRD-262 US-026 "
+        "(langchain-text-splitters and langchain-core), at the versions its W2 lock "
+        "installed, which test.yml's reference-goldens job runs in a throwaway venv to "
+        "re-record the chunks the vendored splitters are judged against. A bump would "
+        "change the reference, not fix anything that ships; no image installs it."
+    ),
+    "scripts/ci/reference/requirements-leiden-partitions.lock": (
+        "Frozen on purpose: the Leiden clustering Railway's API ran before PRD-262 US-027 "
+        "(graphifyy with graspologic 3.3.0 over graspologic-native), at the versions its "
+        "[leiden] lock installed, which test.yml's reference-goldens job runs in a throwaway "
+        "venv to re-record the partitions the graspologic-native adapter is judged against. "
+        "A bump would change the reference, not fix anything that ships; no image installs it."
     ),
 }
 
@@ -208,6 +243,24 @@ def test_every_third_party_compose_image_is_pinned_as_tag_at_digest():
     third_party = {where: image for where, image in images.items() if not FIRST_PARTY.match(image)}
     assert len(third_party) >= 6, f"the compose search found too few images: {sorted(images)}"
     assert {where: image for where, image in third_party.items() if not PINNED.match(image)} == {}
+
+
+
+def test_this_repositorys_own_compose_images_are_its_published_and_dev_names():
+    """docker-compose.yml names the three published images, docker-compose.dev.yml their dev builds."""
+    own = {where: image for where, image in _compose_images().items() if FIRST_PARTY.match(image)}
+    published = {where for where, image in own.items() if image.startswith("ghcr.io/")}
+    dev = {where for where, image in own.items() if image.endswith(":dev")}
+    services = ("backend", "frontend", "workspace-worker")
+    assert published == {f"docker-compose.yml:{service}" for service in services}
+    assert dev == {f"docker-compose.dev.yml:{service}" for service in services}
+
+
+def test_the_compose_updater_ignores_this_repositorys_own_images():
+    """Neither name is a registry pin: the tag moves with AUTOMATOS_IMAGE_TAG, and a dev build is local."""
+    (entry,) = _entries("docker-compose")
+    whole = {rule["dependency-name"] for rule in entry.get("ignore") or [] if not rule.get("update-types")}
+    assert {"automatos-*", "ghcr.io/automatosai/automatos-*"} <= whole
 
 
 # ── the updater ─────────────────────────────────────────────────────────────

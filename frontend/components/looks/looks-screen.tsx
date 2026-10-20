@@ -1,21 +1,20 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
+import { HostLink, LOOK_STYLE_HREF } from '@automatos/theme-sdk'
 
-import { asNewLook, baseLook, statusLine, withValues, type LookValues } from '@/lib/looks/editor'
-import { PRESETS } from '@/lib/looks/presets'
-import type { Look } from '@/lib/looks/types'
-import { LOOK_STYLE_HREF } from '@/lib/ticket-links'
+import { asNewLook, baseLook, statusLine, withValues, type LookValues } from '../../lib/looks/editor'
+import { PRESETS } from '../../lib/looks/presets'
+import type { Look } from '../../lib/looks/types'
 
 import { LookEditor } from './look-editor'
 import { LookImport } from './look-import'
 import { LookManager } from './look-manager'
 import { LookPreview } from './look-preview'
-import { useLook } from './look-provider'
 import { LooksRow } from './looks-row'
-import { PLAY_ONLY_HEADING } from './play-only-route'
 import styles from './looks.module.css'
+import { PLAY_ONLY_HEADING } from './screen-heading'
+import { usePlayLook } from './use-play-look'
 
 /**
  * PRD-260 §4 — Make it yours (/looks, Ember looks-01), ported from Automatos
@@ -23,7 +22,7 @@ import styles from './looks.module.css'
  * name, a live preview with Auto, the Looks row (the five presets, then the
  * user's saved looks), the picked look's actions (Save, Rename, Duplicate,
  * Delete, Export, Copy JSON), Import, and the editor over EDITABLE_FIELDS.
- * Every change goes through useLook().setLook, which re-themes the whole app
+ * Every change goes through usePlayLook().setLook, which re-themes the whole app
  * at once, not only the preview. 'See the style sheet' opens /looks/style.
  * Until the stored look is read (after hydration, once the account is known)
  * the frame shows only the heading and is aria-busy: never Ember's choices
@@ -40,7 +39,7 @@ export const STYLE_SHEET_LINK = 'See the style sheet'
 
 /** The editor's state and actions: picking, editing, Save as new look and Reset. */
 function useLookEditing() {
-  const { look, saved, loaded, setLook, saveLook } = useLook()
+  const { look, saved, loaded, setLook, saveLook } = usePlayLook()
   const [errors, setErrors] = useState<readonly string[]>([])
 
   const pick = (next: Look) => {
@@ -87,9 +86,9 @@ export function LooksScreen() {
               <p className={styles.status} role="status">
                 {statusLine(look, saved)}
               </p>
-              <Link href={LOOK_STYLE_HREF} className={styles.styleLink}>
+              <HostLink href={LOOK_STYLE_HREF} className={styles.styleLink}>
                 {STYLE_SHEET_LINK}
-              </Link>
+              </HostLink>
             </div>
           )}
         </div>

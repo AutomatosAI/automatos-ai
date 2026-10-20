@@ -1,10 +1,7 @@
 'use client'
 
 import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
-
-import type { DeliverableRef } from '@/lib/chat/deliverables'
-import { messageText } from '@/lib/chat/message-text'
-import type { ChatMessage } from '@/types'
+import type { HostChatMessage } from '@automatos/theme-sdk'
 
 import { AutoReply } from './auto-reply'
 import styles from './chat.module.css'
@@ -17,7 +14,9 @@ import styles from './chat.module.css'
  * you scrolled up to read; a new message follows again. What follows the
  * conversation (a turn that failed before a reply began, a Mission Auto
  * suggests) sits under the list, inside the scroll. A reply you stopped says
- * so (P260-FX-30).
+ * so (P260-FX-30). The messages are the SDK's (useChatController's view model,
+ * PRD-261 A-14a): each reply carries its Deliverables, its approval cards and
+ * whether Stop ended it.
  */
 
 /** How close to the bottom counts as "reading the newest line". */
@@ -28,7 +27,7 @@ function nearBottom(scroller: HTMLElement): boolean {
 }
 
 /** jsdom has no scrollIntoView, hence the check. */
-function useFollow(messages: readonly ChatMessage[]): {
+function useFollow(messages: readonly HostChatMessage[]): {
   scrollerRef: RefObject<HTMLDivElement>
   endRef: RefObject<HTMLDivElement>
 } {
@@ -60,33 +59,18 @@ function useFollow(messages: readonly ChatMessage[]): {
 }
 
 export interface MessageListProps {
-  readonly messages: readonly ChatMessage[]
+  readonly messages: readonly HostChatMessage[]
   /** Auto is answering: the newest reply is the one being written. */
   readonly streaming: boolean
-  /** The Deliverables a reply made live, by its id. */
-  readonly deliverablesOf?: (replyId: string) => readonly DeliverableRef[]
   /** Try again, for the newest reply's snag box. */
   readonly onRetry?: () => void
   /** A spent trial blocked the newest turn: its reply shows no snag box. */
   readonly trialBlocked?: boolean
   /** Shown under the conversation, inside the scroll. */
   readonly after?: ReactNode
-  /** The approval cards a reply raised, by its id (T-005c). */
-  readonly approvalsOf?: (replyId: string) => ReactNode
-  /** Stop ended this reply (hooks/use-stopped-reply.ts). */
-  readonly isStopped?: (replyId: string) => boolean
 }
 
-export function MessageList({
-  messages,
-  streaming,
-  deliverablesOf,
-  onRetry,
-  trialBlocked = false,
-  after,
-  approvalsOf,
-  isStopped,
-}: MessageListProps) {
+export function MessageList({ messages, streaming, onRetry, trialBlocked = false, after }: MessageListProps) {
   const { scrollerRef, endRef } = useFollow(messages)
   const newest = messages[messages.length - 1]?.id
   return (
@@ -95,16 +79,13 @@ export function MessageList({
         {messages.map((message) => (
           <li key={message.id} className={message.role === 'user' ? styles.userItem : styles.replyItem}>
             {message.role === 'user' ? (
-              <p className={styles.bubble}>{messageText(message)}</p>
+              <p className={styles.bubble}>{message.text}</p>
             ) : (
               <AutoReply
                 message={message}
                 streaming={streaming && message.id === newest}
-                deliverables={deliverablesOf?.(message.id)}
                 onRetry={message.id === newest ? onRetry : undefined}
                 snagHidden={trialBlocked && message.id === newest}
-                approvals={approvalsOf?.(message.id)}
-                stopped={isStopped?.(message.id)}
               />
             )}
           </li>

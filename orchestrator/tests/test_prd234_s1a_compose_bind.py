@@ -158,7 +158,12 @@ def test_the_smoke_lane_asserts_the_frontend_listens_on_loopback():
     address. A failed check fails the smoke (``fail`` exits 1 through the report trap)."""
     smoke = SMOKE_SH.read_text(encoding="utf-8")
     assert re.search(r'bash scripts/ci/smoke-loopback-ports\.sh "\$COMPOSE_FILE" \\\n\s+\|\| fail ', smoke)
-    assert re.search(r"^\s+boot_frontend\n\s+check_loopback_ports$", smoke, re.M), "runs once the frontend is up"
+    # Runs once the frontend is up. Other steps may sit between the two since PRD-262
+    # US-036 (make up's exit) and US-037/US-038 (checks of what make up left behind).
+    main = re.search(r"^main\(\) \{\n(.*?)^\}", smoke, re.M | re.S).group(1)
+    steps = [line.strip() for line in main.splitlines()]
+    assert "boot_frontend" in steps and "check_loopback_ports" in steps
+    assert steps.index("boot_frontend") < steps.index("check_loopback_ports"), "runs once the frontend is up"
     check = LOOPBACK_SH.read_text(encoding="utf-8")
     assert 'LOOPBACK="127.0.0.1"' in check
     assert 'FRONTEND_EXPECTED="${LOOPBACK}:${FRONTEND_PORT:-3000}"' in check

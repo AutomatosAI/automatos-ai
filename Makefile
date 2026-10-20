@@ -3,26 +3,90 @@
 # =============================================================================
 # Every target that builds also cleans up after itself: a rebuild leaves the
 # previous image untagged and grows the build cache, which is what turns a
-# 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
+# 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind. The
+# build cache of the last week stays, so the next source build after a git pull
+# reuses its dependency installs (PRD-262 US-039).
 #
-#   make up      build (if needed), start, tidy up
-#   make up-images  start the PUBLISHED images instead of building (no source
-#                build; AUTOMATOS_IMAGE_TAG=sha-xxxxxxx pins one, default edge)
-#   make dev     the same with hot reload (source-mounted dev images)
+#   make env     check Docker first: Engine 25 or later and Compose 2.24.4 or
+#                later, or stop and say so (PRD-262 US-038). Then create .env
+#                from .env.example and fill POSTGRES_PASSWORD, REDIS_PASSWORD and
+#                API_KEY with random values while they are empty or CHANGE_ME,
+#                before the first start only (PRD-262 US-037).
+#                make up, make build and make dev run it first.
+#   make up      the published images for this checkout, pulled from GHCR, then
+#                start and tidy up (PRD-262 US-036). It picks one tag for the
+#                three app images, says which and why, builds only what CI has
+#                not published, and writes the tag to .env (AUTOMATOS_IMAGE_TAG)
+#                so plain docker compose runs the same images. Pin a tag with
+#                AUTOMATOS_IMAGE_TAG=sha-xxxxxxx make up (edge follows edge).
+#   make up CORE=1
+#                the core five: postgres, redis, minio, backend and frontend, without
+#                the workspace worker or its image (docker-compose.core.yml, PRD-262
+#                US-040). A worker an earlier make up started is stopped and removed;
+#                its files stay. make up without CORE=1 brings it back.
+#   make build   build the three app images from your checkout instead, as the
+#                production stages CI publishes, under a local-<sha7> tag. postgres,
+#                redis and minio start first, so they come up while the images build
+#                (PRD-262 US-039)
+#   make dev     for editing the code: the development stages with your source
+#                mounted, uvicorn --reload and the Next.js dev server
+#                (docker-compose.dev.yml)
 #   make down    stop the stack, keep your data
-#   make clean   reclaim dangling images + unused build cache (never your data)
+#   make clean   reclaim dangling images + build cache unused for a week (never your data)
 #   make reset   DESTRUCTIVE — stop and delete all data volumes
 #   make status  what is running, and what it costs on disk
 #   make logs    follow the logs (make logs s=backend for one service)
 #
-# Nothing here is required: plain `docker compose up` still works.
+# Nothing here is required: plain `docker compose up` still works (the tag in
+# .env, or :edge), and self-hosting.md §1b gives the commands behind each target.
 # =============================================================================
 
 COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
-IMAGES_COMPOSE ?= docker compose -f docker-compose.yml -f docker-compose.images.yml
+# Picks the app images' tag for make up and make build (PRD-262 US-036).
+STACK_IMAGES ?= python3 scripts/stack_images.py
+# Writes .env's three secrets for make env (PRD-262 US-037).
+STACK_ENV    ?= sh scripts/stack_env.sh
+# Stops make env, and so make up, build and dev, on a Docker older than the floor:
+# Engine 25 and Compose 2.24.4, which the compose healthchecks need (PRD-262 US-038).
+STACK_FLOOR  ?= sh scripts/stack_docker_floor.sh
 
-.PHONY: up up-images dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+.PHONY: env up build dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+
+# The commit a local build is made from: docker-compose.yml stamps it on each app
+# image as org.opencontainers.image.revision (PRD-262 US-036). HEAD, with -dirty
+# when orchestrator, frontend or services/workspace-worker has uncommitted
+# changes; empty outside a git checkout, where compose stamps `unknown`. Set
+# once, when make starts, and passed to every recipe.
+APP_CONTEXTS := orchestrator frontend services/workspace-worker
+ifeq ($(origin AUTOMATOS_REVISION),undefined)
+AUTOMATOS_REVISION := $(shell git rev-parse --verify -q HEAD 2>/dev/null)$(if $(shell git status --porcelain -- $(APP_CONTEXTS) 2>/dev/null),-dirty,)
+endif
+export AUTOMATOS_REVISION
+
+# An empty AUTOMATOS_IMAGE_TAG in the shell would make compose run :edge instead
+# of the tag make up wrote to .env, so an empty one is not passed on.
+ifeq ($(strip $(AUTOMATOS_IMAGE_TAG)),)
+unexport AUTOMATOS_IMAGE_TAG
+endif
+
+# CORE=1: the core stack, five containers without the workspace worker (PRD-262
+# US-040). Every docker compose command then reads docker-compose.core.yml on top of
+# docker-compose.yml, through COMPOSE_FILE: make's own, and the ones make up runs through
+# scripts/stack_images.py, which reads COMPOSE_FILE to leave the worker's image alone.
+# make dev names its files with -f, so it always runs all six.
+CORE_COMPOSE_FILE := docker-compose.yml:docker-compose.core.yml
+ifeq ($(CORE),1)
+export COMPOSE_FILE := $(CORE_COMPOSE_FILE)
+endif
+
+# Under the core override compose leaves alone a worker that an earlier six-container run
+# started, so CORE=1 stops and removes it before the stack starts; its files stay in the
+# automatos_workspaces_data volume. It is named through docker-compose.yml, where the
+# worker has no profile. Without CORE=1 this line is empty.
+define remove_core_worker
+$(if $(filter 1,$(CORE)),@$(COMPOSE) -f docker-compose.yml rm --stop --force workspace-worker)
+endef
 
 # PRD-234 S2: LOCAL_PROJECTS_DIR (root .env) is the owner's projects folder; the
 # default bind source ./workspaces/projects must exist before compose mounts it.
@@ -57,26 +121,51 @@ define migrate_workspace_layout
 fi
 endef
 
+# First the Docker floor (scripts/stack_docker_floor.sh): docker-compose.yml's
+# healthchecks probe every second while a service starts (start_interval), which
+# Compose refuses on an engine older than 25, so an older Docker stops here with the
+# floor named, before anything else runs. Then .env with the three secrets
+# (scripts/stack_env.sh): generated before the first start, never changed after it.
+# An install that started on a CHANGE_ME placeholder stops here with how to rotate it.
+# up, build and dev run it as their first recipe line, not as a prerequisite, so the
+# #818 guide test still parses `up:`.
+env:
+	@$(STACK_FLOOR)
+	@$(STACK_ENV)
+
 up:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
-	$(COMPOSE) up -d --build --remove-orphans
+	@$(STACK_IMAGES) up
+	$(remove_core_worker)
+	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
 	@$(MAKE) --no-print-directory cli-host-nudge
 
-# The published images (docker-compose.images.yml): pull, never build. `clean`
-# afterwards drops the previous :edge left untagged by the pull.
-up-images:
+# Builds the three app images from this checkout (the production stages CI
+# publishes) under local-<sha7>, written to .env first so the build and every
+# later compose command use it. Compose never builds under an official tag.
+# postgres, redis and minio start before the build (PRD-262 US-039), so their
+# first-run initdb and health gate pass while the images build, not after them;
+# the backend still waits for all three to be healthy (depends_on). A failed
+# build leaves those three running: make down stops them.
+build:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
-	$(IMAGES_COMPOSE) pull backend frontend workspace-worker
-	$(IMAGES_COMPOSE) up -d --no-build --remove-orphans
+	@$(STACK_IMAGES) build
+	$(COMPOSE) up -d postgres redis minio
+	$(COMPOSE) build backend frontend workspace-worker
+	$(remove_core_worker)
+	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
 	@$(MAKE) --no-print-directory cli-host-nudge
 
 dev:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	$(DEV_COMPOSE) up -d --build --remove-orphans
@@ -88,15 +177,22 @@ down:
 # Safe at any time, stack up or down:
 #   - dangling images only. NEVER `-a`, which deletes images your other
 #     projects still need.
-#   - unused build cache. Cached layers still referenced by a live build stay.
+#   - build cache nothing has used for a week (until=168h). A plain
+#     `docker builder prune -f` deletes every cache record no image holds, and
+#     the dependency installs are in no image: the frontend's npm install and
+#     the backend's pip install run in build stages whose output the production
+#     images only copy. The next make build or make dev after a git pull then
+#     installed every dependency again. The week keeps them; CI's
+#     source-build-cache job rebuilds after this target and needs both CACHED
+#     (PRD-262 US-039). `docker builder prune -f` alone still reclaims it all.
 #   - NO volume pruning. A stopped stack's named volumes look "unused" to
 #     Docker, so `docker volume prune` here would delete your database. Data is
 #     only ever removed by `make reset`, which asks first.
 clean:
 	@before=$$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | tr '\n' ' '); \
 	docker image prune -f >/dev/null; \
-	docker builder prune -f >/dev/null; \
-	echo "→ cleaned: dangling images and unused build cache reclaimed."
+	docker builder prune -f --filter until=168h >/dev/null; \
+	echo "→ cleaned: dangling images and build cache unused for a week reclaimed."
 
 reset:
 	@echo "This deletes the database, object storage and all local data. Ctrl-C to abort."

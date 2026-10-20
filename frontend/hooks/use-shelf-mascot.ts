@@ -2,19 +2,20 @@
 
 import { useCallback, useEffect, useReducer } from 'react'
 
-import { useBackendHealth } from '@/hooks/use-backend-health'
-import { useCelebrateNew } from '@/hooks/use-celebrate-new'
-import { captionFor } from '@/lib/mascot/media'
-import { INITIAL_MASCOT, mascotReducer } from '@/lib/mascot/reducer'
-import type { MascotName } from '@/lib/mascot/types'
-import { kindOf, shelfCaption, type ShelfView } from '@/lib/play/shelf'
+import { useHealth } from '@automatos/theme-sdk'
+
+import { captionFor } from '../lib/mascot/media'
+import { INITIAL_MASCOT, mascotReducer } from '../lib/mascot/reducer'
+import type { MascotName } from '../lib/mascot/types'
+import { kindOf, shelfCaption, type ShelfView } from '../lib/play/shelf'
+import { useCelebrateNew } from './use-celebrate-new'
 
 /**
  * PRD-260 §4, D6 — Auto in the shelf's header (Ember mock 04), as Automatos
  * Play's ShelfScreen drives him: proud of the count while he idles, a
  * celebration once for a Deliverable this browser hasn't seen
  * (useCelebrateNew), oops when the shelf doesn't load until it does (Try
- * again), and asleep while the backend doesn't answer (useBackendHealth, the
+ * again), and asleep while the backend doesn't answer (the SDK's useHealth: the
  * frame's GET /health).
  */
 
@@ -31,7 +32,7 @@ function idleCaption(state: MascotName, total: number | null): string | undefine
 
 export function useShelfMascot(view: ShelfView): ShelfMascot {
   const [state, dispatch] = useReducer(mascotReducer, INITIAL_MASCOT)
-  const { connection } = useBackendHealth()
+  const { connection } = useHealth()
   const celebrate = useCallback(() => dispatch({ type: 'deliverable-added' }), [])
   const onClipEnded = useCallback((mascot: MascotName) => dispatch({ type: 'clip-ended', state: mascot }), [])
   // A shelf that loads ends a failed load's oops. Declared before useCelebrateNew,
