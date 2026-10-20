@@ -94,8 +94,13 @@ function OpenRequest({ packageId, request }: { packageId: string; request: Theme
   )
 }
 
+export const SIGN_AGAIN = 'Sign it again with an active Automatos key:'
+
 export function SignaturePanel({ report }: { report: ThemeReviewReport }) {
   if (report.status !== 'approved' && !report.signed) return null
+  // A stored signature no active key verifies (its key retired or revoked) can be replaced (C-05b).
+  const canSign = report.status === 'approved' && !(report.signed && report.signatureVerified)
+  const request = canSign ? report.signatureRequest : null
   return (
     <section aria-label="Signature" className="space-y-2 rounded-lg border border-border/50 p-3">
       <p className="text-sm font-medium">Signature</p>
@@ -103,9 +108,13 @@ export function SignaturePanel({ report }: { report: ThemeReviewReport }) {
         <p className={report.signatureVerified ? 'text-xs' : 'text-xs text-destructive'} data-testid="theme-signed">
           Signed. {storedSignatureWords(report.signatureVerified, report.keyId)}
         </p>
-      ) : report.signatureRequest ? (
-        <OpenRequest packageId={report.id} request={report.signatureRequest} />
-      ) : (
+      ) : null}
+      {request ? (
+        <>
+          {report.signed ? <p className="text-xs">{SIGN_AGAIN}</p> : null}
+          <OpenRequest packageId={report.id} request={request} />
+        </>
+      ) : report.signed ? null : (
         <p className="text-xs text-muted-foreground">This version has no open signature request.</p>
       )}
     </section>
