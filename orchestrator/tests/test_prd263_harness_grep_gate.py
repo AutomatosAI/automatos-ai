@@ -15,6 +15,10 @@ owner-only bypass key it set: no source outside the tests names either again.
 US-048 deletes the direct apply helper, the card parsers and the F156 legacy ledger-file
 importer from services.harness_service, and submits the audit report straight through
 ReportService, so harness_service.py joins GATED and names none of them again.
+
+US-049 moves PRESCRIBE onto the change-kind registry (services.harness_changes), which
+joins GATED. The placeholder kinds and their constants are gone from every service:
+grep ``review_needed`` in orchestrator/services returns 0 (section 11-Q9).
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ GATED = (
     "services/harness_mode.py",
     "core/stats/harness_verdicts.py",
     HARNESS_SERVICE,
+    "services/harness_changes.py",
 )
 EXECUTORS = re.compile(r"\b(PlatformActionExecutor|UnifiedToolExecutor|execute_tool)\b")
 # An import of any of these modules, or of these names, is an LLM client import.
@@ -54,6 +59,13 @@ DELETED_APPLY = (
     "_extract_text_section", "_extract_risk_score", "_read_applied_tasks", "_write_applied_tasks",
     "LEGACY_LEDGER_FILE", "UNREADABLE_LEDGER_", "_import_legacy_ledger", "_file_unreadable_ledger_card",
 )
+# What US-049 deleted: the placeholder emitters' kinds, their placeholder and its threshold
+# (grep across orchestrator/services returns 0).
+DELETED_PLACEHOLDERS = (
+    "review_needed", "model_change_same_tier", "description_update", "_PLACEHOLDER_PROPOSED_VALUE",
+    "_MIN_SUCCESS_RATE_FOR_COST_OPT",
+)
+SERVICES = "services"
 # Skipped by that grep: the tests, and caches and tool state (__pycache__, dot directories).
 SKIPPED_PARTS = ("tests", "__pycache__")
 CONFIG_SURFACE = "reports/config-surface.json"
@@ -130,3 +142,13 @@ def test_the_weekly_run_files_no_card_and_sends_no_notice():
 def test_harness_service_names_none_of_the_deleted_apply_helpers():
     source = (_ORCH / HARNESS_SERVICE).read_text(encoding="utf-8")
     assert [name for name in DELETED_APPLY if name in source] == []
+
+
+def test_no_service_names_the_placeholder_kinds():
+    offenders = [
+        f"{path.relative_to(_ORCH)}: {name}"
+        for path in (_ORCH / SERVICES).rglob("*.py")
+        for name in DELETED_PLACEHOLDERS
+        if name in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert offenders == []

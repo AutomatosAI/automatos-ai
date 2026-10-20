@@ -505,6 +505,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     monkeypatch.setattr(dbmod, "SessionLocal", lambda: _HarnessDB(ws, events))
 
+    from services.harness_changes import Prescribed
     from services.harness_service import HarnessService
 
     svc = HarnessService()
@@ -539,9 +540,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("diagnose")
         return {"coverage": None, "convergence": "insufficient_data", "counts": {}, "agents": {}, "issues": []}
 
-    async def _prescribe(_ws, _diag, _run_id):
+    async def _prescribe(_ws, _metrics, _diag, _run_id, _db):
         events.append("prescribe")
-        return []
+        return Prescribed(valid=(), dropped=())
 
     async def _report(_ws, _diag, _prescriptions, _db, _iteration):
         events.append("report")

@@ -11,8 +11,9 @@ three units under test:
   3. the action's registration as a platform tool.
 
 The HARNESS apply branch that mapped ``power_mode_*`` prescriptions onto the action
-went with HARNESS's direct apply helper (PRD-263 US-048). HARNESS's change-kind
-registry (US-049, a later PR) brings the kinds it may propose, with their own tests.
+went with HARNESS's direct apply helper (PRD-263 US-048). In HARNESS's change-kind
+registry (services.harness_changes, US-049) power mode is a report kind, never
+applied: test_prd263_harness_changes_registry.py covers it.
 
 Dummy POSTGRES_* + the apscheduler stub let the coordinator import chain load
 without a real DB or the prod-only scheduler.

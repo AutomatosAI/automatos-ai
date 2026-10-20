@@ -5,9 +5,10 @@ table (read by the UniversalRouter at Tier 2a) and fails closed on a rule with n
 target or no matcher. The HARNESS apply branch that mapped routing_rule_add (and
 power_mode_*) prescriptions onto platform actions went with HARNESS's direct apply
 helper (PRD-263 US-048), and with it this file's harness_service import and its
-apscheduler stub. HARNESS's change-kind registry (US-049, a later PR) brings the
-kinds it may propose, with their own tests. Dummy POSTGRES_* lets the config
-import chain load without a DB.
+apscheduler stub. In HARNESS's change-kind registry (services.harness_changes,
+US-049) routing and power mode are report kinds, never applied:
+test_prd263_harness_changes_registry.py covers them. Dummy POSTGRES_* lets the
+config import chain load without a DB.
 """
 import asyncio
 import os

@@ -139,13 +139,16 @@ async def _swept(monkeypatch) -> list:
 def _assert_reported_only(record, new_session, ws: UUID, tickets_before: int) -> dict:
     """One completed run whose suggestion is a report line; nothing filed, granted or sent but the report,
     which goes straight to ReportService (no platform action, US-048)."""
-    from services.harness_service import RECONNECT_RISK, SUGGESTIONS_HEADING
+    from services.harness_changes import KINDS
+    from services.harness_diagnose import RECONNECT_APP
+    from services.harness_service import SUGGESTIONS_HEADING
 
     (run,) = hr.runs(new_session, ws)
     assert (run["status"], run["report_status"]) == ("completed", "ok")
     (rx,) = run["prescriptions"]
     assert (rx["prescription_id"], rx["change_type"], rx["risk_score"], rx["proposed_value"]) == (
-        f"rx-{run['id']}-001", "reconnect_app", RECONNECT_RISK, {"app_name": FAILING_APP})
+        f"rx-{run['id']}-001", RECONNECT_APP, KINDS[RECONNECT_APP].risk, {"app_name": FAILING_APP})
+    assert rx["apply_kind"] is False                   # a report kind: a line of the report, never a card
     assert SUGGESTIONS_HEADING in run["report_md"] and rx["prescription_id"] in run["report_md"]
     assert f"reconnect {FAILING_APP}" in run["report_md"]
     assert record.actions == []                        # no platform action, not even for the audit report
