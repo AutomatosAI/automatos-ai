@@ -2,7 +2,7 @@
 
 import { type Dispatch, useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
-import { IDLE_MS, useIdleTimeout } from '@/hooks/use-idle-timeout'
+import { IDLE_MS, useIdleTimeout } from './use-idle-timeout'
 import {
   type ChatStatus,
   mascotEventsFromData,
@@ -10,10 +10,10 @@ import {
   mascotEventsFromStatus,
   NO_REPLY,
   type ReplyProgress,
-} from '@/lib/mascot/events'
-import { INITIAL_MASCOT, mascotReducer } from '@/lib/mascot/reducer'
-import { claimFirstOpen, type SessionSource } from '@/lib/mascot/session'
-import type { MascotEvent, MascotName, MascotState } from '@/lib/mascot/types'
+} from '../lib/mascot/events'
+import { INITIAL_MASCOT, mascotReducer } from '../lib/mascot/reducer'
+import { claimFirstOpen, type SessionSource } from '../lib/mascot/session'
+import type { MascotEvent, MascotName, MascotState } from '../lib/mascot/types'
 
 /**
  * PRD-260 D5, D6 — Auto driven by the core chat. Play's reducer
