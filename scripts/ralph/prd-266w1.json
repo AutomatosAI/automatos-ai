@@ -309,7 +309,9 @@
         "The local operator (the anonymous lane) and a paired device can mint (US-004b's caller fix); a test proves both.",
         "Discovery's capabilities gain 'voice_live', mapped to POST /api/voice/web-call.",
         "Tests: orchestrator/tests/test_prd266_voice_mint.py with a recorded Retell create-web-call response under orchestrator/tests/fixtures/voice/ (Basic → 403 with the message; Business → 200 with transport, url, ice_servers, expires_at; enterprise unrestricted; local unrestricted; the local operator and a device mint; a response without those fields omits them).",
-        "Local checks, nothing else runs here: python3 -m py_compile on every changed .py; after the story commit, python3 scripts/ci/check_changed_code_shape.py --base $(bash scripts/ralph/acceptance-prd266w1.sh --print-base) reports no error; bash scripts/ralph/acceptance-prd266w1.sh --no-ci shows this story's checks PASS (tsc, vitest, pytest and ruff run once, in the wave's CI run)."
+        "Local checks, nothing else runs here: python3 -m py_compile on every changed .py; after the story commit, python3 scripts/ci/check_changed_code_shape.py --base $(bash scripts/ralph/acceptance-prd266w1.sh --print-base) reports no error; bash scripts/ralph/acceptance-prd266w1.sh --no-ci shows this story's checks PASS (tsc, vitest, pytest and ruff run once, in the wave's CI run).",
+        "The Business-plan refusal carries a machine-readable code beside the message the web already shows: 403 {\"detail\": {\"code\": \"voice_live_plan_required\", \"message\": \"Auto Live is on the Business plan\"}} (or the repo's existing coded-error shape if one exists; grep for an existing {code, message} 403 first and follow it); the Automatos Go app keys on the code, never the sentence (lead, 21 Oct, from the app's voice kit)",
+        "The mint stays on Retell's /v2/create-web-call (modules/voice/retell_api.py RETELL_CREATE_WEB_CALL_URL): calls minted through /v3 send no transcript or talking events, which the phone's Auto Live needs; a test pins the URL constant's path to /v2/create-web-call (lead, 21 Oct)"
       ],
       "priority": 15,
       "passes": false,
