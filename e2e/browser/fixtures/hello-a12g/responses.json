@@ -1,0 +1,154 @@
+{
+  "_comment": "PRD-261 A-12g: test data only. The bodies specs/pages-playbooks.spec.ts answers GET /api/workflow-recipes, GET /api/workflow-recipes/<template_id>, GET /api/workflow-recipes/<template_id>/executions and POST /api/workflow-recipes/<template_id>/execute with, in the shapes of WorkflowTemplate.to_dict and RecipeExecution.to_dict (orchestrator/core/models/core.py) and the routes in orchestrator/api/workflow_recipes.py.",
+  "playbookList": {
+    "items": [
+      {
+        "id": 102,
+        "template_id": "hello-a12g-inbox-sweep",
+        "name": "Inbox sweep",
+        "description": "Test data: tidy the inbox.",
+        "workspace_id": "00000000-0000-4000-8000-00000000e2e7",
+        "owner_type": "workspace",
+        "tags": [
+          "e2e"
+        ],
+        "steps": [
+          {
+            "order": 1,
+            "name": "Sort the inbox",
+            "agent_id": 1
+          }
+        ],
+        "inputs": null,
+        "schedule_config": null,
+        "use_count": 3,
+        "success_rate": 1.0,
+        "quality_score": null,
+        "is_public": true,
+        "is_featured": false,
+        "version": "1.0.0",
+        "created_by": "system",
+        "created_at": "2026-10-19T09:00:00",
+        "updated_at": "2026-10-19T09:00:00",
+        "last_used_at": null
+      },
+      {
+        "id": 101,
+        "template_id": "hello-a12g-weekly-notes",
+        "name": "Weekly notes",
+        "description": "Test data: summarise the week.",
+        "workspace_id": "00000000-0000-4000-8000-00000000e2e7",
+        "owner_type": "workspace",
+        "tags": [
+          "e2e"
+        ],
+        "steps": [
+          {
+            "order": 1,
+            "name": "Gather the week's notes",
+            "agent_id": 1
+          },
+          {
+            "order": 2,
+            "name": "Write the summary",
+            "agent_id": 2
+          }
+        ],
+        "inputs": null,
+        "schedule_config": null,
+        "use_count": 3,
+        "success_rate": 1.0,
+        "quality_score": null,
+        "is_public": true,
+        "is_featured": false,
+        "version": "1.0.0",
+        "created_by": "system",
+        "created_at": "2026-10-19T09:00:00",
+        "updated_at": "2026-10-19T09:00:00",
+        "last_used_at": null
+      }
+    ],
+    "total": 2,
+    "skip": 0,
+    "limit": 10
+  },
+  "playbookDetail": {
+    "id": 101,
+    "template_id": "hello-a12g-weekly-notes",
+    "name": "Weekly notes",
+    "description": "Test data: summarise the week.",
+    "workspace_id": "00000000-0000-4000-8000-00000000e2e7",
+    "owner_type": "workspace",
+    "tags": [
+      "e2e"
+    ],
+    "steps": [
+      {
+        "order": 1,
+        "name": "Gather the week's notes",
+        "agent_id": 1
+      },
+      {
+        "order": 2,
+        "name": "Write the summary",
+        "agent_id": 2
+      }
+    ],
+    "inputs": null,
+    "schedule_config": null,
+    "use_count": 3,
+    "success_rate": 1.0,
+    "quality_score": null,
+    "is_public": true,
+    "is_featured": false,
+    "version": "1.0.0",
+    "created_by": "system",
+    "created_at": "2026-10-19T09:00:00",
+    "updated_at": "2026-10-19T09:00:00",
+    "last_used_at": null
+  },
+  "runs": {
+    "items": [
+      {
+        "id": 31,
+        "execution_id": "hello-a12g-run-2",
+        "recipe_id": 101,
+        "status": "completed",
+        "current_step": 2,
+        "error_message": null,
+        "started_at": "2026-10-19T10:00:00",
+        "completed_at": "2026-10-19T10:02:00",
+        "triggered_by": "manual",
+        "attempt_count": 1,
+        "retry_of": null
+      },
+      {
+        "id": 30,
+        "execution_id": "hello-a12g-run-1",
+        "recipe_id": 101,
+        "status": "failed",
+        "current_step": 1,
+        "error_message": "Test data: step 1 failed.",
+        "started_at": "2026-10-18T10:00:00",
+        "completed_at": "2026-10-18T10:01:00",
+        "triggered_by": "manual",
+        "attempt_count": 1,
+        "retry_of": null
+      }
+    ],
+    "total": 2,
+    "skip": 0,
+    "limit": 5,
+    "recipe_id": "hello-a12g-weekly-notes",
+    "recipe_quality_score": null
+  },
+  "runStarted": {
+    "recipe_execution_id": "hello-a12g-run-3",
+    "recipe_id": "hello-a12g-weekly-notes",
+    "status": "started",
+    "total_steps": 2,
+    "message": "Playbook 101 \"Weekly notes\" is running.",
+    "task_id": null,
+    "number": null
+  }
+}

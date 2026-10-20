@@ -1,5 +1,5 @@
 {
-  "route_count": 940,
+  "route_count": 941,
   "routes": [
     {
       "method": "GET",
@@ -2352,6 +2352,10 @@
     {
       "method": "PATCH",
       "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}/ai-labels"
     },
     {
       "method": "POST",

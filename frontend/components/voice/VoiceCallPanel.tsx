@@ -8,12 +8,15 @@
  * screen's orb rides. The props interface is unchanged so hosts
  * (multimodal-input) need nothing; `workspaceId` stays for callers but the
  * server now derives the workspace from the authenticated mint.
+ *
+ * PRD-264 EUAI-04: the header carries "AI voice assistant" for the whole call.
  */
 
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2, Mic, MicOff, Phone, PhoneOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AiVoiceLabel } from '@/components/voice/AiVoiceLabel'
 import { PresenceOrb } from '@/components/voice/PresenceOrb'
 import { useRetellCall } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
@@ -109,6 +112,7 @@ export function VoiceCallPanel({
               <p className={`text-xs ${STATE_COLORS[orbState]}`} aria-live="polite">
                 {stateLabel}
               </p>
+              <AiVoiceLabel />
             </div>
           </div>
           {isActive && (

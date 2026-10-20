@@ -1,15 +1,12 @@
 /**
- * PRD-260 T-006, K10 — /conversations is Play's alone: the server component
- * reads the automatos-style cookie (parseUiStyle) and sends Classic, Studio, a
- * missing and a tampered cookie to /chat before anything paints; under Play it
- * renders MainLayout (fullBleed) with Play's Conversations screen.
- *
- * PRD-261 A-02b: "under Play" is the style builtin Play's, `theme:builtin:play`,
- * which the legacy `play` cookie parses to as well; any other theme (an installed
- * one) has no Conversations page here and goes to /chat.
+ * PRD-260 T-006, K10; PRD-261 A-04b — /conversations is the old address of Play's Conversations
+ * page, which is now builtin Play's theme route at /x/conversations. The server component reads
+ * the automatos-style cookie (parseUiStyle) and, before anything paints, sends the browser to
+ * /x/conversations under a theme whose registry entry lists the route (builtin Play, the legacy
+ * `play` cookie too), and to /chat under Classic, Studio, an installed theme (no entry on the
+ * server), and a missing or tampered cookie. app/x/[...path]/page.tsx renders the route
+ * (components/theme-host/__tests__/theme-slot-route.test.tsx).
  */
-import React from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const cookieJar = vi.hoisted(() => ({ style: undefined as string | undefined }))
@@ -27,21 +24,9 @@ const redirectMock = vi.hoisted(() =>
 )
 vi.mock('next/navigation', () => ({ redirect: redirectMock }))
 
-vi.mock('@/components/layout/main-layout', () => ({
-  MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
-    <div data-testid="main-layout" data-full-bleed={fullBleed ? 'true' : 'false'}>
-      {children}
-    </div>
-  ),
-}))
-vi.mock('@/components/play/conversations/play-conversations', () => ({
-  PlayConversations: () => <div data-testid="play-conversations" />,
-}))
-
 import ConversationsPage from '../page'
 
 afterEach(() => {
-  cleanup()
   vi.clearAllMocks()
   cookieJar.style = undefined
 })
@@ -53,12 +38,11 @@ describe('/conversations', () => {
   it.each([
     ['the style builtin Play is', 'theme:builtin:play'],
     ['a legacy play cookie', 'play'],
-  ])('renders Play’s Conversations inside MainLayout under %s', async (_label, value) => {
+  ])('sends the browser to /x/conversations under %s', async (_label, value) => {
     cookieJar.style = value
-    render(await ConversationsPage())
-    expect(redirectMock).not.toHaveBeenCalled()
-    expect(screen.getByTestId('main-layout')).toHaveAttribute('data-full-bleed', 'true')
-    expect(screen.getByTestId('play-conversations')).toBeInTheDocument()
+    await expect(ConversationsPage()).rejects.toThrow('NEXT_REDIRECT:/x/conversations')
+    expect(redirectMock).toHaveBeenCalledTimes(1)
+    expect(redirectMock).toHaveBeenCalledWith('/x/conversations')
   })
 
   it.each([

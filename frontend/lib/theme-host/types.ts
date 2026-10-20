@@ -34,8 +34,23 @@ export interface ThemeDefinition {
   unregister?(): void
 }
 
-/** Why a theme did not start, or stopped: each reason has its own notice text. */
+/**
+ * Why a theme did not start, or stopped: each reason has its own notice text.
+ *
+ * - `auth` (A-08b): the session was refused (401/403) on the active-theme read, the entry or a
+ *   theme file, as when it expired. It is the session's fault, not the theme's, so it never
+ *   counts toward the three-failure revert (A-04c).
+ * - `revoked`: the installed version was revoked. A `warn` revocation never fails the load (the
+ *   theme runs and the host shows a notice, ThemeLoadOk.revoked); a `disable` one names no theme
+ *   (ThemeLoadAbsent), as the server's own choice rewrite does.
+ * - `opt-in`: private code the member has not opted in to (PRD-261 Q6): GET /api/themes/active
+ *   says `optIn.required`, so no theme file is asked for (the files proxy would 404 each one).
+ * - `unavailable`: the theme's files could not be reached (a 5xx from the files proxy, a network
+ *   failure, or the host's own sources chunk not loading, as after a deploy). Not the theme's
+ *   fault, so it never counts toward the revert either.
+ */
 export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 'look' | 'render'
+  | 'auth' | 'revoked' | 'opt-in' | 'unavailable'
 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'
@@ -51,8 +66,9 @@ export interface FrameProps {
 export type FrameComponent = ComponentType<FrameProps>
 
 /**
- * A checked theme.json (the spike's format, `automatos-theme-spike/v1`, until A-06b's package
- * manifest replaces it). The three file fields are absolute URLs under the theme's files folder.
+ * A checked theme.json: a package's (`automatos-theme/v1`, its files by the package layout) or the
+ * browser lane's spike fixtures' (`automatos-theme-spike/v1`, its files named), manifest.ts
+ * parseThemeManifest. The three file fields are absolute URLs under the theme's files folder.
  */
 export interface SpikeManifest {
   readonly id: string
@@ -79,11 +95,20 @@ export interface ThemeRegistrations {
   readonly routes: ReadonlyMap<string, unknown>
 }
 
+/** A `warn` revocation of the running version (GET /api/themes/active `theme.revoked`): it still runs. */
+export interface ThemeRevocationWarning {
+  readonly level: 'warn'
+  /** The maintainer's reason, shown as text; empty when none was given. */
+  readonly reason: string
+}
+
 export interface ThemeLoadOk extends ThemeRegistrations {
   readonly ok: true
   readonly ref: ThemeRef
   /** The installed theme's checked manifest; null for a builtin theme, which has a registry entry instead. */
   readonly manifest: SpikeManifest | null
+  /** A `warn` revocation of this installed version, for the host's notice; absent or null for none. */
+  readonly revoked?: ThemeRevocationWarning | null
   /** Removes the theme's class, stylesheet and variables, then runs its unregister; safe to call twice. */
   readonly cleanup: () => void
 }
@@ -117,9 +142,23 @@ export interface LoaderDeps {
   readonly fetchJson: (url: string) => Promise<unknown>
   /** The browser's own import(), for an installed theme's entry. */
   readonly importModule: (url: string) => Promise<unknown>
+  /** A-08c: leaves the package digest the active-theme answer named for the next request's boot cache. */
+  readonly rememberDigest?: (installId: string, digest: string) => void
   readonly doc: Document
   readonly timeoutMs: number
 }
+
+/**
+ * A-08c: the cookie in which the client host leaves the package digest GET /api/themes/active
+ * named for an install, as `<installId>.<digest>`. The root layout's boot cache
+ * (boot-server.ts) is keyed by user, install and this digest, so a boot whose digest the client
+ * no longer sees active (after an update or a rollback) is fetched again instead of served for
+ * the rest of its 60 s. A hint only: it can make the server ask the backend again, never choose
+ * what the page paints.
+ */
+export const THEME_DIGEST_COOKIE = 'automatos-theme-digest'
+/** Between the install id and the digest in THEME_DIGEST_COOKIE (neither contains it). */
+export const THEME_DIGEST_HINT_SEPARATOR = '.'
 
 /** Where a theme comes from: compiled into the app (`builtin:`) or installed in the workspace (`install:`). */
 export interface ThemeSource {

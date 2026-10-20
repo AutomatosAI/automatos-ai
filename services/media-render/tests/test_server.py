@@ -16,12 +16,13 @@ import pytest
 import soundfile
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN, bundle
+from helpers import TOKEN, VOICES, bundle
 from media_render.config import ConfigError, load_settings
 from media_render.kokoro_tts import SpokenLine
 from media_render.pipeline import CheckOutcome, PipelineError, RenderResult
-from media_render.server import TOKEN_HEADER, create_app
+from media_render.server import STATE, TOKEN_HEADER, create_app
 from media_render.tts import Speaker
+from media_render.voices_build import voice_names
 
 AUTH = {TOKEN_HEADER: TOKEN}
 FINDING = {"section": "lint", "severity": "error", "code": "non_deterministic_code", "message": "Math.random()"}
@@ -323,5 +324,35 @@ def test_tts_returns_durations_segments_and_the_wav_on_request(settings):
             assert bad.status == 400
             wrong = await client.post("/tts", data=json.dumps({"lines": [{"id": "l01", "text": "x"}], "speed": 9}), headers=AUTH)
             assert wrong.status == 400
+
+    asyncio.run(go())
+
+
+def test_a_voice_or_a_language_the_image_does_not_carry_is_a_400_naming_the_field(settings):
+    """PRD-262 US-052: the app reads the voices from the image's voices file when it is
+    made, at boot; a voice that file lacks, or a language other than en-us or en-gb, is
+    refused before anything is spoken, staged or checked."""
+
+    async def go():
+        pipeline = StubPipeline()
+        async with serve(settings, pipeline, Speaker(settings, synthesize=fake_synthesize)) as client:
+            assert client.app[STATE].voices == voice_names(settings.kokoro_voices_path) == VOICES
+            line = [{"id": "l01", "text": "Hello."}]
+            for body, field in (({"lines": line, "voice": "am_santa"}, "voice"), ({"lines": line, "lang": "fr-fr"}, "lang")):
+                response = await client.post("/tts", data=json.dumps(body), headers=AUTH)
+                answer = await response.json()
+                assert response.status == 400 and answer["error"] == "invalid_request", answer
+                assert answer["message"].startswith(f"{field} must be one of "), answer
+            spoken = {"lines": [{"id": "l01", "at": 0.3, "text": "Hi."}]}
+            for voice, field in (({**spoken, "voice": "zf_xiaoxiao"}, "audio.voice.voice"), ({**spoken, "lang": "es"}, "audio.voice.lang")):
+                status, answer = await post(client, bundle(audio={"voice": voice}))
+                assert status == 400 and answer["error"] == "invalid_bundle", answer
+                assert answer["message"].startswith(f"{field} must be one of "), answer
+            assert pipeline.checked == []
+            british = {"lines": line, "voice": "bf_emma", "lang": "en-gb"}
+            response = await client.post("/tts", data=json.dumps(british), headers=AUTH)
+            assert response.status == 200
+            answer = await response.json()
+            assert (answer["voice"], answer["lang"]) == ("bf_emma", "en-gb")
 
     asyncio.run(go())

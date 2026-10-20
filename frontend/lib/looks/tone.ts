@@ -3,7 +3,7 @@ import { parseThemeTone } from '@/lib/theme-host/boot-sanitize'
 import { UI_STYLE_COOKIE_MAX_AGE_S } from '@/lib/ui-style'
 
 import type { GroundKey } from './catalogue'
-import { isDarkGround } from './css'
+import { isDarkGround } from './engine'
 
 /**
  * PRD-260 K4 — under Play the look's ground sets the tone: Paper forces

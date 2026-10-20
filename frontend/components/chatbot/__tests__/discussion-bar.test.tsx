@@ -19,7 +19,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
-// The theme's width source, the one PlayRouteSwitch reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
+// The theme's width source, the one ThemeSlot reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
 // PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; builtin Play's does.
 vi.mock('@/hooks/use-studio-theme', async () => {
   const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')

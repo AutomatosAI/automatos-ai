@@ -1,0 +1,11 @@
+/* PRD-261 A-04b: the theme-route hello theme's one stylesheet. Every rule sits under
+   html.hello-a04b, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a04b .hello-a04b-frame {
+  min-height: 100vh;
+  background: var(--hello-a04b-ground);
+  color: var(--hello-a04b-ink);
+}
+
+html.hello-a04b .hello-a04b-route {
+  padding: 24px;
+}

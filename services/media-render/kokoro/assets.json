@@ -1,0 +1,35 @@
+{
+ "about": "The Kokoro files the media assets image, ghcr.io/automatosai/automatos-media-assets, carries at /kokoro/<path> (PRD-262 US-053). images.yml's media-assets job (scripts/ci/media_assets.py) fetches each file from its url, checks its size and sha256, publishes the image and checks every file again in what it published. Until Gerard picks the D4 model by ear (US-050), every candidate is here: the fp32 model media-render runs today, the v1.1 release's fp16 and the v1.0 release's fp16. When he picks, the other models leave this list and the job runs again. kokoro/SHA256SUMS stays what media-render's own build checks.",
+ "licence": "Apache-2.0",
+ "notice": "Kokoro-82M, by hexgrad (https://huggingface.co/hexgrad/Kokoro-82M), is licensed under the Apache License, Version 2.0. The model and voices files are the unmodified ONNX exports published at https://github.com/thewh1teagle/kokoro-onnx/releases (tags model-files-v1.0 and model-files-v1.1).",
+ "files": [
+  {
+   "path": "model-files-v1.0/voices-v1.0.bin",
+   "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+   "bytes": 28214398,
+   "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+   "use": "The voices, which every candidate model reads. The v1.1 release's voices-v1.0.bin has the same sha256."
+  },
+  {
+   "path": "model-files-v1.0/kokoro-v1.0.onnx",
+   "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
+   "bytes": 325532387,
+   "sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+   "use": "fp32: the model media-render runs today (kokoro/SHA256SUMS)."
+  },
+  {
+   "path": "model-files-v1.1/kokoro-v1.0.fp16.onnx",
+   "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx",
+   "bytes": 163527961,
+   "sha256": "f3a290d384fbb27966d462905c71a46cef9e5fd00516b40df32a0b4afe77ac96",
+   "use": "D4 candidate (US-050): fp16, input_ids -> waveform + duration; it keeps today's line timing only with sentence_pause=0, clause_pause=0."
+  },
+  {
+   "path": "model-files-v1.0/kokoro-v1.0.fp16.onnx",
+   "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx",
+   "bytes": 177464787,
+   "sha256": "c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204",
+   "use": "D4 candidate (US-050): fp16, today's graph (tokens -> audio)."
+  }
+ ]
+}

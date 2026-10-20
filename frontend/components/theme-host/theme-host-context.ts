@@ -16,6 +16,12 @@ export interface ThemeHostContextValue {
   readonly frame: FrameComponent | null
   /** Every slot the active theme registered (frame@1 included), or null with no active theme. */
   readonly slots: ReadonlyMap<SlotId, unknown> | null
+  /**
+   * The active theme's registerPage pages and registerRoute routes (A-04b), or null with no active
+   * theme. Optional so a value made for the frame and slots alone still types; absent reads as none.
+   */
+  readonly pages?: ReadonlyMap<string, unknown> | null
+  readonly routes?: ReadonlyMap<string, unknown> | null
   /** Called by the frame slot's boundary when the frame throws while drawing. */
   readonly reportRenderFailure: (error: unknown) => void
 }

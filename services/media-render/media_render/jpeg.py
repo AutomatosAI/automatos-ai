@@ -5,6 +5,9 @@ orchestrator has no image library (and adds none), so it sends the still here,
 where ffmpeg already is: ``POST /jpeg`` with the image's bytes answers the same
 picture as a JPEG. A transparent pixel is laid over white, the way a PNG shows on
 a page, since JPEG has no transparency.
+
+The encode drops the still's metadata, so POST /jpeg gives the JPEG the AI mark the
+image carried, after this conversion (PRD-264 EUAI-06a, ``provenance.carry_mark``).
 """
 
 from __future__ import annotations
