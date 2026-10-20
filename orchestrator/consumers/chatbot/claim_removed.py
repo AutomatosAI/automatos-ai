@@ -65,6 +65,11 @@ _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
 _LABEL = r"\*\*[^*\n]+?(?::\*\*|\*\*:)"
 _KEPT_IN_FRONT = re.compile(rf"^(\s*)([-•+*]\s+)?({_LABEL}\s*)?")
 _ONLY_FRONT = re.compile(rf"\s*(?:[-•+*]\s*)?(?:{_LABEL})?\s*")
+# Night 18 (#1211's N17-5 follow-up): a read that observes nothing of the workspace or the world (a skill's
+# instructions loaded) found nothing for a reply to report: "Your post is now live on LinkedIn." after a loaded
+# skill alone is no finding, so the turn is checked as one that read nothing.
+_OBSERVES_NOTHING = frozenset({"load_skill"})
+_PLATFORM_PREFIX = "platform_"
 
 
 @dataclass(frozen=True)
@@ -265,11 +270,16 @@ def _dropped(answer: str, found: List[Tuple[str, str]], outcomes: List[Outcome])
 
 def _only_read(ran: List[Outcome], read_ahead: bool) -> bool:
     """Whether the turn wrote nothing (no write receipt: done, refused or waiting) and read something (a
-    done read, or its reads before the loop, ``read_ahead``)."""
+    done read that observes something, ``_observes``, or its reads before the loop, ``read_ahead``)."""
     receipts = [receipt(*outcome) for outcome in ran]
     if any(r["kind"] == WRITE for r in receipts):
         return False
-    return read_ahead or any(r["kind"] == READ and r["status"] == DONE for r in receipts)
+    return read_ahead or any(r["kind"] == READ and r["status"] == DONE and _observes(r["action"]) for r in receipts)
+
+
+def _observes(action: str) -> bool:
+    """Whether a read looks at the workspace or the world; a skill loaded (``_OBSERVES_NOTHING``) does not."""
+    return str(action or "").removeprefix(_PLATFORM_PREFIX) not in _OBSERVES_NOTHING
 
 
 def without_unbacked_claims(answer: str, outcomes: Iterable[Outcome],
