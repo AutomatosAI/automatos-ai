@@ -1,0 +1,35 @@
+# The text splitters the API ran before PRD-262 US-026, for
+# scripts/ci/reference/text_splitters.py only: langchain-text-splitters 1.0.0, the
+# langchain-core it builds on, and every package they pull in, each pinned at the
+# version the API's W2 lock (orchestrator/requirements.lock before US-026) installed
+# with them. Never bumped: the reference is what production ran, and it runs only in a
+# throwaway CI venv on fixtures this repository holds. Compile with the command at the
+# top of requirements-text-splitters.lock.
+langchain-text-splitters==1.0.0
+langchain-core==1.6.10
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.10.18
+charset-normalizer==3.5.2
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+jsonpatch==1.35
+jsonpointer==3.3
+langchain-protocol==0.0.19
+langsmith==0.8.5
+orjson==3.13.0
+packaging==26.3
+pydantic==2.14.1
+pydantic-core==2.50.1
+pyyaml==6.0.3
+requests==2.34.2
+requests-toolbelt==1.0.0
+tenacity==8.2.3
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+urllib3==2.8.0
+uuid-utils==0.17.1
+xxhash==4.0.1
+zstandard==0.25.0

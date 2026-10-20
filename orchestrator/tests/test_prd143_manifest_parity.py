@@ -13,7 +13,6 @@ hang the fail-soft import-time connect. Nothing here touches a DB.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
 import re
 import sys
@@ -54,18 +53,6 @@ def _install_fake_apscheduler():
 
 _install_fake_apscheduler()
 
-
-# Lean-venv shim: modules/tools/__init__ pulls modules.rag's ingestion chain
-# (camelot at module top). Stub the missing leaf only when truly absent.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from modules.tools.discovery.action_registry import ActionRegistry  # noqa: E402
 from modules.tools.discovery.platform_actions import register_all_actions  # noqa: E402

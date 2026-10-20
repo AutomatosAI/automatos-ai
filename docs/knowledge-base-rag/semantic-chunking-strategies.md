@@ -56,7 +56,7 @@ graph TB
         PDF["PDF (pdfplumber)"]
         DOCX["DOCX (python-docx)"]
         CODE["Python (PythonCodeTextSplitter)"]
-        MD["Markdown (MarkdownTextSplitter)"]
+        MD["Markdown (section chunks, F311)"]
     end
 
     subgraph "Code Entity Space"
@@ -117,7 +117,7 @@ Utilizes Shannon entropy to calculate information density. Boundaries are placed
 Creates a parent-child relationship between chunks. Large "parent" chunks provide broad context, while smaller "child" chunks allow for high-precision vector matches. This is reflected in the `DocumentChunk` dataclass which includes a `parent_content` field for context expansion `[orchestrator/modules/rag/ingestion/manager.py:100-101]()`.
 
 ### 4. Code-Aware Chunking
-For Python files, the system uses the `PythonCodeTextSplitter` `[orchestrator/modules/rag/ingestion/manager.py:35-36]()`. This splitter respects class and function boundaries, preventing logic from being severed mid-definition `[orchestrator/modules/rag/ingestion/manager.py:126-129]()`.
+When the `SemanticChunker` is unavailable or fails, `DocumentProcessor.chunk_document` falls back to a plain splitter: `PythonCodeTextSplitter` for Python files and `RecursiveCharacterTextSplitter` for everything else, both at 1,000 characters with 200 of overlap. The two are vendored from langchain-text-splitters 1.0.0 (MIT) in `[orchestrator/modules/rag/chunking/text_splitters.py]()` (PRD-262 US-026). The Python splitter cuts at classes and module-level functions first, then at blank lines, lines and words, so a definition is cut only when it is longer than a chunk `[orchestrator/modules/rag/ingestion/manager.py:439-442]()`.
 
 ### 5. Adaptive Strategy
 The system balances chunk sizes dynamically. `RAGConfig` initializes with `chunk_size` (default 500), `min_chunk_size` (100), and `max_chunk_size` (1500) `[orchestrator/modules/rag/service.py:161-166]()`.
@@ -137,7 +137,7 @@ The `DocumentProcessor` handles format-specific extraction before passing text t
 | :--- | :--- | :--- |
 | **PDF** | `pdfplumber` / `PyPDF2` | Primary extraction via `pdfplumber` with a `PyPDF2` fallback for robust text recovery `[orchestrator/modules/rag/ingestion/manager.py:157-194]()`. |
 | **DOCX** | `python-docx` | Iterates through `doc.paragraphs` to maintain structural flow `[orchestrator/modules/rag/ingestion/manager.py:196-203]()`. |
-| **Markdown** | `MarkdownTextSplitter` | Splits based on header hierarchy (h1, h2, h3) `[orchestrator/modules/rag/ingestion/manager.py:33-34]()`. |
+| **Markdown** | `section_chunks` | A Markdown or text document with headings is chunked by section, each chunk under the headings above it (F311); one without headings goes to the `SemanticChunker` `[orchestrator/modules/rag/chunking/markdown_sections.py]()`. |
 | **Cloud Files** | `CloudFileDownloader` | Downloads from Composio (Dropbox, OneDrive, GDrive, Box) before local processing `[orchestrator/modules/rag/services/cloud_file_downloader.py:28-35]()`. |
 
 ### Extraction Data Flow

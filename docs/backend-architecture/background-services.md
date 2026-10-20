@@ -5,7 +5,6 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/alembic/versions/wave3_escalation_level.py](orchestrator/alembic/versions/wave3_escalation_level.py)
 - [orchestrator/config.py](orchestrator/config.py)
 - [orchestrator/core/services/escalation.py](orchestrator/core/services/escalation.py)

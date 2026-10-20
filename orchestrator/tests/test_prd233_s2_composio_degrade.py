@@ -30,6 +30,7 @@ for _name in [n for n, m in list(_sys_guard.modules.items())
               and getattr(m, "__spec__", None) is None]:
     _sys_guard.modules.pop(_name, None)
 
+import importlib.machinery  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import uuid  # noqa: E402
@@ -57,10 +58,17 @@ class _FakeSDK:
     """Stands in for ``composio.Composio`` — the import succeeded."""
 
 
+def _sdk_installed(monkeypatch, installed: bool) -> None:
+    """The probe's one question about the SDK: can find_spec find it (PRD-262 US-032)."""
+    spec = importlib.machinery.ModuleSpec(cc.COMPOSIO_SDK_PACKAGE, None) if installed else None
+    monkeypatch.setattr(cc, "find_spec", lambda name, package=None: spec)
+
+
 @pytest.fixture
 def composio_on(monkeypatch):
     monkeypatch.setattr(config, "COMPOSIO_API_KEY", "test-key-not-a-secret")
     monkeypatch.setattr(cc, "_get_composio", lambda: _FakeSDK)
+    _sdk_installed(monkeypatch, True)
     cc.reset_composio_availability()
     yield
     cc.reset_composio_availability()
@@ -93,11 +101,7 @@ def test_unavailable_without_key(composio_off):
 
 def test_unavailable_when_sdk_missing(monkeypatch):
     monkeypatch.setattr(config, "COMPOSIO_API_KEY", "test-key-not-a-secret")
-
-    def _no_sdk():
-        raise ImportError("composio not installed")
-
-    monkeypatch.setattr(cc, "_get_composio", _no_sdk)
+    _sdk_installed(monkeypatch, False)
     cc.reset_composio_availability()
     try:
         assert cc.composio_available() is False
@@ -116,7 +120,7 @@ def test_probe_is_cached_per_process_and_resettable(monkeypatch):
         assert cc.composio_available() is False
         # Flipping config WITHOUT a reset keeps the cached verdict.
         monkeypatch.setattr(config, "COMPOSIO_API_KEY", "now-set")
-        monkeypatch.setattr(cc, "_get_composio", lambda: _FakeSDK)
+        _sdk_installed(monkeypatch, True)
         assert cc.composio_available() is False
         cc.reset_composio_availability()
         assert cc.composio_available() is True

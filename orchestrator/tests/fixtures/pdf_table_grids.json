@@ -1,0 +1,148 @@
+{
+  "fixtures": {
+    "parts-two-pages": [
+      {
+        "page": 1,
+        "rows": [
+          [
+            "SKU",
+            "Description",
+            "Qty"
+          ],
+          [
+            "A-100",
+            "Steel bracket",
+            "40"
+          ],
+          [
+            "B-220",
+            "Hex bolt M8",
+            "250"
+          ],
+          [
+            "C-310",
+            "Washer",
+            "1200"
+          ]
+        ]
+      },
+      {
+        "page": 2,
+        "rows": [
+          [
+            "SKU",
+            "Description",
+            "Qty"
+          ],
+          [
+            "D-415",
+            "Hinge pin",
+            "75"
+          ],
+          [
+            "E-520",
+            "Cable ties",
+            "500"
+          ],
+          [
+            "F-630",
+            "Spring clip",
+            "60"
+          ]
+        ]
+      }
+    ],
+    "revenue-by-region": [
+      {
+        "page": 1,
+        "rows": [
+          [
+            "Revenue by region",
+            "",
+            "",
+            ""
+          ],
+          [
+            "Region",
+            "Quarter",
+            "Revenue",
+            "Change"
+          ],
+          [
+            "North",
+            "2026-Q1",
+            "1,250,400.00",
+            "+4.2%"
+          ],
+          [
+            "South",
+            "2026-Q1",
+            "980,150.50",
+            "-1.8%"
+          ],
+          [
+            "East",
+            "2026-Q1",
+            "1,102,000.00",
+            "+0.6%"
+          ],
+          [
+            "West",
+            "2026-Q1",
+            "760,325.25",
+            "+12.9%"
+          ],
+          [
+            "Central",
+            "2026-Q1",
+            "455,000.00",
+            "-3.1%"
+          ]
+        ]
+      }
+    ],
+    "team-headcount": [
+      {
+        "page": 1,
+        "rows": [
+          [
+            "Team",
+            "Lead",
+            "Headcount",
+            "Opened"
+          ],
+          [
+            "Platform",
+            "Ana Silva",
+            "12",
+            "2024-03-01"
+          ],
+          [
+            "Data",
+            "Rui Costa",
+            "7",
+            "2025-01-15"
+          ],
+          [
+            "Design",
+            "",
+            "4",
+            "2025-06-30"
+          ],
+          [
+            "Support",
+            "Joana Reis",
+            "9",
+            "2023-11-20"
+          ],
+          [
+            "Sales",
+            "Marta Lopes",
+            "15",
+            "2024-09-09"
+          ]
+        ]
+      }
+    ]
+  }
+}
