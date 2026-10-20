@@ -12,6 +12,9 @@
  * so the queue works on their machine with no isolated-job note (`hosted` false). On the hosted
  * edition a person whose system role is not admin sees the admin-only notice and no request is
  * made; the server's `caller_is_admin` is still the rule, and its 403 sentence is shown as is.
+ *
+ * The report is keyed by version: a cached report renders at once, so without the key a reject
+ * reason, a pasted note or a refusal typed for one version would carry over to the next.
  */
 import { useState } from 'react'
 
@@ -47,7 +50,7 @@ function QueueBody({ hosted }: { hosted: boolean }) {
         <PendingList pending={pending.data.pending} selected={selected} onSelect={setSelected} />
       </div>
       {selected ? (
-        <ReviewReport packageId={selected} hosted={hosted} />
+        <ReviewReport key={selected} packageId={selected} hosted={hosted} />
       ) : (
         <p className="text-sm text-muted-foreground">{PICK_A_VERSION}</p>
       )}

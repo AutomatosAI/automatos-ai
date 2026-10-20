@@ -74,6 +74,13 @@ async function openReport(hosted = false) {
   return screen.findByTestId('theme-review-report')
 }
 
+const OTHER_ID = '66666666-6666-4666-8666-666666666666'
+const OTHER_NAME = 'Other theme'
+
+function rejectReason() {
+  return screen.getByLabelText(/Reason \(the submitter sees it\)/)
+}
+
 function approveButton() {
   return screen.getByRole('button', { name: APPROVE })
 }
@@ -194,6 +201,25 @@ describe('Reject', () => {
 
     await waitFor(() => expect(api.rejectTheme).toHaveBeenCalledWith(PACKAGE_ID, 'Copies a core page.'))
     expect(clerk.openReverification).not.toHaveBeenCalled()
+  })
+
+  it('a reason typed for one version does not carry over to another whose report is cached', async () => {
+    api.getPendingThemes.mockResolvedValue({ pending: [pendingRow(), pendingRow({ id: OTHER_ID, name: OTHER_NAME })] })
+    api.getThemeReport.mockImplementation(async (id: string) => reportOf(id === OTHER_ID ? { id: OTHER_ID, name: OTHER_NAME } : {}))
+    renderWithQuery(<ThemeReviewQueue hosted={false} />)
+    const pick = async (id: string, name: string) => {
+      fireEvent.click(await screen.findByTestId(`pending-theme-${id}`))
+      await within(await screen.findByTestId('theme-review-report')).findByRole('heading', { name })
+    }
+    await pick(PACKAGE_ID, 'Hello theme')
+    await pick(OTHER_ID, OTHER_NAME) // both reports are cached from here on
+    await pick(PACKAGE_ID, 'Hello theme')
+    fireEvent.change(rejectReason(), { target: { value: 'Copies a core page.' } })
+
+    await pick(OTHER_ID, OTHER_NAME)
+    expect(rejectReason()).toHaveValue('')
+    expect(screen.getByRole('button', { name: REJECT })).toBeDisabled()
+    expect(api.rejectTheme).not.toHaveBeenCalled()
   })
 })
 
