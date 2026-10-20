@@ -5,9 +5,12 @@ applied through PlatformActionExecutor with no owner's click, a risky one was fi
 as a [HARNESS] board task (and a risk-4 one sent a channel notice), and done
 [HARNESS] tasks were applied on the next tick. Through beta every workspace is
 ``report_only`` (D2): a run's suggestions are lines of its audit report and nothing
-else, ``propose`` behaves the same until US-054, and ``disabled`` (or a stored
-``enabled: false``) skips the workspace. The mode is read through
-services.harness_mode, which maps the values stored before PRD-263.
+else, and ``disabled`` (or a stored ``enabled: false``) skips the workspace. The mode is
+read through services.harness_mode, which maps the values stored before PRD-263.
+``propose`` raises Approvals cards only while the installation's
+HARNESS_SELF_MANAGEMENT_ENABLED is on (US-054, test_prd263_harness_grant_flow.py): a
+``report_only`` workspace, or any workspace with the switch off, gets no grant, no card
+and no approval_pending notification, even for a change HARNESS could apply.
 
 Each case runs a full tick on committed rows (the tick opens its own sessions). The
 seeded evidence is an agent with a week of tickets and a judged week in which every
@@ -48,6 +51,7 @@ def workspace(new_session):
     yield ws
     s = new_session.sweep()
     for sql in ("DELETE FROM tool_execution_logs WHERE workspace_id = CAST(:id AS uuid)",
+                "DELETE FROM heartbeat_results WHERE workspace_id = CAST(:id AS uuid)",
                 "DELETE FROM agent_reports WHERE workspace_id = CAST(:id AS uuid)"):
         s.execute(text(sql), {"id": str(ws)})
     s.commit()
@@ -95,6 +99,21 @@ def _seed_evidence(new_session, ws: UUID) -> int:
     s.commit()
     s.close()
     return scout
+
+
+def _seed_heartbeat_evidence(new_session, ws: UUID) -> int:
+    """Watcher: an enabled heartbeat every 60 minutes that met its objective in 1 of 25
+    judged runs of the judged week, so PRESCRIBE proposes doubling its interval: a change
+    of a kind HARNESS may apply (US-050)."""
+    s = new_session()
+    watcher = hdx.agent(s, ws, "Watcher", configuration={"heartbeat": {"enabled": True, "interval_minutes": 60}})
+    beat = text("INSERT INTO heartbeat_results (source_type, source_id, workspace_id, status, tokens_used, "
+                "objective_met, created_at) VALUES ('agent', :sid, CAST(:ws AS uuid), 'success', 10, :met, :at)")
+    for met in [True] + [False] * 24:
+        s.execute(beat, {"sid": str(watcher), "ws": str(ws), "met": met, "at": hdx.at(0)})
+    s.commit()
+    s.close()
+    return watcher
 
 
 def _store_harness(new_session, ws: UUID, harness) -> None:
@@ -200,8 +219,8 @@ async def test_trigger_now_reports_and_changes_nothing(workspace, record, new_se
 ])
 async def test_a_legacy_or_propose_workspace_runs_report_only(workspace, record, new_session, monkeypatch,
                                                               stored, reads):
-    """A stored full_auto or manual reads report_only; propose runs exactly like it until US-054.
-    The sweep includes it."""
+    """A stored full_auto or manual reads report_only; propose runs exactly like it while the
+    installation's switch is off (its default). The sweep includes it."""
     from services.harness_mode import harness_mode
     from services.harness_service import HarnessService
 
@@ -248,3 +267,38 @@ async def test_a_disabled_workspace_is_skipped_by_the_tick_trigger_and_sweep(wor
     # Auto is told nothing ran, not that a run was triggered.
     assert reply == {"success": True, "data": {"status": "disabled", "message": DISABLED_MESSAGE}}
     assert workspace not in await _swept(monkeypatch)
+
+
+def _harness_rows(new_session, ws: UUID) -> int:
+    """The ledger rows and evidence tickets HARNESS has filed in the workspace."""
+    return (_count(new_session, "SELECT count(*) FROM harness_task_ledger WHERE workspace_id = CAST(:id AS uuid)", ws)
+            + _count(new_session, "SELECT count(*) FROM board_tasks WHERE workspace_id = CAST(:id AS uuid) "
+                                  "AND source_type = 'harness'", ws))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored, switch_on", [
+    ({"mode": "report_only"}, True),
+    ({}, True),                       # nothing stored reads report_only
+    ({"mode": "propose"}, False),
+], ids=["report-only-switch-on", "default-switch-on", "propose-switch-off"])
+async def test_report_only_or_the_switch_off_raises_no_card_even_for_a_change_it_could_apply(
+        workspace, record, new_session, monkeypatch, stored, switch_on):
+    """US-054: a run that proposes a heartbeat_tune (an apply kind) still raises 0 grants,
+    files 0 cards and sends no approval_pending notification."""
+    from config import config
+    from services.harness_service import HarnessService
+
+    _seed_heartbeat_evidence(new_session, workspace)
+    _store_harness(new_session, workspace, stored)
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", switch_on)
+    before = _board_tasks(new_session, workspace)
+
+    await HarnessService()._harness_tick(workspace)
+
+    (run,) = hr.runs(new_session, workspace)
+    assert run["status"] == "completed"
+    assert [(rx["change_type"], rx["apply_kind"]) for rx in run["prescriptions"]] == [("heartbeat_tune", True)]
+    assert _grants(new_session, workspace) == 0 and _harness_rows(new_session, workspace) == 0
+    assert _board_tasks(new_session, workspace) == before
+    assert record.notifications == ["report_submitted"] and record.actions == []

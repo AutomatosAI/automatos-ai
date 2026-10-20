@@ -5,9 +5,9 @@ HARNESS Service (PRD-121)
 Self-Optimizing Organization Loop.  Runs weekly, invisible to users.
 Reads each agent's real weekly counts, judges them against a clean reference
 (services.harness_diagnose, PRD-263), lists the configuration changes it would
-suggest with their risk scores (services.harness_changes, the change-kind
-registry), and submits the audit report. It changes nothing:
-every workspace is report_only through beta (PRD-263 D2, services.harness_mode).
+suggest (services.harness_changes) and submits the audit report. It changes
+nothing (services.harness_mode): in a propose workspace, with proposals switched
+on, each change becomes an owner's Approvals card (services.harness_grants).
 
 Registered at server startup alongside HeartbeatService / CoordinatorService.
 """
@@ -321,9 +321,8 @@ class HarnessService:
     ) -> Dict[str, Any]:
         """The dormancy check, then the four phases; returns the row's closing fields.
 
-        Report only (PRD-263 US-016): PRESCRIBE's suggestions become lines of the
-        audit report, and nothing is applied or queued. ``propose`` runs exactly
-        like ``report_only`` until proposals exist (US-054).
+        PRESCRIBE's suggestions become lines of the audit report and nothing is
+        applied (PRD-263 US-016); a propose workspace also gets Approvals cards (US-054).
         """
         from core.database.database import end_open_transaction
         from services import harness_diagnose, harness_runs
@@ -471,17 +470,18 @@ class HarnessService:
     ) -> "Prescribed":
         """Run every change kind's detector over the run's evidence and validate each
         suggestion (services.harness_changes, PRD-263 US-049); a dropped one keeps its
-        reason on the run's row, and none targets the workspace's Auto. Nothing is
-        applied or queued (US-016). Ids are ``rx-<run_id>-<seq>``."""
+        reason on the run's row, and none targets the workspace's Auto. Ids are
+        ``rx-<run_id>-<seq>``. Nothing is applied (US-016): in a propose workspace with
+        proposals on, each valid apply-kind change becomes an Approvals card (US-054)."""
         from services import harness_changes, harness_grants
 
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
         auto_agent = harness_grants.resolve_auto_agent(db, workspace_id)
         evidence = harness_changes.Evidence(metrics, diagnosis, harness_changes.settings_from_config())
         prescribed = harness_changes.prescribe(evidence, run_id, auto_agent["id"] if auto_agent else None)
-        logger.info(
-            "[HARNESS] PRESCRIBE done — %d suggested, %d dropped", len(prescribed.valid), len(prescribed.dropped),
-        )
+        raised = harness_grants.raise_cards(db, workspace_id, run_id, prescribed.valid, diagnosis)
+        logger.info("[HARNESS] PRESCRIBE done — %d suggested, %d dropped, %d Approvals cards",
+                    len(prescribed.valid), len(prescribed.dropped), raised.pending)
         return prescribed
 
     # ------------------------------------------------------------------

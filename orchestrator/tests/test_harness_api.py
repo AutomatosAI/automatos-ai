@@ -67,10 +67,10 @@ def test_the_router_serves_only_the_self_learning_tile():
     assert served == {("GET", "/api/harness/self-learning")}
 
 
-# --- PRD-263 US-021: self-learning health endpoint ---------------------------
+# --- PRD-263 US-021, US-058: self-learning health endpoint --------------------
 # The endpoint is a plain def, so these call it directly (no event loop). The real-DB
-# reads (harness_runs, the workspace-scoped signal count) are covered by
-# test_prd263_self_learning_endpoint.py; here the three reads are faked.
+# reads (harness_runs, the workspace-scoped signal count, the ledger counts) are covered
+# by test_prd263_self_learning_endpoint.py; here the reads are faked.
 
 class _RollbackDB:
     """The endpoint touches the session itself to read the workspace's settings and
@@ -101,6 +101,7 @@ def test_self_learning_health_combines_sections(monkeypatch):
                         lambda: types.SimpleNamespace(get_status=lambda ws, db=None: dict(status)))
     monkeypatch.setattr(runs, "latest_run", lambda db, ws: latest)
     monkeypatch.setattr(h, "_signals_7d", lambda db, ws: 12)
+    monkeypatch.setattr(h, "_ledger_counts", lambda db, ws: {"pending": 2, "applied": 1, "denied": 0, "expired": 3})
     # A mode stored before PRD-263 reads through harness_mode(): full_auto is report_only.
     db = _RollbackDB(settings={"orchestrator": {"harness": {"mode": "full_auto"}}})
 
@@ -109,7 +110,7 @@ def test_self_learning_health_combines_sections(monkeypatch):
     assert out == {
         "workspace_id": str(_WS_ID), "status": "completed", "iteration_count": 3, "coverage": 0.75,
         "insufficient_data": 1, "watch": 1, "regression": 0, "mode": "report_only", "signals_7d": 12,
-        "unavailable": [],
+        "pending": 2, "applied": 1, "denied": 0, "expired": 3, "unavailable": [],
     }
     # Counts, coverage and mode only (#1148): no prescriptions, report, artifacts or
     # process-global tool-routing stats.
@@ -123,6 +124,7 @@ def test_self_learning_health_degrades_gracefully(monkeypatch):
 
     monkeypatch.setattr(h, "_harness_fields", _boom)
     monkeypatch.setattr(h, "_signals_7d", _boom)
+    monkeypatch.setattr(h, "_ledger_counts", _boom)
     db = _RollbackDB()
 
     # Each section degrades to None figures and is named in `unavailable`; the endpoint
@@ -130,7 +132,7 @@ def test_self_learning_health_degrades_gracefully(monkeypatch):
     out = h.self_learning_health(ctx=_ctx(clerk="admin"), db=db)
 
     assert out["workspace_id"] == str(_WS_ID)
-    assert all(out[field] is None for field in h.HARNESS_FIELDS + h.SIGNALS_FIELDS)
-    assert out["unavailable"] == [h.SECTION_HARNESS, h.SECTION_SIGNALS]
+    assert all(out[field] is None for field in h.HARNESS_FIELDS + h.SIGNALS_FIELDS + h.LEDGER_FIELDS)
+    assert out["unavailable"] == [h.SECTION_HARNESS, h.SECTION_SIGNALS, h.SECTION_LEDGER]
     assert "secret-internal-detail" not in repr(out)
-    assert db.rollbacks == 2
+    assert db.rollbacks == 3

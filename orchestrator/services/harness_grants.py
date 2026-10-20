@@ -1,12 +1,15 @@
-"""PRD-263 US-052/US-053: the governed apply rail's ledger, and lapsed cards closed within a day.
+"""PRD-263 US-052/US-053/US-054: the governed apply rail's ledger, its Approvals cards, and
+lapsed cards closed within a day.
 
 Each owner's Approvals card is a tool_call grant for ``platform_harness_apply`` on
-``{"rx_id": ...}`` (US-054) with its ``harness_task_ledger`` row (US-051). :func:`move` is
-the only way a row changes state, never out of a final one (FR-15); the apply handler
-(US-052) reads rows, grants and settings here too. :func:`reconcile` ends each open row
-by its grant (:func:`outcome`) at the start of a HARNESS tick (ORG-2) and in the daily
-sweep, never on a read; a revoke after the change applied leaves it ``applied``, since a
-revoke undoes nothing. :func:`ledger_counts` is the status read.
+``{"rx_id": ...}`` with its ``harness_task_ledger`` row (US-051). :func:`raise_cards`
+raises them (US-054): in a ``propose`` workspace while HARNESS_SELF_MANAGEMENT_ENABLED is
+on, one grant per valid apply-kind prescription, linked to the run's one evidence ticket.
+:func:`move` is the only way a row changes state, never out of a final one (FR-15); the
+apply handler (US-052) reads rows, grants and settings here too. :func:`reconcile` ends
+each open row by its grant (:func:`outcome`) at the start of a HARNESS tick (ORG-2) and in
+the daily sweep, never on a read; a revoke after the change applied leaves it ``applied``,
+since a revoke undoes nothing. :func:`ledger_counts` is the status read.
 No platform action, no tool executor and no model call (FR-12).
 """
 from __future__ import annotations
@@ -15,7 +18,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import func
@@ -28,6 +31,7 @@ from core.models.harness import (
     LEDGER_EXPIRED,
     LEDGER_FAILED,
     LEDGER_PENDING,
+    LEDGER_RAISE_FAILED,
     LEDGER_WITHDRAWN,
     HarnessTaskLedger,
 )
@@ -49,12 +53,26 @@ CARD_BLOCKED = "evidence card was blocked; nothing changed"
 NO_OUTCOME = "no outcome"
 INTERRUPTED = "interrupted"
 NO_GRANT = "no approval grant"
-# What the approval API records when an Approve re-queued the evidence card, dragged to
+# What the approval API records when an Approve re-queued the evidence card, parked in
 # Blocked, instead of running the call (api/approval_grants._resume_tool_call).
 BOARD_REQUEUE = "board_task_requeue"
+BLOCKED = "blocked"
 # Who closed a lapsed or drifted grant (its revoked_by), and the daily sweep's job id.
 SWEEP_ACTOR = "system:harness"
 SWEEP_JOB_ID = "harness_grant_sweep"
+# An Approvals card's grant is a write linked to the run's evidence ticket
+# (``details.board_task_id``); its ledger row's entry names the ticket; why a row got no card.
+APPLY_PERMISSION = "write"
+BOARD_TASK_KEY = "board_task_id"
+EVIDENCE_KEY = "evidence_task_id"
+NOT_RAISED = "the Approvals card could not be raised"
+SETTING_MOVED = "the setting changed while HARNESS ran"
+# The evidence ticket: HARNESS-tagged (left out of harness_metrics' counts), in Review for the
+# owner's decision as approval_cards files one, with no agent (never dispatched) and no SLA.
+EVIDENCE_STATUS = "review"
+EVIDENCE_REVIEW_MODE = "human"
+EVIDENCE_SOURCE = "harness"
+EVIDENCE_CREATED_BY = "system"
 
 
 @dataclass(frozen=True)
@@ -133,6 +151,22 @@ def grant_of(db: "Session", row: HarnessTaskLedger) -> Optional[ApprovalGrant]:
     return _bound_grants(db, row.workspace_id, [row]).get(row.id)
 
 
+def evidence_blocked(db: "Session", grant: ApprovalGrant) -> bool:
+    """Whether the card's evidence ticket (the grant's ``details.board_task_id``) is Blocked.
+    The board's drag records the owner's stop (services.operator_stop), so the approval
+    API runs the click's call instead of re-queueing the ticket; the call then changes
+    nothing (section 11-Q30)."""
+    from core.models.core import BoardTask
+
+    details = grant.details if isinstance(grant.details, dict) else {}
+    task_id = details.get(BOARD_TASK_KEY)
+    if isinstance(task_id, bool) or not isinstance(task_id, int):
+        return False
+    status = (db.query(BoardTask.status)
+              .filter(BoardTask.id == task_id, BoardTask.workspace_id == grant.workspace_id).scalar())
+    return status == BLOCKED
+
+
 def current_value(db: "Session", row: HarnessTaskLedger) -> Optional[Dict[str, Any]]:
     """The row's target setting now, read by its change kind's prior-value reader; None when
     the kind applies nothing, the agent is not in the workspace or the change cannot be read."""
@@ -172,6 +206,161 @@ def move(db: "Session", row: HarnessTaskLedger, to_state: str, *, from_state: st
                      HarnessTaskLedger.state == from_state)
              .update(values, synchronize_session=False))
     return bool(moved)
+
+
+# ------------------------------------------------------------------ raising (US-054)
+
+
+@dataclass(frozen=True)
+class Raised:
+    """What a run raised: its evidence ticket (None when no card was due) and how many
+    proposals got a card (``pending``) or could not (``raise_failed``)."""
+
+    evidence_task_id: Optional[int] = None
+    pending: int = 0
+    raise_failed: int = 0
+
+
+def proposals_on(db: "Session", workspace_id: Union[UUID, str]) -> bool:
+    """Whether HARNESS raises Approvals cards in this workspace: the installation's
+    HARNESS_SELF_MANAGEMENT_ENABLED is on and the workspace's mode is ``propose``."""
+    from config import config
+    from core.models.workspaces import Workspace
+    from services.harness_mode import PROPOSE, harness_mode
+
+    if not config.HARNESS_SELF_MANAGEMENT_ENABLED:
+        return False
+    workspace = db.get(Workspace, _workspace(workspace_id))
+    return workspace is not None and harness_mode(workspace.settings) == PROPOSE
+
+
+def _due(db: "Session", workspace_id: UUID, proposals: Sequence[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """The valid apply-kind proposals to raise: none for an agent and kind that already
+    has an open ledger row (a card waiting for its click, or being applied)."""
+    taken: Set[Tuple[Optional[int], Optional[str]]] = set(
+        db.query(HarnessTaskLedger.target_agent_id, HarnessTaskLedger.kind)
+        .filter(HarnessTaskLedger.workspace_id == workspace_id, HarnessTaskLedger.state.in_(OPEN_STATES)).all())
+    due: List[Mapping[str, Any]] = []
+    for rx in proposals:
+        pair = (rx.get("target_id"), rx.get("change_type"))
+        if rx.get("apply_kind") is True and pair not in taken:
+            taken = taken | {pair}
+            due.append(rx)
+    skipped = sum(1 for rx in proposals if rx.get("apply_kind") is True) - len(due)
+    if skipped:
+        logger.info("[HARNESS] %d proposal(s) in %s already have an open card; none raised for them",
+                    skipped, workspace_id)
+    return due
+
+
+def _still_reads(db: "Session", workspace_id: UUID, rx: Mapping[str, Any]) -> bool:
+    """Whether the target setting reads now, through its kind's prior-value reader, the
+    value the detector saw: that is the prior value the click is checked against."""
+    from services.harness_changes import KINDS
+
+    kind = KINDS[rx["change_type"]]
+    try:
+        now = kind.prior_value_reader(db, workspace_id, rx["target_id"], rx.get("proposed_value") or {})
+    except ValueError:
+        return False
+    return now is not None and now == rx.get("current_value")
+
+
+def _ledger_row(workspace_id: UUID, run_id: int, rx: Mapping[str, Any], state: str, task_id: int,
+                grant_id: Optional[int] = None, reason: Optional[str] = None) -> HarnessTaskLedger:
+    entry: Dict[str, Any] = {EVIDENCE_KEY: task_id, **({REASON_KEY: reason} if reason else {})}
+    return HarnessTaskLedger(
+        workspace_id=workspace_id, state=state, rx_id=rx["prescription_id"], run_id=run_id, grant_id=grant_id,
+        kind=rx["change_type"], target_agent_id=rx["target_id"], prior_value=rx.get("current_value"),
+        proposed_value=rx.get("proposed_value"), entry=entry,
+    )
+
+
+def _raise_one(db: "Session", workspace_id: UUID, run_id: int, task_id: int, rx: Mapping[str, Any],
+               question: str) -> HarnessTaskLedger:
+    """One proposal's grant, inside a savepoint so a failed one leaves the run's other
+    cards standing, and its ledger row: ``pending``, or ``raise_failed`` when
+    issue_tool_grant returned None (logged), or ``drifted`` when the setting moved."""
+    from modules.tools.execution.tool_grants import issue_tool_grant
+    from services import harness_cards
+
+    if not _still_reads(db, workspace_id, rx):
+        return _ledger_row(workspace_id, run_id, rx, LEDGER_DRIFTED, task_id, reason=SETTING_MOVED)
+    savepoint = db.begin_nested()
+    grant = issue_tool_grant(
+        db, workspace_id, action=APPLY_ACTION, params={RX_PARAM: rx["prescription_id"]},
+        permission_level=APPLY_PERMISSION, description=harness_cards.change_and_approve(rx)[0],
+        caller_context={BOARD_TASK_KEY: task_id}, question_md=question,
+    )
+    if grant is None or not isinstance(getattr(grant, "id", None), int):
+        savepoint.rollback()
+        logger.warning("[HARNESS] An Approvals card in %s could not be raised (%s for agent %s)", workspace_id,
+                       rx["change_type"], rx["target_id"])
+        return _ledger_row(workspace_id, run_id, rx, LEDGER_RAISE_FAILED, task_id, reason=NOT_RAISED)
+    savepoint.commit()
+    return _ledger_row(workspace_id, run_id, rx, LEDGER_PENDING, task_id, grant_id=grant.id)
+
+
+def _evidence_task(db: "Session", workspace_id: UUID, run_id: int, title: str) -> Any:
+    """The run's evidence ticket, filed in Review for the owner's decision (flushed for its id)."""
+    from core.models.core import BoardTask
+    from modules.tools.discovery.approval_cards import OWNERS_DECISION
+    from services.harness_metrics import HARNESS_TAG
+
+    task = BoardTask(
+        workspace_id=workspace_id, title=title, status=EVIDENCE_STATUS, review_mode=EVIDENCE_REVIEW_MODE,
+        assigned_agent_id=None, sla_deadline=None, created_by_type=EVIDENCE_CREATED_BY, created_by_id=SWEEP_ACTOR,
+        source_type=EVIDENCE_SOURCE, source_id=str(run_id), tags=[HARNESS_TAG],
+        planning_data={OWNERS_DECISION: True},
+    )
+    db.add(task)
+    db.flush()
+    return task
+
+
+def _raise(db: "Session", workspace_id: UUID, run_id: int, due: Sequence[Mapping[str, Any]],
+           diagnosis: Mapping[str, Any]) -> Raised:
+    """The run's evidence ticket, then each due proposal's card and ledger row, then the
+    ticket's text naming each card (or why it has none). Not committed."""
+    from services import harness_cards
+
+    settings, week = harness_cards.settings_from_config(), str(diagnosis.get("window") or "")
+    task = _evidence_task(db, workspace_id, run_id, harness_cards.evidence_title(week, len(due)))
+    rows = [_raise_one(db, workspace_id, run_id, task.id, rx, harness_cards.question(rx, diagnosis, settings))
+            for rx in due]
+    db.add_all(rows)
+    no_card = {LEDGER_DRIFTED: harness_cards.SETTING_MOVED}
+    outcomes = [harness_cards.Outcome(rx, row.grant_id, no_card.get(row.state)) for rx, row in zip(due, rows)]
+    task.description = harness_cards.evidence_ticket(week, outcomes, diagnosis, settings)
+    states = Counter(row.state for row in rows)
+    return Raised(task.id, states[LEDGER_PENDING], states[LEDGER_RAISE_FAILED])
+
+
+def raise_cards(db: "Session", workspace_id: Union[UUID, str], run_id: int,
+                proposals: Sequence[Mapping[str, Any]], diagnosis: Mapping[str, Any]) -> Raised:
+    """US-054: in a ``propose`` workspace while proposals are switched on
+    (:func:`proposals_on`), raise one tool_call grant for ``platform_harness_apply`` on
+    ``{"rx_id": ...}`` per valid apply-kind proposal of PRESCRIBE (none while that agent
+    and kind has an open row), each with its section 8 text and a ledger row, all linked
+    to one evidence ticket for the run; and commit. A report_only workspace, or the switch
+    off, raises nothing. The handler resolves Auto itself (US-052). A failure is logged
+    and rolled back, and nothing is raised."""
+    ws = _workspace(workspace_id)
+    if not proposals_on(db, ws):
+        return Raised()
+    due = _due(db, ws, proposals)
+    if not due:
+        return Raised()
+    try:
+        raised = _raise(db, ws, run_id, due, diagnosis)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[HARNESS] Could not raise the Approvals cards of run %s in %s", run_id, ws)
+        return Raised()
+    logger.info("[HARNESS] Run %s in %s raised %d Approvals card(s) on ticket %s (%d could not be raised)",
+                run_id, ws, raised.pending, raised.evidence_task_id, raised.raise_failed)
+    return raised
 
 
 # ------------------------------------------------------------------ reconciliation

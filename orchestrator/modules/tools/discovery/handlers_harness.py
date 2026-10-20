@@ -41,6 +41,7 @@ TRIGGERED_MESSAGE = (
 APPLY_EXPIRED = "This approval expired; nothing changed"
 APPLY_DRIFTED = "This setting changed since the proposal; nothing changed"
 APPLY_NOT_GRANTED = "This change has no granted approval on its Approvals card; nothing changed"
+APPLY_BLOCKED = "This change's evidence ticket is Blocked; nothing changed"
 APPLY_DECIDED = "This change is already {state}; nothing changed"
 APPLY_UNKNOWN = "This workspace has no HARNESS change {rx_id}; nothing changed"
 APPLY_FAILED = "The change could not be made ({error}); nothing changed"
@@ -151,7 +152,8 @@ async def harness_apply(
 ) -> Dict[str, Any]:
     """Make one HARNESS change its owner approved (PRD-263 US-052), the only HARNESS path that
     changes an agent setting (FR-11). The ledger row of ``rx_id`` must be ``pending``, its
-    card's grant granted and unexpired (else ``expired``) and the setting still its
+    card's grant granted and unexpired (else ``expired``), its evidence ticket not Blocked
+    (else ``failed``, US-054) and the setting still its
     ``prior_value`` (else ``drifted``); ``pending → applying`` is a guarded UPDATE, so a
     second call changes nothing; the change runs as the workspace's Auto and the row ends
     ``applied`` or ``failed``. A grant never granted changes nothing (reconciliation records
@@ -183,6 +185,9 @@ async def _apply(db: Session, workspace_id: UUID, rx_id: str) -> Dict[str, Any]:
     grant = harness_grants.grant_of(db, row)
     if grant is None or grant.status not in APPROVED_OR_LAPSED:
         return _nothing_changed(APPLY_NOT_GRANTED)
+    if harness_grants.evidence_blocked(db, grant):  # PRD-263 US-054: the owner stopped the evidence ticket
+        harness_grants.move(db, row, LEDGER_FAILED, reason=harness_grants.CARD_BLOCKED)
+        return _nothing_changed(APPLY_BLOCKED)
     if not is_authorising(grant):
         harness_grants.move(db, row, LEDGER_EXPIRED)
         return _nothing_changed(APPLY_EXPIRED)
