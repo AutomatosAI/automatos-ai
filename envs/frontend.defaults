@@ -8,9 +8,14 @@
 #
 # SaaS/Railway is NOT affected — Railway sets its own env per service.
 #
-# NOTE (PRD-153 US-006): NEXT_PUBLIC_* vars are inlined at BUILD time in the
-# production target. The dev target (compose default) reads them at runtime;
-# a production-mode local build must pass these as build args.
+# NOTE: the browser's NEXT_PUBLIC_* values are inlined at BUILD time in the
+# production target, which the default stack runs (PRD-262 US-035/US-036). The
+# published image has the local edition, http://localhost:8000 and
+# http://localhost:9000 baked in; `make up` builds the frontend here instead,
+# passing the values in .env as build args, when .env sets others (self-hosting.md
+# §1b). So a NEXT_PUBLIC_* value changed here does not change what the browser
+# gets from that image: set it in .env. `make dev`'s development target
+# (docker-compose.dev.yml) reads them at runtime.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -19,7 +24,8 @@
 # Browser-reachable backend endpoints (host ports, not service DNS):
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-NODE_ENV=development
+# NODE_ENV is set by compose: production in docker-compose.yml, development in
+# docker-compose.dev.yml (environment: wins over this file).
 # Server-side (Next API routes run INSIDE the frontend container): reach the
 # backend by compose DNS. The browser keeps using NEXT_PUBLIC_API_URL above.
 BACKEND_INTERNAL_URL=http://backend:8000

@@ -23,7 +23,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
 - [orchestrator/main.py](orchestrator/main.py)
 - [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
 - [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)

@@ -20,19 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
-# Accurate token counting
-try:
-    import tiktoken
-    _encoding = tiktoken.encoding_for_model("gpt-4")
-except Exception:
-    import tiktoken
-    _encoding = tiktoken.get_encoding("cl100k_base")
-
-def _count_tokens(text: str) -> int:
-    """Accurate token count using tiktoken"""
-    if not text:
-        return 0
-    return len(_encoding.encode(text))
+# Token counting: the platform's one counter, whose tokenizer loads on first use and
+# never at import (PRD-262 US-033). gpt-4's encoding is the same cl100k_base.
+from core.context_guard import count_tokens as _count_tokens
 
 logger = logging.getLogger(__name__)
 

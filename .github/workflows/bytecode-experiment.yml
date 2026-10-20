@@ -1,0 +1,182 @@
+name: bytecode-experiment
+
+# PRD-262 US-032 (§9-Q7): a one-off experiment for the W4 pull request. Does the app
+# bytecode the API image now ships buy a new container a faster boot, and what does
+# it cost every code-only update?
+#
+# No other lane can measure it in W4: compose still boots the development stage with
+# the source mounted until PRD-262 US-035. This job builds the API's production stage
+# (amd64, the GHCR build args) twice, as committed (`with`: the compile stage compiles
+# the boot modules) and with the compile step removed in the job's workspace
+# (`without`), and each again after a code-only change (`-edit`). All four go to the
+# job's own registry, never to GHCR. scripts/ci/bytecode_experiment.py reads back each
+# build's final app layer and its code-only update delta, judged against US-016's bar.
+# scripts/ci/bytecode-experiment.sh then starts each build in new containers against
+# one seeded Postgres, WEB_CONCURRENCY=1, `docker compose up -d --force-recreate
+# --no-deps backend` (never `restart`, which keeps the .pyc the first boot wrote).
+# The step summary gives the median time to /health 200 over two new containers per
+# build, the app layer's compressed size, the update deltas and the §9-Q7 outcome:
+# the bytecode stays only if it takes 2 s or more off a new container's boot and the
+# code-only update still meets US-016's bar (6 MB, one new layer over 1 MB). The
+# image cost counts the app's boot set only: US-014 already compiles the stdlib.
+#
+# W5's push records the numbers in the PRD and acts on them: it removes the compile
+# step if the gain is under 2 s, or Gerard chooses there between removing it and
+# raising the update bar. That push deletes this workflow and its two scripts.
+#
+# Report only: the job fails when a build, a registry read or a boot fails, never on a
+# number. It runs on a pull request that changes its own files (the W4 PR adds them),
+# and by hand. Actions are pinned to a commit; the comment names the release.
+# NON-REQUIRED.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/bytecode-experiment.yml"
+      - "scripts/ci/bytecode_experiment.py"
+      - "scripts/ci/bytecode-experiment.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bytecode:
+    name: bytecode experiment (§9-Q7) — a new API container with and without app bytecode (non-required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # The throwaway registry the four builds are pushed to (localhost:5000), as in
+    # images.yml.
+    services:
+      registry:
+        image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 # 2.8.3
+        ports:
+          - 5000:5000
+    env:
+      REPO: localhost:5000/automatos-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # network=host lets BuildKit's container reach the registry service on
+      # localhost:5000.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: network=host
+
+      # images.yml's api build (target, amd64 cache, read only; no build args since
+      # PRD-262 US-027). The code and the compile stage are the pull request's.
+      - name: Build with the boot modules' bytecode (as committed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: orchestrator
+          target: production
+          platforms: linux/amd64
+          tags: ${{ env.REPO }}:with
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=api-amd64
+
+      # A comment appended to main.py: the code changes, and nothing else does.
+      - name: A code-only change
+        run: |
+          printf '\n# PRD-262 US-032 bytecode experiment, a code-only change\n' >> orchestrator/main.py
+
+      - name: Build with the bytecode, after the code-only change
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: orchestrator
+          target: production
+          platforms: linux/amd64
+          tags: ${{ env.REPO }}:with-edit
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=api-amd64
+
+      - name: The committed code again, with the compile step removed
+        run: |
+          git checkout -- orchestrator/main.py
+          python3 scripts/ci/bytecode_experiment.py strip-compile orchestrator/Dockerfile
+          git diff --stat
+
+      - name: Build without the bytecode
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: orchestrator
+          target: production
+          platforms: linux/amd64
+          tags: ${{ env.REPO }}:without
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=api-amd64
+
+      - name: The same code-only change
+        run: |
+          printf '\n# PRD-262 US-032 bytecode experiment, a code-only change\n' >> orchestrator/main.py
+
+      - name: Build without the bytecode, after the code-only change
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: orchestrator
+          target: production
+          platforms: linux/amd64
+          tags: ${{ env.REPO }}:without-edit
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=api-amd64
+
+      - name: Restore the checkout
+        run: git checkout -- orchestrator/main.py orchestrator/Dockerfile
+
+      - name: App layers and code-only update deltas
+        env:
+          OUT_DIR: ${{ runner.temp }}/bytecode-experiment
+        run: |
+          python3 scripts/ci/bytecode_experiment.py layers --repo "$REPO" \
+            --budgets .github/image-budgets.json --out "$OUT_DIR/layers.json"
+
+      # The pushed images are in the registry; the builder's copy only takes disk.
+      - name: Free the build cache
+        run: docker buildx prune --all --force
+
+      # The same throwaway local-only secrets as the smoke lanes; no external credential.
+      - name: Boot each build in new containers against one seeded database
+        env:
+          POSTGRES_PASSWORD: bytecode_pg_pw
+          REDIS_PASSWORD: bytecode_redis_pw
+          API_KEY: bytecode_api_key
+          AUTH_EDITION: local
+          REQUIRE_AUTH: "false"
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          BYTECODE_REPO: ${{ env.REPO }}
+          BYTECODE_OUT_DIR: ${{ runner.temp }}/bytecode-experiment
+        run: bash scripts/ci/bytecode-experiment.sh
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        env:
+          OUT_DIR: ${{ runner.temp }}/bytecode-experiment
+        run: |
+          python3 scripts/ci/bytecode_experiment.py report --layers "$OUT_DIR/layers.json" \
+            --boots "$OUT_DIR/boots.jsonl" --out "$OUT_DIR/report.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bytecode-experiment
+          path: ${{ runner.temp }}/bytecode-experiment/
+          if-no-files-found: warn
+          retention-days: 30

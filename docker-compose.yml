@@ -2,23 +2,51 @@
 # Automatos AI - Unified Docker Compose
 # =============================================================================
 # Quick Start:
-#   1. Copy .env.example to .env and set required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY)
+#   0. Docker Engine 25 or later with Compose 2.24.4 or later. The healthchecks below
+#      probe every second while a service starts (start_interval), and Compose refuses
+#      that key on an older engine. `make up` checks both first (PRD-262 US-038).
+#   1. .env with the required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY): `make up`
+#      writes them (make env, PRD-262 US-037); without make, self-hosting.md §1b
 #   PRD-234/262: every published port, the web app included, listens on ${BIND_ADDRESS:-127.0.0.1}
 #   — this machine only. Set BIND_ADDRESS=0.0.0.0 in .env to expose them to your network
 #   deliberately (whoever reaches the local edition is its owner; session mode runs commands).
-#   2. Run: docker compose up
+#   2. Run: make up (or docker compose up)
 #   3. Access: http://localhost:3000
 #   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
 #      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
 #
-# A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+# This file runs the production images, the ones CI builds and scans: the code is
+# inside them and nothing reloads (PRD-262 US-035). Editing the code instead:
+# `make dev` (docker-compose.dev.yml) builds the development stages, mounts your
+# source and runs uvicorn --reload and the Next.js dev server.
+#
+# The three app services (backend, frontend, workspace-worker) name the image CI
+# publishes, ghcr.io/automatosai/automatos-<x>:${AUTOMATOS_IMAGE_TAG:-edge}, next to
+# their build: (PRD-262 US-036). Compose pulls it first and builds only when no such
+# image exists. `make up` picks the tag for this checkout (sha-<7>, edge, or a
+# local-<sha7> it re-tags or builds), pulls it, starts the stack with --no-build and
+# writes the tag to .env, so later plain compose commands run the same images.
+# `make build` builds all three from source as local-<sha7>.
+# Source builds outside make: `AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d
+# --build` builds the production stages under a tag no pull ever replaces (no local-*
+# tag is published). Image names are global to the Docker engine, so a second stack
+# next to this one sets its own local-<ref> in its .env. A plain `docker compose up
+# --build` with no tag tags its build :edge, which the next `make up` that picks edge
+# pulls over. Every local build is labelled org.opencontainers.image.revision from
+# AUTOMATOS_REVISION (make exports git HEAD, -dirty with uncommitted changes in a
+# context; `unknown` without it), as the published images are by CI.
+#
+# A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY,
+# none of them a CHANGE_ME placeholder from .env.example: the backend refuses to start
+# on one (orchestrator/docker-secrets-guard.sh).
 # LLM keys live in the database (Settings → API Keys) or in .env; the stored key
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:
-#   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
-#     workspace-worker (Code Canvas runtime). The worker's files live in a host
-#     directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
+#   - Default: postgres, redis, minio, backend, frontend and the
+#     workspace-worker (Code Canvas runtime), plus minio-volume-owner, a one-shot
+#     that runs before MinIO and exits (PRD-262 US-041). The worker's files live
+#     in a host directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
 #     this file, created on first boot (PRD-233 S1). It is mounted as THE local
 #     workspace's root (/workspaces/<DEFAULT_WORKSPACE_ID>), so on your machine
 #     it holds artifacts/, reports/, sessions/… directly — no workspace-id
@@ -29,9 +57,20 @@
 #     stack (a second workspace, a test workspace) lives in the named volume
 #     automatos_workspaces_data, so it survives `docker compose up --build` too
 #     (F220); only `docker compose down -v` removes it.
-#   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
+#   - All: Add --profile all (adminer, the database GUI)
+#   - Memory: Add --profile memory (qdrant, durable memory; also QDRANT_URL, below)
+#   - Search: Add --profile search (searxng, web search for agents; also SEARXNG_URL)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
+#   - Core, five containers (PRD-262 US-040): `make up CORE=1`, or
+#     docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
+#     The override puts the workspace-worker behind a `workspace` profile, so
+#     postgres, redis, minio, backend and frontend run without it. Agents' workspace
+#     tools, the Deliverables file browser and Code Canvas then answer "Workspace
+#     worker not running". The default stays six containers, the worker included,
+#     for every .env old or new: no key turns the worker off.
+#   docs/getting-started/self-hosting.md §3 lists every service, profile and the core
+#   override; orchestrator/tests/test_prd262_self_host_docs.py holds it to this file.
 # =============================================================================
 
 services:
@@ -51,12 +90,18 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later), so the backend starts within about a second of Postgres being ready.
+    # Over TCP (-h 127.0.0.1): on a fresh volume, initdb first runs a temporary server
+    # that listens on the unix socket alone, and a socket probe would pass on it. The
+    # start period covers a slow first initdb, so the 1 s probes last until it is done.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 60s
+      start_interval: 1s
     networks:
       - automatos
 
@@ -81,14 +126,64 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later); CI holds it to healthy within 2 s of its start
+    # (scripts/ci/smoke_health_gates.py). The 1 s probes run only inside start_period,
+    # and the first passing one ends it, so the longer period costs a fast start nothing.
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - automatos
+
+  # ===========================================================================
+  # minio-volume-owner — hands MinIO's volume to MinIO's own user (PRD-262 US-041)
+  # ===========================================================================
+  # MinIO runs as its image's user, uid 65532, not root. A minio_data volume that
+  # the official minio/minio image (or this stack, before US-041) wrote as root
+  # would refuse it. This one-shot re-owns such a volume to 65532:65532 once,
+  # says so in its log, and exits; on a volume already MinIO's it changes nothing.
+  # minio waits for it to finish (service_completed_successfully), so make up,
+  # plain `docker compose up` and every documented compose command repair an old
+  # volume before MinIO starts. A repair in the Makefile alone would leave plain
+  # compose upgrades with an unhealthy MinIO, and so no backend (it waits for
+  # minio: service_healthy).
+  # It runs on the stack's own digest-pinned redis image, already pulled, whose
+  # busybox has stat and chown: root, with no network and only the capabilities
+  # chown needs. Its image stays equal to redis's (a test holds them together).
+  # $$ is a literal $ to compose, which would otherwise read $owner as a variable.
+  # ===========================================================================
+  minio-volume-owner:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    container_name: automatos_minio_volume_owner
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+    volumes:
+      - minio_data:/data
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        owner="$$(stat -c '%u:%g' /data)"
+        if [ "$$owner" = "65532:65532" ]; then
+          exit 0
+        fi
+        if ! chown -R 65532:65532 /data; then
+          echo "minio-volume-owner: could not re-own /data (owned by $$owner) to 65532:65532, the user MinIO runs as" >&2
+          exit 1
+        fi
+        echo "minio-volume-owner: /data was owned by $$owner; re-owned it to 65532:65532, the user MinIO runs as (PRD-262 US-041)"
 
   # ===========================================================================
   # MinIO — local S3-compatible object store (PRD-176 F089)
@@ -107,9 +202,11 @@ services:
     image: cgr.dev/chainguard/minio:latest@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
     container_name: automatos_minio
     restart: unless-stopped
-    # Root, like the official image: Chainguard's runs as uid 65532, which can't
-    # read a minio_data volume the official image already wrote as root.
-    user: "0:0"
+    # No user: key. MinIO runs as the image's own user, uid 65532, never root
+    # (PRD-262 US-041); minio-volume-owner, above, re-owns a volume root wrote first.
+    depends_on:
+      minio-volume-owner:
+        condition: service_completed_successfully
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -119,12 +216,17 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later); CI holds it to healthy within 2 s of its start
+    # (scripts/ci/smoke_health_gates.py). The 1 s probes run only inside start_period,
+    # and the first passing one ends it, so the longer period costs a fast start nothing.
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - automatos
   # (minio-init deleted — S4's storage factory calls ensure_bucket() on first
@@ -151,14 +253,21 @@ services:
       - automatos
 
   backend:
+    # The image CI publishes (PRD-262 US-036), pulled before anything is built.
+    image: ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./orchestrator
       dockerfile: Dockerfile
-      args:
-        # The Dockerfile defaults are PRODUCTION values (Railway builds it). The
-        # local edition opts out of the ~660 MB Leiden clustering stack here.
-        INSTALL_GRAPH_EXTRAS: "false"
-      target: development
+      # No build args: one API dependency set for every build, Leiden through
+      # graspologic-native included (PRD-262 US-027).
+      # A local build carries its commit, as images.yml's published ones do.
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
+      # PRD-262 US-035: the stage CI builds, scans and publishes, with the code inside
+      # the image. Its worker count comes from WEB_CONCURRENCY (envs/api.defaults).
+      # Hot reload is `make dev`: docker-compose.dev.yml builds the development stage
+      # and mounts the source, the entrypoint and the healthcheck.
+      target: production
     container_name: automatos_backend
     restart: unless-stopped
     depends_on:
@@ -169,9 +278,14 @@ services:
       minio:
         condition: service_healthy
       # F220: the worker mounts workspaces_data first, so a fresh volume takes the
-      # worker image's /workspaces ownership (uid 1000), never root's.
+      # worker image's /workspaces ownership (uid 1000), never root's; the backend
+      # image's /workspaces is uid 1000 too, for a stack without the worker (PRD-262
+      # US-040). required: false lets docker-compose.core.yml (make up CORE=1) leave the
+      # worker out: the backend then starts without it and its workspace calls answer
+      # "Workspace worker not running".
       workspace-worker:
         condition: service_started
+        required: false
     # Local-edition topology + edition defaults (AUTH_EDITION=local,
     # DEFAULT_WORKSPACE_ID, MinIO/mem0/qdrant wiring). NO secrets — those stay in
     # `environment:` below as `:?`-required. `environment:` overrides env_file, so
@@ -181,7 +295,9 @@ services:
       - envs/api.defaults
       # Personal overrides for ANY backend var (gitignored, optional) — the
       # deep-override lane: .env only reaches vars this file references, while
-      # api.local reaches all ~360 config.py dials. Later file wins.
+      # api.local reaches all ~360 config.py dials. Later file wins. An edit applies
+      # with `docker compose up -d --no-deps backend`, which recreates the backend
+      # (the night tooling's path; the fresh-clone smoke checks it, PRD-262 US-035).
       - path: envs/api.local
         required: false
     environment:
@@ -266,9 +382,6 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
       AWS_REGION: ${S3_REGION:-us-east-1}
 
-      # Document Generation (PRD-63)
-      GOTENBERG_URL: http://gotenberg:3000
-
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -293,12 +406,13 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
-      # Mount source for hot-reload in development
-      - ./orchestrator:/app
-      - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
-      - ./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro
+      # No checkout over the image (PRD-262 US-035): the code, the entrypoint and the
+      # healthcheck are the image's own. Only data mounts here; `make dev` adds the
+      # source mounts (docker-compose.dev.yml).
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
+      # The backend's log files, on a named volume that outlives a recreate (kept for
+      # the night and test tooling, PRD-262 §9-Q1).
       - backend_logs:/app/logs
       # The workspace-worker's files, read-only (PRD-233 S1): the backend's
       # WORKSPACE_VOLUME_PATH view of agent deliverables (session files it adopts,
@@ -324,6 +438,10 @@ services:
       # frontend never started. A probe that passes inside start_period marks it
       # healthy at once, so a fast boot waits for nothing more.
       start_period: 300s
+      # PRD-262 US-038: inside start_period Docker probes every second, not every 30 s
+      # (Docker Engine 25 or later), so the frontend, which waits for a healthy
+      # backend, starts within about 2 s of the backend answering /health.
+      start_interval: 1s
     networks:
       - automatos
 
@@ -334,6 +452,10 @@ services:
   #   cd frontend && npm install && npm run dev
   # ===========================================================================
   frontend:
+    # The image CI publishes (PRD-262 US-036). It inlines images.yml's build args
+    # (the local edition, localhost:8000 and localhost:9000); `make up` builds the
+    # frontend here instead when .env sets other NEXT_PUBLIC_* values.
+    image: ghcr.io/automatosai/automatos-frontend:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -349,6 +471,8 @@ services:
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
         # F237: the browser loads presigned media from MinIO's public origin (S3_PUBLIC_ENDPOINT_URL).
         NEXT_PUBLIC_MEDIA_ORIGINS: ${NEXT_PUBLIC_MEDIA_ORIGINS:-http://localhost:9000}
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_frontend
     restart: unless-stopped
     depends_on:
@@ -391,6 +515,8 @@ services:
   # WORKER_INTERNAL_URL (envs/api.defaults).
   # ===========================================================================
   workspace-worker:
+    # The image CI publishes (PRD-262 US-036), pulled before anything is built.
+    image: ghcr.io/automatosai/automatos-workspace-worker:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./services/workspace-worker
       dockerfile: Dockerfile
@@ -398,6 +524,8 @@ services:
         # Production default is a bundled Chromium (1.18 GB); the local edition
         # opts out — workspace_html_to_png says so honestly if used.
         INSTALL_BROWSER: "false"
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_workspace_worker
     restart: unless-stopped
     depends_on:
@@ -456,12 +584,15 @@ services:
         limits:
           cpus: '2.0'
           memory: 2G
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later), within a start period long enough for a slow first start.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 60s
+      start_interval: 1s
     networks:
       - automatos
 
@@ -510,7 +641,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 60s
+      # PRD-262 US-038: probed every second while it starts (Docker Engine 25 or later),
+      # within a start period long enough for the renderer's first start.
+      start_interval: 1s
     networks:
       - automatos
 
@@ -530,23 +664,6 @@ services:
       ADMINER_DESIGN: nette
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${ADMINER_PORT:-8080}:8080"
-    networks:
-      - automatos
-
-  # ===========================================================================
-  # Gotenberg - Document Conversion Sidecar (PRD-63)
-  # DOCX/XLSX → PDF via Chromium + LibreOffice
-  # ===========================================================================
-  gotenberg:
-    image: gotenberg/gotenberg:8@sha256:aa552cc115db488e0f0bcb07446aac13071ad51505b642c84bb894500907b42b
-    container_name: automatos_gotenberg
-    restart: unless-stopped
-    profiles: ["all"]
-    environment:
-      GOTENBERG_API_TIMEOUT: "120s"
-      GOTENBERG_LOG_LEVEL: "info"
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${GOTENBERG_PORT:-3001}:3000"
     networks:
       - automatos
 

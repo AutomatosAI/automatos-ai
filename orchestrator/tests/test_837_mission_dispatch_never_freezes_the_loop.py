@@ -17,7 +17,6 @@ it returns. No database: the coordinator runs over a mocked session.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
 import sys as _sys
 
@@ -27,18 +26,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 # CI collection-order guard (as tests/test_prd164_agent_match.py): drop origin-less
 # modules.* stubs an earlier test left behind, so the real packages import fresh.

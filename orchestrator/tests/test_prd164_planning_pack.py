@@ -18,10 +18,8 @@ Proves the four S1 acceptance criteria with DB-free tests:
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import json
 import os
-import sys as _sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -41,21 +39,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-# Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which
-# pulls modules.rag's ingestion chain (camelot at module top). Stub the missing
-# *leaf* only when truly absent — never the modules.rag package.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from config import config as _config  # noqa: E402,F401
 # CI collection-order guard: earlier-collected tests stub modules.*/consumers.*

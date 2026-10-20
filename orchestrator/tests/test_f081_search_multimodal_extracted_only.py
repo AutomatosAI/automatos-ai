@@ -9,14 +9,7 @@ includes documents, and a document question still has a RAG tool to reach.
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 from unittest.mock import AsyncMock, MagicMock
-
-try:  # the PDF table extractor is a heavy optional import (the tenancy matrix stubs it too)
-    import camelot  # noqa: F401
-except Exception:  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from modules.rag.services.multimodal_knowledge_tools import DEFAULT_KB_TYPES, MultimodalKnowledgeTools
 

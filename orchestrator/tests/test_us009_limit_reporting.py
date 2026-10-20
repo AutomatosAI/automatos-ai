@@ -36,7 +36,7 @@ def _load_streaming_handler_class():
 
     Importing ``consumers.chatbot.streaming`` the normal way runs
     ``consumers/chatbot/__init__.py``, which eagerly imports the full chatbot
-    service (camelot/PDF + DB deps) — none of which the formatter needs. The
+    service (PDF + DB deps) — none of which the formatter needs. The
     module file itself only uses stdlib, so we load it in isolation.
     """
     streaming_path = _orchestrator_root / "consumers" / "chatbot" / "streaming.py"
