@@ -1,9 +1,13 @@
 {
-  "route_count": 951,
+  "route_count": 952,
   "routes": [
     {
       "method": "GET",
       "path": "/"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/automatos.json"
     },
     {
       "method": "GET",
