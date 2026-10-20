@@ -281,10 +281,19 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = "prd263_harness_runs"' in haiku_default
     # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
     # main.py's per-boot ALTERs (futureagi_eval_enabled, skills.content_hash) become a
-    # revision; the guard follows it.
+    # revision.
     boot_columns = (versions / "prd262_boot_columns.py").read_text()
     assert 'down_revision = "auto_haiku_default_20261019"' in boot_columns
-    assert 'EXPECTED_HEAD = "prd262_boot_columns"' in guard
+    # 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto it — the HARNESS
+    # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
+    ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
+    assert 'down_revision = "prd262_boot_columns"' in ledger_grants
+    # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+    # prd263_harness_ledger_grants — the provenance record (content_provenance), a
+    # new table only; the guard follows it.
+    provenance = (versions / "prd264_content_provenance.py").read_text()
+    assert 'down_revision = "prd263_harness_ledger_grants"' in provenance
+    assert 'EXPECTED_HEAD = "prd264_content_provenance"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

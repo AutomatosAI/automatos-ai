@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
-# tests/test_harness_self_management.py) — with one twist: the port points
+# tests/test_harness_routing_rule.py) — with one twist: the port points
 # at nothing. The modules.tools import chain attempts a fail-soft DB connect
 # at import time; a CLOSED port refuses instantly, while a wedged local
 # postgres proxy can hang the handshake forever. CI exports real POSTGRES_*

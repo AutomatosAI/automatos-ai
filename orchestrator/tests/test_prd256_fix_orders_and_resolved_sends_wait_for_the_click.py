@@ -36,6 +36,9 @@ EMAIL = {"recipient_email": SUPPLIER, "subject": "Order confirmation", "body": "
 ORDER = {"email": SUPPLIER, "title": "40 Christmas boxes", "line_items": [{"variant_id": 1, "quantity": 40}]}
 FETCH = {"query": "from:kerbside"}
 NEAR_MISS = "GMAIL_SNED_EMAIL"   # no send word: the executor auto-maps it onto GMAIL_SEND_EMAIL
+# PRD-264 EUAI-07: a send the executor resolves from another name can't take the AI line, so any that sends
+# words is refused (test_prd264_euai07_agent_sends_say_ai.py); an order, which sends none, still asks.
+ORDER_NEAR_MISS = "SHOPIFY_CREATE_ORDR"   # no send word: the executor auto-maps it onto SHOPIFY_CREATE_ORDER
 CACHED = (
     ("GMAIL", "GMAIL_SEND_EMAIL", "Send an email to a recipient"),
     ("GMAIL", "GMAIL_FETCH_EMAILS", "Fetch emails from the inbox"),
@@ -131,7 +134,7 @@ def _ran(desk):
 CALLS = [
     pytest.param("SHOPIFY_CREATE_ORDER", ORDER, None, "SHOPIFY_CREATE_ORDER", id="an order"),
     pytest.param("gmail-send-email", EMAIL, "GMAIL", "GMAIL_SEND_EMAIL", id="a slug form"),
-    pytest.param(NEAR_MISS, EMAIL, None, "GMAIL_SEND_EMAIL", id="a near-miss the executor auto-maps"),
+    pytest.param(ORDER_NEAR_MISS, ORDER, None, "SHOPIFY_CREATE_ORDER", id="a near-miss the executor auto-maps"),
 ]
 
 
@@ -150,30 +153,30 @@ def test_on_autos_ticket_it_raises_the_card_and_nothing_runs(desk, action, param
 
 def test_a_near_miss_card_names_the_action_that_would_run(desk):
     """The gate let the near-miss by (no send word); the executor's re-check of the action it
-    resolved to raised the card, so the card names GMAIL_SEND_EMAIL, the action the click runs."""
-    assert not is_composio_send(NEAR_MISS)
-    _call(desk, _session(desk), NEAR_MISS, EMAIL)
+    resolved to raised the card, so the card names SHOPIFY_CREATE_ORDER, the action the click runs."""
+    assert not is_composio_send(ORDER_NEAR_MISS)
+    _call(desk, _session(desk), ORDER_NEAR_MISS, ORDER)
 
     (grant,) = _grants(desk)
-    assert "GMAIL_SEND_EMAIL" in grant.question_md
-    assert grant.details["params"] == {"action": NEAR_MISS, "params": EMAIL}
+    assert "SHOPIFY_CREATE_ORDER" in grant.question_md
+    assert grant.details["params"] == {"action": ORDER_NEAR_MISS, "params": ORDER}
 
 
 def test_the_click_on_a_near_miss_card_runs_the_resolved_send_once(desk):
     from api.approval_grants import _resume_tool_call
 
-    _call(desk, _session(desk), NEAR_MISS, EMAIL)
+    _call(desk, _session(desk), ORDER_NEAR_MISS, ORDER)
     (grant,) = _grants(desk)
     _click(desk, grant)
 
-    assert _ran(desk) == ["GMAIL_SEND_EMAIL"]
+    assert _ran(desk) == ["SHOPIFY_CREATE_ORDER"]
     assert grant.details["executed_result"]["success"] is True
     asyncio.run(_resume_tool_call(desk.db, grant))       # the same click replayed: nothing runs again
-    assert _ran(desk) == ["GMAIL_SEND_EMAIL"] and len(_grants(desk)) == 1
+    assert _ran(desk) == ["SHOPIFY_CREATE_ORDER"] and len(_grants(desk)) == 1
 
 
 def test_a_near_miss_in_a_persons_chat_asks_the_owner(desk):
-    reply = _call(desk, {"driving_user_id": "7", "conversation_id": "chat-1"}, NEAR_MISS, EMAIL)
+    reply = _call(desk, {"driving_user_id": "7", "conversation_id": "chat-1"}, ORDER_NEAR_MISS, ORDER)
 
     assert _ran(desk) == [] and reply["requires_confirmation"] is True and reply["owner_only"] is True
     assert len(_grants(desk)) == 1

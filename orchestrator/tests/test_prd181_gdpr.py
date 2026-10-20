@@ -194,3 +194,83 @@ def test_erasure_reports_gaps(monkeypatch):
     # never claimed erased.
     caveat = result["untagged_history"]
     assert set(caveat["stores"]) == {"field_memory", "durable_memory"}
+
+
+# ===========================================================================
+# PRD-264 EUAI-10 — erasure removes the workspace's provenance record
+# ===========================================================================
+
+PROVENANCE_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+@pytest.fixture(scope="module")
+def engine():  # conftest's new_session binds to it
+    from sqlalchemy import create_engine
+
+    from core.database.database import get_database_url
+
+    eng = create_engine(get_database_url(), pool_pre_ping=True)
+    yield eng
+    eng.dispose()
+
+
+def _seed_marked_workspace(new_session, *, soft_deleted: bool, kind: str) -> str:
+    """A committed workspace holding one content_provenance row for PROVENANCE_SHA256."""
+    from sqlalchemy import text
+
+    from services.content_provenance import record_marked_file
+
+    ws = str(uuid4())
+    s = new_session()
+    s.execute(
+        text("INSERT INTO workspaces (id, name, deleted_at) VALUES (CAST(:id AS uuid), 'prd264-erasure', "
+             "CASE WHEN CAST(:gone AS boolean) THEN now() END)"),
+        {"id": ws, "gone": soft_deleted},
+    )
+    record_marked_file(s, ws, PROVENANCE_SHA256, kind, "prd264-erasure-test")
+    s.commit()
+    s.close()
+    return ws
+
+
+def _provenance_rows(new_session, ws: str) -> int:
+    from sqlalchemy import text
+
+    s = new_session()
+    try:
+        return s.execute(text("SELECT count(*) FROM content_provenance WHERE workspace_id = CAST(:id AS uuid)"),
+                         {"id": ws}).scalar()
+    finally:
+        s.close()
+
+
+def test_erasure_deletes_the_workspaces_provenance_rows_and_no_one_elses(monkeypatch, new_session):
+    """Workspace erasure (the real SQL purge on the real database) removes the erased
+    workspace's provenance rows; another workspace's row for the same file stays."""
+    from sqlalchemy import text
+
+    from services import gdpr_service, workspace_purge
+
+    monkeypatch.setattr(gdpr_service, "_erase_field_memory", lambda ws, subject_id=None: 0)
+    monkeypatch.setattr(gdpr_service, "_erase_durable_memory", lambda ws, subject_id=None: 0)
+    monkeypatch.setattr(gdpr_service, "_audit_gdpr", lambda db, ws, action, **kw: None)
+    monkeypatch.setattr(workspace_purge, "_build_s3_client", lambda: None)
+
+    erased = _seed_marked_workspace(new_session, soft_deleted=True, kind="video")
+    kept = _seed_marked_workspace(new_session, soft_deleted=False, kind="image")
+    try:
+        assert _provenance_rows(new_session, erased) == 1
+
+        result = gdpr_service.erase_workspace(_FakeSession(), erased, requested_by="user:9")
+
+        assert result["sql"]["workspace_row_deleted"] is True
+        assert result["sql"]["rows_deleted"].get("content_provenance") == 1
+        assert _provenance_rows(new_session, erased) == 0
+        assert _provenance_rows(new_session, kept) == 1
+    finally:
+        s = new_session.sweep()
+        for sql in ("DELETE FROM content_provenance WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",
+                    "DELETE FROM workspaces WHERE id IN (CAST(:a AS uuid), CAST(:b AS uuid))"):
+            s.execute(text(sql), {"a": erased, "b": kept})
+        s.commit()
+        s.close()

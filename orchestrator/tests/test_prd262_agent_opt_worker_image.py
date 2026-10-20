@@ -13,7 +13,7 @@ and pins what a later edit could quietly lose:
 - main.py: no API docs, no /test route, every route but /health on the token router;
 - the CI lane that builds and tests the image;
 - images.yml builds, measures and scans it for amd64 and never publishes it, and
-  litellm's three Criticals are allowlisted against the version the lock installs.
+  litellm is past the KEV-listed advisories with no allowlist entry left for it.
 
 Pure file reads: no Docker, no database.
 """
@@ -22,7 +22,6 @@ from __future__ import annotations
 import ast
 import json
 import re
-from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -159,13 +158,21 @@ def test_images_yml_builds_and_scans_it_on_amd64_and_never_publishes_it():
     assert budgets["budgets"]["agent-opt-worker"]["amd64"]["reason"].strip()
 
 
-def test_litellms_criticals_are_allowlisted_for_the_version_the_lock_installs():
-    """litellm stays at 1.80.0 while ai-evaluation needs openai<2; a bump past it must drop these."""
+# litellm 1.84.0 fixes GHSA-7488-6r32-c95q (KEV) and GHSA-4xpc-pv4p-pm3w; 1.83.7 fixes
+# GHSA-v4p8-mg3p-g94g (KEV) and GHSA-6wvf-77m9-58rm; 1.83.0 fixes GHSA-jjhc-v7c2-5hh6.
+LITELLM_FIXED = (1, 84, 0)
+
+
+def test_litellm_is_past_its_kev_advisories_and_needs_no_allowlist_entry():
+    """The lock installs a litellm that fixes the KEV rows, so `.grype.yaml` lists none for it."""
+    assert _version(_pins()["litellm"]) >= LITELLM_FIXED, _pins()["litellm"]
     allowlist = yaml.safe_load((ROOT / ".grype.yaml").read_text())["ignore"]
-    litellm = [entry for entry in allowlist if (entry.get("package") or {}).get("name") == "litellm"]
-    assert {entry["vulnerability"] for entry in litellm} == {
-        "GHSA-6wvf-77m9-58rm", "GHSA-4xpc-pv4p-pm3w", "GHSA-jjhc-v7c2-5hh6"}
-    for entry in litellm:
-        assert entry["package"]["version"] == _pins()["litellm"]
-        assert "openai<2" in entry["reason"] and "openai>=2.8.0" in entry["reason"]
-        assert entry["expires"] <= date.today() + timedelta(days=90)
+    litellm = [entry["vulnerability"] for entry in allowlist if (entry.get("package") or {}).get("name") == "litellm"]
+    assert not litellm, f"allowlist entries for a litellm the lock no longer installs: {litellm}"
+
+
+def test_the_openai_override_lifts_ai_evaluations_cap_to_what_litellm_needs():
+    """ai-evaluation 1.1.0 caps openai<2; litellm 1.84 and later need openai>=2.20.0,<3."""
+    overrides = (WORKER / "overrides.txt").read_text()
+    assert re.search(r"^openai>=2\.20\.0,<3$", overrides, re.M)
+    assert (2, 20, 0) <= _version(_pins()["openai"]) < (3, 0, 0), _pins()["openai"]

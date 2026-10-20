@@ -29,6 +29,12 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
+**Play is in two repositories until A-19 (A-16b).** From core commit `ebedc7eb8` (W-A5's merge) the Design Kit
+(`AutomatosAI/automatos-play`, `themes/play`) carries a copy of Play's folders listed here. Until A-19 removes
+builtin Play from core, a change to Play in core must be made in the kit too, and the reverse, each pull request
+naming the other; a row that changes here for Play's code changes the kit's copy in the same pair of pull
+requests. `docs/frontend-architecture/play-theme.md` lists what counts as Play's code.
+
 ## 1. The core modules Play's folders import (74: 61 in §0, W-A1's three, the rows W-A2 added and PRD-264's one)
 
 | Module | Read by | Map | SDK names | Why |

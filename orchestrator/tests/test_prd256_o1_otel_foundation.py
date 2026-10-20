@@ -239,6 +239,18 @@ def test_a_query_value_never_reaches_the_collector(traced):
     assert spans[0].attributes["http.url"].endswith("/api/things/7?code=REDACTED&token=REDACTED&page=REDACTED")
 
 
+def test_a_file_hash_in_the_path_never_reaches_the_collector(traced):
+    """PRD-264 FR-17: the public provenance route's path is the SHA-256 of a visitor's
+    file. A 64-hex path segment leaves on no span attribute and in no span name."""
+    client, provider, exporter = traced()
+    digest = "ab" * 32
+    client.get(f"/api/things/{digest}?code=SECRET1")   # 422 (not an int), still a server span
+    spans = _server_spans(provider, exporter)
+    values = [str(v) for s in spans for v in s.attributes.values()] + [s.name for s in spans]
+    assert spans and not [v for v in values if digest in v or "SECRET" in v]
+    assert spans[0].attributes["http.url"].endswith("/api/things/{sha256}?code=REDACTED")
+
+
 def test_the_probes_are_never_traced(traced):
     client, provider, exporter = traced()
     assert client.get("/health").status_code == 200 and client.get("/health/ready").status_code == 200

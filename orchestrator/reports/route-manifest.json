@@ -1,5 +1,5 @@
 {
-  "route_count": 943,
+  "route_count": 942,
   "routes": [
     {
       "method": "GET",
@@ -1358,14 +1358,6 @@
       "path": "/api/github/webhook"
     },
     {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/approve"
-    },
-    {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/reject"
-    },
-    {
       "method": "GET",
       "path": "/api/harness/self-learning"
     },
@@ -2052,6 +2044,10 @@
     {
       "method": "PUT",
       "path": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/provenance/{sha256}"
     },
     {
       "method": "POST",

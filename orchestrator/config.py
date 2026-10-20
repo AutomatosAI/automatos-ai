@@ -658,6 +658,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
+    # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
+    # takes no account, so each client IP gets this many checks a minute (at least one).
+    PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
@@ -936,10 +939,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
-    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
-    # The weekly run is report_only and applies nothing whatever its value
-    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
+    # PRD-141 Phase 5. HIGH RISK — default OFF. Nothing reads it from PRD-263
+    # US-047, which deleted the owner's /approve it gated, until US-054 redefines
+    # it as the switch for approval grants. The weekly run is report_only and
+    # applies nothing whatever its value (PRD-263 US-016).
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
@@ -973,6 +976,13 @@ class Config:
     # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
     # connection failures is reported as "reconnect <app>", never as a bad tool.
     HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
+    # PRD-263 US-050 (section 11-Q10 defaults): HARNESS suggests doubling an enabled heartbeat's
+    # interval (clamped to 5-1440 minutes, as the heartbeat handler clamps it) only when its
+    # judged week has at least HARNESS_HEARTBEAT_MIN_RUNS runs with an outcome (a run whose
+    # objective_met is None is not counted) and the Wilson upper bound (95%) of the share
+    # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
+    HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
+    HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:

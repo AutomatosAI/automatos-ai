@@ -54,9 +54,7 @@ from consumers.chatbot.tool_router import get_tool_router
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
-from modules.tools.tool_router import (
-    get_tools_for_agent_async,
-)
+from modules.tools.tool_router import get_tools_for_agent_async
 from services.page_context import (
     merge_into_trace,
     page_actions_from_context as _page_actions_from_context,
@@ -82,6 +80,7 @@ from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (n
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
     about_a_document, full_path_for_documents, with_document_actions,
 )
+from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
 
@@ -547,6 +546,7 @@ _BASE64_IMG_RE = re.compile(
 
 
 @a_saved_reply_is_on_brand  # F337 (night 10): the saved reply's placeholder company and sign-off are filled
+@reply_images_are_marked  # PRD-264 EUAI-09: each image it saves carries the AI mark and a provenance row
 async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
     """Find base64 image markdown in text, upload to S3, replace with URLs."""
     matches = list(_BASE64_IMG_RE.finditer(text))

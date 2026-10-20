@@ -97,6 +97,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.session_tools"),
     # PRD-233 S6 -- the operator's profile (GET both editions, PUT local only).
     RouterSpec("api.profile"),
+    # PRD-264 EUAI-10 (D16) -- the public detection route: a SHA-256 in, yes or no out,
+    # rate-limited per IP. The one unauthenticated route of PRD-264.
+    RouterSpec("api.provenance"),
 )
 
 
