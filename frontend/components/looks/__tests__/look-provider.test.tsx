@@ -235,7 +235,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     expect(src).toContain('forcedTheme={playTone}')
     expect(src).toContain('<ThemeLookRuntime onToneChange={setPlayTone}>')
     expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
-    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted}>')
+    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {
@@ -252,7 +252,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     ])
     inOrder(readFileSync(LOOK_RUNTIME, 'utf8'), [
       '<AccountLookScope enabled={mounted}>',
-      '<LookProvider onToneChange={onToneChange} enabled={mounted}>',
+      '<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>',
       '</LookProvider>',
       '</AccountLookScope>',
     ])
