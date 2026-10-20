@@ -55,7 +55,7 @@ export interface PrepaintTable {
   readonly defaults: Readonly<Record<string, string | number>>
 }
 
-/** Where the boot script finds the cached active look (Play: lib/looks/storage.ts). */
+/** Where the boot script finds the cached active look (Play: lib/theme-host/builtin/play-look-storage.ts). */
 export interface ThemeLookStorage {
   /** Holds the current scope; the scoped key is scopedPrefix + that scope. */
   readonly pointerKey: string

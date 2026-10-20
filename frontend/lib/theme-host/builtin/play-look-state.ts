@@ -1,7 +1,8 @@
-import { freshLookId } from './editor'
-import { DEFAULT_LOOK, isPresetId } from './presets'
-import type { StoredLooks } from './storage'
-import type { Look } from './types'
+import { freshLookId } from '@/lib/looks/editor'
+import { DEFAULT_LOOK, isPresetId } from '@/lib/looks/presets'
+import type { Look } from '@/lib/looks/types'
+
+import type { StoredLooks } from './play-look-storage'
 
 /**
  * PRD-260 — what the LookProvider holds, as a pure reducer. `lookChanged` /

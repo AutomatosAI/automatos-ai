@@ -59,7 +59,7 @@ import {
   SAVED_LOOKS_KEY,
   UNSCOPED_LOOKS_MOVED_KEY,
   lookKeys,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { SEEN_KEY, seenKey } from '@/lib/play/seen'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'

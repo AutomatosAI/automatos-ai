@@ -1,6 +1,6 @@
 /**
  * PRD-261 A-09b (PA-7) — where builtin Play keeps its looks in this browser: the PRD-260 keys,
- * `automatos-play.*`, unchanged. lib/looks/storage.ts is theme-neutral and takes its keys from the
+ * `automatos-play.*`, unchanged. play-look-storage.ts is theme-neutral and takes its keys from the
  * active theme; an installed theme's are `automatos-theme.<themeId>.*` (installedLookKeys there),
  * builtin Play's are these, so no look a Play user already has moves before A-18 (whose shim reads
  * them once into the installed Play package's keys; A-19 deletes this file).
@@ -8,13 +8,13 @@
  * On the server Play's looks are kept under its package id, `automatos/play`
  * (orchestrator/services/themes/looks.py BUILTIN_PLAY_THEME_ID), so A-18 finds them in place.
  */
-import type { LookKeyBases, LookTheme } from '@/lib/looks/storage'
+import type { LookKeyBases, LookTheme } from '@/lib/theme-host/builtin/play-look-storage'
 
 /** The theme id Play's looks are kept under on the server (GET/PUT /api/themes/looks/{themeId}). */
 export const BUILTIN_PLAY_THEME_ID = 'automatos/play'
 
 /**
- * Play's storage key bases (lib/looks/storage.ts adds the scope, F5):
+ * Play's storage key bases (play-look-storage.ts adds the scope, F5):
  * - saved: the saved looks, a JSON array of Look objects;
  * - active: the active look, its id plus its values, so an unsaved edit survives a reload;
  * - pointer: the scope whose active look the boot script paints (it runs before anyone signs in);

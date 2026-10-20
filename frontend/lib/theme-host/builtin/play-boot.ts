@@ -9,7 +9,7 @@
  * look schema and interface; the tone cookie is the one LookProvider writes the look's tone to
  * (PRD-260 K4), read under Play's 'from-look' tone policy.
  */
-import { bootLookStorage } from '@/lib/looks/storage'
+import { bootLookStorage } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { LOOK_INTERFACE, LOOK_SCHEMA } from '@/lib/looks/types'
 

@@ -7,7 +7,7 @@ import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
-import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
+import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/theme-host/builtin/play-look-storage'
 import { toneOfGround, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 

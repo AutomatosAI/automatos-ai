@@ -30,7 +30,7 @@ import { clearRoot, lookNamesLeft, myLook, rootVars } from '@/lib/looks/__tests_
 import { lookDocumentVars } from '@/lib/looks/document'
 import { DAYLIGHT } from '@/lib/looks/presets'
 import { lookScope } from '@/lib/looks/scope'
-import { LOOK_SCOPE_KEY, lookKeys } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY, lookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { lookJson } from '@/lib/looks/transfer'
 import type { ThemeTone } from '@/lib/theme-host/boot'

@@ -45,7 +45,7 @@ import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catal
 import { SAVED_SUB } from '@/lib/looks/editor'
 import { safeGlow } from '@/lib/looks/engine'
 import { AURORA, DAYLIGHT, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
-import { LOOK_SCOPE_KEY } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY } from '@/lib/theme-host/builtin/play-look-storage'
 import { LOOK_FILE_MAX_BYTES, LOOK_FILE_TYPE, TOO_BIG, lookJson } from '@/lib/looks/transfer'
 import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'

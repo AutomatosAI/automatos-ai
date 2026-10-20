@@ -19,7 +19,7 @@ import { MOTION_ATTRIBUTE, MOTION_VAR, lookDocumentVars } from '@/lib/looks/docu
 import { SAVED_SUB, asNewLook } from '@/lib/looks/editor'
 import { DAYLIGHT, DEFAULT_LOOK, OBSIDIAN } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
-import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'

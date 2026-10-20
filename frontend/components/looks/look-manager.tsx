@@ -134,7 +134,7 @@ function useManage(tell: Tell, closeForm: () => void, returnFocus: ReturnFocus) 
     tell(from.id, storedNotice(`Renamed to ${result.look.name}.`))
   }
 
-  // Deleting the active look takes Play back to the default (lib/looks/store.ts).
+  // Deleting the active look takes Play back to the default (lib/theme-host/builtin/play-look-state.ts).
   const remove = (from: Look) => {
     deleteLook(from.id)
     closeForm()
