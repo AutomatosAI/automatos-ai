@@ -1,13 +1,17 @@
 """HARNESS state in the database: the task ledger (F156) and the run table (PRD-263).
 
-``HarnessTaskLedger``: which done [HARNESS] board tasks self-management
-applied (with the value each change replaced), and which waited for an owner's
-or admin's /approve. It was the idempotency key for the weekly tick's
-card-to-Done path and the /approve command, and lived here instead of in a file
-on the workspace volume that a workspace tool could write. PRD-263 deleted both
-(US-016, US-047) and the service code that wrote it (US-048): DIAGNOSE reads its
-applied rows (services.harness_diagnose), and nothing writes it until the
-governed apply (US-051, US-052).
+``HarnessTaskLedger``: one row per HARNESS change proposal and its outcome. F156
+kept which done [HARNESS] board tasks self-management applied, and which waited
+for an owner's or admin's /approve, here instead of in a file on the workspace
+volume that a workspace tool could write. PRD-263 deleted both paths (US-016,
+US-047) and the code that wrote it (US-048). US-051 makes it the governed apply
+rail's ledger: each row carries its prescription (``rx_id``, unique per
+workspace), the run and approval grant behind it, the change's kind and target
+agent, the value before and the value proposed, and, once applied, when and over
+what value, with the frozen reference the post-change check reads. ``state`` is
+one of the ``LEDGER_*`` values below. ``board_task_id`` is the [HARNESS] card a
+row is keyed by (still unique per workspace), NULL for a row with none. DIAGNOSE
+reads its applied rows (services.harness_diagnose).
 
 ``HarnessRun`` (PRD-263 US-009): one HARNESS run of one workspace, for the ISO
 week it judges. Every worker reads the same row, so run state no longer lives in
@@ -30,8 +34,19 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from core.database.base import Base
 
+# harness_task_ledger.state: a proposal waiting for the owner's click, one being
+# applied, and its ends. ck_harness_task_ledger_state allows exactly these; the
+# F156 ``held`` state became ``expired`` (US-051).
+LEDGER_PENDING = "pending"
+LEDGER_APPLYING = "applying"
 LEDGER_APPLIED = "applied"
-LEDGER_HELD = "held"
+LEDGER_FAILED = "failed"
+LEDGER_DENIED = "denied"
+LEDGER_EXPIRED = "expired"
+LEDGER_DRIFTED = "drifted"
+LEDGER_WITHDRAWN = "withdrawn"
+LEDGER_RAISE_FAILED = "raise_failed"
+LEDGER_ROLLED_BACK = "rolled_back"
 
 # harness_runs.status: a run in flight, the two ends a run that passes the
 # dormancy check reaches, and the dormant ends of one that does not.
@@ -48,15 +63,33 @@ class HarnessTaskLedger(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-    board_task_id = Column(Integer, nullable=False)
+    board_task_id = Column(Integer, nullable=True)
     state = Column(String(20), nullable=False)
     entry = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    # PRD-263 US-051: the governed apply rail. The Alembic revision
+    # prd263_harness_ledger_grants adds the same columns; F156 rows leave them NULL.
+    rx_id = Column(String(64), nullable=True)
+    run_id = Column(Integer, nullable=True)
+    grant_id = Column(Integer, nullable=True)
+    kind = Column(String(40), nullable=True)
+    target_agent_id = Column(Integer, nullable=True)
+    prior_value = Column(JSONB, nullable=True)
+    proposed_value = Column(JSONB, nullable=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    value_at_apply = Column(JSONB, nullable=True)
+    frozen_ref_start = Column(DateTime(timezone=True), nullable=True)
+    frozen_ref_end = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "board_task_id", name="uq_harness_task_ledger_task"),
-        CheckConstraint("state IN ('applied', 'held')", name="ck_harness_task_ledger_state"),
+        Index("uq_harness_task_ledger_rx", "workspace_id", "rx_id", unique=True),
+        CheckConstraint(
+            "state IN ('pending', 'applying', 'applied', 'failed', 'denied', 'expired', "
+            "'drifted', 'withdrawn', 'raise_failed', 'rolled_back')",
+            name="ck_harness_task_ledger_state",
+        ),
         {"extend_existing": True},
     )
 

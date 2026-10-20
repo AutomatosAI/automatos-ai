@@ -83,7 +83,7 @@ Every run is one `harness_runs` row: its judged week, start and finish, status, 
 - `scheduled_not_run_yet`: no run yet, with `next_scheduled_run`;
 - `completed`: with `iteration_count`, `cur_window`, coverage, convergence, the INSUFFICIENT_DATA, WATCH and REGRESSION counts, `last_run_at` and `artifacts.audit_report`.
 
-History from before PRD-263, kept as JSON files under `<WORKSPACE_VOLUME_PATH>/<ws>/harness`, is imported once by `scripts/harness_backfill_runs.py`, which Gerard runs. It inserts one row per workspace and week that has none, defaults to a dry run (`--apply` writes), never writes or deletes a file, and `--summary-only` prints totals that name no workspace. Imported rows carry no coverage or verdicts: the old loop's judgement is not something DIAGNOSE reads.
+History from before PRD-263, kept as JSON files under `<WORKSPACE_VOLUME_PATH>/<ws>/harness`, is imported once by `scripts/harness_backfill_runs.py`, which Gerard runs. It inserts one row per workspace and week that has none, defaults to a dry run (`--apply` writes), never writes a file, and `--summary-only` prints totals that name no workspace. Imported rows carry no coverage or verdicts: the old loop's judgement is not something DIAGNOSE reads. Once the history is in, `--remove-files` (with `--apply`) deletes each workspace's `harness/` JSON files, and only when that workspace's import count verifies: every ISO week its files hold has a `harness_runs` row, read back after the import. A workspace that does not verify keeps its files and is counted; that count must be 0. Symbolic links are never followed or removed.
 
 ### Status diagram
 
