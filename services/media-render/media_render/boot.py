@@ -8,11 +8,13 @@ so the container stops instead of serving broken renders.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import List, Mapping, Sequence
 
 from .config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, TOKEN_ENV, Settings
 from .music import MusicLibraryError, load_library
+from .voices_build import VoicesError, voice_names
 
 BOOT_FAILURE_EXIT_CODE = 2
 
@@ -66,12 +68,39 @@ def music_library_problems(settings: Settings) -> List[str]:
     return []
 
 
+def kokoro_voice_problems(settings: Settings) -> List[str]:
+    """The voices file lists its voices, and the default voice is one of them (PRD-262 US-052).
+
+    A request names only a voice the file holds (validate.voice_name), so a default
+    the file lacks would refuse every request that names none.
+    """
+    try:
+        voices = voice_names(settings.kokoro_voices_path)
+    except VoicesError as exc:
+        return [f"MEDIA_RENDER_KOKORO_VOICES: {exc}"]
+    if settings.kokoro_voice not in voices:
+        return [
+            f"MEDIA_RENDER_KOKORO_VOICE={settings.kokoro_voice!r} is not in the voices file "
+            f"{settings.kokoro_voices_path}, which holds {', '.join(sorted(voices))}"
+        ]
+    return []
+
+
+def marker_problems(settings: Settings) -> List[str]:
+    """PRD-264 EUAI-06a: without exiftool no AI-made file can be marked, and an unmarked one never ships."""
+    if shutil.which(settings.exiftool_bin) is None:
+        return [f"exiftool ({settings.exiftool_bin!r}) is not installed, so no AI-made file could be marked"]
+    return []
+
+
 def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
     return [
         *espeak_data_path_problems(settings.espeak_data_path),
         *hyperframes_env_problems(env),
         *token_problems(settings),
         *music_library_problems(settings),
+        *kokoro_voice_problems(settings),
+        *marker_problems(settings),
     ]
 
 

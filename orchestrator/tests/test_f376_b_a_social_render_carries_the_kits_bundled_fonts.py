@@ -31,10 +31,14 @@ from core.media_render_bundle import BUNDLED_FONT_FILES, FONTS_DIR, build_bundle
 from core.social_templates import SOCIAL_IMAGE, resolve_variables  # noqa: E402
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
+from media_render.voices_build import load_catalogue  # noqa: E402
 from modules.documents import brand_fonts, bundled_fonts  # noqa: E402
 from modules.documents.blocks.page_fonts import font_css  # noqa: E402
 from modules.documents.brand_kit import get_brand_kit  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
+
+# media-render's voices: the catalogue its voices file holds (PRD-262 US-052).
+VOICES = frozenset(load_catalogue())
 
 NIGHT_KIT = {
     "name": "Tide Cafe",
@@ -82,7 +86,7 @@ def test_the_bundle_stages_them_after_the_uploads_and_media_render_takes_it():
     staged = {entry["path"] for entry in bundle["files"]}
     assert all(face["path"] in staged and face["path"].startswith(FONTS_DIR) for face in fonts)
     settings = load_settings({})
-    parsed = parse_bundle(bundle, settings, {})
+    parsed = parse_bundle(bundle, settings, {}, VOICES)
     assert len(parsed.files) <= settings.max_files and len(fonts) <= settings.max_brand_tokens
 
 

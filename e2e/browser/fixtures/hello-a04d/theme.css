@@ -1,0 +1,11 @@
+/* PRD-261 A-04d: the theme-pages hello theme's one stylesheet. Every rule sits under
+   html.hello-a04d, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a04d .hello-a04d-frame {
+  min-height: 100vh;
+  background: var(--hello-a04d-ground);
+  color: var(--hello-a04d-ink);
+}
+
+html.hello-a04d .hello-a04d-page {
+  padding: 24px;
+}

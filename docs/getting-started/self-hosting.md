@@ -333,7 +333,7 @@ You should not need to open the last three for a standard install.
 ## 4. First boot — what happens and how long it takes
 
 1. **Image builds.** Backend (Python dependencies plus system libraries for
-   OCR and PDF rendering), frontend (`npm install`), workspace-worker (Node,
+   OCR and PDF rendering), frontend (`npm ci`), workspace-worker (Node,
    Claude Code CLI, Python tooling, Chromium). This is the slow part and only
    happens once per dependency change.
 2. **Data services.** Postgres initialises an empty cluster with

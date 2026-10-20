@@ -1,5 +1,7 @@
+import { LOOK_TEXT_MAX } from '@/lib/look-kit/validate'
+
 import { findPreset, isPresetId, PRESETS } from './presets'
-import { GLOW_MAX, GLOW_MIN, LOOK_TEXT_MAX, type Look } from './types'
+import { GLOW_MAX, GLOW_MIN, type Look } from './types'
 
 /**
  * PRD-260 — the Looks page's rules, pure: which look the active one started
@@ -48,7 +50,7 @@ export function withValues(look: Look, values: Partial<LookValues>): Look {
 
 /**
  * A slider reading as a whole glow from GLOW_MIN to `max`: the Glow slider
- * passes the look's safeGlow() (lib/looks/css.ts), the cap glowVars() paints
+ * passes the look's safeGlow() (lib/looks/engine.ts), the cap glowVars() paints
  * at; never past GLOW_MAX.
  */
 export function clampGlow(value: number, max: number = GLOW_MAX): number {

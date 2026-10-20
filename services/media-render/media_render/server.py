@@ -4,7 +4,13 @@
     POST /render                     a composition bundle -> 202 job | 422 findings | 400 | 429 | 502 | 503
     GET  /render/{id}                the job: status, check report, timings, outputs
     GET  /render/{id}/output/{name}  the rendered file (Range requests work)
-    POST /tts                        Kokoro lines -> durations and voiced segments (WAVs on request)
+    POST /tts                        Kokoro lines -> durations and voiced segments (WAVs on request, marked AI-made)
+    POST /jpeg                       an image -> the same picture as a JPEG, keeping its AI mark
+
+A WAV /tts hands out is marked AI-made after it is spoken and before the answer
+is built (PRD-264 EUAI-06a, tts.mark_audio): one that cannot be marked is a 500
+``voice_unmarked`` and no WAV goes out. Without ``include_audio`` no WAV leaves,
+and none is marked.
 
 Every path but /health needs X-Internal-Token when one is configured, copied
 from the worker (services/workspace-worker/main.py). Boot refuses production
@@ -24,6 +30,13 @@ across the service (past it, 503 ``busy``) and at most
 MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE for one workspace (past it, 429
 ``workspace_busy`` for that workspace alone), so one workspace's burst never
 takes every slot and shuts the others out (P251W1-RVW-4). Both carry Retry-After.
+
+Once the service is listening, the Kokoro model loads in a background thread
+(PRD-262 US-053): /health answers at once, and the first render's voice step no
+longer carries the model load.
+
+The voices a render or /tts may name are those the image's voices file holds,
+read when the app is made, at boot (PRD-262 US-052); any other voice is a 400.
 """
 
 from __future__ import annotations
@@ -35,7 +48,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, Mapping, Optional, Set
+from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, Mapping, Optional, Sequence, Set
 
 from aiohttp import web
 
@@ -44,12 +57,15 @@ from .config import Settings
 from .hyperframes import LOG_TAIL_CHARS
 from .jpeg import JPEG_CONTENT_TYPE, JpegError, to_jpeg
 from .jobs import DONE, FAILED, QUEUED, REJECTED, RENDERING, Job, JobStore, delete_files, job_json, remove_working_files, reset_work_dir
+from .kokoro_tts import SpokenLine
 from .lanes import Lane
 from .music import Track, load_library
 from .pipeline import CheckOutcome, Pipeline, PipelineError, RenderPipeline
-from .tts import Speaker, line_report, parse_tts_request
+from .provenance import ProvenanceError, carry_mark
+from .tts import Speaker, line_report, mark_audio, parse_tts_request
 from .validate import BundleError
 from .versions import read_versions
+from .voices_build import voice_names
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +80,7 @@ class ServiceState:
     pipeline: Pipeline
     speaker: Speaker
     library: Mapping[str, Track]
+    voices: FrozenSet[str]
     check_lane: Lane
     render_lane: Lane
     versions: Mapping[str, str]
@@ -216,7 +233,7 @@ async def post_render(request: web.Request) -> web.Response:
     if active >= state.settings.max_active_jobs:
         return _retry_later(state, 503, "busy", f"{active} renders are already in progress; try again shortly")
     try:
-        bundle = parse_bundle(payload, state.settings, state.library)
+        bundle = parse_bundle(payload, state.settings, state.library, state.voices)
     except BundleError as exc:
         return _error(400, "invalid_bundle", str(exc))
     # No await from here to create(): the count and the admission are one step.
@@ -265,11 +282,21 @@ async def get_output(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path)
 
 
+async def _unmarked_refusal(settings: Settings, spoken: Sequence[SpokenLine]) -> Optional[web.Response]:
+    """EUAI-06a: mark the WAVs a /tts answer will carry; a 500 when one cannot be, so none leaves unmarked."""
+    try:
+        await asyncio.to_thread(mark_audio, spoken, settings)
+    except ProvenanceError as exc:
+        logger.error("tts: the spoken lines could not be marked as AI-made: %s", exc)
+        return _error(500, "voice_unmarked", "the spoken lines could not be marked as AI-made")
+    return None
+
+
 async def post_tts(request: web.Request) -> web.Response:
     state = request.app[STATE]
     payload = await _read_json(request)
     try:
-        spec = parse_tts_request(payload, state.settings)
+        spec = parse_tts_request(payload, state.settings, state.voices)
     except BundleError as exc:
         return _error(400, "invalid_request", str(exc))
     started = time.monotonic()
@@ -278,6 +305,9 @@ async def post_tts(request: web.Request) -> web.Response:
             spoken = await state.speaker.speak(spec.lines, Path(scratch), voice=spec.voice, speed=spec.speed, lang=spec.lang)
         except ValueError as exc:  # Kokoro's refusal: an unknown voice, a line with nothing to say
             return _error(400, "voice_refused", f"Kokoro could not speak the lines: {exc}")
+        refusal = await _unmarked_refusal(state.settings, spoken) if spec.include_audio else None
+        if refusal is not None:
+            return refusal
         lines = [
             line_report(line_id, said, include_audio=spec.include_audio) for (line_id, _), said in zip(spec.lines, spoken)
         ]
@@ -293,7 +323,8 @@ async def post_tts(request: web.Request) -> web.Response:
 
 async def post_jpeg(request: web.Request) -> web.Response:
     """``POST /jpeg``: the image in the body, answered as a JPEG (US-303: Instagram
-    takes JPEG only, and the stills are PNG)."""
+    takes JPEG only, and the stills are PNG). The conversion drops metadata, so the
+    JPEG is given the AI mark the image carried, after its encode (PRD-264 EUAI-06a)."""
     settings = request.app[STATE].settings
     image = await request.read()
     try:
@@ -302,6 +333,13 @@ async def post_jpeg(request: web.Request) -> web.Response:
         )
     except JpegError as exc:
         return _error(400, "not_an_image", str(exc))
+    try:
+        jpeg = await asyncio.to_thread(
+            carry_mark, image, jpeg, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
+        )
+    except ProvenanceError as exc:
+        logger.error("jpeg: the image's AI mark could not be carried to the JPEG: %s", exc)
+        return _error(500, "mark_failed", "the JPEG could not be given the image's AI mark")
     return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE)
 
 
@@ -338,9 +376,13 @@ def create_app(
     pipeline: Optional[Pipeline] = None,
     speaker: Optional[Speaker] = None,
     library: Optional[Mapping[str, Track]] = None,
+    voices: Optional[AbstractSet[str]] = None,
     clock: Callable[[], float] = time.time,
 ) -> web.Application:
-    """The app. Tests pass a stub pipeline or speaker; the service uses the real ones."""
+    """The app. Tests pass a stub pipeline or speaker; the service uses the real ones.
+
+    The music library and the voices are read from the image unless given.
+    """
 
     @web.middleware
     async def internal_token(request: web.Request, handler):
@@ -360,6 +402,7 @@ def create_app(
         pipeline=pipeline or real_pipeline,
         speaker=speaker,
         library=load_library(settings.music_dir) if library is None else library,
+        voices=voice_names(settings.kokoro_voices_path) if voices is None else frozenset(voices),
         check_lane=Lane(settings.max_concurrent_checks, settings.max_checks_per_workspace),
         render_lane=Lane(settings.max_concurrent_renders, settings.max_renders_per_workspace),
         versions=read_versions(settings.versions_path),
@@ -377,12 +420,41 @@ def create_app(
     return app
 
 
+async def _warm_voice(state: ServiceState) -> None:
+    logger.info("kokoro: loading the voice model in the background")
+    try:
+        seconds = await state.speaker.warm()
+    except Exception:
+        logger.exception("kokoro: the voice model did not load in the background; the first line spoken loads it")
+        return
+    logger.info("kokoro: the voice model loaded in the background in %.2f s", seconds)
+
+
+def warm_voice_in_background(app: web.Application) -> "asyncio.Task[None]":
+    """Start loading the Kokoro model off the event loop; cleanup cancels the wait with the app's other tasks."""
+    state = app[STATE]
+    task = asyncio.create_task(_warm_voice(state))
+    state.tasks.add(task)
+    task.add_done_callback(state.tasks.discard)
+    return task
+
+
+def _on_listening(app: web.Application, settings: Settings) -> Callable[..., None]:
+    """web.run_app calls its ``print`` once, after every site is listening: the voice model starts loading then."""
+
+    def listening(*_message: object) -> None:
+        logger.info("media-render listening on %s:%d", settings.bind_host, settings.port)
+        warm_voice_in_background(app)
+
+    return listening
+
+
 def serve(settings: Settings) -> None:
-    logger.info("media-render listening on %s:%d", settings.bind_host, settings.port)
+    app = create_app(settings)
     web.run_app(
-        create_app(settings),
+        app,
         host=settings.bind_host,
         port=settings.port,
         access_log=None,
-        print=None,
+        print=_on_listening(app, settings),
     )

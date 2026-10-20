@@ -14,7 +14,7 @@ from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN
+from helpers import TOKEN, VOICES
 from media_render.bundle import parse_bundle
 from media_render.fixture import music_bundle
 from media_render.music import DROP_LEAD_SECONDS, Track
@@ -35,7 +35,7 @@ def _track(track_id="deep-house-003", title="Deep House 003", cues=None, duratio
 def _start(settings, cues, **music):
     bundle = music_bundle()
     bundle["audio"] = {**bundle["audio"], "music": {"track": "deep-house-003", **music}}
-    parsed = parse_bundle(bundle, settings, {"deep-house-003": _track(cues=cues)})
+    parsed = parse_bundle(bundle, settings, {"deep-house-003": _track(cues=cues)}, VOICES)
     return music_report(parsed)["start"]
 
 

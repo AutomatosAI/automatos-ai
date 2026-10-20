@@ -16,7 +16,7 @@ import {
   type JsonRecord, type ThemeError,
 } from './css-value'
 import { satisfiesSdkRange } from './engines'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 import { SDK_VERSION } from './sdk'
 
 /** PA-2: the host contract's version (slots, pages, routes, boot data). */

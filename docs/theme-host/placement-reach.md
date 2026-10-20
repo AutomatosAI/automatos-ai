@@ -78,3 +78,13 @@ them there: they are the `slots` map of the theme's load result (`ThemeRegistrat
 active theme the host passes `null`, and every slot draws its fallback, so the page has the DOM it
 had before. The browser lane proves a registered `page-header.mascot@1` draws on a live page
 (`e2e/browser/specs/placement-slots.spec.ts`, fixture `fixtures/hello-a12b-live/`).
+
+## The AI label is not a slot (PRD-264 EUAI-11a, EUAI-11b)
+
+The in-app AI label ("Auto is an AI", or "{agent name} is an AI") is drawn by the host, never through a
+placement slot or a `pages` entry: `AiLabelGate` renders it in `app/chat/layout.tsx` after `ThemeSlot`, so it
+shows on `/chat` whether the core's page, Play's chat or a theme's own `/chat` page is on screen. Every `/x/`
+theme route (`app/x/[...path]/page.tsx`), Play's Conversations among them, renders the same gate around
+`MainLayout`, so the label sits outside the theme's frame. No slot id, prop or manifest field reaches it, so a
+theme can neither replace nor remove it, and a theme page never renders a second copy. The rule and its
+runtime check are in `css-layer-model.md` and `sdk-surface-map.md` ("Host-owned AI label").

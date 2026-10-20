@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2 } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -14,6 +14,7 @@ import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { SessionModeTab } from './SessionModeTab'
 import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
+import { AppearanceTab } from './themes/appearance-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -32,6 +33,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  *
  * Socials (PRD-251B US-B106) is the WORKSPACE switch, in both editions: the
  * platform master stays under System Settings (super-admin).
+ *
+ * Appearance (PRD-261 A-07d) holds Themes, in both editions: installing a private theme is
+ * on by default in the local edition (THEMES_PRIVATE_UPLOAD=auto).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -43,6 +47,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'notifications',
   'socials',  // PRD-251B US-B106 — the workspace's own Socials switch
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
+  'appearance',  // PRD-261 A-07d — Themes: install, opt in, choose
 ])
 
 export function SettingsPanel() {
@@ -60,6 +65,7 @@ export function SettingsPanel() {
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
     { value: 'socials', label: 'Socials', icon: Share2 },
+    { value: 'appearance', label: 'Appearance', icon: Palette },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
@@ -150,6 +156,11 @@ export function SettingsPanel() {
         {/* PRD-251B US-B106: the workspace's own Socials switch (the master is under System Settings) */}
         <TabsContent value="socials">
           <WorkspaceSocialsCard />
+        </TabsContent>
+
+        {/* PRD-261 A-07d: Appearance › Themes — install, opt in, choose; the workspace's theme settings */}
+        <TabsContent value="appearance">
+          <AppearanceTab />
         </TabsContent>
 
         {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}

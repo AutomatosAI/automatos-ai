@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { PRESETS } from '@/lib/looks/presets'
-import { validateLook } from '@/lib/looks/validate'
+import { validateLook } from '@/lib/looks/engine'
 import {
   ANNOTATION_ANCHOR,
   FAMILY_EMOJI,
