@@ -358,9 +358,11 @@ RUN useradd -m -u 1000 automatos && \
 # 2.65 MB): tkinter can't import here (python:slim has no Tk libraries), nothing runs
 # IDLE, turtledemo or 2to3, and pydoc's help() compiles pydoc_data in memory if a
 # person ever asks. unchecked-hash .pyc stay valid whatever the build clamps file
-# mtimes to. Before the COPYs, so neither a code change nor an entrypoint edit
-# rebuilds this layer.
-RUN python -m compileall -q -x '/site-packages/|/(idlelib|tkinter|turtledemo|lib2to3|pydoc_data)/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
+# mtimes to. -S: no site, so the base's distutils-precedence.pth (setuptools) doesn't
+# import _distutils_hack and write its .pyc into site-packages inside this layer, which
+# images.yml's stdlib bytecode layer check refuses. Before the COPYs, so neither a
+# code change nor an entrypoint edit rebuilds this layer.
+RUN python -S -m compileall -q -x '/site-packages/|/(idlelib|tkinter|turtledemo|lib2to3|pydoc_data)/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
 
 # The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029).
 # Before the server it runs the migration step, so Railway (no flag set) migrates

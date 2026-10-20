@@ -205,7 +205,7 @@ LAYER_CHECK = ("compileall", f"{STDLIB}/", f"{STDLIB}/site-packages/", ".pyc")
 def _compile_instruction() -> str:
     """The orchestrator Dockerfile's stdlib compile, as US-001's listing names its layer."""
     dockerfile = (_REPO / "orchestrator" / "Dockerfile").read_text(encoding="utf-8")
-    command = next(line for line in dockerfile.splitlines() if line.startswith("RUN python -m compileall"))
+    command = next(line for line in dockerfile.splitlines() if line.startswith("RUN python -S -m compileall"))
     entry = {"created_by": f"RUN /bin/sh -c {command.removeprefix('RUN ')} # buildkit"}
     return layers.shorten(layers.instruction(entry))
 

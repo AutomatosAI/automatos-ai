@@ -47,7 +47,7 @@ STDLIB = "/usr/local/lib/python3.11"
 STDLIB_EXCLUDED = ("idlelib", "tkinter", "turtledemo", "lib2to3", "pydoc_data")
 STDLIB_EXCLUDE = f"/site-packages/|/({'|'.join(STDLIB_EXCLUDED)})/"
 STDLIB_COMPILE = (
-    f"RUN python -m compileall -q -x '{STDLIB_EXCLUDE}' --invalidation-mode unchecked-hash {STDLIB}"
+    f"RUN python -S -m compileall -q -x '{STDLIB_EXCLUDE}' --invalidation-mode unchecked-hash {STDLIB}"
 )
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 _NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
