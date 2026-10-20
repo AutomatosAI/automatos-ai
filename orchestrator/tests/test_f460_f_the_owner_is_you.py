@@ -1,6 +1,6 @@
 """F460 (night 18): Auto spoke of the owner in the third person, to the owner: "ask Gerard whether…",
 "He hasn't confirmed", "needs Gerard's decision". Both lanes' identity clause now say that the person a
-document, card or tool note names (or calls 'the owner') is the one Auto is talking to; with no name
+document, card or tool note names is the one Auto is talking to; with no name
 known, neither prompt changes.
 """
 from __future__ import annotations
@@ -14,8 +14,8 @@ from consumers.chatbot.service import atom_identity_clause
 
 SETTINGS = {"personality_mode": "friendly", "custom_soul": "", "communication_style": "balanced"}
 NAMELESS_OPENING = "You are Auto, a capable AI assistant. You're ready to help.\n\n## Who You Are\n"
-CLAUSE = ("When a document, card or tool note names Gerard or 'the owner', that is the person you are talking to: "
-          "say 'you' and 'your', never 'Gerard', 'he' or 'the owner', except inside a draft addressed to someone else.")
+CLAUSE = ("When a document, card or tool note names Gerard, that is the person you are talking to: say 'you' and "
+          "'your', never 'Gerard' or a third-person pronoun, except inside a draft addressed to someone else.")
 
 
 def _full(user_name=None):
