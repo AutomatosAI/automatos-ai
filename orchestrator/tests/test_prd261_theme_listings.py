@@ -495,6 +495,22 @@ def test_a_publisher_marked_reserved_needs_the_signature_too_and_an_unreserved_o
     assert card["signature"] == {"state": "verified", "keyId": key_id}
 
 
+def test_a_keys_file_that_does_not_load_fails_closed_and_the_listings_still_answer(api, monkeypatch, tmp_path):
+    _keys(monkeypatch, tmp_path)
+    play = _signable(api.db)
+    _sign(api.db, play)
+    assert _listings(api)[PLAY_LISTING]["publisher"]["official"] is True
+    broken = tmp_path / "signing-keys-broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    card = _listings(api)[PLAY_LISTING]  # 200, not a 500 for every workspace
+    assert card["publisher"]["official"] is False and card["signature"] == {"state": "invalid", "keyId": None}
+    detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["publisher"]["official"] is False
+    assert detail.json()["versions"]["1.0.0"]["signature"]["state"] == "invalid"
+
+
 def test_a_local_operator_who_approves_automatos_x_unsigned_is_not_official(api, monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     submitted = _signable(api.db, theme_id="automatos/x", status="pending")  # as the operator's submission is

@@ -215,13 +215,24 @@ def previews_by_preset(package: ThemePackage) -> Dict[str, Any]:
     }
 
 
+def _signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
+    """The version's signature verdict for a listing. A keys file that does not load fails closed: the
+    signature reads ``invalid`` (never Official) and the listings still answer; the paste route keeps
+    refusing loudly (C-05b)."""
+    try:
+        return signature_verify.package_verdict(package)
+    except signature_verify.SigningKeysError as bad:
+        logger.error("Theme signing keys did not load; %s is shown unverified: %s", package.theme_id, bad)
+        return signature_verify.Verdict(signature_verify.STATE_INVALID)
+
+
 def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
     return {
         "packageId": str(package.id),
         "engines": (package.manifest or {}).get("engines"),
         "compatible": is_compatible(package),
         "revoked": revocation_body(revocation_of(db, package)),
-        "signature": signature_verify.package_verdict(package).view(),
+        "signature": _signature_verdict(package).view(),
         "createdAt": None if package.created_at is None else package.created_at.isoformat(),
     }
 
@@ -251,7 +262,7 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
     shown = latest or versions[0]
     manifest = shown.manifest or {}
     cover = _preview_paths(shown)
-    verdict = signature_verify.package_verdict(shown)
+    verdict = _signature_verdict(shown)
     return {
         "listingId": listing_id_of(shown.theme_id),
         "themeId": shown.theme_id,
