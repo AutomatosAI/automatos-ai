@@ -221,12 +221,12 @@ Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.in:1-142]
 
 ### Frontend
 The frontend uses a multi-stage Dockerfile for a Next.js standalone build [frontend/Dockerfile:1-9]().
-- **`base` stage**: Installs Node.js and common build tools [frontend/Dockerfile:14-26]().
-- **`development` stage**: Installs all dependencies and runs the Next.js development server with hot-reload [frontend/Dockerfile:30-48]().
-- **`builder` stage**: Accepts `NEXT_PUBLIC_*` build arguments which are embedded into the client bundle. It performs the `npm run build` step [frontend/Dockerfile:53-98]().
-- **`production` stage**: Copies only the `.next/standalone`, `.next/static`, and `public` folders for a minimal image. It runs the `node server.js` command [frontend/Dockerfile:103-132]().
+- **`base` stage**: Node 24 on Alpine, with no build tools. It installs every dependency once with `npm ci`, from `package.json`, `package-lock.json` and `.npmrc` alone [frontend/Dockerfile:11-32]().
+- **`development` stage**: Runs the Next.js development server with hot-reload on the base stage's install [frontend/Dockerfile:34-50]().
+- **`builder` stage**: Copies the source, then accepts the `NEXT_PUBLIC_*` build arguments, which are embedded into the client bundle, so changing one reuses the install. It performs the `npm run build` step and moves the dependencies Next traced out of the standalone output [frontend/Dockerfile:52-107]().
+- **`production` stage**: Alpine plus the node binary. It copies the traced `node_modules`, `public`, `.next/static` and the standalone server as four layers, the one that changes least often first, and runs the `node server.js` command [frontend/Dockerfile:109-163]().
 
-Sources: [frontend/Dockerfile:1-132]()
+Sources: [frontend/Dockerfile:1-163]()
 
 ---
 

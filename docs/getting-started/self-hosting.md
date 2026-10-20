@@ -526,7 +526,7 @@ You should not need to open the last three for a standard install.
    main publish against a 150-second bar. A later update downloads only the
    layers that changed. `make build` builds the images from your checkout
    instead (Python dependencies plus system libraries for OCR and PDF
-   rendering, `npm install`, the worker's Node and Claude Code CLI), which takes
+   rendering, `npm ci`, the worker's Node and Claude Code CLI), which takes
    several minutes.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
