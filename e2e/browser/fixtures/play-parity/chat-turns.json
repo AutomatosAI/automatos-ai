@@ -1,0 +1,68 @@
+{
+  "_comment": "PRD-261 A-17b: recorded chat turns for the Play parity specs (specs/play-parity/), in the stream format lib/chat/hooks.ts reads: each frame is a '0:' text line ({ text }) or a 'd:' data line ({ data }), with the payload shapes the backend sends (a chat-id frame naming the new chat; tool-data with a tool_approval and a mission_approval, result_formatter.py; finish). A turn with hold: true keeps its stream open until the browser aborts it (Stop); a turn with a status answers that status with no stream (a refused request). support/play-chat.ts answers the app's own POST /api/chat with them, under builtin Play and under the installed package alike. Test data only.",
+  "chatId": "e2e-play-parity-chat",
+  "turns": {
+    "answer": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-play-parity-chat" } },
+        { "text": "Here is your laptop" },
+        { "text": " shortlist." },
+        { "data": { "type": "finish" } }
+      ]
+    },
+    "partial": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-play-parity-chat" } },
+        { "text": "I am still writing the comparison" }
+      ],
+      "hold": true
+    },
+    "approvals": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-play-parity-chat" } },
+        { "text": "Two things need your answer before they run." },
+        {
+          "data": {
+            "type": "tool-data",
+            "data": {
+              "tool_approval": {
+                "grant_id": 26101,
+                "action": "platform_delete_document",
+                "message": "This action (destructive) requires confirmation.",
+                "permission_level": "destructive",
+                "params": { "document_id": "e2e-play-parity-doc" },
+                "risk_tier": "human_in_the_loop",
+                "oversight_rationale": "Deletes a document. A human must approve before it runs."
+              }
+            }
+          }
+        },
+        {
+          "data": {
+            "type": "tool-data",
+            "data": {
+              "mission_approval": {
+                "mission_id": "e2e-play-parity-mission",
+                "goal": "Write and send the weekly report",
+                "state": "pending_approval",
+                "task_count": 2,
+                "tasks": [
+                  { "title": "Draft the weekly report", "agent_role": "writer", "sequence": 1 },
+                  { "title": "Send it to the team", "agent_role": "communications", "sequence": 2 }
+                ],
+                "cost_estimate_usd": 0.42,
+                "risk_tier": "human_in_the_loop",
+                "oversight_rationale": "A Mission runs agents for you. A human approves its plan first."
+              }
+            }
+          }
+        },
+        { "data": { "type": "finish" } }
+      ]
+    },
+    "refused": {
+      "status": 500,
+      "frames": []
+    }
+  }
+}

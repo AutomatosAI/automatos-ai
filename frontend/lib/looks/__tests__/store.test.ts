@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { AURORA, DAYLIGHT, EMBER, OBSIDIAN } from '@/lib/looks/presets'
-import { INITIAL_LOOK_STATE, type LookAction, type LookState, lookReducer } from '@/lib/looks/store'
+import { INITIAL_LOOK_STATE, type LookAction, type LookState, lookReducer } from '@/lib/theme-host/builtin/play-look-state'
 import type { Look } from '@/lib/looks/types'
 
 import { myLook } from './helpers'

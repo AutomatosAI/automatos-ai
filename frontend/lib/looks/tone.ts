@@ -1,7 +1,3 @@
-import { writeCookie } from '@/lib/cookies'
-import { parseThemeTone } from '@/lib/theme-host/boot-sanitize'
-import { UI_STYLE_COOKIE_MAX_AGE_S } from '@/lib/ui-style'
-
 import type { GroundKey } from './catalogue'
 import { isDarkGround } from './engine'
 
@@ -13,33 +9,23 @@ import { isDarkGround } from './engine'
  * names (lib/theme-host/builtin/play-boot.ts): the root layout reads it into
  * the boot's tone under Play only (PRD-261 A-03), so forcedTheme starts on the
  * server and the first paint is already that tone.
+ *
+ * PRD-261 A-14d: the host writes and deletes the cookie
+ * (lib/theme-host/builtin/play-tone-cookie.ts, through the one cookie writer,
+ * lib/cookies.ts): a theme never writes cookies (docs/theme-host/sdk-surface-map.md).
+ * This file holds only the tones, the cookie's name and its parser.
  */
 
 export const PLAY_TONES = ['dark', 'light'] as const
 export type PlayTone = (typeof PLAY_TONES)[number]
 
 export const PLAY_TONE_COOKIE = 'automatos-play-tone'
-/** Max-Age that deletes a cookie. */
-const COOKIE_EXPIRED_S = 0
 
 export function toneOfGround(key: GroundKey): PlayTone {
   return isDarkGround(key) ? 'dark' : 'light'
 }
 
-/** The tone cookie, strictly: 'dark' or 'light', anything else → none (the theme host's one tone parser). */
+/** The tone cookie, strictly: 'dark' or 'light', anything else → none. */
 export function parsePlayTone(value: string | null | undefined): PlayTone | undefined {
-  return parseThemeTone(value) ?? undefined
-}
-
-export function writePlayToneCookie(tone: PlayTone): void {
-  writeCookie(PLAY_TONE_COOKIE, tone, UI_STYLE_COOKIE_MAX_AGE_S)
-}
-
-function hasPlayToneCookie(): boolean {
-  return document.cookie.split('; ').some((entry) => entry.startsWith(`${PLAY_TONE_COOKIE}=`))
-}
-
-/** Deletes the tone cookie; a no-op when there is none, so Classic and Studio loads write nothing. */
-export function clearPlayToneCookie(): void {
-  if (hasPlayToneCookie()) writeCookie(PLAY_TONE_COOKIE, '', COOKIE_EXPIRED_S)
+  return PLAY_TONES.find((tone) => tone === value)
 }

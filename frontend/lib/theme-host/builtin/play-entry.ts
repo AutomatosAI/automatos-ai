@@ -14,6 +14,15 @@ export const BUILTIN_PLAY_REF = 'builtin:play'
 export const BUILTIN_PLAY_STYLE = 'theme:builtin:play'
 export const BUILTIN_PLAY_HTML_CLASS = 'play'
 
+/**
+ * PRD-261 W-A6b: whether the one look runtime the host has (Play's looks) runs under a theme: the
+ * theme whose <html> class is Play's, builtin Play or Play's package. Only such a theme keeps the
+ * look's tone cookie, so only its boot may start on it (boot.ts); the LookProvider paints only under it.
+ */
+export function runsPlayLooks(theme: { readonly htmlClass: string } | null | undefined): boolean {
+  return theme?.htmlClass === BUILTIN_PLAY_HTML_CLASS
+}
+
 /** Play's Conversations page: its theme route `conversations` (PRD-261 A-04b); /conversations redirects here. */
 export const PLAY_CONVERSATIONS_ROUTE_NAME = 'conversations'
 export const PLAY_CONVERSATIONS_HREF = `/x/${PLAY_CONVERSATIONS_ROUTE_NAME}`
