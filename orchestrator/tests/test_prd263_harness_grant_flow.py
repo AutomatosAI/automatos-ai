@@ -298,7 +298,10 @@ def _block(db, ticket_id, *, by_the_owner):
     db.flush()
 
 
-def test_the_dispatcher_never_claims_the_evidence_ticket(db_session, crew):
+def test_the_dispatcher_never_claims_the_unassigned_evidence_ticket(db_session, crew):
+    """The dispatcher claims only assigned cards with an agent (board_dispatcher.claim_tasks),
+    and the evidence ticket has none, even once an Approve re-queues it: no HARNESS-specific
+    exclusion is needed or tested here."""
     _, grant, _ = _raised(db_session, crew)
     (ticket,) = _evidence(db_session, crew)
 
