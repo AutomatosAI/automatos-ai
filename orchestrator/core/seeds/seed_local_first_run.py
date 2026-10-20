@@ -2,8 +2,10 @@
 Local-edition first-run seed — the two-minute demo (PRD-233 S3)
 ================================================================
 
-Runs inside the existing entrypoint seed step (``core.database.load_seed_data``)
-and only in the local edition: ``config.AUTH_EDITION == "local"`` with a
+Runs at the end of the lifespan's boot leader block on every boot, whatever the
+seed fingerprint (``core/seeds/leader_stage.py``, PRD-262 US-031), and in the full
+seed loader that ``docker-entrypoint.sh migrate`` runs (``core.database.load_seed_data``);
+only in the local edition: ``config.AUTH_EDITION == "local"`` with a
 ``config.DEFAULT_WORKSPACE_ID``. SaaS never enters this module's write path.
 
 What it seeds, all scoped to the DEFAULT_WORKSPACE_ID workspace:

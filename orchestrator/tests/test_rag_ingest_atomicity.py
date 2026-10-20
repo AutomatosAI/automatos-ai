@@ -29,7 +29,7 @@ These tests pin the W3-S8 hardening contract:
   ``green`` finding on ingest success and a ``rag`` / ``down`` finding
   on failure via the W3-S1 helper — un-instrumented before this story.
 
-Pure unit shape — heavy infra (boto3, camelot, ``docx``) is stubbed in
+Pure unit shape — heavy infra (boto3, ``docx``) is stubbed in
 ``sys.modules`` before importing ``modules.rag.ingestion.manager`` so the
 test runs without AWS / DOCX deps, mirroring the
 ``test_memory_single_write_path`` pattern.
@@ -90,24 +90,17 @@ if "botocore" not in sys.modules:
     sys.modules["botocore"] = _botocore
     sys.modules["botocore.exceptions"] = _botocore_exc
 
-# camelot — optional PDF dep, absent in test env.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
 # magic stubs are typically present, but a couple of CI envs lack it.
 if "magic" not in sys.modules:
     _magic = types.ModuleType("magic")
     _magic.from_file = lambda *a, **k: "text/plain"
     sys.modules["magic"] = _magic
 
-# pytesseract / PIL / pandas are pulled by the multimodal processors which
+# pytesseract / PIL are pulled by the multimodal processors which
 # manager.py reaches only at *call* time — but ``modules.rag.__init__`` does
-# top-level eager imports, so stubbing here is the simplest unblock.
+# top-level eager imports, so stubbing here is the simplest unblock. (pandas
+# was stubbed here too until PRD-262 US-025: the processors no longer use it.)
 sys.modules.setdefault("pytesseract", types.ModuleType("pytesseract"))
-
-if "pandas" not in sys.modules:
-    _pandas = types.ModuleType("pandas")
-    _pandas.DataFrame = type("DataFrame", (), {})  # type-annotation marker
-    sys.modules["pandas"] = _pandas
 
 if "PIL" not in sys.modules:
     _pil = types.ModuleType("PIL")
@@ -140,17 +133,22 @@ for _pkg in ("modules", "modules.rag", "modules.rag.ingestion"):
 
 # semantic_chunker / multimodal are referenced from manager.py inside ``try``
 # blocks — they fail to import gracefully. Pre-stub so the try block fails
-# fast without dragging in pandas/PIL/Image internals.
-sys.modules.setdefault(
-    "modules.rag.chunking", types.ModuleType("modules.rag.chunking")
-)
+# fast without dragging in PIL/Image internals. The ``modules.rag.chunking``
+# stub carries a path like its parents: manager.py imports the vendored
+# splitters from ``modules.rag.chunking.text_splitters`` at module top
+# (PRD-262 US-026), so a bare stub would fail the import whenever this module
+# is collected before anything loads the real ``modules.rag``.
+_chunking_stub = types.ModuleType("modules.rag.chunking")
+_chunking_stub.__path__ = [str(ORCH_ROOT / "modules" / "rag" / "chunking")]
+if sys.modules.setdefault("modules.rag.chunking", _chunking_stub) is _chunking_stub:
+    _LEAKED_PARENT_STUBS["modules.rag.chunking"] = _chunking_stub
 _sc_stub = types.ModuleType("modules.rag.chunking.semantic_chunker")
 _sc_stub.SemanticChunker = MagicMock()
 _sc_stub.ChunkingStrategy = MagicMock()
 sys.modules.setdefault("modules.rag.chunking.semantic_chunker", _sc_stub)
 
 # Pre-stub multimodal so import-time references resolve without pytesseract /
-# pandas internals being walked.
+# PIL internals being walked.
 _mm_stub = types.ModuleType("modules.rag.ingestion.multimodal")
 _mm_stub.TableProcessor = MagicMock
 _mm_stub.FormulaProcessor = MagicMock

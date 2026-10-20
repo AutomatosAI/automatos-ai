@@ -167,5 +167,6 @@ def test_boot_seeding_reaches_every_workspace_with_socials_on_and_only_those(mon
     totals = seed_templates.seed_social_starters_where_on(db, lambda settings: parse_workspace_socials(settings).enabled)
 
     assert seeded == [on]
-    assert totals == {"workspaces": 2, "created": 6, "refreshed": 0}
+    # The broken workspace is counted, so the boot leader stage stays unclean (PRD-262 US-031).
+    assert totals == {"workspaces": 2, "created": 6, "refreshed": 0, "failed": 1}
     assert db.rollbacks == 1

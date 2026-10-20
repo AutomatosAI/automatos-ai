@@ -14,8 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
     [
         "orchestrator/docker-entrypoint.sh",
         "orchestrator/docker-healthcheck.sh",
+        "orchestrator/docker-secrets-guard.sh",
         "services/workspace-worker/entrypoint.sh",
-        "Dockerfile.backend",
+        "orchestrator/Dockerfile",
         "services/workspace-worker/Dockerfile",
         "Makefile",
         "orchestrator/config.py",

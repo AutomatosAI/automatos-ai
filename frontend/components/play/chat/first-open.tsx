@@ -1,7 +1,7 @@
 'use client'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import type { MascotName } from '@/lib/mascot/types'
+import type { MascotName } from '../../../lib/mascot/types'
+import { AutoMascot } from '../../mascot/auto-mascot'
 
 import styles from './first-open.module.css'
 

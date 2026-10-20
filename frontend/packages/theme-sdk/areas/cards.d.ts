@@ -186,6 +186,17 @@ export interface TrialExhaustedBannerProps {
   readonly errorCode?: string | null
 }
 
+/** The host's two AI labels: the page's, beside every in-app chat, and Auto's floating widget's. */
+export type AiLabelId = 'page' | 'widget'
+
+export interface AiLabelFenceProps {
+  readonly children: ReactNode
+  /** The label beside this chat: the page's (the default) or Auto's floating widget's. */
+  readonly label?: AiLabelId
+  /** Keep the composer disabled until that label has been checked once. */
+  readonly held?: boolean
+}
+
 export interface CorePageProps {
   /** What to render where there is no core page (a theme route, or outside the host's page seam). */
   readonly children?: ReactNode
@@ -226,6 +237,13 @@ export declare function FirstRunNudge(): ReactElement
 
 /** The host's header utilities: Help, notifications, the theme menu and the account. Every frame renders it. */
 export declare function HeaderUtilities(): ReactElement
+
+/**
+ * The host's AI label fence (PRD-264 EUAI-11a) around a theme's chat composer: every control inside it is
+ * disabled while a theme keeps the host's AI label beside that chat from being seen. It draws no box. Wrap the
+ * composer only, never a whole chat screen (the approval cards in a reply stay clickable).
+ */
+export declare function AiLabelFence(props: AiLabelFenceProps): ReactElement
 
 /** Core's own page for this route inside the theme's page, or `children` where there is none. */
 export declare function CorePage(props: CorePageProps): ReactElement

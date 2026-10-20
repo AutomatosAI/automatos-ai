@@ -1,5 +1,6 @@
-import { toolActivity, type ToolActivity } from '@/lib/mascot/tools'
-import type { ToolCall } from '@/types'
+import type { HostToolCall } from '@automatos/theme-sdk'
+
+import { toolActivity, type ToolActivity } from '../../../lib/mascot/tools'
 
 /**
  * PRD-260 §4 — a tool call in words, ported from Automatos Play's
@@ -22,7 +23,7 @@ const MS_PER_SECOND = 1000
 /** F12 (Gerard, 15 Oct): a done line's time reads '2.1 s', as in the approved design. */
 export const SECONDS_DECIMALS = 1
 
-/** The line's state: the core's ToolCall (running, completed, error) read with its waiting and skipped flags. */
+/** The line's state: the SDK's tool call (running, completed, error) read with its waiting and skipped flags. */
 export type ToolStatus = 'running' | 'done' | 'failed' | 'waiting' | 'skipped' | 'stopped'
 
 /** running and waiting are the accent, done the line's own colour, failed the error, skipped and stopped muted. */
@@ -100,7 +101,7 @@ function phrases(activity: ToolActivity, toolName: string): Phrases {
  * longer being written was stopped (useChat closes running calls only on a
  * finish frame); a completed call waits on the owner's click or was skipped.
  */
-export function toolStatusOf(call: ToolCall, streaming: boolean): ToolStatus {
+export function toolStatusOf(call: HostToolCall, streaming: boolean): ToolStatus {
   if (call.state === 'error') return 'failed'
   if (call.state === 'running') return streaming ? 'running' : 'stopped'
   if (call.waiting) return 'waiting'
@@ -129,7 +130,7 @@ const MARKS: Readonly<Record<ToolStatus, string | null>> = {
   stopped: MARK_MUTED,
 }
 
-function toolText(call: ToolCall, status: ToolStatus, said: Phrases): string {
+function toolText(call: HostToolCall, status: ToolStatus, said: Phrases): string {
   switch (status) {
     case 'running': {
       const detail = toolDetail(call.input)
@@ -148,7 +149,7 @@ function toolText(call: ToolCall, status: ToolStatus, said: Phrases): string {
   }
 }
 
-export function toolLineLabel(call: ToolCall, streaming: boolean): ToolLineLabel {
+export function toolLineLabel(call: HostToolCall, streaming: boolean): ToolLineLabel {
   const status = toolStatusOf(call, streaming)
   const said = phrases(toolActivity(call.toolName), call.toolName)
   return { mark: MARKS[status], text: toolText(call, status, said), tone: TONES[status] }

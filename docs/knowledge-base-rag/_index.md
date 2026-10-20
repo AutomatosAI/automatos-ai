@@ -30,7 +30,7 @@ The Knowledge Base & RAG (Retrieval-Augmented Generation) system provides docume
 - [RAG Retrieval System](#7.4) — Hybrid dense/sparse search, RRF fusion, retrieval filters, feedback penalties, fail-closed team scoping, retrieval recall evals
 - [Cloud Storage Integration](#7.5) — CloudSyncService, cloud file downloader, CloudDocument model, folder selection, sync jobs, S3 Vectors backend
 - [Documents API Reference](#7.6) — API endpoints for document upload, search, download, delete, analytics, cloud connections, multimodal knowledge
-- [Document Generation & Deliverables Rendering](#7.7) — generation_service, template_service, HTML templates (report, invoice, executive summary), Gotenberg PDF rendering, and template security
+- [Document Generation & Deliverables Rendering](#7.7) — generation_service, template_service, HTML templates (report, invoice, executive summary), WeasyPrint PDF rendering, and template security
 
 ---
 
@@ -122,7 +122,7 @@ Provides REST endpoints for document upload, semantic search, download, deletion
 **Sources**: [orchestrator/api/documents.py:111-121](), [orchestrator/api/context.py:54-108]()
 
 ## 7.7 Document Generation & Deliverables Rendering
-Manages generation and template services, HTML templates for reports, invoices, and summaries, Gotenberg PDF rendering pipelines, and security validation. For details, see [Document Generation & Deliverables Rendering](#7.7).
+Manages generation and template services, HTML templates for reports, invoices, and summaries, WeasyPrint PDF rendering, and security validation. For details, see [Document Generation & Deliverables Rendering](#7.7).
 **Sources**: [orchestrator/api/documents.py:1-15]()
 
 ---

@@ -25,6 +25,10 @@
  * no theme code, and turns safe mode on for the rest of the tab. Safe mode also takes the theme's
  * first paint (the root layout's boot: its classes and prepaint variables) off <html>, so what
  * shows is Studio's look, not only Studio's code.
+ *
+ * PRD-261 W-A6b (gap G1): the installed theme's registry entry (contexts/ui-style-context.tsx,
+ * from the root layout's boot) stands while the host loads or runs the theme; when it fails,
+ * enters safe mode or turns off for the style, the host releases it and activeTheme is null again.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -49,7 +53,13 @@ import {
 } from '@/lib/theme-host/failure-ledger'
 import { isInstalledThemeStyle } from '@/lib/theme-host/registry'
 import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
-import type { ThemeFailureReason, ThemeHostStatus, ThemeLoadOk, ThemeLoadResult } from '@/lib/theme-host/types'
+import {
+  THEME_HOST_RUNNING_STATUSES,
+  type ThemeFailureReason,
+  type ThemeHostStatus,
+  type ThemeLoadOk,
+  type ThemeLoadResult,
+} from '@/lib/theme-host/types'
 import {
   STYLE_HTML_CLASS_NAMES,
   styleHtmlClasses,
@@ -352,6 +362,21 @@ function useFailureRevert(state: HostState, setStyle: SetStyle | null): void {
   }, [state, setStyle])
 }
 
+type ReleaseInstalledTheme = UiStyleContextValue['releaseInstalledTheme']
+
+/**
+ * W-A6b: names to the style context the installed theme's style the host cannot run (failed, safe
+ * mode, off with no install to run), and null while it loads or runs one, so the theme's registry
+ * entry stands exactly while the theme does.
+ */
+function useInstalledThemeRelease(state: HostState, release: ReleaseInstalledTheme | null): void {
+  const running = THEME_HOST_RUNNING_STATUSES.includes(state.status)
+  const released = state.style !== null && !running ? state.style : null
+  useEffect(() => {
+    release?.(released)
+  }, [released, release])
+}
+
 /** The style the host loads a theme for: an installed theme's, else null (off). */
 function installedThemeStyle(uiStyle: UiStyleContextValue | null): UiStyle | null {
   const style = uiStyle?.style ?? null
@@ -365,6 +390,7 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
   useThemeHostAttributes(state.status, state.reason)
   useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null)
   useFailureRevert(state, uiStyle?.setStyle ?? null)
+  useInstalledThemeRelease(state, uiStyle?.releaseInstalledTheme ?? null)
   const value = useMemo<ThemeHostContextValue>(
     () => ({
       status: state.status,

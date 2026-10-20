@@ -23,7 +23,8 @@ describe('PRD-244 W0 honesty', () => {
   it('providers list the two tones only, mount the style provider, and mount no URL flag', () => {
     const src = read('components/providers.tsx')
     expect(src).toContain("themes={['light', 'dark']}")
-    expect(src).toContain('<UiStyleProvider initialStyle={initialUiStyle}>')
+    // PRD-261 G1: the server's installed-theme entry rides along, so the first render names the same theme.
+    expect(src).toContain('<UiStyleProvider initialStyle={initialUiStyle} installedTheme={initialTheme}>')
     expect(src).not.toContain('StudioThemeFlag')
     expect(src).toContain('defaultTheme="dark"') // PRD-244 D1: Studio + Dark are the defaults (Gerard, 09-17)
   })

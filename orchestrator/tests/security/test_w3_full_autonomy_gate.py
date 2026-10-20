@@ -19,28 +19,11 @@ deterministic and never touch the DB.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
-import sys as _sys
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-# Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which pulls
-# modules.rag's ingestion chain (camelot at module top). Stub the missing *leaf* only
-# when truly absent — never the modules.rag package. Blessed pattern, see W2-S7.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 import modules.tools.discovery.platform_executor as pe
 from modules.tools.discovery.action_registry import ActionDefinition

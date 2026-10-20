@@ -2,11 +2,10 @@
 
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
-import { useBackendHealth } from '@/hooks/use-backend-health'
-import { useBackendMascot } from '@/hooks/use-backend-mascot'
-import { isLocal } from '@/lib/auth-edition'
-import { refocus } from '@/lib/play/focus'
+import { useEdition, useHealth } from '@automatos/theme-sdk'
 
+import { useBackendMascot } from '../../../hooks/use-backend-mascot'
+import { refocus } from '../../../lib/play/focus'
 import { ASLEEP_TITLE, AsleepScreen, asleepDetail } from './asleep-screen'
 
 /**
@@ -34,12 +33,18 @@ import { ASLEEP_TITLE, AsleepScreen, asleepDetail } from './asleep-screen'
  * frame's <main> (the wakeFocus ref) takes focus when it mounts again. One
  * live region outside the swap, present from the start so it is heard, says
  * each change: asleep, then back.
+ *
+ * PRD-261 A-14f: the health and the edition come through '@automatos/theme-sdk'
+ * (useHealth, the same poll; useEdition); Auto's reducer and the focus helper are
+ * Play's own, by relative path.
  */
 
 /** How often the asleep screen asks again on its own (Automatos Play's RECHECK_MS). */
 export const ASLEEP_RECHECK_MS = 10_000
 /** The gate owns the frame's /health poll. */
 const OWNS_THE_POLL = { poll: true } as const
+/** The edition with a start command to offer (useEdition). */
+const LOCAL_EDITION = 'local'
 const MS_PER_SECOND = 1000
 /** What the gate's live region says once the page is back after a nap. */
 export const AWAKE_LINE = 'Automatos is back'
@@ -73,7 +78,8 @@ function useWakeFocus(asleep: boolean, target: RefObject<HTMLElement> | undefine
 }
 
 export function AsleepGate({ children, wakeFocus }: AsleepGateProps) {
-  const backend = useBackendHealth(OWNS_THE_POLL)
+  const backend = useHealth(OWNS_THE_POLL)
+  const local = useEdition() === LOCAL_EDITION
   const auto = useBackendMascot(backend.connection)
   const asleep = auto.asleep && backend.connection !== 'connected'
   const announcement = useNapAnnouncement(asleep)
@@ -88,7 +94,7 @@ export function AsleepGate({ children, wakeFocus }: AsleepGateProps) {
           onCheck={backend.check}
           checking={backend.checking}
           recheckSeconds={Math.round(ASLEEP_RECHECK_MS / MS_PER_SECOND)}
-          local={isLocal}
+          local={local}
         />
       ) : (
         children

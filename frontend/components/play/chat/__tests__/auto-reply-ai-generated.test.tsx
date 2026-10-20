@@ -8,7 +8,7 @@ import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ChatMessage } from '@/types'
+import type { HostChatMessage } from '@automatos/theme-sdk'
 
 vi.mock('../play-markdown', () => ({
   PlayMarkdown: ({ text }: { text: string }) => <div data-testid="the-answer">{text}</div>,
@@ -19,7 +19,26 @@ import { AutoReply, SPEAKER } from '../auto-reply'
 
 afterEach(cleanup)
 
-const reply = { id: 'a1', role: 'assistant', content: 'Done.', parts: [] } as unknown as ChatMessage
+const reply: HostChatMessage = {
+  id: 'a1',
+  role: 'assistant',
+  text: 'Done.',
+  activity: [],
+  error: null,
+  writing: false,
+  stopped: false,
+  receipts: null,
+  above: [],
+  deliverables: [],
+  approvals: [],
+  taskCards: [],
+  toolCalls: [],
+  provenance: null,
+  savedError: null,
+  limitReached: null,
+  reasoningChars: 0,
+  linkedDeliverables: [],
+} as unknown as HostChatMessage
 
 describe("Auto's reply in Play is marked AI-generated", () => {
   it('carries data-ai-generated="true" on the reply that holds the answer', () => {
@@ -30,7 +49,7 @@ describe("Auto's reply in Play is marked AI-generated", () => {
   })
 
   it('carries it while the reply still streams', () => {
-    render(<AutoReply message={{ ...reply, content: '' }} streaming />)
+    render(<AutoReply message={{ ...reply, text: '' }} streaming />)
     expect(screen.getByRole('article', { name: `${SPEAKER} said` })).toHaveAttribute('data-ai-generated', 'true')
   })
 })

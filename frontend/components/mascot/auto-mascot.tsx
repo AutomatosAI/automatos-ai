@@ -2,11 +2,11 @@
 
 import { type SyntheticEvent, useCallback, useState } from 'react'
 
-import { type MascotPlayer, useMascotPlayer } from '@/hooks/use-mascot-player'
-import { useVideoFormat } from '@/hooks/use-media-preferences'
-import { captionFor, clipUrls, pageGlow, posterUrl, type VideoFormat } from '@/lib/mascot/media'
-import { ringTone } from '@/lib/mascot/ring'
-import type { MascotName } from '@/lib/mascot/types'
+import { type MascotPlayer, useMascotPlayer } from '../../hooks/use-mascot-player'
+import { useVideoFormat } from '../../hooks/use-media-preferences'
+import { captionFor, clipUrls, pageGlow, posterUrl, type VideoFormat } from '../../lib/mascot/media'
+import { ringTone } from '../../lib/mascot/ring'
+import type { MascotName } from '../../lib/mascot/types'
 
 import styles from './auto-mascot.module.css'
 import { MascotPauseButton } from './mascot-pause-button'

@@ -13,7 +13,7 @@ The following files were used as context for generating this wiki page:
 - [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 
 </details>
@@ -54,7 +54,7 @@ graph TB
         PG["automatos-ai-pgvector<br/>pgvector/pgvector:pg16<br/>Port 5432"]
         Redis["Redis<br/>redis:7-alpine<br/>Port 6379"]
         Qdrant["Qdrant<br/>qdrant/qdrant:latest<br/>Port 6333"]
-        MinIO["automatos_minio<br/>minio/minio<br/>Port 9000"]
+        MinIO["automatos_minio<br/>cgr.dev/chainguard/minio<br/>Port 9000"]
     end
     
     subgraph "Monitoring_Group"
@@ -133,10 +133,10 @@ For details, see [Redis & Vector Store Configuration](#20.5).
 
 ## Production Deployment & CI/CD
 
-The Automatos AI platform is deployed to production using Railway, with its topology defined in `infrastructure/railway-manifest.json`. This manifest organizes services into logical groups like `core`, `data`, `voice`, and `monitoring`, specifying their repositories, build configurations (e.g., `builder: DOCKERFILE`), and environment variables [infrastructure/railway-manifest.json:12-228](). GitHub Actions workflows, such as `test.yml`, enforce code quality and reliability by running comprehensive test suites, including a coverage ratchet to maintain code coverage standards [orchestrator/tests/test.yml:1-144](). The `import-linter` tool is used to enforce architectural boundaries and prevent unwanted dependencies between modules [orchestrator/requirements.txt:66-70](). Scaling and disaster recovery scripts are part of the operational toolkit, ensuring high availability and performance.
+The Automatos AI platform is deployed to production using Railway, with its topology defined in `infrastructure/railway-manifest.json`. This manifest organizes services into logical groups like `core`, `data`, `voice`, and `monitoring`, specifying their repositories, build configurations (e.g., `builder: DOCKERFILE`), and environment variables [infrastructure/railway-manifest.json:12-228](). GitHub Actions workflows, such as `test.yml`, enforce code quality and reliability by running comprehensive test suites, including a coverage ratchet to maintain code coverage standards [orchestrator/tests/test.yml:1-144](). The `import-linter` tool is used to enforce architectural boundaries and prevent unwanted dependencies between modules [orchestrator/requirements-dev.txt](). Scaling and disaster recovery scripts are part of the operational toolkit, ensuring high availability and performance.
 
 For details, see [Production Deployment & CI/CD](#20.6).
 
-**Sources:** [infrastructure/railway-manifest.json:12-228](), [orchestrator/tests/test.yml:1-144](), [orchestrator/requirements.txt:66-70]()
+**Sources:** [infrastructure/railway-manifest.json:12-228](), [orchestrator/tests/test.yml:1-144](), [orchestrator/requirements-dev.txt]()
 
 ---

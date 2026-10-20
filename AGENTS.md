@@ -148,6 +148,6 @@ Open an issue before changing:
 
 ## Running things
 
-- **The development environment** is `docker compose up` (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment)).
+- **The development environment** is `make dev` (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up`): the backend's and the frontend's development stages, with your source mounted and reloading on every edit (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment)). Plain `docker compose up` and `make up` run the published images, not your checkout.
 - **Backend tests:** `cd orchestrator && pytest tests/<file>`. **Frontend tests:** `cd frontend && npm run test`.
 - **CI is the source of truth.** Every pull request runs the lanes listed in CONTRIBUTING.md. Red is red, even on a lane marked non-required.

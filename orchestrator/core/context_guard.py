@@ -28,9 +28,13 @@ Usage:
     )
 """
 
+import functools
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from tiktoken import Encoding
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +42,40 @@ logger = logging.getLogger(__name__)
 # Token counting (reuses tiktoken, already a project dependency)
 # ---------------------------------------------------------------------------
 
-try:
-    import tiktoken
-    _encoding = tiktoken.get_encoding("cl100k_base")
-except Exception:
-    _encoding = None
-    logger.warning("[ContextGuard] tiktoken unavailable — falling back to word-based estimation")
+# The one encoding the platform counts tokens with. The API image fetches it at build
+# time into TIKTOKEN_CACHE_DIR (orchestrator/Dockerfile, PRD-262 US-033), so counting
+# needs no internet. An encoding requested anywhere in orchestrator/ must be in that
+# fetch too: tests/test_prd262_offline_boot.py holds the two lists together.
+TOKENIZER_ENCODING = "cl100k_base"
+
+
+@functools.lru_cache(maxsize=1)
+def get_tokenizer() -> Optional["Encoding"]:
+    """The tiktoken encoding, loaded on first use and then kept (PRD-262 US-033).
+
+    Never at import: tiktoken downloads an encoding it has no cached copy of, through
+    ``requests.get`` with no timeout, so a module-level load hung ``import main`` for
+    minutes on a host whose egress drops packets, or killed it outright. None when
+    tiktoken is missing or the encoding cannot load; the counters below then estimate
+    about 4 characters per token. That outcome is cached too, so the failure is logged
+    once and a dead network is never retried on every count.
+    """
+    try:
+        import tiktoken
+
+        return tiktoken.get_encoding(TOKENIZER_ENCODING)
+    except Exception:
+        logger.exception("[ContextGuard] tiktoken unavailable — estimating ~4 characters per token")
+        return None
 
 
 def count_tokens(text: str) -> int:
     """Count tokens in a text string."""
     if not text:
         return 0
-    if _encoding:
-        return len(_encoding.encode(text))
+    encoding = get_tokenizer()
+    if encoding:
+        return len(encoding.encode(text))
     # Rough fallback: ~4 chars per token
     return max(1, len(text) // 4)
 
@@ -75,13 +99,14 @@ def truncate_to_token_budget(
     """
     if not text or max_tokens <= 0:
         return text
-    if _encoding is None:
+    encoding = get_tokenizer()
+    if encoding is None:
         limit = max_tokens * 4
         return text if len(text) <= limit else text[:limit] + suffix
-    tokens = _encoding.encode(text)
+    tokens = encoding.encode(text)
     if len(tokens) <= max_tokens:
         return text
-    return _encoding.decode(tokens[:max_tokens]) + suffix
+    return encoding.decode(tokens[:max_tokens]) + suffix
 
 
 def count_message_tokens(messages: List[Dict[str, Any]]) -> int:

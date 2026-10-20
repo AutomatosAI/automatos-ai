@@ -5,7 +5,7 @@ only ``>=62.0``). 70 removed ``weasyprint.default_url_fetcher``, which
 ``generation_service._safe_url_fetcher`` (PRD-156 S4, the SSRF guard) calls for every
 ``data:`` URI. Every PDF with a logo or chart then failed: "PDF generation failed:
 'function' object has no attribute '_fail_on_errors'", a 500 on /api/documents/generate.
-requirements.txt now keeps WeasyPrint below 70; this test fails on any WeasyPrint the
+requirements.in (requirements.txt before PRD-262 US-022) now keeps WeasyPrint below 70; this test fails on any WeasyPrint the
 guarded fetcher can't drive.
 """
 from __future__ import annotations

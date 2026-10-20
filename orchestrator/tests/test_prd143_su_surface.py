@@ -24,9 +24,7 @@ it). Import idiom mirrors tests/test_prd143_su_executor_gate.py.
 from __future__ import annotations
 
 import asyncio
-import importlib.util as _ilu
 import os
-import sys as _sys
 import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,7 +33,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
-# tests/test_harness_self_management.py) — the port points at nothing so the
+# tests/test_harness_routing_rule.py) — the port points at nothing so the
 # modules.tools import chain's fail-soft DB connect refuses instantly instead
 # of hanging on a wedged local proxy. CI exports real POSTGRES_* so these
 # setdefaults no-op there. Nothing in this file touches a DB.
@@ -45,21 +43,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-# Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which
-# pulls modules.rag's ingestion chain (camelot at module top). Stub the missing
-# *leaf* only when truly absent — never the modules.rag package.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 # CI collection-order guard: earlier-collected tests stub modules.*/consumers.*
 # in sys.modules (bare ModuleType, no __spec__). On Linux collection order the

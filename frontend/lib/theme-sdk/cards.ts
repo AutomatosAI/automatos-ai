@@ -10,6 +10,7 @@
  * - chat reply cards: TaskCard, WithdrawOfferCard, MissionSuggestionCard, MissionCreatedCard;
  * - content: FilePreview, MarkdownView, MadeBy;
  * - chrome: HeaderUtilities, TrialExhaustedBanner, FirstRunNudge;
+ * - the composer: AiLabelFence, the host's AI label fence (PRD-264 EUAI-11a; W-A5's seam owner);
  * - CorePage: core's own page inside a theme's page.
  *
  * The names are the plan's (surface/cards.json); the types are declared again for themes in
@@ -44,6 +45,9 @@ export type { FilePreviewProps, FilePreviewType, MadeByProps, MarkdownViewProps 
 
 export { FirstRunNudge, HeaderUtilities, TrialExhaustedBanner } from './host-cards/chrome'
 export type { TrialExhaustedBannerProps } from './host-cards/chrome'
+
+export { AiLabelFence } from './host-cards/ai-label-fence'
+export type { AiLabelFenceProps, AiLabelId } from './host-cards/ai-label-fence'
 
 export { CorePage } from './host-cards/core-page'
 export type { CorePageProps } from './host-cards/core-page'

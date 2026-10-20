@@ -15,7 +15,8 @@ that only record it may store ``None`` (``AuditService.log`` accepts it and
 carries ``actor_type`` instead).
 
 Extracted 2026-09-11 from the byte-identical copies in ``api.team`` and
-``api.harness`` — both now import from here.
+``api.harness``; ``api.harness`` stopped importing it when its approve route was
+deleted (PRD-263 US-047).
 """
 from __future__ import annotations
 

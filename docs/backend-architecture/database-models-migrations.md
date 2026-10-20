@@ -40,7 +40,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
 - [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
 - [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_w1s8_get_db_lifecycle.py](orchestrator/tests/test_w1s8_get_db_lifecycle.py)
 
@@ -246,6 +246,6 @@ graph TD
     G --> H[Database Schema Updated];
 ```
 
-Sources: [orchestrator/Dockerfile:131](), [orchestrator/requirements.txt:14](), [orchestrator/.github/workflows/test.yml:110]()
+Sources: [orchestrator/Dockerfile:131](), [orchestrator/requirements.in:14](), [orchestrator/.github/workflows/test.yml:110]()
 
 ---
