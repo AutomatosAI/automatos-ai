@@ -24,8 +24,12 @@ A plan is a campaign of kind ``plan`` (``modules/socials/plans.py``):
   execution id). A missing copy is put back from the marketplace first (PRD-251C US-C102);
   409, with why, only when it cannot be.
 * ``GET /api/socials/plans/{plan_id}/slots?start&end``: the planned and made slots in a
-  window of at most 62 days; ``PUT .../slots/{slot_key}`` moves a planned slot or skips
-  it (``slot_overrides``), the cadence untouched.
+  window of at most 62 days, each with why it is empty and the batch that makes it
+  (P256-FIX-SOC-5, ``modules/socials/slot_phases.py``); ``PUT .../slots/{slot_key}`` moves a
+  planned slot or skips it (``slot_overrides``), the cadence untouched.
+* A weekly or monthly plan's view says when its next batch is made (never one that makes
+  nothing), where its current batch stands (``current_batch``) and, for a batch day that splits
+  the calendar week, which days the next batch makes (``warnings``): P256-FIX-SOC-5.
 * ``POST /api/socials/plans/{plan_id}/batches/{batch_key}/approve``: approve the week
   (PRD-251C US-C205, ``api/socials_batches.py``).
 
@@ -55,7 +59,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.socials import SocialCampaign
-from modules.socials import batches, campaigns, plan_row_visuals, plan_store, plans, service
+from modules.socials import batches, campaigns, plan_row_visuals, plan_store, plans, service, slot_phases
 from services import socials_plan_research, socials_research_setup
 
 router = APIRouter()
@@ -187,12 +191,30 @@ def load_plan(db: Session, ctx: RequestContext, plan_id: UUID) -> SocialCampaign
     return plan
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _batch_view(db: Session, plan: SocialCampaign, now: datetime) -> Dict[str, Any]:
+    """A plan's batch fields: when its next batch is made (PRD-251C US-C202; never an announced one
+    with nothing left to make), where its current one stands and the week-split warning
+    (P256-FIX-SOC-5). A daily plan has none of them."""
+    if not batches.is_batched(plan):
+        return {"next_batch_at": None, "current_batch": None, "warnings": []}
+    facts = plan_store.slot_facts(db, plan)
+    upcoming = batches.next_window(plan, now, facts.taken)
+    split = batches.week_split(plan, now)
+    return {
+        "next_batch_at": upcoming.moment.isoformat() if upcoming else None,
+        "current_batch": slot_phases.current_batch(plan, now, facts),
+        "warnings": [split] if split else [],
+    }
+
+
 def plan_view(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
-    """The plan with its bank's counts and, for a weekly or monthly plan, when its next batch
-    is made (PRD-251C US-C202)."""
+    """The plan with its bank's counts and, for a weekly or monthly plan, its batch fields (``_batch_view``)."""
     counts = plan_store.bank_counts(db, [plan.id]).get(plan.id, {"topics": 0, "unused": 0})
-    upcoming = batches.next_window(plan, datetime.now(timezone.utc))
-    return {**plan.to_dict(), "bank": counts, "next_batch_at": upcoming.moment.isoformat() if upcoming else None}
+    return {**plan.to_dict(), "bank": counts, **_batch_view(db, plan, _now())}
 
 
 def _saved(db: Session, plan: SocialCampaign) -> Dict[str, Any]:
@@ -295,13 +317,13 @@ def list_social_plan_slots(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ) -> Dict[str, Any]:
     """The plan's slots in [start, end): ``planned`` ones (with the topic pinned to their
-    day) and ``made`` ones (with their post)."""
+    day) and ``made`` ones (with their post), each with its phase, why and batch (P256-FIX-SOC-5)."""
     plan = load_plan(db, ctx, plan_id)
     try:
         start, end = plans.window(start, end)
     except service.SocialsError as exc:
         _raise_for(exc)
-    return {"plan_id": str(plan.id), "slots": plan_store.plan_slots(db, plan, start, end)}
+    return {"plan_id": str(plan.id), "slots": plan_store.plan_slots(db, plan, start, end, _now())}
 
 
 @router.put("/plans/{plan_id}/slots/{slot_key:path}", dependencies=[CAN_UPDATE])

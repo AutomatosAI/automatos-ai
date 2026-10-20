@@ -13,7 +13,10 @@ waits for the owner (``service.waits_for_input``). On the plan maker's harness
 * (b) a template whose required photo is empty waits the same way, saying the render's words;
 * (c) a proposal that fills every field and binds a figure to the topic's knowledge fact is
   rendered once and made, the figure stored as a claim with its document;
-* (d) any other failure of the render is still a failed slot, told as before.
+* (d) any other failure of the render (P256-FIX-SOC-5 replaced "a failed slot, told as 'not made'",
+  which was false for a made draft): the draft waits for the owner too, saying a fixed line and
+  never the exception's text (``plan_refusals``; the platform's own refusals are
+  ``tests/test_f437_a_a_plan_post_that_cannot_render_says_why.py``).
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ import api.socials as socials_api  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
 from core.models.core import Document  # noqa: E402
 from modules.documents import social_starters  # noqa: E402
-from modules.socials import plan_notify, plan_store, render, service  # noqa: E402
+from modules.socials import plan_notify, plan_refusals, plan_store, render, service  # noqa: E402
 from services import socials_plan_maker as maker_mod  # noqa: E402
 from tests.test_prd251_api import WS_A  # noqa: E402
 from tests.test_prd251bw2_maker import EVERY_DAY, NOW, _made, _make, _text_plan, _topic  # noqa: E402
@@ -172,7 +175,7 @@ def test_c_a_post_with_every_field_filled_is_rendered_with_its_figure_bound(docu
     assert post.variables["stat_1_value"] == {"value": "1,240", "claim": True}  # F433: the template's claim, marked
 
 
-def test_d_any_other_render_failure_is_still_a_failed_slot(maker, monkeypatch):  # noqa: F811
+def test_d_any_other_render_failure_waits_for_you_with_a_fixed_line(maker, monkeypatch):  # noqa: F811
     plan = _image_plan(maker, monkeypatch, STATS)
     _proposing(monkeypatch, {})
 
@@ -181,9 +184,10 @@ def test_d_any_other_render_failure_is_still_a_failed_slot(maker, monkeypatch): 
 
     monkeypatch.setattr(socials_api, "render_post", renderer_down)
 
-    assert _make(plan, KEY) == maker_mod.FAILED
+    assert _make(plan, KEY) == maker_mod.WAITS
 
     post = _made(maker, KEY)
-    assert post.status == "draft" and not service.waits_for_input(post)
-    assert _skipped(maker) == ["Countdown to Lisbon: the draft for September in numbers waits for you"]
-    assert maker.waiting == []
+    assert post.status == "draft" and service.waits_for_input(post)
+    assert post.review_log[-1]["comment"] == plan_refusals.COULD_NOT_WRITE  # never "the renderer is down"
+    assert _skipped(maker) == []  # "not made" was false: the draft is made
+    assert maker.waiting == [(str(post.id), [], plan_refusals.COULD_NOT_WRITE)]

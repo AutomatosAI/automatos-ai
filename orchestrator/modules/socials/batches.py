@@ -23,12 +23,24 @@ tick had not made it (an outage, a backlog across every plan) is no longer made:
 batch is announced it is recorded as skipped and the notice names it (``passed_unmade``).
 A record is dropped ``KEEP_BATCH_DAYS`` after its batch began. All of it is pure: the tick
 reads and writes.
+
+P256-FIX-SOC-5 (F436, socials day 14 Oct): there is no off-by-one. A weekly batch makes the 7 local
+days from the next midnight after its batch day, so with a Wednesday batch Thursday 22 and Friday 23
+are made by the batch of Wednesday 21; the run's "empty" slots were the next batch's. What was
+wrong around it is fixed here:
+
+* :func:`next_window` passes over a batch that is announced and has nothing left to make, so a
+  same-day change of the batch time never advertises a batch that makes nothing;
+* :func:`unannounced` names the latest batch whose moment came while nothing announced it (a week
+  whose only post was moved earlier and made then), so the tick announces it at its own moment;
+* :func:`week_split` says, on a plan whose batch day is not Sunday, which days of the coming week
+  another batch makes. Why a slot is empty is ``slot_phases``.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from modules.socials import plans
 
@@ -36,6 +48,10 @@ BATCHES = "batches"
 SKIPPED = "skipped"
 ANNOUNCED = "announced"
 WEEK_DAYS = 7
+# PRD-251C (C1): why a batch slot whose time came before the tick made it is recorded as skipped.
+PASSED_UNMADE = "its time came before it could be made"
+# The batch day whose week runs Monday to Sunday: any other splits a calendar week (``week_split``).
+CALENDAR_BATCH_DAY = "sun"
 KEEP_BATCH_DAYS = 70
 _FIRST_OF_MONTH = 1
 
@@ -112,15 +128,85 @@ def made_through(plan: Any, now: datetime) -> Optional[Window]:
     return following if following.moment <= now else current
 
 
-def next_window(plan: Any, now: datetime) -> Optional[Window]:
+def next_window(plan: Any, now: datetime, taken: Iterable[str] = ()) -> Optional[Window]:
     """The first batch still to be made after ``now`` that holds a day of the plan; None for a
-    daily plan or one whose dates hold no later batch."""
+    daily plan or one whose dates hold no later batch. A batch that is announced already and has
+    no open slot (none after ``now`` that ``taken`` or a skip does not hold) is passed over: it
+    makes nothing (P256-FIX-SOC-5)."""
     latest = made_through(plan, now)
     starts_on, ends_on = getattr(plan, "starts_on", None), getattr(plan, "ends_on", None)
     if latest is None or starts_on is None or ends_on is None:
         return None
+    done = {*taken, *skipped_keys(plan)}
     upcoming = window_of(plan, max(latest.end, starts_on))
+    while upcoming.start <= ends_on and announced(plan, upcoming.key) and not _open_slots(plan, upcoming, now, done):
+        upcoming = window_of(plan, upcoming.end)
     return upcoming if upcoming.start <= ends_on else None
+
+
+def _local_span(plan: Any, window: Window) -> Tuple[datetime, datetime]:
+    """The window's days as UTC [start, end)."""
+    zone = plans.zone_of(plan)
+    return plans.local_to_utc(window.start, "00:00", zone), plans.local_to_utc(window.end, "00:00", zone)
+
+
+def _open_slots(plan: Any, window: Window, now: datetime, done: Set[str]) -> List[plans.Slot]:
+    """The window's slots still to make: their time after ``now``, and nothing holds or skipped them."""
+    start, end = _local_span(plan, window)
+    reach = timedelta(days=plans.MAX_MOVE_DAYS + 1)  # a moved slot stays its own day's batch
+    return [slot for slot in plans.expand_slots(plan, max(start - reach, now), end + reach)
+            if slot.key not in done and batch_key(plan, slot.local_date) == window.key]
+
+
+def key_of_slot(plan: Any, slot_key: str) -> Optional[str]:
+    """The batch a slot key's day belongs to (its own day, wherever the slot was moved); None for
+    a daily plan or a key that names no day."""
+    parsed = plans.parse_slot_key(slot_key)
+    return batch_key(plan, parsed[1]) if parsed is not None else None
+
+
+def unannounced(plan: Any, now: datetime, taken: Iterable[str]) -> List[str]:
+    """P256-FIX-SOC-5: the ``taken`` slot keys of the latest batch whose moment has come by ``now``
+    (``made_through``) while it is not announced; [] otherwise. The tick adds them to what it touched,
+    so a week whose only posts were made early, before its moment, is announced at its moment."""
+    through = made_through(plan, now)
+    if through is None or announced(plan, through.key):
+        return []
+    return sorted(key for key in taken if key_of_slot(plan, key) == through.key)
+
+
+def _days_named(days: List[date]) -> str:
+    """"Thu 22 and Fri 23 Oct": the month once, after the last day, when they share it."""
+    shared = len({(day.year, day.month) for day in days}) == 1
+    names = [f"{day:%a} {day.day}" if shared else f"{day:%a} {day.day} {day:%b}" for day in days]
+    listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{listed} {days[-1]:%b}" if shared else listed
+
+
+def week_split(plan: Any, now: datetime) -> Optional[str]:
+    """P256-FIX-SOC-5 (F436): on a weekly plan whose batch day is not Sunday, the line saying which
+    days of the coming calendar week (Monday to Sunday, from the plan's start at the earliest) a
+    later batch makes, when its cadence has days on both sides of the split; None otherwise.
+    "Your Wednesday 13:44 batch makes Thursday to Wednesday: Thu 22 and Fri 23 Oct are made in the
+    batch of Wed 21 Oct." """
+    settings = plans.make_settings(plan)
+    starts_on = getattr(plan, "starts_on", None)
+    if settings["rhythm"] != plans.WEEKLY or settings["batch_day"] == CALENDAR_BATCH_DAY or starts_on is None:
+        return None
+    zone = plans.zone_of(plan)
+    anchor = max(now.astimezone(zone).date() + timedelta(days=1), starts_on)
+    monday = anchor + timedelta(days=(WEEK_DAYS - anchor.weekday()) % WEEK_DAYS)
+    week = plans.local_to_utc(monday, "00:00", zone), plans.local_to_utc(monday + timedelta(days=WEEK_DAYS), "00:00", zone)
+    days = [slot.local_date for slot in plans.expand_slots(plan, *week) if not slot.moved]
+    keys = list(dict.fromkeys(batch_key(plan, day) for day in days))
+    if len(keys) < 2:
+        return None
+    later = sorted({day for day in days if batch_key(plan, day) == keys[-1]})
+    window = window_of(plan, later[0])
+    made_on = window.start - timedelta(days=1)
+    verb = "is" if len(later) == 1 else "are"
+    return (f"Your {made_on:%A} {settings['time']} batch makes {window.start:%A} to {made_on:%A}: "
+            f"{_days_named(later)} {verb} made in the batch of {made_on:%a} {made_on.day} {made_on:%b}.")
 
 
 def label(plan: Any, window: Window) -> str:
@@ -199,7 +285,7 @@ def due_slots(plan: Any, now: datetime, taken: Iterable[str]) -> List[plans.Slot
     ]
 
 
-def _utc(moment: Optional[datetime]) -> Optional[datetime]:
+def as_utc(moment: Optional[datetime]) -> Optional[datetime]:
     """A stored time as UTC (SQLite gives it back without a zone)."""
     if moment is None:
         return None
@@ -214,7 +300,7 @@ def passed_unmade(plan: Any, key: str, now: datetime, taken: Iterable[str]) -> L
     window = window_of(plan, start) if start is not None else None
     if window is None:
         return []
-    created = _utc(getattr(plan, "created_at", None))
+    created = as_utc(getattr(plan, "created_at", None))
     since = max(window.moment, created) if created is not None else window.moment
     done = {*taken, *skipped_keys(plan)}
     return [slot for slot in plans.expand_slots(plan, since, now) if slot.key not in done and batch_key(plan, slot.local_date) == key]

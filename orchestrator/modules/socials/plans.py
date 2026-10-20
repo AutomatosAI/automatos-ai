@@ -480,6 +480,26 @@ def due_slots(plan: Any, now: datetime, made: Set[str]) -> List[Slot]:
     return [slot for slot in expand_slots(plan, now, horizon) if slot.key not in made and make_at(plan, slot) <= now]
 
 
+def within_daily_cap(plan: Any, slots: Sequence[Slot], taken: Iterable[str]) -> List[Slot]:
+    """``slots`` (in order) as many as ``make.max_per_day`` lets each local day take, counting the
+    posts its ``taken`` slot keys hold: the make tick's cap, and why a slot reads stalled
+    (P256-FIX-SOC-5, ``slot_phases``). Every slot when the plan sets no cap."""
+    cap = make_settings(plan)["max_per_day"]
+    if not cap:
+        return list(slots)
+    counts: Dict[date, int] = {}
+    for key in taken:
+        parsed = parse_slot_key(key)
+        if parsed is not None:
+            counts[parsed[1]] = counts.get(parsed[1], 0) + 1
+    kept = []
+    for slot in slots:
+        if counts.get(slot.local_date, 0) < cap:
+            counts[slot.local_date] = counts.get(slot.local_date, 0) + 1
+            kept.append(slot)
+    return kept
+
+
 def next_free_slot(plan: Any, row_id: str, after: datetime, taken: Set[str]) -> Optional[Slot]:
     """The late policy's ``next_slot`` (B11): the first slot of the same cadence row after
     ``after`` that no post holds, within NEXT_SLOT_HORIZON_DAYS; ``None`` when there is none."""

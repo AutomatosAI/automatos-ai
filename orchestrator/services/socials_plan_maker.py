@@ -22,6 +22,10 @@ a tick:
    for, a required photo, a chart not from its report) leaves the post a draft that waits
    for the owner (``service.waits_for_input``): its history says what to fill in, the owner
    is told, linked to the post, and the slot stays its own. Never a silent failed draft.
+   P256-FIX-SOC-5 (F437): anything else that stops it is kept and said too (``_held``,
+   ``modules/socials/plan_refusals.py``): a render the platform refused fails the draft with
+   the reason, any other refusal or a composer failure leaves it waiting for the owner, and a
+   post another writer has is left alone; the batch's notice counts both apart.
 5. Once per plan and day: "Today's posts are ready".
 
 PRD-251C (C1, US-C203): a weekly or monthly plan makes its whole batch once its moment
@@ -59,7 +63,7 @@ from core.models.socials import SocialCampaign, SocialPost, SocialTopic
 from core.models.workspaces import Workspace
 from core.social_cuts import cut_to_length
 from modules.socials import batches, compose, compose_facts, plan_notify, plan_store, plan_visuals, plans, render, service, topics
-from modules.socials import upload_crops
+from modules.socials import plan_refusals, slot_phases, upload_crops
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
 from modules.socials.targets import kind_for  # P256-FIX-SOC-4: one choice of kind, an agent's channels too
@@ -70,10 +74,10 @@ PLAN_TICK_JOB_ID = "socials_plan_tick"
 PLAN_AGENT = "the plan"
 MADE, TAKEN, GONE, NO_TOPIC, SKIPPED, FAILED = "made", "taken", "gone", "no_topic", "skipped", "failed"
 WAITS = "waits_for_input"  # P256-FIX-SOC-2: the render refused the post; it waits for the owner as a draft
+# P256-FIX-SOC-5: the outcomes after which the slot's batch may be complete, so its notice is checked.
+TOUCHES_A_BATCH = (MADE, SKIPPED, WAITS, FAILED)
 FILL_IN_NOTE = "Fill in {fields} before rendering."
 READY_NOTE = "Made from the plan's content bank: {topic}."
-# PRD-251C (C1): why a batch slot whose time came before the tick made it is recorded as skipped.
-PASSED_UNMADE = "its time came before it could be made"
 # A fact's source kind (B8) → the post source kind a claim binds to (D7). A note backs no claim.
 FACT_SOURCE_KINDS = {"knowledge": "document", "deliverable": "deliverable", "web": "url", "github": "url"}
 STILL_FORMATS = ("image", "carousel", "fact_card", "infographic")
@@ -114,42 +118,41 @@ def _tell_once(db: Any, plan: SocialCampaign, event: tuple, title: str, now: dat
 # ── which slots ────────────────────────────────────────────────────────────
 
 
-def _within_daily_cap(plan: SocialCampaign, slots: List[plans.Slot], taken: set) -> List[plans.Slot]:
-    cap = plans.make_settings(plan)["max_per_day"]
-    if not cap:
-        return slots
-    counts: Dict[date, int] = {}
-    for key in taken:
-        parsed = plans.parse_slot_key(key)
-        if parsed is not None:
-            counts[parsed[1]] = counts.get(parsed[1], 0) + 1
-    kept = []
-    for slot in slots:
-        if counts.get(slot.local_date, 0) < cap:
-            counts[slot.local_date] = counts.get(slot.local_date, 0) + 1
-            kept.append(slot)
-    return kept
-
-
-def _plan_due(db: Any, plan: SocialCampaign, now: datetime) -> List[plans.Slot]:
+def _plan_due(db: Any, plan: SocialCampaign, now: datetime) -> Tuple[List[plans.Slot], List[str]]:
+    """The plan's slots to make now, within its daily cap, and (P256-FIX-SOC-5) the taken keys of its
+    latest batch when that batch's moment has come and it is not announced yet (``batches.unannounced``),
+    from the one read of the plan's taken keys."""
     workspace = db.get(Workspace, plan.workspace_id)
     if workspace is None or socials_off_reason(workspace) is not None:
-        return []
+        return [], []
     taken = plan_store.taken_keys(db, plan)
-    found = batches.due_slots(plan, now, taken) if batches.is_batched(plan) else plans.due_slots(plan, now, taken)
-    return _within_daily_cap(plan, found, taken)
+    if not batches.is_batched(plan):
+        return plans.within_daily_cap(plan, plans.due_slots(plan, now, taken), taken), []
+    return plans.within_daily_cap(plan, batches.due_slots(plan, now, taken), taken), batches.unannounced(plan, now, taken)
+
+
+def collect_tick(now: datetime) -> Tuple[List[Tuple[UUID, str]], Dict[UUID, Set[str]]]:
+    """The (plan, slot key) pairs to make now, earliest first, at most a tick's worth; and, per plan,
+    the made keys of a batch whose moment came while nothing announced it (P256-FIX-SOC-5): a week
+    whose only posts were made early is announced at its own moment."""
+    db = _session()
+    try:
+        due: List[Tuple[datetime, UUID, str]] = []
+        unannounced: Dict[UUID, Set[str]] = {}
+        for plan in plan_store.active_plans(db):
+            slots, made_early = _plan_due(db, plan, now)
+            due += [(slot.at, plan.id, slot.key) for slot in slots]
+            if made_early:
+                unannounced[plan.id] = set(made_early)
+        cap = int(config.SOCIALS_PLAN_MAX_SLOTS_PER_TICK)
+        return [(plan_id, key) for _at, plan_id, key in sorted(due)][:cap], unannounced
+    finally:
+        db.close()
 
 
 def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
     """The (plan, slot key) pairs to make now, earliest first, at most a tick's worth."""
-    db = _session()
-    try:
-        due: List[Tuple[datetime, UUID, str]] = []
-        for plan in plan_store.active_plans(db):
-            due += [(slot.at, plan.id, slot.key) for slot in _plan_due(db, plan, now)]
-        return [(plan_id, key) for _at, plan_id, key in sorted(due)][: int(config.SOCIALS_PLAN_MAX_SLOTS_PER_TICK)]
-    finally:
-        db.close()
+    return collect_tick(now)[0]
 
 
 # ── one slot ───────────────────────────────────────────────────────────────
@@ -351,18 +354,55 @@ def _make(db: Any, plan_id: UUID, key: str, now: datetime) -> str:
         return SKIPPED
     topic = topics.next_topic(db, plan, slot.format, slot.local_date)
     if topic is None:
-        _tell_once(db, plan, plan_notify.BANK_EMPTY, f"{plan.name}: research again or add topics", now)
+        _tell_no_topic(db, plan, slot, now)
         return NO_TOPIC
     post = claim(db, plan, slot, topic, now)
     if post is None:
         return TAKEN
     try:
         return write(db, workspace, plan, slot, topic, post, now)
-    except Exception:  # noqa: BLE001 — the claimed draft stays for a person; logged and told
+    except Exception as exc:  # noqa: BLE001 — the claimed draft stays for a person; logged, kept and told (_held)
         logger.exception("[Socials] plan %s: the post for slot %s could not be written", plan_id, key)
+        return _held(db, plan, post, exc)
+
+
+def _tell_no_topic(db: Any, plan: SocialCampaign, slot: plans.Slot, now: datetime) -> None:
+    """No topic for the slot, told once a day: the bank is empty, or (P256-FIX-SOC-5) none of its
+    unused topics suits the slot's format, which the notice names."""
+    if topics.unused_topics(db, plan):
+        why = slot_phases.NO_TOPIC_WHY.format(format=slot.format)
+        _tell_once(db, plan, plan_notify.NO_FITTING_TOPIC, f"{plan.name}: {why}; research again or add one", now)
+    else:
+        _tell_once(db, plan, plan_notify.BANK_EMPTY, f"{plan.name}: research again or add topics", now)
+
+
+def _hold(post: SocialPost, actor: str, kind: str, why: str) -> None:
+    """The post as the plan leaves it (``plan_refusals``): failed with the platform's refusal, or a
+    draft that waits for the owner, saying why."""
+    if kind == plan_refusals.REFUSED:
+        service.refuse_render(post, actor, why)
+    else:
+        service.ask_for_input(post, actor, why)
+
+
+def _held(db: Any, plan: SocialCampaign, post: SocialPost, exc: BaseException) -> str:
+    """P256-FIX-SOC-5 (F437): the claimed draft ``write`` could not finish, kept and said why
+    (``plan_refusals.held_as``): ``TAKEN`` when another writer has it, ``FAILED`` when the platform
+    refused its render, else ``WAITS`` for the owner. Its history says why, in words a person may
+    read, and the owner is told, linked to the post. A write that lost a race writes nothing."""
+    kind, why = plan_refusals.held_as(exc)
+    db.rollback()
+    db.refresh(post)
+    if kind == plan_refusals.TAKEN or post.status != service.DRAFT:
+        return TAKEN  # a draft only: a post that moved on is another writer's
+    status, content_hash = post.status, post.content_hash
+    _hold(post, plan.created_by, kind, why)
+    if not service.claim_unchanged(db, post, status=status, content_hash=content_hash):
         db.rollback()
-        plan_notify.notify_plan(plan.workspace_id, plan.id, plan_notify.SLOT_SKIPPED, f"{plan.name}: the draft for {topic.title} waits for you")
-        return FAILED
+        return TAKEN
+    db.commit()
+    plan_notify.notify_post_waiting(plan.workspace_id, post.id, post.title, (), why)
+    return FAILED if kind == plan_refusals.REFUSED else WAITS
 
 
 def make_slot(plan_id: UUID, key: str, now: datetime) -> str:
@@ -395,35 +435,45 @@ def _batch_posts(db: Any, plan: SocialCampaign, key: str) -> List[SocialPost]:
     return db.query(SocialPost).filter(SocialPost.campaign_id == plan.id, SocialPost.batch_key == key).all()
 
 
-def _ready_title(plan: SocialCampaign, window: batches.Window, count: int, passed: int, waiting: int = 0) -> str:
-    """"Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made; 1 waits for you"."""
+def _ready_title(plan: SocialCampaign, window: batches.Window, count: int, passed: int, waiting: int = 0,
+                 failed: int = 0) -> str:
+    """"Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made; 1 waits for you;
+    1 could not render"."""
     title = f"{plan.name}: {count} post{'' if count == 1 else 's'} for {batches.label(plan, window)}"
     if passed:
         title = f"{title}; {passed} passed before {'it' if passed == 1 else 'they'} could be made"
     if waiting:
         title = f"{title}; {waiting} wait{'s' if waiting == 1 else ''} for you"
+    if failed:
+        title = f"{title}; {failed} could not render"
     return title
 
 
 def _announce_if_complete(db: Any, plan: SocialCampaign, window: batches.Window, now: datetime) -> None:
-    """"Your week is ready", once, when every slot of the batch is made or skipped. A slot whose
-    time came before the tick made it is recorded as skipped then, and the notice names it. The
-    posts that wait for the owner are counted apart: the Queue does not list them (P256-FIX-SOC-2)."""
+    """"Your week is ready", once, when every slot of the batch is made or skipped, and never before
+    the batch's moment (P256-FIX-SOC-5: a slot moved earlier is made early, and its week is announced
+    at its own moment, counting it). A slot whose time came before the tick made it is recorded as
+    skipped then, and the notice names it. The posts that wait for the owner (P256-FIX-SOC-2) and
+    those whose render the platform refused are counted apart: the Queue does not list them."""
+    if window.moment > now:
+        return
     taken = plan_store.taken_keys(db, plan)
     if batches.announced(plan, window.key) or batches.pending(plan, window.key, now, taken):
         return
     passed = [slot.key for slot in batches.passed_unmade(plan, window.key, now, taken)]
     posts = _batch_posts(db, plan, window.key)
-    waiting = sum(1 for post in posts if service.waits_for_input(post))  # P256-FIX-SOC-2: not in the Queue
+    waiting = sum(1 for post in posts if service.waits_for_input(post))
+    failed = sum(1 for post in posts if post.status == service.FAILED)
     if not posts and not passed:
         return
     today = _local_today(plan, now)
     if passed:
-        plan.make = batches.with_skips(plan, window.key, passed, PASSED_UNMADE, today)
+        plan.make = batches.with_skips(plan, window.key, passed, batches.PASSED_UNMADE, today)
     plan.make = batches.with_record(plan, window.key, {batches.ANNOUNCED: now.isoformat()}, today)
     db.commit()
     event = plan_notify.MONTH_READY if batches.rhythm_of(plan) == plans.MONTHLY else plan_notify.WEEK_READY
-    plan_notify.notify_review(plan.workspace_id, plan.id, event, _ready_title(plan, window, len(posts) - waiting, len(passed), waiting))
+    title = _ready_title(plan, window, len(posts) - waiting - failed, len(passed), waiting, failed)
+    plan_notify.notify_review(plan.workspace_id, plan.id, event, title)
 
 
 def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> None:
@@ -453,9 +503,8 @@ async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
     now = now or datetime.now(timezone.utc)
     outcomes: Dict[str, int] = {}
     made: Dict[UUID, int] = {}
-    touched: Dict[UUID, Set[str]] = {}
     try:
-        due = await anyio.to_thread.run_sync(collect_due, now)
+        due, touched = await anyio.to_thread.run_sync(collect_tick, now)  # P256-FIX-SOC-5: early weeks, at their moment
     except Exception:  # noqa: BLE001 — the next tick tries again
         logger.exception("[Socials] the plan tick could not read its due slots")
         return outcomes
@@ -464,7 +513,7 @@ async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
         if outcome == MADE:
             made[plan_id] = made.get(plan_id, 0) + 1
-        if outcome in (MADE, SKIPPED, WAITS):  # a post that waits is not one waiting for approval
+        if outcome in TOUCHES_A_BATCH:  # a post that waits, or failed, is not one waiting for approval
             touched[plan_id] = {*touched.get(plan_id, set()), key}
     if made:
         await anyio.to_thread.run_sync(tell_ready, made, now)

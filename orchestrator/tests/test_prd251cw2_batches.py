@@ -232,7 +232,7 @@ def test_a_slot_whose_time_came_before_the_tick_made_it_is_recorded_and_named_on
     made = _posts(week, plan)
     assert [post.slot_key for post in made][0] == "r1|2026-10-20|09:00" and len(made) == 6  # Monday's 09:00 had passed
     week.session.refresh(row)
-    assert row.make["batches"]["2026-W43"]["skipped"] == {"r1|2026-10-19|09:00": maker_mod.PASSED_UNMADE}
+    assert row.make["batches"]["2026-W43"]["skipped"] == {"r1|2026-10-19|09:00": batches.PASSED_UNMADE}
     assert week.reviews == [("Your week is ready: ", "Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made")]
     _tick(_at(2026, 10, 19, 10, 5))
     assert len(_posts(week, plan)) == 6 and len(week.reviews) == 1

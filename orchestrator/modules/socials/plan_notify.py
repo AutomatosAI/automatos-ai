@@ -2,13 +2,17 @@
 
 * ``social_plan_ready``: "Today's posts are ready", once per plan and day, when the
   make tick made posts that wait for approval (linked to the plan).
-* ``social_plan_bank_empty``: a slot found no topic in the bank (once per plan and day).
+* ``social_plan_bank_empty``: a slot found no topic in the bank (once per plan and day); when the
+  bank holds unused topics none of which suits the slot's format, the notice says so and names the
+  format (P256-FIX-SOC-5), on the same once-a-day record.
 * ``social_plan_slot_skipped``: a slot was not made, and why (over the render quota,
   no channel connected that posts its format): never half-made.
 * ``social_post_slot_moved``: the late policy moved a post to the plan's next slot
   (linked to the post).
 * ``social_post_needs_input`` (P256-FIX-SOC-2): the render refused a plan's post, so it waits
   for the owner as a draft; the notice says what to fill in and opens the post's editor.
+  P256-FIX-SOC-5: the same notice says why when anything else stopped the plan's post (the
+  platform refused its render, the composer failed), in words a person may read.
 * ``social_plan_weekly_note`` (PRD-251C US-C403): how the plan's week went, linked to its
   Posted view.
 
@@ -29,6 +33,7 @@ from modules.socials import notify
 PLAN_LINK_TYPE = "social_plan"
 READY = ("social_plan_ready", "Today's posts are ready: ", "action_required")
 BANK_EMPTY = ("social_plan_bank_empty", "The content bank is empty: ", "error")
+NO_FITTING_TOPIC = ("social_plan_bank_empty", "A planned post has no topic: ", "error")
 SLOT_SKIPPED = ("social_plan_slot_skipped", "A planned post was not made: ", "error")
 SLOT_MOVED = ("social_post_slot_moved", "Moved to the plan's next slot: ", "ok")
 WAITS_FOR_YOU = ("social_post_needs_input", "A planned post needs you: ", "action_required")
