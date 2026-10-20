@@ -20,7 +20,6 @@
  */
 import { LooksScreen } from '@/components/looks/looks-screen-lazy'
 import { StyleScreen } from '@/components/looks/style/style-screen-lazy'
-import { PlayChat } from '@/components/play/chat/play-chat-lazy'
 import { PlayConversations } from '@/components/play/conversations/play-conversations-lazy'
 import { PlayShelf } from '@/components/play/deliverables/play-shelf-lazy'
 import { LostScreen } from '@/components/play/edges/lost-screen-lazy'
@@ -30,6 +29,8 @@ import { CHAT_HREF, DELIVERABLES_HREF } from '@/lib/ticket-links'
 import { FRAME_SLOT } from '../constants'
 import type { SlotId } from '../registry-types'
 import type { FrameProps, ThemeRegistrations } from '../types'
+
+import { PlayChat } from './play-chat-lazy'
 
 /** Builtin Play's route for its Conversations page: /x/conversations. */
 export const PLAY_CONVERSATIONS_ROUTE = 'conversations'

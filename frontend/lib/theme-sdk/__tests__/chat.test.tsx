@@ -210,6 +210,39 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
     expect(Object.isFrozen(result.current.messages)).toBe(true)
   })
 
+  it('copies what else a reply carries: its tool calls, who wrote it, a saved failure, a cap, its reasoning, a withdraw offer (A-14a)', () => {
+    const search = { toolCallId: 't1', toolName: 'platform_web_search', state: 'running', input: { query: 'budget laptops' }, startedAt: 'x' }
+    const report = { ...MOVED, subject: 'Laptop report', link: '/deliverables/d-9' }
+    const posted = message('r3', 'assistant', 'Here is the report', {
+      toolCalls: [search, { toolCallId: 't2', toolName: 'platform_update_agent', state: 'completed', waiting: true, summary: 'card raised' }],
+      metadata: { source: 'Auto · background' },
+      limitReached: { limit: 'turns', value: 3, message: 'Turn limit reached.' },
+      reasoning: 'abc',
+      withdrawOffer: { message: 'Withdraw the request?', requests: [{ grant_id: 5, action: 'send_email' }] },
+      receipts: [report],
+    })
+    const saved = message('r4', 'assistant', '⚠️ The model took too long.', { source: { origin: 'turn_error' }, metadata: { source: 'Error' } })
+    const { result } = openChat(coreView({ messages: [ASK, REPLY, posted, saved] }))
+    const [, plain, carried, failed] = result.current.messages
+    expect(plain).toMatchObject({ toolCalls: [], provenance: null, savedError: null, limitReached: null, reasoningChars: 0, withdrawOffer: null, linkedDeliverables: [] })
+    expect(carried.toolCalls).toEqual([
+      { toolCallId: 't1', toolName: 'platform_web_search', state: 'running', input: { query: 'budget laptops' }, skipped: false, waiting: false },
+      { toolCallId: 't2', toolName: 'platform_update_agent', state: 'completed', summary: 'card raised', skipped: false, waiting: true },
+    ])
+    expect(Object.keys(carried.toolCalls[0])).not.toContain('startedAt')
+    expect(Object.isFrozen(carried.toolCalls[0])).toBe(true)
+    expect(carried).toMatchObject({
+      provenance: 'Auto · background',
+      savedError: null,
+      limitReached: 'Turn limit reached.',
+      reasoningChars: 3,
+      withdrawOffer: { message: 'Withdraw the request?', requests: [{ grant_id: 5, action: 'send_email' }] },
+      linkedDeliverables: [{ id: 'd-9', title: 'Laptop report', kind: 'document' }],
+    })
+    expect(Object.isFrozen(carried.withdrawOffer?.requests)).toBe(true)
+    expect(failed).toMatchObject({ savedError: 'The model took too long.', provenance: null })
+  })
+
   it('binds each approval card to its outcomes, in the reply and after the conversation', () => {
     const core = coreView()
     const { result } = openChat(core)
@@ -313,6 +346,9 @@ describe('PRD-261 A-11b — the receipt lines', () => {
     expect(receiptLink(REFUSED)).toBeNull()
     expect(receiptLink({ ...MOVED, link: '//evil.example' })).toBeNull()
     expect(receiptLink({ ...MOVED, link: 'https://evil.example' })).toBeNull()
+    // A-14a: only a path HostLink takes, so a theme can link every receipt receiptLink gives it.
+    expect(receiptLink({ ...MOVED, link: '/\\evil.example' })).toBeNull()
+    expect(receiptLink({ ...MOVED, link: '/board?task=4 22' })).toBeNull()
   })
 
   it('tells whether a done write moved a card on the board', () => {

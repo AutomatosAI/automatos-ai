@@ -113,12 +113,13 @@ vi.mock('@/components/ui/sheet', () => ({
 }))
 
 // Play's slots as they are once their chunks have loaded: the screen renders in the same pass.
-// The chat's slot reads the real PlayChat from a holder the imports below fill. Its factory may not
-// import play-chat itself: play-chat imports MainLayout, which reaches this slot through the
-// builtin registrations (theme-slot-registrations -> builtin/slots -> play-slots, PRD-261 A-04b),
-// so a factory awaiting play-chat waits on MainLayout, which waits on the factory: the file never loads.
+// The chat's slot (builtin Play's, lib/theme-host/builtin/play-chat-lazy.tsx: the real PlayChat in
+// MainLayout, full bleed, PRD-261 A-14a) reads them from a holder the imports below fill. Its factory
+// may not import them itself: MainLayout reaches this slot through the builtin registrations
+// (theme-slot-registrations -> builtin/slots -> play-slots, PRD-261 A-04b), so a factory awaiting
+// MainLayout waits on the factory: the file never loads.
 const loadedChat = vi.hoisted(() => ({ PlayChat: null as null | (() => React.ReactElement | null) }))
-vi.mock('@/components/play/chat/play-chat-lazy', () => ({
+vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({
   PlayChat: () => {
     const Screen = loadedChat.PlayChat
     if (Screen === null) throw new Error('play-chat has not loaded: the test imports it below')
@@ -146,7 +147,11 @@ import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } fr
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION } from '@/lib/ui-style'
 
-loadedChat.PlayChat = PlayChat
+loadedChat.PlayChat = () => (
+  <MainLayout fullBleed>
+    <PlayChat />
+  </MainLayout>
+)
 
 const CHAT_PAGE = 'The core chat page'
 const STUDIO_PAGE = 'A Studio page Play has no design for'
