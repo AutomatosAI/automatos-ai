@@ -19,7 +19,10 @@ name: browser-e2e
 # It watches only the paths below (the app shell, the theme host and every folder
 # PRD-261 Phase A touches (PA-6), the boot substrate and itself). A change to the
 # rest of the backend or to other pages can break it without running it. See
-# e2e/browser/README.md.
+# e2e/browser/README.md. PRD-261 A-17b widened it to all of what counts as Play
+# (docs/frontend-architecture/play-theme.md: lib/play, lib/mascot, the hooks, the
+# chat store, plain-line, Play's fonts, public/auto) and the chat code the parity
+# specs read (lib/chat, components/widgets), so a change there runs the parity specs.
 #
 # workflow_dispatch works only once this file is on main: GitHub dispatches only
 # workflows that exist on the default branch. Before that, the lane runs on a
@@ -72,15 +75,20 @@ on:
       - "frontend/lib/theme-sdk/**"
       - "frontend/lib/look-kit/**"
       - "frontend/lib/looks/**"
+      - "frontend/lib/mascot/**"
+      - "frontend/lib/play/**"
+      - "frontend/lib/chat/**"
+      - "frontend/lib/text/plain-line.ts"
       - "frontend/lib/ui-style.ts"
       - "frontend/lib/api-client.ts"
       - "frontend/lib/auth-edition.ts"
       - "frontend/packages/theme-sdk/**"
       - "frontend/contexts/ui-style-context.tsx"
-      - "frontend/hooks/use-studio-theme.ts"
-      - "frontend/hooks/use-mobile.ts"
-      - "frontend/hooks/use-global-search.ts"
-      - "frontend/hooks/use-installed-themes.ts"
+      - "frontend/components/widgets/**"
+      - "frontend/stores/play-chat-store.ts"
+      - "frontend/hooks/use-*.ts"
+      - "frontend/app/fonts/play/**"
+      - "frontend/public/auto/**"
       - "frontend/scripts/theme-sdk/**"
       - "frontend/next.config.js"
       - "frontend/middleware.ts"
@@ -138,15 +146,20 @@ on:
       - "frontend/lib/theme-sdk/**"
       - "frontend/lib/look-kit/**"
       - "frontend/lib/looks/**"
+      - "frontend/lib/mascot/**"
+      - "frontend/lib/play/**"
+      - "frontend/lib/chat/**"
+      - "frontend/lib/text/plain-line.ts"
       - "frontend/lib/ui-style.ts"
       - "frontend/lib/api-client.ts"
       - "frontend/lib/auth-edition.ts"
       - "frontend/packages/theme-sdk/**"
       - "frontend/contexts/ui-style-context.tsx"
-      - "frontend/hooks/use-studio-theme.ts"
-      - "frontend/hooks/use-mobile.ts"
-      - "frontend/hooks/use-global-search.ts"
-      - "frontend/hooks/use-installed-themes.ts"
+      - "frontend/components/widgets/**"
+      - "frontend/stores/play-chat-store.ts"
+      - "frontend/hooks/use-*.ts"
+      - "frontend/app/fonts/play/**"
+      - "frontend/public/auto/**"
       - "frontend/scripts/theme-sdk/**"
       - "frontend/next.config.js"
       - "frontend/middleware.ts"
@@ -185,11 +198,17 @@ env:
   KIT_PLAY_WORKSPACE: themes/play
   PLAY_PACKAGE: automatos.play-1.0.0.autotheme
   PLAY_PACKAGE_ARTIFACT: play-package
+  # The package job's name (jobs.package.name, below), which the lane waits on, and how long it
+  # waits: the package job's own 15-minute timeout and a few minutes to be picked up.
+  PLAY_PACKAGE_JOB: Pack Play from the Design Kit
+  PLAY_PACKAGE_WAIT_SECONDS: "1200"
 
 jobs:
   # PRD-261 A-17a: Play's .autotheme, built and packed with the kit's own scripts from its
   # committed lockfile. No install script runs (--ignore-scripts); Play's build fetches Auto's
   # clips from core at the commit its mascot.lock.json pins, checking each one's sha256.
+  # It runs beside browser-e2e, not before it: the lane waits for it only just before it downloads
+  # the package, so the kit's build overlaps the lane's docker and frontend builds.
   package:
     name: Pack Play from the Design Kit
     runs-on: ubuntu-24.04
@@ -248,10 +267,14 @@ jobs:
 
   browser-e2e:
     name: Browser e2e (non-required)
-    needs: package
-    # The lane runs when the package job failed too: every other spec still reports, and the
+    # No `needs: package`: the lane starts at once and waits for the package job only before it
+    # downloads the package (scripts/wait-for-job.sh), so a slow kit build delays only that step.
+    # When the package job failed or the wait timed out, every other spec still reports, and the
     # @package specs fail on the missing package (specs/installed-play.spec.ts).
-    if: ${{ !cancelled() }}
+    # actions: read is for that wait (the run's jobs); the job needs nothing else.
+    permissions:
+      actions: read
+      contents: read
     # Pinned, not -latest: the browsers' system packages are installed for this image.
     runs-on: ubuntu-24.04
     # PRD-261 A-17b: 60, up from 45, for the Play parity specs (twice each, one test at a time).
@@ -362,10 +385,20 @@ jobs:
           done
           echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
 
-      # PRD-261 A-17a: the package job's Play package. When that job failed there is nothing to
-      # download, and the @package specs fail on the missing file.
+      # PRD-261 A-17a: the package job's Play package, once that job has finished. When it failed,
+      # or did not finish in time, there is nothing to download, and the @package specs fail on the
+      # missing file. The wait itself never fails the lane.
+      - name: Wait for the Play package job
+        id: package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion="$(bash e2e/browser/scripts/wait-for-job.sh "$PLAY_PACKAGE_JOB" "$PLAY_PACKAGE_WAIT_SECONDS")" || conclusion=unfinished
+          echo "The Play package job: ${conclusion}"
+          echo "conclusion=${conclusion}" >> "$GITHUB_OUTPUT"
+
       - name: Download the Play package from the Design Kit
-        if: needs.package.result == 'success'
+        if: steps.package.outputs.conclusion == 'success'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ env.PLAY_PACKAGE_ARTIFACT }}

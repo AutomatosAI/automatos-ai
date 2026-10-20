@@ -29,9 +29,12 @@ The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-p
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
 uploads `automatos.play-1.0.0.autotheme` as the `play-package` artifact. Play's build fetches Auto's
-clips from core at the commit its `mascot.lock.json` pins. The browser job waits for it, downloads
-the package and names it in `E2E_KIT_PACKAGE`; when the package job failed the browser job still
-runs, and the `@package` specs fail on the missing file.
+clips from core at the commit its `mascot.lock.json` pins. The two jobs run side by side (no
+`needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
+downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
+`PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
+or did not finish in time, the browser job still runs every other spec, and the `@package` specs
+fail on the missing file.
 
 `support/kit-package.ts` installs it the way Settings › Appearance › Themes does (A-07d): `POST
 /api/themes/import`, `POST /api/themes/installs/{id}/opt-in`, `PUT /api/themes/choice` with the
@@ -123,7 +126,9 @@ Specs live in `specs/`, shared helpers in `support/`.
 On a pull request (any base branch) or a push to `main` that changes one of the paths in the
 workflow's `paths:` list: the root layout, the pages and components PRD-261 Phase A touches (PA-6:
 the Q3 pages, the theme host, Play, the looks, the Style axis files, the theme routes and services
-on the backend), `next.config.js`, the middleware, the frontend's package files, the compose boot
+on the backend; since A-17b also all of what counts as Play in
+`docs/frontend-architecture/play-theme.md`, with `public/auto/`, and the chat code the parity specs
+read, `lib/chat/` and `components/widgets/`), `next.config.js`, the middleware, the frontend's package files, the compose boot
 files and this folder. It does not watch the rest of
 the backend or the other pages, so a change there can break the lane without running it.
 
