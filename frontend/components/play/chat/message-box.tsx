@@ -13,6 +13,11 @@ import styles from './composer.module.css'
  * Focus and blur tell Auto you're typing. The ref is the textarea: Try again
  * puts focus back in it as its snag box goes (P260-FX-22, M20). PRD-264 EUAI-11a: the host's
  * AI label fence disables it while a theme hides the label.
+ *
+ * PRD-261 A-14a seam item: the fence is host-only and the SDK has no name for it yet (its chat
+ * area is to pause a theme's composer the same way, docs/theme-host/sdk-surface-map.md "Host-owned
+ * AI label"), so it is this area's one import of the core, allowed by name in
+ * lib/__tests__/prd261-port-chat.test.ts until the SDK carries it.
  */
 
 export const PLACEHOLDER = 'Message Auto'

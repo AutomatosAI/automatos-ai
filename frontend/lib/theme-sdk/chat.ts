@@ -12,9 +12,11 @@
  *   start on the newest conversation or a new chat, New chat pressed again), or null while it
  *   opens; with a theme's own draft link, the words waiting for the message box.
  * - `useChatController(conversation)` in a child keyed by `conversation.key`: that conversation's
- *   stream and turn as a view model (messages with their text, receipts, Deliverables and approval
- *   cards; status; Send, Try again and Stop, which keeps the partial reply, P260-FX-30). Keying the
- *   child is what starts the stream afresh for another conversation, as Play's PlayChatView is keyed.
+ *   stream and turn as a view model (messages with their text, tool calls, receipts, Deliverables and
+ *   approval cards, and what else a reply carries: who wrote it, a failure the server saved, a cap,
+ *   a withdraw offer, PRD-261 A-14a; status; Send, Try again and Stop, which keeps the partial reply,
+ *   P260-FX-30). Keying the child is what starts the stream afresh for another conversation, as
+ *   Play's PlayChatView is keyed.
  *
  * A component calls it one way for its whole life: switching throws, instead of React's hook-order
  * error. Only a conversation the first call handed out opens a stream (it carries the host's own
@@ -39,6 +41,7 @@ import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useMissionStore } from '@/stores/mission-store'
 import { usePlayChatStore } from '@/stores/play-chat-store'
 
+import type { WithdrawOffer } from './host-cards/chat-cards'
 import {
   type OpenedConversation,
   hostApproval,
@@ -48,6 +51,7 @@ import {
   isForgedConversation,
   openedConversationOf,
 } from './internal/chat-view'
+import { isInternalHref } from './internal/href'
 
 export type HostChatRole = 'system' | 'user' | 'assistant'
 export type HostChatStatus = 'idle' | 'streaming' | 'error'
@@ -92,6 +96,23 @@ export interface HostTaskCard {
   readonly denials?: number
   readonly started_at?: string | null
   readonly completed_at?: string | null
+}
+
+/** One tool call of a reply, as its tool lines show it (PRD-238 S3). */
+export interface HostToolCall {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly state: 'running' | 'completed' | 'error'
+  /** The call's input as the model sent it (a query, a page, a title), unchecked. */
+  readonly input?: unknown
+  readonly error?: string
+  readonly durationMs?: number
+  /** The server's one-line result headline, never a raw payload. */
+  readonly summary?: string
+  /** The loop de-duplicated this call: it never ran. */
+  readonly skipped: boolean
+  /** An ask for the owner's click: it waits on its card, it did not fail. */
+  readonly waiting: boolean
 }
 
 /** A reply that failed in words. */
@@ -143,6 +164,20 @@ export interface HostChatMessage {
   /** The approval cards this reply raised that the owner has not closed. */
   readonly approvals: readonly HostChatApproval[]
   readonly taskCards: readonly HostTaskCard[]
+  /** The reply's tool calls, in the order they started. */
+  readonly toolCalls: readonly HostToolCall[]
+  /** Who wrote the reply when the turn didn't ("Auto · background"); null for a reply of the turn. */
+  readonly provenance: string | null
+  /** A failed turn the server saved, in its words: the reply is that failure, never an answer. */
+  readonly savedError: string | null
+  /** A cap that ended the reply's turn, in words; null when none did. */
+  readonly limitReached: string | null
+  /** The length of the model's reasoning on this reply: its growth is the model thinking. */
+  readonly reasoningChars: number
+  /** The owner said no while a request still waits on a yes: place it in cards.WithdrawOfferCard. */
+  readonly withdrawOffer: WithdrawOffer | null
+  /** The Deliverables the reply's done receipts link to, each id checked by the host. */
+  readonly linkedDeliverables: readonly HostDeliverable[]
 }
 
 /** A conversation the chat page shows. Pass it back to useChatController in a child keyed by `key`. */
@@ -365,9 +400,10 @@ export function receiptLine(receipt: HostReceipt): string {
   return coreReceiptLine(receipt)
 }
 
-/** A done receipt's page, only when it is a path in this app; else null. */
+/** A done receipt's page, only when it is a path in this app that HostLink takes; else null. */
 export function receiptLink(receipt: HostReceipt): string | null {
-  return receipt.status === 'done' ? safeLink(receipt.link) : null
+  const link = receipt.status === 'done' ? safeLink(receipt.link) : null
+  return link !== null && isInternalHref(link) ? link : null
 }
 
 /** Whether a done write touched a card on the board (named by its number). */

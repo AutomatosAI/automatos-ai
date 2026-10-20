@@ -141,7 +141,7 @@ On `/deliverables`, the core's `DeliverableDeepLink` sheet is mounted inside the
 
 ### Play's code loads only when Play renders (M17)
 
-The core's seams never import Play's screens statically. Builtin Play's registrations (`lib/theme-host/builtin/play-slots.tsx`, the one core module that names them) import small `'use client'` slots, and the seams (`MainLayout` through `components/theme-host/theme-frame-slot.tsx`; the two route layouts and `app/not-found.tsx` through `ThemeSlot`) draw them from there. Each slot exports `dynamic(() => import('./x').then((m) => m.X))` with SSR on: `components/play/shell/play-frame-lazy.tsx` (`PlayFrame`), `components/play/chat/play-chat-lazy.tsx` (`PlayChat`), `components/play/deliverables/play-shelf-lazy.tsx` (`PlayShelf`) and `components/play/edges/lost-screen-lazy.tsx` (`LostScreen`). Classic and Studio users download none of Play's frame, chat, shelf or 404 code and CSS. The slots keep SSR on, but the server never knows the width (`'pending'`), so Play's screens first render, and their chunks load, in the browser once Play renders them. `LookProvider` stays a static import: it must react to a runtime switch to Play. The guard test's section (e) walks the static import graph from each seam.
+The core's seams never import Play's screens statically. Builtin Play's registrations (`lib/theme-host/builtin/play-slots.tsx`, the one core module that names them) import small `'use client'` slots, and the seams (`MainLayout` through `components/theme-host/theme-frame-slot.tsx`; the two route layouts and `app/not-found.tsx` through `ThemeSlot`) draw them from there. Each slot exports `dynamic(() => import('./x').then((m) => m.X))` with SSR on: `components/play/shell/play-frame-lazy.tsx` (`PlayFrame`), `lib/theme-host/builtin/play-chat-lazy.tsx` (`PlayChat`; host code since PRD-261 A-14a, which also draws `MainLayout` around the chat, both through `import()`, since the chat imports the core only through `@automatos/theme-sdk`), `components/play/deliverables/play-shelf-lazy.tsx` (`PlayShelf`) and `components/play/edges/lost-screen-lazy.tsx` (`LostScreen`). Classic and Studio users download none of Play's frame, chat, shelf or 404 code and CSS. The slots keep SSR on, but the server never knows the width (`'pending'`), so Play's screens first render, and their chunks load, in the browser once Play renders them. `LookProvider` stays a static import: it must react to a runtime switch to Play. The guard test's section (e) walks the static import graph from each seam.
 
 ### Play's frame
 
@@ -561,7 +561,7 @@ frontend/
 │   ├── mascot/                    # AutoMascot and its CSS module
 │   ├── play/
 │   │   ├── shell/                 # PlayFrame (+ lazy slot), PlaySidebar, play-nav, ConnectionPill, PageColumns
-│   │   ├── chat/                  # Play's chat (+ lazy slot), the reply, its cards and turn details
+│   │   ├── chat/                  # Play's chat, the reply, its cards and turn details (its slot is lib/theme-host/builtin/play-chat-lazy.tsx)
 │   │   ├── conversations/         # Play's Conversations
 │   │   ├── deliverables/          # the shelf (+ lazy slot) and a Deliverable
 │   │   └── edges/                 # AsleepGate, the asleep and lost screens (+ lazy slot)
