@@ -7,10 +7,8 @@ import {
   useConversationList,
   useHostRouter,
   useStartChat,
+  useThemeLayout,
 } from '@automatos/theme-sdk'
-// PRD-261 A-14c seam: the SDK has no name for the theme layout yet (sdk-surface-map.md calls it
-// host-only, but ThemeSlotRoute renders a route at any width and leaves the phone to the route).
-import { useThemeLayout } from '@/hooks/use-studio-theme'
 
 import { type ConversationSummary, filterByTitle, summaryOfHostChat } from '../../../lib/play/conversations'
 import { AutoMascot } from '../../mascot/auto-mascot'
@@ -38,7 +36,8 @@ import styles from './conversations.module.css'
  * Play on this page, and below 1024 px, where Play's pages don't render (D7)
  * and the core chat's own history is the list. Until the width is known (the
  * server, hydration) it shows nothing and sends nowhere, so a phone never asks
- * for the list (P260-FX-25, M69).
+ * for the list (P260-FX-25, M69). The width is the SDK's useThemeLayout (the host's own value):
+ * ThemeSlotRoute renders a theme route at any width and leaves the phone to the route.
  */
 
 export const CONVERSATIONS_TITLE = 'Conversations'

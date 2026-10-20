@@ -7,7 +7,9 @@
  * the host's React) and hands back a small, theme-neutral copy: never the provider's whole value,
  * so a theme sees no webhook key, plan limits or settings, and the host can change its providers
  * without changing the SDK. Outside a provider each hook answers "unknown" (null, or the same
- * fail-open default the host's own chrome uses), never throws. The one exception is useHealth: it
+ * fail-open default the host's own chrome uses), never throws. useThemeLayout is the host's own
+ * width source for the active theme (hooks/use-studio-theme.ts), added by W-A5's seam owner for a
+ * theme route that must leave a phone to the host's page. The one exception is useHealth: it
  * reads react-query, so it needs the host's QueryClientProvider (components/providers.tsx) above it, as
  * every page and theme the host draws has; in an isolated mount without one, react-query throws.
  */
@@ -18,7 +20,9 @@ import { useWorkspaceOptional, type TrialState, type Workspace } from '@/compone
 import { useSystemRoleOptional } from '@/contexts/role-context'
 import { useBackendHealth, type BackendHealth, type BackendHealthOptions } from '@/hooks/use-backend-health'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
+import { useThemeLayout as useHostThemeLayout } from '@/hooks/use-studio-theme'
 import { authEdition, type AuthEdition } from '@/lib/auth-edition'
+import type { ThemeLayout } from '@/lib/theme-host/registry-types'
 
 export { useOnline } from '@/hooks/use-online'
 
@@ -28,6 +32,7 @@ export type HostSystemRole = 'super_admin' | 'admin' | 'user'
 export type HostTone = 'light' | 'dark'
 export type HostHealth = BackendHealth
 export type HostHealthOptions = BackendHealthOptions
+export type HostThemeLayout = ThemeLayout
 
 /** The workspace the page is in: who it is, its plan, and whether Socials is offered in it. */
 export interface HostWorkspace {
@@ -148,4 +153,14 @@ export function useTone(): HostTone | null {
   const { forcedTheme, resolvedTheme } = useTheme()
   const tone = forcedTheme ?? resolvedTheme
   return tone !== undefined && HOST_TONES.includes(tone) ? (tone as HostTone) : null
+}
+
+/**
+ * Where the active theme draws at this width: 'theme' at or above its minWidth, 'fallback' below it (or
+ * when no theme is active), 'pending' on the server and while hydrating, before the width is known
+ * (render nothing of the theme and send nowhere until then). The host's own value, the one its
+ * ThemeSlot and frame read (PRD-260 P260-FX-25, PRD-261 A-02a).
+ */
+export function useThemeLayout(): HostThemeLayout {
+  return useHostThemeLayout()
 }

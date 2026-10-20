@@ -9,12 +9,12 @@
  * Nothing on the plan's ban list: '@/…', 'next/*', '@tanstack/react-query', 'sonner', zustand,
  * the backend client.
  *
- * PENDING_SEAMS holds the imports the SDK has no planned name for yet, each a seam-review item;
- * the guard fails once one is gone, so the list only shrinks.
+ * Nothing is pending: the area's one seam item, the theme layout, is the SDK's
+ * `context.useThemeLayout` since W-A5's seam review (sdk-surface-map.md).
  *
  * Tests (__tests__/, *.test.ts[x]) are host-side harnesses and are not scanned. The plan's literal
  * check (`git grep -nE "from '(@/|next/|@tanstack/react-query|sonner)|from 'zustand'" -- <area>`)
- * does not exclude them, so besides the pending seam it prints the PRD-260 harness's two lines in
+ * does not exclude them, so it prints the PRD-260 harness's two lines in
  * play-conversations.test.tsx: QueryClientProvider (the SDK's hooks need the host's provider, as
  * the SDK's own page tests mount it) and CONVERSATION_LIMIT (the core's history call it asserts).
  *
@@ -58,14 +58,6 @@ const BANNED: readonly RegExp[] = [
   /^zustand(\/|$)/,
   /(^|\/)api-client(\.tsx?)?$/,
 ]
-/**
- * Imports the SDK has no planned name for (surface/*.json), kept until the seam review decides:
- * Conversations is a theme route, and ThemeSlotRoute renders a route at any width, so the page
- * itself sends a phone (and any style but Play) to /chat on the host's theme layout.
- */
-const PENDING_SEAMS: ReadonlyArray<readonly [string, string]> = [
-  ['components/play/conversations/play-conversations.tsx', '@/hooks/use-studio-theme'],
-]
 /** Code points the one-line rule is compared on: the BMP without surrogates, and the astral ranges it names. */
 const ASTRAL_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1f000, 0x1faff],
@@ -90,10 +82,6 @@ function areaFiles(): string[] {
   return [...inDirs, ...AREA_FILES].sort()
 }
 
-function isPending(file: string, specifier: string): boolean {
-  return PENDING_SEAMS.some(([seamFile, seamSpecifier]) => seamFile === file && seamSpecifier === specifier)
-}
-
 /** A relative specifier's target, relative to the frontend. */
 function relativeTarget(file: string, specifier: string): string {
   return path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
@@ -115,7 +103,7 @@ function specifiersOf(file: string): string[] {
 function refusals(): string[] {
   return areaFiles().flatMap((file) =>
     specifiersOf(file).flatMap((specifier) => {
-      const why = isPending(file, specifier) ? null : refusal(file, specifier)
+      const why = refusal(file, specifier)
       return why === null ? [] : [`${file} imports '${specifier}': ${why}`]
     }),
   )
@@ -169,11 +157,6 @@ describe('PRD-261 A-14c — the guard reads what it should', () => {
 describe("PRD-261 A-14c — Play's conversations import the core only through the SDK", () => {
   it("import only '@automatos/theme-sdk', react, react-dom and Play's own folders", () => {
     expect(refusals()).toEqual([])
-  })
-
-  it('still hold every pending seam, so the list is cut once the seam review decides', () => {
-    const missing = PENDING_SEAMS.filter(([file, specifier]) => !specifiersOf(file).includes(specifier))
-    expect(missing).toEqual([])
   })
 })
 
