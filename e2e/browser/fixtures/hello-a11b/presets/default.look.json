@@ -1,0 +1,7 @@
+{
+  "vars": {
+    "--hello-a11b-accent": "#2f6fed",
+    "--hello-a11b-ground": "#f4efe6",
+    "--hello-a11b-ink": "#1a1814"
+  }
+}

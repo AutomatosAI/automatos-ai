@@ -1,9 +1,8 @@
 'use client'
 
-import type { Told } from '@/hooks/use-notice-seq'
-
-import { useLook } from './look-provider'
 import styles from './manage.module.css'
+import type { Told } from './use-notice-seq'
+import { usePlayLook } from './use-play-look'
 
 /**
  * PRD-260 — what the last manage or import action on the Looks page did, in
@@ -12,9 +11,9 @@ import styles from './manage.module.css'
  * reader hears the change); failures are an alert listing the reasons.
  * Everything here is React text: an imported name is never read as HTML.
  * A success that changed the looks (`stored`) adds LOOKS_NOT_KEPT while
- * storage isn't keeping them (useLook().persisted), including when the write
+ * storage isn't keeping them (usePlayLook().persisted), including when the write
  * after the action is the one refused (M98).
- * Every notice carries a `seq` (hooks/use-notice-seq.ts): the words sit in a
+ * Every notice carries a `seq` (./use-notice-seq.ts): the words sit in a
  * <span key={seq}> inside the polite region and the alert is keyed by it, so
  * the same outcome twice (the same import, the same failure) is a new node a
  * screen reader announces again, never an unchanged text it skips (M22).
@@ -37,7 +36,7 @@ export function storedNotice(text: string): Notice {
 }
 
 export function LookNotice({ notice }: { readonly notice: Told<Notice> | null }) {
-  const { persisted } = useLook()
+  const { persisted } = usePlayLook()
   const notKept = notice?.kind === 'done' && notice.stored === true && !persisted
   return (
     <>

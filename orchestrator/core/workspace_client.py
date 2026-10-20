@@ -28,6 +28,16 @@ logger = logging.getLogger(__name__)
 BINARY_PIECE_BYTES = 600 * 1024
 PART_SUFFIX = ".part"
 
+# What a call the worker never answered returns (PRD-262 US-040), and the HTTP status the
+# workspace endpoints give it. The local edition also says how to start the worker.
+WORKER_NOT_RUNNING = "Workspace worker not running or unreachable"
+WORKER_UNAVAILABLE = 503
+WORKER_START_HINT = (
+    ". Workspace files, commands and Code Canvas need it: start it with "
+    "`docker compose up -d workspace-worker`, or `make up` without CORE=1 "
+    "(the core stack runs without it)"
+)
+
 # Singleton client — reused across the orchestrator process
 _client: Optional[httpx.AsyncClient] = None
 
@@ -52,12 +62,19 @@ def _worker_url(workspace_id: str, path: str) -> str:
 
 
 def _connection_error(action: str, err: Exception) -> Dict[str, Any]:
-    """Standard error response for connection/timeout failures."""
+    """The answer to a call the worker never served (PRD-262 US-040).
+
+    No connection, or none in time: the worker is not running (the core stack,
+    docker-compose.core.yml, leaves it out) or cannot be reached. Every workspace
+    endpoint answers this with a 503 and every agent workspace tool returns it, never a
+    500. A connected call that ran out of time says that instead. The transport's own
+    error goes to the log, not to the caller.
+    """
     logger.error("WorkspaceClient %s failed: %s", action, err)
-    return {
-        "success": False,
-        "error": f"Workspace worker unreachable ({action}): {err}",
-    }
+    if isinstance(err, httpx.TimeoutException) and not isinstance(err, httpx.ConnectTimeout):
+        return {"success": False, "error": f"Workspace worker timed out ({action})", "status_code": WORKER_UNAVAILABLE}
+    hint = WORKER_START_HINT if config.IS_LOCAL_EDITION else ""
+    return {"success": False, "error": f"{WORKER_NOT_RUNNING} ({action}){hint}", "status_code": WORKER_UNAVAILABLE}
 
 
 class WorkspaceClient:

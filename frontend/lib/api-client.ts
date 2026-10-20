@@ -1005,6 +1005,8 @@ export interface ThemeSettings {
   installRoles: string[]
   /** This caller may install (the gate of POST /api/themes/import). */
   canInstall: boolean
+  /** The platform switch THEMES_MARKETPLACE (services/themes/listings.py marketplace_switch). */
+  marketplace: 'on' | 'off'
   defaultInstallId: string | null
   pins: ThemePinState[]
   updatedAt: string | null
@@ -1026,6 +1028,132 @@ export interface ThemeLooks {
   defaultLook: Record<string, unknown> | null
   /** Saved looks the theme's current schema no longer accepts. */
   dropped: number
+}
+
+// ===== PRD-261 W-C2: the answers of api/marketplace_themes*.py and api/admin_themes.py (plan §2.2) =====
+/** services/themes/listings.py _publisher: the id's publisher; `official` for a reserved one. */
+export interface ThemeListingPublisher { name: string; official: boolean }
+
+/** listings.py installed_state: this workspace's active install of the listed theme. */
+export interface ThemeListingInstall {
+  installId: string; packageId: string; version: string
+  /** The install references the Marketplace package (false: the workspace's own upload of the theme). */
+  fromListing: boolean
+  /** A newer listed version this install can move to through A-07b's update route, else null. */
+  updatePackageId: string | null
+}
+
+/** One card of the Themes tab: GET /api/marketplace/themes (listings.py listing_summary). */
+export interface ThemeListing {
+  /** The theme id with its `/` written as `.` (`automatos/play` is `automatos.play`). */
+  listingId: string; themeId: string; name: string | null; description: string | null
+  publisher: ThemeListingPublisher; version: string; packageId: string
+  /** This host can run the version shown (the newest compatible one, else the newest). */
+  compatible: boolean
+  uses: string[]; pricing: string; cover: string | null
+  revoked: ThemeRevocationState | null; installed: ThemeListingInstall | null
+}
+
+/** listings.py previews_by_preset: one preset and its previews (screen null for the preset's own). */
+export interface ThemePresetPreviews { id: string; default: boolean; previews: { screen: string | null; url: string }[] }
+
+/** listings.py _version_entry: one approved version in the detail's versions map. */
+export interface ThemeListingVersion {
+  packageId: string; engines: Record<string, string> | null; compatible: boolean
+  revoked: ThemeRevocationState | null; createdAt: string | null
+}
+
+/** GET /api/marketplace/themes/{listingId} (listings.py listing_detail). */
+export interface ThemeListingDetail extends ThemeListing {
+  presets: ThemePresetPreviews[]; otherPreviews: string[]
+  readme: string | null; changelog: string | null
+  base: string | null; tone: string | null; minWidth: number | null
+  pages: string[]; routes: string[]
+  /** The newest version this host runs, or null when none does. */
+  latest: string | null
+  /** Version → its entry, newest first. */
+  versions: Record<string, ThemeListingVersion>
+}
+
+/** POST /api/marketplace/themes/{listingId}/install: 201 created, or 200 with the install it has. */
+export interface ThemeListingInstallResult { created: boolean; install: InstalledTheme }
+
+/** POST /api/marketplace/themes/submit (api/marketplace_themes_submit.py submission_item). */
+export interface ThemeSubmission {
+  package: {
+    id: string; themeId: string; version: string; name: string | null; digest: string
+    ownerType: string; status: string; reviewed: boolean
+    /** The verdict and the non-LLM checks only (review_stage.member_view). */
+    scanVerdict: string | null; scanReport: Record<string, unknown> | null
+  }
+  /** These exact bytes were submitted before (200 instead of 201). */
+  duplicate: boolean
+}
+
+/** services/themes/review.py package_summary: a Marketplace version in the review queue. */
+export interface ThemeReviewPackage {
+  id: string; themeId: string; version: string; name: string | null; publisher: string; digest: string
+  status: string; reviewed: boolean; scanVerdict: string | null
+  submittedBy: number | null; signed: boolean; createdAt: string | null
+}
+
+export type ThemeReportNoteOutcome = 'pass' | 'fail'
+
+/** review.py note_view: the isolated review job's summary the reviewer pasted (C-02b). */
+export interface ThemeReportNote {
+  summary: string; outcome: ThemeReportNoteOutcome; by: number | null
+  /** Absent in the answer of POST …/report-note itself. */
+  at?: string | null
+}
+
+/** review.py _approval: whether approve would pass now, and why not. */
+export interface ThemeApprovalState { allowed: boolean; reason: string | null }
+
+/** One row of GET /api/admin/themes/pending. */
+export interface ThemePendingVersion extends ThemeReviewPackage {
+  reportNote: ThemeReportNote | null; approval: ThemeApprovalState
+}
+
+/** review.py _history: one review event, newest first. */
+export interface ThemeReviewEvent {
+  event: string; from: string | null; to: string | null; by: number | null; reason: string | null; at: string | null
+}
+
+/** services/themes/signing.py request_signature / request_view: what a person hands the kit's sign workflow. */
+export interface ThemeSignatureRequest {
+  requestId: string
+  payload: { id: string; version: string; digest: string; files: Record<string, string> }
+  payloadSha256: string; algorithm: string; form: string
+  /** The exact text the kit signs. */
+  canonical: string | null
+}
+
+/** GET /api/admin/themes/{packageId}/report (review.py report). */
+export interface ThemeReviewReport extends ThemeReviewPackage {
+  manifest: Record<string, unknown> | null; scanReport: Record<string, unknown> | null
+  reportNote: ThemeReportNote | null; approval: ThemeApprovalState
+  history: ThemeReviewEvent[]; signatureRequest: ThemeSignatureRequest | null
+  /** Always false until C-05 verifies signatures. */
+  signatureVerified: boolean
+}
+
+/** POST …/report-note: the version with the note just stored. */
+export interface ThemeReportNoteResult extends ThemeReviewPackage { reportNote: ThemeReportNote }
+
+/** POST …/approve: the approved version, its signature request and how many installs were offered it. */
+export interface ThemeApprovalResult extends ThemeReviewPackage {
+  signatureRequest: ThemeSignatureRequest; updatesOffered: number
+}
+
+/** POST …/reject: the rejected version and the reason as stored. */
+export interface ThemeRejectionResult extends ThemeReviewPackage { reason: string }
+
+/** POST …/deactivate: the version taken down; its digest has a `disable` revocation. */
+export interface ThemeDeactivationResult extends ThemeReviewPackage { reason: string; revocation: 'disable' }
+
+/** POST …/signature (signing.py store_signature): stored, not verified (C-05). */
+export interface ThemeSignatureResult extends ThemeReviewPackage {
+  signature: { requestId: string; signature: string; algorithm: string; verified: boolean }
 }
 
 /** A theme id as path segments: `acme/hello` stays two segments, each one encoded. */
@@ -3630,6 +3758,87 @@ class ApiClient {
     return this.request<ThemeLooks>(`/api/themes/looks/${themeIdPath(themeId)}`, {
       method: 'PUT',
       body: JSON.stringify({ looks: looks.looks, active: looks.active }),
+    })
+  }
+
+  // ===== PRD-261 W-C2: the Marketplace's Themes tab and the admin review queue (W-C1 routes, plan §2.2) =====
+  /** GET /api/marketplace/themes: every approved theme, one card each (member). */
+  async getThemeListings(): Promise<{ listings: ThemeListing[] }> {
+    return this.request<{ listings: ThemeListing[] }>('/api/marketplace/themes')
+  }
+
+  /** GET /api/marketplace/themes/{listingId}: previews per preset, docs and the versions map (member). */
+  async getThemeListing(listingId: string): Promise<ThemeListingDetail> {
+    return this.request<ThemeListingDetail>(`/api/marketplace/themes/${encodeURIComponent(listingId)}`)
+  }
+
+  /**
+   * POST /api/marketplace/themes/{listingId}/install: add a listed version to this workspace by
+   * reference (manage + who installs + step-up). Without a packageId the server installs the
+   * newest version this host runs.
+   */
+  async installThemeListing(listingId: string, packageId?: string): Promise<ThemeListingInstallResult> {
+    return this.request<ThemeListingInstallResult>(`/api/marketplace/themes/${encodeURIComponent(listingId)}/install`, {
+      method: 'POST',
+      body: JSON.stringify(packageId === undefined ? {} : { packageId }),
+    })
+  }
+
+  /** POST /api/marketplace/themes/submit: submit a .autotheme for review (member + step-up). */
+  async submitTheme(file: File): Promise<ThemeSubmission> {
+    const form = new FormData()
+    form.append('file', file)
+    return this.request<ThemeSubmission>('/api/marketplace/themes/submit', { method: 'POST', body: form })
+  }
+
+  /** GET /api/admin/themes/pending: the versions waiting for review, oldest first (platform admin). */
+  async getPendingThemes(limit?: number): Promise<{ pending: ThemePendingVersion[] }> {
+    const query = limit === undefined ? '' : `?limit=${encodeURIComponent(String(limit))}`
+    return this.request<{ pending: ThemePendingVersion[] }>(`/api/admin/themes/pending${query}`)
+  }
+
+  /** GET /api/admin/themes/{packageId}/report: scan report, note, history and signature request (platform admin). */
+  async getThemeReport(packageId: string): Promise<ThemeReviewReport> {
+    return this.request<ThemeReviewReport>(`/api/admin/themes/${encodeURIComponent(packageId)}/report`)
+  }
+
+  /** POST /api/admin/themes/{packageId}/report-note: store the isolated review job's summary (admin + step-up). */
+  async addThemeReportNote(
+    packageId: string,
+    note: { summary: string; outcome: ThemeReportNoteOutcome },
+  ): Promise<ThemeReportNoteResult> {
+    return this.request<ThemeReportNoteResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/report-note`, {
+      method: 'POST',
+      body: JSON.stringify({ summary: note.summary, outcome: note.outcome }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/approve: refused for a blocked or not-run scan (admin + step-up). */
+  async approveTheme(packageId: string): Promise<ThemeApprovalResult> {
+    return this.request<ThemeApprovalResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/approve`, { method: 'POST' })
+  }
+
+  /** POST /api/admin/themes/{packageId}/reject: reject a pending version with a reason (platform admin). */
+  async rejectTheme(packageId: string, reason: string): Promise<ThemeRejectionResult> {
+    return this.request<ThemeRejectionResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/deactivate: take an approved version down (admin + step-up). */
+  async deactivateTheme(packageId: string, reason: string): Promise<ThemeDeactivationResult> {
+    return this.request<ThemeDeactivationResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/deactivate`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/signature: the kit's base64 Ed25519 signature for the open request (admin + step-up). */
+  async storeThemeSignature(packageId: string, requestId: string, signature: string): Promise<ThemeSignatureResult> {
+    return this.request<ThemeSignatureResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/signature`, {
+      method: 'POST',
+      body: JSON.stringify({ requestId, signature }),
     })
   }
 }

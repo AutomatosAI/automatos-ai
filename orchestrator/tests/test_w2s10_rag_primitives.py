@@ -24,16 +24,11 @@ These are exercised on a bare instance (``__new__`` bypasses the DB-reading
 from __future__ import annotations
 
 import os
-import sys
-import types
 
 for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
     os.environ.setdefault(_k, "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
-
-# modules/rag/__init__ pulls camelot (optional PDF dep, absent in test env).
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 import pytest  # noqa: E402
 

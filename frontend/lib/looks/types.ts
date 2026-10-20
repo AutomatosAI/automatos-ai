@@ -10,10 +10,6 @@ export const LOOK_INTERFACE = 'play'
 
 export const GLOW_MIN = 0
 export const GLOW_MAX = 40
-/** For `name` and `sub`, counted in characters (code points). */
-export const LOOK_TEXT_MAX = 40
-/** Letters, digits and dashes, so an id is safe as a storage key or a React key. */
-export const LOOK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
 export interface Look {
   readonly schema: typeof LOOK_SCHEMA

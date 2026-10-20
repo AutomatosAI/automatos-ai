@@ -16,8 +16,8 @@ import logging
 import threading
 import time
 from datetime import datetime
+from importlib.util import find_spec
 from typing import List, Optional, Dict, Any, Tuple
-from uuid import UUID
 
 from config import config
 from core.composio import lookup_cache
@@ -1516,17 +1516,19 @@ def get_composio_client() -> ComposioClient:
 # =============================================================================
 #
 # "Available" means the platform can actually reach Composio: a key is
-# configured (config only — never os.getenv here) AND the SDK imports. Every
-# consumer that decides whether to OFFER or RUN a Composio tool asks this one
-# predicate; nothing else probes the key. Evaluated once per process (the key
-# is env-only and the SDK install is static) — ``reset_composio_availability``
-# exists for tests that flip the config.
+# configured (config only — never os.getenv here) AND the SDK is installed, found
+# with find_spec and not imported: importing it loaded the whole SDK at boot, in
+# TOOL_SYNC, only to learn it was there; the first real call imports it, through
+# _get_composio() (PRD-262 US-032). Every consumer that decides whether to OFFER or
+# RUN a Composio tool asks this one predicate; nothing else probes the key.
+# Evaluated once per process — ``reset_composio_availability`` resets it for tests.
 
 COMPOSIO_UNAVAILABLE_NO_KEY = "COMPOSIO_KEY is not configured"
 # NOTE: keep "composio-openai" out of this string — tool_router's
 # _is_fatal_dependency_error() keys on it and would replace the honest
 # message with a generic "restart the backend" line.
 COMPOSIO_UNAVAILABLE_NO_SDK = "Composio SDK is not installed (composio-core package missing)"
+COMPOSIO_SDK_PACKAGE = "composio"  # the SDK's top-level package, which the probe finds
 
 _availability: Optional[Tuple[bool, Optional[str]]] = None
 
@@ -1534,9 +1536,7 @@ _availability: Optional[Tuple[bool, Optional[str]]] = None
 def _probe_composio_availability() -> Tuple[bool, Optional[str]]:
     if not config.COMPOSIO_API_KEY:
         return False, COMPOSIO_UNAVAILABLE_NO_KEY
-    try:
-        _get_composio()
-    except ImportError:
+    if find_spec(COMPOSIO_SDK_PACKAGE) is None:
         return False, COMPOSIO_UNAVAILABLE_NO_SDK
     return True, None
 

@@ -27,7 +27,7 @@ spec:
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
-          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.worker.image) }}
           env:
             - name: WORKSPACE_VOLUME_PATH
               value: /workspaces

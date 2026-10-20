@@ -8,8 +8,8 @@ the bug only stayed hidden because the unit suites used an in-memory fake
 executor instead of this real handler.
 
 The handler is loaded directly from its file: importing the `modules.tools`
-package pulls in the RAG/multimodal chain (camelot) that isn't installed in the
-unit env. The function's `from core.models.core import BoardTask` runs at call
+package pulls in the whole RAG/multimodal chain, which this handler doesn't
+need. The function's `from core.models.core import BoardTask` runs at call
 time and resolves the real ORM class, so the SQLAlchemy class-attribute
 expressions are genuine — the fake query just ignores them. The JSONB `tags`
 *filter* (`tags @> [...]`) needs a real Postgres and is exercised at the

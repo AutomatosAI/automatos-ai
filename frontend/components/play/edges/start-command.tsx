@@ -13,12 +13,12 @@ import styles from './edges.module.css'
  *
  * The command is SETUP.md's day-to-day start, `make up` (P260-FX-21, M84): it
  * starts Automatos in the background, where `docker compose up` held the
- * terminal. START_HINT names the start for an install from the published
- * images (`make up` would build from source there) and for a machine without make.
+ * terminal, and runs the published images (PRD-262 US-036). START_HINT names
+ * the start for a machine without make.
  */
 
 export const START_COMMAND = 'make up'
-export const START_HINT = 'Installed with the published images? Run make up-images. No make? docker compose up -d'
+export const START_HINT = 'No make? docker compose up -d'
 export const COPY_LABEL = 'Copy'
 export const COPIED_LABEL = 'Copied'
 export const COPY_FAILED = "Couldn't copy it. Select the command and copy it yourself."

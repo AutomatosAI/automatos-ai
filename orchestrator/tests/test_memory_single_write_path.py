@@ -59,13 +59,6 @@ if _ic_stub_installed:
     _ic_stub.get_intent_classifier = lambda: MagicMock()
     sys.modules["consumers.chatbot.intent_classifier"] = _ic_stub
 
-# ``smart_memory`` is imported lazily by smart_orchestrator only for type
-# hints / runtime calls *we mock on the fake self* — but we DO want to be able
-# to test the real ``SmartMemoryManager.store_conversation`` shape below, so
-# stub anything it would pull at module load time. We avoid importing it here
-# at module load (the source is loaded on-demand inside one of the tests).
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
 from consumers.chatbot.smart_orchestrator import SmartChatOrchestrator  # noqa: E402
 
 # De-pollute: our intent_classifier stub is intentionally partial (no

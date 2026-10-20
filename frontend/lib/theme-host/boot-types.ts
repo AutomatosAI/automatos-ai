@@ -1,6 +1,6 @@
 /**
  * PRD-261 A-03 — the shape of a theme's first-paint data (plan §2.2), in a file of its own so
- * the modules that build a theme's prepaint table (lib/looks/prepaint.ts) can name the types
+ * the modules that build a theme's prepaint table (lib/theme-host/builtin/play-prepaint.ts) can name the types
  * without loading the boot resolver. lib/theme-host/boot.ts re-exports every one of them.
  */
 import type { ThemeTonePolicy, UiStyle } from './registry-types'
@@ -55,7 +55,7 @@ export interface PrepaintTable {
   readonly defaults: Readonly<Record<string, string | number>>
 }
 
-/** Where the boot script finds the cached active look (Play: lib/looks/storage.ts). */
+/** Where the boot script finds the cached active look (Play: lib/theme-host/builtin/play-look-storage.ts). */
 export interface ThemeLookStorage {
   /** Holds the current scope; the scoped key is scopedPrefix + that scope. */
   readonly pointerKey: string

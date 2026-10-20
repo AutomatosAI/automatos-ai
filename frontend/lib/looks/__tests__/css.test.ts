@@ -5,19 +5,18 @@
  */
 import { describe, expect, it } from 'vitest'
 
+import { AA_TEXT, READABLE_TARGET, contrastRatio } from '@/lib/look-kit/contrast'
+import { rgbList, rgba } from '@/lib/look-kit/css'
 import { ACCENT_KEYS, GROUNDS, GROUND_KEYS, TYPE_STYLES, TYPE_STYLE_KEYS } from '@/lib/looks/catalogue'
-import { AA_TEXT, READABLE_TARGET, contrastRatio } from '@/lib/looks/contrast'
 import {
   GLOW_VAR,
   LOOK_VAR_NAMES,
   fontVars,
   lookToCssVars,
-  rgbList,
-  rgba,
   safeGlow,
   sheetOf,
   snagGlowAlpha,
-} from '@/lib/looks/css'
+} from '@/lib/looks/engine'
 import { DAYLIGHT, EMBER, PRESETS } from '@/lib/looks/presets'
 
 describe('lookToCssVars', () => {

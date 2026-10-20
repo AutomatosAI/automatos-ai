@@ -13,9 +13,7 @@ Three pure seams, no DB:
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
-import sys as _sys
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
 # tests/test_harness_self_management.py) — the port points at nothing so the
@@ -28,21 +26,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-# Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which
-# pulls modules.rag's ingestion chain (camelot at module top). Stub the missing
-# *leaf* only when truly absent — never the modules.rag package.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 # CI collection-order guard: earlier-collected tests stub modules.*/consumers.*
 # in sys.modules (bare ModuleType, no __spec__). On Linux collection order the

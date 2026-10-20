@@ -17,8 +17,6 @@ not the preview.
 from __future__ import annotations
 
 import os
-import sys
-import types
 
 # --- collection-order guard (Ralph mandate for module-level modules.* import) -
 os.environ.setdefault("POSTGRES_USER", "test")
@@ -26,8 +24,6 @@ os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
-# modules/rag/__init__ pulls camelot (optional PDF dep, absent in test env).
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 import tests.conftest as _conftest  # noqa: E402
 _conftest._restore_real_app_modules()
