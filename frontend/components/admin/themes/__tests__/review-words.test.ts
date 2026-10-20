@@ -1,17 +1,21 @@
 /**
- * PRD-261 C-03b — reading a scan report, the approve rule and the note's digest line.
+ * PRD-261 C-03b — reading a scan report, the approve rule and the note's digest line; C-05b — a
+ * stored signature in words.
  */
 import { describe, expect, it } from 'vitest'
 
 import {
   SCAN_BLOCKED,
   SCAN_NOT_RUN,
+  SIGNATURE_INVALID,
+  SIGNATURE_VERIFIED,
   approveRefusal,
   noteDigestLine,
   noteNamesDigest,
   reportChecksOf,
+  storedSignatureWords,
 } from '../review-words'
-import { DIGEST, SCAN_REPORT_V2, kitSummary } from './review-fixtures'
+import { DIGEST, KEY_ID, RETIRED_KEY_ID, SCAN_REPORT_V2, kitSummary } from './review-fixtures'
 
 const ALLOWED = { allowed: true, reason: null }
 
@@ -74,5 +78,19 @@ describe('noteNamesDigest', () => {
     expect(noteNamesDigest(kitSummary('e'.repeat(64)), DIGEST)).toBe(false)
     expect(noteNamesDigest(`Package digest: ${DIGEST}`, DIGEST)).toBe(false)
     expect(noteNamesDigest(`see ${DIGEST}`, DIGEST)).toBe(false)
+  })
+})
+
+describe('storedSignatureWords (C-05b)', () => {
+  it('a signature an active key verifies names that key', () => {
+    expect(storedSignatureWords(true, KEY_ID)).toBe(`Verified with the active Automatos key ${KEY_ID}.`)
+    expect(storedSignatureWords(true, null)).toBe(SIGNATURE_VERIFIED)
+  })
+
+  it('one no active key verifies says so, and names the retired or revoked key that does', () => {
+    expect(storedSignatureWords(false, null)).toBe(SIGNATURE_INVALID)
+    expect(storedSignatureWords(false, RETIRED_KEY_ID)).toBe(
+      `${SIGNATURE_INVALID} Only ${RETIRED_KEY_ID}, a retired or revoked key, verifies it.`,
+    )
   })
 })

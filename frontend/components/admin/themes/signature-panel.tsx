@@ -6,8 +6,10 @@
  * The orchestrator never holds a signing key (`services/themes/signing.py`). Approve records a
  * signature request; a person runs the kit's "Theme sign" workflow with the WHOLE request JSON
  * shown here (its `request` input), and pastes the base64 Ed25519 signature it prints. The server
- * checks the shape and that it answers this version's open request, and stores it. Nothing
- * verifies it yet (C-05), and the panel says so.
+ * checks the shape and that it answers this version's open request, and stores it only when an
+ * active Automatos signing key verifies it (C-05b; a 400 otherwise). The report checks the stored
+ * signature again on every read (`signatureVerified`, `keyId`): the panel names the active key that
+ * verifies it, or says no active key does.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -17,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import type { ThemeReviewReport, ThemeSignatureRequest } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
-import { SIGNATURE_NOT_VERIFIED } from './review-words'
+import { storedSignatureWords } from './review-words'
 import { useStoreThemeSignature } from './use-theme-review'
 
 export const SAVE_SIGNATURE = 'Save signature'
@@ -98,8 +100,8 @@ export function SignaturePanel({ report }: { report: ThemeReviewReport }) {
     <section aria-label="Signature" className="space-y-2 rounded-lg border border-border/50 p-3">
       <p className="text-sm font-medium">Signature</p>
       {report.signed ? (
-        <p className="text-xs" data-testid="theme-signed">
-          Signed. {SIGNATURE_NOT_VERIFIED}
+        <p className={report.signatureVerified ? 'text-xs' : 'text-xs text-destructive'} data-testid="theme-signed">
+          Signed. {storedSignatureWords(report.signatureVerified, report.keyId)}
         </p>
       ) : report.signatureRequest ? (
         <OpenRequest packageId={report.id} request={report.signatureRequest} />
