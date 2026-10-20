@@ -93,7 +93,7 @@ SPOKEN_LEAD_SECONDS = 2.5
 AUDIO_ONLY_FORMATS: FrozenSet[str] = frozenset({"audio"})
 
 # What the receipt says about the setting (``summary``).
-ON_LINE = '{name}: on. The caption starts with "{label}".'
+ON_LINE = '{name}: on. The caption starts with "{label}"'  # the label ends in its own full stop
 OFF_LINE = "{name}: off for this post. You are responsible for disclosing deep fakes."
 VIDEO_LINE = ' The video shows "{text}" for its first {seconds:g} s and again every {interval:g} s.'
 RENDER_AGAIN = " The video was rendered with the label {was}: render it again before it is approved or published."
