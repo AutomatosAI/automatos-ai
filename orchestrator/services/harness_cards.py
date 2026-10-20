@@ -63,10 +63,10 @@ class CardSettings:
 
 @dataclass(frozen=True)
 class Outcome:
-    """One proposal on the evidence ticket: its prescription, and its card's grant id
+    """One proposal on the evidence ticket: what PRESCRIBE suggested, and its card's grant id
     (None when the card could not be raised) or why it got none."""
 
-    prescription: Mapping[str, Any]
+    proposal: Mapping[str, Any]
     grant_id: Optional[int] = None
     no_card: Optional[str] = None
 
@@ -94,7 +94,7 @@ def _value(value: Any, key: str) -> Any:
 
 
 def change_and_approve(rx: Mapping[str, Any]) -> Tuple[str, str]:
-    """What changes, and what approving does, for a prescription of an apply kind."""
+    """What changes, and what approving does, for a proposal of an apply kind."""
     agent, kind = rx["target_name"], rx["change_type"]
     before, after = rx.get("current_value"), rx.get("proposed_value")
     if kind == HEARTBEAT_TUNE:
@@ -154,7 +154,7 @@ def evidence_title(week: str, count: int) -> str:
 
 
 def _evidence_line(outcome: Outcome, settings: CardSettings) -> str:
-    rx = outcome.prescription
+    rx = outcome.proposal
     if outcome.grant_id is not None:
         card = CARD_RAISED.format(grant_id=outcome.grant_id)
     else:

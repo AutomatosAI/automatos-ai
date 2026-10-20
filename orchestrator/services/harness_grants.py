@@ -234,19 +234,19 @@ def proposals_on(db: "Session", workspace_id: Union[UUID, str]) -> bool:
     return workspace is not None and harness_mode(workspace.settings) == PROPOSE
 
 
-def _due(db: "Session", workspace_id: UUID, prescriptions: Sequence[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
-    """The valid apply-kind prescriptions to raise: none for an agent and kind that
-    already has an open ledger row (a card waiting for its click, or being applied)."""
+def _due(db: "Session", workspace_id: UUID, proposals: Sequence[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """The valid apply-kind proposals to raise: none for an agent and kind that already
+    has an open ledger row (a card waiting for its click, or being applied)."""
     taken: Set[Tuple[Optional[int], Optional[str]]] = set(
         db.query(HarnessTaskLedger.target_agent_id, HarnessTaskLedger.kind)
         .filter(HarnessTaskLedger.workspace_id == workspace_id, HarnessTaskLedger.state.in_(OPEN_STATES)).all())
     due: List[Mapping[str, Any]] = []
-    for rx in prescriptions:
+    for rx in proposals:
         pair = (rx.get("target_id"), rx.get("change_type"))
         if rx.get("apply_kind") is True and pair not in taken:
             taken = taken | {pair}
             due.append(rx)
-    skipped = sum(1 for rx in prescriptions if rx.get("apply_kind") is True) - len(due)
+    skipped = sum(1 for rx in proposals if rx.get("apply_kind") is True) - len(due)
     if skipped:
         logger.info("[HARNESS] %d proposal(s) in %s already have an open card; none raised for them",
                     skipped, workspace_id)
@@ -294,8 +294,8 @@ def _raise_one(db: "Session", workspace_id: UUID, run_id: int, task_id: int, rx:
     )
     if grant is None or not isinstance(getattr(grant, "id", None), int):
         savepoint.rollback()
-        logger.warning("[HARNESS] The Approvals card for %s in %s could not be raised", rx["prescription_id"],
-                       workspace_id)
+        logger.warning("[HARNESS] An Approvals card in %s could not be raised (%s for agent %s)", workspace_id,
+                       rx["change_type"], rx["target_id"])
         return _ledger_row(workspace_id, run_id, rx, LEDGER_RAISE_FAILED, task_id, reason=NOT_RAISED)
     savepoint.commit()
     return _ledger_row(workspace_id, run_id, rx, LEDGER_PENDING, task_id, grant_id=grant.id)
@@ -337,18 +337,18 @@ def _raise(db: "Session", workspace_id: UUID, run_id: int, due: Sequence[Mapping
 
 
 def raise_cards(db: "Session", workspace_id: Union[UUID, str], run_id: int,
-                prescriptions: Sequence[Mapping[str, Any]], diagnosis: Mapping[str, Any]) -> Raised:
+                proposals: Sequence[Mapping[str, Any]], diagnosis: Mapping[str, Any]) -> Raised:
     """US-054: in a ``propose`` workspace while proposals are switched on
     (:func:`proposals_on`), raise one tool_call grant for ``platform_harness_apply`` on
-    ``{"rx_id": ...}`` per valid apply-kind prescription (none while that agent and kind
-    has an open row), each with its section 8 text and a ledger row, all linked to one
-    evidence ticket for the run; and commit. A report_only workspace, or the switch off,
-    raises nothing. The handler resolves Auto itself (US-052). A failure is logged and
-    rolled back, and nothing is raised."""
+    ``{"rx_id": ...}`` per valid apply-kind proposal of PRESCRIBE (none while that agent
+    and kind has an open row), each with its section 8 text and a ledger row, all linked
+    to one evidence ticket for the run; and commit. A report_only workspace, or the switch
+    off, raises nothing. The handler resolves Auto itself (US-052). A failure is logged
+    and rolled back, and nothing is raised."""
     ws = _workspace(workspace_id)
     if not proposals_on(db, ws):
         return Raised()
-    due = _due(db, ws, prescriptions)
+    due = _due(db, ws, proposals)
     if not due:
         return Raised()
     try:
