@@ -32,7 +32,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import object_session
 
 from core.models.socials import SocialPostTarget
-from modules.socials import media_urls, publish_lifecycle, service
+from modules.socials import ai_media, media_urls, publish_lifecycle, service
 from modules.socials.capabilities import ChannelStep
 from modules.socials.publish_lifecycle import TARGET_FAILED, TARGET_PENDING, TARGET_PUBLISHED, TARGET_UPLOADING
 from modules.socials.publish_sources import StalePlan, TargetContext, context_for, steps_of
@@ -121,10 +121,11 @@ def begin_attempt(factory: Callable[[], Any], target_id: UUID) -> bool:
         db.close()
 
 
-def _write(factory: Callable[[], Any], target_id: UUID, notes: Sequence[str], **values: Any) -> None:
-    """Write the end of an attempt onto a target this run holds (uploading). The row
-    is locked first: a post ended meanwhile as lost (``end_lost``) keeps its end,
-    and this attempt is not written over it."""
+def _write(factory: Callable[[], Any], target_id: UUID, notes: Sequence[str], ai_label: str = "", **values: Any) -> None:
+    """Write the end of an attempt onto a target this run holds (uploading), with the AI
+    label decision it published with (PRD-264, ``ai_media.LABEL``). The row is locked
+    first: a post ended meanwhile as lost (``end_lost``) keeps its end, and this attempt
+    is not written over it."""
     db = factory()
     try:
         target = db.query(SocialPostTarget).filter(SocialPostTarget.id == target_id).with_for_update().one_or_none()
@@ -136,23 +137,29 @@ def _write(factory: Callable[[], Any], target_id: UUID, notes: Sequence[str], **
             setattr(target, name, value)
         plan = dict(target.action_plan or {})
         plan[NOTES] = list(notes)
+        if ai_label:
+            plan[ai_media.LABEL] = ai_label
         target.action_plan = plan
         db.commit()
     finally:
         db.close()
 
 
-def fail_attempt(factory: Callable[[], Any], target_id: UUID, message: str, notes: Sequence[str]) -> None:
-    _write(factory, target_id, notes, status=TARGET_FAILED, error=message)
+def fail_attempt(
+    factory: Callable[[], Any], target_id: UUID, message: str, notes: Sequence[str], *, ai_label: str = "",
+) -> None:
+    _write(factory, target_id, notes, ai_label, status=TARGET_FAILED, error=message)
 
 
 def record_published(
     factory: Callable[[], Any], target_id: UUID, remote_id: Optional[str], permalink: Optional[str], notes: Sequence[str],
+    *, ai_label: str = "",
 ) -> None:
     _write(
         factory,
         target_id,
         notes,
+        ai_label,
         status=TARGET_PUBLISHED,
         error=None,
         remote_id=remote_id[:REMOTE_ID_MAX_CHARS] if remote_id else None,

@@ -28,7 +28,7 @@ jobs:
       IMAGE: media-render:ci
       TEST_IMAGE: media-render:test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # US-104 (S1.1c): the local edition runs the renderer as the optional
       # compose profile `media`, and the backend's SOCIALS_RENDER_URL points at it.
       # Throwaway values for the three `:?`-required secrets; nothing starts.
@@ -254,12 +254,32 @@ jobs:
             --job "$out/job.json" --min-line-seconds 0.5 --max-voice-seconds 2.394 \
             --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
           python3 -c 'import json, sys; t = json.load(open(sys.argv[1]))["report"]["timings"]; print("check_seconds:", t.get("check_seconds"), "s (5.009 s in run 37612086159; report only)")' "$out/job.json"
+      # PRD-264 EUAI-06a (EU AI Act Art. 50(2)): the MP4 carries the IPTC "AI-generated"
+      # mark, read back with the image's own exiftool (the writer, D14). The fixture bundle
+      # names no ai_inputs (an older caller), so only its Kokoro line counts as AI: a
+      # synthetic voice over the template's visuals is a composite. Its packet carries a
+      # random xmpMM:InstanceID too (FR-16). Every format's own read-back, and the packet's
+      # field allowlist, run in tests/test_provenance*.py above.
+      - name: The MP4 carries its AI mark (exiftool reads the IPTC DigitalSourceType back)
+        run: |
+          out="$RUNNER_TEMP/out"
+          expected="http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
+          found=$(docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -n -s3 -XMP-iptcExt:DigitalSourceType /out/fixture.mp4)
+          echo "DigitalSourceType: $found"
+          docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -b -XMP /out/fixture.mp4; echo
+          if [ "$found" != "$expected" ]; then echo "::error::the fixture MP4 is not marked $expected"; exit 1; fi
+          instance=$(docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -s3 -XMP-xmpMM:InstanceID /out/fixture.mp4)
+          echo "InstanceID: $instance"
+          if ! echo "$instance" | grep -Eqx 'xmp\.iid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'; then
+            echo "::error::the fixture MP4 carries no random InstanceID (FR-16)"; exit 1
+          fi
+          echo "the fixture MP4 carries DigitalSourceType $expected and a random InstanceID: PASS"
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
       - name: Keep the rendered fixture
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: media-render-fixture
           path: ${{ runner.temp }}/out
@@ -306,7 +326,7 @@ jobs:
             --pcm "$out/script.pcm" --rate 16000 --duration 9.0 --expect-fitted l01 --max-tempo 1.25
       - name: Keep the rendered fixture script
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: media-render-fixture-script
           path: ${{ runner.temp }}/script
@@ -355,7 +375,7 @@ jobs:
             --credit 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.'
       - name: Keep the rendered video with music
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: media-render-fixture-music
           path: ${{ runner.temp }}/music-render
@@ -464,7 +484,7 @@ jobs:
       SHARDS: 4
       PER_JOB: 2
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the image (default target, as Railway builds it)
         run: docker build -t "$IMAGE" services/media-render/
       - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
@@ -505,7 +525,7 @@ jobs:
           exit $code
       - name: Keep the seeded templates' previews
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: media-render-template-previews-${{ matrix.shard }}
           path: ${{ runner.temp }}/templates

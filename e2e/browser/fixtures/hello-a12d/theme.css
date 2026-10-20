@@ -1,0 +1,11 @@
+/* PRD-261 A-12d: the SDK agents-page hello theme's one stylesheet. Every rule sits under
+   html.hello-a12d, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12d .hello-a12d-frame {
+  min-height: 100vh;
+  background: var(--hello-a12d-ground);
+  color: var(--hello-a12d-ink);
+}
+
+html.hello-a12d .hello-a12d-page {
+  padding: 24px;
+}

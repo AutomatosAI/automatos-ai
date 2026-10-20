@@ -4,7 +4,13 @@
     POST /render                     a composition bundle -> 202 job | 422 findings | 400 | 429 | 502 | 503
     GET  /render/{id}                the job: status, check report, timings, outputs
     GET  /render/{id}/output/{name}  the rendered file (Range requests work)
-    POST /tts                        Kokoro lines -> durations and voiced segments (WAVs on request)
+    POST /tts                        Kokoro lines -> durations and voiced segments (WAVs on request, marked AI-made)
+    POST /jpeg                       an image -> the same picture as a JPEG, keeping its AI mark
+
+A WAV /tts hands out is marked AI-made after it is spoken and before the answer
+is built (PRD-264 EUAI-06a, tts.mark_audio): one that cannot be marked is a 500
+``voice_unmarked`` and no WAV goes out. Without ``include_audio`` no WAV leaves,
+and none is marked.
 
 Every path but /health needs X-Internal-Token when one is configured, copied
 from the worker (services/workspace-worker/main.py). Boot refuses production
@@ -42,7 +48,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, Mapping, Optional, Set
+from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, Mapping, Optional, Sequence, Set
 
 from aiohttp import web
 
@@ -51,10 +57,12 @@ from .config import Settings
 from .hyperframes import LOG_TAIL_CHARS
 from .jpeg import JPEG_CONTENT_TYPE, JpegError, to_jpeg
 from .jobs import DONE, FAILED, QUEUED, REJECTED, RENDERING, Job, JobStore, delete_files, job_json, remove_working_files, reset_work_dir
+from .kokoro_tts import SpokenLine
 from .lanes import Lane
 from .music import Track, load_library
 from .pipeline import CheckOutcome, Pipeline, PipelineError, RenderPipeline
-from .tts import Speaker, line_report, parse_tts_request
+from .provenance import ProvenanceError, carry_mark
+from .tts import Speaker, line_report, mark_audio, parse_tts_request
 from .validate import BundleError
 from .versions import read_versions
 from .voices_build import voice_names
@@ -274,6 +282,16 @@ async def get_output(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path)
 
 
+async def _unmarked_refusal(settings: Settings, spoken: Sequence[SpokenLine]) -> Optional[web.Response]:
+    """EUAI-06a: mark the WAVs a /tts answer will carry; a 500 when one cannot be, so none leaves unmarked."""
+    try:
+        await asyncio.to_thread(mark_audio, spoken, settings)
+    except ProvenanceError as exc:
+        logger.error("tts: the spoken lines could not be marked as AI-made: %s", exc)
+        return _error(500, "voice_unmarked", "the spoken lines could not be marked as AI-made")
+    return None
+
+
 async def post_tts(request: web.Request) -> web.Response:
     state = request.app[STATE]
     payload = await _read_json(request)
@@ -287,6 +305,9 @@ async def post_tts(request: web.Request) -> web.Response:
             spoken = await state.speaker.speak(spec.lines, Path(scratch), voice=spec.voice, speed=spec.speed, lang=spec.lang)
         except ValueError as exc:  # Kokoro's refusal: an unknown voice, a line with nothing to say
             return _error(400, "voice_refused", f"Kokoro could not speak the lines: {exc}")
+        refusal = await _unmarked_refusal(state.settings, spoken) if spec.include_audio else None
+        if refusal is not None:
+            return refusal
         lines = [
             line_report(line_id, said, include_audio=spec.include_audio) for (line_id, _), said in zip(spec.lines, spoken)
         ]
@@ -302,7 +323,8 @@ async def post_tts(request: web.Request) -> web.Response:
 
 async def post_jpeg(request: web.Request) -> web.Response:
     """``POST /jpeg``: the image in the body, answered as a JPEG (US-303: Instagram
-    takes JPEG only, and the stills are PNG)."""
+    takes JPEG only, and the stills are PNG). The conversion drops metadata, so the
+    JPEG is given the AI mark the image carried, after its encode (PRD-264 EUAI-06a)."""
     settings = request.app[STATE].settings
     image = await request.read()
     try:
@@ -311,6 +333,13 @@ async def post_jpeg(request: web.Request) -> web.Response:
         )
     except JpegError as exc:
         return _error(400, "not_an_image", str(exc))
+    try:
+        jpeg = await asyncio.to_thread(
+            carry_mark, image, jpeg, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
+        )
+    except ProvenanceError as exc:
+        logger.error("jpeg: the image's AI mark could not be carried to the JPEG: %s", exc)
+        return _error(500, "mark_failed", "the JPEG could not be given the image's AI mark")
     return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE)
 
 

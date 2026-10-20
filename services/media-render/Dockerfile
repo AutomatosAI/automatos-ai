@@ -222,9 +222,11 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg (encode, mix, ffprobe), tini (PID 1 reaps Chrome's orphans), fonts,
-# libstdc++6 (the node binary's one library beyond glibc and libgcc-s1), and the
-# libraries chrome-headless-shell needs on Debian trixie: the worker's list
+# ffmpeg (encode, mix, ffprobe), exiftool (PRD-264 EUAI-06a, D14: it writes and reads
+# the IPTC "AI-generated" XMP mark on every output), tini (PID 1 reaps Chrome's
+# orphans), fonts, libstdc++6 (the node binary's one library beyond glibc and
+# libgcc-s1), and the libraries chrome-headless-shell needs on Debian trixie: the
+# worker's list
 # (services/workspace-worker/Dockerfile, INSTALL_BROWSER). No curl or unzip: the
 # downloads happen in the builder stages, and the HEALTHCHECK is Python's urllib.
 #
@@ -241,7 +243,7 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates ffmpeg tini fontconfig libstdc++6 \
+        ca-certificates ffmpeg libimage-exiftool-perl tini fontconfig libstdc++6 \
         libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
         libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \

@@ -23,6 +23,7 @@ Every version is pinned. The build records them in `/opt/media-render/versions.j
   - on amd64, the build Hyperframes manages;
   - on arm64, the headless shell of the `playwright-core` that `js/package-lock.json` pins.
 - **ffmpeg** encodes the video and makes the mix.
+- **exiftool** (Debian's `libimage-exiftool-perl`, PRD-264 D14) writes and reads the IPTC "AI-generated" mark (see below).
 - **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files come from the media assets (see below) and are checked against `kokoro/SHA256SUMS`. The voices file then keeps the 27 English voices the platform offers, and espeak-ng keeps its English dictionary alone (see "The voices and languages" below). The service loads the model in a background thread once it is listening, so `/health` answers at once and the first render does not wait for the load.
 - **The Python packages** are installed into `/opt/venv` from `requirements.lock`, every one hash-checked.
 - **GSAP 3.14.2** drives each composition's single paused timeline. It is staged into every render from `/opt/media-render/vendor`.
@@ -81,15 +82,23 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **429** `workspace_busy` when this workspace already has `MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE` jobs in progress (other workspaces are still admitted); **503** `busy` when the service as a whole has `MEDIA_RENDER_MAX_ACTIVE_JOBS` in progress. Both carry `Retry-After`. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render, and with `"still": {"at": [seconds…]}` it is an image (see below) |
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
-| `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 in `en-us`. **400** `invalid_request` naming `voice` for a voice the image's voices file does not hold, or `lang` for a language other than `en-us` or `en-gb` |
-| `POST /jpeg` | The image's bytes (a PNG still): the same picture as a JPEG, transparency over white (PRD-251 US-303: Instagram takes JPEG only). 400 `not_an_image` when ffmpeg cannot read it |
+| `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request, carrying the AI mark (see below). Defaults: `af_heart` at 0.95 in `en-us`. **400** `invalid_request` naming `voice` for a voice the image's voices file does not hold, or `lang` for a language other than `en-us` or `en-gb`; **500** `voice_unmarked` when a requested WAV cannot be marked (no WAV is returned) |
+| `POST /jpeg` | The image's bytes (a PNG still): the same picture as a JPEG, transparency over white (PRD-251 US-303: Instagram takes JPEG only), carrying the AI mark the image carried. 400 `not_an_image` when ffmpeg cannot read it |
 
 **The bundle** is described at the top of `media_render/bundle.py`:
 - the template's HTML and CSS, and the variables that fill its `{{ name }}` placeholders (HTML-escaped text: every word on screen is template text);
 - brand tokens (`--brand-<name>` CSS variables) and font files;
 - inline files (logo, fonts, small charts) as `data:` URIs;
 - media as presigned GET URLs on our storage;
-- an audio plan: Kokoro or file voice lines, a music-library track and window, and SFX cues.
+- an audio plan: Kokoro or file voice lines, a music-library track and window, and SFX cues;
+- `ai_inputs` (PRD-264 EUAI-06a): `{footage, stills, voice, uploads, template}`, each true or false, saying which inputs are AI-made. The orchestrator sets it from the rule the post's network labels use (`orchestrator/modules/socials/ai_media.py`); a document's social render, which no slot file joins, declares the template and its spoken voice (`core/media_render_bundle.with_template_inputs`).
+
+**The AI mark** (PRD-264 EUAI-06a, EU AI Act Art. 50(2), `media_render/provenance.py`). After the last encode of every output, each file with an AI element carries one XMP property, `Iptc4xmpExt:DigitalSourceType`: `http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia` when every visual and audio element is AI-made, `…/compositeWithTrainedAlgorithmicMedia` when AI-made and other elements are mixed. A file made only from templates and the person's own content gets none.
+- AI-made: AI footage and AI stills (`ai_inputs`), a voice file when `ai_inputs.voice` is true, and every line Kokoro speaks here, whatever the job says. Not AI-made: the composition (the template), the person's uploads, the library music and the SFX.
+- `render.mp4` holds the visuals and the mix; `render.png`, `render-NN.png`, `preview-NN.png` and `preview.mp4` (no sound) the visuals; `mix.wav` the audio; each Kokoro line's WAV is AI-made through and through, and is marked only where it leaves the service: `POST /tts` with `include_audio` marks every WAV it returns after it is spoken and before it answers, and answers **500** `voice_unmarked`, with no WAV, when one cannot be marked. Synthesis itself runs no exiftool, so a render's timed voice step carries no mark: its lines (`audio/vo`, `audio/fit`) never leave the service and reach the outside only through the mix and the video, which are marked; a JPEG from `POST /jpeg` keeps the mark of the image it came from.
+- A job without `ai_inputs` (an older caller) is logged, and only the Kokoro voice counts as AI.
+- Every packet also carries `xmpMM:InstanceID`, a fresh random UUID (`xmp.iid:<uuid4>`, FR-16), so two files made from identical input never share a SHA-256 (the public detection route answers by hash, EUAI-10).
+- exiftool writes MP4, PNG and JPEG in place, clearing their XMP first, so the packet holds nothing else: no user, workspace, prompt or file path. exiftool does not write WAV, so a WAV's packet is made by exiftool and stored as the RIFF `_PMX` chunk, where exiftool reads it back. A file that cannot be marked fails its job.
 
 **What a bundle is refused for (400, before anything is fetched):**
 - a media URL that is not under `MEDIA_RENDER_MEDIA_URL_PREFIXES`, or any URL in the markup (a composition reads only files staged beside it);
@@ -216,16 +225,17 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_QUALITY` / `MEDIA_RENDER_FPS` / `MEDIA_RENDER_WORKERS` | `delivery` / `30` / `auto` |
 | `MEDIA_RENDER_PREVIEW_WIDTH` / `_PREVIEW_MAX_FRAMES` / `_PREVIEW_REEL_FPS` / `_PREVIEW_TIMEOUT_SECONDS` | `540` / `12` / `2` / `120` (the frames' and the reel's ffmpeg steps, and a still's) |
 | `MEDIA_RENDER_STILL_MAX_FRAMES` | `10`: the most PNGs one still takes (a carousel's slides) |
+| `MEDIA_RENDER_EXIFTOOL_BIN` / `MEDIA_RENDER_MARK_TIMEOUT_SECONDS` | `exiftool` / `60`: the AI mark's writer and reader, and how long one mark or read may take |
 
 ## Tests
 
 Nothing runs on a developer machine. The `media-render` CI job:
 1. builds the image, and reports how long it took. It builds it again from a copy whose only change is the Hyperframes pin, and requires the Kokoro layer to keep its digest and the js layer to change (`scripts/ci/image_layer_digest.py`). It checks that Node's compile cache is seeded and readable by uid 1000;
 2. checks the music library the build wrote against `music/manifest.json` (every track as committed, with cue windows, and Deep House 003's break at 34.0-35.8 s), then builds the image again from a manifest with one wrong sha256 and requires that build to fail (`ci/assert_music.py`);
-3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro, which speaks a line in every catalogue voice and gives the phonemes the build took with espeak-ng's full data (PRD-262 US-052);
+3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro, which speaks a line in every catalogue voice and gives the phonemes the build took with espeak-ng's full data (PRD-262 US-052); `tests/test_provenance.py` makes one file of every format, marks it, and reads its DigitalSourceType back with exiftool, fails on any XMP field outside its allowlist, and marks one file twice to prove the two copies' SHA-256 differ (random InstanceIDs); `tests/test_provenance_render.py` reads the marks of the real pipeline's outputs back;
 4. proves the boot assertion and `/health`;
 5. waits for the background Kokoro load to finish, then posts the fixture bundle to `POST /render` with the token, timed;
-6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`), and that the voice step, with the model already loaded, took less than 2.394 s; `check_seconds` is reported;
+6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`), and that the voice step, with the model already loaded, took less than 2.394 s (`check_seconds` is reported), and reads its AI mark back with exiftool (its Kokoro line makes it `compositeWithTrainedAlgorithmicMedia`);
 7. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
 8. renders the music fixture (`fixtures/music`, US-112): the MP4's integrated loudness must be -14 ± 1 LUFS, and its report must name Deep House 003 with its CC BY credit line;
 9. posts a voice outside `voices.json` and a language other than `en-us` or `en-gb` to `/tts` and `/render`, and requires a 400 naming the field each time (`ci/assert_voice_refusals.py`);

@@ -32,8 +32,10 @@ import {
 import { useUser } from '@/lib/auth-hooks'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
+import { WidgetAiLabelFrame } from '@/components/ai-label/widget-ai-label' // PRD-264 EUAI-11a
 import { usePageContext } from '@/lib/page-context'
 import { getPageEntry } from '@/lib/generated/page-manifest'
+import { WidgetEmptyState } from '@/components/chatbot/widget-empty-state'
 import { useSystemRole } from '@/contexts/role-context'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
@@ -359,12 +361,7 @@ function WidgetConversation({
     (qp) => !qp.admin_only || isAdmin,
   )
 
-  const {
-    messages,
-    isLoading,
-    sendMessage,
-    stop,
-  } = useChat({
+  const { messages, isLoading, sendMessage, stop } = useChat({
     // Empty id → the backend creates the chat and streams its id back.
     id: initialChatId ?? '',
     initialMessages,
@@ -396,45 +393,19 @@ function WidgetConversation({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <WidgetAiLabelFrame>
       {/* Messages area */}
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-3 py-2 space-y-3"
       >
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center px-4">
-            <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mb-3">
-              <Bot className="w-5 h-5 text-primary" />
-            </div>
-            <p className="text-sm font-medium text-foreground mb-1">Hey, I'm Auto</p>
-            <p className="text-xs text-muted-foreground">
-              Ask me anything about {pageLabel || 'this page'}, or tell me what you need help with.
-            </p>
-            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-              {/* PRD-206 S3: resume chip — always offered on an empty thread,
-                  answered in-chat by the platform_resume_context tool */}
-              <button
-                type="button"
-                onClick={() => !isLoading && sendMessage('Where did we leave off?')}
-                disabled={isLoading}
-                className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                Where did we leave off?
-              </button>
-              {quickPrompts.map((qp) => (
-                <button
-                  key={qp.text}
-                  type="button"
-                  onClick={() => !isLoading && sendMessage(qp.text)}
-                  disabled={isLoading}
-                  className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-                >
-                  {qp.text}
-                </button>
-              ))}
-            </div>
-          </div>
+          <WidgetEmptyState
+            pageLabel={pageLabel}
+            quickPrompts={quickPrompts}
+            isLoading={isLoading}
+            onSend={sendMessage}
+          />
         )}
 
         {messages.map((msg) => (
@@ -483,7 +454,7 @@ function WidgetConversation({
           )}
         </div>
       </div>
-    </div>
+    </WidgetAiLabelFrame>
   )
 }
 

@@ -1124,7 +1124,7 @@ class StreamingChatService:
         _cto_prompt = CtoPromptBuilder.build(
             soul_document=_soul,
             architecture_context=_arch_ctx,
-            user_name=None,
+            db_session=self.db, workspace_id=self.workspace_id, widget_mode=self.widget_mode,  # PRD-264 FR-15
             msg_count=len(messages),
             memories=_cto_memories,
             tool_names=[t.get("function", {}).get("name", "") for t in (use_tools or []) if isinstance(t, dict)],

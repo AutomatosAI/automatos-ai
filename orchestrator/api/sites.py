@@ -12,6 +12,9 @@ GET    /api/sites/{site_id}             fetch one (404 if not owned)
 PATCH  /api/sites/{site_id}             update display_name / status
 PATCH  /api/sites/{site_id}/settings    shallow-merge settings JSONB
 
+PRD-264 EUAI-02a (D17): a save whose ``ai_disclosure`` line would not say
+it is an AI, in the site's locale, is refused with HTTP 422.
+
 Telemetry endpoint and DELETE are out of scope until Phase 4
 (``widget_event_log`` table) and the dashboard's disconnect flow.
 
@@ -36,6 +39,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.channels import ChannelConnection
 from core.models.sites import SITE_TYPES
+from modules.policy.ai_disclosure import AIDisclosureRejected, touches_disclosure, validate_settings
 from services.callback import new_request_id
 from services.destinations.base import CALLBACK_PLATFORMS, CallbackPayload, DESTINATION_TYPES
 from services.destinations.dispatcher import dispatch_callback_for_site
@@ -79,6 +83,15 @@ class UpdateSiteSettingsRequest(BaseModel):
     settings: dict = Field(..., description="Top-level keys merge into site.settings")
 
 
+def _refuse_a_silent_ai_notice(settings: dict) -> None:
+    """PRD-264 D17: HTTP 422 when the settings as stored would carry an AI
+    notice line that doesn't contain the locale's AI term."""
+    try:
+        validate_settings(settings)
+    except AIDisclosureRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -105,11 +118,13 @@ async def list_sites_route(
 
 
 @router.post("", status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_site_route(
+def create_site_route(
     body: CreateSiteRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    if body.settings:
+        _refuse_a_silent_ai_notice(body.settings)
     try:
         site = create_site(
             db,
@@ -246,7 +261,7 @@ def _validate_callback_destinations(
 
 
 @router.patch("/{site_id}/settings", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def patch_site_settings_route(
+def patch_site_settings_route(
     site_id: UUID,
     body: UpdateSiteSettingsRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -259,6 +274,11 @@ async def patch_site_settings_route(
             db=db,
             workspace_id=ctx.workspace_id,
         )
+    if touches_disclosure(body.settings):
+        current = get_site(db, ctx.workspace_id, site_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Site not found")
+        _refuse_a_silent_ai_notice({**(current.settings or {}), **body.settings})
 
     site = update_site_settings(
         db,

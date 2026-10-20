@@ -8,6 +8,7 @@ so the container stops instead of serving broken renders.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import List, Mapping, Sequence
 
@@ -85,6 +86,13 @@ def kokoro_voice_problems(settings: Settings) -> List[str]:
     return []
 
 
+def marker_problems(settings: Settings) -> List[str]:
+    """PRD-264 EUAI-06a: without exiftool no AI-made file can be marked, and an unmarked one never ships."""
+    if shutil.which(settings.exiftool_bin) is None:
+        return [f"exiftool ({settings.exiftool_bin!r}) is not installed, so no AI-made file could be marked"]
+    return []
+
+
 def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
     return [
         *espeak_data_path_problems(settings.espeak_data_path),
@@ -92,6 +100,7 @@ def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
         *token_problems(settings),
         *music_library_problems(settings),
         *kokoro_voice_problems(settings),
+        *marker_problems(settings),
     ]
 
 
