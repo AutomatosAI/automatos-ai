@@ -4,8 +4,9 @@ Inside the image, with its own ffmpeg, exiftool and c2pa-python: one file of eve
 media-render hands out (MP4, PNG, JPEG, WAV) is made, XMP-marked (EUAI-06a), signed, and
 read back with c2pa. The manifest says ``c2pa.created`` with the same digital source type
 as the XMP, names "Automatos AI media-render/<version>", carries the XMP's instance id and
-no identifier; the XMP mark survives the signing untouched. A JPEG made from a signed still
-keeps the still's manifest as an ingredient. When signing fails the file keeps its XMP mark,
+no identifier; the XMP mark survives the signing untouched. A JPEG made from a still this
+service signed keeps the still's manifest as an ingredient; one made from an image another
+generator signed (a person's own, FR-10) drops it. When signing fails the file keeps its XMP mark,
 unchanged, and the failure is logged with the job and counted. The signing certificate is
 a throwaway one made at test time (conftest: a per-install one in the scratch dir).
 """
@@ -20,24 +21,28 @@ import logging
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Dict
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from c2pa_checks import active_manifest, assert_signed, ingredient_labels, store_of
 from helpers import TOKEN
-from media_render import content_credentials, provenance
+from media_render import content_credentials, provenance, signing_keys
 from media_render.content_credentials import ContentSigner
 from media_render.jpeg import to_jpeg
 from media_render.provenance import COMPOSITE, TRAINED
 from media_render.server import MANIFEST_HEADER, SHA256_HEADER, SOURCE_TYPE_HEADER, TOKEN_HEADER, create_app
 from media_render.signing_keys import SigningKeyError
 from media_render.tts import Speaker
+from media_render.versions import SERVICE_VERSION
 from provenance_checks import assert_only_the_mark, ffmpeg, packet_of, seconds_of, source_type_of
 from test_server import fake_synthesize
 
 AUTH = {TOKEN_HEADER: TOKEN}
 JOB = "render 0123456789abcdef0123456789abcdef"
+# Another tool's claim generator, on a stand-in manifest signed with the test certificate.
+FOREIGN_GENERATOR = "Another Tool"
 
 
 def _mp4(settings, path: Path) -> Path:
@@ -139,23 +144,77 @@ def test_an_input_that_carries_a_manifest_is_kept_as_an_ingredient(settings, tmp
     assert [ingredient["relationship"] for ingredient in manifest["ingredients"]] == ["componentOf"]
 
 
-def test_a_jpeg_made_from_a_signed_still_is_signed_and_keeps_the_stills_manifest(settings, tmp_path):
-    still = _png(settings, tmp_path / "render.png")
-    signer = ContentSigner(settings)
-    still_record = signer.sign(still, COMPOSITE, job=JOB, instance_id=_mark(settings, still, COMPOSITE))
-    source = still.read_bytes()
+def _signed_elsewhere(settings, path: Path, kind: str) -> Dict[str, Any]:
+    """``path`` signed the way another tool or a phone would sign it: its own claim generator
+    (the test certificate stands in for theirs). The store it then carries."""
+    definition = {
+        "claim_generator_info": [{"name": FOREIGN_GENERATOR, "version": "1.0"}],
+        "assertions": [{"label": content_credentials.ACTIONS_LABEL, "data": {"actions": [
+            {"action": content_credentials.CREATED, "digitalSourceType": kind},
+        ]}}],
+    }
+    staged = path.with_name(f"signing-{path.name}")
+    mime = content_credentials.mime_type(path)
+    content_credentials.embed(path, staged, mime, definition, (), signing_keys.load_material(settings))
+    staged.replace(path)
+    return store_of(path)
+
+
+def _converted(settings, signer: ContentSigner, source: bytes, out: Path):
+    """``source`` made into a JPEG the way POST /jpeg makes it: its AI mark carried, then signed."""
     kwargs = {"exiftool_bin": settings.exiftool_bin, "timeout_seconds": 60}
     carried = provenance.carry_mark(source, to_jpeg(source, ffmpeg_bin=settings.ffmpeg_bin, timeout_seconds=30), **kwargs)
-    assert carried.kind == COMPOSITE and carried.instance_id
+    assert carried.kind is not None and carried.instance_id
     data, record = content_credentials.sign_converted(
         signer, carried.data, ".jpg", carried.kind, job="POST /jpeg", instance_id=carried.instance_id, source=source
     )
-    out = tmp_path / "out.jpg"
     out.write_bytes(data)
     assert record.manifest_id is not None and record.sha256 == _sha256(out)
+    return carried, record
+
+
+def test_a_jpeg_made_from_a_still_this_service_signed_keeps_the_stills_manifest(settings, tmp_path):
+    still = _png(settings, tmp_path / "render.png")
+    signer = ContentSigner(settings)
+    still_record = signer.sign(still, COMPOSITE, job=JOB, instance_id=_mark(settings, still, COMPOSITE))
+    out = tmp_path / "out.jpg"
+    carried, _record = _converted(settings, signer, still.read_bytes(), out)
+    assert carried.kind == COMPOSITE
     store = assert_signed(out, COMPOSITE, instance_id=carried.instance_id, absent=(str(tmp_path),))
     assert ingredient_labels(active_manifest(store)) == [still_record.manifest_id]
     assert source_type_of(settings, out) == COMPOSITE
+
+
+def test_a_jpeg_made_from_an_image_another_generator_signed_drops_that_manifest(settings, tmp_path):
+    """FR-10: a person's own image with an AI mark can carry another tool's or a phone's
+    manifest (a place, EXIF data, who made it). The JPEG is signed fresh, with no ingredient,
+    and nothing of that manifest reaches it."""
+    image = _png(settings, tmp_path / "own-image.png")
+    _mark(settings, image, TRAINED)
+    foreign = _signed_elsewhere(settings, image, TRAINED)
+    assert not content_credentials.signed_here(foreign), "the stand-in reads as this service's own"
+    out = tmp_path / "out.jpg"
+    carried, record = _converted(settings, ContentSigner(settings), image.read_bytes(), out)
+    assert carried.kind == TRAINED
+    absent = (str(tmp_path), FOREIGN_GENERATOR, foreign["active_manifest"])
+    store = assert_signed(out, TRAINED, instance_id=carried.instance_id, absent=absent)
+    assert ingredient_labels(active_manifest(store)) == []
+    assert list(store["manifests"]) == [record.manifest_id], "the other generator's manifest was kept in the store"
+    assert source_type_of(settings, out) == TRAINED
+
+
+def test_only_a_manifest_this_service_signed_counts_as_its_own():
+    def store(manifest: Dict[str, Any]) -> Dict[str, Any]:
+        return {"active_manifest": "urn:c2pa:active", "manifests": {"urn:c2pa:active": manifest, "urn:c2pa:other": {}}}
+
+    ours = {"name": content_credentials.CLAIM_GENERATOR_NAME, "version": SERVICE_VERSION}
+    assert content_credentials.signed_here(store({"claim_generator_info": [ours]}))
+    assert content_credentials.signed_here(store({"claim_generator": f"{content_credentials.claim_generator()} c2pa-rs/0.70"}))
+    # The claim generator is the first entry: this service named second is another tool's claim.
+    assert not content_credentials.signed_here(store({"claim_generator_info": [{"name": FOREIGN_GENERATOR}, ours]}))
+    assert not content_credentials.signed_here(store({"claim_generator": f"{FOREIGN_GENERATOR}/2.1"}))
+    assert not content_credentials.signed_here(store({}))
+    assert not content_credentials.signed_here({})
 
 
 def test_post_jpeg_answers_a_signed_jpeg_and_its_record_in_the_headers(settings, tmp_path):

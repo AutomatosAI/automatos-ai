@@ -8,8 +8,8 @@ a page, since JPEG has no transparency.
 
 The encode drops the still's metadata, so POST /jpeg gives the JPEG the AI mark the
 image carried, after this conversion (PRD-264 EUAI-06a, ``provenance.carry_mark``), and
-signs it, keeping the image's own C2PA manifest as an ingredient (EUAI-06b,
-``content_credentials.sign_converted``).
+signs it, keeping the image's C2PA manifest as an ingredient only when this service signed it
+(EUAI-06b, FR-10, ``content_credentials.sign_converted``).
 """
 
 from __future__ import annotations

@@ -14,8 +14,9 @@ workspace, prompt or file path (Guidelines ¶94); thumbnails are off, and ingred
 named ``input-NN`` whatever their files are called.
 
 **Ingredients.** An input that already carries a C2PA manifest (AI footage or a still from
-a provider that signs, the mix inside the video, the PNG a JPEG is made from) is kept as a
-``componentOf`` ingredient, so its own signed history stays readable (FR-9).
+a provider that signs, the mix inside the video) is kept as a ``componentOf`` ingredient, so
+its own signed history stays readable (FR-9). The image a JPEG is made from (POST /jpeg)
+keeps its manifest only when this service signed it; any other is dropped (FR-10).
 
 **When signing fails** the file still ships, with its XMP mark: the failure is logged with
 the job, counted (``counts``, served by /health), and the file's record carries no manifest
@@ -139,21 +140,42 @@ def read_store(path: Path, mime: str) -> Optional[Dict[str, Any]]:
             return json.loads(reader.json())
 
 
-def _carries_manifest(path: Path, mime: str) -> bool:
+def _store_of_input(path: Path, mime: str) -> Optional[Dict[str, Any]]:
     try:
-        return read_store(path, mime) is not None
+        return read_store(path, mime)
     except (C2paError, OSError, ValueError) as exc:  # an input c2pa cannot read is no ingredient, and says so
         logger.warning("c2pa: input %s could not be read for a manifest, so it is not kept as an ingredient: %s", path.name, exc)
-        return False
+        return None
 
 
-def ingredients_in(paths: Iterable[Path], prefixes: Tuple[str, ...] = VISUAL_PREFIXES + (AUDIO_PREFIX,)) -> Tuple[Ingredient, ...]:
-    """The files among ``paths`` whose type starts with one of ``prefixes`` and that carry a manifest. Blocking."""
+def signed_here(store: Dict[str, Any]) -> bool:
+    """Whether the store's active manifest is this service's own: its claim generator (the first
+    ``claim_generator_info`` name, or a v1 claim's ``claim_generator``) starts with
+    :data:`CLAIM_GENERATOR_NAME`, the name the signer writes."""
+    manifest = (store.get("manifests") or {}).get(store.get("active_manifest")) or {}
+    info = [entry.get("name") for entry in manifest.get("claim_generator_info") or [] if isinstance(entry, dict)]
+    generator = next(iter(info), None) or manifest.get("claim_generator")
+    return isinstance(generator, str) and generator.startswith(CLAIM_GENERATOR_NAME)
+
+
+def ingredients_in(
+    paths: Iterable[Path], prefixes: Tuple[str, ...] = VISUAL_PREFIXES + (AUDIO_PREFIX,), *, own_only: bool = False
+) -> Tuple[Ingredient, ...]:
+    """The files among ``paths`` whose type starts with one of ``prefixes`` and that carry a
+    manifest; with ``own_only``, only those whose manifest this service signed
+    (:func:`signed_here`). Blocking."""
     found = []
     for path in paths:
         mime = mime_type(path)
-        if mime is not None and mime.startswith(prefixes) and path.is_file() and _carries_manifest(path, mime):
-            found.append(Ingredient(path, mime))
+        if mime is None or not mime.startswith(prefixes) or not path.is_file():
+            continue
+        store = _store_of_input(path, mime)
+        if store is None:
+            continue
+        if own_only and not signed_here(store):
+            logger.info("c2pa: input %s carries another generator's manifest, so it is not kept as an ingredient (FR-10)", path.name)
+            continue
+        found.append(Ingredient(path, mime))
     return tuple(found)
 
 
@@ -249,8 +271,12 @@ def sniffed_suffix(data: bytes) -> Optional[str]:
 def sign_converted(
     signer: ContentSigner, data: bytes, suffix: str, kind: str, *, job: str, instance_id: Optional[str], source: bytes
 ) -> Tuple[bytes, MarkRecord]:
-    """``data`` (a file converted from ``source`` and XMP-marked ``kind``) signed, keeping the
-    manifest ``source`` carried as an ingredient; and its record. Blocking."""
+    """``data`` (a file converted from ``source`` and XMP-marked ``kind``) signed; and its record.
+
+    ``source``'s manifest is kept as an ingredient only when this service signed it (FR-10):
+    a person's own image that carries an IPTC AI mark can also carry another tool's or a
+    phone's manifest, with a place, EXIF data or who made it, so any other manifest is
+    dropped and the file is signed fresh. Blocking."""
     with tempfile.TemporaryDirectory(prefix="media-render-c2pa-") as scratch:
         target = Path(scratch) / f"{CONVERTED_STEM}{suffix}"
         target.write_bytes(data)
@@ -259,6 +285,6 @@ def sign_converted(
         if source_suffix is not None:
             original = Path(scratch) / f"{SOURCE_STEM}{source_suffix}"
             original.write_bytes(source)
-            ingredients = ingredients_in([original])
+            ingredients = ingredients_in([original], own_only=True)
         record = signer.sign(target, kind, job=job, instance_id=instance_id, ingredients=ingredients)
         return target.read_bytes(), record

@@ -346,7 +346,8 @@ async def post_tts(request: web.Request) -> web.Response:
 
 
 async def _signed_jpeg(state: ServiceState, image: bytes, carried: CarriedMark) -> web.Response:
-    """A marked JPEG signed (EUAI-06b), keeping the image's own manifest as an ingredient; its record in the headers."""
+    """A marked JPEG signed (EUAI-06b), keeping the image's manifest as an ingredient only when
+    this service signed it (FR-10, content_credentials.sign_converted); its record in the headers."""
     jpeg, record = await asyncio.to_thread(
         sign_converted, state.signer, carried.data, JPEG_SUFFIX, carried.kind,
         job="POST /jpeg", instance_id=carried.instance_id, source=image,
