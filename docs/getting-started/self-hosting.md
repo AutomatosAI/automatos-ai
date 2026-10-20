@@ -1453,31 +1453,11 @@ choice; the phrase above is the ceiling to keep in mind.
 
 ## Network exposure (`BIND_ADDRESS`)
 
-Every port the stack publishes listens on `127.0.0.1` by default: the web app
-(3000), the API (8000), Postgres, Redis, MinIO and the services of the optional
-profiles. They are reachable from this machine only. To reach them from another
-device on your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the
-local edition an anonymous request is the operator (through the web app's chat as
-much as through the API), and with session mode (PRD-234) the API can start
-Claude Code sessions that run commands on this machine — do not expose it to a
-network you do not control.
-
-`API_PUBLISH_ADDRESS` and `WEB_PUBLISH_ADDRESS` publish only the API and the web
-app (each defaults to `BIND_ADDRESS`); Postgres, Redis, MinIO, Qdrant, Adminer and
-SearXNG stay on `BIND_ADDRESS`. Whichever way the API or the web app reaches beyond
-this machine, `BIND_ADDRESS=0.0.0.0` included, `LOCAL_REMOTE_ACCESS` must say who
-may call it, or the backend refuses to start and names the fix:
-
-- `LOCAL_REMOTE_ACCESS=paired`: every phone and browser pairs with a one-time code,
-  and a request with no credential is refused (`401 device_pairing_required`). Mint
-  the first code from the server console with
-  `docker compose exec backend python -m scripts.mint_pairing_code`.
-- `LOCAL_REMOTE_ACCESS=open`: today's behaviour, for a network you trust: anyone who
-  reaches it is the operator. The backend logs a warning at every boot.
-- `LOCAL_REMOTE_ACCESS=off` (the default): only for an install on `127.0.0.1`.
-
-Prefer the two publish variables to `BIND_ADDRESS=0.0.0.0`, which publishes the
-datastores as well. The backend sees only what compose tells it: a tunnel or a
-reverse proxy on this machine in front of a `127.0.0.1` publish (Caddy, nginx,
-cloudflared, ngrok) also reaches beyond this machine, so run
-`LOCAL_REMOTE_ACCESS=paired` behind one.
+Every port the stack publishes listens on `127.0.0.1` by default (the web app on 3000, the API on 8000,
+Postgres, Redis, MinIO and the optional profiles), so only this machine reaches them. `BIND_ADDRESS=0.0.0.0`
+in `.env` publishes them all; `API_PUBLISH_ADDRESS` and `WEB_PUBLISH_ADDRESS` publish only the API and the web
+app. In the local edition a request with no credential is the operator, and session mode (PRD-234) runs
+commands on this machine, so while either reaches beyond it the backend refuses to start unless
+`LOCAL_REMOTE_ACCESS=paired` (every phone and browser pairs with a one-time code; the first comes from
+`docker compose exec backend python -m scripts.mint_pairing_code`) or `open` (whoever reaches it is the operator;
+a warning at every boot). A tunnel or reverse proxy on this machine is invisible to that check: run paired.
