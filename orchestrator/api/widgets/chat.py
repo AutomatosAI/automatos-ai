@@ -9,15 +9,19 @@ Reuses the existing ``ChatService`` and ``StreamingChatService`` from
 memory, and tool-loop capabilities as the main chat UI.
 
 Auth: ``widget_auth`` + ``require_permission("chat")``.
+
+The SSE stream itself lives in ``api/widgets/chat_stream.py``. PRD-264
+EUAI-02a: its first event is the AI notice, and every assistant message
+event carries ``"ai_generated": true``.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
-from typing import AsyncGenerator, List, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -26,14 +30,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
+from api.widgets.chat_stream import WidgetStreamContext, widget_event_stream
+from api.widgets.config import resolve_ai_disclosure
 from core.security.log_safe import log_safe
 from core.database.database import get_db
 from integrations import PLUGIN_REGISTRY
-from modules.tools.widget_callback import (
-    WIDGET_OPEN_CALLBACK_FORM_NAME,
-    WIDGET_SIGNAL_KEY,
-    WIDGET_SIGNAL_OPEN_CALLBACK_FORM,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,207 @@ def _resolve_workspace_vertical(db: Session, workspace_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# POST /chat — the steps of one widget turn
+# ---------------------------------------------------------------------------
+
+_SSE_HEADERS: dict[str, str] = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+@dataclass(frozen=True)
+class _WidgetTurn:
+    """The visitor's message after the vertical plugin has seen it."""
+
+    message: str
+    system_preamble: Optional[str]
+    vertical: str
+    is_proactive: bool
+
+
+def _log_tag(request: Request, auth: WidgetAuthContext) -> str:
+    """The ``[widget_chat req=… ws=… origin=…]`` prefix of every line of a turn."""
+    req_id = _short(
+        request.headers.get("X-Request-ID")
+        or request.headers.get("x-railway-request-id")
+        or uuid.uuid4().hex[:12],
+        64,
+    )
+    origin = _short(request.headers.get("Origin") or "?", 120)
+    return f"[{_LOG_TAG} req={req_id} ws={auth.workspace_id} origin={origin}]"
+
+
+def _log_request(log_extra: str, body: WidgetChatRequest) -> None:
+    logger.info(
+        "%s REQUEST: agent_id=%s conv_id=%s trigger_reason=%s page_type=%s msg_len=%d msg_preview=%s",
+        log_extra,
+        _short(body.agent_id, 40),
+        _short(body.conversation_id, 64),
+        _short(body.trigger_reason, 40),
+        _short((body.page_context or {}).get("pageType") if body.page_context else None, 40),
+        len(body.message or ""),
+        _short(body.message),
+    )
+
+
+def _chat_services(log_extra: str) -> Tuple[Any, Any]:
+    """``ChatService`` and ``StreamingChatService``, imported per call: the chat
+    infrastructure may not be available in every deploy (503 when it isn't)."""
+    try:
+        from consumers.chatbot import ChatService, StreamingChatService
+    except ImportError:
+        logger.error("%s SERVICE_UNAVAILABLE: consumers.chatbot import failed", log_extra)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chat service is not available in this deployment",
+        ) from None
+    return ChatService, StreamingChatService
+
+
+def _log_plugin_outcome(body: WidgetChatRequest, rewritten: str, telemetry: Any,
+                        vertical: str, is_proactive: bool, log_extra: str) -> None:
+    if is_proactive:
+        logger.info(
+            "%s PROACTIVE_REWRITE: vertical=%s trigger=%s original_msg_len=%d new_msg_len=%d telemetry=%s new_preview=%s",
+            log_extra, vertical, _short(body.trigger_reason, 40), len(body.message or ""),
+            len(rewritten), telemetry, _short(rewritten),
+        )
+    elif body.trigger_reason:
+        logger.warning(
+            "%s UNKNOWN_TRIGGER_REASON: %s vertical=%s (page_context=%s) — proceeding as normal chat",
+            log_extra, _short(body.trigger_reason, 40), vertical,
+            "present" if body.page_context else "missing",
+        )
+
+
+async def _run_vertical_plugin(body: WidgetChatRequest, auth: WidgetAuthContext,
+                               db: Session, log_extra: str) -> _WidgetTurn:
+    """PRD-141: dispatch the message through the workspace's vertical plugin.
+
+    Generic surfaces (this file) hold zero vertical-specific keys — all
+    rewrite logic lives under ``integrations/<vertical>/``. ``is_proactive``
+    (a known proactive trigger + populated context) controls the LLM-call
+    shape (force_text_only, skip_composio); the plugin's decision to rewrite
+    or pass through is independent of it.
+    """
+    vertical = _resolve_workspace_vertical(db, str(auth.workspace_id))
+    plugin = PLUGIN_REGISTRY.get(vertical)
+    if plugin is None:
+        logger.warning("%s UNKNOWN_VERTICAL: %s — falling back to generic plugin", log_extra, vertical)
+        vertical = "generic"
+        plugin = PLUGIN_REGISTRY["generic"]
+    is_proactive = body.trigger_reason in PROACTIVE_TRIGGER_REASONS and body.page_context is not None
+    result = await plugin.handle_widget_message(
+        message=body.message,
+        page_context=body.page_context,
+        trigger_reason=body.trigger_reason,
+        workspace_id=auth.workspace_id,
+        db=db,
+    )
+    _log_plugin_outcome(body, result.message, result.telemetry, vertical, is_proactive, log_extra)
+    return _WidgetTurn(message=result.message, system_preamble=result.system_preamble,
+                       vertical=vertical, is_proactive=is_proactive)
+
+
+def _open_conversation(db: Session, chat_service: Any, body: WidgetChatRequest, turn: _WidgetTurn,
+                       auth: WidgetAuthContext, user_id: int, log_extra: str) -> str:
+    """Resume a conversation this key started (404 otherwise), or start one."""
+    if body.conversation_id:
+        if not _key_started(db, body.conversation_id, auth):
+            logger.warning("%s CONV_NOT_FOUND: %s", log_extra, _short(body.conversation_id, 64))
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        logger.info("%s CONV_RESUMED: chat_id=%s", log_extra, body.conversation_id)
+        return body.conversation_id
+
+    t_conv = time.perf_counter()
+    title = f"{turn.message[:40] if turn.message else 'Widget Chat'} [{uuid.uuid4().hex[:8]}]"
+    chat = chat_service.create_chat(
+        user_id=user_id,
+        title=title,
+        visibility="private",
+        workspace_id=uuid.UUID(str(auth.workspace_id)),
+        widget_key_id=auth.api_key_id,
+    )
+    logger.info(
+        "%s CONV_CREATED: chat_id=%s title=%s (took %.0fms)",
+        log_extra, chat.id, _short(title, 60), (time.perf_counter() - t_conv) * 1000,
+    )
+    return str(chat.id)
+
+
+def _ground_with_preamble(history: List[dict], turn: _WidgetTurn, log_extra: str) -> List[dict]:
+    """PRD-141: prepend the plugin's per-turn grounding preamble (e.g. the page
+    the visitor is viewing) to the latest user turn, in memory only, so the
+    persisted transcript and title stay the verbatim user text. Vertical-agnostic:
+    the preamble's shape is never inspected."""
+    if not (turn.system_preamble and history and history[-1].get("role") == "user"):
+        return history
+    last_parts = history[-1].get("parts") or [{"type": "text", "text": ""}]
+    original = next(
+        (p.get("text", "") for p in last_parts if isinstance(p, dict) and p.get("type") == "text"),
+        "",
+    )
+    grounded = {"role": "user", "parts": [{"type": "text", "text": f"{turn.system_preamble}\n\n{original}"}]}
+    logger.info(
+        "%s PAGE_CONTEXT_GROUNDED: vertical=%s preamble_len=%d",
+        log_extra, turn.vertical, len(turn.system_preamble),
+    )
+    return history[:-1] + [grounded]
+
+
+def _history_for_turn(chat_service: Any, chat_id: str, turn: _WidgetTurn,
+                      workspace_id: str, log_extra: str) -> List[dict]:
+    """Persist the visitor's message, then build the LLM's message history."""
+    t_save = time.perf_counter()
+    chat_service.save_message(
+        chat_id=chat_id,
+        role="user",
+        parts=[{"type": "text", "text": turn.message}],
+        workspace_id=workspace_id,
+    )
+    logger.debug(
+        "%s USER_MSG_SAVED: chat_id=%s (took %.0fms)",
+        log_extra, chat_id, (time.perf_counter() - t_save) * 1000,
+    )
+    messages = chat_service.get_messages_by_chat_id(chat_id)
+    history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
+    logger.debug("%s HISTORY_LOADED: %d messages", log_extra, len(history))
+    return _ground_with_preamble(history, turn, log_extra)
+
+
+def _effective_agent_id(db: Session, auth: WidgetAuthContext, body: WidgetChatRequest,
+                        workspace_id: str, log_extra: str) -> int:
+    """The agent that answers: the key's lock, else the visitor's choice
+    (public_id UUID or legacy int), else the workspace's Auto."""
+    from core.utils.agent_resolver import resolve_agent_id as _resolve_aid
+
+    raw_agent_ref = auth.default_agent_id or body.agent_id
+    if not raw_agent_ref:
+        from api.chat import get_default_agent_id
+
+        agent_id = get_default_agent_id(db, workspace_id)
+        logger.info("%s AGENT_DEFAULT: id=%s (workspace auto)", log_extra, agent_id)
+        return agent_id
+
+    agent_id = _resolve_aid(db, raw_agent_ref, workspace_id)
+    logger.info(
+        "%s AGENT_RESOLVED: input=%s -> id=%s (source=%s)",
+        log_extra, _short(str(raw_agent_ref), 40), agent_id,
+        "key_lock" if auth.default_agent_id else "body",
+    )
+    if not auth.default_agent_id:
+        # F155 (a), log-only: which agents each key's visitors name, before
+        # a per-key agent allow-list is decided.
+        logger.info(
+            "%s AGENT_CENSUS: key=%s named=%s resolved=%s",
+            log_extra, auth.api_key_id, _short(str(body.agent_id), 40), agent_id,
+        )
+    return agent_id
+
+
+# ---------------------------------------------------------------------------
 # POST /chat — send message, get SSE stream back
 # ---------------------------------------------------------------------------
 
@@ -167,425 +369,55 @@ async def widget_chat(
     Events.
 
     SSE event types emitted:
-    - ``message``    — text delta from the assistant
+    - ``ai_disclosure`` — always first, before any token: the AI notice
+      (PRD-264 EUAI-02a), ``{"type": "ai_disclosure", "badge", "line", "locale"}``
+    - ``message``    — text delta from the assistant, ``"ai_generated": true``
     - ``tool-start`` — a tool invocation is beginning
     - ``tool-end``   — a tool invocation finished
-    - ``tool-data``  — intermediate data from a tool
+    - ``open-callback-form`` — the agent asked the widget to open its callback form
+    - ``error``      — the stream failed
     - ``done``       — stream is complete
     """
-
-    # ------------------------------------------------------------------
-    # Tag this request for log correlation
-    # ------------------------------------------------------------------
-    req_id = _short(
-        request.headers.get("X-Request-ID")
-        or request.headers.get("x-railway-request-id")
-        or uuid.uuid4().hex[:12],
-        64,
-    )
     started_at = time.perf_counter()
-    origin = _short(request.headers.get("Origin") or "?", 120)
-    log_extra = (
-        f"[{_LOG_TAG} req={req_id} ws={auth.workspace_id} origin={origin}]"
-    )
-    logger.info(
-        "%s REQUEST: agent_id=%s conv_id=%s trigger_reason=%s page_type=%s msg_len=%d msg_preview=%s",
-        log_extra,
-        _short(body.agent_id, 40),
-        _short(body.conversation_id, 64),
-        _short(body.trigger_reason, 40),
-        _short((body.page_context or {}).get("pageType") if body.page_context else None, 40),
-        len(body.message or ""),
-        _short(body.message),
-    )
-
-    # ------------------------------------------------------------------
-    # Import chat infrastructure (may not be available in every deploy)
-    # ------------------------------------------------------------------
-    try:
-        from consumers.chatbot import ChatService, StreamingChatService
-    except ImportError:
-        logger.error("%s SERVICE_UNAVAILABLE: consumers.chatbot import failed", log_extra)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Chat service is not available in this deployment",
-        )
+    log_extra = _log_tag(request, auth)
+    _log_request(log_extra, body)
+    chat_service_cls, streaming_service_cls = _chat_services(log_extra)
 
     workspace_id = str(auth.workspace_id)
     user_id = _get_widget_user_id(db)
-
-    # PRD-141: dispatch the message through the per-workspace vertical
-    # plugin. Generic surfaces (this file) hold zero vertical-specific
-    # keys — all rewrite logic lives under ``integrations/<vertical>/``.
-    #
-    # ``is_proactive`` stays defined on the request shape (a known
-    # proactive trigger + populated context) because it controls the
-    # downstream LLM-call shape (force_text_only, skip_composio); the
-    # plugin's decision to rewrite or pass through is independent of
-    # whether the agent should run in opener mode.
-    vertical = _resolve_workspace_vertical(db, workspace_id)
-    plugin = PLUGIN_REGISTRY.get(vertical)
-    if plugin is None:
-        logger.warning(
-            "%s UNKNOWN_VERTICAL: %s — falling back to generic plugin",
-            log_extra,
-            vertical,
-        )
-        vertical = "generic"
-        plugin = PLUGIN_REGISTRY["generic"]
-    is_proactive = (
-        body.trigger_reason in PROACTIVE_TRIGGER_REASONS
-        and body.page_context is not None
-    )
-    original_msg_len = len(body.message or "")
-    plugin_result = await plugin.handle_widget_message(
-        message=body.message,
-        page_context=body.page_context,
-        trigger_reason=body.trigger_reason,
-        workspace_id=auth.workspace_id,
-        db=db,
-    )
-    body.message = plugin_result.message
-    if is_proactive:
-        logger.info(
-            "%s PROACTIVE_REWRITE: vertical=%s trigger=%s original_msg_len=%d new_msg_len=%d telemetry=%s new_preview=%s",
-            log_extra,
-            vertical,
-            _short(body.trigger_reason, 40),
-            original_msg_len,
-            len(body.message),
-            plugin_result.telemetry,
-            _short(body.message),
-        )
-    elif body.trigger_reason:
-        logger.warning(
-            "%s UNKNOWN_TRIGGER_REASON: %s vertical=%s (page_context=%s) — proceeding as normal chat",
-            log_extra,
-            _short(body.trigger_reason, 40),
-            vertical,
-            "present" if body.page_context else "missing",
-        )
-
-    chat_service = ChatService(db)
-
-    # ------------------------------------------------------------------
-    # Resolve or create conversation
-    # ------------------------------------------------------------------
-    chat_id: str
-
-    t_conv = time.perf_counter()
-    if body.conversation_id:
-        if not _key_started(db, body.conversation_id, auth):
-            logger.warning(
-                "%s CONV_NOT_FOUND: %s",
-                log_extra,
-                _short(body.conversation_id, 64),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Conversation not found",
-            )
-        chat_id = body.conversation_id
-        logger.info("%s CONV_RESUMED: chat_id=%s", log_extra, chat_id)
-    else:
-        short_id = uuid.uuid4().hex[:8]
-        title = f"{body.message[:40] if body.message else 'Widget Chat'} [{short_id}]"
-        ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
-        chat = chat_service.create_chat(
-            user_id=user_id,
-            title=title,
-            visibility="private",
-            workspace_id=ws_uuid,
-            widget_key_id=auth.api_key_id,
-        )
-        chat_id = str(chat.id)
-        logger.info(
-            "%s CONV_CREATED: chat_id=%s title=%s (took %.0fms)",
-            log_extra,
-            chat_id,
-            _short(title, 60),
-            (time.perf_counter() - t_conv) * 1000,
-        )
-
-    # ------------------------------------------------------------------
-    # Persist the user message
-    # ------------------------------------------------------------------
-    t_save = time.perf_counter()
-    chat_service.save_message(
-        chat_id=chat_id,
-        role="user",
-        parts=[{"type": "text", "text": body.message}],
-        workspace_id=workspace_id,
-    )
-    logger.debug(
-        "%s USER_MSG_SAVED: chat_id=%s (took %.0fms)",
-        log_extra,
-        chat_id,
-        (time.perf_counter() - t_save) * 1000,
-    )
-
-    # ------------------------------------------------------------------
-    # Build message history for the LLM
-    # ------------------------------------------------------------------
-    messages = chat_service.get_messages_by_chat_id(chat_id)
-    message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
-    logger.debug(
-        "%s HISTORY_LOADED: %d messages", log_extra, len(message_history)
-    )
-
-    # PRD-141: a plugin MAY return a per-turn grounding preamble (e.g. the
-    # page the visitor is viewing). It rides on `system_preamble`, not
-    # `message`, so the persisted transcript and title stay the verbatim
-    # user text — we prepend it to the latest user turn in-memory only.
-    # Fully vertical-agnostic: chat.py never inspects the preamble's shape.
-    if (
-        plugin_result.system_preamble
-        and message_history
-        and message_history[-1].get("role") == "user"
-    ):
-        _last_parts = message_history[-1].get("parts") or [{"type": "text", "text": ""}]
-        _orig_text = next(
-            (p.get("text", "") for p in _last_parts
-             if isinstance(p, dict) and p.get("type") == "text"),
-            "",
-        )
-        message_history = message_history[:-1] + [{
-            "role": "user",
-            "parts": [{
-                "type": "text",
-                "text": f"{plugin_result.system_preamble}\n\n{_orig_text}",
-            }],
-        }]
-        logger.info(
-            "%s PAGE_CONTEXT_GROUNDED: vertical=%s preamble_len=%d",
-            log_extra,
-            vertical,
-            len(plugin_result.system_preamble),
-        )
-
-    # API key can lock the agent — ignore client-provided agent_id when set
-    # Resolve public_id (UUID) or legacy int to internal id
-    from core.utils.agent_resolver import resolve_agent_id as _resolve_aid
-    _raw_agent_ref = auth.default_agent_id or body.agent_id
-    if _raw_agent_ref:
-        effective_agent_id = _resolve_aid(db, _raw_agent_ref, workspace_id)
-        logger.info(
-            "%s AGENT_RESOLVED: input=%s -> id=%s (source=%s)",
-            log_extra,
-            _short(str(_raw_agent_ref), 40),
-            effective_agent_id,
-            "key_lock" if auth.default_agent_id else "body",
-        )
-        if not auth.default_agent_id:
-            # F155 (a), log-only: which agents each key's visitors name, before
-            # a per-key agent allow-list is decided.
-            logger.info(
-                "%s AGENT_CENSUS: key=%s named=%s resolved=%s",
-                log_extra, auth.api_key_id, _short(str(body.agent_id), 40), effective_agent_id,
-            )
-    else:
-        # Fallback to workspace Auto agent (Phase 2 will replace the `or 1`)
-        from api.chat import get_default_agent_id
-        effective_agent_id = get_default_agent_id(db, workspace_id)
-        logger.info(
-            "%s AGENT_DEFAULT: id=%s (workspace auto)",
-            log_extra,
-            effective_agent_id,
-        )
+    turn = await _run_vertical_plugin(body, auth, db, log_extra)
+    chat_service = chat_service_cls(db)
+    chat_id = _open_conversation(db, chat_service, body, turn, auth, user_id, log_extra)
+    message_history = _history_for_turn(chat_service, chat_id, turn, workspace_id, log_extra)
+    effective_agent_id = _effective_agent_id(db, auth, body, workspace_id, log_extra)
 
     # PRD-124: the team that scopes this chat's documents.
     agent_team = _retrieval_team(db, auth, effective_agent_id)
     # F155: the key's scopes, team lock and agent lock mark every call of the turn.
-    streaming_service = StreamingChatService(
+    streaming_service = streaming_service_cls(
         db, workspace_id=workspace_id, widget_mode=True, widget_scopes=auth.permissions, widget_team=auth.team,
         widget_agent_lock=effective_agent_id if auth.default_agent_id else None)
+    stream_ctx = WidgetStreamContext(
+        chat_id=chat_id, agent_id=effective_agent_id, team=agent_team, is_proactive=turn.is_proactive,
+        log_extra=log_extra, started_at=started_at, disclosure=resolve_ai_disclosure(db, auth.workspace_id),
+    )
 
-    # ------------------------------------------------------------------
-    # Stream
-    # ------------------------------------------------------------------
-    async def _event_stream() -> AsyncGenerator[str, None]:
-        """Wrap the existing streaming service output as SSE events.
-
-        The streaming service yields AI-SDK formatted chunks:
-        - ``0:"text"\n``        — text content
-        - ``d:{...}\n``         — data events (tool-start, finish, etc.)
-        - ``{"_final_response": ...}`` — internal dict (skip)
-
-        The widget SDK expects standard SSE:
-        ``event: message\ndata: {"content":"text","conversation_id":"..."}\n\n``
-        """
-        stream_start = time.perf_counter()
-        first_chunk_at: Optional[float] = None
-        first_yield_at: Optional[float] = None
-        counts = {
-            "total": 0, "dict": 0, "non_str": 0,
-            "text": 0, "data_event": 0, "other": 0,
-            "yielded_message": 0, "yielded_tool_start": 0, "yielded_tool_end": 0,
-            "text_chars": 0,
-        }
-        logger.info(
-            "%s STREAM_START: chat_id=%s agent_id=%s team=%s proactive=%s",
-            log_extra, chat_id, effective_agent_id, agent_team, is_proactive,
+    def _open_chunks() -> AsyncIterator[Any]:
+        # PRD-007 v0.5 — proactive openers must produce plain text only.
+        # `skip_composio` alone wasn't enough: the agent still had ~45
+        # platform tools loaded from its skill and would call one (40s
+        # with text_count=0). force_text_only=True clears use_tools
+        # entirely so the LLM can only emit text. Keeps openers within
+        # the <2s latency budget.
+        return streaming_service.stream_response_with_agent(
+            chat_id=chat_id, messages=message_history, agent_id=effective_agent_id, user_id=user_id,
+            team=agent_team, skip_composio=turn.is_proactive, force_text_only=turn.is_proactive,
         )
-        # PRD-008-A.2: track tool calls so the widget_open_callback_form
-        # tool-end (or its tool-data signal) can be converted into the
-        # SSE `event: open-callback-form` event for the SDK. We capture
-        # product_context from tool-start args so it survives even if the
-        # LLM omits it from the result payload.
-        callback_form_args: dict = {}
-        callback_form_emitted = False
-
-        def _emit_open_callback_form(product_context: Optional[str]) -> str:
-            payload = {
-                "conversation_id": chat_id,
-                "product_context": product_context,
-            }
-            logger.info(
-                "%s OPEN_CALLBACK_FORM emitted (product_context=%s)",
-                log_extra, _short(product_context, 120),
-            )
-            return f"event: open-callback-form\ndata: {json.dumps(payload)}\n\n"
-
-        try:
-            async for chunk in streaming_service.stream_response_with_agent(
-                chat_id=chat_id,
-                messages=message_history,
-                agent_id=effective_agent_id,
-                user_id=user_id,
-                team=agent_team,
-                # PRD-007 v0.5 — proactive openers must produce plain text only.
-                # `skip_composio` alone wasn't enough: the agent still had ~45
-                # platform tools loaded from its skill and would call one (40s
-                # with text_count=0). force_text_only=True clears use_tools
-                # entirely so the LLM can only emit text. Keeps openers within
-                # the <2s latency budget.
-                skip_composio=is_proactive,
-                force_text_only=is_proactive,
-            ):
-                counts["total"] += 1
-                if first_chunk_at is None:
-                    first_chunk_at = time.perf_counter()
-                    logger.info(
-                        "%s STREAM_FIRST_CHUNK: after %.0fms (type=%s, preview=%s)",
-                        log_extra,
-                        (first_chunk_at - stream_start) * 1000,
-                        type(chunk).__name__,
-                        _short(repr(chunk), 100),
-                    )
-
-                # Skip internal dicts (e.g. _final_response)
-                if isinstance(chunk, dict):
-                    counts["dict"] += 1
-                    continue
-
-                # Skip non-string chunks
-                if not isinstance(chunk, str):
-                    counts["non_str"] += 1
-                    continue
-
-                # Parse AI-SDK text chunks: 0:"text content"\n
-                if chunk.startswith('0:'):
-                    counts["text"] += 1
-                    text = chunk[2:].strip()
-                    # Remove surrounding quotes: "text" → text
-                    if text.startswith('"') and text.endswith('"'):
-                        # Unescape JSON string
-                        try:
-                            text = json.loads(text)
-                        except (json.JSONDecodeError, ValueError):
-                            text = text[1:-1]
-                    if text:
-                        counts["text_chars"] += len(text)
-                        if first_yield_at is None:
-                            first_yield_at = time.perf_counter()
-                            logger.info(
-                                "%s STREAM_FIRST_TEXT_YIELD: after %.0fms",
-                                log_extra,
-                                (first_yield_at - stream_start) * 1000,
-                            )
-                        counts["yielded_message"] += 1
-                        yield f"event: message\ndata: {json.dumps({'content': text, 'conversation_id': chat_id})}\n\n"
-
-                # Forward tool events for SDK tool-start/tool-end support
-                elif chunk.startswith('d:'):
-                    counts["data_event"] += 1
-                    try:
-                        data = json.loads(chunk[2:].strip())
-                        event_type = data.get("type", "")
-                        inner = data.get("data") or {}
-                        tool_name_in_event = inner.get("toolName") or ""
-                        if event_type == "tool-start":
-                            counts["yielded_tool_start"] += 1
-                            if tool_name_in_event == WIDGET_OPEN_CALLBACK_FORM_NAME:
-                                # Stash args so the tool-data / tool-end bridge can read
-                                # product_context even when the LLM omits it from the result.
-                                callback_form_args = inner.get("input") or {}
-                            yield f"event: tool-start\ndata: {json.dumps({'tool': tool_name_in_event, 'arguments': inner.get('input', {})})}\n\n"
-                        elif event_type == "tool-end":
-                            counts["yielded_tool_end"] += 1
-                            yield f"event: tool-end\ndata: {json.dumps({'tool': tool_name_in_event, 'result': inner.get('result')})}\n\n"
-                        elif event_type == "tool-data":
-                            # PRD-008-A.2: bridge widget signals to SSE events.
-                            # The widget_open_callback_form tool emits a tool-data
-                            # chunk carrying `_widget_signal: "open-callback-form"`
-                            # which we translate into the dedicated SSE event the
-                            # SDK already subscribes to.
-                            if (
-                                not callback_form_emitted
-                                and inner.get(WIDGET_SIGNAL_KEY) == WIDGET_SIGNAL_OPEN_CALLBACK_FORM
-                            ):
-                                # PRD-141: ``product_context`` is sourced from
-                                # the LLM tool call (tool-data first, tool-start
-                                # input args second). The previous Shopify-key
-                                # fallback on ``body.page_context`` is gone —
-                                # generic surfaces hold no vertical knowledge.
-                                product_context = (
-                                    inner.get("product_context")
-                                    or callback_form_args.get("product_context")
-                                )
-                                yield _emit_open_callback_form(product_context)
-                                callback_form_emitted = True
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-
-                # Skip other AI-SDK control chunks (e:, etc.)
-                else:
-                    counts["other"] += 1
-
-        except Exception as exc:
-            logger.exception(
-                "%s STREAM_ERROR: chat_id=%s after %.0fms",
-                log_extra, chat_id, (time.perf_counter() - stream_start) * 1000,
-            )
-            yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
-        finally:
-            elapsed_ms = (time.perf_counter() - stream_start) * 1000
-            total_ms = (time.perf_counter() - started_at) * 1000
-            log_level = logger.info if counts["yielded_message"] > 0 or counts["yielded_tool_start"] > 0 else logger.warning
-            log_level(
-                "%s STREAM_DONE: chat_id=%s stream=%.0fms total=%.0fms counts=%s",
-                log_extra, chat_id, elapsed_ms, total_ms, counts,
-            )
-            if counts["total"] == 0:
-                logger.warning(
-                    "%s STREAM_EMPTY: no chunks from streaming service. Agent=%s may be misconfigured or LLM call returned nothing.",
-                    log_extra, effective_agent_id,
-                )
-            elif counts["yielded_message"] == 0:
-                logger.warning(
-                    "%s STREAM_NO_TEXT: agent produced %d chunks but no text (text_count=%d, data_event=%d, dict=%d). Skill prompt may be missing or agent is tool-only.",
-                    log_extra, counts["total"], counts["text"], counts["data_event"], counts["dict"],
-                )
-            yield f"event: done\ndata: {json.dumps({'conversation_id': chat_id})}\n\n"
 
     return StreamingResponse(
-        _event_stream(),
+        widget_event_stream(stream_ctx, _open_chunks),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 

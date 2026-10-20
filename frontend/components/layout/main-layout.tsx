@@ -12,9 +12,9 @@ import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
+import { ThemeSlotScope } from '@/components/theme-host/theme-slot-registrations'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useActiveTheme, useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
-import { builtinFrameOf } from '@/lib/theme-host/builtin/frames'
+import { useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -101,45 +101,51 @@ function StudioDesktopShell({ children, fullBleed, autoWidget }: DesktopShellPro
   )
 }
 
-export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
+/**
+ * The page the floating Auto widget names, by the route's first matching prefix (in this order).
+ * PRD-260 M70: Play's own pages too (Conversations, at /x/conversations since PRD-261 A-04b; Make
+ * it yours and its style sheet).
+ */
+const PAGE_BY_ROUTE: ReadonlyArray<readonly [string, string]> = [
+  ['/agents', 'agents'],
+  ['/documents', 'documents'],
+  ['/tools', 'tools'],
+  ['/marketplace', 'marketplace'],
+  ['/analytics', 'analytics'],
+  ['/activity', 'activity'],
+  ['/command-center', 'activity'],
+  ['/assignments', 'assignments'],
+  ['/context', 'context'],
+  ['/playbooks', 'playbooks'],
+  ['/workspace', 'workspace'],
+  ['/deliverables', 'workspace'],
+  ['/settings', 'settings'],
+  ['/team', 'team'],
+  ['/chat', 'chat'],
+  ['/conversations', 'chat'],
+  ['/x/conversations', 'chat'],
+  ['/looks', 'looks'],
+]
+const HOME_PAGE = 'chat'
+const OTHER_PAGE = 'dashboard'
+
+function currentPageOf(pathname: string | null): string {
+  if (pathname === '/') return HOME_PAGE
+  return PAGE_BY_ROUTE.find(([prefix]) => pathname?.startsWith(prefix))?.[1] ?? OTHER_PAGE
+}
+
+interface ClassicShellProps extends DesktopShellProps {
+  isMobileLayout: boolean
+  isStudio: boolean
+}
+
+/**
+ * The classic chrome: the collapsible sidebar on a desktop, and below 1024 px the sheet menu
+ * every style uses (Studio's labelled rail in it, or the classic MobileSidebar).
+ */
+function ClassicShell({ children, fullBleed, autoWidget, isMobileLayout, isStudio }: ClassicShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const isMobileLayout = useIsTabletOrBelow()
-  const isStudio = useIsStudio()
-  const themeLayout = useThemeLayout()
-  const BuiltinFrame = builtinFrameOf(useActiveTheme())
-  const pathname = usePathname()
-
-  // Get current page context for the chat
-  const getCurrentPage = () => {
-    if (pathname === '/') return 'chat'
-    if (pathname.startsWith('/agents')) return 'agents'
-    if (pathname.startsWith('/documents')) return 'documents'
-    if (pathname.startsWith('/tools')) return 'tools'
-    if (pathname.startsWith('/marketplace')) return 'marketplace'
-    if (pathname.startsWith('/analytics')) return 'analytics'
-    if (pathname.startsWith('/activity')) return 'activity'
-    if (pathname.startsWith('/command-center')) return 'activity'
-    if (pathname.startsWith('/assignments')) return 'assignments'
-    if (pathname.startsWith('/context')) return 'context'
-    if (pathname.startsWith('/playbooks')) return 'playbooks'
-    if (pathname.startsWith('/workspace')) return 'workspace'
-    if (pathname.startsWith('/deliverables')) return 'workspace'
-    if (pathname.startsWith('/settings')) return 'settings'
-    if (pathname.startsWith('/team')) return 'team'
-    if (pathname.startsWith('/chat')) return 'chat'
-    // PRD-260 M70: Play's own pages (Conversations; Make it yours and its style sheet).
-    if (pathname?.startsWith('/conversations')) return 'chat'
-    if (pathname?.startsWith('/looks')) return 'looks'
-    return 'dashboard'
-  }
-
-  const currentPage = getCurrentPage()
-  const showAutoWidget = !pathname?.startsWith('/chat')
-  // Auto Widget — floating assistant on every page except /chat, in every shell
-  const autoWidget = (
-    <AutoWidget position="bottom-right" currentPage={currentPage} visible={showAutoWidget} />
-  )
 
   const handleMenuClick = () => {
     if (isMobileLayout) {
@@ -147,26 +153,6 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     } else {
       setSidebarCollapsed(!sidebarCollapsed)
     }
-  }
-
-  // PRD-260 D7, PRD-261 A-02b: a builtin theme's frame from its entry's minWidth up; below it,
-  // the fallback chrome as for Studio. Under a theme while the width isn't known (the server,
-  // hydration), nothing: a page mounted in one chrome and again in the other runs its effects
-  // twice (P260-FX-25, M69). Only a builtin theme's frame draws here (builtin/frames.ts, until
-  // A-04b moves Play's into the frame@1 slot); an installed theme's draws through ThemeFrameSlot,
-  // which draws nothing while the host loads it, for the same reason.
-  if (themeLayout === 'pending') return null
-  if (themeLayout === 'theme' && BuiltinFrame !== null) {
-    return <BuiltinFrame fullBleed={fullBleed} autoWidget={autoWidget}>{children}</BuiltinFrame>
-  }
-
-  if (isStudio && !isMobileLayout) {
-    const shell = <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
-    return (
-      <ThemeFrameSlot fallback={shell} fullBleed={fullBleed} autoWidget={autoWidget}>
-        {children}
-      </ThemeFrameSlot>
-    )
   }
 
   // PRD-246: below 1024 the Studio pages render inside this chrome, and they are
@@ -242,5 +228,43 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
 
       {autoWidget}
     </div>
+  )
+}
+
+export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
+  const isMobileLayout = useIsTabletOrBelow()
+  const isStudio = useIsStudio()
+  const themeLayout = useThemeLayout()
+  const pathname = usePathname()
+
+  // Auto Widget — floating assistant on every page except /chat, in every shell
+  const autoWidget = (
+    <AutoWidget position="bottom-right" currentPage={currentPageOf(pathname)} visible={!pathname?.startsWith('/chat')} />
+  )
+
+  // PRD-260 D7, PRD-261 A-04b: under a theme, from its entry's minWidth up, the theme's frame
+  // (frame@1) draws through ThemeFrameSlot, a builtin theme's handed to it by ThemeSlotScope and an
+  // installed theme's by the theme host; below it, the fallback chrome as for Studio. Under a theme
+  // while the width isn't known (the server, hydration), nothing: a page mounted in one chrome and
+  // again in the other runs its effects twice (P260-FX-25, M69). ThemeFrameSlot draws nothing
+  // while the host loads an installed theme, for the same reason.
+  if (themeLayout === 'pending') return null
+
+  const studioDesktop = isStudio && !isMobileLayout
+  const chrome = studioDesktop ? (
+    <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
+  ) : (
+    <ClassicShell fullBleed={fullBleed} autoWidget={autoWidget} isMobileLayout={isMobileLayout} isStudio={isStudio}>
+      {children}
+    </ClassicShell>
+  )
+  if (themeLayout !== 'theme' && !studioDesktop) return chrome
+
+  return (
+    <ThemeSlotScope>
+      <ThemeFrameSlot fallback={chrome} fullBleed={fullBleed} autoWidget={autoWidget}>
+        {children}
+      </ThemeFrameSlot>
+    </ThemeSlotScope>
   )
 }

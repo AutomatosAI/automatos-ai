@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from helpers import VOICES
 from media_render import fit, hyperframes
 from media_render.bundle import parse_bundle
 from media_render.config import load_settings
@@ -130,6 +131,6 @@ def test_the_script_is_four_kokoro_lines_and_the_first_needs_its_window_fitted()
 
 
 def test_the_script_bundle_parses(settings):
-    parsed = parse_bundle(script_bundle(), settings, {})
+    parsed = parse_bundle(script_bundle(), settings, {}, VOICES)
     assert parsed.composition.duration == 9.0
     assert [line.id for line in parsed.audio.voice.lines] == ["l01", "l02", "l03", "l04"]

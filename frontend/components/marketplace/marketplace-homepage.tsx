@@ -13,6 +13,7 @@ import {
   BookOpen,
   Cpu,
   Puzzle,
+  Palette,
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
@@ -26,6 +27,7 @@ import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { MarketplacePackagesTab } from './marketplace-packages-tab'
+import { MarketplaceThemesTab, THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './themes/tab'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -216,14 +218,79 @@ const TAB_ICONS: Record<string, any> = {
   recipes: BookOpen,
   llms: Cpu,
   capabilities: Puzzle,
+  [THEMES_TAB_VALUE]: Palette,
+}
+
+const CATEGORY_TABS = [
+  { value: 'packages', label: 'Packages' },
+  { value: 'tools', label: 'Applications' },
+  { value: 'agents', label: 'Agents' },
+  { value: 'recipes', label: 'Playbooks' },
+  { value: 'llms', label: 'LLMs' },
+  { value: 'capabilities', label: 'Capabilities' },
+  // PRD-261 C-04b: the Marketplace's Themes tab (Gerard, D3/Q11: "Themes", not "Skins").
+  { value: THEMES_TAB_VALUE, label: THEMES_TAB_LABEL },
+]
+
+function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
+  // PRD-230: Packages lead the marketplace — the curated starter teams are the answer.
+  const [selectedTab, setSelectedTab] = useState('packages')
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.3 }}
+    >
+      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
+        <TabsList className="bg-secondary/50">
+          {CATEGORY_TABS.map((tab) => {
+            const Icon = TAB_ICONS[tab.value]
+            return (
+              <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
+                {Icon && <Icon className="h-4 w-4" />}
+                {tab.label}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
+
+        <TabsContent value="packages" className="mt-0">
+          <MarketplacePackagesTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="tools" className="mt-0">
+          <MarketplaceToolsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="agents" className="mt-0">
+          <MarketplaceAgentsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="recipes" className="mt-0">
+          <MarketplacePlaybooksTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="llms" className="mt-0">
+          <MarketplaceLlmsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="capabilities" className="mt-0">
+          <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId} />
+        </TabsContent>
+
+        <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
+          <MarketplaceThemesTab searchQuery={searchQuery} />
+        </TabsContent>
+      </Tabs>
+    </motion.div>
+  )
 }
 
 export function MarketplaceHomepage() {
   const { workspaceId } = useWorkspace()
   const { isAdmin } = useSystemRole()
   const [searchQuery, setSearchQuery] = useState('')
-  // PRD-230: Packages lead the marketplace — the curated starter teams are the answer.
-  const [selectedTab, setSelectedTab] = useState('packages')
   const [stats, setStats] = useState({ totalItems: 0, totalInstalls: 0 })
   const { data: featuredItems, isLoading: featuredLoading } = useFeaturedItems(5)
 
@@ -334,56 +401,7 @@ export function MarketplaceHomepage() {
       <RecommendationsRail items={recItems} onItemClick={setSelectedItem} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
-      >
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-          <TabsList className="bg-secondary/50">
-            {[
-              { value: 'packages', label: 'Packages' },
-              { value: 'tools', label: 'Applications' },
-              { value: 'agents', label: 'Agents' },
-              { value: 'recipes', label: 'Playbooks' },
-              { value: 'llms', label: 'LLMs' },
-              { value: 'capabilities', label: 'Capabilities' },
-            ].map((tab) => {
-              const Icon = TAB_ICONS[tab.value]
-              return (
-                <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
-                  {Icon && <Icon className="h-4 w-4" />}
-                  {tab.label}
-                </TabsTrigger>
-              )
-            })}
-          </TabsList>
-
-          <TabsContent value="packages" className="mt-0">
-            <MarketplacePackagesTab searchQuery={searchQuery} />
-          </TabsContent>
-
-          <TabsContent value="tools" className="mt-0">
-            <MarketplaceToolsTab searchQuery={searchQuery} />
-          </TabsContent>
-
-          <TabsContent value="agents" className="mt-0">
-            <MarketplaceAgentsTab searchQuery={searchQuery} />
-          </TabsContent>
-
-          <TabsContent value="recipes" className="mt-0">
-            <MarketplacePlaybooksTab searchQuery={searchQuery} />
-          </TabsContent>
-
-          <TabsContent value="llms" className="mt-0">
-            <MarketplaceLlmsTab searchQuery={searchQuery} />
-          </TabsContent>
-
-          <TabsContent value="capabilities" className="mt-0">
-            <CapabilitiesTab searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
-          </TabsContent>
-        </Tabs>
-      </motion.div>
+      <MarketplaceCategoryTabs searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
 
       {/* Item detail modal for featured/recommended clicks */}
       {selectedItem !== null && (

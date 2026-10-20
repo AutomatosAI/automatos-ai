@@ -5,6 +5,7 @@ import { Providers } from '../components/providers'
 import { parseUiStyle, UI_STYLE_COOKIE } from '@/lib/ui-style'
 import { createThemeBootResolver, type CookieReader } from '@/lib/theme-host/boot'
 import { CORE_FONT_VARIABLE_CLASSES } from '@/app/core-fonts'
+import { installedThemeBootResolver } from '@/lib/theme-host/boot-server'
 import { PLAY_FONT_VARIABLE_CLASSES } from '@/lib/theme-host/builtin/play-fonts'
 import { ThemeBootScripts } from '@/components/theme-host/theme-boot'
 import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
@@ -42,10 +43,12 @@ export default async function RootLayout({
   // (lib/theme-host/boot.ts) carries its <html> classes, the look it paints before first paint
   // and its tone; the Tone axis stays with next-themes in the browser, and a theme whose tone
   // follows its look forces it from the first paint through the boot's tone (PRD-260 K4).
+  // PRD-261 A-08c: an installed theme's boot (its classes, prepaint and module integrity) comes
+  // from the backend with the user's session, within 300 ms, else the base boot (boot-server.ts).
   const store = await cookies()
   const readCookie: CookieReader = (name) => store.get(name)?.value
   const uiStyle = parseUiStyle(readCookie(UI_STYLE_COOKIE))
-  const boot = await createThemeBootResolver(readCookie)(uiStyle)
+  const boot = await createThemeBootResolver(readCookie, installedThemeBootResolver)(uiStyle)
 
   return (
     <html

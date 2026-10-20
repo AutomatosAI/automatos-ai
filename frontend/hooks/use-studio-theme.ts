@@ -52,7 +52,7 @@ const widthOnServer = (): boolean | null => null;
 
 /**
  * PRD-260 P260-FX-25 (M69), PRD-261 A-02a — the one width source for a theme:
- * MainLayout, the route switch, the 404, the theme-only pages and Conversations
+ * MainLayout, ThemeSlot's pages and the 404, the theme-only pages and Conversations
  * all read it. The width comes from useSyncExternalStore over matchMedia,
  * against the active theme's minWidth, so a mount in the browser knows it on its
  * first render (useIsTabletOrBelow starts false, which mounted the theme for one

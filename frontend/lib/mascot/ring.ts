@@ -1,4 +1,4 @@
-import { lookToCssVars } from '@/lib/looks/css'
+import { lookToCssVars } from '@/lib/looks/engine'
 import type { Look } from '@/lib/looks/types'
 
 import type { MascotName } from './types'
@@ -31,7 +31,7 @@ const RING_TONES: Readonly<Record<MascotName, RingTone>> = {
   loading: 'quiet',
 }
 
-/** The look variable (lib/looks/css.ts) each tone's ring is drawn in. */
+/** The look variable (lib/look-kit/css.ts, through lib/looks/engine.ts) each tone's ring is drawn in. */
 export const RING_VARS: Readonly<Record<RingTone, string>> = {
   light: '--pl-auto-light',
   accent: '--pl-accent',

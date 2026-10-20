@@ -37,6 +37,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
+from modules.policy import ai_disclosure
 from modules.voice import arming, call_events, live_settings, live_socket, retell_api, turn_timing, voice_meter
 from modules.voice.caller import named_call_agent
 # mint_web_call keeps its call site: it is over the 50-line shape limit, so a
@@ -590,6 +591,22 @@ def _call_status(call_id: str) -> Optional[str]:
         return db.query(VoiceCall.status).filter(VoiceCall.call_id == str(call_id)).scalar()
 
 
+def _socket_ports() -> live_socket.SocketPorts:
+    """What a call's socket borrows from the route.
+
+    The turn stream and the status read are late-bound through this module's
+    names, so they stay patchable where they live. The AI notice texts
+    (PRD-264 EUAI-04) come from the one rules module: ``VOICE_AI_GREETING`` when
+    it says it is an AI in the call's language, else the default.
+    """
+    return live_socket.SocketPorts(
+        stream_turn=lambda req: _agent_retell_stream(req),
+        call_status=lambda cid: _call_status(cid),
+        ai_greeting=ai_disclosure.voice_greeting(config.VOICE_AI_GREETING, config.VOICE_LIVE_LANGUAGE),
+        ai_reminder=ai_disclosure.VOICE_REMINDER,
+    )
+
+
 @router.websocket("/api/voice/retell/llm-websocket/{call_id}")
 async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
     """Retell custom-LLM WebSocket — Auto's brain on Retell's actual transport.
@@ -632,10 +649,4 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
 
     await websocket.accept()
     logger.info("voice_live_ws_open call=%s", call_id)
-    # Late-bound through this module's names, so the turn stream and the
-    # status read stay patchable where they live.
-    ports = live_socket.SocketPorts(
-        stream_turn=lambda req: _agent_retell_stream(req),
-        call_status=lambda cid: _call_status(cid),
-    )
-    await live_socket.LiveCallSocket(websocket, call_id, ports).run()
+    await live_socket.LiveCallSocket(websocket, call_id, _socket_ports()).run()

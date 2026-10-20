@@ -1,8 +1,10 @@
 """What the image carries, recorded once at build and served by /health.
 
-``python -m media_render.versions --browser <path> --write <file>`` runs in the
-Dockerfile, so the build log shows every version and a missing tool fails the
-build. The browser version is best effort: the pin that matters is Hyperframes'.
+``python -m media_render.versions --browser <path> --node-modules <dir> --write <file>``
+runs in the Dockerfile, so the build log shows every version and a missing tool
+fails the build. Hyperframes' and GSAP's versions are read from the node_modules
+tree the Dockerfile's ``js`` stage installs with ``npm ci`` (PRD-262 US-053). The
+browser version is best effort: the pin that matters is Hyperframes'.
 """
 
 from __future__ import annotations
@@ -35,13 +37,14 @@ def _browser_version(browser_path: str) -> str:
     return match.group(0) if match else "unknown"
 
 
-def collect_versions(browser_path: str) -> Dict[str, str]:
-    npm_root = Path(_run(["npm", "root", "-g"]))
+def collect_versions(browser_path: str, node_modules: Path) -> Dict[str, str]:
+    """Every version the image carries; the Node packages' from ``node_modules``."""
     versions = {
-        name: json.loads((npm_root / name / "package.json").read_text())["version"] for name in NODE_PACKAGES
+        name: json.loads((node_modules / name / "package.json").read_text())["version"] for name in NODE_PACKAGES
     }
     versions["node"] = _run(["node", "--version"])
     versions["ffmpeg"] = _run(["ffmpeg", "-version"]).splitlines()[0].split()[2]
+    versions["exiftool"] = _run(["exiftool", "-ver"])  # PRD-264 EUAI-06a: the AI mark's writer and reader
     versions["chrome-headless-shell"] = _browser_version(browser_path)
     for name in PYTHON_PACKAGES:
         versions[name] = importlib.metadata.version(name)
@@ -59,9 +62,10 @@ def read_versions(path: str) -> Dict[str, str]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m media_render.versions")
     parser.add_argument("--browser", required=True, help="the chrome-headless-shell binary")
+    parser.add_argument("--node-modules", required=True, type=Path, help="the js stage's node_modules tree")
     parser.add_argument("--write", required=True, type=Path, help="where to record the versions")
     args = parser.parse_args(argv)
-    versions = collect_versions(args.browser)
+    versions = collect_versions(args.browser, args.node_modules)
     text = json.dumps(versions, indent=2, sort_keys=True) + "\n"
     args.write.parent.mkdir(parents=True, exist_ok=True)
     args.write.write_text(text)

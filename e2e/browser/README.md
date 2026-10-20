@@ -56,7 +56,10 @@ Every test carries one tag through the `tag` option, for example
 `--grep`.
 
 - `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell.
-- `@off` — a fresh browser on Studio loads none of the theme host.
+- `@off` — a fresh browser on Studio loads none of the theme host, and the server sends a page a
+  ThemeSlot page entry wraps (`/agents`, `/chat`, `/deliverables`) with one Studio shell, in no
+  outlined boundary. CI traces caught `/agents` and `/chat` coming down twice before the change;
+  `/deliverables` was not captured then, so its check has not been seen to fail without it.
 - `@host` — the theme host loads an installed theme, falls back on the theme's own failures, keeps
   the theme when the page inside its frame fails, and stays off where it should.
 - `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.

@@ -40,18 +40,49 @@ export does not fit its declaration.
 change, and sets its surface file's `status` to `built`. Names never change (A-10c). **A change to the surface after
 W-A3 merges** bumps `sdkVersion` in `shared-modules.json` and `version` here together (PRD §4.3 item 7).
 
-## Publishing path — recommended, Gerard's call (D2-b)
+## Install it (D2-b: the widget SDK's CDN)
 
-Recommended for v1 (PRD §4.3 item 9): **no npm org and no registry publish** (`"private": true` stops an accidental
-`npm publish`).
+```sh
+npm install https://widgets.automatos.app/theme-sdk/v1/theme-sdk.tgz
+```
 
-1. Core CI runs `npm pack` in `frontend/packages/theme-sdk` and attaches the tarball
-   (`automatos-theme-sdk-<sdkVersion>.tgz`) to the wave's run as an artefact.
-2. The theme kit vendors the `.d.ts` files by version under its own `packages/theme-sdk/`, from that tarball, and
-   records the core SHA it came from.
-3. A theme declares `engines.sdk` against that version; the host refuses a theme whose range its `sdkVersion` does
-   not meet.
+That is the newest `1.x`. For a lockfile that never changes under you, pin the exact version instead:
 
-Not decided until Gerard answers D2-b: whether to publish under an npm org instead, and the CI step that attaches the
-tarball (it belongs to the workflow's owner, not to this package). Until then the kit copies these files at a pinned
-core SHA.
+```sh
+npm install https://widgets.automatos.app/theme-sdk/v1.0.0/theme-sdk.tgz
+```
+
+`package-lock.json` records the tarball's integrity hash. The `v1` alias moves when a new `1.x` ships, so a lock
+made against it fails `npm ci` with `EINTEGRITY` until you run `npm install` again; the `v<version>` URL never
+changes. Either way the package name is `@automatos/theme-sdk`, and a theme imports from it as usual (types only:
+keep it external in the bundler, the host provides the runtime).
+
+## How it is published
+
+No npm org and no registry publish (`"private": true` stops an accidental `npm publish`; `npm pack` ignores it).
+The widget SDK's distribution is reused instead (Gerard, D2-b): its S3 bucket and CloudFront distribution
+(`widgets.automatos.app`), its immutable-version + major-alias layout and its five `AWS_SDK_DEPLOY_*` secrets.
+
+- `.github/workflows/theme-sdk-cdn.yml` runs on a push to `main` that touches `frontend/packages/theme-sdk/**` or
+  `frontend/lib/theme-sdk/surface/**`, and on a manual run. It calls `scripts/theme-sdk/deploy-cdn.sh`.
+- The script runs `npm pack` here and uploads the tarball twice, then writes a marker:
+
+  | Key | Cache | Rule |
+  |---|---|---|
+  | `theme-sdk/v<version>/theme-sdk.tgz` | `public, max-age=31536000, immutable` | never overwritten |
+  | `theme-sdk/v<major>/theme-sdk.tgz` | `public, max-age=3600` | replaced on every deploy; the only path CloudFront invalidates |
+  | `theme-sdk/v<version>/published.json` | `no-cache` | written last; its presence stops the next deploy of this version |
+
+- The marker goes up only after the CloudFront invalidation has completed and both URLs serve the tarball's exact
+  bytes (sha256). A run that fails part way leaves no marker, so the next run resumes: it downloads the immutable
+  copy and redoes the alias, the invalidation and the checks, never re-packing over a published version.
+
+- `<version>` is this file's `version`, which is `sdkVersion`. **To ship a change, bump both together**; a push
+  that does not bump them is a no-op ("already published", the job exits 0 with a notice).
+- Until the five secrets (`AWS_SDK_DEPLOY_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_REGION`, `_BUCKET`,
+  `_DISTRIBUTION_ID`) are set on this repository or the org, the job prints a notice and exits 0.
+- A manual deploy is the same script: `scripts/theme-sdk/deploy-cdn.sh --dry-run` first, then without the flag,
+  with AWS credentials in the shell.
+
+A theme declares `engines.sdk` against the version it was built with; the host refuses a theme whose range its
+`sdkVersion` does not meet.
