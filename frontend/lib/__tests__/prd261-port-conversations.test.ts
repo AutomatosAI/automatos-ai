@@ -12,6 +12,12 @@
  * PENDING_SEAMS holds the imports the SDK has no planned name for yet, each a seam-review item;
  * the guard fails once one is gone, so the list only shrinks.
  *
+ * Tests (__tests__/, *.test.ts[x]) are host-side harnesses and are not scanned. The plan's literal
+ * check (`git grep -nE "from '(@/|next/|@tanstack/react-query|sonner)|from 'zustand'" -- <area>`)
+ * does not exclude them, so besides the pending seam it prints the PRD-260 harness's two lines in
+ * play-conversations.test.tsx: QueryClientProvider (the SDK's hooks need the host's provider, as
+ * the SDK's own page tests mount it) and CONVERSATION_LIMIT (the core's history call it asserts).
+ *
  * Play's copies of core code the surface map copies into Play (the one-line text rule, the
  * untitled name, the "Made by" words) are held to the core's here, so the two never drift.
  */
