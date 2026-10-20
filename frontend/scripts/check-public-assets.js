@@ -45,7 +45,9 @@ const SVG_SNIFF_BYTES = 1024
 const HEAD_HEX_BYTES = 8
 // What may come before an SVG's root element: whitespace, an XML declaration, comments
 // and an svg doctype, whose internal subset (Illustrator exports have one) may hold '>'.
-const SVG_PROLOG = /^(?:\s+|<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE\s+svg(?:[^>[]|\[[\s\S]*?\])*>)*/i
+// One whitespace character per round (not \s+), so no run of whitespace can be split
+// between rounds in more than one way (CodeQL js/redos).
+const SVG_PROLOG = /^(?:\s|<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE\s+svg(?:[^>[]|\[[\s\S]*?\])*>)*/i
 const SVG_ROOT = /^<svg[\s>]/
 const KINDS = { '.png': 'png', '.svg': 'svg' }
 const ARTICLE = { png: 'a PNG', svg: 'an SVG' }
