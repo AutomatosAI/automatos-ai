@@ -33,6 +33,8 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from config import config
+# The bearer prefix names the lane: the registry routes amd_ to the device lane.
+from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
 from core.auth.pairing import (
     PAIRING_CODE_TTL_SECONDS,
     hash_secret,
@@ -45,8 +47,6 @@ from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDev
 from services.mobile.events import ENROLLED, with_event
 from services.mobile.urls import api_url, web_url
 
-# The bearer prefix names the lane (core/auth/credentials.py routes amd_ to the device lane).
-DEVICE_TOKEN_PREFIX = "amd_"
 DEVICE_TOKEN_BYTES = 32
 # The QR payload: a universal link on the web app, never a custom scheme (any app can
 # register a scheme, §4.1/§4.3). ``query`` is the url-encoded ``api`` and ``code``.

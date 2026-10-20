@@ -10,8 +10,9 @@ Any code that hands ``ctx.user.id`` to an INTEGER column (``chats.user_id``,
 fetch" (``GET /api/documents/variables``) are the same bug.
 
 This is the ONE resolver. Lanes that already carry the PK (an int ``id``, or
-the local operator's ``raw_claims["user_id"]``) resolve without a query; the
-Clerk lane looks the row up by ``clerk_user_id`` and then by email.
+the ``raw_claims["user_id"]`` of the local operator or of a paired device)
+resolve without a query; the Clerk lane looks the row up by ``clerk_user_id``
+and then by email.
 """
 
 from __future__ import annotations
@@ -21,17 +22,21 @@ from typing import Any, Optional
 from sqlalchemy import text
 
 
-# The only lane that stashes the integer PK on ``raw_claims`` — the local
-# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``).
-# The Clerk lane's ``raw_claims`` is the RAW JWT payload; a claim that merely
-# happens to be called ``user_id`` there must never be trusted as our PK.
+# The only lanes that stash the integer PK on ``raw_claims``: the local
+# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``)
+# and the paired-device lane in ``core/auth/device.py`` (PRD-266,
+# ``"source": "mobile_device"``). The Clerk lane's ``raw_claims`` is the RAW JWT
+# payload; a claim that merely happens to be called ``user_id`` there must
+# never be trusted as our PK.
 LOCAL_OPERATOR_CLAIM_SOURCE = "local_operator"
+MOBILE_DEVICE_CLAIM_SOURCE = "mobile_device"
+_PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE})
 
 
 def _claimed_pk(user: Any) -> Optional[int]:
-    """The integer PK the local-operator lane stashed on ``raw_claims``, else None."""
+    """The integer PK the local-operator or device lane stashed on ``raw_claims``, else None."""
     claims = getattr(user, "raw_claims", None)
-    if not isinstance(claims, dict) or claims.get("source") != LOCAL_OPERATOR_CLAIM_SOURCE:
+    if not isinstance(claims, dict) or claims.get("source") not in _PK_CLAIM_SOURCES:
         return None
     claimed = claims.get("user_id")
     return claimed if isinstance(claimed, int) and not isinstance(claimed, bool) else None
@@ -77,4 +82,4 @@ def resolve_user_pk(db: Any, ctx: Any) -> Optional[int]:
     return None
 
 
-__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "resolve_user_pk"]
+__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "resolve_user_pk"]
