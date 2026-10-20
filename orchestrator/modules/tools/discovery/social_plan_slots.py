@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-from modules.socials import plan_store, plans, slot_phases
+from modules.socials import plan_store, plans, service, slot_phases
 
 DEFAULT_DAYS, MAX_DAYS, MAX_LINES = 7, 14, 40
 READ_STATUSES = (plans.ACTIVE, plans.PAUSED)
@@ -78,7 +78,7 @@ def _made(row: Dict[str, Any]) -> str:
     status, why = post.get("status"), row.get("why")
     if not why:
         return f"made ({status})"
-    reason = f"its render failed: {why}" if status == "failed" else f"it waits for you: {why}"
+    reason = f"its render failed: {why}" if status == service.FAILED else f"it waits for you: {why}"
     return f"made ({status}): {reason}"
 
 
