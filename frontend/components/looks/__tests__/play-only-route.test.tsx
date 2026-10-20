@@ -26,7 +26,7 @@ function install(overrides: Partial<InstalledTheme>): InstalledTheme {
 describe('Switch to Play', () => {
   it('is stored through useChooseStyle, never a bare setStyle', () => {
     expect(src).toContain('const chooseStyle = useChooseStyle()')
-    expect(src).toContain('chooseStyle(playStyleFor(uiStyle.installedThemes))')
+    expect(src).toContain('chooseStyle(playStyleFor(uiStyle.installedThemes), FOCUS_HEADING_AFTER_RELOAD)')
     expect(src).not.toContain('uiStyle.setStyle(')
   })
 

@@ -168,15 +168,6 @@ export const GAP_INSTALLED_THEME_HAS_NO_ENTRY =
 export const GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK =
   'Core gap G2 (with G1): the installed boot carries no lookStorage, lookGuard or tone (serve.py _boot), so a stored look and its tone are not painted before first paint'
 
-/**
- * Core gap G3. Switch to Play picks the workspace's install of Play's package when there is one
- * (lib/theme-host/builtin/play-only-route.tsx playStyleFor), and a switch to an installed theme
- * reloads the page (PA-13, contexts/ui-style-context.tsx setStyle). The reload drops what
- * ThemeSlotPage remembered, so focus is not handed to the screen's heading (P260-FX-22, M21).
- */
-export const GAP_SWITCH_TO_PACKAGE_RELOADS =
-  'Core gap G3: Switch to Play onto an install reloads the page (PA-13), so focus does not reach the screen heading after the swap (P260-FX-22)'
-
 /** Marks the running test fixme for the package only, naming the core gap; builtin Play runs it. */
 export function knownPackageGap(variant: PlayVariant, gap: string): void {
   test.fixme(variant.id === 'package', gap)

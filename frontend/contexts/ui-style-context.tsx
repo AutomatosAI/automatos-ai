@@ -8,6 +8,8 @@
  * already the right design system. Switching writes the cookie (for the next request), the html classes (for this
  * document) and localStorage (a mirror), and never touches the tone. A switch to an installed
  * theme writes the cookie and reloads instead (PA-13): its first paint comes from the server.
+ * What the switch must carry across that reload runs in its `beforeReload`, just before it (G3:
+ * the note's 'Switch to Play' keeps focus for the screen's heading, lib/theme-host/switch-focus.ts).
  *
  * PRD-261 A-02c (PA-12): the server holds the choice. `setStyle` is the local half (cookie, html,
  * reload); lib/theme-host/choice-sync.ts stores a pick on the server and checks the server's
@@ -34,9 +36,15 @@ import {
   type UiStyle,
 } from '@/lib/ui-style'
 
+/** What a style switch carries across the reload into an installed theme (PA-13). */
+export interface StyleSwitchOptions {
+  /** Runs just before the page reloads into an installed theme; never for a switch made in place. */
+  readonly beforeReload?: () => void
+}
+
 export interface UiStyleContextValue {
   style: UiStyle
-  setStyle: (next: UiStyle) => void
+  setStyle: (next: UiStyle, options?: StyleSwitchOptions) => void
   /** True for Studio AND every theme drawn on Studio (PRD-260 D2): the theme renders Studio's layout where it has no design. */
   isStudio: boolean
   /** The active theme's registry entry: null for Classic and Studio, and for a theme the registry doesn't know. */
@@ -100,9 +108,10 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = 
 
   // PRD-261 PA-13: an installed theme's boot data and import map come with the page, so a
   // switch to one is never made in place: the cookie is written and the page reloads.
-  const setStyle = useCallback((next: UiStyle) => {
+  const setStyle = useCallback((next: UiStyle, options?: StyleSwitchOptions) => {
     if (isInstalledThemeStyle(next)) {
       persistUiStyle(next)
+      options?.beforeReload?.()
       reloadPage()
       return
     }
