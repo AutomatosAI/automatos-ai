@@ -2177,6 +2177,11 @@ class Config:
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")
     BRAND_STYLE_READ_TIMEOUT_SECONDS: int = int(os.getenv("BRAND_STYLE_READ_TIMEOUT_SECONDS", "90"))
+    # PRD-264 ART5-1 (EU AI Act Art. 5): the model read that checks every image, video and voice
+    # request before it goes to a provider (core/generation_guard.py; empty model: the
+    # workspace's own), and how long it may take. A read that fails refuses the request.
+    GENERATION_GUARD_MODEL: str = os.getenv("GENERATION_GUARD_MODEL", "")
+    GENERATION_GUARD_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_GUARD_TIMEOUT_SECONDS", "30"))
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation

@@ -436,9 +436,9 @@ async def _voice_links(
     """The script of ``bundle`` spoken by the post's voice toolkit when it chose one
     (US-111), as line id → (extension, presigned link): each line a file in our storage.
     Spoken ONCE per render, whatever its sizes (it is paid). Kokoro speaks inside
-    media-render: no links."""
+    media-render: no links. Either way the script is checked first (ART5-1, in speak)."""
     lines = voice_script(bundle)
-    if job.voice is None or not lines:
+    if not lines:
         return {}
     try:
         spoken = await voice_recipes.speak(

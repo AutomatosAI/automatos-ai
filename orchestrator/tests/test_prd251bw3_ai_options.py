@@ -33,6 +33,7 @@ if str(_ORCH) not in sys.path:
 
 import api.socials_brand as socials_brand  # noqa: E402
 import api.socials_media_tools as media_tools_api  # noqa: E402
+import core.generation_guard as generation_guard  # noqa: E402
 import core.utils.background_tasks as background_tasks  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
 from core.models.socials import SocialPost  # noqa: E402
@@ -271,3 +272,34 @@ def test_any_other_failure_still_settles_the_slot(options, monkeypatch):
     media_tools_api._settle(WS_A, uuid.UUID(post["id"]), "still_1", PROMPT, records, error)
     assert _footage(options, post["id"])["still_1"]["options_state"] == "failed"
 
+
+def test_art5_a_refused_prompt_makes_no_option_and_the_slot_says_why(options, monkeypatch):
+    """PRD-264 ART5-1: the options' prompt and the liked reference go through the generation guard
+    before anything is priced; a refusal makes no option, and make() says why."""
+    post = _video_post(options)
+    assert _ask(options, post["id"]).status_code == 202
+    ((plan, *_rest),) = options.made
+    reference_png = b"\x89PNG\r\n\x1a\n" + b"liked reference " * 40
+    fetched, asked = [], []
+
+    async def fetch(link, *, max_bytes, timeout_seconds):
+        fetched.append(link)
+        return reference_png
+
+    async def read(request, workspace_id):
+        asked.append(request)
+        return {"sexual": True, "minor": False, "real_person": True}
+
+    monkeypatch.setattr(footage_recipes, "fetch", fetch)
+    monkeypatch.setattr(generation_guard, "read_answers", read)
+    factory = sessionmaker(bind=options.session.get_bind())
+
+    records, error = asyncio.run(ai_options.make(plan, workspace_id=WS_A, post_id=uuid.UUID(post["id"]), title="T",
+                                                 slot="still_1", prompt=PROMPT, session_factory=factory, store=None))
+
+    assert records == [] and error == f"{generation_guard.REFUSED_MESSAGE} Nothing was submitted."
+    assert fetched == [REFERENCE]
+    (request,) = asked
+    assert request.path == "socials.footage"
+    sent = footage_recipes.prompt_for(PROMPT, plan.shots[0][0].style)  # as the provider would get it
+    assert request.texts == (sent,) * ai_options.OPTIONS and request.images == ((reference_png, "image/png"),)
