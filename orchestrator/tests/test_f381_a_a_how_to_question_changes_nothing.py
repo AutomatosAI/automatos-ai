@@ -105,11 +105,14 @@ def test_the_persona_answers_a_question_and_does_a_request():
 
 @pytest.mark.parametrize("old", ["fallback", "with the doctrine"])
 def test_a_row_on_the_earlier_friendly_default_is_lifted_to_the_new_one(old):
+    """A row written before 7 Oct carries the doctrine block of its day: since PRD-263
+    US-066 changed point 2 (DELEGATE → RESPOND), that is _PREVIOUS_MANAGER_DOCTRINE_BLOCK,
+    the text such a row actually holds, not the current block."""
     from core.seeds import seed_auto_agent as seed
 
     persona = seed._PREVIOUS_FRIENDLY_FALLBACK
     if old == "with the doctrine":
-        persona = seed.compose_persona_with_doctrine(persona)
+        persona = seed.compose_persona_with_doctrine(persona, seed._PREVIOUS_MANAGER_DOCTRINE_BLOCK)
     row = NS(custom_persona_prompt=persona, use_custom_persona=True, workspace_id=WS, slug="auto-x", configuration={})
 
     assert seed._backfill_auto_persona(row) == "updated"
