@@ -11,17 +11,33 @@ sorted by id with each id once, built from one small function per source:
   key for (``platform_key_allowed``: NVIDIA is the user's own key on saas) with
   a platform key present: an active row in the operator workspace
   (``PLATFORM_KEY_WORKSPACE_ID``), the credential store under the resolver's
-  four names, or the config's env key.
+  four names, or the config's env key;
+* (c) **the embeddings provider**: the ``embeddings.provider`` system setting,
+  else ``config.EMBEDDING_PROVIDER``, the read ``EmbeddingManager`` makes
+  (``disabled`` and ``huggingface_local`` send nothing out);
+* (d) **the RAG reranker** (Cohere), which receives the user's query, when
+  reranking is on and the reranker has a key;
+* (e) **session-mode runtimes** (local edition with ``CLI_RUNTIME_ENABLED``):
+  the CLI each session agent of this workspace runs on, named as the analytics
+  page names its spend (Claude Code, Codex, GitHub Copilot);
+* (f) **Retell**, when this workspace can use Auto Live voice: Auto Live sends
+  the user's audio to Retell (Apple 5.1.2(i)).
 
 Ids are the provider registry's slugs (``core/llm/providers.py``, stable),
 names its labels. A key-only provider (Cohere has no chat client) is never a
-chat route, so neither source lists it.
+chat route, so neither (a) nor (b) lists it; (c) and (d) can.
 
 It reads key PRESENCE only. It selects the ``provider`` and ``name`` columns,
 never a key column; nothing is decrypted, and no key value is returned, logged
 or cached. The resolvers the calls themselves use decrypt and log a line per
 call, so they are not called here. Each store is read with one query, whatever
 the number of providers.
+
+A key store that cannot be read raises. The settings behind (c), (d) and (f)
+are read through their runtime readers, which answer their defaults when the
+read fails: the list then says what the runtime itself does in that moment
+(the embeddings manager falls back to the config, the reranker to no key, the
+voice mint refuses).
 """
 
 from __future__ import annotations
@@ -35,10 +51,15 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from config import config
+from core.cli_presets import USAGE_PROVIDER_LABELS, usage_provider_slug
+from core.cli_runtime import is_cli_agent, session_cli
+from core.llm import embedding_manager, rerank_manager
 from core.llm import providers as registry
-from core.models.core import UserApiKey
+from core.models.core import Agent, UserApiKey
 from core.models.credentials import Credential
 from core.models.workspaces import Workspace
+from modules.voice import live_settings
+from services import plan_tiers
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +76,23 @@ CREDENTIAL_NAME_FORMS: Tuple[str, ...] = (
     "{slug}",
 )
 
+# (c) Embeddings provider values that send nothing out: the deterministic
+# fallback and the model on this machine (EmbeddingManager._load_provider).
+EMBEDDINGS_STAY_HERE = frozenset({"disabled", "huggingface_local"})
+# Embeddings provider values the registry knows under another slug.
+EMBEDDINGS_REGISTRY_SLUGS = {"huggingface_api": "huggingface"}
+
+# (d) The reranker's provider (core/llm/rerank_manager.py calls Cohere's API).
+RERANK_PROVIDER_SLUG = "cohere"
+
+# (f) Retell, the voice vendor Auto Live streams the user's audio to.
+RETELL_PROVIDER_ID = "retell"
+RETELL_PROVIDER_NAME = "Retell AI"
+# The capability family a plan switches voice on with (PLAN_TIERS[*]["families"]),
+# and the plan a workspace row without one is on (Workspace.plan's default).
+VOICE_FAMILY = "voice"
+DEFAULT_PLAN = "basic"
+
 ProviderNames = Dict[str, str]
 ProviderSource = Callable[[Session, uuid.UUID], ProviderNames]
 
@@ -62,8 +100,8 @@ ProviderSource = Callable[[Session, uuid.UUID], ProviderNames]
 def workspace_ai_providers(db: Session, workspace_id: Any) -> List[Dict[str, str]]:
     """The AI providers this workspace's data goes to, as a new list of ``{id, name}``.
 
-    Sorted by id, each id once. Raises on a read failure: the caller decides what
-    an unknown list means (GET /api/workspaces/current answers ``null``).
+    Sorted by id, each id once. Raises when a key store cannot be read: the caller
+    decides what an unknown list means (GET /api/workspaces/current answers ``null``).
     """
     workspace_uuid = uuid.UUID(str(workspace_id))
     found: ProviderNames = {}
@@ -192,6 +230,101 @@ def _credential_store_slugs(db: Session, slugs: List[str]) -> List[str]:
     return sorted({slug_by_name[row.name] for row in rows})
 
 
-_SOURCES: Tuple[ProviderSource, ...] = (_own_keys, _platform_routes)
+# ---------------------------------------------------------------------------
+# (c) the embeddings provider, (d) the reranker
+# ---------------------------------------------------------------------------
+
+
+def _embeddings(_db: Session, _workspace_id: uuid.UUID) -> ProviderNames:
+    """(c) The embeddings provider, read as ``EmbeddingManager._load_provider`` reads it.
+
+    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``.
+    Unset, ``disabled`` and ``huggingface_local`` add none; a slug the registry
+    knows takes its label, so a provider that is also a chat route appears once.
+    """
+    provider = embedding_manager.get_system_setting("provider") or config.EMBEDDING_PROVIDER
+    if not provider or provider in EMBEDDINGS_STAY_HERE:
+        return {}
+    return _registry_names([EMBEDDINGS_REGISTRY_SLUGS.get(provider, provider)])
+
+
+def _reranker(_db: Session, _workspace_id: uuid.UUID) -> ProviderNames:
+    """(d) Cohere, when RAG reranking is on and the reranker has a key (presence: ``is_available``)."""
+    if not (config.RAG_RERANK_ENABLED and rerank_manager.get_rerank_manager().is_available()):
+        return {}
+    return _registry_names([RERANK_PROVIDER_SLUG])
+
+
+# ---------------------------------------------------------------------------
+# (e) session-mode runtimes
+# ---------------------------------------------------------------------------
+
+
+def _session_runtimes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
+    """(e) Local edition with session mode on: the CLI every session agent of this workspace runs on.
+
+    Id the CLI's usage slug, name its label (``core/cli_presets``). Every agent of
+    the workspace counts, an inactive one too: the CLI host's claim runs it. A
+    CLI with no preset adds none: no host runs it, and its text is never shown.
+    Nothing on saas, where session mode cannot be switched on.
+    """
+    if not (config.IS_LOCAL_EDITION and config.CLI_RUNTIME_ENABLED):
+        return {}
+    rows = db.query(Agent.configuration).filter(Agent.workspace_id == workspace_id).all()
+    slugs = {
+        usage_provider_slug(session_cli(row.configuration))
+        for row in rows
+        if is_cli_agent(row.configuration)
+    }
+    return {slug: USAGE_PROVIDER_LABELS[slug] for slug in sorted(slugs) if slug in USAGE_PROVIDER_LABELS}
+
+
+# ---------------------------------------------------------------------------
+# (f) Retell, for Auto Live voice
+# ---------------------------------------------------------------------------
+
+
+def _retell(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
+    """(f) Retell, when this workspace can use Auto Live voice.
+
+    The mint route's own gates, read through the same helpers, minus the monthly
+    cap (a capped workspace is still a Retell user this month): the workspace's
+    switch, the plan (saas only), the platform switch, and Retell armed. The
+    credentials are read last, and only ``armed`` is kept: no key leaves here.
+    """
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None or not live_settings.parse_workspace_voice_live(workspace.settings).enabled:
+        return {}
+    if not _plan_allows_voice(workspace.plan):
+        return {}
+    if not (live_settings.voice_live_enabled() and live_settings.retell_credentials().armed):
+        return {}
+    return {RETELL_PROVIDER_ID: RETELL_PROVIDER_NAME}
+
+
+def _plan_allows_voice(plan: Optional[str]) -> bool:
+    """D34: on saas the plan's families switch voice on, or it is a known tier that declares none.
+
+    A tier restricts only by declaring families (``enterprise`` declares none);
+    an unknown plan resolves to the entry tier, which does. A local install is
+    never plan-gated.
+    """
+    if not config.IS_SAAS_EDITION:
+        return True
+    plan_name = plan or DEFAULT_PLAN
+    if bool(plan_tiers.exposure_for_plan(plan_name)["families"].get(VOICE_FAMILY)):
+        return True
+    tier = plan_tiers.get_tier(plan_name)
+    return isinstance(tier, dict) and not isinstance(tier.get("families"), dict)
+
+
+_SOURCES: Tuple[ProviderSource, ...] = (
+    _own_keys,
+    _platform_routes,
+    _embeddings,
+    _reranker,
+    _session_runtimes,
+    _retell,
+)
 
 __all__ = ["workspace_ai_providers"]

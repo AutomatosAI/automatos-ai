@@ -37,12 +37,15 @@ _conftest._restore_real_app_modules()
 import core.credentials.encryption as encryption_mod  # noqa: E402
 import core.credentials.resolver as credential_resolver_mod  # noqa: E402
 import core.llm.key_resolver as key_resolver_mod  # noqa: E402
+import core.llm.manager as llm_manager_mod  # noqa: E402
+import core.llm.rerank_manager as rerank_manager_mod  # noqa: E402
 import core.llm.workspace_keys as workspace_keys_mod  # noqa: E402
 from config import config  # noqa: E402
 from core.credentials.service import CredentialStore  # noqa: E402
 from core.llm import providers as registry  # noqa: E402
 from core.models.core import UserApiKey  # noqa: E402
 from core.models.credentials import Credential, CredentialType  # noqa: E402
+from modules.voice import live_settings  # noqa: E402
 from services import ai_providers  # noqa: E402
 from services.ai_providers import CREDENTIAL_NAME_FORMS, workspace_ai_providers  # noqa: E402
 
@@ -64,6 +67,13 @@ def floor(db_session, seed_workspace, monkeypatch):
             monkeypatch.setattr(config, spec.env_key, "", raising=False)
     monkeypatch.setattr(config, "PLATFORM_KEY_WORKSPACE_ID", "")
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    # US-017b's sources (embeddings, reranker, session runtimes, Retell) read system
+    # settings outside this transaction: every one off, so these tests see chat keys only.
+    monkeypatch.setattr(llm_manager_mod, "get_system_setting", lambda _category, _key, default=None: default)
+    monkeypatch.setattr(live_settings, "get_system_setting", lambda _category, _key, default=None: default)
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", None)
+    monkeypatch.setattr(config, "CLI_RUNTIME_ENABLED", False)
+    monkeypatch.setattr(rerank_manager_mod, "get_rerank_manager", lambda: SimpleNamespace(is_available=lambda: False))
     # The platform lane reads the credential store unscoped, so a row another test
     # committed would count here: removed inside this test's transaction (its
     # rollback restores it).
