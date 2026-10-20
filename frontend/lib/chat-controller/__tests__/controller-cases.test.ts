@@ -13,7 +13,8 @@
  *   under the reply being written; a card outliving the reply Try again replaced; a card settled
  *   mid-turn; a reply the server finished detached merging in on chat_changed;
  * - play-chat-turn.test.tsx: a reply that failed in words and Try again, a send the server refused and a
- *   reply blocked mid-stream (a spent trial), a Deliverable part with a bad id;
+ *   reply blocked mid-stream (a spent trial), a Deliverable part with a bad id (and, beside it, one with a
+ *   good id filed under the reply mid-turn, linked to the core's page);
  * - play-chat.test.tsx: the history lists asked again when a turn ends (P260-FX-10, M44);
  * - play-chat-approvals.test.tsx: parts that only look like approvals (approvals.ts itself:
  *   lib/chat/__tests__/approvals.test.ts).
@@ -39,6 +40,7 @@ vi.mock('@/stores/chat-session-store', () => ({ useChatSessionStore: { getState:
 
 import { CHAT_HISTORY_QUERY_PREFIX } from '@/hooks/use-refresh-history-on-turn-end'
 import type { FiledApproval } from '@/lib/chat/approvals'
+import { deliverableHref } from '@/lib/chat/deliverables'
 import { messageText } from '@/lib/chat/message-text'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { useChatApprovalsStore } from '@/lib/chat-controller/approvals'
@@ -46,65 +48,10 @@ import { useChatController } from '@/lib/chat-controller/controller'
 import type { ChatConversationView, ChatTurnEvent } from '@/lib/chat-controller/view-model'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 
-// --- the wire: useChat's data stream (`0:` words, `d:` data, `e:` a failure), one stream per request ------------
+import { chatEndpoint, dataLine, endStream, posts, stream, tick, turns, wire, wordsLine } from './support/chat-wire'
 
-interface Turn {
-  readonly push: (line: string) => void
-  readonly end: () => void
-}
-
-/** The body useChat posts: the words of the message are its first part's text. */
-type ChatPost = { readonly message?: { readonly parts?: ReadonlyArray<{ readonly text?: string }> } }
-
-type Refusal = { readonly status: number; readonly body: string }
-
-const CHAT_PATH = '/api/chat'
 /** What useBoardEventStream fans the lane's chat_changed out as (hooks/use-board-event-stream.ts). */
 const CHAT_CHANGED_EVENT = 'automatos:chat-changed'
-const turns: Turn[] = []
-const posts: ChatPost[] = []
-const wire: { refusal: Refusal | null } = { refusal: null }
-
-/** A response body the test writes into; an abort (Stop, an unmount) fails the read as a browser's does. */
-function streamResponse(signal: AbortSignal | null | undefined): Response {
-  const encoder = new TextEncoder()
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
-  const body = new ReadableStream<Uint8Array>({
-    start(c) {
-      controller = c
-    },
-  })
-  signal?.addEventListener('abort', () => controller?.error(new DOMException('The user aborted a request.', 'AbortError')))
-  turns.push({ push: (line) => controller?.enqueue(encoder.encode(`${line}\n`)), end: () => controller?.close() })
-  return { ok: true, status: 200, headers: { get: () => null }, body } as unknown as Response
-}
-
-function refusedResponse({ status, body }: Refusal): Response {
-  return { ok: false, status, headers: { get: () => null }, text: async () => body } as unknown as Response
-}
-
-const chatEndpoint = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
-  if (url !== CHAT_PATH) throw new Error(`unexpected request: ${url}`)
-  posts.push(JSON.parse(String(init?.body)) as ChatPost)
-  return wire.refusal ? refusedResponse(wire.refusal) : streamResponse(init?.signal)
-})
-
-const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-const dataLine = (type: string, data: Record<string, unknown>) => `d:${JSON.stringify({ type, data })}`
-const wordsLine = (text: string) => `0:${JSON.stringify(text)}`
-
-/** Write lines into the newest request's stream, and let useChat read them; endStream closes it. */
-async function stream(...lines: string[]) {
-  await act(async () => {
-    lines.forEach((line) => turns[turns.length - 1].push(line))
-    await tick()
-  })
-}
-
-const endStream = () => act(async () => {
-  turns[turns.length - 1].end()
-  await tick()
-})
 
 // --- core fixtures: types/chat.ts' shapes, result_formatter.py's payloads -------------------------------------------
 
@@ -123,6 +70,8 @@ const TOOL_APPROVAL = { grant_id: 42, action: 'platform_delete_document', params
 const MISSION_APPROVAL = { mission_id: 'm-1', goal: 'Refund the customer', task_count: 1, tasks: [{ title: 'Issue refund' }] }
 const APPROVAL_LINE = dataLine('tool-data', { tool_approval: TOOL_APPROVAL })
 const MISSION_LINE = dataLine('tool-data', { mission_approval: MISSION_APPROVAL })
+/** The document tool's tool-data part (format_for_frontend in result_formatter.py), naming a good id. */
+const DOCUMENT_LINE = dataLine('tool-data', { generated_document: { deliverable_id: 'd-42', title: 'Laptop shortlist', format: 'pdf' } })
 const SEARCH_START = dataLine('tool-start', { toolCallId: 't1', toolName: 'platform_web_search', input: { query: 'old brief' } })
 
 // --- the controller under the root providers' QueryClient (components/providers.tsx), a history list beside it -----
@@ -364,6 +313,20 @@ describe('approvals on the wire', () => {
     expect(hook.result.current.approvals.waiting).toBe(false)
     expect(hook.result.current.deliverablesOf(writing.id)).toEqual([])
     expect(turnEvents(hook)).toEqual([])
+  })
+
+  it("files the Deliverable a document tool part names under the reply being written, mid-turn, linked to the core's page", async () => {
+    const hook = renderController()
+    await ask(hook, ASK)
+    await stream(wordsLine('Here is your shortlist.'), DOCUMENT_LINE)
+    const writing = newest(hook)
+    expect(hook.result.current.streaming).toBe(true)
+    const made = hook.result.current.deliverablesOf(writing.id)
+    expect(made).toEqual([{ id: 'd-42', title: 'Laptop shortlist', kind: 'document' }])
+    expect(made.map((ref) => deliverableHref(ref.id))).toEqual(['/deliverables?deliverable=d-42'])
+    expect(turnEvents(hook)).toEqual(['deliverable-added'])
+    await endStream()
+    expect(hook.result.current.deliverablesOf(writing.id)).toEqual(made)
   })
 })
 
