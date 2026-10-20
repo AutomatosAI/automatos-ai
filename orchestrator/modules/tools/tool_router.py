@@ -30,6 +30,7 @@ from modules.tools.registry import ToolCategory, get_tool_registry as registry_g
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.execution.card_raised import holds_the_signal, signals_unless_it_asked, the_model_reads_the_card
 from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
+from modules.tools.discovery.owner_only import the_card_decides
 from modules.tools.execution.owner_reasons import OWNER_REASON, intent_gate_error, intent_refused
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
@@ -2095,12 +2096,10 @@ async def execute_tool_with_validation(
         if not action_id and tool_name.startswith("composio_") and tool_name != "composio_execute":
             action_id = tool_name.replace("composio_", "")
 
-        if action_id:
-            eligible, reason = validate_action_for_intent(
-                action_id=action_id,
-                intent=original_intent,
-                allow_destructive=allow_destructive
-            )
+        # F459 (night 18): in a person's chat a send is decided by their click on its card, not their words.
+        if action_id and not the_card_decides(action_id, the_callers_context()):
+            eligible, reason = validate_action_for_intent(action_id=action_id, intent=original_intent,
+                                                          allow_destructive=allow_destructive)
 
             if not eligible:
                 logger.warning(

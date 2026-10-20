@@ -175,6 +175,16 @@ def is_composio_send(slug: str) -> bool:
     return _a_channel_publish("_".join(words))
 
 
+def the_card_decides(action_id: Any, caller_context: Any) -> bool:
+    """F459 (night 18): whether a Composio action waits for a person's click on its card, which shows to
+    whom, about what and its first line (``asks_before_a_send``): a send in a chat a person drives. There
+    the card decides it, so the intent gate (tool_router) does not read the owner's words for it: "Email
+    Quay Coffee House the new terms." read as a create, and the send was refused before any card. An
+    agent's run, a playbook step, a heartbeat or a widget visitor's turn drives no user, so the intent
+    gate keeps every action it reads, sends included."""
+    return human_driven(caller_context) and is_composio_send(str(action_id or ""))
+
+
 def _a_message_send(name: str) -> bool:
     """Whether the capability classifier's ``message.send`` name patterns read the slug (its
     words in order, joined by '_') as a send (a notify, a direct message), and it carries no read word."""
@@ -625,4 +635,5 @@ def _without_a_signer(params: Any) -> Any:
 
 
 __all__ = ["AT_WORK_STATUSES", "CLICKED_BY", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send",
-           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]
+           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by",
+           "the_card_decides"]
