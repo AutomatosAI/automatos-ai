@@ -24,10 +24,10 @@ which runs in the background:
    answers once the job is staged, spoken, mixed and checked; a full renderer
    is asked again after its ``Retry-After``;
 2. poll the job every ``SOCIALS_RENDER_POLL_SECONDS`` until it ends;
-3. fetch every output, taking its sha256 on the way, then copy each into our
-   storage, ``social-media/{workspace}/{post}/{file}`` (D9), and register it as
-   a Deliverable, which records the music it mixed (S1.6). Nothing is stored
-   until every output has arrived whole;
+3. fetch every output, taking its sha256 on the way (a marked one must be the bytes
+   media-render marked), then store each, ``social-media/{workspace}/{post}/{file}``
+   (D9), write a marked file's provenance row (PRD-264 EUAI-06b) and register it as
+   a Deliverable with the music it mixed (S1.6). Nothing is stored until all arrive;
 4. finish the post with a compare-and-set: ``rendering`` → ``needs_approval``
    with the files as ``media`` (the content hash covers their digests) and, when
    the music is a CC BY track, its credit line appended to the copy
@@ -84,6 +84,7 @@ from core.media_render_client import (
     MediaRenderError,
     MediaRenderUnavailable,
 )
+from core.media_render_provenance import marked_file, record_marked
 from core.media_render_quota import (
     RenderReservation,
     book_render_seconds,
@@ -632,7 +633,7 @@ async def _fetch(
     if path.exists():
         raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
     try:
-        size, digest = await client.download(str(record["id"]), str(output["name"]), path)
+        size, digest = await client.download(str(record["id"]), str(output["name"]), path, mark=marked_file(output))
     except MediaRenderError as exc:
         raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
     if size <= 0:
@@ -653,6 +654,7 @@ async def _store_one(
     except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
         logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
         raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
+    record_marked(job.workspace_id, marked_file(output), file_name)  # PRD-264 EUAI-06b/EUAI-10: its provenance row
     file_record: Dict[str, Any] = {"name": file_name, "sha256": digest, "bytes": size, "content_type": content_type}
     if not job.preview:
         entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}

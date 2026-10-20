@@ -31,7 +31,7 @@ if str(_ORCH) not in sys.path:
 import tests.test_prd251w3_publisher as harness  # noqa: E402
 from config import config  # noqa: E402
 from core import media_render_client  # noqa: E402
-from core.media_render_client import MediaRenderClient, MediaRenderUnavailable  # noqa: E402
+from core.media_render_client import ConvertedJpeg, MediaRenderClient, MediaRenderUnavailable  # noqa: E402
 from modules.socials.capabilities import SEEDED_CHANNELS  # noqa: E402
 from modules.socials.media_urls import MediaFile  # noqa: E402
 from modules.socials.publish_steps import Runtime, Stager  # noqa: E402
@@ -102,7 +102,7 @@ def _run(env, post_id, executor, converter):
             env.sleeps.append(seconds)
             env.clock[0] += seconds
 
-        real = Stager(stager.workdir, client=FakeStore(), converter=convert)
+        real = Stager(stager.workdir, stager.workspace_id, client=FakeStore(), converter=convert)
         return Runtime(executor=executor, stager=real, sleep=sleep, clock=lambda: env.clock[0])
 
     ended = asyncio.run(run_publish(job, executor=executor, session_factory=env.factory, runtime=build))
@@ -110,7 +110,7 @@ def _run(env, post_id, executor, converter):
 
 
 async def to_jpeg(image):
-    return JPEG
+    return ConvertedJpeg(JPEG)  # an unmarked image's JPEG: no mark, so no provenance row
 
 
 def _receipt(env, post_id, kind):
@@ -241,7 +241,7 @@ def test_the_client_posts_the_image_to_media_render_s_jpeg_route(monkeypatch):
 
     monkeypatch.setattr(config, "SOCIALS_RENDER_URL", "http://media-render:8090")
     client = MediaRenderClient(http=httpx.AsyncClient(transport=httpx.MockTransport(answer)))
-    assert asyncio.run(client.to_jpeg(PNG)) == JPEG
+    assert asyncio.run(client.to_jpeg(PNG)) == ConvertedJpeg(JPEG, None)
     assert seen == [("POST", "/jpeg", PNG)]
     with pytest.raises(media_render_client.MediaRenderError):
         asyncio.run(client.to_jpeg(b"bad"))
