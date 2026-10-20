@@ -8,7 +8,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import { expect, vi, type Mock } from 'vitest'
 
 import LooksPage from '@/app/looks/page'
-import { LookProvider } from '@/components/looks/look-provider'
+import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { lookDocumentVars } from '@/lib/looks/document'

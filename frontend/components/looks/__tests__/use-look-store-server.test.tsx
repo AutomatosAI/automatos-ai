@@ -9,7 +9,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { type LookServer, type LookServerBody, LOOK_SEND_DELAY_MS, useLookStore } from '@/components/looks/use-look-store'
+import { type LookServer, type LookServerBody, LOOK_SEND_DELAY_MS, useLookStore } from '@/lib/theme-host/builtin/play-look-store'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { memoryStorage, myLook } from '@/lib/looks/__tests__/helpers'
 import { AURORA, DAYLIGHT, OBSIDIAN } from '@/lib/looks/presets'

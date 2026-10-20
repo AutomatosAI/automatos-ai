@@ -57,7 +57,7 @@ vi.mock('next/link', async () => {
 })
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
-import { LookProvider } from '@/components/looks/look-provider'
+import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { useActiveTheme, useIsStudio } from '@/hooks/use-studio-theme'

@@ -12,7 +12,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { LookProvider, useLook } from '@/components/looks/look-provider'
+import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { MOTION_ATTRIBUTE, MOTION_VAR, lookDocumentVars } from '@/lib/looks/document'

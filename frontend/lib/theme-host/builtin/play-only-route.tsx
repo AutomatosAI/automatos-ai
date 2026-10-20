@@ -24,16 +24,19 @@ import type { UiStyle } from '@/lib/theme-host/registry-types'
  * app/__tests__/page-frames), since Play's variables exist only under html.play. Each note is a
  * region named by the page, so its words and Switch to Play read as one block.
  * Switch to Play replaces the whole note, the button with it: once Play's screen renders, its h1
- * (marked PLAY_ONLY_HEADING, tabIndex={-1}) takes the focus that dropped to <body> (P260-FX-22,
- * M21), which ThemeSlotPage finds by SCREEN_HEADING_SELECTOR.
+ * (marked with Play's PLAY_ONLY_HEADING, components/looks/screen-heading.ts, tabIndex={-1}) takes
+ * the focus that dropped to <body> (P260-FX-22, M21), which ThemeSlotPage finds by
+ * SCREEN_HEADING_SELECTOR.
+ * PRD-261 A-14d: host code (the core's frame, the theme menu's pick), so it lives with builtin
+ * Play's registrations, out of Play's folders;
+ * components/looks/__tests__/copied-helpers.test.tsx holds Play's heading mark to this selector.
  */
 
 export const SWITCH_TO_PLAY = 'Switch to Play'
 export const WIDER_SCREEN_NOTE = "It opens on a laptop or desktop screen: Play's pages need a wider window."
 
+/** The attribute a Play-only screen's h1 carries (with tabIndex={-1}): where focus goes after Switch to Play. */
 const HEADING_ATTRIBUTE = 'data-play-only-heading'
-/** Spread on a Play-only screen's h1 (with tabIndex={-1}): where focus goes after Switch to Play. */
-export const PLAY_ONLY_HEADING = { [HEADING_ATTRIBUTE]: true } as const
 /** The screen's heading, as ThemeSlotPage looks for it once the screen replaces the note. */
 export const SCREEN_HEADING_SELECTOR = `[${HEADING_ATTRIBUTE}]`
 
