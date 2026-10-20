@@ -104,6 +104,8 @@ const refreshWorkspace = async (): Promise<void> => undefined
 const LOADED: WorkspaceStub = { workspace: { id: WORKSPACE }, isLoading: false, error: null, refreshWorkspace }
 const LOADING: WorkspaceStub = { workspace: null, isLoading: true, error: null, refreshWorkspace }
 const FAILED: WorkspaceStub = { workspace: null, isLoading: false, error: new Error('Failed to fetch workspace'), refreshWorkspace }
+/** workspace-provider.tsx after a refetch fails: the workspace it had is kept, with the error. */
+const REFETCH_FAILED: WorkspaceStub = { ...LOADED, error: new Error('Failed to fetch workspace') }
 
 function accountBlobKey(themeId: string, userKey: string = USER): string {
   return `${THEME_STATE_KEY_PREFIX}b:${themeId}:u:${userKey}`
@@ -270,6 +272,18 @@ describe('PRD-261 E3c — the workspace part', () => {
     expect(readThemeState(KEY, { within: 'workspace' }).ready).toBe(false)
     expect(write(KEY, 'hello', 'workspace')).toMatchObject({ ok: false, reason: 'not-ready' })
     expect(write(KEY, 'hello', 'account')).toEqual({ ok: true, persisted: true })
+  })
+
+  it('a refetch that fails keeps the workspace the provider still holds: workspace state stays ready', () => {
+    window.localStorage.setItem(workspaceBlobKey(HELLO_ID), blob({ [KEY]: 'kept in ws-1' }))
+    const { rerender } = show(HELLO, 'active')
+    expect(readThemeState(KEY, { within: 'workspace' })).toMatchObject({ ready: true, value: 'kept in ws-1' })
+
+    harness.workspace = REFETCH_FAILED
+    rerender(<Host status="active" />)
+    expect(currentThemeStateScope()).toEqual({ themeId: HELLO_ID, userKey: USER, workspaceKey: WORKSPACE })
+    expect(readThemeState(KEY, { within: 'workspace' })).toMatchObject({ ready: true, value: 'kept in ws-1' })
+    expect(write(KEY, 'still here', 'workspace')).toEqual({ ok: true, persisted: true })
   })
 
   it('the workspace arriving makes workspace state ready, with its stored value, and tells its subscribers', () => {

@@ -62,9 +62,12 @@ function useUserKey(): string | null {
   return isLocal ? LOCAL_EDITION_USER_KEY : nonEmpty(user?.id)
 }
 
-/** The workspace's id once it loaded; null while it loads, after it failed, and outside a provider. */
+/**
+ * The workspace's id once it loaded; null while it loads, when it never loaded, and outside a
+ * provider. A failed refetch keeps the workspace the provider still holds, as the look scope does.
+ */
 function workspaceKeyOf(workspaceCtx: WorkspaceState): string | null {
-  if (workspaceCtx === null || workspaceCtx.isLoading || workspaceCtx.error !== null) return null
+  if (workspaceCtx === null || workspaceCtx.isLoading) return null
   return nonEmpty(workspaceCtx.workspace?.id)
 }
 
