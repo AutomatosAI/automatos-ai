@@ -18,7 +18,9 @@ Pinned (plan §2.6 A-08a):
   reports), so it is no approved listing and an install runs it only after the member's opt-in;
 * tampered stored bytes → 404 and a logged error; ``Service-Worker: script`` → 403;
 * the integrity value is the base64 form of the stored hex; a ``disable`` revocation → 404 and
-  the base boot; the local edition's operator counts as owner of every workspace.
+  the base boot; the local edition's operator counts as owner of every workspace;
+* PRD-261 W-A6b (gap G1): the boot of a theme that runs carries its registry entry from
+  ``theme.json`` (``entry``); the base boot's is null.
 """
 from __future__ import annotations
 
@@ -272,8 +274,32 @@ def test_a_member_who_has_not_opted_in_gets_404_for_files_and_the_base_boot(worl
     assert boot.status_code == 200
     assert boot.json() == {
         "addClasses": ["studio"], "removeClasses": ["hello", "play"], "tone": {"policy": "user", "value": None},
-        "prepaint": None, "lookStorage": None, "lookGuard": None, "integrity": None,
+        "prepaint": None, "lookStorage": None, "lookGuard": None, "integrity": None, "entry": None,
     }
+
+
+def test_the_boot_of_a_theme_that_runs_carries_its_registry_entry_from_theme_json(world):
+    _, install = _private(world, TEAM)
+    entry = _boot(world, _person("alice"), install.id).json()["entry"]
+    assert entry == {
+        "name": "Hello theme", "base": "studio", "htmlClass": "hello", "minWidth": 0, "tone": "user",
+        "reviewed": False, "ownsPages": [], "routes": ["hello"],
+        "nav": [{"id": "hello", "label": "Hello", "path": "/x/hello"}],
+        "slots": ["frame@1", "lookEditor@1", "styleSheet@1"],
+    }
+
+
+def test_the_entry_lists_the_pages_a_theme_draws_and_its_review(world):
+    manifest = {
+        **world.package.manifest, "htmlClass": "play", "minWidth": 1024, "tone": "from-look",
+        "pages": {"/deliverables": {"mode": "own", "keepCorePage": ["tab"]}, "/chat": {"mode": "own"}},
+    }
+    reviewed = ThemePackage(manifest=manifest, owner_type="marketplace", reviewed=True)
+    entry = serve.theme_entry(reviewed)
+    assert (entry["htmlClass"], entry["minWidth"], entry["tone"]) == ("play", 1024, "from-look")
+    assert entry["ownsPages"] == ["/chat", "/deliverables"]
+    assert entry["reviewed"] is True
+    assert serve.theme_entry(ThemePackage(manifest=manifest, owner_type="workspace", reviewed=True))["reviewed"] is False
 
 
 def test_an_uninstalled_install_serves_nothing(world):

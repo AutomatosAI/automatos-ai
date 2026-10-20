@@ -2,7 +2,6 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   describeParity,
   GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK,
-  GAP_INSTALLED_THEME_HAS_NO_ENTRY,
   knownPackageGap,
   openPlay,
   PARITY_TAG,
@@ -103,7 +102,6 @@ describeParity('Play below 1024 px', (variant) => {
   })
 
   test("the look's tone is forced over the user's own, and the theme menu says so", { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), STORED_TONE)
     await openPlay(page, request, variant, FRAME_PATH)
     await expectCoreChrome(page)

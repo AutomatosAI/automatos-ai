@@ -30,6 +30,11 @@ The boot is the §2.2 ``ThemeBoot``: the theme's classes and tone policy, ``boot
 checked again by ``css_value.py``, and ``integrity`` (module URL → ``sha256-<base64>``, from the
 stored hex) for every JS module, which ``active`` (A-07b) carries too. A caller who has not
 opted in, or a revoked version, gets the base boot: the theme's base classes and nothing else.
+
+PRD-261 W-A6b (gap G1): the boot of a theme that runs also carries ``entry``, what the host's
+theme registry needs of it (``theme_entry``: its name, base, class, width, tone, pages, routes,
+nav and slots, from the checked ``theme.json``), so the root layout hands the client the same
+registry entry on the server render and the first client render. The base boot's is null.
 """
 
 from __future__ import annotations
@@ -76,6 +81,8 @@ STUDIO_HTML_CLASS = "studio"
 # and each builtin theme's.
 STYLE_HTML_CLASSES: Tuple[str, ...] = (STUDIO_HTML_CLASS, *sorted(HTML_CLASS_OWNERS))
 USER_TONE = "user"
+# theme.json requires minWidth; a manifest stored before it was required draws at every width.
+DEFAULT_MIN_WIDTH = 0
 FIXED_TONES = frozenset({"light", "dark"})
 
 # (storage prefix, package path) -> the stored bytes, or None when the object is gone.
@@ -261,6 +268,7 @@ def _boot(add_classes: List[str], extra_remove: Tuple[str, ...], policy: str) ->
         "lookStorage": None,
         "lookGuard": None,
         "integrity": None,
+        "entry": None,
     }
 
 
@@ -290,12 +298,35 @@ def theme_prepaint(package: ThemePackage, reader: FileReader) -> Optional[Dict[s
     return document
 
 
+def theme_entry(package: ThemePackage) -> Dict[str, Any]:
+    """The theme's registry entry, as the host reads it (frontend ``lib/theme-host/installed-entry.ts``).
+
+    Every field comes from the ``theme.json`` checked on import (``manifest.py``); ``ownsPages`` lists
+    the core pages the theme draws (``pages``' routes), and ``reviewed`` is the package's review, the
+    rule ``choices.is_private`` reads. The frontend checks the answer again before it uses it.
+    """
+    manifest = package.manifest or {}
+    pages = manifest.get("pages")
+    return {
+        "name": str(manifest.get("name", "")),
+        "base": str(manifest.get("base", STUDIO_BASE)),
+        "htmlClass": str(manifest["htmlClass"]),
+        "minWidth": manifest.get("minWidth", DEFAULT_MIN_WIDTH),
+        "tone": str(manifest.get("tone", USER_TONE)),
+        "reviewed": not is_private(package),
+        "ownsPages": sorted(pages) if isinstance(pages, dict) else [],
+        "routes": list(manifest.get("routes", [])),
+        "nav": [dict(item) for item in manifest.get("nav", []) if isinstance(item, dict)],
+        "slots": list(manifest.get("slots", [])),
+    }
+
+
 def theme_boot(package: ThemePackage, prepaint: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The boot of a theme that runs: its base's classes and its own, its tone, prepaint and integrity."""
+    """The boot of a theme that runs: its base's classes and its own, its tone, prepaint, integrity and entry."""
     manifest = package.manifest or {}
     classes = [*_base_classes(manifest), str(manifest["htmlClass"])]
     boot = _boot(classes, (), str(manifest.get("tone", USER_TONE)))
-    return {**boot, "prepaint": prepaint, "integrity": module_integrity(package)}
+    return {**boot, "prepaint": prepaint, "integrity": module_integrity(package), "entry": theme_entry(package)}
 
 
 def install_boot(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Dict[str, Any]:
@@ -314,5 +345,6 @@ def install_boot(db: Any, membership: Membership, target: BootTarget, reader: Fi
 __all__ = [
     "BootTarget", "FileReader", "ThemeFileMissing", "ThemeStorageUnavailable", "authorised_package", "base_boot",
     "belongs_to_install", "boot_target", "file_cache_seconds", "install_boot", "integrity_value", "is_private",
-    "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_prepaint", "verified_file",
+    "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_entry", "theme_prepaint",
+    "verified_file",
 ]

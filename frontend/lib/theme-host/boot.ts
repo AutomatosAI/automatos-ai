@@ -26,6 +26,7 @@ import type { ThemeTonePolicy, UiStyle } from './registry-types'
 export type {
   BuiltinThemeBootData,
   CookieReader,
+  InstalledThemeEntryData,
   PrepaintKnobTable,
   PrepaintNumericRule,
   PrepaintPair,
@@ -67,6 +68,7 @@ export function baseThemeBoot(style: UiStyle): ThemeBoot {
     lookStorage: null,
     lookGuard: null,
     integrity: null,
+    entry: null,
   })
 }
 

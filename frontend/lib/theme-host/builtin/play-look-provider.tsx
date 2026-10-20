@@ -153,11 +153,11 @@ export interface LookProviderProps {
    */
   readonly enabled?: boolean
   /**
-   * PRD-261 W-A6: while switched off, leave the look's properties on <html> as they are instead of
-   * clearing them. ThemeLookRuntime sets it while the host loads or runs an installed theme: the
-   * root layout's boot painted that theme's first paint (its prepaint table, Studio's tokens among
-   * it) under the same names, and nothing paints it again. Leaving a look this provider painted, or
-   * a failed load, clears as before.
+   * PRD-261 W-A6: while it paints no look (switched off, or a theme whose class isn't Play's), leave
+   * the look's properties on <html> as they are instead of clearing them. ThemeLookRuntime sets it
+   * while the host loads or runs an installed theme: the root layout's boot painted that theme's
+   * first paint (its prepaint table, Studio's tokens among it) under the same names, and nothing
+   * paints it again. Leaving a look this provider painted, or a failed load, clears as before.
    */
   readonly keepFirstPaint?: boolean
 }
@@ -184,7 +184,7 @@ export function LookProvider({ children, storage = browserStorage, onToneChange,
 
   return (
     <LookContext.Provider value={value}>
-      <LookRuntimeBridge value={value} enabled={enabled}>
+      <LookRuntimeBridge value={value} enabled={active}>
         {children}
       </LookRuntimeBridge>
     </LookContext.Provider>

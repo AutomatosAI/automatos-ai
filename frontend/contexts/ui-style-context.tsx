@@ -13,6 +13,13 @@
  * reload); lib/theme-host/choice-sync.ts stores a pick on the server and checks the server's
  * choice once per workspace and tab. It also fills `installedThemes`, which the theme menu and
  * ⌘K list; this provider sits above the workspace and query providers, so it cannot read them.
+ *
+ * PRD-261 W-A6b (gap G1): an installed theme's registry entry comes with the page: the root
+ * layout builds it from the boot the server resolved for the style (lib/theme-host/installed-entry.ts)
+ * and passes it in as `installedTheme`, so the server render and the first client render name the
+ * same activeTheme. The theme host (components/theme-host/theme-host-provider.tsx), which sits
+ * below, releases it when it cannot run the theme (a failed load, safe mode, no install to run):
+ * activeTheme is then null, as for a theme the registry doesn't know.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
@@ -39,8 +46,16 @@ export interface UiStyleContextValue {
   setStyle: (next: UiStyle) => void
   /** True for Studio AND every theme drawn on Studio (PRD-260 D2): the theme renders Studio's layout where it has no design. */
   isStudio: boolean
-  /** The active theme's registry entry: null for Classic and Studio, and for a theme the registry doesn't know. */
+  /**
+   * The active theme's registry entry: null for Classic and Studio, for a theme the registry doesn't
+   * know, and for an installed theme whose boot carried no entry or that the theme host released.
+   */
   activeTheme: ThemeEntry | null
+  /**
+   * PRD-261 W-A6b: the theme host names the installed theme's style it cannot run (failed, safe mode,
+   * no install to run), or null while it loads or runs one.
+   */
+  releaseInstalledTheme: (style: UiStyle | null) => void
   /** PRD-261 A-02c: the workspace's installed themes, for the menu and ⌘K; [] until ThemeChoiceSync reads them. */
   installedThemes: readonly InstalledTheme[]
   setInstalledThemes: (rows: readonly InstalledTheme[]) => void
@@ -86,16 +101,38 @@ function reloadDocument(): void {
   window.location.reload()
 }
 
+/** Builtin themes from the registry; an installed theme from its boot's entry, until the host releases it. */
+function activeThemeOf(style: UiStyle, installed: ThemeEntry | null, released: UiStyle | null): ThemeEntry | null {
+  if (!isInstalledThemeStyle(style)) return findThemeEntry(style)
+  if (installed === null || released === style) return null
+  return findThemeEntry(style, [installed])
+}
+
+/** The active theme's entry, and the host's way to release an installed one it cannot run. */
+function useActiveThemeEntry(style: UiStyle, installed: ThemeEntry | null) {
+  const [released, releaseInstalledTheme] = useState<UiStyle | null>(null)
+  const activeTheme = useMemo(() => activeThemeOf(style, installed, released), [style, installed, released])
+  return { activeTheme, releaseInstalledTheme }
+}
+
 interface UiStyleProviderProps {
   initialStyle?: UiStyle
+  /** PRD-261 W-A6b: the installed theme's entry the root layout built from its boot; null for every other style. */
+  installedTheme?: ThemeEntry | null
   /** How a switch to an installed theme reloads the page (PA-13); tests pass their own. */
   reloadPage?: () => void
   children: ReactNode
 }
 
-export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = reloadDocument, children }: UiStyleProviderProps) {
+export function UiStyleProvider({
+  initialStyle = DEFAULT_UI_STYLE,
+  installedTheme = null,
+  reloadPage = reloadDocument,
+  children,
+}: UiStyleProviderProps) {
   const [style, setStyleState] = useState<UiStyle>(initialStyle)
   const [installedThemes, setInstalledThemes] = useState<readonly InstalledTheme[]>(NO_INSTALLED_THEMES)
+  const { activeTheme, releaseInstalledTheme } = useActiveThemeEntry(style, installedTheme)
   const { setTheme } = useTheme()
 
   // PRD-261 PA-13: an installed theme's boot data and import map come with the page, so a
@@ -140,11 +177,12 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, reloadPage = 
       style,
       setStyle,
       isStudio: rendersStudio(style),
-      activeTheme: findThemeEntry(style),
+      activeTheme,
+      releaseInstalledTheme,
       installedThemes,
       setInstalledThemes,
     }),
-    [style, setStyle, installedThemes],
+    [style, setStyle, activeTheme, releaseInstalledTheme, installedThemes],
   )
   return <UiStyleContext.Provider value={value}>{children}</UiStyleContext.Provider>
 }

@@ -5,7 +5,6 @@ import { ask, autoReplies, messageBox, openPlayChat } from '../../support/play-c
 import {
   APP_URL,
   describeParity,
-  GAP_INSTALLED_THEME_HAS_NO_ENTRY,
   GAP_SWITCH_TO_PACKAGE_RELOADS,
   knownPackageGap,
   openPlay,
@@ -89,7 +88,6 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
   })
 
   test("This look's toolbar keeps focus through Rename, Delete and Keep it", { tag: PARITY_TAG }, async ({ page, request }) => {
-    knownPackageGap(variant, GAP_INSTALLED_THEME_HAS_NO_ENTRY)
     await openPlay(page, request, variant, LOOKS_PATH)
     await page.getByRole('complementary', { name: 'Edit the look', exact: true }).getByRole('button', { name: 'Save as new look', exact: true }).click()
 
