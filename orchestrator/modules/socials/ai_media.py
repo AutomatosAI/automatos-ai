@@ -41,6 +41,15 @@ speaks its script speaks with a synthetic voice, and the template's own visuals 
 there. media-render marks each file it makes from it (IPTC DigitalSourceType in XMP,
 ``services/media-render/media_render/provenance.py``), so a post and its files agree.
 
+**The AI-generated label** (PRD-264 EUAI-08a, ``deepfake_label.py``): on by default while
+the post carries AI media. The render record keeps whether the render burned it into the
+video (``labelled``); a caption channel's receipt says the caption label was added while
+it is on, and asks the person to add it while it is off; the AI-labels answer carries the
+setting (``deepfake_label.summary``). A rendered video whose burned-in label disagrees with
+the post's label (switched after the render, or rendered before ``labelled`` existed, which
+counts as no label) is neither approved nor published until it is rendered again
+(:func:`label_mismatch`, read by ``service.approve`` and every publish guard).
+
 Pure: no database, no Composio.
 """
 from __future__ import annotations
@@ -51,7 +60,9 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from core.media_render_bundle import AI_INPUTS, ai_inputs, voice_script
 from core.social_templates import IMAGE_SLOT
+from modules.socials import deepfake_label
 from modules.socials.channel_adapters import CHANNEL_ADAPTERS
+from modules.socials.deepfake_label import Caption
 from modules.socials.kokoro_voices import KOKORO
 
 RECORD = "ai_media"  # a render_done entry's report key: the render record
@@ -59,7 +70,14 @@ LABEL = "ai_label"  # a target's action_plan key: the AI label line its last pub
 RENDER_DONE = "render_done"  # service.ACTION_RENDER_DONE (the service imports this module)
 VIDEO_FORMAT = "video"  # a post's format whose render speaks its script
 IMAGE_TYPE = "image/"
+VIDEO_TYPE = "video/"  # a rendered file record's content_type when the file is a video
 FOOTAGE, STILLS, OWN, VOICE, FILES = "footage", "stills", "own", "voice", "files"
+LABELLED = "labelled"  # the render record's: the render burned the AI-generated label in (EUAI-08a)
+# PRD-264 EUAI-08a: why a video whose burned-in label disagrees with the post's label is not approved or published.
+LABEL_MISMATCH = (
+    "This video was rendered with the AI-generated label {was}, and the post's label is {now}: "
+    "render it again before it is approved or published."
+)
 INPUTS = AI_INPUTS  # a render bundle's key: which inputs are AI-made (media-render's bundle.py)
 
 # How each channel shows a post's AI label through Composio (the schemas above).
@@ -85,6 +103,17 @@ CAPTION_LINE = (
     "This post carries {what}, and {channel} takes no AI label through its API, so the caption "
     "carries the disclosure: start it with \"AI-generated.\""
 )
+# PRD-264 EUAI-08a: while the post is labelled (deepfake_label.py), the caption carries it already.
+CAPTION_ADDED = (
+    "This post carries {what}, and {channel} takes no AI label through its API, so the caption "
+    "carries the disclosure: \"{label}\" was added at its start."
+)
+CAPTION_HAS = (
+    "This post carries {what}, and {channel} takes no AI label through its API, so the caption "
+    "carries the disclosure: it starts with \"{label}\"."
+)
+CAPTION_CHOSEN = "The post carries no AI media, and you chose to label it: \"{label}\" starts its caption."
+NO_CAPTION = Caption("")  # a caption with no label: the person adds the disclosure
 
 
 @dataclass(frozen=True)
@@ -163,13 +192,15 @@ def _digests(media: Any) -> Set[str]:
 def render_record(post: Any, bundle: Any, media: Any) -> Dict[str, Any]:
     """What a finished render was made from: the post's filled slots (a rendering post is
     never edited, so they are the render's), the voice that spoke the bundle's script, and
-    the sha256 of each file in ``media``, the render's output."""
+    the sha256 of each file in ``media``, the render's output, and whether it burned the
+    AI-generated label in (PRD-264 EUAI-08a: the bundle's ``ai_label``)."""
     slots = _done_slots(getattr(post, "footage", None))
     spoken = bool(voice_script(bundle)) if isinstance(bundle, Mapping) else False
     return {
         FOOTAGE: list(slots[FOOTAGE]), STILLS: list(slots[STILLS]), OWN: list(slots[OWN]),
         VOICE: voice_name(getattr(post, "voice", None)) if spoken else None,
         FILES: sorted(_digests(media)),
+        LABELLED: isinstance(bundle, Mapping) and bool(bundle.get(deepfake_label.FIELD)),
     }
 
 
@@ -255,9 +286,8 @@ def _from_post(post: Any, *, rendered: bool) -> AiMedia:
 def for_post(post: Any) -> AiMedia:
     """The AI media of the post as it is now: from the render record of the files it
     carries, else from its own fields."""
-    carried = _digests(getattr(post, "media", None))
-    record = _record_for(getattr(post, "review_log", None), carried) if carried else None
-    return _from_record(record) if record is not None else _from_post(post, rendered=bool(carried))
+    record = _render_record_of(post)
+    return _from_record(record) if record is not None else _from_post(post, rendered=bool(_digests(getattr(post, "media", None))))
 
 
 def describe(ai: AiMedia) -> str:
@@ -282,35 +312,97 @@ def channel_label(toolkit: str) -> str:
     return str(adapter["label"]) if adapter else toolkit.replace("_", " ").title()
 
 
-def label_line(toolkit: str, ai: AiMedia, options: Mapping[str, Any]) -> str:
+def _caption_line(channel: str, ai: AiMedia, caption: Caption) -> str:
+    """A caption channel's line: the label its caption starts with (PRD-264 EUAI-08a, while
+    the post is labelled), else the person is asked to add it."""
+    what = describe(ai)
+    if not caption.label:
+        return CAPTION_LINE.format(channel=channel, what=what) if ai.carries else NO_AI_MEDIA
+    if not ai.carries:
+        return CAPTION_CHOSEN.format(label=caption.label)
+    line = CAPTION_ADDED if caption.added else CAPTION_HAS
+    return line.format(channel=channel, what=what, label=caption.label)
+
+
+def label_line(toolkit: str, ai: AiMedia, options: Mapping[str, Any], caption: Caption = NO_CAPTION) -> str:
     """The channel's AI label decision, as its receipt states it. A channel outside the
-    table (a generic one) takes no AI flag: the caption carries the disclosure."""
+    table (a generic one) takes no AI flag: the caption carries the disclosure, and
+    ``caption`` (``deepfake_label.caption_for``) says whether it starts with the label."""
     how = CHANNEL_AI_LABEL.get(toolkit, CAPTION_ONLY)
     channel = channel_label(toolkit)
     if how == NETWORK_FLAG:
         if ai.carries:
             return FLAG_ON.format(channel=channel, what=describe(ai))
         return FLAG_CHOSEN.format(channel=channel) if options.get(FLAG_OPTION) is True else FLAG_OFF.format(channel=channel)
-    if not ai.carries:
-        return NO_AI_MEDIA
-    line = STUDIO_LINE if how == STUDIO_ONLY else CAPTION_LINE
-    return line.format(channel=channel, what=describe(ai))
+    if how == CAPTION_ONLY:
+        return _caption_line(channel, ai, caption)
+    return STUDIO_LINE.format(channel=channel, what=describe(ai)) if ai.carries else NO_AI_MEDIA
 
 
-def _target_label(target: Any, ai: AiMedia) -> Dict[str, Any]:
+def _target_label(target: Any, ai: AiMedia, post: Any, labelled: bool) -> Dict[str, Any]:
     plan = target.action_plan if isinstance(target.action_plan, Mapping) else {}
     stored = plan.get(LABEL)
     at_publish = isinstance(stored, str) and bool(stored)
+    caption = deepfake_label.caption_for(getattr(post, "copy", None), target.toolkit, labelled)
     return {
         "id": str(target.id), "toolkit": target.toolkit, "post_kind": target.post_kind,
-        "ai_label": stored if at_publish else label_line(target.toolkit, ai, target.options),
+        "ai_label": stored if at_publish else label_line(target.toolkit, ai, target.options, caption),
         "at_publish": at_publish,
     }
 
 
+def _render_record_of(post: Any) -> Optional[Mapping[str, Any]]:
+    carried = _digests(getattr(post, "media", None))
+    return _record_for(getattr(post, "review_log", None), carried) if carried else None
+
+
+def _has_video(media: Any) -> bool:
+    """Whether ``media`` (``{aspect: [records]}``) holds a rendered video file."""
+    groups = media.values() if isinstance(media, Mapping) else ()
+    return any(
+        isinstance(record, Mapping) and str(record.get("content_type") or "").startswith(VIDEO_TYPE)
+        for records in groups if isinstance(records, (list, tuple)) for record in records
+    )
+
+
+def burned_label(post: Any) -> Optional[bool]:
+    """Whether the post's rendered video shows the AI-generated label (PRD-264 EUAI-08a), by the
+    render record of the files it carries; ``None`` when it carries no rendered video. A record
+    that does not say (a render from before the label existed, or before the record did) shows none."""
+    if not _has_video(getattr(post, "media", None)):
+        return None
+    record = _render_record_of(post)
+    return record is not None and record.get(LABELLED) is True
+
+
+def label_mismatch(post: Any) -> Optional[str]:
+    """Why the post's rendered video can't be approved or published as it is: it shows the
+    AI-generated label while the post's label is off, or shows none while it is on (the label
+    publish reads, ``publish_sources.context_for``). ``None`` when they agree, or with no video."""
+    burned = burned_label(post)
+    if burned is None:
+        return None
+    on = deepfake_label.is_on(deepfake_label.setting_of(post), for_post(post).carries)
+    if burned == on:
+        return None
+    return LABEL_MISMATCH.format(was="on" if burned else "off", now="on" if on else "off")
+
+
+def assert_label_rendered(post: Any) -> None:
+    """``service.NotPublishable`` with :func:`label_mismatch`'s reason: the video is rendered again first."""
+    reason = label_mismatch(post)
+    if reason is not None:
+        raise _service().NotPublishable(reason)
+
+
 def labels_for(post: Any) -> Dict[str, Any]:
-    """The post's AI media and each target's AI label: the line its publish used, for a
-    target a publish attempt ran, else the line its publish will use."""
+    """The post's AI media, its AI-generated label setting (PRD-264 EUAI-08a,
+    ``deepfake_label.summary``) and each target's AI label: the line its publish used, for
+    a target a publish attempt ran, else the line its publish will use."""
     ai = for_post(post)
+    setting = deepfake_label.summary(post, ai.carries, burned_label(post))
     targets = sorted(getattr(post, "targets", None) or (), key=lambda t: (t.toolkit, t.post_kind))
-    return {"ai_media": ai.to_dict(), "targets": [_target_label(target, ai) for target in targets]}
+    return {
+        "ai_media": ai.to_dict(), "deepfake_label": setting,
+        "targets": [_target_label(target, ai, post, setting["on"]) for target in targets],
+    }

@@ -31,6 +31,12 @@ their fitted copies (``audio/fit``) are not marked: they never leave the service
 output names them, and the job drops them when its render ends), and the mix and the
 video they reach carry the mark. So the timed voice step runs no exiftool.
 
+A bundle with an ``ai_label`` (PRD-264 EUAI-08a, ai_label.py) gets a visible
+"AI-generated" label burned into its video after ``hyperframes render`` and before the
+mark and the signature, so both follow the last encode: the signed file carries the
+label, and its ``sha256`` is the labelled file's. A label that cannot be burned in fails
+the job: a labelled post's video never ships without it.
+
 Each marked file is then signed with a C2PA manifest (EUAI-06b, content_credentials.py),
 keeping as ingredients the job's AI-made inputs that carry one (and, in the video, the
 signed mix); a person's own upload is never an ingredient (FR-10). A file whose signing
@@ -53,7 +59,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Protocol, Seque
 import aiohttp
 from yarl import URL
 
-from . import audio, content_credentials, fit, hyperframes, probe, provenance
+from . import ai_label, audio, content_credentials, fit, hyperframes, probe, provenance
 from .bundle import Bundle, MediaInput
 from .check_report import CheckReportError, parse_check_output
 from .composition import GSAP_PATH, MIX_PATH
@@ -394,6 +400,21 @@ class RenderPipeline:
             self._signer.sign, path, kind, job=f"render {job.id}", instance_id=instance_id, ingredients=ingredients
         )
 
+    async def _label(self, job: Job, video: Path) -> Dict[str, float]:
+        """EUAI-08a: the bundle's AI-generated label burned into ``video``, and how long it took."""
+        label, composition, settings = job.bundle.ai_label, job.bundle.composition, self._settings
+        if label is None:
+            return {}
+        try:
+            seconds = await asyncio.to_thread(
+                ai_label.burn, video, label, work_dir=job.dir / ai_label.WORK_DIR, width=composition.width,
+                height=composition.height, ffmpeg_bin=settings.ffmpeg_bin, font_path=settings.ai_label_font_path,
+                timeout_seconds=settings.label_timeout_seconds,
+            )
+        except ai_label.LabelError as exc:
+            raise PipelineError("label_failed", "the AI-generated label could not be added to the video", detail=str(exc)) from None
+        return {"label_seconds": seconds}
+
     async def _mix(self, job: Job, lines: Sequence[PlacedLine]) -> Dict[str, Any]:
         """The mix, the composition's one <audio>, marked for its audio elements; its loudness facts."""
         settings, target = self._settings, job.project_dir / MIX_PATH
@@ -474,6 +495,7 @@ class RenderPipeline:
             if run.timed_out:
                 raise PipelineError("render_timed_out", f"the render ran past {settings.render_timeout_seconds} s")
             raise PipelineError("render_failed", f"hyperframes render exited {run.returncode}", detail=run.tail())
+        labelled = await self._label(job, output)
         kind = provenance.video_type(job.bundle)
         ingredients = await self._ingredients(job, kind, ANY_INPUT, (job.project_dir / MIX_PATH,))
         record = await self._mark(job, output, kind, "render_failed", ingredients)
@@ -496,7 +518,7 @@ class RenderPipeline:
             "probe": facts,
             **_mark_fields(record),
         }
-        timings = {"render_seconds": run.seconds, "probe_seconds": round(time.monotonic() - started, 3)}
+        timings = {"render_seconds": run.seconds, **labelled, "probe_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=(entry,), timings=timings)
 
     def _ffmpeg(self, argv: Sequence[str], what: str, *, code: str = "preview_failed") -> None:

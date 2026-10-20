@@ -101,6 +101,13 @@ def signing_problems(settings: Settings) -> List[str]:
     return configured_problems(settings)
 
 
+def label_font_problems(settings: Settings) -> List[str]:
+    """PRD-264 EUAI-08a: without its font, no labelled video could show "AI-generated"."""
+    if not Path(settings.ai_label_font_path).is_file():
+        return [f"the AI-generated label's font {settings.ai_label_font_path!r} is missing (MEDIA_RENDER_AI_LABEL_FONT)"]
+    return []
+
+
 def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
     return [
         *espeak_data_path_problems(settings.espeak_data_path),
@@ -110,6 +117,7 @@ def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
         *kokoro_voice_problems(settings),
         *marker_problems(settings),
         *signing_problems(settings),
+        *label_font_problems(settings),
     ]
 
 

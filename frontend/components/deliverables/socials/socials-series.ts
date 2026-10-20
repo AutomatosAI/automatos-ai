@@ -32,6 +32,7 @@ export const SERIES_LEFT_LABELS: Record<SocialSeriesLeftReason, string> = {
   not_in_campaign: 'Not in this campaign',
   not_shown: 'Not shown to you',
   not_in_batch: 'Not in this batch',  // PRD-251C (C2): approving a plan's week, a post of another batch
+  render_again: 'Render the video again',  // PRD-264 EUAI-08a: its AI-generated label disagrees with the post's
 }
 
 export const SERIES_OFF_MESSAGE =
