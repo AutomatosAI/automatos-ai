@@ -30,8 +30,12 @@ vi.mock('@/lib/api-client', () => ({ apiClient: api }))
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 
 const workspace = vi.hoisted(() => ({ socials: false }))
+// Whether Socials is offered comes through the SDK's useWorkspace (lib/theme-sdk/context.ts), which reads this.
 vi.mock('@/components/workspace-provider', () => ({
-  useWorkspace: () => ({ workspace: { id: 'ws-1', socials: { available: workspace.socials } }, isLoading: false }),
+  useWorkspaceOptional: () => ({
+    workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro', socials: { available: workspace.socials } },
+    isLoading: false,
+  }),
 }))
 
 const pictures = vi.hoisted(() => ({ blobUrl: vi.fn((url: string | undefined) => ({ src: null as string | null, error: null, url })) }))

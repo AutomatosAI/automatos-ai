@@ -29,12 +29,17 @@ export type HostTone = 'light' | 'dark'
 export type HostHealth = BackendHealth
 export type HostHealthOptions = BackendHealthOptions
 
-/** The workspace the page is in: who it is, and its plan. */
+/** The workspace the page is in: who it is, its plan, and whether Socials is offered in it. */
 export interface HostWorkspace {
   readonly id: string
   readonly name: string
   readonly slug: string
   readonly plan: Workspace['plan']
+  /**
+   * The platform offers Socials to this workspace (`socials.available` on GET /api/workspaces/current,
+   * PRD-251 D1), as the host's Deliverables page reads it. False while the workspace doesn't say.
+   */
+  readonly socialsAvailable: boolean
 }
 
 export interface HostWorkspaceState {
@@ -76,12 +81,13 @@ export function useWorkspace(): HostWorkspaceState {
   const name = source?.name
   const slug = source?.slug
   const plan = source?.plan
+  const socialsAvailable = source?.socials?.available === true
   return useMemo(() => {
     const workspace = id !== undefined && name !== undefined && slug !== undefined && plan !== undefined
-      ? Object.freeze({ id, name, slug, plan })
+      ? Object.freeze({ id, name, slug, plan, socialsAvailable })
       : null
     return Object.freeze({ workspace, isLoading })
-  }, [id, name, slug, plan, isLoading])
+  }, [id, name, slug, plan, socialsAvailable, isLoading])
 }
 
 /** The caller's workspace and platform roles. */

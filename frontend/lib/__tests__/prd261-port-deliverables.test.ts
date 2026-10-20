@@ -60,12 +60,10 @@ const PLAY_HOME: readonly RegExp[] = [
 ]
 /**
  * Seam items: [file, import] for a core import the SDK has no name for yet. Each file says why.
- * socials-offered.ts: whether the platform offers Socials; `context.useWorkspace` doesn't carry it.
  * use-celebrate-new.ts: whose seen record it is (the signed-in user in the workspace, PRD-260 F5);
  * the host fills that context (components/theme-host/look-scope.ts), and no SDK name carries the user.
  */
 const PENDING: ReadonlyArray<readonly [string, string]> = [
-  ['components/play/deliverables/socials-offered.ts', '@/components/workspace-provider'],
   ['hooks/use-celebrate-new.ts', '@/components/theme-host/look-scope'],
 ]
 /** Imports the scan must see, so a broken reader can never pass by finding nothing. */

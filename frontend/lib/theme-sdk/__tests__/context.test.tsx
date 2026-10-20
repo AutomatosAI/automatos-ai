@@ -52,10 +52,13 @@ afterEach(() => {
 })
 
 describe('PRD-261 A-10a — useWorkspace', () => {
-  it('hands over id, name, slug and plan only', () => {
+  it('hands over id, name, slug, plan and whether Socials is offered, only', () => {
     host.workspace = { workspace: PROVIDER_WORKSPACE, isLoading: false, canEdit: false }
     const { result } = renderHook(() => useWorkspace())
-    expect(result.current).toEqual({ workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro' }, isLoading: false })
+    expect(result.current).toEqual({
+      workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro', socialsAvailable: false },
+      isLoading: false,
+    })
     expect(JSON.stringify(result.current)).not.toContain('not-for-themes')
     expect(Object.isFrozen(result.current)).toBe(true)
     expect(Object.isFrozen(result.current.workspace)).toBe(true)
@@ -68,6 +71,17 @@ describe('PRD-261 A-10a — useWorkspace', () => {
     host.workspace = { workspace: { ...PROVIDER_WORKSPACE }, isLoading: false, canEdit: true }
     rerender()
     expect(result.current).toBe(first)
+  })
+
+  it("says Socials is offered exactly when the platform's switch (socials.available) is on, not this workspace's", () => {
+    const socials = (available: boolean, enabled: boolean) => ({ ...PROVIDER_WORKSPACE, socials: { available, enabled } })
+    host.workspace = { workspace: socials(true, false), isLoading: false, canEdit: true }
+    const { result, rerender } = renderHook(() => useWorkspace())
+    expect(result.current.workspace).toMatchObject({ id: 'ws-1', socialsAvailable: true })
+    expect(Object.keys(result.current.workspace ?? {})).not.toContain('socials')
+    host.workspace = { workspace: socials(false, true), isLoading: false, canEdit: true }
+    rerender()
+    expect(result.current.workspace?.socialsAvailable).toBe(false)
   })
 
   it('answers no workspace while loading, and outside the provider', () => {

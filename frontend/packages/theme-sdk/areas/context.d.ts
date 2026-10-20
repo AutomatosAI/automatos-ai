@@ -25,12 +25,14 @@ export interface HostHealthOptions {
   readonly poll?: boolean
 }
 
-/** The workspace the page is in: who it is, and its plan. */
+/** The workspace the page is in: who it is, its plan, and whether Socials is offered in it. */
 export interface HostWorkspace {
   readonly id: string
   readonly name: string
   readonly slug: string
   readonly plan: 'basic' | 'pro' | 'business' | 'enterprise'
+  /** The platform offers Socials to this workspace, as the host's Deliverables page reads it; false while unknown. */
+  readonly socialsAvailable: boolean
 }
 
 export interface HostWorkspaceState {
