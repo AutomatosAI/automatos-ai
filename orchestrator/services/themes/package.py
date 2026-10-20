@@ -12,12 +12,17 @@ with a code, the path and a plain sentence:
   §6), or is not on the whitelist in ``FILE_KINDS``;
 * files that unpack past the package's limits, a file over its own cap (the entry over
   ``THEME_MAX_ENTRY_KB``, a clip over ``THEME_MAX_CLIP_KB``), JS plus CSS over
-  ``THEME_MAX_CODE_KB``, bytes that are not what the path says;
+  ``THEME_MAX_CODE_KB``, bytes that are not what the path says (M-02: a phone's font,
+  ``assets/fonts/mobile/<NAME>.ttf`` or ``.otf``, is one complete sfnt face, ``_sfnt_problem``);
 * a theme.json the manifest check refuses (``services/themes/manifest.py``); a missing entry,
   look schema or preset, or a preset the schema refuses (``look_schema.py``); a prepaint value
   outside the CSS-value grammar (``css_value.py``); CSS outside the theme's class, with
-  ``!important`` or ``@import`` (``css_scope.py``); a preview, font or wordmark the manifest
-  names that is not in the package.
+  ``!important`` or ``@import`` (``css_scope.py``); a preview, font, wordmark or mobile font the
+  manifest names that is not in the package;
+* M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
+  code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look paints
+  no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
+  mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``).
 
 The result carries every file with its checked type, the file manifest
 ``{path: {type, size, sha256}}`` and the package digest (``digest.py``). Nothing here touches
@@ -35,20 +40,25 @@ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tup
 
 from config import config
 from modules.documents.brand_fonts import BrandFontError, check_woff2
-from services.themes.contract import CAP_SETTINGS, KB, MANIFEST_PATH, MB, ThemeError, echo, parse_json, theme_error
+from services.themes.contract import (
+    CAP_SETTINGS, KB, MANIFEST_PATH, MB, MOBILE_REQUIRED_TOKENS, ThemeError, echo, parse_json, theme_error,
+)
 from services.themes.css_scope import STYLE_PATH, css_scope_errors
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import digest_of_manifest, file_manifest
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
+from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
+from services.themes.mobile_tokens import project_look
 
 THEME_IMPORT_ROUTE = "/api/themes/import"
 PACKAGE_ERROR_CODES: Tuple[str, ...] = (
     "PACKAGE_TOO_LARGE", "NOT_A_ZIP", "ZIP64", "TOO_MANY_FILES", "SYMLINK", "UNSAFE_PATH", "DUPLICATE_FILE",
     "ENCRYPTED", "NOT_ALLOWED", "SVG_NOT_ALLOWED", "UNCOMPRESSED_TOO_LARGE", "CORRUPT_FILE", "FILE_TOO_LARGE",
     "ENTRY_TOO_LARGE", "CODE_TOO_LARGE", "CLIP_TOO_LARGE", "BAD_FILE_TYPE", "NOT_UTF8", "BAD_JSON", "MISSING_FILE",
-    "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK",
+    "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK", "MOBILE_CANNOT_PAINT",
 )
+MOBILE_CANNOT_PAINT = "MOBILE_CANNOT_PAINT"
 ENTRY_PATH = "dist/entry.js"
 
 # The plugin upload's limits (core/services/plugin_upload_service.py) hold for themes too.
@@ -85,6 +95,29 @@ CODE_KINDS = frozenset({"entry", "chunk", "style"})
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 WEBM_SIGNATURE = b"\x1a\x45\xdf\xa3"
 
+# M-02: a phone's font is one sfnt face, as the woff2 a browser gets is: TrueType outlines (00 01 00 00, or
+# Apple's "true") or CFF ("OTTO"). A collection ("ttcf") is refused. The header is the version, then
+# numTables and three search fields (two bytes each); each table record is tag, checksum, offset, length.
+SFNT_VERSIONS = frozenset({b"\x00\x01\x00\x00", b"true", b"OTTO"})
+SFNT_COLLECTION = b"ttcf"
+SFNT_VERSION_BYTES = 4
+SFNT_HEADER_BYTES = 12
+SFNT_RECORD_BYTES = 16
+SFNT_COUNT_BYTES = 2
+SFNT_FIELD_BYTES = 4
+SFNT_SPAN_AT = 8  # where a record's offset sits; its length follows
+SFNT_MIN_TABLES = 1
+SFNT_MAX_TABLES = 64
+
+# M-02 (PB-36): the files a phone draws each mascot state from, by the block's mode (absent is "none").
+# MASCOT_KEY is both theme.json's top-level mascot ({"states": [...]}) and the block's mode.
+MASCOT_FOLDER = "assets/mascot"
+MASCOT_KEY = "mascot"
+STATES_KEY = "states"
+MOBILE_MASCOT_FILES: Dict[str, Tuple[str, ...]] = {"clips": ("mp4", "png"), "stills": ("png",), MASCOT_NONE: ()}
+MOBILE_FROM_LOOKS = "fromLooks"
+PREPAINT_DEFAULTS = "defaults"
+
 
 def cap_bytes(name: str) -> int:
     """One of ``CAP_SETTINGS`` in bytes: config's value once B2-wire names it, else the default."""
@@ -97,6 +130,43 @@ def _woff2_problem(data: bytes) -> Optional[str]:
         check_woff2(data)
     except BrandFontError as exc:
         return str(exc)
+    return None
+
+
+def _big_endian(data: bytes, at: int, size: int) -> int:
+    return int.from_bytes(data[at:at + size], "big")
+
+
+def _sfnt_tables(data: bytes) -> Tuple[int, Optional[str]]:
+    """The face's table count once its header and table directory fit the file, else why not."""
+    version = data[:SFNT_VERSION_BYTES]
+    if not data:
+        return 0, "the file is empty"
+    if version == SFNT_COLLECTION:
+        return 0, "it is a font collection (ttcf), and a theme ships one face per file"
+    if version not in SFNT_VERSIONS:
+        return 0, "its bytes are not a TrueType or OpenType font"
+    if len(data) < SFNT_HEADER_BYTES:
+        return 0, "its font header is cut short"
+    tables = _big_endian(data, SFNT_VERSION_BYTES, SFNT_COUNT_BYTES)
+    if not SFNT_MIN_TABLES <= tables <= SFNT_MAX_TABLES:
+        return 0, f"its header lists {tables} tables, and a font holds {SFNT_MIN_TABLES} to {SFNT_MAX_TABLES}"
+    if SFNT_HEADER_BYTES + tables * SFNT_RECORD_BYTES > len(data):
+        return 0, "its table directory runs past the end of the file"
+    return tables, None
+
+
+def _sfnt_problem(data: bytes) -> Optional[str]:
+    """Why ``data`` is not one complete sfnt face (a .ttf or .otf), or None: every table lies inside the file."""
+    tables, problem = _sfnt_tables(data)
+    if problem is not None:
+        return problem
+    for index in range(tables):
+        at = SFNT_HEADER_BYTES + index * SFNT_RECORD_BYTES + SFNT_SPAN_AT
+        offset = _big_endian(data, at, SFNT_FIELD_BYTES)
+        length = _big_endian(data, at + SFNT_FIELD_BYTES, SFNT_FIELD_BYTES)
+        if offset + length > len(data):
+            return f"its table {index + 1} of {tables} runs past the end of the file"
     return None
 
 
@@ -139,6 +209,8 @@ FILE_KINDS: Tuple[FileKind, ...] = (
     _kind("look-schema", r"looks/schema\.json", "application/json", lambda: JSON_MAX_BYTES),
     _kind("preset", rf"looks/presets/{LOOK_ID}\.look\.json", "application/json", lambda: JSON_MAX_BYTES),
     _kind("font", rf"assets/fonts/{NAME}\.woff2", "font/woff2", lambda: FONT_MAX_BYTES, check=_woff2_problem),
+    _kind("mobile-font", rf"assets/fonts/mobile/{NAME}\.ttf", "font/ttf", lambda: FONT_MAX_BYTES, check=_sfnt_problem),
+    _kind("mobile-font", rf"assets/fonts/mobile/{NAME}\.otf", "font/otf", lambda: FONT_MAX_BYTES, check=_sfnt_problem),
     _kind("licence", rf"assets/fonts/{NAME}\.(?:txt|md)", TEXT_TYPE, lambda: TEXT_MAX_BYTES),
     _kind("clip", rf"assets/mascot/{NAME}\.webm", "video/webm", lambda: cap_bytes("clip"), "CLIP_TOO_LARGE", IS_WEBM),
     _kind("clip", rf"assets/mascot/{NAME}\.mp4", "video/mp4", lambda: cap_bytes("clip"), "CLIP_TOO_LARGE", IS_MP4),
@@ -356,12 +428,59 @@ def _manifest_link_errors(manifest: Mapping[str, Any], files: Mapping[str, Theme
     return errors
 
 
+def _paint_errors(block: Mapping[str, Any], files: Mapping[str, ThemeFile]) -> List[ThemeError]:
+    """``fromLooks``: the prepaint table's ``defaults`` look paints the phone's ground and its text.
+
+    A table that isn't a JSON object is refused once, by ``_prepaint_errors``.
+    """
+    if block.get(MOBILE_FROM_LOOKS) is not True:
+        return []
+    if PREPAINT_PATH not in files:
+        return [theme_error(MOBILE_CANNOT_PAINT, PREPAINT_PATH, (
+            f'"mobile.fromLooks" paints a phone from {PREPAINT_PATH}, which isn\'t in the package. '
+            'Add the table, or give "mobile.tokens" instead.'
+        ))]
+    table, error = parse_json(files[PREPAINT_PATH].data, PREPAINT_PATH)
+    if error is not None or not isinstance(table, dict):
+        return []
+    painted = project_look(table, table.get(PREPAINT_DEFAULTS))
+    missing = [name for name in MOBILE_REQUIRED_TOKENS if name not in painted]
+    if not missing:
+        return []
+    return [theme_error(MOBILE_CANNOT_PAINT, f"{PREPAINT_PATH}#{PREPAINT_DEFAULTS}", (
+        f'{PREPAINT_PATH}: the default look paints no {" or ".join(missing)}, so a phone can\'t draw the theme '
+        'from its looks. Give the default choices those tokens, or give "mobile.tokens" instead.'
+    ))]
+
+
+def _mascot_file_errors(
+    manifest: Mapping[str, Any], block: Mapping[str, Any], files: Mapping[str, ThemeFile],
+) -> List[ThemeError]:
+    """``clips``: every state's .mp4 and .png; ``stills``: every state's .png (PB-36). No .webm: a phone plays mp4."""
+    mode = block.get(MASCOT_KEY, MASCOT_NONE)
+    states = (manifest.get(MASCOT_KEY) or {}).get(STATES_KEY) or []
+    suffixes = MOBILE_MASCOT_FILES.get(mode, ())
+    needed = [f"{MASCOT_FOLDER}/{state}.{suffix}" for state in states for suffix in suffixes]
+    return [
+        theme_error("MISSING_FILE", path, f'"mobile.mascot" "{mode}" needs {path}, which isn\'t in the package.')
+        for path in needed if path not in files
+    ]
+
+
+def _mobile_link_errors(manifest: Mapping[str, Any], files: Mapping[str, ThemeFile]) -> List[ThemeError]:
+    """A ``mobile`` block a phone draws without the theme's code: its colours paint, its mascot files exist."""
+    block = manifest.get(MOBILE_FIELD)
+    if not isinstance(block, dict):
+        return []
+    return _paint_errors(block, files) + _mascot_file_errors(manifest, block, files)
+
+
 def _content_errors(files: Mapping[str, ThemeFile]) -> Tuple[Optional[Dict[str, Any]], List[ThemeError]]:
     manifest, errors = _manifest(files)
     _, look_errors = look_file_errors({path: item.data for path, item in files.items()})
     errors = errors + _code_errors(files) + look_errors + _prepaint_errors(files)
     if manifest is not None:
-        errors += _manifest_link_errors(manifest, files)
+        errors += _manifest_link_errors(manifest, files) + _mobile_link_errors(manifest, files)
     return manifest, errors
 
 
