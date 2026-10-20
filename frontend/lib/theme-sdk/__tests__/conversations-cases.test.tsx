@@ -28,12 +28,12 @@ import type { Chat } from '@/types'
 
 const api = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
-vi.mock('@/lib/auth-hooks', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/auth-hooks')>()),
+// The chat scope (hooks/use-chat-session.ts useChatScope) is all this page's render reads of the
+// signed-in user and the workspace: useUser and useWorkspaceOptional, and nothing else of either.
+vi.mock('@/lib/auth-hooks', () => ({
   useUser: () => ({ isLoaded: true, isSignedIn: true, user: { id: 'u-1' } }),
 }))
-vi.mock('@/components/workspace-provider', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/components/workspace-provider')>()),
+vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' }, isLoading: false }),
 }))
 vi.mock('@/hooks/use-studio-theme', async () => {
