@@ -84,7 +84,7 @@ The application implements a standard middleware stack to handle cross-cutting c
 | `CORSMiddleware` | Configures allowed origins, methods, and headers for the Next.js frontend. | [orchestrator/main.py:14]() |
 | `Authentication` | `get_request_context_hybrid` resolves Clerk JWTs or API keys into a `RequestContext`. | [orchestrator/main.py:17]() |
 | `Logging` | Standard Python logging for request/response cycles. | [orchestrator/main.py:8]() |
-| `Rate Limiting` | `slowapi` integration for protecting sensitive endpoints. | [orchestrator/requirements.txt:99]() |
+| `Rate Limiting` | `slowapi` integration for protecting sensitive endpoints. | [orchestrator/requirements.in:99]() |
 
 ### Data Flow: Request Authentication
 When a request enters the system, it typically passes through the `get_request_context_hybrid` dependency [orchestrator/main.py:17](). This function extracts the `workspace_id` and user identity, which are then used by downstream services to ensure data isolation. The configuration for these security layers is managed centrally in `Config` [orchestrator/config.py:37-58]().

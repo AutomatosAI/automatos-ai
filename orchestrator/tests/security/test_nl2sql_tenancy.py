@@ -10,33 +10,17 @@ unauthenticated HTTP self-calls. S3:
   * the analytics + audit endpoints are workspace-scoped.
 
 Pure unit / structural tests — no live DB. The cross-workspace DB matrix runs in
-CI. ``exec_research`` is now import-light; a camelot leaf-stub keeps the
-``modules.tools`` package import from breaking collection in a lean venv.
+CI. ``exec_research`` is now import-light.
 """
 from __future__ import annotations
 
 import asyncio
-import importlib.util as _ilu
 import pathlib
 import re
-import sys as _sys
 
 import pytest
 
 ORCH = pathlib.Path(__file__).resolve().parents[2]  # .../orchestrator
-
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 
 # --- A: re-enabled path fails closed without scope; query_main_database deleted -

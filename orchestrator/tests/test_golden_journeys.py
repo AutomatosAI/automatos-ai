@@ -32,7 +32,6 @@ break *between* the units is caught, which the unit tests cannot see.
 from __future__ import annotations
 
 import os
-import sys
 import types
 from uuid import uuid4
 
@@ -41,9 +40,6 @@ for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD"):
 os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("POSTGRES_DB", "test_db")
-
-# consumers/RAG import chains pull camelot (optional PDF dep, absent in test env).
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from unittest.mock import MagicMock  # noqa: E402
 

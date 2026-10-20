@@ -32,9 +32,6 @@ import ast
 import difflib
 import inspect
 import os
-import sys
-import types
-import importlib.util as _ilu
 from typing import Dict, List, Optional, Set, Tuple
 
 import pytest
@@ -49,16 +46,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 # CI collection-order safety net: sibling tests collected earlier may have
 # stubbed modules.*/consumers.* into sys.modules. Restore the real chain before

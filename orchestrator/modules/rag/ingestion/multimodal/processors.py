@@ -15,10 +15,13 @@ Implementation is original Automatos code built on our Context Engineering frame
 Integrates with Automatos Context Engineering framework.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 import hashlib
 from typing import Dict, List, Optional, Any, Tuple
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
@@ -27,16 +30,38 @@ from io import BytesIO
 
 from config import config
 
-# PDF and image processing
-import pdfplumber
-from PIL import Image
-import pytesseract
-
-# Table extraction
-import camelot  # For table extraction from PDFs
-import pandas as pd
+# PDF and image processing (pdfplumber, Pillow, pytesseract) load in the methods that
+# use them, not when the app imports this module (PRD-262 US-032): it is on the boot
+# path, main → api.knowledge_multimodal → modules.rag → ingestion → multimodal.
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# pdfplumber's text strategy finds a table without ruling lines: columns where words
+# line up (left, right or centre) and rows from each line of words. It replaced a
+# stream-mode extractor that pulled in opencv only to import (PRD-262 US-023), and
+# tests/test_prd262_pdf_tables.py holds it to that extractor's grids.
+TEXT_TABLE_SETTINGS = {"vertical_strategy": "text", "horizontal_strategy": "text"}
+# pdfplumber scores no table; the value the old path used when it had no score.
+TEXT_TABLE_CONFIDENCE = 0.8
+
+
+def clean_table_rows(rows: List[List[Optional[str]]]) -> List[List[str]]:
+    """A table's rows as text, without the rows and columns that hold none.
+
+    pdfplumber gives None for a cell outside the grid and "" for an empty one. The text
+    strategy also puts an empty row in every gap between two lines of text wider than
+    its 3 pt snap tolerance, where stream extraction put none, so all-empty rows (and
+    all-empty columns) are dropped. A cell's lines are joined with a space, so a cell
+    stays one Markdown cell.
+    """
+    cells = [[" ".join((cell or "").split()) for cell in row] for row in rows]
+    kept_rows = [row for row in cells if any(row)]
+    width = max((len(row) for row in kept_rows), default=0)
+    padded = [row + [""] * (width - len(row)) for row in kept_rows]
+    kept_columns = [index for index in range(width) if any(row[index] for row in padded)]
+    return [[row[index] for index in kept_columns] for row in padded]
 
 
 class ContentModality(Enum):
@@ -117,122 +142,81 @@ class FormulaExtraction:
 
 class TableProcessor:
     """
-    Extract and process tables from documents.
-    Supports multiple extraction methods for different table types.
+    Extract and process tables from PDF documents with pdfplumber's text strategy.
     """
-    
-    def __init__(self):
-        self.extraction_methods = ['lattice', 'stream']  # Camelot methods
-        
-    def extract_tables_from_pdf(
-        self, 
-        pdf_path: str, 
-        pages: Optional[str] = 'all'
-    ) -> List[TableExtraction]:
+
+    def extract_tables_from_pdf(self, pdf_path: str) -> List[TableExtraction]:
         """
-        Extract tables from PDF using Camelot.
-        
+        Extract the tables on every page of a PDF, page by page and top to bottom.
+
+        A file pdfplumber cannot read yields no tables, with a warning: the ingest also
+        passes DOCX files here, which the extractor before PRD-262 US-023 refused too.
+
         Args:
             pdf_path: Path to PDF file
-            pages: Pages to extract from ('all', '1,2,3', '1-5')
-        
+
         Returns:
             List of extracted tables
         """
-        extracted_tables = []
-        
-        for method in self.extraction_methods:
-            try:
-                # Extract using Camelot
-                tables = camelot.read_pdf(
-                    pdf_path, 
-                    pages=pages, 
-                    flavor=method,
-                    suppress_stdout=True
-                )
-                
-                for i, table in enumerate(tables):
-                    try:
-                        extraction = self._process_camelot_table(table, i)
-                        extracted_tables.append(extraction)
-                        logger.info(f"Extracted table {i+1} with {method} method: {extraction.row_count}x{extraction.column_count}")
-                    except Exception as e:
-                        logger.warning(f"Failed to process table {i} with {method}: {e}")
-                
-                # If we got tables with lattice, skip stream
-                if tables and method == 'lattice':
-                    break
-                    
-            except Exception as e:
-                logger.warning(f"Table extraction with {method} failed: {e}")
-        
-        return extracted_tables
-    
-    def _process_camelot_table(
-        self, 
-        table: Any,  # Camelot Table object
-        index: int
+        import pdfplumber
+        from pdfplumber.utils.exceptions import PdfminerException
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                return [table for page in pdf.pages for table in self._page_tables(page)]
+        except PdfminerException as e:
+            logger.warning(f"Table extraction skipped, pdfplumber cannot read {pdf_path}: {e}")
+            return []
+
+    def _page_tables(self, page: Any) -> List[TableExtraction]:
+        """The tables on one pdfplumber page that hold any text."""
+        tables = []
+        for table in page.find_tables(dict(TEXT_TABLE_SETTINGS)):
+            rows = clean_table_rows(table.extract())
+            if rows:
+                extraction = self._build_extraction(rows, page.page_number, table.bbox)
+                logger.info(f"Extracted table on page {page.page_number}: {extraction.row_count}x{extraction.column_count}")
+                tables.append(extraction)
+        return tables
+
+    def _build_extraction(
+        self,
+        rows: List[List[str]],
+        page_number: int,
+        bbox: Tuple[float, float, float, float]
     ) -> TableExtraction:
-        """Process a Camelot table into our format"""
-        
-        df = table.df
-        
-        # Detect if first row is header
-        has_header = self._detect_header_row(df)
-        
+        """One table's rows in our format; the first row is the header when it reads like one."""
+        has_header = self._detect_header_row(rows)
         if has_header:
-            headers = df.iloc[0].tolist()
-            data_rows = df.iloc[1:].values.tolist()
+            headers, data_rows = rows[0], rows[1:]
         else:
-            headers = [f"Column_{i+1}" for i in range(len(df.columns))]
-            data_rows = df.values.tolist()
-        
-        # Infer data types
-        data_types = self._infer_column_types(headers, data_rows)
-        
-        # Generate multiple representations
-        markdown = self._to_markdown(headers, data_rows)
-        csv = self._to_csv(headers, data_rows)
-        json_data = self._to_json(headers, data_rows)
-        
-        # Get position from table.parsing_report
-        position = None
-        if hasattr(table, '_bbox'):
-            bbox = table._bbox
-            position = {
-                'x': bbox[0],
-                'y': bbox[1],
-                'width': bbox[2] - bbox[0],
-                'height': bbox[3] - bbox[1]
-            }
-        
+            headers, data_rows = [f"Column_{i+1}" for i in range(len(rows[0]))], rows
+
+        # pdfplumber's page coordinates: y is measured down from the top of the page.
+        x0, top, x1, bottom = bbox
         return TableExtraction(
             headers=headers,
             rows=data_rows,
-            data_types=data_types,
-            markdown=markdown,
-            csv=csv,
-            json=json_data,
+            data_types=self._infer_column_types(headers, data_rows),
+            markdown=self._to_markdown(headers, data_rows),
+            csv=self._to_csv(headers, data_rows),
+            json=self._to_json(headers, data_rows),
             row_count=len(data_rows),
             column_count=len(headers),
             has_header=has_header,
-            page_number=table.page,
-            position=position,
-            confidence=table.accuracy / 100.0 if hasattr(table, 'accuracy') else 0.8
+            page_number=page_number,
+            position={'x': x0, 'y': top, 'width': x1 - x0, 'height': bottom - top},
+            confidence=TEXT_TABLE_CONFIDENCE
         )
-    
-    def _detect_header_row(self, df: pd.DataFrame) -> bool:
-        """Detect if first row is likely a header"""
-        if df.empty or len(df) < 2:
+
+    def _detect_header_row(self, rows: List[List[str]]) -> bool:
+        """Detect if first row is likely a header: it has more non-numeric cells than the second."""
+        if len(rows) < 2:
             return False
-        
-        first_row = df.iloc[0]
-        second_row = df.iloc[1]
-        
-        # Check if first row has more non-numeric values
-        first_non_numeric = sum(not str(v).replace('.','').isdigit() for v in first_row)
-        second_non_numeric = sum(not str(v).replace('.','').isdigit() for v in second_row)
-        
+
+        first_non_numeric = sum(not str(v).replace('.', '').isdigit() for v in rows[0])
+        second_non_numeric = sum(not str(v).replace('.', '').isdigit() for v in rows[1])
+
         return first_non_numeric > second_non_numeric
     
     def _infer_column_types(
@@ -334,6 +318,8 @@ class ImageProcessor:
         Returns:
             List of extracted images
         """
+        import pdfplumber
+
         extracted_images = []
         
         with pdfplumber.open(pdf_path) as pdf:
@@ -342,22 +328,20 @@ class ImageProcessor:
             for page_num in pages_to_process:
                 if page_num >= len(pdf.pages):
                     continue
-                
-                page = pdf.pages[page_num]
-                
-                # Extract images from page
-                if hasattr(page, 'images'):
-                    for i, img_info in enumerate(page.images):
-                        try:
-                            extraction = self._process_pdf_image(
-                                page, img_info, page_num, i
-                            )
-                            extracted_images.append(extraction)
-                            logger.info(f"Extracted image from page {page_num+1}, index {i}")
-                        except Exception as e:
-                            logger.warning(f"Failed to extract image: {e}")
+                extracted_images.extend(self._page_images(pdf.pages[page_num], page_num))
         
         return extracted_images
+
+    def _page_images(self, page: Any, page_num: int) -> List[ImageExtraction]:
+        """The images on one pdfplumber page. One that fails to extract is logged and skipped."""
+        extracted = []
+        for i, img_info in enumerate(getattr(page, 'images', [])):
+            try:
+                extracted.append(self._process_pdf_image(page, img_info, page_num, i))
+                logger.info(f"Extracted image from page {page_num+1}, index {i}")
+            except Exception:
+                logger.exception(f"Failed to extract image {i} from page {page_num+1}")
+        return extracted
     
     def _process_pdf_image(
         self, 
@@ -367,7 +351,8 @@ class ImageProcessor:
         index: int
     ) -> ImageExtraction:
         """Process a single PDF image"""
-        
+        from PIL import Image
+
         # Get image object from page
         # Note: This is simplified - actual implementation depends on PDF structure
         x0, y0, x1, y1 = img_info['x0'], img_info['top'], img_info['x1'], img_info['bottom']
@@ -423,6 +408,8 @@ class ImageProcessor:
     
     def _extract_text_with_ocr(self, image: Image.Image) -> Optional[str]:
         """Extract text from image using OCR"""
+        import pytesseract
+
         try:
             text = pytesseract.image_to_string(image)
             return text.strip() if text.strip() else None
@@ -642,6 +629,8 @@ class MultimodalDocumentProcessor:
         Returns:
             Dictionary with extracted content by modality
         """
+        import pdfplumber
+
         results = {
             'tables': [],
             'images': [],

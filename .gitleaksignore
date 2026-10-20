@@ -46,3 +46,8 @@ e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_
 # The tests use short fake keys now. Flagged by the #1172 history scan.
 29e3111742c043b9cc296437888c8cc9d24a11b3:orchestrator/tests/test_1170_bedrock_converse.py:generic-api-key:26
 29e3111742c043b9cc296437888c8cc9d24a11b3:orchestrator/tests/test_1170_bedrock_converse.py:generic-api-key:161
+# PRD-262 US-025: test_prd262_pandas_leaves.py set PANDASAI_API_KEY to a made-up
+# placeholder string so the PandasAI service counts as enabled; generic-api-key matched
+# its entropy. The test uses a short fake key now. Flagged by a local range scan of
+# feat/prd-262-api before its PR.
+49448b51881b9e64414848f39b5b6e49bded2510:orchestrator/tests/test_prd262_pandas_leaves.py:generic-api-key:213

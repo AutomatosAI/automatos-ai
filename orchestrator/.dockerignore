@@ -1,6 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
+# Python. A pattern matches from the context root, so only `**/` reaches the
+# __pycache__ and bytecode nested in every package (PRD-262 US-017).
+**/__pycache__
+**/*.py[cod]
 *$py.class
 *.so
 .Python
@@ -98,3 +99,13 @@ add-*.py
 .env.*
 **/.env
 **/.env.*
+
+# Runtime data and local caches (PRD-262 US-017): what the app and the dev tools
+# write into a checkout, never code. /documents is DOCUMENT_STORAGE_DIR's default
+# (relative to /app), where the compose bind mount used to put generated documents,
+# thumbnails and brand files. Root-anchored on purpose: `**/documents` would drop
+# modules/documents, and `**/*.md` the skill seeds the app loads (core/seeds).
+/documents
+scripts/eval/tool_routing/.embedding_cache.json
+scripts/eval/**/results/
+.import_linter_cache

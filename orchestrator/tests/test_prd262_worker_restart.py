@@ -60,6 +60,20 @@ def test_the_workers_are_the_uvicorn_processs_spawned_children():
     assert restart.uvicorn_workers(_rows()) == {"manager": 12, "workers": [21, 22, 23, 24], "servers": 1}
 
 
+def test_the_us029_command_with_web_concurrency_two_has_a_manager_and_two_workers():
+    """PRD-262 US-029: the entrypoint execs `sh -c 'exec uvicorn …'` (no --workers), so
+    uvicorn is the entrypoint's child and WEB_CONCURRENCY=2 gives it two workers."""
+    rows = [
+        {"pid": 1, "ppid": 0, "args": "/bin/bash /usr/local/bin/docker-entrypoint.sh /bin/sh -c exec uvicorn "
+                                      "main:app --host 0.0.0.0 --port ${PORT:-8000}"},
+        {"pid": 12, "ppid": 1, "args": "/usr/local/bin/python3.11 /usr/local/bin/uvicorn main:app --host 0.0.0.0 "
+                                       "--port 8000"},
+        {"pid": 13, "ppid": 12, "args": TRACKER},
+    ] + [{"pid": pid, "ppid": 12, "args": SPAWN} for pid in (21, 22)]
+    assert restart.uvicorn_workers(rows) == {"manager": 12, "workers": [21, 22], "servers": 1}
+    assert restart.pick_victim([21, 22]) == 22
+
+
 def test_two_uvicorn_processes_or_none_name_no_manager():
     rows = _rows() + [{"pid": 40, "ppid": 1, "args": UVICORN}]
     assert restart.uvicorn_workers(rows)["manager"] is None

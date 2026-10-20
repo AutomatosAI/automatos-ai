@@ -1,0 +1,42 @@
+# =============================================================================
+# The core stack: five containers, without the workspace worker (PRD-262 US-040)
+# =============================================================================
+#   make up CORE=1
+#   docker compose -f docker-compose.yml -f docker-compose.core.yml up -d     # without make
+#
+# postgres, redis, minio, backend and frontend. The workspace worker (the Code Canvas
+# runtime) is the default stack's sixth container; this override puts it behind a
+# `workspace` profile, so a smaller machine runs and downloads five. Without it, agents'
+# workspace tools, the Deliverables file browser and Code Canvas answer "Workspace worker
+# not running" (orchestrator/core/workspace_client.py); everything else works as before.
+# Start it later with the same two files, naming it (that turns its profile on):
+#   docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker
+# or run `make up` without CORE=1, the default six.
+#
+# An override, not COMPOSE_PROFILES=workspace in .env.example. A --profile flag replaces
+# COMPOSE_PROFILES instead of adding to it, so every documented
+# `docker compose --profile all|search|memory|media up` would start without the worker;
+# and an .env written before this file existed lacks the key, so an upgrade would lose
+# the worker with no error. docker-compose.yml alone keeps all six, whatever the .env.
+#
+# Railway never reads this file.
+# =============================================================================
+services:
+  workspace-worker:
+    profiles: ["workspace"]
+
+  backend:
+    volumes:
+      # The workspaces volume, read-write here and read-only in docker-compose.yml. This
+      # entry has the same target, so it takes the place of that one. The backend mounts
+      # your deliverables folder at /workspaces/<DEFAULT_WORKSPACE_ID>, inside this
+      # volume, and Docker must create that mount point in the volume before it can mount
+      # the folder there: on a read-only mount it cannot, and the backend would not start
+      # on a fresh volume. In the default stack the worker, started first, creates it.
+      # The backend image's /workspaces is uid 1000 (orchestrator/Dockerfile), so a fresh
+      # volume is the worker's user even though the backend mounts it first here, and a
+      # worker started later re-owns nothing (services/workspace-worker/entrypoint.sh).
+      - type: volume
+        source: workspaces_data
+        target: /workspaces
+        read_only: false
