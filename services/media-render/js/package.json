@@ -4,10 +4,10 @@
   "description": "media-render's Node packages (PRD-262 US-053): Hyperframes and GSAP for the image, and playwright-core for the arm64 headless shell at build. The image installs them with npm ci from package-lock.json.",
   "license": "Apache-2.0",
   "dependencies": {
-    "gsap": "3.14.2",
-    "hyperframes": "0.8.62"
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.167"
   },
   "devDependencies": {
-    "playwright-core": "1.61.1"
+    "playwright-core": "1.64.1"
   }
 }
