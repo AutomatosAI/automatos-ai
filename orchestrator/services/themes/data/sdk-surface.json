@@ -21,6 +21,7 @@
       "WithdrawOfferCard"
     ],
     "chat": [
+      "liveReceiptsOf",
       "movedSomethingOnTheBoard",
       "receiptLine",
       "receiptLink",
