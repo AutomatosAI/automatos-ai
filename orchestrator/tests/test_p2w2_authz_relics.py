@@ -154,13 +154,18 @@ def test_valid_permissions_speak_canonical_vocabulary():
     for expected in ("missions:read", "missions:execute", "playbooks:read", "playbooks:execute"):
         assert expected in VALID_PERMISSIONS
 
-    for rel in (
-        Path("frontend") / "components" / "settings" / "ApiKeyManager.tsx",
-        Path("frontend") / "app" / "marketplace" / "publish" / "page.tsx",
+    # The API key form's scope list lives in api-keys/api-key-types.ts since the ApiKeyManager split.
+    key_types = Path("frontend") / "components" / "settings" / "api-keys" / "api-key-types.ts"
+    assert "missions:read" in (_REPO / key_types).read_text(encoding="utf-8"), f"{key_types} no longer lists the scopes"
+    api_key_ui = sorted((_REPO / key_types.parent).glob("*.ts*"))
+    for path in (
+        *api_key_ui,
+        _REPO / "frontend" / "components" / "settings" / "ApiKeyManager.tsx",
+        _REPO / "frontend" / "app" / "marketplace" / "publish" / "page.tsx",
     ):
-        text = (_REPO / rel).read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
         assert "workflows:read" not in text and "workflows:execute" not in text, (
-            f"{rel} still offers legacy workflows:* scopes"
+            f"{path.relative_to(_REPO)} still offers legacy workflows:* scopes"
         )
 
 

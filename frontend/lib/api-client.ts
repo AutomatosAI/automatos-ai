@@ -944,6 +944,261 @@ export interface SocialSeriesApproval {
   left: SocialSeriesLeftPost[]
 }
 
+// ===== PRD-261 themes: the answers of orchestrator/api/themes_*.py (plan §2.2) =====
+/** PUT /api/themes/choice: 'classic' | 'studio' | 'builtin:play' | an install id (the server checks it). */
+export type ThemeChoiceValue = string
+
+/** services/themes/optin.py opt_in_state: required until the member opts in to this package. */
+export interface ThemeOptInState { required: boolean; wording: string; packageId: string }
+
+/** services/themes/revocations.py revocation_body: a live revocation's effective level. */
+export interface ThemeRevocationState { level: 'warn' | 'disable'; reason: string }
+
+/** One row of GET /api/themes/installed (services/themes/updates.py install_row). */
+export interface InstalledTheme {
+  installId: string; themeId: string; name: string | null; packageId: string; version: string
+  ownerType: string; reviewed: boolean; private: boolean; isDefault: boolean
+  pinnedVersion: string | null; previousPackageId: string | null
+  pendingPackageId: string | null; pendingVersion: string | null; installedAt: string | null
+  optIn: ThemeOptInState; revoked: ThemeRevocationState | null
+  /** A cloned core page changed in this release (the clonedFrom drift check). */
+  needsUpdate: boolean
+}
+
+/** POST /api/themes/import: the package, its scan and the install (api/themes_import.py upload_item). */
+export interface ThemeUpload {
+  package: {
+    id: string; themeId: string; version: string; name: string | null; digest: string
+    ownerType: string; reviewed: boolean; scanVerdict: string | null; scanReport: Record<string, unknown> | null
+  }
+  install: { id: string; themeId: string; packageId: string; pendingPackageId: string | null; isDefault: boolean } | null
+  status: 'installed' | 'update_available' | 'stored'
+  /** The same bytes were uploaded before (200 instead of 201). */
+  duplicate: boolean
+}
+
+/** GET /api/themes/installs/{id}/compare/{packageId} (services/themes/updates.py compare). */
+export interface ThemeUpdateComparison {
+  installId: string
+  from: { packageId: string; version: string; reviewed: boolean }
+  to: { packageId: string; version: string; reviewed: boolean }
+  files: { added: string[]; removed: string[]; changed: string[] }
+  scan: {
+    verdict: { from: string | null; to: string | null }
+    changed: Record<string, { from: unknown; to: unknown }>
+  }
+}
+
+/** One install's pin in GET /api/themes/settings. */
+export interface ThemePinState {
+  installId: string; themeId: string; version: string | null; pinnedVersion: string | null; pinnableVersions: string[]
+}
+
+/** GET/PUT /api/themes/settings (services/themes/settings.py read_settings). */
+export interface ThemeSettings {
+  privateUploads: {
+    setting: 'on' | 'off' | null; source: 'workspace' | 'default'; default: 'on' | 'off'
+    platform: 'on' | 'off' | 'admins' | 'auto'; effective: 'on' | 'off' | 'admins'
+  }
+  membersMayChoose: boolean
+  installRole: string
+  installRoles: string[]
+  /** This caller may install (the gate of POST /api/themes/import). */
+  canInstall: boolean
+  /** The platform switch THEMES_MARKETPLACE (services/themes/listings.py marketplace_switch). */
+  marketplace: 'on' | 'off'
+  defaultInstallId: string | null
+  pins: ThemePinState[]
+  updatedAt: string | null
+}
+
+/** PUT /api/themes/settings: only the keys sent change; null means the default. */
+export interface ThemeSettingsChange {
+  privateUploads?: 'on' | 'off' | null
+  membersMayChoose?: boolean | null
+  installRole?: string | null
+  pins?: { installId: string; version: string | null }[]
+}
+
+/** GET/PUT /api/themes/looks/{themeId} (services/themes/looks.py looks_response). */
+export interface ThemeLooks {
+  themeId: string
+  looks: Record<string, unknown>[]
+  active: Record<string, unknown> | null
+  defaultLook: Record<string, unknown> | null
+  /** Saved looks the theme's current schema no longer accepts. */
+  dropped: number
+}
+
+// ===== PRD-261 W-C2: the answers of api/marketplace_themes*.py and api/admin_themes.py (plan §2.2) =====
+/** services/themes/listings.py _publisher: the id's publisher; `official` for a reserved one. */
+export interface ThemeListingPublisher { name: string; official: boolean }
+
+/** listings.py installed_state: this workspace's active install of the listed theme. */
+export interface ThemeListingInstall {
+  installId: string; packageId: string; version: string
+  /** The install references the Marketplace package (false: the workspace's own upload of the theme). */
+  fromListing: boolean
+  /** A newer listed version this install can move to through A-07b's update route, else null. */
+  updatePackageId: string | null
+}
+
+/** One card of the Themes tab: GET /api/marketplace/themes (listings.py listing_summary). */
+export interface ThemeListing {
+  /** The theme id with its `/` written as `.` (`automatos/play` is `automatos.play`). */
+  listingId: string; themeId: string; name: string | null; description: string | null
+  publisher: ThemeListingPublisher; version: string; packageId: string
+  /** This host can run the version shown (the newest compatible one, else the newest). */
+  compatible: boolean
+  uses: string[]; pricing: string; cover: string | null
+  revoked: ThemeRevocationState | null; installed: ThemeListingInstall | null
+}
+
+/** listings.py previews_by_preset: one preset and its previews (screen null for the preset's own). */
+export interface ThemePresetPreviews { id: string; default: boolean; previews: { screen: string | null; url: string }[] }
+
+/** listings.py _version_entry: one approved version in the detail's versions map. */
+export interface ThemeListingVersion {
+  packageId: string; engines: Record<string, string> | null; compatible: boolean
+  revoked: ThemeRevocationState | null; createdAt: string | null
+}
+
+/** GET /api/marketplace/themes/{listingId} (listings.py listing_detail). */
+export interface ThemeListingDetail extends ThemeListing {
+  presets: ThemePresetPreviews[]; otherPreviews: string[]
+  readme: string | null; changelog: string | null
+  base: string | null; tone: string | null; minWidth: number | null
+  pages: string[]; routes: string[]
+  /** The newest version this host runs, or null when none does. */
+  latest: string | null
+  /** Version → its entry, newest first. */
+  versions: Record<string, ThemeListingVersion>
+}
+
+/** POST /api/marketplace/themes/{listingId}/install: 201 created, or 200 with the install it has. */
+export interface ThemeListingInstallResult { created: boolean; install: InstalledTheme }
+
+/** POST /api/marketplace/themes/submit (api/marketplace_themes_submit.py submission_item). */
+export interface ThemeSubmission {
+  package: {
+    id: string; themeId: string; version: string; name: string | null; digest: string
+    ownerType: string; status: string; reviewed: boolean
+    /** The verdict and the non-LLM checks only (review_stage.member_view). */
+    scanVerdict: string | null; scanReport: Record<string, unknown> | null
+  }
+  /** These exact bytes were submitted before (200 instead of 201). */
+  duplicate: boolean
+}
+
+/** services/themes/review.py package_summary: a Marketplace version in the review queue. */
+export interface ThemeReviewPackage {
+  id: string; themeId: string; version: string; name: string | null; publisher: string; digest: string
+  status: string; reviewed: boolean; scanVerdict: string | null
+  submittedBy: number | null; signed: boolean; createdAt: string | null
+}
+
+export type ThemeReportNoteOutcome = 'pass' | 'fail'
+
+/** review.py note_view: the isolated review job's summary the reviewer pasted (C-02b). */
+export interface ThemeReportNote {
+  summary: string; outcome: ThemeReportNoteOutcome; by: number | null
+  /** Absent in the answer of POST …/report-note itself. */
+  at?: string | null
+}
+
+/** review.py _approval: whether approve would pass now, and why not. */
+export interface ThemeApprovalState { allowed: boolean; reason: string | null }
+
+/** One row of GET /api/admin/themes/pending. */
+export interface ThemePendingVersion extends ThemeReviewPackage {
+  reportNote: ThemeReportNote | null; approval: ThemeApprovalState
+}
+
+/** review.py _history: one review event, newest first. */
+export interface ThemeReviewEvent {
+  event: string; from: string | null; to: string | null; by: number | null; reason: string | null; at: string | null
+}
+
+/** services/themes/signing.py request_signature / request_view: what a person hands the kit's sign workflow. */
+export interface ThemeSignatureRequest {
+  requestId: string
+  payload: { id: string; version: string; digest: string; files: Record<string, string> }
+  payloadSha256: string; algorithm: string; form: string
+  /** The exact text the kit signs. */
+  canonical: string | null
+}
+
+/** GET /api/admin/themes/{packageId}/report (review.py report). */
+export interface ThemeReviewReport extends ThemeReviewPackage {
+  manifest: Record<string, unknown> | null; scanReport: Record<string, unknown> | null
+  reportNote: ThemeReportNote | null; approval: ThemeApprovalState
+  history: ThemeReviewEvent[]; signatureRequest: ThemeSignatureRequest | null
+  /** Always false until C-05 verifies signatures. */
+  signatureVerified: boolean
+}
+
+/** POST …/report-note: the version with the note just stored. */
+export interface ThemeReportNoteResult extends ThemeReviewPackage { reportNote: ThemeReportNote }
+
+/** POST …/approve: the approved version, its signature request and how many installs were offered it. */
+export interface ThemeApprovalResult extends ThemeReviewPackage {
+  signatureRequest: ThemeSignatureRequest; updatesOffered: number
+}
+
+/** POST …/reject: the rejected version and the reason as stored. */
+export interface ThemeRejectionResult extends ThemeReviewPackage { reason: string }
+
+/** POST …/deactivate: the version taken down; its digest has a `disable` revocation. */
+export interface ThemeDeactivationResult extends ThemeReviewPackage { reason: string; revocation: 'disable' }
+
+/** POST …/signature (signing.py store_signature): stored, not verified (C-05). */
+export interface ThemeSignatureResult extends ThemeReviewPackage {
+  signature: { requestId: string; signature: string; algorithm: string; verified: boolean }
+}
+
+/** A theme id as path segments: `acme/hello` stays two segments, each one encoded. */
+function themeIdPath(themeId: string): string {
+  return themeId.split('/').map(encodeURIComponent).join('/')
+}
+
+/** The error `request` throws for a non-2xx response. */
+export interface ApiHttpError extends Error {
+  /** The HTTP status (absent on a 401, whose message names the sign-in instead). */
+  status?: number
+  /** PRD-261 §2.2: the parsed JSON body, when the response had one (step-up's top-level `clerk_error`). */
+  body?: unknown
+}
+
+/**
+ * The error for a non-2xx response: the message is the body's `detail` (a string, or the
+ * JSON of a structured one), else the status text; the status rides it (so a caller can
+ * tell a conflict, 409, from a failure) and, since PRD-261, the parsed body rides it as
+ * `body`, so a caller can read a structured refusal such as step-up's (A-07d's lib/theme-host/api.ts).
+ */
+async function httpErrorOf(response: Response): Promise<ApiHttpError> {
+  console.error('❌ API Error:', response.status, response.statusText)
+  // Try to extract detail message from response body
+  let detail = response.statusText
+  let errorBody: unknown
+  try {
+    errorBody = await response.json()
+    const bodyDetail = (errorBody as { detail?: unknown } | null)?.detail
+    if (bodyDetail) {
+      detail = typeof bodyDetail === 'string' ? bodyDetail : JSON.stringify(bodyDetail)
+    }
+  } catch {
+    // Response body not JSON, use statusText
+  }
+  const withBody = errorBody === undefined ? {} : { body: errorBody }
+  if (response.status === 401) {
+    return Object.assign(new Error(
+      'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
+      'Make sure you are signed in and the API client is configured with Clerk.'
+    ), withBody)
+  }
+  return Object.assign(new Error(detail || `HTTP ${response.status}`), { status: response.status, ...withBody })
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -1013,34 +1268,26 @@ class ApiClient {
     return headers
   }
 
-  async request<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`
-
-    // Get Clerk token if available (with timeout to prevent hanging)
-    let token: string | null = null
-    if (this.getClerkToken) {
-      try {
-        // Add 2 second timeout to prevent hanging indefinitely
-        const tokenPromise = this.getClerkToken()
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
-        token = await Promise.race([tokenPromise, timeoutPromise])
-        if (!token) {
-          console.warn('⚠️ Clerk token fetch timed out after 2s - proceeding without auth')
-        }
-      } catch (error) {
-        console.warn('⚠️ Failed to get Clerk token:', error)
+  /** The Clerk token, or null when there is no getter, it fails, or it takes over 2 s. */
+  private async clerkTokenOrNull(): Promise<string | null> {
+    if (!this.getClerkToken) return null
+    try {
+      // Add 2 second timeout to prevent hanging indefinitely
+      const tokenPromise = this.getClerkToken()
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+      const token = await Promise.race([tokenPromise, timeoutPromise])
+      if (!token) {
+        console.warn('⚠️ Clerk token fetch timed out after 2s - proceeding without auth')
       }
+      return token
+    } catch (error) {
+      console.warn('⚠️ Failed to get Clerk token:', error)
+      return null
     }
+  }
 
-    // Auto-stringify body if it's an object and not FormData
-    let body = options.body
-    if (body && typeof body === 'object' && !(body instanceof FormData)) {
-      body = JSON.stringify(body)
-    }
-
+  /** Default + caller headers, the workspace and the bearer; no Content-Type for FormData. */
+  private requestHeaders(options: RequestInit, body: RequestInit['body'], token: string | null): Record<string, string> {
     const headers: Record<string, string> = {
       ...this.defaultHeaders,
       ...(options.headers as Record<string, string>),
@@ -1065,11 +1312,28 @@ class ApiClient {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
+    return headers
+  }
+
+  async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`
+
+    // Get Clerk token if available (with timeout to prevent hanging)
+    const token = await this.clerkTokenOrNull()
+
+    // Auto-stringify body if it's an object and not FormData
+    let body = options.body
+    if (body && typeof body === 'object' && !(body instanceof FormData)) {
+      body = JSON.stringify(body)
+    }
 
     const config: RequestInit = {
       ...options,
       body,
-      headers,
+      headers: this.requestHeaders(options, body, token),
     }
 
     try {
@@ -1078,27 +1342,7 @@ class ApiClient {
         redirect: 'follow' // Follow redirects automatically
       })
 
-      if (!response.ok) {
-        console.error('❌ API Error:', response.status, response.statusText)
-        // Try to extract detail message from response body
-        let detail = response.statusText
-        try {
-          const errorBody = await response.json()
-          if (errorBody?.detail) {
-            detail = typeof errorBody.detail === 'string' ? errorBody.detail : JSON.stringify(errorBody.detail)
-          }
-        } catch {
-          // Response body not JSON, use statusText
-        }
-        if (response.status === 401) {
-          throw new Error(
-            'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
-            'Make sure you are signed in and the API client is configured with Clerk.'
-          )
-        }
-        // The status rides the error, so a caller can tell a conflict (409) from a failure.
-        throw Object.assign(new Error(detail || `HTTP ${response.status}`), { status: response.status })
-      }
+      if (!response.ok) throw await httpErrorOf(response)
 
       // Handle empty bodies (204 No Content, or any successful response with no body)
       // without throwing a JSON parse error.
@@ -3424,15 +3668,178 @@ class ApiClient {
     })
   }
 
-  // ===== PRD-261 themes (W-A2's opening commit adds the rest of plan §2.2's theme methods) =====
+  // ===== PRD-261 themes (plan §2.2): every theme route by name, so the route-contract check sees it =====
   /**
-   * GET /api/themes/active: the workspace's theme choice and its active install. A-07b (W-B2)
-   * mounts the route, so the path is baselined in scripts/route-contract-baseline.json until then;
-   * a 404 means no active install (lib/theme-host/sources.ts). parseActiveInstall checks the
-   * answer, so it is unknown here.
+   * GET /api/themes/active: the member's choice and its active install. parseActiveInstall
+   * (lib/theme-host/sources.ts) checks the answer, so it is unknown here.
    */
   async getActiveTheme(): Promise<unknown> {
     return this.request<unknown>('/api/themes/active')
+  }
+
+  /** GET /api/themes/installed: the workspace's installs, each with its opt-in, revocation and drift. */
+  async getInstalledThemes(): Promise<{ installs: InstalledTheme[] }> {
+    return this.request<{ installs: InstalledTheme[] }>('/api/themes/installed')
+  }
+
+  /** PUT /api/themes/choice: the member's choice here; answers the active theme it gives (403 when members may not choose). */
+  async putThemeChoice(choice: ThemeChoiceValue): Promise<unknown> {
+    return this.request<unknown>('/api/themes/choice', { method: 'PUT', body: JSON.stringify({ choice }) })
+  }
+
+  /** POST /api/themes/import: upload a .autotheme into this workspace (manage + step-up). */
+  async importTheme(file: File): Promise<ThemeUpload> {
+    const form = new FormData()
+    form.append('file', file)
+    return this.request<ThemeUpload>('/api/themes/import', { method: 'POST', body: form })
+  }
+
+  /** POST /api/themes/installs/{id}/opt-in: opt in to the package the dialog showed (step-up; 409 for any other). */
+  async optInTheme(installId: string, packageId: string): Promise<{ installId: string; optIn: ThemeOptInState }> {
+    return this.request<{ installId: string; optIn: ThemeOptInState }>(
+      `/api/themes/installs/${encodeURIComponent(installId)}/opt-in`,
+      { method: 'POST', body: JSON.stringify({ packageId }) },
+    )
+  }
+
+  /** PUT /api/themes/default: the workspace default, or null to clear it (manage + step-up; 409 for unreviewed). */
+  async setDefaultTheme(installId: string | null): Promise<{ defaultInstallId: string | null }> {
+    return this.request<{ defaultInstallId: string | null }>('/api/themes/default', {
+      method: 'PUT',
+      body: JSON.stringify({ installId }),
+    })
+  }
+
+  /** GET /api/themes/installs/{id}/compare/{packageId}: versions, changed files and the scan diff (manage). */
+  async compareThemeUpdate(installId: string, packageId: string): Promise<ThemeUpdateComparison> {
+    return this.request<ThemeUpdateComparison>(
+      `/api/themes/installs/${encodeURIComponent(installId)}/compare/${encodeURIComponent(packageId)}`,
+    )
+  }
+
+  /** POST /api/themes/installs/{id}/update: move to a newer package; the old one becomes the rollback (manage + step-up). */
+  async updateThemeInstall(installId: string, packageId: string): Promise<InstalledTheme> {
+    return this.request<InstalledTheme>(`/api/themes/installs/${encodeURIComponent(installId)}/update`, {
+      method: 'POST',
+      body: JSON.stringify({ packageId }),
+    })
+  }
+
+  /** POST /api/themes/installs/{id}/rollback: back to the previous package (manage + step-up). */
+  async rollbackTheme(installId: string): Promise<InstalledTheme> {
+    return this.request<InstalledTheme>(`/api/themes/installs/${encodeURIComponent(installId)}/rollback`, { method: 'POST' })
+  }
+
+  /** DELETE /api/themes/installs/{id}: soft uninstall; looks stay (manage). */
+  async uninstallTheme(installId: string): Promise<{ uninstalled: string }> {
+    return this.request<{ uninstalled: string }>(`/api/themes/installs/${encodeURIComponent(installId)}`, { method: 'DELETE' })
+  }
+
+  /** GET /api/themes/settings: the workspace's theme settings and what this caller may do. */
+  async getThemeSettings(): Promise<ThemeSettings> {
+    return this.request<ThemeSettings>('/api/themes/settings')
+  }
+
+  /** PUT /api/themes/settings: change the keys sent, all or none (manage + step-up). */
+  async putThemeSettings(changes: ThemeSettingsChange): Promise<ThemeSettings> {
+    return this.request<ThemeSettings>('/api/themes/settings', { method: 'PUT', body: JSON.stringify(changes) })
+  }
+
+  /** GET /api/themes/looks/{themeId}: the caller's own looks for the theme, fitted to its schema. */
+  async getThemeLooks(themeId: string): Promise<ThemeLooks> {
+    return this.request<ThemeLooks>(`/api/themes/looks/${themeIdPath(themeId)}`)
+  }
+
+  /** PUT /api/themes/looks/{themeId}: replace the caller's looks; both keys are required (active may be null). */
+  async putThemeLooks(
+    themeId: string,
+    looks: { looks: Record<string, unknown>[]; active: Record<string, unknown> | null },
+  ): Promise<ThemeLooks> {
+    return this.request<ThemeLooks>(`/api/themes/looks/${themeIdPath(themeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ looks: looks.looks, active: looks.active }),
+    })
+  }
+
+  // ===== PRD-261 W-C2: the Marketplace's Themes tab and the admin review queue (W-C1 routes, plan §2.2) =====
+  /** GET /api/marketplace/themes: every approved theme, one card each (member). */
+  async getThemeListings(): Promise<{ listings: ThemeListing[] }> {
+    return this.request<{ listings: ThemeListing[] }>('/api/marketplace/themes')
+  }
+
+  /** GET /api/marketplace/themes/{listingId}: previews per preset, docs and the versions map (member). */
+  async getThemeListing(listingId: string): Promise<ThemeListingDetail> {
+    return this.request<ThemeListingDetail>(`/api/marketplace/themes/${encodeURIComponent(listingId)}`)
+  }
+
+  /**
+   * POST /api/marketplace/themes/{listingId}/install: add a listed version to this workspace by
+   * reference (manage + who installs + step-up). Without a packageId the server installs the
+   * newest version this host runs.
+   */
+  async installThemeListing(listingId: string, packageId?: string): Promise<ThemeListingInstallResult> {
+    return this.request<ThemeListingInstallResult>(`/api/marketplace/themes/${encodeURIComponent(listingId)}/install`, {
+      method: 'POST',
+      body: JSON.stringify(packageId === undefined ? {} : { packageId }),
+    })
+  }
+
+  /** POST /api/marketplace/themes/submit: submit a .autotheme for review (member + step-up). */
+  async submitTheme(file: File): Promise<ThemeSubmission> {
+    const form = new FormData()
+    form.append('file', file)
+    return this.request<ThemeSubmission>('/api/marketplace/themes/submit', { method: 'POST', body: form })
+  }
+
+  /** GET /api/admin/themes/pending: the versions waiting for review, oldest first (platform admin). */
+  async getPendingThemes(limit?: number): Promise<{ pending: ThemePendingVersion[] }> {
+    const query = limit === undefined ? '' : `?limit=${encodeURIComponent(String(limit))}`
+    return this.request<{ pending: ThemePendingVersion[] }>(`/api/admin/themes/pending${query}`)
+  }
+
+  /** GET /api/admin/themes/{packageId}/report: scan report, note, history and signature request (platform admin). */
+  async getThemeReport(packageId: string): Promise<ThemeReviewReport> {
+    return this.request<ThemeReviewReport>(`/api/admin/themes/${encodeURIComponent(packageId)}/report`)
+  }
+
+  /** POST /api/admin/themes/{packageId}/report-note: store the isolated review job's summary (admin + step-up). */
+  async addThemeReportNote(
+    packageId: string,
+    note: { summary: string; outcome: ThemeReportNoteOutcome },
+  ): Promise<ThemeReportNoteResult> {
+    return this.request<ThemeReportNoteResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/report-note`, {
+      method: 'POST',
+      body: JSON.stringify({ summary: note.summary, outcome: note.outcome }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/approve: refused for a blocked or not-run scan (admin + step-up). */
+  async approveTheme(packageId: string): Promise<ThemeApprovalResult> {
+    return this.request<ThemeApprovalResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/approve`, { method: 'POST' })
+  }
+
+  /** POST /api/admin/themes/{packageId}/reject: reject a pending version with a reason (platform admin). */
+  async rejectTheme(packageId: string, reason: string): Promise<ThemeRejectionResult> {
+    return this.request<ThemeRejectionResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/deactivate: take an approved version down (admin + step-up). */
+  async deactivateTheme(packageId: string, reason: string): Promise<ThemeDeactivationResult> {
+    return this.request<ThemeDeactivationResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/deactivate`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  }
+
+  /** POST /api/admin/themes/{packageId}/signature: the kit's base64 Ed25519 signature for the open request (admin + step-up). */
+  async storeThemeSignature(packageId: string, requestId: string, signature: string): Promise<ThemeSignatureResult> {
+    return this.request<ThemeSignatureResult>(`/api/admin/themes/${encodeURIComponent(packageId)}/signature`, {
+      method: 'POST',
+      body: JSON.stringify({ requestId, signature }),
+    })
   }
 }
 

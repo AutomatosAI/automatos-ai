@@ -111,6 +111,12 @@ class ChannelDriver(ABC):
     #: block). Same tuple shape.
     optional_config: tuple[tuple[str, str, str], ...] = ()
 
+    #: PRD-264 EUAI-03: where the channel sender puts the AI notice. False (a
+    #: person reads the message): the notice is the text's first paragraph.
+    #: True (the receiver is a system): ``send`` takes an ``ai_disclosure``
+    #: keyword and puts it in the payload, with ``ai_generated: true``.
+    AI_NOTICE_IN_PAYLOAD: bool = False
+
     # ------------------------------------------------------------------
     # Required lifecycle
     # ------------------------------------------------------------------

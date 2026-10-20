@@ -21,7 +21,7 @@ import {
   TYPE_STYLES,
   TYPE_STYLE_KEYS,
 } from '@/lib/looks/catalogue'
-import { duskOf, lookToCssVars } from '@/lib/looks/css'
+import { duskOf, lookToCssVars } from '@/lib/looks/engine'
 import { AURORA, DAYLIGHT, EMBER, PRESETS } from '@/lib/looks/presets'
 import {
   COLOUR_TOKENS,

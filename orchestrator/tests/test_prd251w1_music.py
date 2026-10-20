@@ -183,10 +183,18 @@ def test_every_committed_track_has_licence_attribution_url_and_sha256():
 def test_no_audio_is_committed_and_the_image_build_fetches_and_checks_every_track():
     assert sorted(p.name for p in MANIFEST.parent.iterdir()) == ["manifest.json"]
     dockerfile = DOCKERFILE.read_text()
-    step = dockerfile.index("COPY music/manifest.json media_render/music_build.py /opt/media-render/build/")
-    run = dockerfile.index("RUN python /opt/media-render/build/music_build.py /opt/media-render/build/manifest.json /opt/media-render/music")
-    # After numpy is installed (the analysis) and before the package is copied (so a code change re-uses the layer).
-    assert dockerfile.index("pip install --no-cache-dir -r requirements.txt") < step < run < dockerfile.index("\nCOPY . .")
+    # PRD-262 US-053: the music stage builds from py (numpy, for the analysis) plus
+    # ffmpeg, before the runtime's app copy (so a code change re-uses its layers).
+    music = dockerfile.index("\nFROM py AS music\n")
+    ffmpeg = dockerfile.index("apt-get install -y --no-install-recommends ffmpeg", music)
+    tracks = dockerfile.index("COPY --link --from=assets /music /opt/media-render/assets/music", music)
+    step = dockerfile.index("COPY music/manifest.json media_render/music_build.py /opt/media-render/build/", music)
+    run = dockerfile.index("RUN python /opt/media-render/build/music_build.py /opt/media-render/build/manifest.json /opt/media-render/music", music)
+    assert dockerfile.index("\nFROM python:3.12-slim@") < dockerfile.index("uv pip install") < music
+    assert music < ffmpeg < tracks < step < run < dockerfile.index("\nCOPY . .")
+    # Every track is checked against its sha256 again in the music stage, wherever it came from.
+    assert "--tracks /opt/media-render/assets/music" in dockerfile[run : dockerfile.index("\n\n", run)]
+    assert "COPY --link --from=music /opt/media-render/music /opt/media-render/music" in dockerfile
     build = (MEDIA_RENDER / "media_render" / "music_build.py").read_text()
     assert "sha256 mismatch" in build and "def verify(" in build
     assert not re.search(r"^\s*(?:from|import)\s+(?:\.|media_render)", build, re.M), "the build step runs before the package is copied"

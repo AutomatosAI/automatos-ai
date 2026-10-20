@@ -62,6 +62,12 @@ def _check_job(job: dict, args: argparse.Namespace, expect: Callable[[bool, str]
     expect(report.get("check", {}).get("ok") is True, f"hyperframes check passed: {json.dumps(report.get('check', {}))}")
     lines = report.get("voice", [])
     expect(bool(lines), f"the report lists the spoken lines ({len(lines)})")
+    if args.max_voice_seconds is not None:
+        voice = float(report.get("timings", {}).get("voice_seconds") or 0)
+        expect(
+            0 < voice < args.max_voice_seconds,
+            f"the voice step took less than {args.max_voice_seconds:g} s (found {voice:.3f} s)",
+        )
     if args.min_line_seconds is not None:
         for line in lines:
             seconds = float(line.get("seconds") or 0)
@@ -94,6 +100,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--tolerance", type=float, required=True, help="allowed duration error, seconds")
     parser.add_argument("--job", type=Path, help="the render job, as GET /render/{id} returned it")
     parser.add_argument("--min-line-seconds", type=float, help="every voice line must be longer than this")
+    parser.add_argument("--max-voice-seconds", type=float, help="the report's voice_seconds must be under this")
     parser.add_argument("--ebur128", type=Path, help="ffmpeg's ebur128 log for the rendered file")
     parser.add_argument("--lufs", type=float, help="the integrated loudness target")
     parser.add_argument("--lufs-tolerance", type=float, default=1.0)

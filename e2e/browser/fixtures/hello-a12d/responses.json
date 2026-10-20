@@ -1,0 +1,72 @@
+{
+  "_comment": "PRD-261 A-12d: test data the spec (specs/pages-agents.spec.ts) answers the agents page's reads with. The stats count more agents than the roster lists, so the page shows which read each number came from. iconMappings answers the icon-mapping read useAgents makes first: empty, as on a fresh workspace, so the roster's query key never changes under the spec and every roster read it counts is one the page asked for.",
+  "agents": [
+    {
+      "id": 12401,
+      "public_id": "00000000-0000-4000-8000-000000a12d01",
+      "name": "Hello Ada",
+      "description": "Writes the weekly report",
+      "job_title": "Analyst",
+      "team": null,
+      "reports_to_id": null,
+      "agent_type": "custom",
+      "status": "active",
+      "configuration": {},
+      "tags": [],
+      "priority_level": "medium",
+      "max_concurrent_tasks": 5,
+      "auto_start": false,
+      "created_at": "2026-10-01T09:00:00Z",
+      "updated_at": "2026-10-18T09:00:00Z",
+      "skills": [],
+      "tools": [],
+      "plugins": [],
+      "is_system_agent": false,
+      "slug": null,
+      "marketplace_category": null,
+      "unavailable": null
+    },
+    {
+      "id": 12402,
+      "public_id": "00000000-0000-4000-8000-000000a12d02",
+      "name": "Hello Grace",
+      "description": "Checks the build",
+      "job_title": "Reviewer",
+      "team": null,
+      "reports_to_id": null,
+      "agent_type": "custom",
+      "status": "inactive",
+      "configuration": {},
+      "tags": [],
+      "priority_level": "medium",
+      "max_concurrent_tasks": 5,
+      "auto_start": false,
+      "created_at": "2026-10-02T09:00:00Z",
+      "updated_at": "2026-10-18T09:00:00Z",
+      "skills": [],
+      "tools": [],
+      "plugins": [],
+      "is_system_agent": false,
+      "slug": null,
+      "marketplace_category": null,
+      "unavailable": null
+    }
+  ],
+  "stats": {
+    "total_agents": 7,
+    "active_agents": 3,
+    "inactive_agents": 4,
+    "agents_by_type": { "custom": 7 },
+    "timestamp": "2026-10-19T09:00:00Z"
+  },
+  "iconMappings": {
+    "id": 0,
+    "config_key": "system_icon_mappings",
+    "config_value": {},
+    "description": null,
+    "is_active": true,
+    "created_at": "2026-10-19T09:00:00Z",
+    "updated_at": "2026-10-19T09:00:00Z",
+    "updated_by": null
+  }
+}

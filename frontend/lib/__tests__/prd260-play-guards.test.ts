@@ -19,10 +19,12 @@
  * (d) M01, M16: Play's own type, inline code and sheet colours win over
  *     Studio's element rules, which reach Play's elements because <html>
  *     carries studio and play together. Proven statically (css: false).
- * (e) M17: the core's seams (the chrome, every layout, the 404) load none of
- *     Play's screens with them: the static import graph from a seam reaches
- *     components/play only at the switches and the lazy slots, whose screen
- *     comes through import() when it renders.
+ * (e) M17: the core's seams (the chrome, every layout, the 404, the theme
+ *     route page) load none of Play's screens with them: the static import
+ *     graph from a seam reaches components/play only at the lazy slots, whose
+ *     screen comes through import() when it renders. PRD-261 A-04b: each seam
+ *     goes through its ThemeSlot entry point, and the lazy slots reach it only
+ *     through builtin Play's registrations (lib/theme-host/builtin/play-slots.tsx).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -492,17 +494,23 @@ describe("PRD-260 (d) — Play's own type, inline code and sheet colours win ove
 const CHROME_DIR = 'components/layout'
 /** The files every page of a route loads with it: its layouts and its 404. */
 const APP_SEAM = /^(layout|not-found)\.tsx$/
+/** PRD-261 A-04b: the page every theme route (/x/<route>) renders through; A-04d: home, a ThemeSlot page entry. */
+const [THEME_ROUTE_PAGE, HOME_PAGE] = ['app/x/[...path]/page.tsx', 'app/page.tsx']
 const PLAY_DIR = 'components/play/'
 /** A slot: a 'use client' module that fetches one Play screen with import() when it renders. */
 const LAZY_SLOT = /-lazy\.tsx$/
-/** The switches that pick Play's screen or the core's: they hold no Play design of their own. */
-const PLAY_SWITCHES = new Set(['components/play/play-route-switch.tsx', 'components/play/edges/not-found-view.tsx'])
-/** Each seam and the slot its Play screen comes through. */
-const SEAM_SLOTS: ReadonlyArray<readonly [string, string]> = [
-  ['components/layout/main-layout.tsx', 'components/play/shell/play-frame-lazy.tsx'],
-  ['app/chat/layout.tsx', 'components/play/chat/play-chat-lazy.tsx'],
-  ['app/deliverables/layout.tsx', 'components/play/deliverables/play-shelf-lazy.tsx'],
-  ['app/not-found.tsx', 'components/play/edges/lost-screen-lazy.tsx'],
+/** Builtin Play's registrations: the one module of the core that names Play's lazy slots (PA-7). */
+const PLAY_REGISTRATIONS = 'lib/theme-host/builtin/play-slots.tsx'
+/**
+ * Each seam, the ThemeSlot entry point it goes through (PRD-261 A-04b), and the slot builtin Play
+ * registers there (its frame, its chat and Deliverables pages, its 404, its route Conversations).
+ */
+const SEAM_SLOTS: ReadonlyArray<readonly [string, string, string]> = [
+  ['components/layout/main-layout.tsx', 'components/theme-host/theme-frame-slot.tsx', 'components/play/shell/play-frame-lazy.tsx'],
+  ['app/chat/layout.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/chat/play-chat-lazy.tsx'],
+  ['app/deliverables/layout.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/deliverables/play-shelf-lazy.tsx'],
+  ['app/not-found.tsx', 'components/theme-host/theme-slot.tsx', 'components/play/edges/lost-screen-lazy.tsx'],
+  [THEME_ROUTE_PAGE, 'components/theme-host/theme-slot-route.tsx', 'components/play/conversations/play-conversations-lazy.tsx'],
 ]
 const MODULE_SUFFIXES = ['', '.tsx', '.ts', '/index.tsx', '/index.ts']
 
@@ -562,11 +570,16 @@ function staticGraph(seam: string): string[] {
 function seamFiles(): string[] {
   const chrome = walk(path.join(FRONTEND, CHROME_DIR), (name) => SOURCE_FILE.test(name))
   const app = walk(path.join(FRONTEND, 'app'), (name) => APP_SEAM.test(name))
-  return [...chrome, ...app].map(relative).filter((rel) => !TEST_FILE.test(rel))
+  return [...chrome, ...app].map(relative).filter((rel) => !TEST_FILE.test(rel)).concat(THEME_ROUTE_PAGE, HOME_PAGE)
 }
 
 function isSlot(rel: string): boolean {
-  return LAZY_SLOT.test(rel) || PLAY_SWITCHES.has(rel)
+  return LAZY_SLOT.test(rel)
+}
+
+/** The modules in a seam's graph that load `target` with them. */
+function importersIn(graph: readonly string[], target: string): string[] {
+  return graph.filter((rel) => localLoads(rel, 'static').includes(target))
 }
 
 describe("PRD-260 (e) — the core's seams load Play's screens only when Play renders them (M17)", () => {
@@ -597,12 +610,13 @@ describe("PRD-260 (e) — the core's seams load Play's screens only when Play re
     expect(seams).toEqual(expect.arrayContaining(['app/layout.tsx', ...SEAM_SLOTS.map(([seam]) => seam)]))
     expect(seams.some((rel) => rel.includes('__tests__'))).toBe(false)
     const graph = staticGraph('app/chat/layout.tsx')
-    expect(graph).toContain('components/play/play-route-switch.tsx')
+    expect(graph).toContain('components/theme-host/theme-slot.tsx')
+    expect(graph).toContain(PLAY_REGISTRATIONS)
     expect(graph).toContain('components/chatbot/discussion-bar.tsx')
     expect(staticGraph('components/layout/main-layout.tsx')).toContain('components/layout/studio-header.tsx')
   })
 
-  it('reaches components/play from a seam only at the switches and the lazy slots, however deep', () => {
+  it('reaches components/play from a seam only at the lazy slots, however deep', () => {
     const loaded = seamFiles().flatMap((seam) =>
       staticGraph(seam)
         .filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel))
@@ -611,12 +625,22 @@ describe("PRD-260 (e) — the core's seams load Play's screens only when Play re
     expect(loaded).toEqual([])
   }, SCAN_TIMEOUT_MS)
 
-  it('mounts each Play screen through its slot, which fetches it with import() and loads nothing of Play with it', () => {
-    for (const [seam, slot] of SEAM_SLOTS) {
-      expect(staticGraph(seam), seam).toContain(slot)
+  it('mounts each Play screen through its ThemeSlot entry point and its slot, which fetches it with import() and loads nothing of Play with it', () => {
+    for (const [seam, entryPoint, slot] of SEAM_SLOTS) {
+      const graph = staticGraph(seam)
+      expect(graph, seam).toContain(entryPoint)
+      expect(graph, seam).toContain(slot)
+      // The slot reaches the seam only through builtin Play's registrations, never by a direct import.
+      expect(importersIn(graph, slot), `${seam}: ${slot}`).toEqual([PLAY_REGISTRATIONS])
       expect(localLoads(slot, 'static').filter((rel) => rel.startsWith(PLAY_DIR)), slot).toEqual([])
       expect(localLoads(slot, 'dynamic').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel)), slot).toHaveLength(1)
     }
+  }, SCAN_TIMEOUT_MS)
+
+  it("loads Play's screens from builtin Play's registrations only through lazy slots, and none on demand itself", () => {
+    expect(localLoads(PLAY_REGISTRATIONS, 'static').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel))).toEqual([])
+    expect(localLoads(PLAY_REGISTRATIONS, 'static').filter((rel) => isSlot(rel)).length).toBeGreaterThanOrEqual(SEAM_SLOTS.length)
+    expect(localLoads(PLAY_REGISTRATIONS, 'dynamic')).toEqual([])
   })
 })
 

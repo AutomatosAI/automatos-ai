@@ -41,6 +41,13 @@ const DATA_LINE = 'd:'
 const OK = 200
 
 const PLAY_STYLE = 'theme:builtin:play'
+const ACTIVE_ROUTE = '**/api/themes/active'
+/**
+ * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
+ * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
+ * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
+ */
+const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
 const PLAY_CLASS = /\bplay\b/
 const PLAY_PAGE_BACKGROUND = '--pl-page-background'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
@@ -251,6 +258,7 @@ function backgrounds(page: Page, variable: string): Promise<{ body: string; vari
 }
 
 test("under the Play cookie, the body takes Play's page background, not Studio's bg-background", { tag: '@host' }, async ({ page }) => {
+  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
   await chooseStyle(page, PLAY_STYLE, APP_URL)
   await page.goto(THEME_E2E_PATH)
   await expect(page.locator('html')).toHaveClass(PLAY_CLASS)

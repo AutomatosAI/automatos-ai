@@ -1,0 +1,13 @@
+/* PRD-261 A-12h: the Command Center data hello theme's one stylesheet. Every rule sits under
+   html.hello-a12h, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12h .hello-a12h-frame {
+  min-height: 100vh;
+  background: var(--hello-a12h-ground);
+  color: var(--hello-a12h-ink);
+}
+
+html.hello-a12h .hello-a12h-page {
+  display: grid;
+  gap: 8px;
+  padding: 24px;
+}

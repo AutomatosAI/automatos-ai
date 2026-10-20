@@ -191,7 +191,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Start the local backend (postgres, redis, minio, backend)
         run: docker compose up -d --build postgres redis minio backend
@@ -200,7 +200,7 @@ jobs:
         run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:8000/health/ready 300
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -268,6 +268,18 @@ jobs:
         working-directory: e2e/browser
         run: npx tsc -p fixtures/hello-theme/tsconfig.json
 
+      # PRD-261 A-07d (PA-6): the .autotheme packages the install specs upload, built with the
+      # backend's own fixture builder (bare python3, no orchestrator dependencies). The specs read
+      # the folder from E2E_THEME_PACKAGES: hello (A-07d), hello-clip (A-08b), hello-throws (A-04c).
+      - name: Build the test theme packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/theme-packages"
+          for variant in hello hello-clip hello-throws; do
+            python3 orchestrator/tests/fixtures/themes/build.py --variant "$variant" \
+              --out "$RUNNER_TEMP/theme-packages/$variant.autotheme"
+          done
+          echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
+
       # EXPECTED_REACT_VERSION and NEXT_VERSION come from $GITHUB_ENV (set above).
       - name: Run the browser specs
         working-directory: e2e/browser
@@ -284,7 +296,7 @@ jobs:
 
       - name: Upload the theme-host record
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: theme-host-record
           path: e2e/browser/records
@@ -300,7 +312,7 @@ jobs:
 
       - name: Upload the Playwright report, traces and logs
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-e2e-report
           path: |

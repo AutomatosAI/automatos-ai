@@ -58,6 +58,7 @@ from core.models.themes import (  # noqa: E402
 )
 from core.workspaces.models import WorkspaceMember  # noqa: E402
 from services.themes import records  # noqa: E402
+from services.themes.listings import MARKETPLACE_SETTING  # noqa: E402
 from services.themes.records import PRIVATE_UPLOAD_SETTING  # noqa: E402
 
 WS_A = uuid.uuid4()
@@ -183,6 +184,19 @@ def test_each_default_per_edition_and_member_count(api, monkeypatch, edition, sw
     assert (body["membersMayChoose"], body["installRole"], body["canInstall"]) == (True, "admins", True)
     assert body["installRoles"] == ["admins", "owner"]
     assert (body["defaultInstallId"], body["pins"], body["updatedAt"]) == (None, [], None)
+
+
+@pytest.mark.parametrize("switch, shown", [("on", "on"), ("off", "off"), ("OFF ", "off"), ("maybe", "off")])
+def test_the_answer_reports_the_marketplace_switch_failing_closed(api, monkeypatch, switch, shown):
+    # W-C2 seam: the Themes tab hides the listing grid and Publish theme while the switch is off.
+    monkeypatch.setattr(config, MARKETPLACE_SETTING, switch, raising=False)
+    assert _get(api)["marketplace"] == shown
+
+
+@pytest.mark.parametrize("unset", [None, ""])
+def test_an_unset_marketplace_switch_reads_on(api, monkeypatch, unset):
+    monkeypatch.setattr(config, MARKETPLACE_SETTING, unset, raising=False)
+    assert _get(api)["marketplace"] == "on"
 
 
 def test_an_owner_without_a_member_row_and_one_member_are_two_people_so_auto_is_off(api):
