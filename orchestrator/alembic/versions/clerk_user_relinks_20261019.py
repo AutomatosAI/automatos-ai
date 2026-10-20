@@ -12,13 +12,13 @@ A new table only: no existing table or row changes. ``IF NOT EXISTS`` keeps the
 upgrade a no-op on a database that ``create_all`` built from the models.
 
 Revision ID: clerk_user_relinks_20261019
-Revises: auto_haiku_default_20261019
+Revises: prd262_boot_columns
 Create Date: 2026-10-19
 """
 from alembic import op
 
 revision = "clerk_user_relinks_20261019"
-down_revision = "auto_haiku_default_20261019"
+down_revision = "prd262_boot_columns"
 branch_labels = None
 depends_on = None
 
