@@ -33,7 +33,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
-| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | host-only | — | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label. The host keeps it; once Play is a package, the SDK's chat area pauses its composer the same way (see "Host-owned AI label" below). |
+| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | SDK | `cards.AiLabelFence` | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label (see "Host-owned AI label" below). The SDK name is the host's fence with the host's props (`label`, `held`); the label check and the pause stay the host's. Added by W-A5's seam owner; the SDK stays 1.0.0, as for W-A2's and W-A4's names: it has not been published yet (the CDN secrets do not exist). |
 | `@/components/chatbot/mission-created-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionCreatedCard` | The host's card for the Mission the chat created. |
 | `@/components/chatbot/mission-suggestion-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionSuggestionCard` | The host's card offering a Mission. |
 | `@/components/chatbot/task-card` | c/play/chat/reply-cards.tsx | SDK | `cards.TaskCard` | The host's task card. |
@@ -197,6 +197,8 @@ off, and no manifest field, SDK name or setting does either.
   (the default chat's input through `FencedMultimodalInput`, Play's message box) and the chat says "This theme
   hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps the composer only, never a
   whole chat screen, so the approval cards in a reply stay clickable (they are protected surfaces).
+- **A theme's composer** sits inside `cards.AiLabelFence`, the host's fence itself (W-A5: Play's message box
+  imports it from the SDK), so a theme's chat pauses the same way the host's does.
 - **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:
   a theme's composer built on `chat.useChatController` must pause the same way while the label is hidden, and
   the chat stream must not start until the host's label is mounted. A-11b's tests prove both.

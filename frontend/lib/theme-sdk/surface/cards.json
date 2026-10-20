@@ -4,6 +4,7 @@
   "story": "A-12a",
   "status": "built",
   "names": [
+    "AiLabelFence",
     "CorePage",
     "FilePreview",
     "FirstRunNudge",

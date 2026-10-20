@@ -11,9 +11,9 @@
  * - packages only from the allowed list: `@automatos/theme-sdk`, `react`, `react-dom`, and `zustand`
  *   in Play's own stores;
  * - every relative import lands inside Play's own folders (its components, lib, mascot library,
- *   looks, and the hooks and stores that move with it), so no `../../lib/<core>` slips past the ban;
- * - the seam items (a core import the SDK has no name for yet, PA-16) are allowed one file and one
- *   import each, and the allowance fails once its import has gone.
+ *   looks, and the hooks and stores that move with it), so no `../../lib/<core>` slips past the ban.
+ *   Nothing is pending: the area's one seam item, the host's AI label fence, is the SDK's
+ *   `cards.AiLabelFence` since W-A5's seam review (sdk-surface-map.md).
  *
  * And what the area copied from the core (sdk-surface-map.md: "copied into Play") stays equal to the
  * core's own: the receipts' closing notes, a Deliverable's id check, link and type words, the Mission's
@@ -85,15 +85,6 @@ const PLAY_HOME: readonly RegExp[] = [
   /^hooks\/use-(shelf-mascot|celebrate-new|play-[\w-]+|auto-mascot|backend-mascot|mascot-player|media-preferences)(\.tsx?)?$/,
   /^stores\/play-[\w-]+(\.ts)?$/,
 ]
-/**
- * Seam items: [file, import] for a core import the SDK has no name for yet. Each file says why.
- * message-box.tsx: the host's AI label fence (PRD-264 EUAI-11a) around Play's composer; the SDK's chat
- * area has no name that pauses a theme's composer while the label is hidden (sdk-surface-map.md,
- * "Host-owned AI label").
- */
-const PENDING: ReadonlyArray<readonly [string, string]> = [
-  ['components/play/chat/message-box.tsx', '@/components/ai-label/ai-label-fence'],
-]
 /** Imports the scan must see, so a broken reader can never pass by finding nothing. */
 const MUST_SEE = ['@automatos/theme-sdk', 'react', STORE_PACKAGE]
 /** Files the scan must find, so a moved folder can never pass by scanning nothing. */
@@ -158,10 +149,6 @@ function isBanned(found: FoundImport): boolean {
   return BANNED.some((pattern) => pattern.test(found.specifier)) && !isAllowedStoreImport(found)
 }
 
-function isPending({ file, specifier }: FoundImport): boolean {
-  return PENDING.some(([pendingFile, pendingImport]) => pendingFile === file && pendingImport === specifier)
-}
-
 /** Where a relative import lands, relative to the frontend. */
 function landing({ file, specifier }: FoundImport): string {
   return path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
@@ -186,8 +173,8 @@ describe('PRD-261 A-14a — the scan of the chat area', () => {
     expect(MUST_SEE.filter((specifier) => !specifiers.has(specifier))).toEqual([])
   })
 
-  it('imports nothing on the ban list but its seam items (and zustand in Play’s own stores)', () => {
-    const banned = IMPORTS.filter((found) => isBanned(found) && !isPending(found))
+  it('imports nothing on the ban list (but zustand in Play’s own stores)', () => {
+    const banned = IMPORTS.filter(isBanned)
     expect(banned.map(describeImport)).toEqual([])
   })
 
@@ -199,12 +186,6 @@ describe('PRD-261 A-14a — the scan of the chat area', () => {
   it("lands every relative import inside Play's own folders", () => {
     const outside = IMPORTS.filter((found) => isRelative(found.specifier) && !landsInPlay(found))
     expect(outside.map((found) => `${describeImport(found)} -> ${landing(found)}`)).toEqual([])
-  })
-
-  it('keeps each seam item only while its import is there', () => {
-    const found = new Set(IMPORTS.map(describeImport))
-    const stale = PENDING.map(([file, specifier]) => describeImport({ file, specifier })).filter((item) => !found.has(item))
-    expect(stale).toEqual([])
   })
 })
 
