@@ -1,4 +1,8 @@
+import type { ChatStatus, ReplyProgress } from '../chat/chat-status'
 import type { MascotEvent } from './types'
+
+/** PRD-261 A-19a — the chat's status and newest reply are the core's (lib/chat/chat-status.ts) until builtin Play leaves core. */
+export { NO_REPLY, type ChatStatus, type ReplyProgress } from '../chat/chat-status'
 
 /**
  * PRD-260 D5, D6 — the core chat's status and newest reply as Auto's events. Pure.
@@ -11,8 +15,6 @@ import type { MascotEvent } from './types'
  * from it (mascotEventsFromReply). The data callback's parts are Auto's events
  * through lib/mascot/data-events.ts.
  */
-
-export type ChatStatus = 'idle' | 'streaming' | 'error'
 
 /** The message on Auto's error event when the turn was blocked (errorCode names why). */
 export const BLOCKED_TURN = 'The turn was blocked'
@@ -33,25 +35,6 @@ export function mascotEventsFromStatus(previous: ChatStatus, next: ChatStatus, e
   if (errorCode !== null) return [{ type: 'error', message: BLOCKED_TURN, code: errorCode }]
   return [{ type: 'finish', finishReason: null }]
 }
-
-/**
- * The newest reply, as far as Auto cares: which one it is, whether its words
- * have started, whether one of its tool calls is still running, how much the
- * model has reasoned on it, and whether a cap ended its turn. useChat writes the
- * words, the reasoning and the cap onto the reply (lib/chat/hooks.ts) instead of
- * handing them to onData, so they are read from the reply itself.
- */
-export type ReplyProgress = {
-  readonly id: string | null
-  readonly hasText: boolean
-  readonly toolRunning: boolean
-  /** The length of the reply's reasoning: its growth is the model thinking. */
-  readonly reasoningChars: number
-  /** A cap (limit_reached) ended the reply's turn. */
-  readonly limitReached: boolean
-}
-
-export const NO_REPLY: ReplyProgress = { id: null, hasText: false, toolRunning: false, reasoningChars: 0, limitReached: false }
 
 /** The reducer only reads that a text event came: its words are on the reply. */
 const ANSWER_STARTED: MascotEvent = { type: 'text', text: '' }

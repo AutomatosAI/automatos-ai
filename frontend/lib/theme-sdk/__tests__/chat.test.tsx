@@ -40,8 +40,8 @@ vi.mock('@/lib/chat-controller/controller', () => ({
     return host.core
   },
 }))
-vi.mock('@/stores/play-chat-store', () => ({
-  usePlayChatStore: (select: (state: { freshDrafts: number }) => unknown) => select({ freshDrafts: host.freshDrafts }),
+vi.mock('@/stores/fresh-draft-store', () => ({
+  useFreshDraftStore: (select: (state: { freshDrafts: number }) => unknown) => select({ freshDrafts: host.freshDrafts }),
 }))
 vi.mock('@/stores/mission-store', () => ({
   useMissionStore: (select: (state: { activePlanningMissionId: string | null }) => unknown) =>

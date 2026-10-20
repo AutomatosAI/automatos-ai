@@ -3,7 +3,7 @@ import { type Dispatch, type MutableRefObject, useCallback, useEffect, useMemo, 
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { apiClient } from '@/lib/api-client'
 import { isPresetId } from '@/lib/looks/presets'
-import { SCOPE_SEPARATOR } from '@/lib/looks/scope'
+import { SCOPE_SEPARATOR } from '@/lib/look-kit/scope'
 import {
   activeLookOf,
   hasLookMark,

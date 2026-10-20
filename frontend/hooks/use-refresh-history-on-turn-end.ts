@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { ChatStatus } from '@/lib/mascot/events'
+import type { ChatStatus } from '@/lib/chat/chat-status'
 
 /**
  * PRD-260 P260-FX-10 (M44) — a turn changes the chat history: a new chat joins

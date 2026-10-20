@@ -26,7 +26,7 @@ vi.mock('@/lib/chat/api', () => chatApi)
 
 import { CONVERSATION_LIMIT, type ConversationListState, useConversationList } from '@/hooks/use-conversation-list'
 import { useRefreshHistoryOnTurnEnd } from '@/hooks/use-refresh-history-on-turn-end'
-import type { ChatStatus } from '@/lib/mascot/events'
+import type { ChatStatus } from '@/lib/chat/chat-status'
 
 /** The root providers' fresh window (components/providers.tsx): within it, nothing is asked again on its own. */
 const ROOT_STALE_MS = 60_000

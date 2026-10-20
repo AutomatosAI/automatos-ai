@@ -85,14 +85,18 @@ const PLAY_HOME: readonly RegExp[] = [
   /^hooks\/use-(shelf-mascot|celebrate-new|play-[\w-]+|auto-mascot|backend-mascot|mascot-player|media-preferences)(\.tsx?)?$/,
   /^stores\/play-[\w-]+(\.ts)?$/,
 ]
-/** Imports the scan must see, so a broken reader can never pass by finding nothing. */
-const MUST_SEE = ['@automatos/theme-sdk', 'react', STORE_PACKAGE]
+/**
+ * Imports the scan must see, so a broken reader can never pass by finding nothing. Play's one store
+ * (stores/play-chat-store.ts, zustand's `create`) left the area in A-19a: the SDK's chat and New
+ * chat were its only readers, so it is the host's stores/fresh-draft-store.ts
+ * (lib/__tests__/prd261-a19-seams.test.ts), and no file of the area imports zustand any more.
+ */
+const MUST_SEE = ['@automatos/theme-sdk', 'react']
 /** Files the scan must find, so a moved folder can never pass by scanning nothing. */
 const MUST_FIND = [
   'components/play/chat/play-chat.tsx',
   'components/play/chat/play-chat-view.tsx',
   'components/play/chat/auto-reply.tsx',
-  'stores/play-chat-store.ts',
   ...AREA_HOOKS,
 ]
 

@@ -20,12 +20,12 @@ vi.mock('next/navigation', () => ({
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
 // The theme's width source, the one ThemeSlot reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
-// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; builtin Play's does.
+// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; the fixture theme's does (A-19b).
 vi.mock('@/hooks/use-studio-theme', async () => {
-  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  const { FIXTURE_THEME_ENTRY } = await import('@/lib/theme-host/__tests__/fixture-theme-entry')
   return {
     useIsStudio: () => true,
-    useActiveTheme: () => (look.play ? { ...BUILTIN_PLAY_ENTRY, ownsPages: look.ownsChat ? BUILTIN_PLAY_ENTRY.ownsPages : [] } : null),
+    useActiveTheme: () => (look.play ? { ...FIXTURE_THEME_ENTRY, ownsPages: look.ownsChat ? FIXTURE_THEME_ENTRY.ownsPages : [] } : null),
     useThemeLayout: () => (look.play && !look.narrow ? 'theme' : 'fallback'),
   }
 })
