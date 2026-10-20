@@ -20,7 +20,7 @@
     },
     "cases": [
       { "name": "the hello manifest", "code": null },
-      { "name": "exact engines", "set": { "engines": { "automatos": "1.0.0", "sdk": "1.0.0" } }, "code": null },
+      { "name": "exact engines", "set": { "engines": { "automatos": "1.1.0", "sdk": "1.1.0" } }, "code": null },
       { "name": "the fewest fields", "unset": ["description", "routes", "nav", "uses", "look"], "code": null },
       { "name": "every optional field", "set": {
         "pages": {
@@ -66,7 +66,7 @@
       { "name": "engines as text", "set": { "engines": "^1.0.0" }, "code": "BAD_ENGINES" },
       { "name": "an engine this host doesn't know", "set": { "engines": { "automatos": "^1.0.0", "sdk": "^1.0.0", "node": "^20.0.0" } }, "code": "UNKNOWN_FIELD" },
       { "name": "a newer major host", "set": { "engines": { "automatos": "^2.0.0", "sdk": "^1.0.0" } }, "code": "ENGINES_MISMATCH" },
-      { "name": "a newer minor sdk", "set": { "engines": { "automatos": "^1.0.0", "sdk": "^1.1.0" } }, "code": "ENGINES_MISMATCH" },
+      { "name": "a newer minor sdk", "set": { "engines": { "automatos": "^1.0.0", "sdk": "^1.2.0" } }, "code": "ENGINES_MISMATCH" },
       { "name": "another exact host", "set": { "engines": { "automatos": "1.0.1", "sdk": "^1.0.0" } }, "code": "ENGINES_MISMATCH" },
       { "name": "an htmlClass in capitals", "set": { "htmlClass": "Hello" }, "code": "BAD_HTML_CLASS" },
       { "name": "an htmlClass of two letters", "set": { "htmlClass": "hi" }, "code": "BAD_HTML_CLASS" },

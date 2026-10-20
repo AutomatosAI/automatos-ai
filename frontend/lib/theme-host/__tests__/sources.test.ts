@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ getActiveTheme: vi.fn() }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { getActiveTheme: api.getActiveTheme } }))
 
+import { SDK_VERSION } from '../sdk'
 import {
   builtinThemeSource,
   defaultLoaderDeps,
@@ -28,7 +29,7 @@ import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 const INSTALL_ID = '00000000-0000-4000-8000-00000000e2e1'
 const INSTALLED_STYLE: UiStyle = `theme:install:${INSTALL_ID}`
 const TIMEOUT_MS = 1_000
-const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: '1.0.0', modules: Object.freeze({}) })
+const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: SDK_VERSION, modules: Object.freeze({}) })
 
 function Frame() {
   return null

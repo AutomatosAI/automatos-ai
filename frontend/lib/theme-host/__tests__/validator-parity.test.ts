@@ -26,6 +26,8 @@ import sharedModules from '../shared-modules.json'
 const REPO_ROOT = path.resolve(__dirname, '../../../..')
 const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
+// PB-3: the host and SDK version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
+const CONTRACT_VERSION = '1.1.0'
 
 interface CorpusCase {
   readonly name: string
@@ -189,6 +191,11 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(strings('SDK_VERSION')).toEqual([SDK_VERSION])
     expect(sharedModules.hostVersion).toBe(THEME_HOST_VERSION)
     expect(sharedModules.sdkVersion).toBe(SDK_VERSION)
+  })
+
+  it('is at 1.1.0: the storage area and the boot tone rule are new (PB-3, D7 QB-3)', () => {
+    expect(THEME_HOST_VERSION).toBe(CONTRACT_VERSION)
+    expect(SDK_VERSION).toBe(CONTRACT_VERSION)
   })
 
   it('reserves the same <html> classes, with Play keeping html.play (PA-8)', () => {

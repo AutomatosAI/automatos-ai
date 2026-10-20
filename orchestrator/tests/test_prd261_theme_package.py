@@ -352,7 +352,9 @@ def test_an_encrypted_member_is_refused():
 
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
-    assert contract.THEME_HOST_VERSION == "1.0.0"
+    # PB-3 (D7, QB-3): 1.1.0 for the storage area (SDK) and the boot tone rule and looks presets (host).
+    assert contract.THEME_HOST_VERSION == "1.1.0"
+    assert contract.SDK_VERSION == "1.1.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
     assert {"studio", "classic", "play", "dark", "light"} <= set(contract.RESERVED_HTML_CLASSES)
     assert contract.HTML_CLASS_OWNERS == {"play": "automatos/play"}

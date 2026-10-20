@@ -1,7 +1,7 @@
 {
   "_comment": "PRD-261 A-01, A-10a: the modules a theme shares with the host. Read by lib/theme-host/* and scripts/theme-sdk/generate-shims.js. A React entry lists the builds its shim's names are read from (from); the SDK entry names the folder of surface files whose union is its shim's names (surface). A-06b (PA-2): hostVersion is the host contract's version a theme's engines.automatos is checked against; it equals THEME_HOST_VERSION in orchestrator/services/themes/contract.py, as sdkVersion equals its SDK_VERSION (both parity tests hold it).",
-  "sdkVersion": "1.0.0",
-  "hostVersion": "1.0.0",
+  "sdkVersion": "1.1.0",
+  "hostVersion": "1.1.0",
   "hostGlobal": "__AUTOMATOS_THEME_HOST__",
   "publicPath": "/theme-sdk/v1/",
   "publicDir": "public/theme-sdk/v1",

@@ -28,8 +28,8 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # PA-2: the host contract's version (slots, pages, routes, boot data) and the SDK's. They equal
 # frontend/lib/theme-host/shared-modules.json "hostVersion" and "sdkVersion"; the parity tests on
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
-THEME_HOST_VERSION = "1.0.0"
-SDK_VERSION = "1.0.0"
+THEME_HOST_VERSION = "1.1.0"
+SDK_VERSION = "1.1.0"
 
 MANIFEST_SCHEMA = "automatos-theme/v1"
 LOOK_SCHEMA_SCHEMA = "automatos-look-schema/v1"

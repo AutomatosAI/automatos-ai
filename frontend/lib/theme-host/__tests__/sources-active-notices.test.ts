@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { countsTowardRevert } from '../failure-ledger'
 import { settleLoad, step } from '../loader'
+import { SDK_VERSION } from '../sdk'
 import {
   defaultLoaderDeps,
   importInstalledEntry,
@@ -31,7 +32,7 @@ const INSTALL_ID = '00000000-0000-4000-8000-0000000a2b01'
 const DIGEST = 'd'.repeat(64)
 const ENTRY_URL = `/api/themes/files/${DIGEST}/entry.js`
 const PRESET_URL = `/api/themes/files/${DIGEST}/presets/default.look.json`
-const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: '1.0.0', modules: Object.freeze({}) })
+const HOST: ThemeHostGlobal = Object.freeze({ sdkVersion: SDK_VERSION, modules: Object.freeze({}) })
 const MANIFEST = {
   schema: 'automatos-theme-spike/v1',
   id: 'automatos-e2e/hello',
