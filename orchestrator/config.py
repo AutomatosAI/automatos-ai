@@ -1711,6 +1711,10 @@ class Config:
     # /health answers 503, so the liveness watchdog (docker-entrypoint.sh, F416)
     # restarts the backend. A dead or hung backend still restarts within ~2 min.
     HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
+    # F458: when a checkout leaves the pool full, one WARNING lists who holds every
+    # connection and where each holder is now (core/database/pool_watch.py), at most
+    # once per this many seconds. 0 = off.
+    DB_POOL_FULL_LOG_SECONDS: float = float(os.getenv("DB_POOL_FULL_LOG_SECONDS", "60"))
     # F140: a playbook step's whole answer at most this long, ending by asking for
     # what it needs, stops the run and asks the owner. Night 4's 12 asks were at
     # most 402 characters; a longer answer is the step's work, even if it ends
