@@ -4,10 +4,11 @@
  * the host's chat checks a payload off the wire, with the widget metadata built from where the card
  * came from; the reply, content and chrome cards as they are; CorePage the core page the host hands
  * down, or its children where there is none. The host's cards are stood in for here, recording
- * what they were given; MadeBy runs the host's own line.
+ * what they were given; MadeBy runs the host's own line, and AiLabelFence the host's own fence on the
+ * host's AI label store (PRD-264 EUAI-11a).
  */
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const host = vi.hoisted(() => {
@@ -82,6 +83,7 @@ vi.mock('@/components/layout/studio-header', () => ({
 }))
 
 import {
+  AiLabelFence,
   CorePage,
   FilePreview,
   FirstRunNudge,
@@ -102,6 +104,8 @@ import { checkedMissionCard, checkedToolCard } from '../host-cards/approvals'
 import { CorePageProvider } from '../host-cards/core-page'
 import { MADE_BY_FALLBACK, MADE_BY_SOURCE } from '@/components/workspace/gallery-view/made-by'
 import { MISSION_APPROVAL_TITLE, MISSION_SOURCE, TOOL_APPROVAL_TITLE, UNNAMED_ACTION } from '@/lib/chat/approvals'
+import { AI_LABEL_FENCE_ATTR } from '@/components/ai-label/ai-label-fence'
+import { PAGE_AI_LABEL, WIDGET_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 
 const GRANT: ToolApprovalData = {
   grant_id: 12101,
@@ -131,6 +135,7 @@ function given(name: string): Record<string, unknown> {
 
 afterEach(() => {
   host.props.clear()
+  useAiLabelStore.setState({ hiddenLabels: [] })
 })
 
 describe('PRD-261 A-12a — ToolApproval', () => {
@@ -275,5 +280,48 @@ describe('PRD-261 A-12a — CorePage', () => {
       </CorePage>,
     )
     expect(screen.getByText('No core page here')).toBeInTheDocument()
+  })
+})
+
+describe("PRD-261 W-A5 — AiLabelFence (the host's AI label fence, PRD-264 EUAI-11a)", () => {
+  const COMPOSER = 'Message Auto'
+
+  function hide(label: typeof PAGE_AI_LABEL, hidden: boolean) {
+    act(() => useAiLabelStore.getState().setHidden(label, hidden))
+  }
+
+  it("is the host's fence: a theme's composer pauses while the page's label is hidden, and comes back", () => {
+    render(
+      <AiLabelFence>
+        <textarea aria-label={COMPOSER} />
+      </AiLabelFence>,
+    )
+    const composer = screen.getByRole('textbox', { name: COMPOSER })
+    expect(composer.closest(`[${AI_LABEL_FENCE_ATTR}]`)).not.toBeNull()
+    expect(composer).toBeEnabled()
+    hide(PAGE_AI_LABEL, true)
+    expect(composer).toBeDisabled()
+    hide(PAGE_AI_LABEL, false)
+    expect(composer).toBeEnabled()
+  })
+
+  it("hands the host the theme's label and held: the widget's fence follows the widget's label, held stays disabled", () => {
+    render(
+      <AiLabelFence label={WIDGET_AI_LABEL}>
+        <textarea aria-label={COMPOSER} />
+      </AiLabelFence>,
+    )
+    const composer = screen.getByRole('textbox', { name: COMPOSER })
+    hide(PAGE_AI_LABEL, true)
+    expect(composer).toBeEnabled()
+    hide(WIDGET_AI_LABEL, true)
+    expect(composer).toBeDisabled()
+    render(
+      <AiLabelFence held>
+        <button type="button">Send</button>
+      </AiLabelFence>,
+    )
+    hide(PAGE_AI_LABEL, false)
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 })

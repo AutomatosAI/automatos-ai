@@ -11,9 +11,10 @@
  *   client, zustand (the area keeps no store);
  * - packages only from the allowed list: `@automatos/theme-sdk`, `react`, `react-dom`;
  * - every relative import lands inside Play's own folders (its components, lib, mascot library,
- *   looks, and the hooks and stores that move with it), so no `../../lib/<core>` slips past the ban;
- * - the seam items (a core import the SDK has no name for yet, PA-16) are allowed one file and one
- *   import each, and the allowance fails once its import has gone.
+ *   looks, and the hooks and stores that move with it), so no `../../lib/<core>` slips past the ban.
+ *   Nothing is pending: the area's two seam items are the SDK's since W-A5's seam review
+ *   (sdk-surface-map.md): whether Socials is offered (`useWorkspace().workspace.socialsAvailable`)
+ *   and whose seen record it is (`looks.useLookScope`).
  *
  * And the pure utilities and wording the area copied from the core (sdk-surface-map.md: "copied
  * into Play") stay equal to the core's own.
@@ -58,16 +59,6 @@ const PLAY_HOME: readonly RegExp[] = [
   /^hooks\/use-(shelf-mascot|celebrate-new|play-[\w-]+|auto-mascot|backend-mascot|mascot-player|media-preferences)(\.tsx?)?$/,
   /^stores\/play-[\w-]+(\.ts)?$/,
 ]
-/**
- * Seam items: [file, import] for a core import the SDK has no name for yet. Each file says why.
- * socials-offered.ts: whether the platform offers Socials; `context.useWorkspace` doesn't carry it.
- * use-celebrate-new.ts: whose seen record it is (the signed-in user in the workspace, PRD-260 F5);
- * the host fills that context (components/theme-host/look-scope.ts), and no SDK name carries the user.
- */
-const PENDING: ReadonlyArray<readonly [string, string]> = [
-  ['components/play/deliverables/socials-offered.ts', '@/components/workspace-provider'],
-  ['hooks/use-celebrate-new.ts', '@/components/theme-host/look-scope'],
-]
 /** Imports the scan must see, so a broken reader can never pass by finding nothing. */
 const MUST_SEE = ['@automatos/theme-sdk', 'react']
 /** Files the scan must find, so a moved folder can never pass by scanning nothing. */
@@ -108,10 +99,6 @@ function isBanned(specifier: string): boolean {
   return BANNED.some((pattern) => pattern.test(specifier))
 }
 
-function isPending({ file, specifier }: FoundImport): boolean {
-  return PENDING.some(([pendingFile, pendingImport]) => pendingFile === file && pendingImport === specifier)
-}
-
 /** Where a relative import lands, relative to the frontend. */
 function landing({ file, specifier }: FoundImport): string {
   return path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
@@ -136,8 +123,8 @@ describe('PRD-261 A-14b — the scan of the deliverables area', () => {
     expect(MUST_SEE.filter((specifier) => !specifiers.has(specifier))).toEqual([])
   })
 
-  it('imports nothing on the ban list but its seam items', () => {
-    const banned = IMPORTS.filter((found) => isBanned(found.specifier) && !isPending(found))
+  it('imports nothing on the ban list', () => {
+    const banned = IMPORTS.filter((found) => isBanned(found.specifier))
     expect(banned.map(describeImport)).toEqual([])
   })
 
@@ -149,12 +136,6 @@ describe('PRD-261 A-14b — the scan of the deliverables area', () => {
   it("lands every relative import inside Play's own folders", () => {
     const outside = IMPORTS.filter((found) => isRelative(found.specifier) && !landsInPlay(found))
     expect(outside.map((found) => `${describeImport(found)} -> ${landing(found)}`)).toEqual([])
-  })
-
-  it('keeps each seam item only while its import is there', () => {
-    const found = new Set(IMPORTS.map(describeImport))
-    const stale = PENDING.map(([file, specifier]) => describeImport({ file, specifier })).filter((item) => !found.has(item))
-    expect(stale).toEqual([])
   })
 })
 

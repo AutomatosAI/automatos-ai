@@ -32,7 +32,10 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 })
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 vi.mock('@/components/workspace-provider', () => ({
-  useWorkspace: () => ({ workspace: { id: 'ws-1', socials: { available: false } }, isLoading: false }),
+  useWorkspaceOptional: () => ({
+    workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro', socials: { available: false } },
+    isLoading: false,
+  }),
 }))
 
 const media = vi.hoisted(() => ({ blobUrl: vi.fn((url: string | undefined) => ({ src: null as string | null, error: null as string | null, url })) }))

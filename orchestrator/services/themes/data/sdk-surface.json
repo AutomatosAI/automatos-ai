@@ -5,6 +5,7 @@
       "assetUrl"
     ],
     "cards": [
+      "AiLabelFence",
       "CorePage",
       "FilePreview",
       "FirstRunNudge",
@@ -34,6 +35,7 @@
       "useMediaPreferences",
       "useOnline",
       "useRole",
+      "useThemeLayout",
       "useTone",
       "useTrial",
       "useWorkspace"
@@ -63,7 +65,8 @@
       "importLook",
       "listLooks",
       "saveLook",
-      "useLook"
+      "useLook",
+      "useLookScope"
     ],
     "navigation": [
       "BOARD_HREF",
