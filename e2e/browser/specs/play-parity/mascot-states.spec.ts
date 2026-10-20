@@ -19,6 +19,15 @@ const CLIP_EXTENSION: Readonly<Record<string, string>> = { chromium: 'webm', web
 /** HTMLMediaElement.HAVE_CURRENT_DATA: a frame is there to draw. */
 const HAVE_CURRENT_DATA = 2
 const SERVED_STATUSES = [200, 206, 304]
+/**
+ * WebKit plays HEVC clips through its own media stack, which fetches them outside the network layer
+ * Playwright watches, so their responses report status 0 (browser-e2e run 39382509598, builtin and
+ * installed Play alike). Status 0 says nothing about the file: a refused one reports its real status
+ * (404, 403), which this check still catches, and expectClips checks what each slot draws. Only that
+ * case is excused; every other mascot file, and every clip in Chromium, must be served.
+ */
+const MEDIA_STACK_STATUS = 0
+const MEDIA_STACK_CLIP = /\.mp4$/
 /** The 12 states in the style sheet's order, each with its ring tone (lib/mascot/types.ts, lib/mascot/ring.ts). */
 const STATES: ReadonlyArray<readonly [string, string]> = [
   ['hello', 'light'],
@@ -58,11 +67,16 @@ function slotDrawing(slot: Locator): Promise<SlotDrawing> {
 }
 
 /** Every mascot file response that was not served, as '<status> <path>'. */
-function refusedMascotFiles(responses: readonly ResponseSeen[], play: AvailablePlay): string[] {
+function servedByMediaStack(status: number, pathname: string, browserName: string): boolean {
+  return browserName === 'webkit' && status === MEDIA_STACK_STATUS && MEDIA_STACK_CLIP.test(pathname)
+}
+
+function refusedMascotFiles(responses: readonly ResponseSeen[], play: AvailablePlay, browserName: string): string[] {
   const root = play.mascotPath('')
   return responses
     .map(({ url, status }) => ({ status, pathname: new URL(url).pathname }))
     .filter(({ status, pathname }) => pathname.startsWith(root) && !SERVED_STATUSES.includes(status))
+    .filter(({ status, pathname }) => !servedByMediaStack(status, pathname, browserName))
     .map(({ status, pathname }) => `${status} ${pathname}`)
 }
 
@@ -115,7 +129,7 @@ describeParity("Auto's 12 states on the style sheet", (variant) => {
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
     await expectClips(section, play, browserName)
 
-    expect(refusedMascotFiles(watch.responses, play)).toEqual([])
+    expect(refusedMascotFiles(watch.responses, play, browserName)).toEqual([])
     expect(watch.pageErrors).toEqual([])
   })
 })
