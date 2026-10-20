@@ -44,13 +44,13 @@ vi.mock('@/components/layout/main-layout', () => ({
 }))
 // PRD-261 A-04b: builtin Play's style sheet comes through its lazy slot (styleSheet@1); here as it
 // is once its chunk has loaded, so the sheet renders in the same pass (and on the server).
-vi.mock('@/components/looks/style/style-screen-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-style-lazy', async () => ({
   StyleScreen: (await import('@/components/looks/style/style-screen')).StyleScreen,
 }))
 
 import LookStylePage from '@/app/looks/style/page'
-import { LookProvider, useLook } from '@/components/looks/look-provider'
-import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
+import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/lib/theme-host/builtin/play-only-route'
 import { SAMPLE_TITLE } from '@/components/looks/style/style-components'
 import { PLAY_STATES } from '@/components/looks/style/style-mascots'
 import { REDUCED_MOTION_NOTE, StyleMotion } from '@/components/looks/style/style-motion'
@@ -64,7 +64,7 @@ import { lookDocumentVars } from '@/lib/looks/document'
 import { lookToCssVars } from '@/lib/looks/engine'
 import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
-import { lookKeys } from '@/lib/looks/storage'
+import { lookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { RADII, SPACING_STEPS, radiusToken, rootBlock } from '@/lib/looks/style'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'

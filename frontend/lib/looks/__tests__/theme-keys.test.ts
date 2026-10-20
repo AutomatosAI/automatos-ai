@@ -29,7 +29,7 @@ import {
   setLookMark,
   writeActiveLook,
   writeSavedLooks,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 import { BUILTIN_PLAY_BOOT } from '@/lib/theme-host/builtin/play-boot'
 import {
   BUILTIN_PLAY_LOOK_KEYS,

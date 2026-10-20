@@ -1,11 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef } from 'react'
+import { useStartChat, type Deliverable } from '@automatos/theme-sdk'
 
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { useStartChat } from '@/hooks/use-start-chat'
-import { refocus } from '@/lib/play/focus'
-import { emptyMessage, type ShelfFilter, type ShelfView } from '@/lib/play/shelf'
+import { refocus } from '../../../lib/play/focus'
+import { emptyMessage, type ShelfFilter, type ShelfView } from '../../../lib/play/shelf'
 
 import { ShelfCard } from './shelf-card'
 import cardStyles from './shelf-card.module.css'

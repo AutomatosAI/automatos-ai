@@ -1,15 +1,12 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { HostChatMessage } from '@automatos/theme-sdk'
 
-import { type DeliverableRef, deliverablesFromReceipts, mergeDeliverables } from '@/lib/chat/deliverables'
-import { activityLines, messageText, provenanceOf, savedTurnError } from '@/lib/chat/message-text'
-import { receiptsOf } from '@/lib/chat/receipts'
-import type { ChatMessage } from '@/types'
-
+import { ApprovalCards } from './approval-cards'
 import { DeliverableCard } from './deliverable-card'
 import { PlayMarkdown } from './play-markdown'
 import { Receipts } from './receipts'
+import { replyDeliverables } from './reply'
 import { ReplyCards } from './reply-cards'
 import { SnagBox } from './snag-box'
 import { ToolLines } from './tool-lines'
@@ -17,9 +14,10 @@ import styles from './chat.module.css'
 
 /**
  * PRD-260 §4 — one reply from Auto (mocks 01, 02 and 08), ported from
- * Automatos Play's components/chat/AutoReply.tsx onto the core's ChatMessage,
- * top to bottom: the "Auto" label, who wrote it when the turn didn't ("Auto ·
- * background", Studio's badge), the lines the platform puts above the answer
+ * Automatos Play's components/chat/AutoReply.tsx onto the SDK's message
+ * (useChatController's view model, PRD-261 A-14a), top to bottom: the "Auto"
+ * label, who wrote it when the turn didn't ("Auto · background", Studio's
+ * badge), the lines the platform puts above the answer
  * (a refused write, work not done), what he said before his tools and their
  * progress, his tool lines, the answer as markdown with a cursor while it
  * streams, the Deliverables the turn made, the approvals it raised (the core's
@@ -28,14 +26,12 @@ import styles from './chat.module.css'
  * then a failure: in the snag box once the turn is over, as a plain line while
  * he answers. A failed turn the server saved is that failure, never an answer.
  * A reply you stopped keeps what it had and says so last (P260-FX-30, as the
- * approved Play app does; hooks/use-stopped-reply.ts keeps it on screen).
+ * approved Play app does; the chat controller keeps it on screen).
  */
 
 export const SPEAKER = 'Auto'
 /** Under a reply you stopped (the approved Play app's words). */
 export const STOPPED_NOTICE = 'You stopped this answer.'
-
-const NO_DELIVERABLES: readonly DeliverableRef[] = []
 
 function Lines({ lines, className }: { readonly lines: readonly string[]; readonly className: string }) {
   return (
@@ -85,49 +81,33 @@ function Failure({ message, streaming, onRetry, hidden }: FailureProps) {
 }
 
 export interface AutoReplyProps {
-  readonly message: ChatMessage
+  /** The reply: its Deliverables, its approval cards and whether Stop ended it come with it. */
+  readonly message: HostChatMessage
   /** This reply is the one being written now. */
   readonly streaming: boolean
-  /** The Deliverables this reply made live (from the chat's data parts); its receipts add theirs. */
-  readonly deliverables?: readonly DeliverableRef[]
   /** Try again on this reply's snag box: only the newest reply gets it. */
   readonly onRetry?: () => void
   /** A spent trial blocked this turn: the core's banner says so instead of the snag box. */
   readonly snagHidden?: boolean
-  /** The approval cards this reply raised (approval-cards.tsx). */
-  readonly approvals?: ReactNode
-  /** You pressed Stop while Auto wrote this reply. */
-  readonly stopped?: boolean
 }
 
-export function AutoReply({
-  message,
-  streaming,
-  deliverables = NO_DELIVERABLES,
-  onRetry,
-  snagHidden = false,
-  approvals,
-  stopped = false,
-}: AutoReplyProps) {
-  const receipts = receiptsOf(message)
-  const made = mergeDeliverables(deliverables, deliverablesFromReceipts(receipts))
-  const notices = message.limitReached?.message ? [message.limitReached.message] : []
-  const provenance = provenanceOf(message)
-  const savedError = savedTurnError(message)
+export function AutoReply({ message, streaming, onRetry, snagHidden = false }: AutoReplyProps) {
+  const { provenance, savedError, limitReached } = message
+  const notices = limitReached ? [limitReached] : []
   return (
     <article className={styles.reply} aria-label={`${SPEAKER} said`} aria-busy={streaming}>
       <h2 className={styles.speaker}>{SPEAKER}</h2>
       <Lines lines={provenance ? [provenance] : []} className={styles.notice} />
-      <Lines lines={message.receiptsAbove ?? []} className={styles.above} />
-      <Lines lines={activityLines(message)} className={styles.activity} />
+      <Lines lines={message.above} className={styles.above} />
+      <Lines lines={message.activity} className={styles.activity} />
       <ToolLines calls={message.toolCalls} streaming={streaming} />
-      {savedError === null && <Answer text={messageText(message)} streaming={streaming} />}
-      {made.map((deliverable) => (
+      {savedError === null && <Answer text={message.text} streaming={streaming} />}
+      {replyDeliverables(message).map((deliverable) => (
         <DeliverableCard key={deliverable.id} deliverable={deliverable} />
       ))}
-      {approvals}
+      <ApprovalCards approvals={message.approvals} />
       <ReplyCards message={message} />
-      <Receipts receipts={receipts} />
+      <Receipts receipts={message.receipts} />
       <Lines lines={notices} className={styles.notice} />
       <Failure
         message={message.error?.message ?? savedError}
@@ -135,7 +115,7 @@ export function AutoReply({
         onRetry={onRetry}
         hidden={snagHidden}
       />
-      {stopped && <p className={styles.notice}>{STOPPED_NOTICE}</p>}
+      {message.stopped && <p className={styles.notice}>{STOPPED_NOTICE}</p>}
     </article>
   )
 }
