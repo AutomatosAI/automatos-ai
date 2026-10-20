@@ -18,6 +18,11 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   matches wins); any other preview is in ``otherPreviews``. Every URL is the files route
   (``serve.module_url``), which serves an approved listing's files to any caller (A-08a).
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
+* **Official** (QB-21): ``publisher.official`` is true only for a reserved publisher
+  (``automatos``, or a ``theme_publishers`` row marked reserved) whose shown version carries a
+  signature an active Automatos key verifies (``signature_verify``, C-05b). A reserved name alone
+  is never Official: a local edition's operator may submit and approve ``automatos/x`` unsigned.
+  The card, the detail and each entry of the versions map carry ``signature {state, keyId}``.
 * **Install** writes a ``theme_installations`` row that **references** the approved package:
   every workspace that installs a version shares its one package row. Update, compare and
   rollback of a listing install are A-07b's routes; this module only creates the row. An
@@ -39,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.models.themes import ThemeInstallation, ThemePackage, ThemePublisher
+from services.themes import signature_verify
 from services.themes.choices import (
     CONFLICT,
     FORBIDDEN,
@@ -162,11 +168,12 @@ def newer_compatible(versions: Sequence[ThemePackage], package: ThemePackage) ->
 # ---------------------------------------------------------------------------
 
 
-def _publisher(db: Session, theme_id: str) -> Dict[str, Any]:
+def _publisher(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
+    """The id's publisher; ``official`` only when it is reserved and the shown version's signature verifies."""
     name = publisher_of(theme_id)
     row = db.query(ThemePublisher).filter(ThemePublisher.publisher == name).first()
-    official = name in RESERVED_PUBLISHERS or bool(row is not None and row.reserved)
-    return {"name": name, "official": official}
+    reserved = name in RESERVED_PUBLISHERS or bool(row is not None and row.reserved)
+    return {"name": name, "official": reserved and verdict.verified}
 
 
 def _file_url(package: ThemePackage, path: str) -> Optional[str]:
@@ -214,6 +221,7 @@ def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
         "engines": (package.manifest or {}).get("engines"),
         "compatible": is_compatible(package),
         "revoked": revocation_body(revocation_of(db, package)),
+        "signature": signature_verify.package_verdict(package).view(),
         "createdAt": None if package.created_at is None else package.created_at.isoformat(),
     }
 
@@ -243,12 +251,14 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
     shown = latest or versions[0]
     manifest = shown.manifest or {}
     cover = _preview_paths(shown)
+    verdict = signature_verify.package_verdict(shown)
     return {
         "listingId": listing_id_of(shown.theme_id),
         "themeId": shown.theme_id,
         "name": manifest.get("name"),
         "description": manifest.get("description"),
-        "publisher": _publisher(db, shown.theme_id),
+        "publisher": _publisher(db, shown.theme_id, verdict),
+        "signature": verdict.view(),
         "version": shown.version,
         "packageId": str(shown.id),
         "compatible": latest is not None,
