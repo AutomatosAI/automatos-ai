@@ -122,9 +122,10 @@
 #
 # PRD-262 US-021, in every mode: the API image keeps only the botocore models of the
 # services we call. Once the frontend and the images check out, and before the warm
-# restarts, scripts/ci/smoke_document_presign.py uploads a document through the backend,
-# which puts it in MinIO through that botocore, and the host fetches it back by the
-# presigned URL the Documents page's download call answers with.
+# restarts, scripts/ci/smoke_document_presign.py uploads a document through the backend
+# as a chat attachment, which the backend puts in MinIO through that botocore and nothing
+# else (no embedding: CI has no provider), and the host fetches it back by the presigned
+# URL the app mints for it (AttachmentStore.sign_url, run in the backend's container).
 #
 # PRD-262 US-037, SMOKE_IMAGES=pull: no secret is exported, as on a self-hoster's clean
 # checkout. make up's first step, make env, creates .env from .env.example and writes
@@ -686,9 +687,11 @@ check_minio_user() {
 }
 
 # PRD-262 US-021: a document uploaded to the backend lands in MinIO through the pruned
-# botocore, and the host fetches it back by its presigned URL.
+# botocore, and the host fetches it back by its presigned URL. The backend stores it
+# under the local workspace, DEFAULT_WORKSPACE_ID, and mints the link in its container.
 check_document_storage() {
   python3 "$DOCUMENT_TOOL" --api "$API_BASE" --storage "$STORAGE_URL" \
+    --container "$BACKEND_CONTAINER" --workspace "$DEFAULT_WORKSPACE_ID" \
     --out "$DOCUMENT_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
     || fail "a document uploaded to the backend did not come back from object storage by its presigned URL"
 }
