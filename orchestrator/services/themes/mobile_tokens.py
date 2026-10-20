@@ -18,7 +18,9 @@ way the web's first paint paints it: ``frontend/lib/theme-host/boot-sanitize.ts`
   ``integer``, ``min`` <= ``max``, ``scale`` > 0, ``capTable`` null or two look fields, a colour knob),
   other rules dropped; ``defaults`` with text or finite number values; the tone rule kept only when
   every choice of its knob has a tone. None when the defaults don't fit what is left (boot-sanitize.ts
-  :231): the web then paints nothing from the table.
+  :231): the web then paints nothing from the table. Every number is the one ``JSON.parse`` gives the
+  web (``contract.js_number``): compared as a double, and not finite past the double's range, where
+  Python would keep a 310-digit literal whole and JavaScript reads Infinity.
 * :func:`look_fits` is the boot script's ``fits`` (boot.ts :158-:159; ``lookFitsPrepaint``): the look
   names an option of every knob table and a cell of every pair table, and for every numeric rule its
   knob is a finite number in range (whole when ``integer``), its colour knob a key of the rule's
@@ -46,7 +48,7 @@ import re
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from services.themes.contract import (
-    MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, TONE_RULE_KEY, TONE_RULE_TONES, is_finite_number,
+    MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, TONE_RULE_KEY, TONE_RULE_TONES, is_finite_number, js_number,
 )
 
 # hsl.ts TRIPLET and contrast.ts HEX, with ASCII digits ([0-9]: Python's \d also takes other scripts' digits).
@@ -197,11 +199,6 @@ def _js_length(text: str) -> int:
     return len(text.encode("utf-16-le", "surrogatepass")) // UTF16_UNIT_BYTES
 
 
-def _finite(value: Any) -> bool:
-    """JavaScript's ``Number.isFinite`` over a JSON value (a bool is no number)."""
-    return is_finite_number(value) and math.isfinite(value)
-
-
 def _is_knob(name: Any) -> bool:
     return isinstance(name, str) and KNOB_NAME.fullmatch(name) is not None
 
@@ -241,7 +238,8 @@ def _boot_pair(raw: Any) -> Optional[BootPair]:
 
 
 def _cap(value: Any) -> Optional[float]:
-    return value if _finite(value) and CAP_MIN <= value <= CAP_MAX else None
+    number = js_number(value)
+    return number if number is not None and CAP_MIN <= number <= CAP_MAX else None
 
 
 def _boot_caps(rule: Mapping[str, Any]) -> Optional[BootCaps]:
@@ -266,8 +264,8 @@ def _boot_rule(raw: Any) -> Optional[BootRule]:
         return None
     if not isinstance(var, str) or BOOT_VAR_NAME.fullmatch(var) is None or not _is_knob(knob):
         return None
-    low, high, scale = rule.get("min"), rule.get("max"), rule.get("scale")
-    if not (_finite(low) and _finite(high) and _finite(scale)) or low > high or scale <= 0:
+    low, high, scale = (js_number(rule.get(field)) for field in ("min", "max", "scale"))
+    if low is None or high is None or scale is None or low > high or scale <= 0:
         return None
     caps, color = _boot_caps(rule), _object(rule.get("color"))
     if caps is None or not _is_knob(color.get("knob")):
@@ -276,8 +274,9 @@ def _boot_rule(raw: Any) -> Optional[BootRule]:
 
 
 def _boot_defaults(defaults: Any) -> Dict[str, Any]:
-    """``sanitizeDefaults``: look fields whose value is text or a finite number."""
-    return {knob: value for knob, value in _object(defaults).items() if _is_knob(knob) and (isinstance(value, str) or _finite(value))}
+    """``sanitizeDefaults``: look fields whose value is text or a number JavaScript reads as finite."""
+    kept = _object(defaults).items()
+    return {knob: value for knob, value in kept if _is_knob(knob) and (isinstance(value, str) or is_finite_number(value))}
 
 
 def _boot_tone(raw: Any, table: BootTable) -> Optional[BootTone]:
@@ -318,8 +317,8 @@ def _has(table: Any, key: Any) -> bool:
 
 def _rule_fits(rule: BootRule, look: Mapping[str, Any]) -> bool:
     """boot.ts ``num`` (``numericFits``)."""
-    value = look.get(rule.knob)
-    if not _finite(value) or not rule.low <= value <= rule.high or (rule.integer and value % 1 != 0):
+    value = js_number(look.get(rule.knob))
+    if value is None or not rule.low <= value <= rule.high or (rule.integer and value % 1 != 0):
         return False
     if not _has(rule.rgb, look.get(rule.color_knob)):
         return False

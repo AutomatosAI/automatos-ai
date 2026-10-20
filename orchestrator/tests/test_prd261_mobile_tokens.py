@@ -8,7 +8,8 @@
   ``sanitizePrepaint``): knob tables, then pair tables, in table order; a look that doesn't fit the
   table (boot.ts :158-:159 ``fits``) paints the defaults WHOLE (boot.ts :164), the cases
   ``frontend/lib/looks/__tests__/prepaint.test.ts`` holds the script to; a numeric rule's variable is
-  painted last with rgba() (boot.ts :167); only mobile tokens whose final value parses are kept;
+  painted last with rgba() (boot.ts :167); only mobile tokens whose final value parses are kept; every
+  number is the double JSON.parse gives the web (a 310-digit literal is Infinity), and nothing raises;
 * ``missing_tokens`` names the required tokens a painting lacks;
 * ``look_tone``: theme.json's fixed tone first (boot.ts :57-:60, :69), then under ``from-look`` the
   table's tone rule, and otherwise the painted ground (look-kit ``isDarkGround``);
@@ -62,6 +63,10 @@ TABLE = {
 PAPER_LOOK = {"ground": "paper", "accent": "blue", "glow": 10}
 INK_LOOK = {"ground": "ink", "accent": "green", "glow": 3}
 NO_RULE = {key: value for key, value in TABLE.items() if key != contract.TONE_RULE_KEY}
+# A 310-digit literal: Python's json keeps it whole; JSON.parse reads Infinity (past the double's range).
+PAST_DOUBLE = 10 ** 309
+# JSON.parse reads 2**53 + 1 as the nearest double, 2**53.
+SAFE_LIMIT = 2 ** 53
 
 
 # ---------------------------------------------------------------------------
@@ -221,10 +226,30 @@ def test_a_table_whose_defaults_do_not_fit_it_paints_nothing_for_any_look(defaul
     ({"knobs": {"ground": {"paper": "#ffffff"}}, "pairs": [None, {"a": 1, "b": "x", "table": []}]}, {"ground": "paper"}),
     ({"knobs": {"ground": {"paper": PAPER}}, "numeric": [None, {"capTable": ["a"]}], "defaults": "paper"}, None),
     (TABLE, ["paper"]),
+    # numbers past the double's range, where Python's float() overflows
+    ({**TABLE, "defaults": {**TABLE["defaults"], "radius": PAST_DOUBLE}}, None),
+    ({**TABLE, "defaults": {**TABLE["defaults"], "glow": PAST_DOUBLE}}, INK_LOOK),
+    (TABLE, {**INK_LOOK, "glow": PAST_DOUBLE}),
+    ({**TABLE, "numeric": [{**GLOW, "min": -PAST_DOUBLE, "max": PAST_DOUBLE, "scale": PAST_DOUBLE}]}, INK_LOOK),
+    ({**TABLE, "numeric": [{**GLOW, "capTable": ["ground", "accent"], "caps": {"ink": {"green": PAST_DOUBLE}}}]}, INK_LOOK),
 ])
 def test_a_table_or_a_look_of_the_wrong_shape_paints_without_raising(table, look):
     tokens = paint_look(table, look)
     assert set(tokens) <= set(contract.MOBILE_TOKEN_NAMES)
+
+
+def test_a_number_is_read_as_the_web_s_json_parse_reads_it():
+    # boot-sanitize.ts isFiniteNumber(Infinity) is false: the default is dropped and the rest still fit
+    assert boot_table({**TABLE, "defaults": {**TABLE["defaults"], "radius": PAST_DOUBLE}}).defaults == TABLE["defaults"]
+    # without its glow the defaults no longer fit the glow rule, so the web drops the whole table
+    assert boot_table({**TABLE, "defaults": {**TABLE["defaults"], "glow": PAST_DOUBLE}}) is None
+    assert not look_fits(boot_table(TABLE), {**INK_LOOK, "glow": PAST_DOUBLE})
+    # a rule whose max is Infinity is dropped, so a look with no glow fits what is left
+    assert look_fits(boot_table({**TABLE, "numeric": [{**GLOW, "max": PAST_DOUBLE}]}), {"ground": "ink", "accent": "green"})
+    # past 2**53 the web compares the rounded double: 2**53 + 1 is within a max of 2**53, and whole
+    wide = {**TABLE, "numeric": [{**GLOW, "max": SAFE_LIMIT}]}
+    assert look_fits(boot_table(wide), {**INK_LOOK, "glow": SAFE_LIMIT + 1})
+    assert paint_look(wide, {**INK_LOOK, "glow": SAFE_LIMIT + 1})["--background"] == INK["--background"]
 
 
 def test_missing_tokens_names_the_required_tokens_a_painting_gives_no_colour():

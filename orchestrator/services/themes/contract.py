@@ -20,6 +20,7 @@ through ``config`` and falls back to the defaults below until B2-wire adds them.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from pathlib import Path
@@ -223,9 +224,26 @@ def is_whole_number(value: Any) -> bool:
     return isinstance(value, int) or value.is_integer()
 
 
+def js_number(value: Any) -> Optional[float]:
+    """A JSON number as JavaScript's ``JSON.parse`` reads it, when that is finite; else None (a bool is no number).
+
+    Python keeps an integer literal whole however long it is, where JavaScript reads the nearest
+    double: past 2**53 a rounded one, past the double range Infinity. So the value is compared as
+    ``float(value)``, and one that overflows (a 310-digit literal) or is infinite (``1e400``) is not
+    finite, as ``Number.isFinite`` says of what ``JSON.parse`` gives for it.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def is_finite_number(value: Any) -> bool:
-    """A JSON number that is not a bool (the parser below refuses NaN and the infinities)."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) != float("inf")
+    """A JSON number that JavaScript reads as finite (``js_number``); never a bool. The parser below refuses NaN."""
+    return js_number(value) is not None
 
 
 # ---------------------------------------------------------------------------

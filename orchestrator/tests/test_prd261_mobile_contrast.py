@@ -228,6 +228,15 @@ def test_from_looks_with_no_table_paints_nothing_so_every_subject_fails_and_neve
     assert measure_mobile({"mobile": {"fromLooks": True}}, broken)["status"] == "fail"
 
 
+def test_a_number_past_the_double_s_range_is_dropped_as_the_web_drops_it_and_never_raises():
+    # JSON.parse reads a 310-digit literal as Infinity, which boot-sanitize.ts drops; Python's float() would overflow
+    past_double = 10 ** 309
+    table = {**TABLE, "defaults": {**TABLE["defaults"], "radius": past_double}}
+    files = _look_files(table, default={"accent": "blue", "ground": "paper", "radius": past_double})
+    measured = measure_mobile({"mobile": {"fromLooks": True}}, files)
+    assert [subject["status"] for subject in measured["presets"]] == ["pass", "pass"] and measured["status"] == "pass"
+
+
 def test_a_manifest_without_the_block_is_left_to_the_review():
     assert measure_mobile(build.hello_manifest(), {}) is None
     assert measure_mobile({"mobile": None}, {}) is None
