@@ -303,7 +303,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # relink); the guard follows it.
     relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
     assert 'down_revision = "prd264_blog_review"' in relinks
-    assert 'EXPECTED_HEAD = "clerk_user_relinks_20261019"' in guard
+    # 2026-10-20 (PRD-266 US-002): prd266_mobile_devices chains onto
+    # clerk_user_relinks_20261019 — a new table only (mobile_devices); the guard
+    # follows it.
+    mobile_devices = (versions / "prd266_mobile_devices.py").read_text()
+    assert 'down_revision = "clerk_user_relinks_20261019"' in mobile_devices
+    assert 'EXPECTED_HEAD = "prd266_mobile_devices"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
