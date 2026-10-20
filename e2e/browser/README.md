@@ -19,8 +19,56 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
    `node .next/standalone/server.js` on `http://localhost:3000`, the backend's CORS default.
 3. Installs this package (`npm ci`), the browsers (`npx playwright install --with-deps`),
    type-checks the specs (`npx tsc`) and runs them.
-4. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
+4. Runs the `@package` and `@parity` specs in a step of their own (below), after the others.
+5. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
    frontend server logs as `browser-e2e-report` (kept 7 days).
+
+## Play from the Design Kit (PRD-261 A-17a)
+
+The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-play`, public, so
+no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
+(npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
+uploads `automatos.play-1.0.0.autotheme` as the `play-package` artifact. Play's build fetches Auto's
+clips from core at the commit its `mascot.lock.json` pins. The two jobs run side by side (no
+`needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
+downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
+`PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
+or did not finish in time, the browser job still runs every other spec, and the `@package` specs
+fail on the missing file.
+
+`support/kit-package.ts` installs it the way Settings › Appearance › Themes does (A-07d): `POST
+/api/themes/import`, `POST /api/themes/installs/{id}/opt-in`, `PUT /api/themes/choice` with the
+install's id, then the style cookie. Those specs store the member's choice on the lane's one backend,
+which every other spec's tab reads, so they run in their own step, one test at a time
+(`--workers=1`), with their own report and output folders (`playwright-report-package`,
+`test-results-package`). Each test puts the choice back on Studio and removes the install.
+
+To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the Play
+change it carries (the mirror rule, `docs/frontend-architecture/play-theme.md`).
+
+## Play parity (PRD-261 A-17b)
+
+`specs/play-parity/*.spec.ts` hold builtin Play and the installed package to the same assertions.
+Each spec writes its tests once inside `describeParity` (`support/play-parity.ts`), which runs them
+under each Play: builtin Play (the server choice `builtin:play`, then the style cookie
+`theme:builtin:play`) and the kit's package (uploaded, opted in to and chosen through
+`support/kit-package.ts`). They cover Auto's 12 states on the style sheet (each still and clip
+served from that Play's own files), approvals in the chat (a tool card and a Mission card, approve,
+deny and reject), P260-FX-19 (Make it yours readable on Paper, in forced colours and with a long
+name), P260-FX-22 (focus after Try again, the asleep screen, This look's toolbar and Switch to
+Play), P260-FX-30 (Stop keeps the reply) and Play below 1024 px (the core chrome in the look's
+colours, the look's tone forced, a stored look painted from the first frame). Play's chat runs on
+recorded turns (`fixtures/play-parity/chat-turns.json`, through `support/chat-stream.ts`); no model
+is called.
+
+They store the member's choice and builtin Play's looks on the lane's one backend, so they carry
+`@parity` and run in the `@package` step, one test at a time. Each test starts and ends on Studio,
+with no install of Play's package and no looks kept for Play on the server.
+
+Where core treats an installed theme differently, so the package cannot pass what builtin Play
+passes, the test keeps its assertions and is `test.fixme` for the package only, naming the gap
+(`GAP_*` in `support/play-parity.ts`). The gaps, and the checks no browser lane can make, are in
+`parity-checklist.md`, the manual pass (Q22).
 
 The package pins `@playwright/test`, `typescript`, `@types/node`, `@types/react` and
 `@types/react-dom` exactly and commits its own `package-lock.json` (every package from
@@ -62,6 +110,10 @@ Every test carries one tag through the `tag` option, for example
   `/deliverables` was not captured then, so its check has not been seen to fail without it.
 - `@host` — the theme host loads an installed theme, falls back on the theme's own failures, keeps
   the theme when the page inside its frame fails, and stays off where it should.
+- `@package` — Play installed from the Design Kit's package (above). Selected only by the
+  workflow's own step for it, never by the main run's `--grep`.
+- `@parity` — the Play parity specs (above), run under builtin Play and the installed package.
+  Selected by the same step as `@package`.
 - `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.
   The only tag Firefox runs (the `firefox` project has `grep: /@record/`).
   `scripts/summarise-records.mjs` turns the folder into the job summary's table; the folder is
@@ -74,7 +126,9 @@ Specs live in `specs/`, shared helpers in `support/`.
 On a pull request (any base branch) or a push to `main` that changes one of the paths in the
 workflow's `paths:` list: the root layout, the pages and components PRD-261 Phase A touches (PA-6:
 the Q3 pages, the theme host, Play, the looks, the Style axis files, the theme routes and services
-on the backend), `next.config.js`, the middleware, the frontend's package files, the compose boot
+on the backend; since A-17b also all of what counts as Play in
+`docs/frontend-architecture/play-theme.md`, with `public/auto/`, and the chat code the parity specs
+read, `lib/chat/` and `components/widgets/`), `next.config.js`, the middleware, the frontend's package files, the compose boot
 files and this folder. It does not watch the rest of
 the backend or the other pages, so a change there can break the lane without running it.
 

@@ -70,7 +70,7 @@ def _fake_qdrant(existing_by_hash=None, query_hits=None, retrieved=None):
 
 
 def _make_store(client) -> DurableMemoryStore:
-    with patch("modules.memory.durable_store.AsyncQdrantClient", return_value=client), \
+    with patch("modules.memory.durable_store.QdrantRestClient", return_value=client), \
          patch("modules.memory.durable_store.EmbeddingManager") as embedder_cls:
         embedder_cls.return_value.generate_embedding = AsyncMock(
             return_value=[0.1, 0.2, 0.3]

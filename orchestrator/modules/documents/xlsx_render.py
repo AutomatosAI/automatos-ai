@@ -70,13 +70,20 @@ def logo_image(brand: Optional[Mapping[str, Any]], design: Design) -> Optional[T
 
 
 def _write_cell(worksheet: Any, row: int, col: int, value: Any, formats: Mapping[str, Any], cell: Any = None) -> None:
-    """One body cell; ``cell`` is its format when the sheet is branded (F356), else the plain one."""
-    if isinstance(value, (int, float)):
+    """One body cell; ``cell`` is its format when the sheet is branded (F356), else the plain one.
+
+    A missing value is a blank cell and a bool an Excel TRUE/FALSE, as pandas wrote them
+    for create_xlsx before this writer served it (PRD-262 US-025)."""
+    if value is None:
+        worksheet.write_blank(row, col, None, cell or formats["body"])
+    elif isinstance(value, bool):
+        worksheet.write_boolean(row, col, value, cell or formats["body"])
+    elif isinstance(value, (int, float)):
         worksheet.write_number(row, col, value, cell or formats["body"])
     elif isinstance(value, datetime):
         worksheet.write_datetime(row, col, value, formats["date"])
     else:
-        worksheet.write_string(row, col, str(value) if value is not None else "", cell or formats["body"])
+        worksheet.write_string(row, col, str(value), cell or formats["body"])
 
 
 def _widths(columns: Sequence[Any], rows: Sequence[Sequence[Any]]) -> List[int]:

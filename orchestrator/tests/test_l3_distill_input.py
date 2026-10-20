@@ -20,7 +20,6 @@ UnifiedMemoryService (no durable store, no DB).
 """
 import os
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -40,11 +39,6 @@ for _k, _v in {
     os.environ.setdefault(_k, _v)
 
 import core.llm as core_llm  # noqa: E402  (patch target for create_llm_manager)
-
-# consumers/__init__.py eagerly imports the chatbot stack → RAG → camelot, an
-# optional PDF dep that isn't installed in the test env. Stub it so the import
-# chain resolves without the real package.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from consumers.chatbot.smart_memory import (  # noqa: E402
     SmartMemoryManager,

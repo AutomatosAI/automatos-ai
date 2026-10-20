@@ -4,7 +4,13 @@
  * `automatos-theme.<themeId>.*`, builtin Play under its PRD-260 `automatos-play.*` keys (so no
  * look moves before A-18), and the boot paints from the same keys the store writes. The server's
  * answer goes through the same checks as a stored one.
+ *
+ * PRD-261 W-A6b (gap G2): the backend's boot names an installed theme's keys for the boot script
+ * (orchestrator serve.py look_storage); both sides are held to one shared fixture.
  */
+import { readFileSync } from 'fs'
+import path from 'path'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DAYLIGHT, EMBER } from '@/lib/looks/presets'
@@ -29,7 +35,7 @@ import {
   setLookMark,
   writeActiveLook,
   writeSavedLooks,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 import { BUILTIN_PLAY_BOOT } from '@/lib/theme-host/builtin/play-boot'
 import {
   BUILTIN_PLAY_LOOK_KEYS,
@@ -83,7 +89,15 @@ describe("builtin Play's keys", () => {
   })
 })
 
+/** The keys the backend's boot names for an installed theme (orchestrator/tests/fixtures/themes/look-storage.json). */
+const SHARED_LOOK_STORAGE_PATH = path.resolve(__dirname, '../../../../orchestrator/tests/fixtures/themes/look-storage.json')
+
 describe("an installed theme's keys", () => {
+  it("are the ones the backend's boot names for the boot script (serve.py look_storage)", () => {
+    const shared = JSON.parse(readFileSync(SHARED_LOOK_STORAGE_PATH, 'utf8')) as { themeId: string; lookStorage: unknown }
+    expect(bootLookStorage(installedLookKeys(shared.themeId))).toEqual(shared.lookStorage)
+  })
+
   it('are automatos-theme.<themeId>.looks, .look and .look.current, and nothing moves', () => {
     expect(HELLO).toEqual({
       saved: 'automatos-theme.acme/hello.looks',

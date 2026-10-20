@@ -57,7 +57,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 
 def _install_fake_apscheduler():
-    """Stub apscheduler ONLY when truly absent (camelot-shim philosophy).
+    """Stub apscheduler ONLY when truly absent (stub a missing leaf, never a real one).
 
     This file collects alphabetically FIRST in the prd143 family — an
     unconditional fake would shadow the real package for every later test
@@ -92,18 +92,6 @@ def _install_fake_apscheduler():
 
 _install_fake_apscheduler()
 
-
-# Lean-venv shim: modules/tools/__init__ pulls modules.rag's ingestion chain
-# (camelot at module top). Stub the missing leaf only when truly absent.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402

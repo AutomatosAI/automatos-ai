@@ -424,19 +424,20 @@ def seed_social_starters_where_on(db: Session, socials_on: Callable[[Any], bool]
     ships later (the photo cards) would never reach a workspace that turned it on before.
     ``socials_on`` reads a workspace's settings (``modules/socials/settings``, which this
     module may not import). Idempotent: a workspace that has every starter is left as it
-    is. Each workspace commits on its own, so one that fails is logged and the others
-    still get theirs.
+    is. Each workspace commits on its own, so one that fails is logged and counted in
+    ``failed``, and the others still get theirs.
     """
     from core.models.workspaces import Workspace
 
     on = [row.id for row in db.query(Workspace.id, Workspace.settings).all() if socials_on(row.settings)]
-    totals = {"workspaces": len(on), "created": 0, "refreshed": 0}
+    totals = {"workspaces": len(on), "created": 0, "refreshed": 0, "failed": 0}
     for workspace_id in on:
         try:
             counts = seed_social_starters(db, workspace_id)
         except Exception:
             db.rollback()
             logger.exception("Social starters for workspace %s could not be seeded", workspace_id)
+            totals["failed"] += 1
             continue
         totals["created"] += counts["created"]
         totals["refreshed"] += counts["refreshed"]

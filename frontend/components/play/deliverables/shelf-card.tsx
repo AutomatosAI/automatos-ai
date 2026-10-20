@@ -1,12 +1,9 @@
 'use client'
 
-import Link from 'next/link'
 import { useState } from 'react'
+import { HostLink, useAuthenticatedBlobUrl, type Deliverable } from '@automatos/theme-sdk'
 
-import { deliverableHref, isDeliverableId, UNTITLED } from '@/lib/chat/deliverables'
-import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { kindOf, shelfDate, typeLabel } from '@/lib/play/shelf'
+import { deliverableHref, isDeliverableId, kindOf, shelfDate, typeLabel, UNTITLED } from '../../../lib/play/shelf'
 
 import styles from './shelf-card.module.css'
 
@@ -19,7 +16,7 @@ import styles from './shelf-card.module.css'
  *
  * The picture comes through the core's own authenticated path, as the
  * Deliverables gallery's cards load theirs (DocumentThumbnail and
- * DeliverableCard): useAuthenticatedBlobUrl over the image's preview_url, or
+ * DeliverableCard): the SDK's useAuthenticatedBlobUrl over the image's preview_url, or
  * else the thumbnail_url GET /api/deliverables/{id}/thumbnail serves.
  */
 
@@ -82,9 +79,9 @@ export function ShelfCard({ deliverable, now, newest }: ShelfCardProps) {
   return (
     <li className={styles.item} data-newest={newest ? 'true' : undefined}>
       {isDeliverableId(deliverable.id) ? (
-        <Link href={deliverableHref(deliverable.id)} className={styles.card}>
+        <HostLink href={deliverableHref(deliverable.id)} className={styles.card}>
           {body}
-        </Link>
+        </HostLink>
       ) : (
         <div className={styles.card}>{body}</div>
       )}

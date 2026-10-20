@@ -3,7 +3,9 @@
  * chat session store can't: New chat was pressed. The session model's New chat
  * changes nothing while a new chat is already the active one (withDraft), so a
  * new chat whose first send failed would stay on screen; usePlayConversation
- * follows this count and shows a fresh one.
+ * (the SDK's useChatController(), lib/theme-sdk/chat.ts) follows this count
+ * and shows a fresh one. Play's own store: it imports zustand and nothing of
+ * the core (PRD-261 A-14a).
  */
 import { create } from 'zustand'
 

@@ -9,6 +9,12 @@ warm-up (#927) and the output-budget load (#836) follow the same contract.
 
 Every function here is *self-guarding*: it never raises, so launching it with a
 bare ``create_task`` cannot leave an unretrieved task exception.
+
+PRD-262 US-034: they run while the server already serves requests, so their
+synchronous work (database reads, the embedding provider's set-up, the action
+registry, the shared-context factory) runs in worker threads through
+``asyncio.to_thread``; only network calls are awaited on the event loop. A blocked
+loop held every request and made APScheduler miss its jobs.
 """
 from __future__ import annotations
 
@@ -24,25 +30,47 @@ logger = logging.getLogger(__name__)
 _refreshers: Set["asyncio.Task[None]"] = set()
 
 
+def _embedding_provider_info() -> dict:
+    """The embedding manager with its provider loaded (a settings read on first use)."""
+    from core.llm.embedding_manager import get_embedding_manager
+
+    emgr = get_embedding_manager()
+    emgr._ensure_provider()
+    return emgr.get_provider_info()
+
+
+def _workspace_ids(db) -> list:
+    from core.models.workspaces import Workspace
+
+    return [w.id for w in db.query(Workspace.id).all()]
+
+
+def _agent_embedding_counts(db) -> "tuple[int, int]":
+    """Active agents with an embedding, and all active agents."""
+    from core.models.core import Agent
+
+    active = db.query(Agent).filter(Agent.status == "active")
+    return active.filter(Agent.semantic_embedding.isnot(None)).count(), active.count()
+
+
 async def embed_all_agents_on_startup() -> None:
     """Seed semantic embeddings for agents across all workspaces (PRD-64).
 
+    Only the boot leader starts it (``main._seed_semantic_embeddings``, PRD-262
+    US-034): it writes the agents' shared embeddings to the database. Its database
+    reads run in worker threads; the embedding calls are awaited on the loop.
     Non-fatal: any failure is logged + recorded and boot continues.
     """
     try:
         from core.database.database import SessionLocal
-        from core.llm.embedding_manager import get_embedding_manager
-        from core.models.core import Agent
-        from core.models.workspaces import Workspace
         from core.routing.semantic_indexer import embed_workspace_agents
 
         db = SessionLocal()
         try:
-            emgr = get_embedding_manager()
-            emgr._ensure_provider()
-            logger.info("PRD-64: Embedding provider: %s", emgr.get_provider_info())
+            provider = await asyncio.to_thread(_embedding_provider_info)
+            logger.info("PRD-64: Embedding provider: %s", provider)
 
-            ws_ids = [w.id for w in db.query(Workspace.id).all()]
+            ws_ids = await asyncio.to_thread(_workspace_ids, db)
             total = 0
             for ws_id in ws_ids:
                 try:
@@ -50,12 +78,7 @@ async def embed_all_agents_on_startup() -> None:
                 except Exception:
                     logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
 
-            all_agents = db.query(Agent).filter(Agent.status == "active").count()
-            with_embeddings = (
-                db.query(Agent)
-                .filter(Agent.status == "active", Agent.semantic_embedding.isnot(None))
-                .count()
-            )
+            with_embeddings, all_agents = await asyncio.to_thread(_agent_embedding_counts, db)
             logger.info(
                 "PRD-64: Semantic embeddings seeded — %d new, %d/%d agents have embeddings",
                 total,
@@ -77,13 +100,18 @@ async def warm_action_index_on_startup() -> None:
     rewords actions, on semantic ranking. Texts already in Redis are cache hits;
     only new or changed ones go upstream. With no embedding provider configured it
     skips with one line. Non-fatal: any other failure is logged + recorded.
+
+    Every worker runs it (PRD-262 US-034): the index is process-local, its vectors
+    held in this process's memory, so each worker has its own to warm.
     """
     try:
         from core.llm.clients.base import EmbeddingUnavailableError
         from modules.tools.discovery.action_semantic_index import get_action_semantic_index
 
+        # Building the index builds the ActionRegistry: synchronous, so in a thread.
+        index = await asyncio.to_thread(get_action_semantic_index)
         try:
-            await get_action_semantic_index().warm()
+            await index.warm()
         except EmbeddingUnavailableError as exc:
             logger.info("#927: action index not warmed — no embedding provider (%s)", exc)
             return
@@ -128,7 +156,7 @@ async def ensure_field_memory_collection() -> None:
         from modules.context.adapters.vector_field import VectorFieldSharedContext
         from modules.context.factory import get_shared_context
 
-        ctx = get_shared_context()
+        ctx = await asyncio.to_thread(get_shared_context)
         inner = getattr(ctx, "_inner", ctx)
         if isinstance(inner, VectorFieldSharedContext):
             await inner.ensure_shared_collection()

@@ -1,4 +1,4 @@
-import { LOOK_TEXT_MAX } from '@/lib/look-kit/validate'
+import { LOOK_TEXT_MAX } from '../look-kit/validate'
 
 import { findPreset, isPresetId, PRESETS } from './presets'
 import { GLOW_MAX, GLOW_MIN, type Look } from './types'

@@ -9,6 +9,7 @@
     "useMediaPreferences",
     "useOnline",
     "useRole",
+    "useThemeLayout",
     "useTone",
     "useTrial",
     "useWorkspace"

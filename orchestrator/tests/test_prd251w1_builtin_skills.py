@@ -603,8 +603,17 @@ def test_a_malformed_manifest_fails_loud(tmp_path, skills, problem):
 
 
 def test_the_boot_leader_seeds_the_builtin_skills_before_the_marketplace():
+    """PRD-262 US-031: the leader's seed block is core/seeds/leader_stage.py's SECTIONS,
+    which _boot_phase_1_core runs as the boot leader."""
+    import inspect
+
+    from core.seeds import leader_stage
+
     src = (_ORCH / "main.py").read_text(encoding="utf-8")
     start = src.index("async def _boot_phase_1_core")
     body = src[start:src.index("async def ", start + 1)]
-    assert body.index("if not is_leader") < body.index("seed_builtin_skills(db)")
-    assert body.index("seed_builtin_skills(db)") < body.index("seed_packages(db, create_only=True)")
+    assert body.index("if not is_leader") < body.index("run_leader_seeds()")
+    sources = [inspect.getsource(section) for _name, section in leader_stage.SECTIONS]
+    builtin = next(i for i, source in enumerate(sources) if "seed_builtin_skills(db)" in source)
+    packages = next(i for i, source in enumerate(sources) if "seed_packages(db, create_only=True)" in source)
+    assert builtin < packages
