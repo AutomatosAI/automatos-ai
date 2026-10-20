@@ -103,6 +103,13 @@ const store = () => useChatSessionStore.getState()
 /** The backend names the new chat on screen, as useChat's onChatIdUpdate hands it on. */
 const nameNewChat = (chatId: string) => act(() => chat.options?.onChatIdUpdate(chatId))
 
+/** The cold start's getChatHistory, held until the test answers it with these rows. */
+function holdHistory(): (rows: Chat[]) => Promise<void> {
+  let answer: (rows: Chat[]) => void = () => undefined
+  api.getChatHistory.mockReturnValue(new Promise<Chat[]>((resolve) => { answer = resolve }))
+  return (rows) => act(async () => answer(rows))
+}
+
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getChatHistory.mockResolvedValue([])
@@ -265,14 +272,24 @@ describe('the conversation on screen across mounts and races', () => {
     expect(chat.mounts).toBe(2)
   })
 
+  it('New chat pressed before the cold start reads the newest conversation stays a new chat (M10)', async () => {
+    setSession(NOTHING_OPEN)
+    const answer = holdHistory()
+    renderPage()
+    expect(screen.getByText(OPENING)).toBeInTheDocument()
+    act(() => store().newDraft())
+    const draft = await shownChat(null)
+    await answer([storedChat('c1', 'Laptop for uni')])
+    expect(sessionNow().activeChatId).toBeNull()
+    expect(api.getChat).not.toHaveBeenCalled()
+    expect(seen.chat?.conversation.chatId).toBeNull()
+    expect(seen.chat?.conversation.key).toBe(draft.conversation.key)
+    expect(screen.queryByText(OPENING)).toBeNull()
+  })
+
   it("a cold start's late answer replaces neither a new chat nor a conversation opened meanwhile (M10)", async () => {
     setSession(NOTHING_OPEN)
-    let answer: (rows: Chat[]) => void = () => undefined
-    api.getChatHistory.mockReturnValue(
-      new Promise<Chat[]>((resolve) => {
-        answer = resolve
-      }),
-    )
+    const answer = holdHistory()
     serve('c2', 'Bake sale', [message('m1', 'user', BAKE)])
     renderPage()
     expect(screen.getByText(OPENING)).toBeInTheDocument()
@@ -280,7 +297,7 @@ describe('the conversation on screen across mounts and races', () => {
     await shownChat(null)
     act(() => store().openChat('c2'))
     await shownChat('c2')
-    await act(async () => answer([storedChat('c1', 'Laptop for uni')]))
+    await answer([storedChat('c1', 'Laptop for uni')])
     expect(sessionNow().activeChatId).toBe('c2')
     expect(api.getChat).not.toHaveBeenCalledWith('c1')
     expect(screen.getByText(BAKE)).toBeInTheDocument()
