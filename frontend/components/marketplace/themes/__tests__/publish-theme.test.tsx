@@ -270,6 +270,8 @@ describe('the 400 codes', () => {
     expect(publishErrorGroupOf('BAD_ENGINES')).toBe('manifest')
     expect(publishErrorGroupOf('RESERVED_HTML_CLASS')).toBe('manifest')
     expect(publishErrorGroupOf('BAD_LOOK_ID')).toBe('manifest')
+    expect(publishErrorGroupOf('BAD_MOBILE')).toBe('manifest')
+    expect(publishErrorGroupOf('MOBILE_CANNOT_PAINT')).toBe('manifest')
     expect(publishErrorGroupOf('CSS_IMPORT')).toBe('styleSheet')
     expect(publishErrorGroupOf('LOOK_BAD_VALUE')).toBe('looks')
     expect(publishErrorGroupOf('BAD_KNOB')).toBe('looks')
