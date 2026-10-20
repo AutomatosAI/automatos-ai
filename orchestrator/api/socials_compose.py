@@ -48,12 +48,13 @@ from core.database.database import get_db
 from core.models.core import DocumentTemplate, Skill
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
-from core.social_templates import SOCIAL_TEMPLATE_FORMATS, made_for
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS, claim_names, made_for
 from modules.documents.brand_kit import get_brand_kit
 from modules.socials import compose, compose_photos, compose_sources, history, service, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
+from modules.socials.template_claims import with_template_claims
 from modules.socials.render import NotRenderable
 from modules.socials.template_gallery import durations_of
 from api.socials_media_upload import UPLOAD_ASPECT
@@ -346,12 +347,13 @@ def _auto_context(db: Session, workspace_id: UUID, post: Any) -> compose.Compose
 
 def _auto_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
     """The edit that records the pick: the template, its fields and the sources Auto bound,
-    where the post's own value wins for a field the template has, and its own sources stay."""
+    where the post's own value wins for a field the template has, and its own sources stay.
+    A value in a field the template marks a claim is one, the post's own included (F433)."""
     schema = (proposal.get("template") or {}).get("variables_schema") or {}
     own = {name: spec for name, spec in (post.variables or {}).items() if name in schema}
     return {
         "template_id": proposal["template_id"],
-        "variables": {**(proposal.get("variables") or {}), **own},
+        "variables": with_template_claims({**(proposal.get("variables") or {}), **own}, set(claim_names(schema))),
         "sources": {**(proposal.get("sources") or {}), **(post.sources or {})},
     }
 

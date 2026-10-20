@@ -12,6 +12,9 @@ render that failed, and why; a render not made yet; a caption). The answer gives
 match before the rows, and ``queue`` picks the posts by what they need: ``awaiting_approval``
 (waiting for the owner), ``not_rendered`` (failed renders and drafts with nothing rendered yet)
 or ``open`` (everything not yet approved or out).
+
+P256-FIX-SOC-2: a plan's draft the render refused waits for the owner's input; its row says
+what to fill in ("your input: Big number, Top item 1: value"), from its history.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ AWAITING_APPROVAL, NOT_RENDERED, OPEN = "awaiting_approval", "not_rendered", "op
 QUEUES = (AWAITING_APPROVAL, NOT_RENDERED, OPEN)
 FAILED, DRAFT, CHANGES, WAITING, RENDERING = "failed", "draft", "changes_requested", "needs_approval", "rendering"
 RENDER_FAILED, REQUEST_CHANGES = "render_failed", "request_changes"   # modules/socials/service.py ACTION_*
+NEEDS_INPUT = "needs_input"   # modules/socials/service.py ACTION_NEEDS_INPUT (service.waits_for_input)
 REASON_CHARS = 200
 
 NEEDS_APPROVAL = "the owner's approval in the Socials tab"
@@ -29,6 +33,7 @@ NEEDS_FIX = "its render failed: {why}"
 NEEDS_CHANGES = "the changes a reviewer asked for: {why}"
 NEEDS_CAPTION = "a caption: its copy is empty"
 IS_RENDERING = "rendering now"
+NEEDS_YOUR_INPUT = "your input: {fields}"
 UNKNOWN_QUEUE = "queue must be one of {queues}."
 
 
@@ -51,6 +56,17 @@ def _last_comment(post: Mapping[str, Any], *actions: str) -> str:
     return "see platform_get_social_post"
 
 
+def _input_asked(post: Mapping[str, Any]) -> List[str]:
+    """What a draft waiting for the owner's input asks for, from its last history entry (as
+    ``service.waits_for_input`` reads it); [] for any other post."""
+    log = post.get("review_log") or []
+    last = log[-1] if log and isinstance(log[-1], dict) else {}
+    if post.get("status") != DRAFT or last.get("action") != NEEDS_INPUT:
+        return []
+    fields = ", ".join(str(field) for field in last.get("fields") or [] if field)
+    return [NEEDS_YOUR_INPUT.format(fields=fields or str(last.get("comment") or "")[:REASON_CHARS])]
+
+
 def what_it_needs(post: Mapping[str, Any]) -> List[str]:
     """What the post still needs before it can go out, in plain words; [] when nothing."""
     status = post.get("status")
@@ -61,6 +77,7 @@ def what_it_needs(post: Mapping[str, Any]) -> List[str]:
         needs.append(IS_RENDERING)
     elif status in (DRAFT, CHANGES) and not _rendered(post):
         needs.append(NEEDS_RENDER)
+    needs.extend(_input_asked(post))
     if status == CHANGES:
         needs.append(NEEDS_CHANGES.format(why=_last_comment(post, REQUEST_CHANGES)))
     if status == WAITING:

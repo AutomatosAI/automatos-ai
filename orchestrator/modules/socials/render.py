@@ -140,7 +140,11 @@ class RendererUnavailable(service.SocialsError):
 
 
 class NotRenderable(service.SocialsError):
-    """The post has nothing a renderer can render."""
+    """The post has nothing a renderer can render; ``missing`` fields or a required ``photo``'s label: what to fill in."""
+
+    def __init__(self, message: str, *, missing: Tuple[str, ...] = (), photo: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.missing, self.photo = tuple(missing), photo
 
 
 class RenderFailure(Exception):
@@ -222,12 +226,12 @@ def bundle_for(
     blocks = at_chosen_length(blocks, post)
     empty = empty_required_slots(blocks, footage_slots) if require_photos else []
     if empty:
-        raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]))
+        raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]), photo=empty[0])
     if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
         blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
     resolved = resolved_fields(blocks, post)
     if resolved.missing:
-        raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
+        raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering", missing=tuple(resolved.missing))
     if resolved.invalid:
         raise NotRenderable("; ".join(resolved.invalid))
     bundle = build_bundle(

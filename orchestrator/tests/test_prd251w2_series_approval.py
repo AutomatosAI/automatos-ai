@@ -18,7 +18,9 @@ included). Pins:
   another worker: the compare-and-set) is left unapproved and reported; a post
   of the campaign the approver was not shown is reported, not approved.
 * **Unsourced claims (D7)** need that post's own override, and a claim whose
-  source no longer resolves counts as unsourced, as for a single approval.
+  source no longer resolves counts as unsourced, as for a single approval. So
+  does a value in a field the post's template marks a claim, flagged or not
+  (F433), in a series and in a plan's batch; each template is read once.
 * **The switch and the mode.** With the workspace switch off, or the campaign in
   ``per_post`` mode, the route answers 409 and approves nothing.
 * **Tenant isolation, the role, and the routes.** Another workspace's campaign or
@@ -32,6 +34,7 @@ import json
 import os
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -58,8 +61,12 @@ import tests.test_prd251_api as api_harness  # noqa: E402
 import tests.test_prd251_settings as settings_harness  # noqa: E402
 from core.models.socials import SocialCampaign, SocialPost  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
+from modules.socials import template_claims  # noqa: E402
 from modules.socials.settings import require_socials_enabled  # noqa: E402
+from tests.test_f433_one_provenance_rule import B142, FIGURES, claims_template  # noqa: E402
 from tests.test_prd251_api import WS_A, WS_B, _create, _ctx, _post  # noqa: E402
+from tests.test_prd251bw2_plans import _create as _create_plan  # noqa: E402
+from tests.test_prd251bw2_plans import bank  # noqa: E402,F401  (the fixture)
 
 # The S0.3b routes on SQLite (api); the workspace switch's PUT/GET fakes (master, flag_spy).
 api = api_harness.api
@@ -403,6 +410,57 @@ def test_a_source_that_no_longer_resolves_counts_as_unsourced(api, monkeypatch):
     left = _left(body)[post["id"]]
     assert left["reason"] == "unsourced" and left["unresolved"] == {"users": "the Deliverable is gone"}
     assert _row(api, post["id"])["status"] == "needs_approval"
+
+
+def _stored_unflagged(api, template_id, title, variables, **fields):
+    """A post waiting for approval, stored before F433's rule: its figures carry no claim flag."""
+    post = socials_service.create_draft(api.session, workspace_id=WS_A, created_by="member-1", title=title,
+                                        copy={"base": title}, format="video", template_id=template_id, variables=variables)
+    for name, value in fields.items():
+        setattr(post, name, value)
+    socials_service.submit(post, "member-1")
+    api.session.commit()
+    return post.to_dict()
+
+
+def test_f433_an_unflagged_template_claim_is_left_unsourced_and_each_template_is_read_once(api, monkeypatch):
+    _series_switch(api, True)
+    campaign = _campaign(api)
+    template_id = claims_template(api)
+    invented = _stored_unflagged(api, template_id, "Invented", B142)
+    blank = _stored_unflagged(api, template_id, "Blank", {"stat_value": {"value": ""}})
+    for post in (invented, blank):
+        assert _add(api, campaign["id"], post["id"]).status_code == 200
+    plain = _waiting(api, campaign["id"], "Plain")
+    reads = []
+    real_names = template_claims.names
+    monkeypatch.setattr(template_claims, "names", lambda db, ws, tid: reads.append(tid) or real_names(db, ws, tid))
+
+    body = _approve(api, campaign["id"], _shown(invented, blank, plain)).json()
+
+    assert sorted(p["id"] for p in body["approved"]) == sorted([blank["id"], plain["id"]])
+    left = _left(body)[invented["id"]]
+    assert left["reason"] == "unsourced" and left["claims"] == FIGURES
+    assert _row(api, invented["id"])["status"] == "needs_approval"
+    assert reads == [template_id, None]  # one read per template in the series (Blank used the first)
+
+
+def test_f433_a_plans_batch_leaves_an_unflagged_template_claim_unsourced(bank):  # noqa: F811
+    plan = _create_plan(bank)
+    template_id = claims_template(bank)
+    ahead = datetime.now(timezone.utc) + timedelta(days=3)
+    posts = [
+        _stored_unflagged(bank, template_id, f"Day {day}", variables, campaign_id=uuid.UUID(plan["id"]),
+                          batch_key="2026-W43", slot_key=f"r1|2026-10-{day}|09:00", planned_for=ahead + timedelta(hours=day))
+        for day, variables in ((19, B142), (20, {}))
+    ]
+    shown = [{"post_id": post["id"], "content_hash": post["content_hash"]} for post in posts]
+
+    body = bank.client.post(f"/api/socials/plans/{plan['id']}/batches/2026-W43/approve", json={"posts": shown}).json()
+
+    assert [row["id"] for row in body["approved"]] == [posts[1]["id"]]
+    (left,) = body["left"]
+    assert (left["post_id"], left["reason"], left["claims"]) == (posts[0]["id"], "unsourced", FIGURES)
 
 
 def test_posts_not_shown_or_not_waiting_are_reported_not_approved(api):

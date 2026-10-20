@@ -561,6 +561,19 @@ def test_voiding_an_approval_clears_the_override():
     assert post.override_unsourced is False
 
 
+def test_f433_a_template_claim_counts_unflagged_but_never_blank_and_a_stored_flag_still_counts():
+    post = _draft(variables={"stat_value": {"value": "987"}, "blank": {"value": " "}, "users": {"value": 1, "claim": True}})
+    assert service.unsourced_claims(post, template_claims={"stat_value", "blank"}) == ["stat_value", "users"]
+    assert service.unsourced_claims(post) == ["users"]  # no template: the stored flags, as before
+
+
+def test_f433_with_template_claims_returns_a_new_dict_and_never_unclaims():
+    given = {"stat_value": {"value": "987", "claim": False}, "was": {"value": "", "claim": True}, "name": {"value": "Rye"}}
+    marked = service.post_claims.with_template_claims(given, {"stat_value", "was"})
+    assert marked == {**given, "stat_value": {"value": "987", "claim": True}} and marked is not given
+    assert given["stat_value"]["claim"] is False and service.post_claims.with_template_claims(None, {"was"}) is None
+
+
 # ---------------------------------------------------------------------------
 # The review log and the review actions
 # ---------------------------------------------------------------------------

@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, spoken_fields, text_search, upload_crops, voice_examples, workspace_copies
+from modules.socials import report_charts, spoken_fields, template_claims, text_search, upload_crops, voice_examples, workspace_copies
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -435,7 +435,7 @@ def _credited(db: Session, workspace_id: UUID, changes: Dict[str, Any], post: Op
     if not lines:
         return changes
     copy_before = changes["copy"] if "copy" in changes or post is None else post.copy
-    credited = service.with_credits(copy_before, lines)
+    credited = post_credits.with_credits(copy_before, lines)
     return changes if credited is copy_before else {**changes, "copy": credited}
 
 
@@ -473,10 +473,11 @@ async def create_post(
 
     The template must be the workspace's own, a voice toolkit one it can speak
     with now (D11) and footage only slots its template lets a toolkit fill
-    (D12); every source must resolve in the workspace (D7). The copy carries
-    the credit lines its media's music asks for (S1.6).
+    (D12); every source must resolve in the workspace (D7), and a value in a field the template marks a
+    claim is stored as one (F433). The copy carries the credit lines its media's music asks for (S1.6).
     """
     _check_template(db, workspace_id, fields.get("template_id"))
+    fields = template_claims.marked_fields(db, workspace_id, fields)
     _check_choices(db, workspace_id, fields.get("format"), fields.get("template_id"), fields.get("length_seconds"))
     await _check_voice(db, workspace_id, fields.get("voice"))
     _check_footage(db, workspace_id, fields.get("footage"), fields.get("template_id"))
@@ -500,8 +501,8 @@ async def edit_post(
     at approval. A voice toolkit it names must be one the workspace can speak
     with now (D11); the voice is a render setting, so changing it alone voids
     nothing. So is the footage (D12): a slot asked for with its prompt unchanged
-    keeps what a render made for it. The copy keeps the credit lines its
-    media's music asks for (S1.6): an edit that drops one gets it back.
+    keeps what a render made for it. The copy keeps the credit lines its media's music asks for
+    (S1.6). Variables sent, or a template change that marks new ones, keep the template's claims (F433).
     """
     status, content_hash = post.status, post.content_hash
     if "title" in changes and changes["title"] is None:
@@ -519,7 +520,7 @@ async def edit_post(
         _check_footage(db, workspace_id, changes["footage"], changes.get("template_id", post.template_id))
     if changes.get("sources"):
         post_sources.require_resolved(db, workspace_id, changes["sources"], unchanged_from=post.sources)
-    changes = _credited(db, workspace_id, changes, post)
+    changes = _credited(db, workspace_id, template_claims.marked_changes(db, post, changes), post)
     service.update_post(post, actor, changes, agent=agent)
     return _commit_unchanged(db, post, status=status, content_hash=content_hash)
 
@@ -707,18 +708,16 @@ def approve_social_post(  # a plain def (F105): it awaits nothing, and its write
     the post's → 409 with the current hash. An edit another worker commits
     after the load is caught by the compare-and-set → the same 409, nothing
     written. Every source is resolved again first (D7): a claim whose source is
-    gone from the workspace counts as unsourced. The approved post's files are then
-    copied into the workspace's socials folders (``workspace_copies``)."""
+    gone from the workspace counts as unsourced, and so does a value in a field the
+    post's template marks a claim, flagged or not (F433). The approved post's files are
+    then copied into the workspace's socials folders (``workspace_copies``)."""
     post = _load(db, ctx, post_id)
     unresolved = post_sources.unresolved(db, ctx.workspace_id, post.sources)
+    claims = template_claims.names(db, ctx.workspace_id, post.template_id)  # a query: before the mutation
     try:
         service.approve(
-            post,
-            _actor(ctx),
-            content_hash=body.content_hash,
-            override_unsourced=body.override_unsourced,
-            comment=body.comment,
-            unresolved_sources=unresolved,
+            post, _actor(ctx), content_hash=body.content_hash, override_unsourced=body.override_unsourced,
+            comment=body.comment, unresolved_sources=unresolved, template_claims=claims,
         )
         saved = _commit_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
     except service.SocialsError as exc:

@@ -261,17 +261,6 @@ def _merged_copy(stored: Any, sent: Any) -> Any:
     return copy
 
 
-def _claimed(variables: Any, claims: set) -> Any:
-    """``variables`` with each one the template marks as a claim, and that has a
-    value, marked a claim (D7): an agent never un-claims a figure."""
-    if not isinstance(variables, dict) or not claims:
-        return variables
-    return {
-        name: {**spec, "claim": True} if name in claims and isinstance(spec, dict) and _value(spec) else spec
-        for name, spec in variables.items()
-    }
-
-
 def _typed_chart_rows(template: Any, variables: Any, stored: Any) -> List[str]:
     """The chart variables (rows and source chip) ``variables`` sets to text other
     than the post already has: an agent never types a chart's rows (S1.7)."""
@@ -412,8 +401,10 @@ async def _create_fields(db: Session, workspace_id: UUID, fields: Dict[str, Any]
         fields["variables"], fields["sources"] = await _charted(
             db, workspace_id, template, chart, fields.get("variables"), fields.get("sources")
         )
-    if "variables" in fields:
-        fields["variables"] = _claimed(fields["variables"], _schema_claims(template))
+    if "variables" in fields:  # D7: an agent never un-claims a figure (the one rule, F433)
+        from modules.socials.template_claims import with_template_claims
+
+        fields["variables"] = with_template_claims(fields["variables"], _schema_claims(template))
     return template
 
 
@@ -480,8 +471,10 @@ async def _update_fields(db: Session, workspace_id: UUID, post: Any, fields: Dic
             db, workspace_id, template, chart,
             fields.get("variables", post.variables), fields.get("sources", post.sources),
         )
-    if "variables" in fields or "template_id" in fields:
-        fields["variables"] = _claimed(fields.get("variables", post.variables), _schema_claims(template))
+    if "variables" in fields or "template_id" in fields:  # D7: the one rule (F433)
+        from modules.socials.template_claims import with_template_claims
+
+        fields["variables"] = with_template_claims(fields.get("variables", post.variables), _schema_claims(template))
     return template
 
 

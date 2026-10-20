@@ -7,6 +7,8 @@
   no channel connected that posts its format): never half-made.
 * ``social_post_slot_moved``: the late policy moved a post to the plan's next slot
   (linked to the post).
+* ``social_post_needs_input`` (P256-FIX-SOC-2): the render refused a plan's post, so it waits
+  for the owner as a draft; the notice says what to fill in and opens the post's editor.
 * ``social_plan_weekly_note`` (PRD-251C US-C403): how the plan's week went, linked to its
   Posted view.
 
@@ -18,7 +20,7 @@ never raised. :func:`once_today` keeps the per-day notices to one: the plan's
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
 from config import config
@@ -29,6 +31,8 @@ READY = ("social_plan_ready", "Today's posts are ready: ", "action_required")
 BANK_EMPTY = ("social_plan_bank_empty", "The content bank is empty: ", "error")
 SLOT_SKIPPED = ("social_plan_slot_skipped", "A planned post was not made: ", "error")
 SLOT_MOVED = ("social_post_slot_moved", "Moved to the plan's next slot: ", "ok")
+WAITS_FOR_YOU = ("social_post_needs_input", "A planned post needs you: ", "action_required")
+FILL_IN = "Fill in: {fields}, then render it."
 # PRD-251C (C1, C3): a weekly or monthly plan's batch is made; it links to the week's review.
 WEEK_READY = ("social_plan_batch_ready", "Your week is ready: ", "action_required")
 MONTH_READY = ("social_plan_batch_ready", "Your month is ready: ", "action_required")
@@ -98,3 +102,10 @@ def notify_weekly_note(workspace_id: UUID | str, plan_id: UUID | str, title: str
 def notify_slot_moved(workspace_id: UUID | str, post_id: UUID | str, title: str, at: Optional[datetime]) -> None:
     when = f" ({at.isoformat(timespec='minutes')})" if at is not None else ""
     notify._send_soon(_send(workspace_id, notify.LINK_TYPE, post_id, SLOT_MOVED, f"{title}{when}"), post_id, SLOT_MOVED[0])
+
+
+def notify_post_waiting(workspace_id: UUID | str, post_id: UUID | str, title: str, labels: Sequence[str], why: str) -> None:
+    """A plan's post waits for the owner (P256-FIX-SOC-2): what to fill in (``labels``), else the
+    render's own words (``why``); linked to the post, so the bell opens its editor. Never raises."""
+    message = FILL_IN.format(fields=", ".join(labels)) if labels else why
+    notify._send_soon(_send(workspace_id, notify.LINK_TYPE, post_id, WAITS_FOR_YOU, title, message), post_id, WAITS_FOR_YOU[0])

@@ -9,7 +9,8 @@ Every template has fields a render needs, so the render now asks Auto, the compo
 * ``auto_brief``: the post's brief and copy, or its title alone;
 * ``auto_template``: the composer is asked for the post's format with no template chosen,
   with only the templates that offer a chosen length; its pick is the edit: the template,
-  its fields (the person's own value wins) and the sources (the person's own stay). No
+  its fields (the person's own value wins, a claim of the template's marked one: F433) and the
+  sources (the person's own stay). No
   template for the format is refused before the model is asked; a refused length, a model
   that does not answer and a proposal with no template are 422 saying why;
 * the render route: a post left to Auto renders on Auto's pick, saved first with a line in
@@ -155,6 +156,16 @@ def test_the_persons_own_values_win_and_their_sources_stay(composer):
         "headline": {"value": "Mine", "claim": False}, "subline": {"value": "Written by Auto", "claim": False},
     }
     assert changes["sources"] == {**composer.proposal["sources"], **own_source}
+
+
+def test_f433_the_persons_own_unflagged_figure_is_marked_a_claim_of_the_template():
+    schema = {**HEADLINE, "stat_value": {"type": "text", "label": "Big number", "claim": True}}
+    proposal = {**_proposal(), "template": {**TITLE_CARD, "variables_schema": schema},
+                "variables": {"stat_value": {"value": "1,240", "claim": True}}}
+
+    changes = compose_api._auto_edit(proposal, _post_like(variables={"stat_value": {"value": "987"}}))
+
+    assert changes["variables"]["stat_value"] == {"value": "987", "claim": True}  # theirs wins, still a claim
 
 
 def test_a_chosen_length_keeps_only_the_templates_that_offer_it(composer):

@@ -6,7 +6,7 @@ Every rendered file records the music it mixed on its Deliverable
 alike. A post's ``media`` names Deliverables, as the ids a save sets or as the
 file records a render writes. :func:`media_credits` reads the credit lines
 those Deliverables ask for, in the caller's workspace only, and the API appends
-them to the post's copy on every save (``service.with_credits``). So a post
+them to the post's copy on every save (:func:`with_credits`). So a post
 that attaches a video with a CC BY track carries the track's credit, however
 the video was made, and an edit that drops the line gets it back.
 
@@ -17,7 +17,7 @@ the query, so an id Postgres cannot parse never reaches it.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -92,3 +92,29 @@ def media_credits(db: Any, workspace_id: Any, media: Any) -> List[str]:
         if line and line not in lines:
             lines.append(line)
     return lines
+
+
+def _credited(text: Any, lines: Sequence[str]) -> Any:
+    if not isinstance(text, str):
+        return text  # not copy the validators take (null included): left for them to refuse
+    body = text.rstrip()
+    missing = [line for line in lines if line not in body]
+    if not missing:
+        return text
+    return "\n\n".join(([body] if body else []) + missing)
+
+
+def with_credits(copy: Any, lines: Iterable[str]) -> Any:
+    """``copy`` with each credit line at the end of its base text (one it lacks
+    starts as the lines) and of every channel's own text that lacks it: a new
+    object. A line already there is not added again, and copy with nothing to
+    add comes back as it was."""
+    wanted = [line for line in dict.fromkeys(lines) if isinstance(line, str) and line]
+    if not wanted or (copy is not None and not isinstance(copy, dict)):
+        return copy
+    out = dict(copy or {})
+    out["base"] = _credited(out.get("base", ""), wanted)
+    channels = out.get("channels")
+    if isinstance(channels, dict) and channels:
+        out["channels"] = {name: _credited(text, wanted) for name, text in channels.items()}
+    return out if out != (copy or {}) else copy
