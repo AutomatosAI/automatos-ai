@@ -6,8 +6,13 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
    (``services/themes/records.py``), else 403 with a plain sentence;
 2. the package is read and checked (``services/themes/package.py``: zip, manifest, engines,
    htmlClass, sizes, CSS scope, looks): 413 over the package cap, 400 with the codes;
-3. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin``, else 403;
-4. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
+3. an optional ``signature`` part (C-05d, a detached ``.sig.json``, ``services/themes/signed_upload.py``)
+   is checked against the upload's own files before anything is stored: 413 over
+   ``ENVELOPE_MAX_BYTES``, 400 ``SIGNATURE_BAD``/``SIGNATURE_MISMATCH``, 503 when the keys file
+   doesn't load; a verified one is stored on the package row. Without the part nothing changes;
+4. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin`` or a verified
+   signature, else 403;
+5. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
    stage reads ``dist/``, the code that runs, since no isolated rebuild ever checks a private
    upload's ``source/``) unless these bytes are already here, and never for a version that would be
    refused (409, checked read-only first); the request's read transaction ends before the stage,
@@ -20,7 +25,7 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
    when ``THEME_REVIEW_MAX_CONCURRENT`` stages already run); a workspace past
    ``THEME_UPLOADS_PER_DAY`` in 24 hours is 429; the LLM check gets what is left of
    ``THEME_REVIEW_DAILY_TOKENS``;
-5. the package row (``owner_type`` 'workspace', ``reviewed`` false) and an install row are
+6. the package row (``owner_type`` 'workspace', ``reviewed`` false) and an install row are
    written; a newer version of an installed theme becomes the install's pending update.
 
 201 with the package (its verdict and plain checks; the LLM check's score and findings are the
@@ -62,6 +67,10 @@ from services.themes.records import (
 from services.themes import review_limits
 from services.themes.review_stage import member_view, run_review_stage
 from services.themes.settings import require_install_role
+from services.themes.signature_verify import SigningKeysError
+from services.themes.signed_upload import (
+    ENVELOPE_MAX_BYTES, SignatureRefused, VerifiedSignature, check_upload_signature,
+)
 from services.themes.storage import theme_prefix, write_theme_files
 from services.themes.upload_claim import upload_claim
 
@@ -77,6 +86,7 @@ STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 IMPORT_REFUSED = "This theme can't be installed."
 STORE_FAILED = "The theme's files couldn't be stored. Try again."
 BUSY = "This theme is being uploaded already. Try again in a moment."
+SIGNATURES_UNAVAILABLE = "Theme signatures can't be checked right now, so nothing was installed. Try again later."
 STATUS_INSTALLED = "installed"
 STATUS_UPDATE_AVAILABLE = "update_available"
 STATUS_STORED = "stored"
@@ -91,6 +101,24 @@ def _read_upload(file: UploadFile) -> Tuple[CheckedThemePackage, int]:
         status = 413 if exc.too_large else 400
         logger.info("[Themes] Upload refused (%d): %s", status, [error["code"] for error in exc.errors])
         raise HTTPException(status_code=status, detail={"message": IMPORT_REFUSED, "errors": exc.errors}) from exc
+
+
+def _read_signature(part: Optional[UploadFile], checked: CheckedThemePackage) -> Optional[VerifiedSignature]:
+    """The upload's verified signature (C-05d), or None without the part; 413/400/503 otherwise."""
+    if part is None:
+        return None
+    data = part.file.read(ENVELOPE_MAX_BYTES + 1)
+    try:
+        verified = check_upload_signature(checked, data)
+    except SignatureRefused as exc:
+        logger.info("[Themes] Upload signature refused (%d): %s", exc.status_code, exc.error["code"])
+        raise HTTPException(status_code=exc.status_code, detail={"message": IMPORT_REFUSED, "errors": [exc.error]}) from exc
+    except SigningKeysError as exc:
+        logger.error("[Themes] The signing keys did not load, so an upload signature can't be checked: %s", exc)
+        raise HTTPException(status_code=503, detail=SIGNATURES_UNAVAILABLE) from exc
+    logger.info("[Themes] Upload of %s@%s carries a signature verified by %s",
+                checked.manifest["id"], checked.manifest["version"], verified.key_id)
+    return verified
 
 
 def _store(prefix: str, checked: CheckedThemePackage) -> None:
@@ -195,44 +223,48 @@ def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, pack
     return run_review_stage(checked, package_bytes, include_source=False, token_budget=tokens)
 
 
-def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+          signature: Optional[str]) -> SavedUpload:
     """Review and save in a review slot, taken before the claim holds a connection: 503 with
-    ``Retry-After`` while ``THEME_REVIEW_MAX_CONCURRENT`` stages run here."""
+    ``Retry-After`` while ``THEME_REVIEW_MAX_CONCURRENT`` stages run here. ``signature`` is the
+    upload's verified one (C-05d), or None."""
     with review_limits.review_slot() as slot:
         if not slot:
             logger.info("[Themes] Upload of %s in workspace %s refused: every review slot is busy",
                         checked.manifest["id"], ctx.workspace_id)
             db.rollback()
             raise HTTPException(status_code=503, detail=review_limits.REVIEWS_BUSY, headers=review_limits.busy_headers())
-        return _save_in_slot(db, ctx, checked, package_bytes)
+        return _save_in_slot(db, ctx, checked, package_bytes, signature)
 
 
-def _save_in_slot(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+def _save_in_slot(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+                  signature: Optional[str]) -> SavedUpload:
     """Review and save under the (workspace, digest) claim: 409 while another upload of these bytes runs."""
     with upload_claim(db, ctx.workspace_id, checked.digest) as claimed:
         if not claimed:
             logger.info("[Themes] Upload of %s in workspace %s refused: the same bytes are being uploaded",
                         checked.manifest["id"], ctx.workspace_id)
             raise _refuse(409, BUSY)
-        return _save_claimed(db, ctx, checked, package_bytes)
+        return _save_claimed(db, ctx, checked, package_bytes, signature)
 
 
-def _save_claimed(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+def _save_claimed(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+                  signature: Optional[str]) -> SavedUpload:
     """Review, then store, under one token hold (``review_limits.token_hold``): what the stage
     spent stays held in this process until its row is committed, when ``tokens_used_today`` sees it."""
     with review_limits.token_hold(lambda: review_limits.tokens_left_today(db)) as tokens:
-        return _review_and_store(db, ctx, checked, package_bytes, tokens)
+        return _review_and_store(db, ctx, checked, package_bytes, tokens, signature)
 
 
 def _review_and_store(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
-                      tokens: review_limits.TokenHold) -> SavedUpload:
+                      tokens: review_limits.TokenHold, signature: Optional[str]) -> SavedUpload:
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"], ctx.workspace_id)
     report = _review(db, ctx, checked, package_bytes, tokens)
     try:
         return save_private_upload(
             db, ctx.workspace_id, resolve_user_pk(db, ctx), checked, prefix, report,
-            store=lambda: _store(prefix, checked),
+            store=lambda: _store(prefix, checked), signature=signature,
         )
     except UploadConflict as exc:
         db.rollback()
@@ -250,15 +282,18 @@ def _review_and_store(db: Session, ctx: RequestContext, checked: CheckedThemePac
 def import_theme(
     response: Response,
     file: UploadFile = File(...),
+    signature: Optional[UploadFile] = File(None),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Upload a .autotheme into this workspace only; returns the package, its scan and the install."""
+    """Upload a .autotheme (and, optionally, its .sig.json) into this workspace only; returns the
+    package, its scan and the install."""
     checked, package_bytes = _read_upload(file)
-    refusal = reserved_publisher_refusal(checked.manifest["id"], ctx.user)
+    verified = _read_signature(signature, checked)
+    refusal = reserved_publisher_refusal(checked.manifest["id"], ctx.user, signed=verified is not None)
     if refusal is not None:
         raise _refuse(403, refusal)
-    saved = _save(db, ctx, checked, package_bytes)
+    saved = _save(db, ctx, checked, package_bytes, None if verified is None else verified.signature)
     if not saved.created:
         response.status_code = 200
     package = saved.package
