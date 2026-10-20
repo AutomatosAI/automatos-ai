@@ -39,6 +39,7 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'social_plan', // PRD-251B US-B205: modules/socials/plan_notify.py (a plan's notices)
   'social_batch', // PRD-251C US-C204: plan_notify.notify_review (a batch to review)
   'social_posted', // PRD-251C US-C403: plan_notify.notify_weekly_note (the weekly note)
+  'content_report', // PRD-266 US-016a: services/content_reports/service.py (the owner's notice)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {
