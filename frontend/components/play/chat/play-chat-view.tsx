@@ -1,100 +1,90 @@
 'use client'
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  type HostChatController,
+  type HostChatConversation,
+  type HostChatDraft,
+  type HostChatMessage,
+  type HostHealth,
+  useHealth,
+} from '@automatos/theme-sdk'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { MascotColumn, PageColumns, PageHeader } from '@/components/play/shell/page-columns'
-import { type AutoMascotDriver, type BackendStatus, useAutoMascot } from '@/hooks/use-auto-mascot'
-import { type BackendConnection, useBackendHealth } from '@/hooks/use-backend-health'
-import { usePlayTurn } from '@/hooks/use-play-turn'
-import { chatTitle, latestReply, replyProgress, runningToolInput } from '@/lib/chat/message-text'
-import { useChatActions, useChatStream, useStreamHandlers } from '@/lib/chat-controller/controller'
-import type { ChatConversationView, ChatStream, ChatTurn } from '@/lib/chat-controller/view-model'
-import type { ComposerFill } from '@/lib/play/draft'
-import type { ChatMessage } from '@/types'
+import { type AutoMascotDriver, type BackendStatus, useAutoMascot } from '../../../hooks/use-auto-mascot'
+import { type PlayTurn, usePlayTurn } from '../../../hooks/use-play-turn'
+import { AutoMascot } from '../../mascot/auto-mascot'
+import { MascotColumn, PageColumns, PageHeader } from '../shell/page-columns'
 
-import { ApprovalCards, LooseApprovalCards } from './approval-cards'
+import { LooseApprovalCards } from './approval-cards'
 import { chatCaption } from './caption'
 import { ExampleChips, FirstOpenHero } from './first-open'
 import { MessageBox } from './message-box'
 import { MessageList } from './message-list'
-import { isTrialBlocked, PlayTrialBanner, TurnEnd } from './turn-end'
+import { latestReply, liveMessages, replyProgress, runningToolInput } from './reply'
+import { PlayTrialBanner, TurnEnd } from './turn-end'
 import styles from './composer.module.css'
 
 /**
  * PRD-260 §4, D5, D6 — the chat with Auto (mocks 01, 02 and 06), ported from
- * Automatos Play's components/chat/ChatView.tsx onto the core's data, on the
- * chat controller (PRD-261 A-11a, lib/chat-controller): sending and streaming
- * through useChatStream (useChatWithReceipts, the hook chat.tsx uses; a new
- * chat's id into the session store as chat.tsx does), and Auto driven by
- * useAutoMascot from the chat's data parts, its status and the reply being
- * written (his thinking ends when the words start), between the stream and
- * the turn so the turn's events reach him. The page lays out the
+ * Automatos Play's components/chat/ChatView.tsx onto the core's data, through
+ * the theme SDK (PRD-261 A-14a): the conversation's chat is usePlayTurn's, the
+ * SDK's useChatController(conversation) on the chat controller (sending and
+ * streaming through useChatWithReceipts, the hook chat.tsx uses; a new chat's
+ * id into the session store as chat.tsx does; Stop keeping the reply Auto was
+ * writing, as stopped, P260-FX-30, and cancelling the turn on the server; Try
+ * again; a turn's Deliverables, Mission suggestion, failure and approval cards
+ * on its view model). Auto is driven by useAutoMascot from the chat's data
+ * parts, its status and the reply being written (his thinking ends when the
+ * words start), and plays the turn's events. The page lays out the
  * conversation and the message box, with Auto in the mascot column and his
  * caption saying what he is doing; an empty chat is the first open. Stop tells
- * Auto first (no celebration for a stopped turn), then keeps the reply Auto was
- * writing, as stopped (the stream's stop, P260-FX-30), and calls the hook's
- * stop(), which also cancels the turn on the server: the conversation on screen,
- * and the one usePlayTurn reads, is useChat's with the stopped replies kept. A
- * turn's details (its Deliverables, a Mission suggestion, a failure, the
- * approvals it raised as the core's cards) come from usePlayTurn; Try again is
- * the hook's reload(); a spent trial shows the core's banner above the box. A
- * card whose reply left the conversation (Try again, a request failing
- * mid-turn, the conversation shown again) shows after it, in its column, until
- * answered or closed.
+ * Auto first (no celebration for a stopped turn), then stops the chat. A spent
+ * trial shows the core's banner above the box. A card whose reply left the
+ * conversation (Try again, a request failing mid-turn, the conversation shown
+ * again) shows after it, in its column, until answered or closed.
+ *
+ * Two components, so Auto hears the chat in the PRD-260 order: the chat in
+ * PlayChatView, Auto and the screen in its child, whose effects (Auto's
+ * reading of the status and the reply) run before the turn's own (a failure,
+ * an approval card waiting or settled) in every commit.
  */
 
 export interface PlayChatViewProps {
-  readonly view: ChatConversationView
-  /** The backend named this new chat: the screen keeps it (usePlayConversation's adopt). */
-  readonly onChatIdAssigned: (chatId: string) => void
+  /** The conversation on screen, as usePlayConversation hands it out; key the view by `conversation.key`. */
+  readonly conversation: HostChatConversation
   /** How long without input before Auto naps (tests shorten it). */
   readonly idleMs?: number
   /** A link's words for the message box (a Deliverable's "Ask Auto about this"). */
-  readonly draft?: ComposerFill | null
+  readonly draft?: HostChatDraft | null
   /** The words are in the box: the link's draft is spent. */
   readonly onDraftTaken?: () => void
 }
 
-const BACKEND_OF: Readonly<Record<BackendConnection, BackendStatus | undefined>> = {
+type ChatWithAutoProps = Omit<PlayChatViewProps, 'conversation'> & { readonly turn: PlayTurn }
+
+const BACKEND_OF: Readonly<Record<HostHealth['connection'], BackendStatus | undefined>> = {
   connected: 'up',
   down: 'down',
   checking: undefined,
 }
 
-/** The chat, Auto and the turn's details, wired together: the chat's data parts reach both, its status moves Auto. */
-function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
-  const { connection } = useBackendHealth()
-  const shown = useChatStream({ view, onChatIdAssigned })
-  const { chat } = shown
+/** Auto, driven by the chat's status and the reply being written, and connected to the chat's parts and events. */
+function usePlayAuto({ chat, connect }: PlayTurn, live: readonly HostChatMessage[], idleMs: number | undefined) {
+  const { connection } = useHealth()
   const auto = useAutoMascot({
     status: chat.status,
     errorCode: chat.errorCode,
-    reply: replyProgress(chat.messages),
+    reply: replyProgress(live),
     backend: BACKEND_OF[connection],
     idleMs,
   })
-  const turn = usePlayTurn({
-    chatId: view.chatId ?? '',
-    messages: shown.messages,
-    streaming: chat.status === 'streaming',
-    dispatch: auto.dispatch,
-  })
-  const toAuto = auto.onData
-  const { onData: toTurn, onChatNamed } = turn
-  const onData = useCallback(
-    (part: unknown) => {
-      toAuto(part)
-      toTurn(part)
-    },
-    [toAuto, toTurn],
-  )
-  useStreamHandlers(shown, onData, onChatNamed)
+  // In the render that makes the driver, before any effect of this commit (use-play-turn.ts).
+  connect(auto)
   const { greet } = auto
   useEffect(() => {
     greet()
   }, [greet])
-  return { chat, auto, turn, shown }
+  return auto
 }
 
 /**
@@ -102,8 +92,8 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
  * box: a new key, so it focuses with them), and focus and blur as Auto's events
  * (he listens while you type). A link's draft is taken once.
  */
-function useComposer(auto: AutoMascotDriver, linked: ComposerFill | null, onTaken?: () => void) {
-  const [fill, setFill] = useState<ComposerFill | null>(linked)
+function useComposer(auto: AutoMascotDriver, linked: HostChatDraft | null, onTaken?: () => void) {
+  const [fill, setFill] = useState<HostChatDraft | null>(linked)
   useEffect(() => {
     if (!linked) return
     setFill((prev) => (prev === linked ? prev : { text: linked.text, serial: (prev?.serial ?? 0) + 1 }))
@@ -117,21 +107,20 @@ function useComposer(auto: AutoMascotDriver, linked: ComposerFill | null, onTake
 }
 
 /** The newest reply's newest live Deliverable's kind, for the caption's "It's on your shelf too." */
-function newestKind(turn: ChatTurn, reply: ChatMessage | undefined): string | undefined {
-  const made = reply ? turn.deliverablesOf(reply.id) : []
+function newestKind(reply: HostChatMessage | undefined): string | undefined {
+  const made = reply?.deliverables ?? []
   return made[made.length - 1]?.kind
 }
 
 /**
- * Send and Try again (the controller's: each clears the turn's suggestion
- * first, as chat.tsx does on a new message). Try again goes with the failed
- * turn's snag box, so focus moves to the message box, never to <body>
- * (P260-FX-22, M20). Stop tells Auto first (a done receipt no longer
- * celebrates the stopped turn), then runs the stream's stop, which keeps the
- * reply being written and stops the chat.
+ * Try again (the chat's: it clears the turn's suggestion first, as chat.tsx
+ * does on a new message) goes with the failed turn's snag box, so focus moves
+ * to the message box, never to <body> (P260-FX-22, M20). Stop tells Auto first
+ * (a done receipt no longer celebrates the stopped turn), then runs the chat's
+ * stop, which keeps the reply being written and stops the turn.
  */
-function useSending(stream: ChatStream, turn: ChatTurn, auto: AutoMascotDriver, box: RefObject<HTMLTextAreaElement>) {
-  const { send, retry: askAgain, stop } = useChatActions(stream.chat, turn.onSend, stream.stop)
+function useSending(chat: HostChatController, auto: AutoMascotDriver, box: RefObject<HTMLTextAreaElement>) {
+  const { retry: askAgain, stop } = chat
   const { dispatch } = auto
   const retry = useCallback(() => {
     if (askAgain()) box.current?.focus()
@@ -140,32 +129,29 @@ function useSending(stream: ChatStream, turn: ChatTurn, auto: AutoMascotDriver, 
     dispatch({ type: 'stop' })
     stop()
   }, [dispatch, stop])
-  return { send, retry, onStop }
+  return { retry, onStop }
 }
 
-/** The approval cards a reply raised, inside that reply; the loose ones (their reply is gone) after the conversation. */
-function useApprovalSlots(turn: ChatTurn, chatId: string) {
-  const { of, loose, answered, closed } = turn.approvals
-  const approvalsOf = useCallback(
-    (replyId: string) => <ApprovalCards cards={of(replyId)} chatId={chatId} onAnswered={answered} onClosed={closed} />,
-    [of, answered, closed, chatId],
-  )
-  const looseCards = <LooseApprovalCards cards={loose} chatId={chatId} onAnswered={answered} onClosed={closed} />
-  return { approvalsOf, looseCards }
+/** The conversation's chat; Auto and the screen in the child (see above). */
+export function PlayChatView({ conversation, ...screen }: PlayChatViewProps) {
+  const turn = usePlayTurn(conversation)
+  return <ChatWithAuto turn={turn} {...screen} />
 }
 
-export function PlayChatView(props: PlayChatViewProps) {
-  const { chat, auto, turn, shown } = usePlayChat(props)
-  const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
+function ChatWithAuto({ turn, idleMs, draft, onDraftTaken }: ChatWithAutoProps) {
+  const { chat } = turn
+  // The conversation as the chat hook holds it, as the PRD-260 chat read it for Auto, his caption and the turn's end.
+  const live = liveMessages(chat.messages)
+  const auto = usePlayAuto(turn, live, idleMs)
+  const composer = useComposer(auto, draft ?? null, onDraftTaken)
   const box = useRef<HTMLTextAreaElement>(null)
-  const { send, retry, onStop } = useSending(shown, turn, auto, box)
-  const { approvalsOf, looseCards } = useApprovalSlots(turn, props.view.chatId ?? '')
-  const streaming = chat.status === 'streaming'
-  const empty = chat.messages.length === 0
-  const reply = latestReply(chat.messages)
+  const { retry, onStop } = useSending(chat, auto, box)
+  const { streaming, trialExhausted } = chat
+  const empty = live.length === 0
+  const reply = latestReply(live)
   const caption = chatCaption(auto.mascot, {
     runningInput: runningToolInput(reply),
-    deliverableKind: newestKind(turn, reply),
+    deliverableKind: newestKind(reply),
     backendDown: auto.state.backendDown,
     approvalWaiting: auto.state.approvalWaiting,
   })
@@ -178,40 +164,38 @@ export function PlayChatView(props: PlayChatViewProps) {
 
   return (
     <PageColumns mascot={mascot}>
-      <PageHeader title={chatTitle(chat.messages, props.view.title)} />
+      <PageHeader title={chat.title} />
       <div className={styles.chat} data-empty={empty || undefined}>
         {empty ? (
           <FirstOpenHero state={auto.mascot} onClipEnded={auto.onClipEnded} {...caption} />
         ) : (
           <MessageList
-            messages={shown.messages}
+            messages={chat.messages}
             streaming={streaming}
-            deliverablesOf={turn.deliverablesOf}
             onRetry={retry}
-            trialBlocked={isTrialBlocked(chat.errorCode)}
-            approvalsOf={approvalsOf}
-            isStopped={shown.isStopped}
+            trialBlocked={trialExhausted}
             after={
               <TurnEnd
                 status={chat.status}
-                errorCode={chat.errorCode}
-                messages={chat.messages}
+                trialExhausted={trialExhausted}
+                messages={live}
                 onRetry={retry}
-                suggestion={turn.suggestion}
-                chatId={props.view.chatId ?? ''}
-                before={looseCards}
+                suggestion={chat.suggestion}
+                planningMissionId={chat.planningMissionId}
+                chatId={chat.conversation.chatId ?? ''}
+                before={<LooseApprovalCards approvals={chat.looseApprovals} />}
               />
             }
           />
         )}
         <div className={styles.footer}>
           {empty && <ExampleChips onPick={composer.pick} />}
-          <PlayTrialBanner errorCode={chat.errorCode} />
+          <PlayTrialBanner errorCode={chat.errorCode} trialExhausted={trialExhausted} />
           <MessageBox
             ref={box}
             key={composer.fill ? `fill-${composer.fill.serial}` : 'box'}
             streaming={streaming}
-            onSend={send}
+            onSend={chat.send}
             onStop={onStop}
             onFocus={composer.onFocus}
             onBlur={composer.onBlur}

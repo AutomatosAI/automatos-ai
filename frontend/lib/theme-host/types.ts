@@ -55,6 +55,9 @@ export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'
 
+/** The host's states in which an installed theme owns the page: it is loading or running. */
+export const THEME_HOST_RUNNING_STATUSES: readonly ThemeHostStatus[] = ['loading', 'active']
+
 /** The props of slot 'frame@1': the page, and the two things MainLayout hands every chrome. */
 export interface FrameProps {
   readonly children?: ReactNode

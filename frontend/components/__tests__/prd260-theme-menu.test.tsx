@@ -57,7 +57,7 @@ vi.mock('next/link', async () => {
 })
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
-import { LookProvider } from '@/components/looks/look-provider'
+import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { useActiveTheme, useIsStudio } from '@/hooks/use-studio-theme'
@@ -65,7 +65,7 @@ import { PHONE_WIDTH_PX, stubWindowWidth } from '@/hooks/__tests__/window-width'
 import { clearRoot } from '@/lib/looks/__tests__/helpers'
 import { DAYLIGHT } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
-import { lookKeys } from '@/lib/looks/storage'
+import { lookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import {
   BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS,

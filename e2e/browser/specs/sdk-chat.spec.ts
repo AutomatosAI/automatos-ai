@@ -2,6 +2,18 @@ import fs from 'fs'
 import path from 'path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fulfillBackendJson } from '../support/backend-route'
+import {
+  askedWords,
+  chatPosts as postsOf,
+  lineOf,
+  noStoredConversations,
+  recordCancels,
+  stubChatStream,
+  type ChatPost,
+  type ChatScript,
+  type Frame,
+  type ServedTurn,
+} from '../support/chat-stream'
 import { chooseStyle, serveInstalledTheme, type InstalledTheme } from '../support/hello-theme'
 import { watchPage } from '../support/watch'
 
@@ -23,13 +35,9 @@ const HELLO_A11B: InstalledTheme = { installId: '00000000-0000-4000-8000-0000000
 const TURNS_FILE = path.resolve(__dirname, '..', 'fixtures', HELLO_A11B.fixture, 'chat-turns.json')
 const CHAT_PATH = '/chat'
 const CHAT_STREAM_PATH = '/api/chat'
-const HISTORY_PATH = '/api/chat/history'
-const CANCEL_PATH = /^\/api\/chat\/[^/]+\/cancel$/
 const GRANT_ROUTE = '**/api/v1/approval-grants/*/grant'
 const POSTS_KEY = '__helloA11bChatPosts'
 const STATUS_ATTR = 'data-theme-host'
-const TEXT_LINE = '0:'
-const DATA_LINE = 'd:'
 const OK = 200
 
 const ASK = 'Find me a laptop under 1,000 euros'
@@ -44,35 +52,10 @@ const SHARING_FAILURE = /Invalid hook call|Minified React error|not in this SDK 
 
 type TurnName = 'answer' | 'again' | 'partial' | 'approval'
 
-interface Frame {
-  readonly text?: string
-  readonly data?: unknown
-}
-
 interface RecordedTurns {
   readonly chatId: string
   readonly turns: Readonly<Record<TurnName, { readonly frames: readonly Frame[]; readonly hold?: boolean }>>
 }
-
-/** A turn as the page serves it: its stream lines, and whether the stream stays open after them. */
-interface ServedTurn {
-  readonly lines: readonly string[]
-  readonly hold: boolean
-}
-
-interface ChatScript {
-  readonly path: string
-  readonly postsKey: string
-  /** The turn each POST /api/chat gets, in order (the last one repeats). */
-  readonly turns: readonly ServedTurn[]
-}
-
-interface ChatPost {
-  readonly id?: string
-  readonly message?: { readonly role?: string; readonly parts?: ReadonlyArray<{ readonly text?: string }> }
-}
-
-type PostsWindow = Window & Record<string, ChatPost[] | undefined>
 
 function readTurns(): RecordedTurns {
   const turns = JSON.parse(fs.readFileSync(TURNS_FILE, 'utf8')) as RecordedTurns
@@ -80,64 +63,9 @@ function readTurns(): RecordedTurns {
   return turns
 }
 
-/** A recorded frame as the line lib/chat/hooks.ts reads. */
-function lineOf(frame: Frame): string {
-  return frame.text !== undefined ? `${TEXT_LINE}${JSON.stringify(frame.text)}` : `${DATA_LINE}${JSON.stringify(frame.data)}`
-}
-
 function served(recorded: RecordedTurns, name: TurnName): ServedTurn {
   const turn = recorded.turns[name]
   return { lines: turn.frames.map(lineOf), hold: turn.hold === true }
-}
-
-/**
- * Runs in the page before its own scripts: the app's POST /api/chat (same origin) gets the next recorded
- * turn as a stream, every other request goes out as it would. A held turn's stream stays open after its
- * lines and fails with an AbortError when the request's signal aborts, as fetch's own stream does.
- */
-function stubChatStream(script: ChatScript): void {
-  const realFetch = window.fetch.bind(window)
-  const posts: ChatPost[] = []
-  Object.defineProperty(window, script.postsKey, { value: posts })
-  let next = 0
-  const holdOpen = (controller: ReadableStreamDefaultController<Uint8Array>, signal: AbortSignal | null | undefined) => {
-    const abort = () => controller.error(new DOMException('The user aborted a request.', 'AbortError'))
-    if (signal?.aborted) abort()
-    else signal?.addEventListener('abort', abort, { once: true })
-  }
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    const url = new URL(raw, window.location.href)
-    const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
-    if (url.origin !== window.location.origin || url.pathname !== script.path || method !== 'POST') return realFetch(input, init)
-    posts.push(typeof init?.body === 'string' ? (JSON.parse(init.body) as ChatPost) : {})
-    const turn = script.turns[Math.min(next, script.turns.length - 1)]
-    next += 1
-    const encoder = new TextEncoder()
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        turn.lines.forEach((line) => controller.enqueue(encoder.encode(`${line}\n`)))
-        if (turn.hold) holdOpen(controller, init?.signal)
-        else controller.close()
-      },
-    })
-    return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } }))
-  }
-}
-
-/** Answers the conversations list with none, so the cold start opens a new chat whatever the backend holds. */
-async function noStoredConversations(page: Page): Promise<void> {
-  await page.route((url) => url.pathname === HISTORY_PATH, (route) => fulfillBackendJson(route, OK, []))
-}
-
-/** Answers Stop's cancel and records the path of each one. */
-async function recordCancels(page: Page): Promise<string[]> {
-  const cancelled: string[] = []
-  await page.route((url) => CANCEL_PATH.test(url.pathname), async (route) => {
-    if (route.request().method() === 'POST') cancelled.push(new URL(route.request().url()).pathname)
-    await fulfillBackendJson(route, OK, { cancelled: true })
-  })
-  return cancelled
 }
 
 /** Opens /chat under the hello theme, every POST /api/chat answered with `turns` in order. */
@@ -162,15 +90,11 @@ async function ask(chat: Locator, words: string): Promise<void> {
 }
 
 function chatPosts(page: Page): Promise<ChatPost[]> {
-  return page.evaluate((key) => [...((window as unknown as PostsWindow)[key] ?? [])], POSTS_KEY)
+  return postsOf(page, POSTS_KEY)
 }
 
 function replies(chat: Locator): Locator {
   return chat.locator('[data-testid="hello-a11b-message"][data-role="assistant"]')
-}
-
-function askedWords(post: ChatPost | undefined): string | undefined {
-  return post?.message?.parts?.[0]?.text
 }
 
 test.describe('the SDK chat area in the browser', () => {

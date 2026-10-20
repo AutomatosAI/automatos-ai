@@ -1,10 +1,10 @@
-import type { ThemeLookStorage } from '@/lib/theme-host/boot-types'
-import { BUILTIN_PLAY_LOOK_KEYS } from '@/lib/theme-host/builtin/play-look-keys'
+import { validateLook } from '@/lib/looks/engine'
+import { DEFAULT_LOOK, isPresetId } from '@/lib/looks/presets'
+import { moveUnscopedOnce, scopedKey } from '@/lib/looks/scope'
+import type { Look } from '@/lib/looks/types'
 
-import { validateLook } from './engine'
-import { DEFAULT_LOOK, isPresetId } from './presets'
-import { moveUnscopedOnce, scopedKey } from './scope'
-import type { Look } from './types'
+import type { ThemeLookStorage } from '../boot-types'
+import { BUILTIN_PLAY_LOOK_KEYS } from './play-look-keys'
 
 /**
  * PRD-260, PRD-261 A-09b — this browser's copy of the looks, per signed-in
@@ -14,12 +14,16 @@ import type { Look } from './types'
  * Play's are its PRD-260 keys (lib/theme-host/builtin/play-look-keys.ts), the
  * default here, so no existing look moves before A-18. The server keeps the
  * looks (GET/PUT /api/themes/looks/{themeId}); this copy is its write-through
- * cache (components/looks/use-look-store.ts), and what Play runs on when the
+ * cache (lib/theme-host/builtin/play-look-store.ts), and what Play runs on when the
  * server can't be reached. localStorage may be missing, blocked or full: then
  * Play runs in Ember, nothing is kept, and the read and write helpers say so
  * (StoredLooks.persisted, the writes' boolean) so the Looks page can tell the
  * user. Every look read back, from here or from the server, goes through
  * validateLook().
+ *
+ * Host code (W-A5): only the host's look runtime here in lib/theme-host/builtin
+ * reads it (and the boot reads bootLookStorage()), so it left Play's lib/looks
+ * with the look state (play-look-state.ts) that names its StoredLooks.
  */
 
 /** Where one theme keeps its looks in this browser; each key gets the scope appended. */
@@ -62,7 +66,7 @@ export const UNSCOPED_LOOKS_MOVED_KEY = BUILTIN_PLAY_LOOK_KEYS.moved as string
 /**
  * Two marks per scope, beside the saved looks (`<saved>.<mark>:<scope>`): `pending`, this copy
  * changed here and the server hasn't kept it yet (it is sent on the next load); `synced`, this
- * browser has met the server's copy once (its own looks have joined it, lib/looks/store.ts
+ * browser has met the server's copy once (its own looks have joined it, play-look-state.ts
  * mergeLooks), so from now on the server's copy is the truth.
  */
 export type LookMark = 'pending' | 'synced'
@@ -248,7 +252,7 @@ export function setLookMark(storage: StorageSource, scope: string, bases: LookKe
 }
 
 /**
- * The look the pre-paint script paints (lib/looks/prepaint.ts): the active
+ * The look the pre-paint script paints (lib/theme-host/builtin/play-prepaint.ts): the active
  * look of the scope the pointer key names, else the one this browser kept
  * before F5, else the default. It only reads: nothing moves, nothing is
  * written. The LookProvider paints it under Play until the account's own
@@ -267,7 +271,7 @@ export function readPrepaintLook(storage: StorageSource, bases: LookKeyBases = B
   }
 }
 
-/** Points the pre-paint script at this scope's active look (lib/looks/prepaint.ts). */
+/** Points the pre-paint script at this scope's active look (lib/theme-host/builtin/play-prepaint.ts). */
 export function rememberLookScope(
   storage: StorageSource,
   scope: string,

@@ -29,6 +29,11 @@ export interface ThemeEntry {
   readonly minWidth: number; readonly tone: ThemeTonePolicy; readonly kind: 'builtin' | 'installed'
   readonly reviewed: boolean; readonly ownsPages: readonly string[]; readonly routes: readonly string[]
   readonly nav: readonly ThemeNavItem[]; readonly slots: readonly SlotId[]
+  /**
+   * PRD-261 W-A6b (gap G2): an installed theme's id (theme.json `id`), which the host's look store keeps
+   * its looks under (installedLookTheme). Builtin entries have none: builtin Play's looks keep their PRD-260 keys.
+   */
+  readonly themeId?: string
 }
 
 /**

@@ -1,15 +1,14 @@
 'use client'
 
 import type { ComponentPropsWithoutRef } from 'react'
-
-import { MarkdownView } from '@/components/shared/markdown-view'
+import { MarkdownView } from '@automatos/theme-sdk'
 
 import styles from './chat.module.css'
 
 /**
  * PRD-260 §4 — Auto's answer as markdown, through the core's renderer
- * (components/shared/markdown-view.tsx: react-markdown 9 and remark-gfm, no
- * rehype-raw). Automatos Play's rules for untrusted model output ride on top:
+ * (the SDK's MarkdownView, PRD-261 A-14a: components/shared/markdown-view.tsx,
+ * react-markdown 9 and remark-gfm, no rehype-raw). Automatos Play's rules for untrusted model output ride on top:
  * raw HTML in the text is dropped (skipHtml), never printed as literal tags;
  * links open in a new tab without handing it this window; an image shows as
  * its alt text, because an image URL is fetched with no click, so injected

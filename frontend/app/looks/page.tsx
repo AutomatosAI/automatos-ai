@@ -1,7 +1,7 @@
 'use client'
 
 import { LOOKS_PLAY_ONLY_NOTE, LOOKS_TITLE } from '@/components/looks/looks-screen'
-import { PlayOnlyNote, SCREEN_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { PlayOnlyNote, SCREEN_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/lib/theme-host/builtin/play-only-route'
 import { ThemeSlotPage } from '@/components/theme-host/theme-slot-page'
 
 /**

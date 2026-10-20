@@ -1,6 +1,6 @@
 /**
  * PRD-260 T-007a — Play's Deliverables shelf over a mocked useDeliverables
- * (hooks/use-deliverables-api.ts), ported from Automatos Play's
+ * (the theme SDK's, lib/theme-sdk/deliverables.ts, since PRD-261 A-14b), ported from Automatos Play's
  * tests/deliverables/{ShelfScreen,ShelfMore}.test.tsx: the cards (title, type,
  * date, the newest in the spotlight), the chips setting artifact_type, Load
  * more asking for the next page, a card's link (?deliverable=<id>), the
@@ -24,31 +24,41 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Deliverable, DeliverableListResponse } from '@/hooks/use-deliverables-api'
 
 const hook = vi.hoisted(() => ({ real: false, mock: vi.fn() }))
-vi.mock('@/hooks/use-deliverables-api', async () => {
-  const actual = await vi.importActual<typeof import('@/hooks/use-deliverables-api')>('@/hooks/use-deliverables-api')
-  return {
-    ...actual,
-    useDeliverables: (
-      filters: Parameters<typeof actual.useDeliverables>[0],
-      options?: Parameters<typeof actual.useDeliverables>[1],
-    ) => (hook.real ? actual.useDeliverables(filters, options) : hook.mock(filters)),
-  }
-})
 
 const api = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 
 const workspace = vi.hoisted(() => ({ socials: false }))
+// Whether Socials is offered comes through the SDK's useWorkspace (lib/theme-sdk/context.ts), which reads this.
 vi.mock('@/components/workspace-provider', () => ({
-  useWorkspace: () => ({ workspace: { id: 'ws-1', socials: { available: workspace.socials } }, isLoading: false }),
+  useWorkspaceOptional: () => ({
+    workspace: { id: 'ws-1', name: 'Acme', slug: 'acme', plan: 'pro', socials: { available: workspace.socials } },
+    isLoading: false,
+  }),
 }))
 
 const pictures = vi.hoisted(() => ({ blobUrl: vi.fn((url: string | undefined) => ({ src: null as string | null, error: null, url })) }))
-vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({ useAuthenticatedBlobUrl: pictures.blobUrl }))
+// PRD-261 A-14b: the shelf reads the list and its pictures through '@automatos/theme-sdk', whose
+// deliverables area (lib/theme-sdk/deliverables.ts) stands in here; the real hook runs under it.
+vi.mock('@/lib/theme-sdk/deliverables', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/theme-sdk/deliverables')>('@/lib/theme-sdk/deliverables')
+  return {
+    ...actual,
+    useDeliverables: (
+      filters: Parameters<typeof actual.useDeliverables>[0],
+      options?: Parameters<typeof actual.useDeliverables>[1],
+    ) => (hook.real ? actual.useDeliverables(filters, options) : hook.mock(filters)),
+    useAuthenticatedBlobUrl: pictures.blobUrl,
+  }
+})
 
 const health = vi.hoisted(() => ({ connection: 'connected' as 'connected' | 'down' | 'checking' }))
-vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: health.connection, check: vi.fn() }) }))
+// Auto naps while the backend doesn't answer: the SDK's useHealth (its context area).
+vi.mock('@/lib/theme-sdk/context', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/theme-sdk/context')>('@/lib/theme-sdk/context')),
+  useHealth: () => ({ connection: health.connection, check: vi.fn() }),
+}))
 
 const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => nav, usePathname: () => '/deliverables' }))

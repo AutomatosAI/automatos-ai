@@ -7,11 +7,11 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'fs'
 import path from 'path'
 
-import { playStyleFor } from '@/components/looks/play-only-route'
+import { playStyleFor } from '@/lib/theme-host/builtin/play-only-route'
 import type { InstalledTheme } from '@/lib/api-client'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 
-const src = readFileSync(path.resolve(__dirname, '..', 'play-only-route.tsx'), 'utf8')
+const src = readFileSync(path.resolve(__dirname, '../../../lib/theme-host/builtin/play-only-route.tsx'), 'utf8')
 
 function install(overrides: Partial<InstalledTheme>): InstalledTheme {
   return {
@@ -26,7 +26,7 @@ function install(overrides: Partial<InstalledTheme>): InstalledTheme {
 describe('Switch to Play', () => {
   it('is stored through useChooseStyle, never a bare setStyle', () => {
     expect(src).toContain('const chooseStyle = useChooseStyle()')
-    expect(src).toContain('chooseStyle(playStyleFor(uiStyle.installedThemes))')
+    expect(src).toContain('chooseStyle(playStyleFor(uiStyle.installedThemes), FOCUS_HEADING_AFTER_RELOAD)')
     expect(src).not.toContain('uiStyle.setStyle(')
   })
 

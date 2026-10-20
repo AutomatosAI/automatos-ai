@@ -8,6 +8,7 @@
     "importLook",
     "listLooks",
     "saveLook",
-    "useLook"
+    "useLook",
+    "useLookScope"
   ]
 }
