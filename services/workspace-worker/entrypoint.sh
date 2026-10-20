@@ -9,16 +9,57 @@ set -e
 # owner's uid and gid instead, and writes your files as you, as Docker Desktop's file
 # sharing already does on macOS and Windows. Never root's: when root owns the folder the
 # worker stays uid 1000, and the log says what to do.
+#
+# Nor any other id the image already gives an account (PRD-262 US-040's security review):
+# a folder owned by www-data (33) or nobody (65534) would make the worker that account,
+# with what it owns, so the worker stays uid 1000 and the log says why. A gid that is
+# root's group (0) or an account's (shadow, 42; users, 100) is not taken either: the
+# worker takes the owner's uid alone, which is what writing the folder needs. A free id
+# needs no `-o` (a duplicate id), so usermod and groupmod run without it, and refuse a
+# taken id themselves.
+
+# Status 0, and why on stdout, when the worker cannot take this uid (passwd) or gid
+# (group): the image already gives it to an account other than the worker. getent exits
+# 2 for an id no account has (status 1); any other failure counts as taken, so no id is
+# taken unchecked.
+id_taken_by() {  # passwd|group ID
+    local entry status=0
+    entry="$(getent "$1" "$2")" || status=$?
+    case "$status" in
+        0) [ "${entry%%:*}" != worker ] && echo "${entry%%:*}'s in the worker's image" ;;
+        2) return 1 ;;
+        *) echo "getent $1 exited $status" ;;
+    esac
+}
+
+# The worker takes the uid of the folder's owner, and its gid when that is free too.
+run_as_folder_owner() {  # UID GID
+    local uid="$1" gid="$2" taken
+    if taken="$(id_taken_by passwd "$uid")"; then
+        echo "[entrypoint] uid $uid owns your deliverables folder (AUTOMATOS_WORKSPACE_DIR), but the worker cannot take that uid ($taken), so it stays uid $(id -u worker) and cannot write to the folder: give the folder to your own user (sudo chown -R <user>: <folder>) and restart the worker" >&2
+        return 0
+    fi
+    taken="$(id_taken_by group "$gid")" || taken=""
+    [ "$gid" != "0" ] || taken="root's group"
+    if [ -n "$taken" ]; then
+        echo "[entrypoint] uid $(id -u worker) cannot write $LOCAL_WORKSPACE_ROOT: the worker runs as its owner, uid $uid, and keeps its own group, not gid $gid ($taken)"
+        usermod -u "$uid" worker || echo "[entrypoint] could not run the worker as uid $uid" >&2
+    else
+        echo "[entrypoint] uid $(id -u worker) cannot write $LOCAL_WORKSPACE_ROOT: the worker runs as its owner, $uid:$gid"
+        groupmod -g "$gid" worker && usermod -u "$uid" worker \
+            || echo "[entrypoint] could not run the worker as $uid:$gid" >&2
+    fi
+}
+
 if [ -n "${LOCAL_WORKSPACE_ROOT:-}" ] && [ -d "$LOCAL_WORKSPACE_ROOT" ] \
     && ! setpriv --reuid=worker --regid=worker --init-groups test -w "$LOCAL_WORKSPACE_ROOT"; then
-    folder_uid="$(stat -c '%u' "$LOCAL_WORKSPACE_ROOT")"
-    folder_gid="$(stat -c '%g' "$LOCAL_WORKSPACE_ROOT")"
+    # Owner and group from one stat, so both are the same moment's.
+    folder_owner="$(stat -c '%u %g' "$LOCAL_WORKSPACE_ROOT")"
+    read -r folder_uid folder_gid <<< "$folder_owner"
     if [ "$folder_uid" = "0" ]; then
         echo "[entrypoint] root owns your deliverables folder (AUTOMATOS_WORKSPACE_DIR), so the worker cannot write to it: give the folder to a user other than root (sudo chown -R <user>: <folder>) and restart the worker" >&2
     elif [ "$folder_uid" != "$(id -u worker)" ]; then
-        echo "[entrypoint] uid $(id -u worker) cannot write $LOCAL_WORKSPACE_ROOT: the worker runs as its owner, $folder_uid:$folder_gid"
-        groupmod -o -g "$folder_gid" worker && usermod -o -u "$folder_uid" worker \
-            || echo "[entrypoint] could not run the worker as $folder_uid:$folder_gid" >&2
+        run_as_folder_owner "$folder_uid" "$folder_gid"
     fi
 fi
 
