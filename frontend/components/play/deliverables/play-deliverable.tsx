@@ -149,7 +149,11 @@ interface DeliverableViewProps {
   readonly now: Date
 }
 
-/** A loaded Deliverable: title, type badge, date and "Made by", the content, the side panel. */
+/**
+ * A loaded Deliverable: title, type badge, date and "Made by", the content, the side panel.
+ * contentView (lib/play/detail.ts, lane A-14c) still takes the core's Deliverable, whose
+ * tags are a mutable string[]; the SDK's are readonly, so they go in as a copy.
+ */
 function DeliverableView({ deliverable, now }: DeliverableViewProps) {
   const kind = kindOf(deliverable)
   const title = detailTitle(deliverable)
@@ -167,7 +171,7 @@ function DeliverableView({ deliverable, now }: DeliverableViewProps) {
           </p>
         </header>
         <DeliverableContent
-          view={contentView(deliverable)}
+          view={contentView({ ...deliverable, tags: deliverable.tags?.slice() })}
           kind={kind}
           title={title}
           filename={deliverableFilename(deliverable)}
