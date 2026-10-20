@@ -865,7 +865,7 @@ def test_the_voice_booking_lands_when_the_connection_pool_has_no_room(ledger, mo
     for pool room, then is dropped; the voice's is written inline, off the loop."""
     env = ledger
     post = _fish_post(env)
-    monkeypatch.setattr(best_effort, "_pool_has_room", lambda: False)
+    monkeypatch.setattr("core.database.pool_watch.pool_has_room", lambda pool=None: False)
 
     ok, _, _ = _render(env, post["id"], FakeStore())
 

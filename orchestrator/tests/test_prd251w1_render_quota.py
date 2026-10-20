@@ -59,9 +59,9 @@ from tests.test_prd251w1_render_lifecycle import (  # noqa: E402  (the lifecycle
 )
 import api.socials as socials_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
-import core.best_effort as best_effort  # noqa: E402
 import core.boot.reaper as reaper  # noqa: E402
 import core.database.database as database_mod  # noqa: E402
+import core.database.pool_watch as pool_watch  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
 import core.media_render_quota as render_quota  # noqa: E402
 import modules.documents.generation_service as generation_service  # noqa: E402
@@ -373,7 +373,7 @@ def test_twenty_documents_rendered_at_once_on_basic_render_ten_and_refuse_ten(en
 def test_the_rendered_seconds_are_in_llm_usage_when_run_render_returns_with_no_pool_room(env, monkeypatch):
     """A booking handed to the best-effort threads waits BEST_EFFORT_POOL_WAIT_S for
     pool room, then is dropped: the render's own is written inline, off the loop."""
-    monkeypatch.setattr(best_effort, "_pool_has_room", lambda: False)
+    monkeypatch.setattr(pool_watch, "pool_has_room", lambda pool=None: False)
     (resp,) = asyncio.run(_ask(env, _drafts(env, 1)))
     assert resp.status_code == 202
 
@@ -384,7 +384,7 @@ def test_the_rendered_seconds_are_in_llm_usage_when_run_render_returns_with_no_p
 
 def test_a_documents_rendered_seconds_are_in_llm_usage_when_generate_returns_with_no_pool_room(env, monkeypatch, tmp_path):
     _documents(monkeypatch, tmp_path)
-    monkeypatch.setattr(best_effort, "_pool_has_room", lambda: False)
+    monkeypatch.setattr(pool_watch, "pool_has_room", lambda pool=None: False)
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(env.renderer.handler)) as http:

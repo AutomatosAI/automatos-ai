@@ -1706,6 +1706,11 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F458: GET /health reads a full pool from its counters, never waiting on it, and
+    # answers degraded (200). A pool seen full at every probe for this long is stuck:
+    # /health answers 503, so the liveness watchdog (docker-entrypoint.sh, F416)
+    # restarts the backend. A dead or hung backend still restarts within ~2 min.
+    HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
     # F140: a playbook step's whole answer at most this long, ending by asking for
     # what it needs, stops the run and asks the owner. Night 4's 12 asks were at
     # most 402 characters; a longer answer is the step's work, even if it ends
