@@ -27,6 +27,8 @@ const OTHER_SCOPE = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_b')
 /** Builtin Play's own motion mark (its look provider sets it), never set by the generic runtime. */
 const BUILTIN_MOTION_ATTRIBUTE = 'data-pl-motion'
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
+/** A value another look runtime puts on one of the table's names. */
+const ANOTHER_RUNTIMES_VALUE = '#123456'
 
 function root(): HTMLElement {
   return document.documentElement
@@ -172,6 +174,45 @@ describe('switched off', () => {
     expect(await screen.findByText('Looks: none')).toBeInTheDocument()
     expect(painted()).toEqual({})
     expect(motion()).toEqual({ attribute: null, variable: '' })
+  })
+
+  it('a theme left in place (its id gone with the style) takes its variables and the motion marks off', async () => {
+    pageBoot(helloThemeBoot())
+    const { storage } = sourceOf()
+    const { rerender } = render(providerFor(storage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    rerender(providerFor(storage, { themeId: null, enabled: false }))
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    await waitFor(() => expect(painted()).toEqual({}))
+    expect(motion()).toEqual({ attribute: null, variable: '' })
+  })
+
+  it("holds the theme's table into the commit where the host stops running it (its status trails the style)", async () => {
+    pageBoot(helloThemeBoot())
+    const { storage } = sourceOf()
+    const { rerender } = render(providerFor(storage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    rerender(providerFor(storage, { themeId: null, enabled: false, keepFirstPaint: true }))
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    expect(painted()).toEqual(paint(TABLE, PAPER))
+    rerender(providerFor(storage, { themeId: null, enabled: false, keepFirstPaint: false }))
+    await waitFor(() => expect(painted()).toEqual({}))
+    expect(motion()).toEqual({ attribute: null, variable: '' })
+  })
+
+  it('clears a theme it left once: what another runtime paints on those names afterwards stays', async () => {
+    pageBoot(helloThemeBoot())
+    const { storage } = sourceOf()
+    const { rerender } = render(providerFor(storage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    rerender(providerFor(storage, { themeId: null, enabled: false }))
+    await waitFor(() => expect(painted()).toEqual({}))
+    const [name] = paintNames(TABLE)
+    root().style.setProperty(name, ANOTHER_RUNTIMES_VALUE)
+    rerender(providerFor(storage, { themeId: null, enabled: false, keepFirstPaint: true }))
+    rerender(providerFor(storage, { themeId: null, enabled: false }))
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    expect(root().style.getPropertyValue(name)).toBe(ANOTHER_RUNTIMES_VALUE)
   })
 
   it("leaves the boot's first paint while the host loads or runs the installed theme (keepFirstPaint)", async () => {

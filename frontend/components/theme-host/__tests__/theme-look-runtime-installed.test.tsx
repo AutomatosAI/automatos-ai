@@ -15,7 +15,7 @@
  * runtime until W-A8.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -29,10 +29,10 @@ vi.mock('@/components/workspace-provider', () => ({
 import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
 import { ThemeLookRuntime } from '@/components/theme-host/theme-look-runtime'
 import { ThemeProvider } from '@/components/theme-provider'
-import { UiStyleProvider } from '@/contexts/ui-style-context'
+import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { clearRoot, lookNamesLeft, rootVars } from '@/lib/looks/__tests__/helpers'
 import { GROUND_KEYS } from '@/lib/looks/catalogue'
-import { applyLook, lookDocumentVars, MOTION_ATTRIBUTE } from '@/lib/looks/document'
+import { applyLook, LOOK_DOCUMENT_NAMES, lookDocumentVars, MOTION_ATTRIBUTE } from '@/lib/looks/document'
 import { DEFAULT_LOOK, PRESETS } from '@/lib/looks/presets'
 import { PLAY_TONE_COOKIE, toneOfGround } from '@/lib/looks/tone'
 import { LOOK_INTERFACE, LOOK_SCHEMA } from '@/lib/looks/types'
@@ -49,7 +49,7 @@ import { THEME_TONE_COOKIE } from '@/lib/theme-host/looks/tone-cookie'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 import { useLook } from '@/lib/theme-sdk/looks'
-import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
+import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
 import {
   HELLO_PACKAGE_ENTRY,
   INSTALLED_HELLO_STYLE,
@@ -102,6 +102,19 @@ function Probe() {
   )
 }
 
+/** The style menu's switch, made in place for a style that isn't an installed theme. */
+function StyleSwitch({ to }: { readonly to: UiStyle }) {
+  const { setStyle } = useUiStyle()
+  return <button type="button" onClick={() => setStyle(to)}>Switch to {to}</button>
+}
+
+/** hello-a09b's table variables currently inline on <html> (none of them builtin Play's names). */
+function helloVars(): Readonly<Record<string, string>> {
+  const { style } = document.documentElement
+  const entries = paintNames(HELLO_RULES.table).map((name): [string, string] => [name, style.getPropertyValue(name).trim()])
+  return Object.fromEntries(entries.filter(([, value]) => value !== ''))
+}
+
 function renderApp(style: UiStyle, status: ThemeHostStatus, entry: ThemeEntry | null = null) {
   return render(<Appearance style={style} status={status} entry={entry}><Probe /></Appearance>)
 }
@@ -116,7 +129,7 @@ function cookie(name: string): string | undefined {
 }
 
 function dropCookies(): void {
-  for (const name of [PLAY_TONE_COOKIE, THEME_TONE_COOKIE]) document.cookie = `${name}=; Max-Age=0; Path=/`
+  for (const name of [PLAY_TONE_COOKIE, THEME_TONE_COOKIE, UI_STYLE_COOKIE]) document.cookie = `${name}=; Max-Age=0; Path=/`
 }
 
 function motionMarks(): { readonly theme: string | null; readonly variable: string; readonly builtin: string | null } {
@@ -249,10 +262,30 @@ describe('PRD-261 A-19d2 — any installed theme with looks runs on it, from its
     expect(await screen.findByText('Looks: available')).toBeInTheDocument()
     expect(await screen.findByText('Tone: light')).toBeInTheDocument()
     await waitFor(() => expect(cookie(THEME_TONE_COOKIE)).toBe('light'))
-    const table = HELLO_RULES.table
-    const painted = Object.fromEntries(paintNames(table).map((name) => [name, document.documentElement.style.getPropertyValue(name).trim()]))
-    expect(painted).toEqual(paint(table, PAPER))
+    expect(helloVars()).toEqual(paint(HELLO_RULES.table, PAPER))
     expect(motionMarks()).toEqual({ theme: 'full', variable: '1', builtin: null })
+  })
+
+  it("left in place for Studio: its table's variables and the motion marks come off once the host stops, also names builtin Play's runtime never clears", async () => {
+    const table = HELLO_RULES.table
+    expect(paintNames(table).filter((name) => LOOK_DOCUMENT_NAMES.includes(name))).toEqual([])
+    const boot = helloThemeBoot()
+    runThemeBoot(boot)
+    removeBoot = putPageBoot(boot)
+    const { rerender } = render(<Appearance style={HELLO_LOOKS_STYLE} status="active" entry={hello}><Probe /><StyleSwitch to="studio" /></Appearance>)
+    await waitFor(() => expect(helloVars()).toEqual(paint(table, PAPER)))
+    await waitFor(() => expect(motionMarks().theme).toBe('full'))
+
+    // A switch away from an installed theme is made in place (only one TO an installed theme reloads),
+    // and the host's status trails the style by a commit: it still runs the theme here.
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to studio' }))
+    // UiStyleProvider reads its props once, at mount, as from the root layout: only the host's status changes here.
+    rerender(<Appearance style="studio" status="off" entry={null}><Probe /><StyleSwitch to="studio" /></Appearance>)
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    await waitFor(() => expect(helloVars()).toEqual({}))
+    expect(motionMarks()).toEqual({ theme: null, variable: '', builtin: null })
+    expect(cookie(THEME_TONE_COOKIE)).toBeUndefined()
+    expect(screen.getByText('Tone: not forced')).toBeInTheDocument()
   })
 
   it('a theme with looks whose boot on the page carries none: no looks, the first paint kept, no tone forced', async () => {

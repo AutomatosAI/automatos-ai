@@ -81,27 +81,43 @@ interface DocumentLook {
   readonly keepFirstPaint: boolean
 }
 
+/** The last table this runtime painted with or held, until its variables come off. */
+interface HeldTable {
+  current: PrepaintTable | null
+}
+
+/** Takes the held table's variables off `root` once: a later run never takes off what another runtime painted since. */
+function clearHeldPaint(root: HTMLElement, held: HeldTable): void {
+  if (held.current === null) return
+  clearPaint(root, held.current)
+  held.current = null
+}
+
+/**
+ * Switched off, the motion marks come off and, unless the host still loads or runs an installed theme
+ * (keepFirstPaint), the variables of the last table this runtime held. A theme left in place (for
+ * Studio, Classic or builtin Play: only a switch TO an installed theme reloads) hands in no table, as
+ * its rules go with its id, and the host's status can trail the style by a commit; so the table is
+ * held, not replaced by none, into the commit where keepFirstPaint turns false.
+ */
 function useLookOnDocument({ table, look, active, reducedMotion, keepFirstPaint }: DocumentLook): void {
+  const held = useRef<PrepaintTable | null>(null)
   useEffect(() => {
     const root = document.documentElement
+    if (table !== null) held.current = table
     if (!active) {
       clearThemeMotion(root)
-      if (!keepFirstPaint && table !== null) clearPaint(root, table)
+      if (!keepFirstPaint) clearHeldPaint(root, held)
       return
     }
     applyThemeMotion(root, reducedMotion)
     if (look !== null && table !== null) applyPaint(root, table, look)
   }, [table, look, active, reducedMotion, keepFirstPaint])
 
-  // The table to clear on unmount: the last one this runtime held.
-  const held = useRef(table)
-  useEffect(() => {
-    held.current = table
-  }, [table])
   useEffect(() => () => {
     const root = document.documentElement
     clearThemeMotion(root)
-    if (held.current !== null) clearPaint(root, held.current)
+    clearHeldPaint(root, held)
   }, [])
 }
 
