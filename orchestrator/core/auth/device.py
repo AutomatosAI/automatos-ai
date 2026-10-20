@@ -3,8 +3,8 @@
 Reached only through the bearer-prefix registry (``core/auth/bearer_registry.py``), which
 runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
 
-* Local edition only. On saas an ``amd_`` bearer is 401 and nothing is looked up: a paired
-  row never exists there (§8).
+* Local edition only (``AUTH_EDITION=local``, read through ``config.IS_LOCAL_EDITION``). On
+  saas an ``amd_`` bearer is 401 and nothing is looked up: a paired row never exists there (§8).
 * The row is found by the SHA-256 of the token (``token_hash``) and confirmed in constant
   time (``core.auth.pairing.secrets_match``), or by ``prev_token_hash`` while the rotation
   overlap lasts (strictly before ``prev_token_valid_until``). A revoked row is
