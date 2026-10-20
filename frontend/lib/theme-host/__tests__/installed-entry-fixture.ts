@@ -11,6 +11,7 @@ export const INSTALLED_HELLO_STYLE: UiStyle = 'theme:install:5d0f2a7e-1c4b-4e9a-
 
 /** The kit's themes/play/theme.json, as the boot route answers it for a private upload. */
 export const PLAY_PACKAGE_ENTRY: InstalledThemeEntryData = {
+  themeId: 'automatos/play',
   name: 'Play',
   base: 'studio',
   htmlClass: 'play',
@@ -29,6 +30,7 @@ export const PLAY_PACKAGE_ENTRY: InstalledThemeEntryData = {
 
 /** orchestrator/tests/fixtures/themes/hello/theme.json: looks declared, a class of its own, the user's tone. */
 export const HELLO_PACKAGE_ENTRY: InstalledThemeEntryData = {
+  themeId: 'automatos-e2e/hello',
   name: 'Hello theme',
   base: 'studio',
   htmlClass: 'hello',

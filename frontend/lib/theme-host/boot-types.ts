@@ -77,6 +77,8 @@ export interface ThemeLookGuard {
  * registry entry (installedThemeEntry).
  */
 export interface InstalledThemeEntryData {
+  /** The theme's id (theme.json `id`), which its looks are kept under, in this browser and on the server (W-A6b, G2). */
+  readonly themeId: string
   readonly name: string
   readonly base: ThemeBase
   readonly htmlClass: string

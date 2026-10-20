@@ -4,6 +4,9 @@
  * server render and the client's first render name the same active theme. A base boot (the theme
  * may not run, or the boot failed) and every other style hand none.
  *
+ * Gap G2: an installed theme whose look sets the tone starts on the tone its look last wrote to the
+ * tone cookie, as builtin Play does, so Providers forces that tone from the server render on.
+ *
  * The installed resolver (lib/theme-host/boot-server.ts, which fetches the backend's boot route) is
  * stood in for here by one that answers the boot the test gives; its own tests are boot-server.test.ts.
  */
@@ -36,7 +39,9 @@ vi.mock('@/lib/theme-host/boot-server', async () => {
 
 import RootLayout from '../layout'
 import { baseThemeBoot } from '@/lib/theme-host/boot'
+import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { bootLookStorage, installedLookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { UI_STYLE_COOKIE } from '@/lib/ui-style'
 
@@ -46,6 +51,7 @@ interface ElementProps {
   readonly children?: ReactNode
   readonly initialUiStyle?: string
   readonly initialTheme?: unknown
+  readonly initialTone?: string
 }
 type LayoutElement = ReactElement<ElementProps>
 
@@ -54,9 +60,10 @@ function childElements(element: LayoutElement): LayoutElement[] {
 }
 
 /** The props the layout hands Providers (the <body>'s one child) under the style cookie `style`. */
-async function providersProps(style: string): Promise<ElementProps | undefined> {
+async function providersProps(style: string, cookies: Readonly<Record<string, string>> = {}): Promise<ElementProps | undefined> {
   cookieJar.clear()
   cookieJar.set(UI_STYLE_COOKIE, style)
+  Object.entries(cookies).forEach(([name, value]) => cookieJar.set(name, value))
   const html = (await RootLayout({ children: null })) as LayoutElement
   const body = childElements(html).find((child) => child.type === 'body')
   return body === undefined ? undefined : childElements(body)[0]?.props
@@ -82,5 +89,18 @@ describe("PRD-261 W-A6b — the root layout hands Providers the installed theme'
   it.each(['classic', 'studio', BUILTIN_PLAY_STYLE])('hands none under %s', async (style) => {
     installedBoot.current = { ...baseThemeBoot(INSTALLED_PLAY_STYLE), entry: PLAY_PACKAGE_ENTRY }
     expect((await providersProps(style))?.initialTheme).toBeNull()
+  })
+})
+
+describe("PRD-261 W-A6b (gap G2) — an installed theme's look tone from the first render", () => {
+  it("hands Providers the tone cookie's tone for a 'from-look' theme whose boot names its look keys", async () => {
+    installedBoot.current = {
+      ...baseThemeBoot(INSTALLED_PLAY_STYLE),
+      tone: { policy: 'from-look', value: null },
+      lookStorage: bootLookStorage(installedLookKeys(PLAY_PACKAGE_ENTRY.themeId)),
+      entry: PLAY_PACKAGE_ENTRY,
+    }
+    expect((await providersProps(INSTALLED_PLAY_STYLE, { [PLAY_TONE_COOKIE]: 'light' }))?.initialTone).toBe('light')
+    expect((await providersProps(INSTALLED_PLAY_STYLE))?.initialTone).toBeUndefined()
   })
 })

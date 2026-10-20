@@ -141,18 +141,6 @@ export function describeParity(title: string, body: (variant: PlayVariant) => vo
 }
 
 /**
- * Core gap G2. An installed theme's first paint never paints a stored look: the backend's boot
- * (orchestrator/services/themes/serve.py theme_boot, through _boot) sends lookStorage and lookGuard
- * as null, the root layout reads no tone cookie for an installed boot (lib/theme-host/boot.ts
- * builtinThemeBoot reads it for builtin themes only), and an installed theme's look keys
- * (`automatos-theme.<publisher>/<name>.*`, play-look-storage.ts installedLookKeys) hold a '/' that
- * boot-sanitize.ts STORAGE_KEY refuses. The look runtime (G1) also keeps every theme's looks under
- * builtin Play's keys.
- */
-export const GAP_INSTALLED_BOOT_PAINTS_NO_STORED_LOOK =
-  'Core gap G2 (with G1): the installed boot carries no lookStorage, lookGuard or tone (serve.py _boot), so a stored look and its tone are not painted before first paint'
-
-/**
  * Core gap G3. Switch to Play picks the workspace's install of Play's package when there is one
  * (lib/theme-host/builtin/play-only-route.tsx playStyleFor), and a switch to an installed theme
  * reloads the page (PA-13, contexts/ui-style-context.tsx setStyle). The reload drops what

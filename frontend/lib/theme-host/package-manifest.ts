@@ -80,7 +80,8 @@ const BRAND_FIELDS: readonly string[] = ['name', 'wordmark']
 const MASCOT_FIELDS: readonly string[] = ['states']
 const MANIFEST_OWNER = 'theme.json'
 
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
+/** A theme's id, `<publisher>/<name>`: the one its looks are kept under (installed-entry.ts reads it too). */
+export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
 const VERSION_PATTERN = /^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/
 const RANGE_PATTERN = /^\^?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/
 export const ROUTE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}(?:\/[a-z0-9][a-z0-9-]{0,31}){0,3}$/

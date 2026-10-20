@@ -21,6 +21,7 @@ import type { InstalledThemeEntryData } from './boot-types'
 import { HTML_CLASS_PATTERN, THEME_SLOT_IDS } from './constants'
 import { isRecord, isWholeNumber, plainTextProblem } from './css-value'
 import {
+  ID_PATTERN,
   LABEL_MAX,
   MAX_NAV,
   MAX_ROUTES,
@@ -61,14 +62,16 @@ function widthOf(value: unknown): number | null {
 
 /** The entry's single fields, or null when any fails its theme.json rule. */
 function scalarsOf(raw: Readonly<Record<string, unknown>>): Scalars | null {
+  const themeId = typeof raw.themeId === 'string' && ID_PATTERN.test(raw.themeId) ? raw.themeId : null
   const name = textOf(raw.name, NAME_MAX)
   const base = oneOf<ThemeBase>(THEME_BASES, raw.base)
   const htmlClass = typeof raw.htmlClass === 'string' && HTML_CLASS_PATTERN.test(raw.htmlClass) ? raw.htmlClass : null
   const minWidth = widthOf(raw.minWidth)
   const tone = oneOf<ThemeTonePolicy>(THEME_TONES, raw.tone)
   const reviewed = typeof raw.reviewed === 'boolean' ? raw.reviewed : null
-  if (name === null || base === null || htmlClass === null || minWidth === null || tone === null || reviewed === null) return null
-  return { name, base, htmlClass, minWidth, tone, reviewed }
+  if (themeId === null || name === null || base === null || htmlClass === null) return null
+  if (minWidth === null || tone === null || reviewed === null) return null
+  return { themeId, name, base, htmlClass, minWidth, tone, reviewed }
 }
 
 /** The items of `value` that pass `keep`, once each, at most `max` of them. */

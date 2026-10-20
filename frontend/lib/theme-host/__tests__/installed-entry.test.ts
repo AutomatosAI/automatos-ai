@@ -3,7 +3,8 @@
  * route's entry data passes its own check with the rest of the boot (a single field that fails its
  * theme.json rule drops the entry, a list item that fails is dropped alone), and the root layout
  * makes it the registry entry of the style's install: its ref, kind 'installed', and the desktop
- * width the host draws an installed theme from in Phase A.
+ * width the host draws an installed theme from in Phase A. Gap G2: the entry names the theme's id
+ * (theme.json `id`), which the host's look store keeps the theme's looks under.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -29,6 +30,10 @@ describe('PRD-261 W-A6b — the boot route entry, checked', () => {
   })
 
   it.each<[string, unknown]>([
+    ['themeId', undefined],
+    ['themeId', 'play'],
+    ['themeId', 'Automatos/Play'],
+    ['themeId', 'automatos/play/../x'],
     ['name', ''],
     ['name', 'a'.repeat(61)],
     ['name', 'two\nlines'],
@@ -76,6 +81,8 @@ describe("PRD-261 W-A6b — the installed theme's registry entry", () => {
   it("is the install's entry: its ref, kind 'installed' and everything the boot route answered", () => {
     const entry = installedThemeEntry(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)
     expect(entry).toEqual({ ...PLAY_PACKAGE_ENTRY, ref: `install:${INSTALL_ID}`, kind: 'installed' })
+    // W-A6b (G2): the id the host's look store keeps the theme's looks under.
+    expect(entry?.themeId).toBe('automatos/play')
     expect(findThemeEntry(INSTALLED_PLAY_STYLE, entry === null ? [] : [entry])).toBe(entry)
   })
 
