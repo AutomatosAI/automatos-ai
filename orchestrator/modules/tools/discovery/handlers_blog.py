@@ -324,6 +324,8 @@ COVER_ASPECT_RATIO = "16:9"
 # posts, 16:9 links and slides (actions_blog.py repeats them as literals).
 IMAGE_ASPECT_RATIOS = ("16:9", "1:1", "4:5", "9:16")
 IMAGE_TITLE_CHARS = 80
+# Where the generation guard says a refusal came from (ART5-1): logged, never the prompt.
+IMAGE_GUARD_PATH = "tools.image"
 IMAGE_SOURCE_TYPE = "agent_output"
 _ERROR_DETAIL_CHARS = 200
 
@@ -349,11 +351,17 @@ async def _image_from_model(workspace_id: UUID, full_prompt: str, context: str) 
     """(mime, base64) from the configured image model; raises :class:`ImageNotMade`.
 
     The cost path of every image this tool makes: one OpenRouter call through
-    the LLM manager, tracked as ``blog_cover_gen`` / ``cover_image``.
+    the LLM manager, tracked as ``blog_cover_gen`` / ``cover_image``. The prompt
+    goes through the generation guard first (PRD-264 ART5-1): a refusal makes nothing.
     """
     from config import config
+    from core import generation_guard
     from core.llm import create_llm_manager
 
+    request = generation_guard.GenerationRequest(path=IMAGE_GUARD_PATH, texts=(full_prompt,))
+    verdict = await generation_guard.check(request, workspace_id=workspace_id)
+    if not verdict.allowed:
+        raise ImageNotMade(verdict.message)
     try:
         llm = create_llm_manager(
             service_name="blog_cover_gen",

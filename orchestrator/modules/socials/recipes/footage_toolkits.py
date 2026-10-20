@@ -123,6 +123,9 @@ class JobState:
     status: str  # RUNNING | DONE | FAILED
     file: Optional[ReturnedFile] = None
     reason: Optional[str] = None
+    # FAILED because the provider refused the request as unsafe content (PRD-264 ART5-1):
+    # a refusal, worded by the generation guard, and never asked of another provider.
+    refused: bool = False
 
 
 # ``ask(role, params, required)``: the route's action for ``role``, called on the
@@ -423,7 +426,8 @@ HF_BALANCE = "HIGGSFIELD_MCP_BALANCE"
 HF_LONG_POLL_SECONDS = 15
 HF_JOB_ID_KEYS = ("job_id", "jobId", "id")
 HF_DONE = frozenset({"completed", "succeeded", "success", "done", "finished"})
-HF_FAILED = frozenset({"failed", "error", "nsfw", "canceled", "cancelled", "rejected", "expired"})
+HF_FAILED = frozenset({"failed", "error", "canceled", "cancelled", "rejected", "expired"})
+HF_REFUSED = frozenset({"nsfw"})  # Higgsfield refused the request as unsafe content (ART5-1)
 
 
 @dataclass(frozen=True)
@@ -489,6 +493,8 @@ class HiggsfieldRecipe(FootageRecipe):
         params = {"jobs": _jobs_param(route.actions[POLL], job), "timeout_seconds": HF_LONG_POLL_SECONDS}
         entry = _job_entry(await ask(POLL, params, ("jobs",)), job)
         status = (find_text(entry, ("status", "state")) or "").lower()
+        if status in HF_REFUSED:
+            return JobState(FAILED, refused=True)
         if status in HF_FAILED:
             why = find_text(entry, ("error", "reason", "message")) or status
             return JobState(FAILED, reason=f"Higgsfield could not make it: {why}")
