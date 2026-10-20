@@ -135,14 +135,21 @@ export interface LookProviderProps {
   readonly storage?: StorageSource
   /** Receives the tone Play forces (undefined when it forces none): components/providers.tsx hands it to ThemeProvider. */
   readonly onToneChange?: (tone: PlayTone | undefined) => void
+  /**
+   * PRD-261 A-13c: false while the active theme has no look runtime: nothing is painted or forced,
+   * exactly as when the style isn't Play. The host keeps the provider mounted either way, so a style
+   * switched in place never remounts the page below it (M69).
+   */
+  readonly enabled?: boolean
 }
 
-export function LookProvider({ children, storage = browserStorage, onToneChange }: LookProviderProps) {
+export function LookProvider({ children, storage = browserStorage, onToneChange, enabled = true }: LookProviderProps) {
   const store = useLookStore(storage, useLookScope())
   const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
   // PRD-261 A-02b, PA-8: Play's look runs under the theme whose <html> class is Play's.
-  const active = useUiStyleOptional()?.activeTheme?.htmlClass === BUILTIN_PLAY_HTML_CLASS
+  const playStyle = useUiStyleOptional()?.activeTheme?.htmlClass === BUILTIN_PLAY_HTML_CLASS
+  const active = enabled && playStyle
   const prepaint = usePrepaintLook(storage, active && !loaded)
   const painted = loaded ? look : prepaint
   const tone = active && painted !== null ? toneOfGround(painted.ground) : undefined

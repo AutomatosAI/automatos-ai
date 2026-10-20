@@ -14,8 +14,12 @@ What it does
 2. Resolve the target if the caller didn't pass one (Telegram default
    chat captured by the bot's ``/start`` handler; Slack default channel
    from row metadata).
-3. Hand off to the platform driver's ``send`` — every per-platform
-   detail lives there.
+3. Decide the EU AI Act Art. 50(1) notice for the target
+   (``channels/ai_notice.py``, PRD-264 EUAI-03) and put it where the
+   driver wants it: the text's first paragraph, or payload fields for
+   the generic webhook.
+4. Hand off to the platform driver's ``send`` — every per-platform
+   detail lives there. This is the only caller of a driver's ``send``.
 
 The sender never raises — it returns a ``SendResult`` so callers (chat
 endpoints, callback dispatcher, heartbeat notifier) can log + bubble
@@ -26,19 +30,26 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
+from .ai_notice import ChannelNotice, notice_for, record_notice_sent
 from .drivers import (
+    ChannelDriver,
     SendResult,
     UnknownPlatform,
     get_driver,
 )
 
 logger = logging.getLogger(__name__)
+
+#: The connection id a workspace still on the legacy integrations bag sends
+#: under (no channel_connections row): it scopes the AI notice state.
+LEGACY_CONNECTION_ID = "legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +160,51 @@ def _resolve_target(
     return None
 
 
+@dataclass(frozen=True)
+class _Route:
+    """Where a send goes: the connection row (or the legacy bag), its config
+    and the resolved target."""
+
+    connection_id: str
+    config: Mapping[str, Any]
+    target: Optional[str]
+
+
+def _route_for(
+    db: Session, workspace_id: str, platform: str, explicit_target: Optional[str],
+) -> Optional[_Route]:
+    """The route for ``platform`` in the workspace, or None when not connected."""
+    loaded = _load_connection(db, workspace_id, platform)
+    if loaded is None:
+        legacy = _legacy_integration_config(db, workspace_id, platform)
+        if legacy is None:
+            return None
+        connection_id, config, metadata = LEGACY_CONNECTION_ID, legacy, {}
+    else:
+        connection_id, config, metadata = loaded
+    target = _resolve_target(
+        db=db,
+        workspace_id=workspace_id,
+        platform=platform,
+        metadata=metadata,
+        explicit_target=explicit_target,
+    )
+    return _Route(connection_id=connection_id, config=config, target=target)
+
+
+def _driver_kwargs(driver: ChannelDriver, route: _Route, workspace_id: str, text: str, notice: ChannelNotice) -> dict:
+    """The driver's ``send`` arguments, with the AI notice where the driver wants it.
+
+    A person-facing driver gets the notice as the text's first paragraph. A
+    driver whose receiver is a system (``AI_NOTICE_IN_PAYLOAD``, the generic
+    webhook) gets it as the ``ai_disclosure`` payload field instead.
+    """
+    kwargs = {"workspace_id": workspace_id, "config": route.config, "target": route.target}
+    if driver.AI_NOTICE_IN_PAYLOAD:
+        return {**kwargs, "text": text, "ai_disclosure": notice.text}
+    return {**kwargs, "text": notice.apply(text)}
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -160,6 +216,7 @@ async def send_to_channel(
     platform: str,
     text: str,
     target: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
 ) -> SendResult:
     """Send ``text`` to the workspace's connected ``platform``.
 
@@ -168,48 +225,37 @@ async def send_to_channel(
     ``target`` overrides the row's default destination. Most callers
     leave it None and let the sender pick from row metadata / legacy
     integrations.
+
+    The driver path's one outbound point (PRD-264 EUAI-03): the message
+    carries "AI assistant for {principal}." on first contact with the target,
+    after the idle gap, and when ``in_reply_to`` (the message being answered)
+    asks whether it is a human. Nothing else calls a driver's ``send``.
     """
     ws_str = str(workspace_id)
 
     try:
-        driver_cls = get_driver(platform)
+        driver = get_driver(platform)()
     except UnknownPlatform as exc:
         return SendResult(ok=False, latency_ms=0, error=str(exc), retryable=False)
-    driver = driver_cls()
 
-    loaded = _load_connection(db, ws_str, platform)
-    if loaded is None:
-        legacy = _legacy_integration_config(db, ws_str, platform)
-        if legacy is None:
-            return SendResult(
-                ok=False,
-                latency_ms=0,
-                error=(
-                    f"No {platform} channel connected for this workspace. "
-                    f"Connect one under Settings → Channels."
-                ),
-                retryable=False,
-            )
-        config: dict = legacy
-        metadata: dict = {}
-    else:
-        _, config, metadata = loaded
-
-    resolved_target = _resolve_target(
-        db=db,
-        workspace_id=ws_str,
-        platform=platform,
-        metadata=metadata,
-        explicit_target=target,
-    )
-
-    try:
-        return await driver.send(
-            workspace_id=ws_str,
-            config=config,
-            target=resolved_target,
-            text=text,
+    route = _route_for(db, ws_str, platform, target)
+    if route is None:
+        return SendResult(
+            ok=False,
+            latency_ms=0,
+            error=(
+                f"No {platform} channel connected for this workspace. "
+                f"Connect one under Settings → Channels."
+            ),
+            retryable=False,
         )
+
+    notice = await notice_for(
+        db, workspace_id=ws_str, connection_id=route.connection_id,
+        person_id=route.target or "", inbound_text=in_reply_to,
+    )
+    try:
+        result = await driver.send(**_driver_kwargs(driver, route, ws_str, text, notice))
     except Exception as exc:  # noqa: BLE001 — never raise to caller
         logger.exception(
             "channel sender: driver %s.send raised for ws=%s", platform, ws_str,
@@ -218,3 +264,6 @@ async def send_to_channel(
             ok=False, latency_ms=0,
             error=f"driver {platform!r} raised: {exc}", retryable=True,
         )
+    if result.ok:
+        await record_notice_sent(notice)
+    return result

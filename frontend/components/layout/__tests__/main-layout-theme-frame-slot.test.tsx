@@ -35,12 +35,13 @@ vi.mock('@/components/ui/sheet', () => ({
 // A desktop width, in the Studio style (the core's chrome, not another style's frame).
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMobile: () => false }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useActiveTheme: () => theme.entry, useThemeLayout: () => theme.layout }))
-vi.mock('@/components/theme-host/theme-host-context', () => ({ useThemeHost: () => host.current }))
-// Builtin Play's frame (play-frame.test.tsx renders the real one through MainLayout).
-vi.mock('@/components/play/shell/play-frame-lazy', () => ({
+// Builtin Play's frame behind its lazy slot (play-frame.test.tsx renders the real one through
+// MainLayout); it arrives a moment after the first render (findBy*).
+vi.mock('@/components/play/shell/play-frame', () => ({
   PlayFrame: ({ children }: { children?: React.ReactNode }) => <section data-testid="play-frame">{children}</section>,
 }))
 
+import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
 import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
 import type { FrameProps } from '@/lib/theme-host/types'
 
@@ -49,12 +50,18 @@ import { MainLayout } from '../main-layout'
 /** An installed theme's entry, once the registry has one (A-02c): the theme layout, no builtin frame. */
 const INSTALLED_ENTRY: ThemeEntry = { ...BUILTIN_PLAY_ENTRY, ref: 'install:00000000-0000-4000-8000-00000000e2e1', kind: 'installed' }
 
-function renderPage() {
-  return render(
-    <MainLayout>
+/** MainLayout under the theme host's current value (none: no provider, as in an isolated mount). */
+function renderLayout(props: { fullBleed?: boolean } = {}) {
+  const layout = (
+    <MainLayout {...props}>
       <div data-testid="page" />
-    </MainLayout>,
+    </MainLayout>
   )
+  return render(host.current === null ? layout : <ThemeHostContext.Provider value={host.current}>{layout}</ThemeHostContext.Provider>)
+}
+
+function renderPage() {
+  return renderLayout()
 }
 
 function HelloFrame({ children }: { children?: React.ReactNode }) {
@@ -79,32 +86,20 @@ afterEach(() => {
 
 describe('MainLayout at desktop width in the Studio style, through the theme frame slot', () => {
   it('draws the Studio shell with no theme host', () => {
-    const { container } = render(
-      <MainLayout>
-        <div data-testid="page" />
-      </MainLayout>,
-    )
+    const { container } = renderPage()
     expect(container.querySelector('.sh-shell.safe-bottom')).not.toBeNull()
     expect(screen.queryByTestId('theme-frame')).toBeNull()
   })
 
   it('keeps the full-bleed main for fullBleed pages', () => {
-    const { container } = render(
-      <MainLayout fullBleed>
-        <div data-testid="page" />
-      </MainLayout>,
-    )
+    const { container } = renderLayout({ fullBleed: true })
     const main = container.querySelector('.sh-shell main.sh-fullbleed')
     expect(main).not.toBeNull()
     expect(main!.querySelector('[data-testid="page"]')).not.toBeNull()
   })
 
   it('keeps the padded main and its max-width wrapper for framed pages', () => {
-    const { container } = render(
-      <MainLayout>
-        <div data-testid="page" />
-      </MainLayout>,
-    )
+    const { container } = renderPage()
     const main = container.querySelector('.sh-shell main')
     expect(main?.className).toContain('px-4')
     expect(main?.querySelector('.max-w-\\[1720px\\] [data-testid="page"]')).not.toBeNull()
@@ -112,22 +107,14 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
 
   it("draws the active theme's frame around the page instead of the shell", () => {
     host.current = { status: 'active', reason: null, frame: HelloFrame, slots: null, reportRenderFailure: vi.fn() }
-    const { container } = render(
-      <MainLayout>
-        <div data-testid="page" />
-      </MainLayout>,
-    )
+    const { container } = renderPage()
     expect(screen.getByTestId('theme-frame')).toContainElement(screen.getByTestId('page'))
     expect(container.querySelector('.sh-shell')).toBeNull()
   })
 
   it("hands the active theme's frame the full-bleed flag and Auto's widget", () => {
     host.current = { status: 'active', reason: null, frame: PropsFrame, slots: null, reportRenderFailure: vi.fn() }
-    render(
-      <MainLayout fullBleed>
-        <div data-testid="page" />
-      </MainLayout>,
-    )
+    renderLayout({ fullBleed: true })
     const frame = screen.getByTestId('theme-frame')
     expect(frame).toHaveAttribute('data-full-bleed', 'true')
     expect(frame).toContainElement(screen.getByTestId('auto-widget'))
@@ -156,11 +143,36 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
     expect(container.innerHTML).toBe('')
   })
 
-  it("draws builtin Play's frame under Play at the theme layout, and not the slot's", () => {
+  it("draws builtin Play's frame under Play at the theme layout, and not the slot's", async () => {
     theme.entry = BUILTIN_PLAY_ENTRY
     theme.layout = 'theme'
     renderPage()
-    expect(screen.getByTestId('play-frame')).toContainElement(screen.getByTestId('page'))
+    expect(await screen.findByTestId('play-frame')).toContainElement(screen.getByTestId('page'))
     expect(screen.queryByTestId('theme-frame')).toBeNull()
+  })
+
+  it("draws builtin Play's frame through the frame slot: the page inside it keeps its own boundary", async () => {
+    theme.entry = BUILTIN_PLAY_ENTRY
+    theme.layout = 'theme'
+    const { container } = renderPage()
+    // The frame slot's own page boundary adds no element: the page sits directly in the frame.
+    const frame = await screen.findByTestId('play-frame')
+    expect(screen.getByTestId('page').parentElement).toBe(frame)
+    expect(container.querySelector('.sh-shell')).toBeNull()
+  })
+
+  it("draws the Studio shell, never Play's frame, under Play below its width", () => {
+    theme.entry = BUILTIN_PLAY_ENTRY
+    theme.layout = 'fallback'
+    const { container } = renderPage()
+    expect(container.querySelector('.sh-shell.safe-bottom')).not.toBeNull()
+    expect(screen.queryByTestId('play-frame')).toBeNull()
+  })
+
+  it("draws nothing under Play while the width is not known (M69)", () => {
+    theme.entry = BUILTIN_PLAY_ENTRY
+    theme.layout = 'pending'
+    const { container } = renderPage()
+    expect(container.innerHTML).toBe('')
   })
 })

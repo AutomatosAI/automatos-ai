@@ -56,17 +56,27 @@ function useWorkspaceRetry(failed: boolean, refreshWorkspace: (() => Promise<voi
   }, [queryClient, failed, refreshWorkspace])
 }
 
-function useAccountScope(): string | null {
+function useAccountScope(enabled: boolean): string | null {
   const workspaceCtx = useWorkspaceOptional()
   const { user, isLoaded, isSignedIn } = useUser()
-  const signedIn = isLoaded && isSignedIn === true
+  const signedIn = enabled && isLoaded && isSignedIn === true
   useWorkspaceRetry(signedIn && workspaceFailed(workspaceCtx), workspaceCtx?.refreshWorkspace)
   if (!signedIn) return null
   if (workspaceCtx !== null && (workspaceCtx.isLoading || workspaceCtx.workspace === null)) return null
   return lookScope(workspaceCtx?.workspace?.id, user?.id)
 }
 
-export function AccountLookScope({ children }: { readonly children: ReactNode }) {
-  const scope = useAccountScope()
+export interface AccountLookScopeProps {
+  readonly children: ReactNode
+  /**
+   * PRD-261 A-13c: false while the active theme has no look runtime (Classic, Studio): no scope, so
+   * nothing below reads looks. The host keeps this mounted either way, so a style switched in place
+   * never changes the tree above the page (M69); it only flips this.
+   */
+  readonly enabled?: boolean
+}
+
+export function AccountLookScope({ children, enabled = true }: AccountLookScopeProps) {
+  const scope = useAccountScope(enabled)
   return <LookScopeContext.Provider value={scope}>{children}</LookScopeContext.Provider>
 }

@@ -84,7 +84,11 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
     (chat 32bb645f); it now says today's date. F337 (night 10): in the workspace's
     zone (``today``, from :func:`todays_line_off_loop`) as the full path's
     DatetimeContextSection does, so late on a Sunday in London is Monday, not UTC's
-    Sunday; UTC without one. The greeting stays on the UTC hour."""
+    Sunday; UTC without one. The greeting stays on the UTC hour. PRD-264 EUAI-11a: it ends with
+    the platform rule that the agent answers truthfully that it is an AI, after the persona, so
+    a persona can't remove it. The workspace's public name is not known on this path, so the rule
+    names no one (FR-15)."""
+    from modules.context.ai_identity_rule import with_ai_identity_rule
     from services.brief_facts import AUTO_OWNER_RULES
     from services.todays_date import today_line
 
@@ -94,7 +98,7 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
     facts_block = f"\n\n{facts}\n" if facts else ""
     # F322 and F327 (night 9b): the owner's turns, not a widget visitor's, carry Auto's rules on their facts.
     owner_block = f"\n\n## What I Avoid\n{AUTO_OWNER_RULES}\n" if facts else ""
-    return (
+    prompt = (
         f"You are {metadata.name}, an AI assistant on the Automatos platform.\n\n"
         f"{time_of_day()}. {today or today_line(None, None)}{identity} "
         "Read the conversation and match the user's energy. "
@@ -109,6 +113,7 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
         f"{owner_block}"
         f"{memory_block}"
     )
+    return with_ai_identity_rule(prompt, None)
 
 
 async def resolve_atom_attachments(db: Any, llm_messages: List[Dict[str, Any]], attachment_ids: List[str], *,

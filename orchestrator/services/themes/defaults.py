@@ -12,9 +12,17 @@ The answer's shape is the one the host reads (``frontend/lib/theme-host/manifest
 ``parseActiveInstall``: ``theme.installId``, ``theme.digest``, ``theme.manifest``)::
 
     {"choice": "classic" | "studio" | "builtin:play" | "<installId>",
-     "theme": null | {installId, themeId, packageId, version, digest, manifest, reviewed,
-                      optIn: {required, wording, packageId}, revoked: null | {level, reason},
+     "source": "choice" | "default" | "fallback",
+     "theme": null | {installId, themeId, packageId, version, digest, manifest, defaultLook,
+                      reviewed, optIn: {required, wording, packageId}, revoked: null | {level, reason},
                       needsUpdate, integrity: {url: "sha256-<base64>"}}}
+
+``source`` says where ``choice`` came from: the member's stored choice, the workspace default
+(no usable stored choice, or members may not choose), or Studio for neither. A tab with a
+cookie-only pick (made before PA-12) stores it when the answer is not the member's own
+(``frontend/lib/theme-host/choice-sync.ts``), so a later workspace default never overrides it.
+``defaultLook`` is the preset the host loads first (``looks.package_default_look``): a package
+manifest names its files by the fixed layout (``package.py`` ``FILE_KINDS``), not by path.
 
 A ``disable`` revocation answers the theme's base (``studio`` or ``classic``) with no theme,
 plus a top-level ``revoked`` naming the install, so the host can say why.
@@ -45,6 +53,7 @@ from services.themes.choices import (
 )
 from services.themes.contract import THEME_BASES
 from services.themes.drift import needs_update
+from services.themes.looks import package_default_look
 from services.themes.optin import opt_in_state
 from services.themes.revocations import disables, revocation_body, revocation_of
 from services.themes.serve import module_integrity
@@ -53,6 +62,10 @@ logger = logging.getLogger(__name__)
 
 PRIVATE_DEFAULT = "An unreviewed theme can't be the workspace default: members would run its code without saying yes."
 WITHDRAWN = "That theme version was withdrawn, so it can't be used."
+# Where the active answer's choice came from (the module docstring).
+SOURCE_CHOICE = "choice"
+SOURCE_DEFAULT = "default"
+SOURCE_FALLBACK = "fallback"
 
 
 def can_be_default(package: ThemePackage) -> bool:
@@ -77,6 +90,7 @@ def theme_payload(
         "version": package.version,
         "digest": package.digest,
         "manifest": manifest,
+        "defaultLook": package_default_look(package),
         "reviewed": bool(package.reviewed),
         "optIn": opt_in_state(db, workspace_id, user_pk, package),
         "revoked": revocation_body(revocation_of(db, package)),
@@ -105,29 +119,34 @@ def default_install(db: Session, workspace_id: UUID) -> Optional[ThemeInstallati
     return row
 
 
-def _pick(db: Session, workspace_id: UUID, choice: Optional[str]) -> Tuple[str, Optional[ThemeInstallation]]:
+def _pick(
+    db: Session, workspace_id: UUID, choice: Optional[str],
+) -> Tuple[str, Optional[ThemeInstallation], str]:
+    """The choice, its install (None for a plain or builtin one) and where it came from."""
     if choice in PLAIN_CHOICES or choice in BUILTIN_CHOICES:
-        return choice, None
+        return choice, None, SOURCE_CHOICE
     install_id = install_id_of(choice)
     install = None if install_id is None else find_active_install(db, workspace_id, install_id)
     if install is not None:
-        return choice, install
+        return choice, install, SOURCE_CHOICE
     fallback = default_install(db, workspace_id)
-    return (str(fallback.id), fallback) if fallback is not None else (FALLBACK_CHOICE, None)
+    if fallback is not None:
+        return str(fallback.id), fallback, SOURCE_DEFAULT
+    return FALLBACK_CHOICE, None, SOURCE_FALLBACK
 
 
 def resolve_active(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> Dict[str, Any]:
     """What this member sees: their choice, else the workspace default, else Studio."""
     choice = stored_choice(db, workspace_id, user_pk) if members_may_choose(db, workspace_id) else None
-    picked, install = _pick(db, workspace_id, choice)
+    picked, install, source = _pick(db, workspace_id, choice)
     if install is None:
-        return {"choice": picked, "theme": None}
+        return {"choice": picked, "source": source, "theme": None}
     package = db.get(ThemePackage, install.package_id)
     revocation = revocation_of(db, package)
     if disables(revocation):
         revoked = {"installId": str(install.id), **revocation_body(revocation)}
-        return {"choice": _base_of(package), "theme": None, "revoked": revoked}
-    return {"choice": picked, "theme": theme_payload(db, workspace_id, user_pk, install, package)}
+        return {"choice": _base_of(package), "source": source, "theme": None, "revoked": revoked}
+    return {"choice": picked, "source": source, "theme": theme_payload(db, workspace_id, user_pk, install, package)}
 
 
 def _clear_default(db: Session, workspace_id: UUID) -> None:

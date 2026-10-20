@@ -10,6 +10,38 @@ never duplicated here.
 from .action_registry import ActionDefinition, ActionRegistry
 
 
+def _get_widget_config_parameters() -> dict:
+    """platform_get_widget_config takes no arguments (a fresh dict per call)."""
+    return {
+        "type": "object",
+        "properties": {},
+    }
+
+
+def _update_widget_config_parameters() -> dict:
+    """platform_update_widget_config: one whitelisted key and its config object (a fresh dict per call)."""
+    return {
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string",
+                "description": (
+                    "The widget-config key to set — one of the public whitelist "
+                    "(currently 'widget_proactive', 'cart_idle', 'callback', "
+                    "'ai_disclosure'; platform_get_widget_config returns the live "
+                    "list). 'ai_disclosure' takes only {'line': ...}, which must "
+                    "say it is an AI; the AI badge is fixed."
+                ),
+            },
+            "config": {
+                "type": "object",
+                "description": "The config object to store under that key (e.g. {'enabled': true, 'idle_seconds': 30}).",
+            },
+        },
+        "required": ["key", "config"],
+    }
+
+
 def register_widgets_actions(registry: ActionRegistry) -> None:
     """Register the widget-config platform tools."""
 
@@ -23,10 +55,7 @@ def register_widgets_actions(registry: ActionRegistry) -> None:
             "why the widget is (not) doing something on the merchant's site."
         ),
         category="widgets",
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
+        parameters=_get_widget_config_parameters(),
         permission_level="read",
         requires_confirmation=False,
         tags=["widgets", "configuration", "setup", "site"],
@@ -47,24 +76,7 @@ def register_widgets_actions(registry: ActionRegistry) -> None:
             "on its next config fetch."
         ),
         category="widgets",
-        parameters={
-            "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string",
-                    "description": (
-                        "The widget-config key to set — one of the public whitelist "
-                        "(currently 'widget_proactive', 'cart_idle', 'callback'; "
-                        "platform_get_widget_config returns the live list)."
-                    ),
-                },
-                "config": {
-                    "type": "object",
-                    "description": "The config object to store under that key (e.g. {'enabled': true, 'idle_seconds': 30}).",
-                },
-            },
-            "required": ["key", "config"],
-        },
+        parameters=_update_widget_config_parameters(),
         permission_level="write",
         requires_confirmation=False,
         tags=["widgets", "configuration", "setup", "site"],

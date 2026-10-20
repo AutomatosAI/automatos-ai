@@ -248,7 +248,7 @@ def _arm_socket(monkeypatch, stream, ack_seconds: float) -> list:
     """Patch the route around ``stream``; return the list record_voice_turn calls land in."""
     import api.voice_retell as vr
     from config import config as app_config
-    from modules.voice import telemetry
+    from modules.voice import ai_notice, telemetry
 
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = ("minted",)
@@ -265,6 +265,9 @@ def _arm_socket(monkeypatch, stream, ack_seconds: float) -> list:
     monkeypatch.setattr(telemetry, "record_voice_turn", lambda **kw: recorded.append(kw))
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", ack_seconds)
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment.")
+    # The call's first socket, not a reconnect: no PRD-264 AI reminder frame
+    # comes before Auto's own (the timings below count frames).
+    monkeypatch.setattr(ai_notice, "_mark_socket_open_sync", lambda call_id: False)
     return recorded
 
 

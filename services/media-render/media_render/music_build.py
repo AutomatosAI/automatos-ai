@@ -1,16 +1,24 @@
 """The music library's build step (PRD-251 S1.6): fetch, verify, analyse.
 
-    python media_render/music_build.py music/manifest.json /opt/media-render/music
+    python media_render/music_build.py music/manifest.json /opt/media-render/music [--tracks DIR]
+    python media_render/music_build.py music/manifest.json /music --fetch-only
 
-The Dockerfile runs it once, while the image builds:
+The Dockerfile runs it twice while the image builds (PRD-262 US-053). Its
+assets-fetch stage fetches and verifies every track into the media assets
+image's layout (``--fetch-only``: steps 1 and 2 only, no analysis, no manifest).
+Its music stage then builds the library from those files (``--tracks``), which
+come from the media assets image once the Dockerfile reads it, and verifies
+every one again:
 
 1. The source manifest (``music/manifest.json``, committed) is checked: every
    track has an id, a title, an artist, a licence this library takes (CC0 1.0
    or CC BY 4.0), an attribution line naming the title and the artist (and the
    licence, when the licence asks for credit), an https source URL and a sha256.
-2. Every track is fetched from its URL and its sha256 compared with the
-   manifest's. A mismatch fails the build: no audio file is committed to git,
-   so the hash is what pins the bytes, as ``kokoro/SHA256SUMS`` pins Kokoro's.
+2. Every track is fetched from its URL, or copied from the ``--tracks``
+   directory (``<id>.<ext>``, as the library names it), and its sha256 compared
+   with the manifest's. A mismatch fails the build: no audio file is committed
+   to git, so the hash is what pins the bytes, as ``kokoro/SHA256SUMS`` pins
+   Kokoro's.
 3. Every track is decoded by ffmpeg (mono, 22.05 kHz) and analysed with numpy
    in 0.1 s frames: the loudness (RMS, dBFS), the energy below 150 Hz (the kick
    and the bass) and the 300-3,000 Hz share of the energy (vocals, chops). The
@@ -40,6 +48,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -276,6 +285,29 @@ def fetch(
     raise MusicBuildError(f"{url}: could not be fetched ({attempts} attempts): {last}")
 
 
+def copy_track(source: Path, target: Path) -> str:
+    """Copy a track the build was handed (``--tracks``) to ``target``: the sha256 of the copy.
+
+    A source that already is the target is left as it is and only read.
+    """
+    if not source.is_file():
+        raise MusicBuildError(f"{source}: no such track among the files the build was given")
+    if not (target.exists() and source.resolve() == target.resolve()):
+        shutil.copyfile(source, target)
+    digest = hashlib.sha256()
+    with target.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(FETCH_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def obtain(entry: Mapping[str, Any], target: Path, *, tracks_dir: Optional[Path], opener: Optional[Opener]) -> str:
+    """The track at ``target``, fetched from its URL or copied from ``tracks_dir``: the sha256 of the bytes."""
+    if tracks_dir is None:
+        return fetch(entry["url"], target, opener=opener)
+    return copy_track(tracks_dir / track_file(entry), target)
+
+
 def verify(track_id: str, expected: str, actual: str) -> None:
     """:class:`MusicBuildError` unless the download is the file the manifest pins."""
     if actual != expected:
@@ -505,14 +537,37 @@ def built_track(entry: Mapping[str, Any], file_name: str, analysed: Mapping[str,
     return track
 
 
-def build(source: Path, library: Path, *, ffmpeg: str = "ffmpeg", opener: Optional[Opener] = None) -> Dict[str, Any]:
-    """Fetch, verify and analyse every track of ``source`` into ``library``; the manifest written there."""
+def fetch_tracks(source: Path, directory: Path, *, opener: Optional[Opener] = None) -> List[str]:
+    """Fetch and verify every track of ``source`` into ``directory``, with no analysis: the files' names.
+
+    The Dockerfile's assets-fetch stage, which lays the tracks out as the media
+    assets image does (``/music/<id>.<ext>``) and has neither numpy nor ffmpeg.
+    """
+    entries = load_source(source)
+    directory.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        verify(entry["id"], entry["sha256"], fetch(entry["url"], directory / track_file(entry), opener=opener))
+    return [track_file(entry) for entry in entries]
+
+
+def build(
+    source: Path,
+    library: Path,
+    *,
+    ffmpeg: str = "ffmpeg",
+    opener: Optional[Opener] = None,
+    tracks_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Verify and analyse every track of ``source`` into ``library``; the manifest written there.
+
+    Each track is fetched from its URL, or copied from ``tracks_dir`` when given.
+    """
     entries = load_source(source)
     library.mkdir(parents=True, exist_ok=True)
     tracks = []
     for entry in entries:
         target = library / track_file(entry)
-        verify(entry["id"], entry["sha256"], fetch(entry["url"], target, opener=opener))
+        verify(entry["id"], entry["sha256"], obtain(entry, target, tracks_dir=tracks_dir, opener=opener))
         analysed = analyse(target, ffmpeg=ffmpeg)
         cues = analysed["cues"]
         print(
@@ -531,14 +586,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("source", type=Path, help="the committed manifest, music/manifest.json")
     parser.add_argument("library", type=Path, help="where the tracks and the built manifest go")
     parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--tracks", type=Path, help="take each track from this directory (<id>.<ext>) instead of its URL")
+    parser.add_argument("--fetch-only", action="store_true", help="fetch and verify the tracks into the library directory; no analysis")
     args = parser.parse_args(argv)
     try:
-        manifest = build(args.source, args.library, ffmpeg=args.ffmpeg)
+        manifest = _run(args)
     except MusicBuildError as exc:
         print(f"music library: {exc}", file=sys.stderr)
         return 1
     print(f"music library: {len(manifest['tracks'])} tracks in {args.library}")
     return 0
+
+
+def _run(args: argparse.Namespace) -> Dict[str, Any]:
+    """What main() was asked for: the library built, or (``--fetch-only``) the tracks fetched."""
+    if args.fetch_only:
+        return {"tracks": fetch_tracks(args.source, args.library)}
+    return build(args.source, args.library, ffmpeg=args.ffmpeg, tracks_dir=args.tracks)
 
 
 if __name__ == "__main__":

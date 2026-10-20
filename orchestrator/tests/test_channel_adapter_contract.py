@@ -774,6 +774,21 @@ def _install_handle_message_stubs(
     return installed
 
 
+def _with_ai_notice(monkeypatch):
+    """PRD-264 EUAI-03: a reply carries the AI notice on first contact.
+
+    Imported before the module stubs go in, so the notice module binds the real
+    ``modules.policy``. Redis is made unavailable (as in CI), which adds the
+    notice every time, and the adapter's workspace id is no UUID, so the notice
+    names no one. Returns the text the person must receive for ``reply``.
+    """
+    import channels.ai_notice as ai_notice
+    from modules.policy.ai_disclosure import channel_notice, prepend_notice
+
+    monkeypatch.setattr(ai_notice, "_get_redis", lambda: None)
+    return lambda reply: prepend_notice(channel_notice(None), reply)
+
+
 def _restore_modules(installed: list[str], saved: dict[str, types.ModuleType | None]):
     """Remove module stubs we installed (or restore the originals if any)."""
     for name in installed:
@@ -791,6 +806,7 @@ class TestEndToEndHeartbeatShape:
         """The success path MUST emit (self.workspace_id, success=True)
         — never another workspace's id."""
         adapter = _make_test_adapter(workspace_id="ws-OWN", connection_id="conn-1")
+        noticed = _with_ai_notice(monkeypatch)
 
         # Stub the lazy imports performed inside handle_message.
         stub_decision = SimpleNamespace(agent_id="agent-1")
@@ -864,8 +880,9 @@ class TestEndToEndHeartbeatShape:
             assert success_emitted is True, (
                 "clean pipeline traversal MUST emit success=True"
             )
-            # The adapter MUST have sent the reply to the channel.
-            assert adapter.sent == [("c-1", "reply")]
+            # The adapter MUST have sent the reply to the channel, with the AI
+            # notice first (PRD-264 EUAI-03).
+            assert adapter.sent == [("c-1", noticed("reply"))]
         finally:
             _restore_modules(installed, saved)
 
@@ -939,6 +956,7 @@ class TestEndToEndHeartbeatShape:
         adapter MUST NOT propagate a heartbeat failure to the platform.
         """
         adapter = _make_test_adapter(workspace_id="ws-OWN", connection_id="conn-3")
+        noticed = _with_ai_notice(monkeypatch)
 
         stub_decision = SimpleNamespace(agent_id="agent-1")
 
@@ -985,8 +1003,8 @@ class TestEndToEndHeartbeatShape:
             }
             # Must NOT raise even though the heartbeat raised.
             asyncio.run(adapter.handle_message(platform_msg))
-            # Reply still went out.
-            assert adapter.sent == [("c-3", "reply")]
+            # Reply still went out, with the AI notice first.
+            assert adapter.sent == [("c-3", noticed("reply"))]
         finally:
             _restore_modules(installed, saved)
 

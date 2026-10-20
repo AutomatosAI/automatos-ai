@@ -57,24 +57,25 @@ async def publish_target(work: TargetWork, rt: Runtime, factory: Callable[[], An
     """One target, attempt by attempt, each attempt claimed and recorded; ``held``
     gains the target once this run has claimed it."""
     progress = TargetProgress()
+    label = work.context.ai_label  # PRD-264 EUAI-05: the AI label decision, kept on the receipt
     attempts = max(1, config.SOCIALS_MAX_TARGET_ATTEMPTS)
     for attempt in range(1, attempts + 1):
         if not await asyncio.to_thread(begin_attempt, factory, work.target_id):
             return  # published already, or another run holds it
         held.add(work.target_id)
         if work.error:  # nothing can run for it (a stale plan): it fails, and nothing is called
-            await asyncio.to_thread(fail_attempt, factory, work.target_id, work.error, ())
+            await asyncio.to_thread(fail_attempt, factory, work.target_id, work.error, (), ai_label=label)
             return
         try:
             remote_id, permalink = await run_steps(work.steps, work.context, rt, progress)
         except StepFailure as failure:
-            await asyncio.to_thread(fail_attempt, factory, work.target_id, failure.message, progress.notes)
+            await asyncio.to_thread(fail_attempt, factory, work.target_id, failure.message, progress.notes, ai_label=label)
             if not failure.transient or attempt == attempts:
                 return
             logger.info("[Socials] target %s: transient failure, attempt %s of %s", work.target_id, attempt, attempts)
             await rt.sleep(config.SOCIALS_PUBLISH_RETRY_BACKOFF_SECONDS * attempt)
             continue
-        await asyncio.to_thread(record_published, factory, work.target_id, remote_id, permalink, progress.notes)
+        await asyncio.to_thread(record_published, factory, work.target_id, remote_id, permalink, progress.notes, ai_label=label)
         return
 
 

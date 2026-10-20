@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from media_render.voices_build import load_catalogue
+
 TOKEN = "t0ken-for-tests"
+# The voices a bundle or /tts may name: the catalogue, which the image's voices
+# file holds exactly (PRD-262 US-052; test_image.py checks the file).
+VOICES = frozenset(load_catalogue())
 STORAGE = "https://media.example-storage.test/automatos/"
 
 PAGE = """<!doctype html>

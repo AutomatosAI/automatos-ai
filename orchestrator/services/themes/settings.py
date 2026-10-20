@@ -25,7 +25,9 @@ means every setting is at its default:
   needs the install permission above.
 
 The workspace default (``is_default``) is set by A-07b's ``PUT /api/themes/default``, which
-answers 409 for an unreviewed theme (Q6); the settings answer only reports it.
+answers 409 for an unreviewed theme (Q6); the settings answer only reports it. It also reports
+the platform switch ``THEMES_MARKETPLACE`` (``marketplace``: ``on|off``, C-04a's
+``listings.marketplace_switch``), so the Marketplace's Themes tab hides what the switch refuses.
 
 Tenancy: every read and write is scoped to the caller's workspace. Installs and packages are
 looked up through A-07b's ``services/themes/choices.py`` helpers, so another workspace's
@@ -59,6 +61,7 @@ from services.themes.choices import (
     active_installs,
     package_is_visible,
 )
+from services.themes.listings import marketplace_switch
 from services.themes.manifest import VERSION_PATTERN
 from services.themes.records import (
     PLATFORM_OFF,
@@ -214,6 +217,7 @@ def read_settings(db: Session, workspace_id: UUID, ctx: Any) -> Dict[str, Any]:
         "installRole": install_role_label(row),
         "installRoles": list(INSTALL_ROLE_CHOICES),
         "canInstall": install_refusal(db, ctx) is None,
+        "marketplace": marketplace_switch(),
         "defaultInstallId": None if default is None else str(default.id),
         "pins": [_pin_row(db, workspace_id, install) for install in installs],
         "updatedAt": None if row is None or row.updated_at is None else row.updated_at.isoformat(),

@@ -11,8 +11,9 @@
 - The lock's root entry is package.json's dependency lists, and every package in the
   lock is reachable from them: the lock was regenerated, not hand-edited.
 
-The built image is checked in CI: test.yml's prod-image-parity job lists the
-frontend image's @img packages and reads its sharp version.
+The build is checked in CI: test.yml's prod-image-parity job lists the @img
+packages in the frontend's builder stage and reads its sharp version. The runtime
+image carries no sharp since US-046 (test_prd262_frontend_standalone.py).
 
 Pure file reads: no npm, no network.
 """
@@ -190,7 +191,7 @@ def test_ci_checks_the_sharp_build_inside_the_frontend_image():
     parity = "\n".join(step.get("run", "") for step in steps)
     for needle in (
         """jq -r '.packages["node_modules/sharp"].version' frontend/package-lock.json""",
-        "ls node_modules/@img",
+        "docker run --rm parity-fe-builder sh -c 'ls node_modules/@img",
         "sharp-linux-*|sharp-libvips-linux-*)",
     ):
         assert needle in parity, needle

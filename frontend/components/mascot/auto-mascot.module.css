@@ -133,3 +133,38 @@
   font: var(--pl-text-mono);
   color: var(--pl-color-text-2);
 }
+
+/* PRD-261 A-13b (F10, WCAG 2.2.2): standing still, under the OS reduced-motion setting or while
+   the user has paused him, the ring stops pulsing too. Here, not only in app/play-theme.css, so
+   the still holds wherever Auto is drawn. */
+.auto[data-motion="still"] .ring {
+  animation: none;
+}
+
+/* The Pause Auto control under him: the style sheet's toggle (components/looks/style). */
+.pause {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pl-space-2);
+  padding: 0 var(--pl-space-4);
+  border: 1px solid var(--pl-line-button);
+  border-radius: var(--pl-radius-button);
+  background: transparent;
+  color: var(--pl-color-text);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+.pause[aria-pressed="true"] {
+  border-color: var(--pl-color-text);
+  background: var(--pl-tint-selected);
+}
+
+/* Two bars, drawn by the page: no icon font, no image. */
+.pauseIcon {
+  width: 10px;
+  height: 12px;
+  border-left: 3px solid currentcolor;
+  border-right: 3px solid currentcolor;
+}

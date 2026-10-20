@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from helpers import bundle
+from helpers import VOICES, bundle
 from media_render.bundle import parse_bundle
 from media_render.jobs import DONE, PREPARING, QUEUED, JobStore, delete_files, job_json, reset_work_dir
 
@@ -20,7 +20,7 @@ class Clock:
 def test_a_job_is_replaced_never_changed(settings, tmp_path):
     clock = Clock()
     store = JobStore(tmp_path, clock)
-    job = store.create(parse_bundle(bundle(reference="post-9"), settings, {}))
+    job = store.create(parse_bundle(bundle(reference="post-9"), settings, {}, VOICES))
     assert job.status == PREPARING and job.dir == tmp_path / job.id and len(job.id) == 32
     queued = store.update(job.id, status=QUEUED)
     assert job.status == PREPARING and queued.status == QUEUED and store.get(job.id) is queued
@@ -38,8 +38,8 @@ def test_a_job_is_replaced_never_changed(settings, tmp_path):
 def test_the_active_count_is_the_services_or_one_workspaces(settings, tmp_path):
     """P251W1-RVW-4: admission counts one workspace's unfinished jobs apart from the rest."""
     store = JobStore(tmp_path, Clock())
-    ours = [store.create(parse_bundle(bundle("ws-a"), settings, {})) for _ in range(3)]
-    store.create(parse_bundle(bundle("ws-b"), settings, {}))
+    ours = [store.create(parse_bundle(bundle("ws-a"), settings, {}, VOICES)) for _ in range(3)]
+    store.create(parse_bundle(bundle("ws-b"), settings, {}, VOICES))
     store.update(ours[1].id, status=QUEUED)
     store.finish(ours[2].id, DONE)
     assert store.active_count() == 3
@@ -50,7 +50,7 @@ def test_the_active_count_is_the_services_or_one_workspaces(settings, tmp_path):
 def test_finished_jobs_expire_after_the_ttl(settings, tmp_path):
     clock = Clock()
     store = JobStore(tmp_path, clock)
-    parsed = parse_bundle(bundle(), settings, {})
+    parsed = parse_bundle(bundle(), settings, {}, VOICES)
     finished, running = store.create(parsed), store.create(parsed)
     finished.dir.mkdir()
     store.finish(finished.id, DONE)

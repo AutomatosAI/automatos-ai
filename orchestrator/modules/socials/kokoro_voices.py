@@ -7,6 +7,12 @@ The catalogue is the English voices of the ``voices-v1.0.bin`` media-render ship
 (``services/media-render/kokoro/SHA256SUMS`` pins the file); a British voice is spoken as
 ``en-gb``, an American one as ``en-us``. ``GET /api/socials/voices`` offers Kokoro with
 ``lists_voices: true``, and ``GET /api/socials/voices/kokoro`` lists this catalogue.
+
+media-render carries these voices alone (PRD-262 US-052): its build rewrites the voices
+file to the ids ``services/media-render/media_render/voices.json`` copies from
+``KOKORO_VOICES``, and it refuses any other voice, and any language but the two below.
+A voice added here goes into that file too; ``tests/test_prd262_media_render_voices.py``
+fails until it does.
 """
 from __future__ import annotations
 
