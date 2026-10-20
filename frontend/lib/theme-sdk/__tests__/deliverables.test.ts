@@ -96,6 +96,14 @@ describe('PRD-261 A-12a — the Deliverables hooks', () => {
     expect(lastCall('useDeliverable')).toEqual([null, false])
   })
 
+  it.each(['../../admin?x=1', 'd laptop', 'd/1', '', 'x'.repeat(129)])(
+    'useDeliverable(%j) leaves the host idle: a value that is not a Deliverable id is never asked for',
+    (id) => {
+      renderHook(() => useDeliverable(id, true))
+      expect(lastCall('useDeliverable')).toEqual([null, true])
+    },
+  )
+
   it("useFileDownload and useAuthenticatedBlobUrl are the host's, with the theme's arguments", () => {
     const { result: downloader } = renderHook(() => useFileDownload('Try again'))
     expect(lastCall('useApiFileDownload')).toEqual(['Try again'])

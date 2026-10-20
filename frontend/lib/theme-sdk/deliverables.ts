@@ -20,6 +20,7 @@ import {
   useDeliverables as useHostDeliverables,
   type FilterState,
 } from '@/hooks/use-deliverables-api'
+import { isDeliverableId } from '@/lib/chat/deliverables'
 import { TAB_LABELS, visibleDeliverableTabs as hostVisibleTabs } from '@/lib/deliverables/tabs'
 
 export { deliverableDownloadUrl, deliverableFilename, deliverableFileUrl, fileDownloadUrl } from '@/lib/deliverables/download'
@@ -164,9 +165,21 @@ export function useDeliverables(filters: DeliverableFilters = DEFAULT_FILTERS, o
   return useHostDeliverables(hostFilters(filters), options)
 }
 
-/** One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null. */
+/**
+ * The id the host may ask the backend for: a Deliverable id (the core's pattern, isDeliverableId),
+ * else null. A theme often hands over a ?deliverable= link's value as it came; one that is not an id
+ * ('../../admin?x=1') never becomes a request path.
+ */
+function askableId(id: unknown): string | null {
+  return typeof id === 'string' && isDeliverableId(id) ? id : null
+}
+
+/**
+ * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null,
+ * and for an id that is not a Deliverable's, which never reaches the backend.
+ */
 export function useDeliverable(id: string | null, includeContent = false): DeliverableQuery {
-  return useHostDeliverable(id, includeContent)
+  return useHostDeliverable(askableId(id), includeContent)
 }
 
 /** Downloads an API file with the caller's token; a failed download shows `failedMessage` as a notice. */

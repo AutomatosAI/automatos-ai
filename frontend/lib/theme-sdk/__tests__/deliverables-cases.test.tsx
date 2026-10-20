@@ -12,10 +12,10 @@
  * page of success: false read as a failure, the list asked again every refetchInterval ms, a card's
  * ?deliverable=<id> link) and of play-deliverable.test.tsx (the detail asked with include_content on
  * the wire, the ?deliverable= link and the backend's ?tab=outputs&deliverable= link opening the
- * theme's page with the deep link's sheet closed, the core page below the theme's width, and the
- * download URLs: a text file's raw route, a raw route as it is, the caller's token, the file's name,
- * the theme's own words when it fails). Their Play-rendering assertions move to the kit (B-05p,
- * B-05d), which lists these cases in `rehomed`.
+ * theme's page with the deep link's sheet closed, the core page below the theme's width, a value
+ * that is not an id never asked for, and the download URLs: a text file's raw route, a raw route as
+ * it is, the caller's token, the file's name, the theme's own words when it fails). Their
+ * Play-rendering assertions move to the kit (B-05p, B-05d), which lists these cases in `rehomed`.
  */
 import React, { useMemo, useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -61,19 +61,9 @@ vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
 }))
 
 import {
-  DELIVERABLE_FEED_FILTERS,
-  DELIVERABLE_PARAM,
-  DELIVERABLES_HREF,
-  deliverableDownloadUrl,
-  deliverableFilename,
-  HostLink,
-  useDeliverable,
-  useDeliverables,
-  useFileDownload,
-  useHostSearchParams,
-  type Deliverable,
-  type DeliverableListResponse,
-  type DeliverablesQuery,
+  DELIVERABLE_FEED_FILTERS, DELIVERABLE_PARAM, DELIVERABLES_HREF, deliverableDownloadUrl, deliverableFilename, HostLink,
+  useDeliverable, useDeliverables, useFileDownload, useHostSearchParams,
+  type Deliverable, type DeliverableListResponse, type DeliverablesQuery,
 } from '@automatos/theme-sdk'
 import DeliverablesLayout from '@/app/deliverables/layout'
 import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
@@ -98,6 +88,9 @@ const RAW_MD = '/api/workspaces/ws-1/files/raw?path=outputs%2Flaptop-shortlist.m
 const CONTENT_MD = '/api/workspaces/ws-1/files/content?path=outputs%2Flaptop-shortlist.md'
 const RAW_XLSX = '/api/workspaces/ws-1/files/raw?path=outputs%2Fbudget.xlsx'
 const BACKEND_WORDS = 'list failed: relation v_workspace_outputs does not exist'
+const OPENING = 'Opening'
+/** ?deliverable= values that are not a Deliverable id (isDeliverableId); the fixture's page hands them over as they came. */
+const NOT_AN_ID = ['../../admin?x=1', 'd laptop', 'd/1', 'x'.repeat(129)]
 
 /** What the fixture's list last handed its page, for the cases that read the query itself. */
 const seen = vi.hoisted(() => ({ list: null as unknown }))
@@ -187,7 +180,7 @@ function FixtureDeliverable({ id }: { readonly id: string }) {
   const { data } = useDeliverable(id, true)
   const { download } = useFileDownload(DOWNLOAD_FAILED)
   const deliverable = data?.success ? data.deliverable : null
-  if (deliverable === null) return <p role="status">Opening</p>
+  if (deliverable === null) return <p role="status">{OPENING}</p>
   const url = deliverableDownloadUrl(deliverable)
   return (
     <article>
@@ -341,6 +334,13 @@ describe('A-19e2 — the ?deliverable= link', () => {
       expect(screen.queryByTestId(CORE_PAGE)).toBeNull()
     },
   )
+
+  it.each(NOT_AN_ID)("?deliverable=%j reaches the theme's page as it came, and the SDK never asks the backend for it", async (id) => {
+    renderDeliverables(new URLSearchParams({ [DELIVERABLE_PARAM]: id }).toString())
+    expect(await screen.findByRole('status')).toHaveTextContent(OPENING)
+    await act(async () => undefined)
+    expect(api.request).not.toHaveBeenCalled()
+  })
 
   it("below the theme's width keeps the core page and its deep link, and the theme never asks for it", () => {
     state.layout = 'fallback'

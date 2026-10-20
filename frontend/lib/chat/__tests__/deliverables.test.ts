@@ -7,6 +7,8 @@
  *
  * - every assertion of components/play/chat/__tests__/deliverables.test.ts (all of it tests core);
  * - deliverableHref as the port guards pin it ('d-laptop', 'A_b-9', 'a b');
+ * - isDeliverableId on the ids lib/__tests__/prd261-port-deliverables.test.ts holds Play's copy to,
+ *   each one accepted or refused here by name, and kindOfFormat's format mapping;
  * - the card's link of components/play/chat/__tests__/play-chat-turn.test.tsx: a live tool-data
  *   part naming d-42 links '/deliverables?deliverable=d-42'.
  *
@@ -23,6 +25,8 @@ import {
   deliverableIdFromLink,
   deliverablesFromReceipts,
   deliverablesInPart,
+  isDeliverableId,
+  kindOfFormat,
   UNTITLED,
 } from '@/lib/chat/deliverables'
 import type { Receipt } from '@/types'
@@ -111,5 +115,32 @@ describe('deliverableFromToolData', () => {
     expect(deliverableFromToolData(made)).toEqual({ id: ID, title: 'Laptop shortlist', kind: 'image' })
     expect(deliverableFromToolData({ generated_document: { deliverable_id: '../../admin' } })).toBeNull()
     expect(deliverableFromToolData({ receipts: { receipts: [] } })).toBeNull()
+  })
+})
+
+describe('isDeliverableId: an id the core links to or opens (K8)', () => {
+  it('accepts letters, digits, - and _, from 1 to 128 of them', () => {
+    const accepted = ['d-laptop', 'A_b-9', 'd-42', 'x', ID, 'x'.repeat(128)]
+    expect(accepted.filter((id) => !isDeliverableId(id))).toEqual([])
+  })
+
+  it('refuses an empty id, spaces, a path, a query, a dot, a line break and anything over 128', () => {
+    const refused = ['', ' ', '  d-1', 'd laptop', 'd/1', '../../admin?x=1', '..', 'd.pdf', 'd-1?x=1', 'd-1#top', 'd-1\n', 'x'.repeat(129)]
+    expect(refused.filter(isDeliverableId)).toEqual([])
+  })
+})
+
+describe("kindOfFormat: the generated document's format as a shelf kind", () => {
+  it('reads the image and video formats as image and video, in any case', () => {
+    const images = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'PNG', 'Jpeg']
+    const videos = ['mp4', 'webm', 'mov', 'MP4', 'MoV']
+    expect(images.map(kindOfFormat)).toEqual(images.map(() => 'image'))
+    expect(videos.map(kindOfFormat)).toEqual(videos.map(() => 'video'))
+  })
+
+  it('files every other format, and none, as a document', () => {
+    const documents = ['pdf', 'docx', 'md', 'xlsx', 'html', 'mp3', 'png.exe', '']
+    expect(documents.map(kindOfFormat)).toEqual(documents.map(() => 'document'))
+    expect(kindOfFormat(null)).toBe('document')
   })
 })

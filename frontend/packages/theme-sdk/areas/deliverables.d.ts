@@ -121,7 +121,11 @@ export declare const DELIVERABLE_TAB_LABELS: Readonly<Record<DeliverableTab, str
 /** This workspace's Deliverables, a page at a time (every Deliverable when `filters` is omitted). */
 export declare function useDeliverables(filters?: DeliverableFilters, options?: DeliverablesOptions): DeliverablesQuery
 
-/** One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null. */
+/**
+ * One Deliverable; with `includeContent`, its text and its file's API path. Idle while `id` is null,
+ * and for an id that is not a Deliverable's (letters, digits, `-` and `_`, 1 to 128 of them): a
+ * ?deliverable= value handed over as it came that is not one never reaches the backend.
+ */
 export declare function useDeliverable(id: string | null, includeContent?: boolean): DeliverableQuery
 
 /** Downloads an API file with the caller's token; a failed download shows `failedMessage` as a notice. */
