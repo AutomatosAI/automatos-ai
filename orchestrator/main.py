@@ -90,6 +90,8 @@ from api.notifications import (  # PRD-128: Unified notification system
 from api.themes_import import router as themes_import_router
 from api.themes_install import router as themes_install_router
 from api.themes_files import router as themes_files_router
+# PRD-261 M-04: the theme as data for the phone (not named themes_*: B2-wire pins its five routers).
+from api.themes_mobile import router as mobile_theme_router
 from api.themes_looks import router as themes_looks_router
 from api.themes_settings import router as themes_settings_router
 from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
@@ -1283,6 +1285,7 @@ app.include_router(notification_preferences_router)  # PRD-128: Notification pre
 app.include_router(themes_import_router)  # PRD-261 A-07a: POST /api/themes/import (private upload)
 app.include_router(themes_install_router)  # PRD-261 A-07b: installed, active, choice, opt-in, default, versions
 app.include_router(themes_files_router)  # PRD-261 A-08a: files by digest + boot data (membership, not ctx.workspace_id)
+app.include_router(mobile_theme_router)  # PRD-261 M-04: GET /api/themes/mobile/{install_id} (membership, like boot)
 app.include_router(themes_looks_router)  # PRD-261 A-09a: a member's own looks per theme
 app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme settings
 app.include_router(marketplace_themes_submit_router)  # PRD-261 C-01a: POST /api/marketplace/themes/submit
