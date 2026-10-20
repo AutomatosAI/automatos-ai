@@ -22,7 +22,7 @@ import { STYLE_HTML_CLASS_NAMES, styleHtmlClasses } from '@/lib/ui-style'
 import { parseThemeTone, sanitizeThemeBoot } from './boot-sanitize'
 import type { BuiltinThemeBootData, CookieReader, ThemeBoot, ThemeBootResolver, ThemeTone } from './boot-types'
 import { BUILTIN_PLAY_BOOT } from './builtin/play-boot'
-import { BUILTIN_PLAY_REF } from './builtin/play-entry'
+import { BUILTIN_PLAY_REF, runsPlayLooks } from './builtin/play-entry'
 import { findThemeEntry, isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeTonePolicy, UiStyle } from './registry-types'
 
@@ -107,10 +107,12 @@ const LOOK_TONE_COOKIE = PLAY_TONE_COOKIE
  * PRD-261 W-A6b (gap G2): an installed theme whose look sets the tone and whose boot names where
  * its look is kept starts on the tone its look last wrote to the tone cookie, as builtin Play's
  * boot does, so the first paint is already that tone. The cookie is read per request, after the
- * backend's boot (which the boot cache may hold) is answered.
+ * backend's boot (which the boot cache may hold) is answered. Only a theme the look runtime runs
+ * under (runsPlayLooks: Play's class) keeps that cookie; any other would start on Play's last tone
+ * and drop it after hydration, so its tone stays the user's.
  */
 function withLookTone(boot: ThemeBoot, readCookie: CookieReader): ThemeBoot {
-  if (boot.tone.policy !== 'from-look' || boot.lookStorage === null) return boot
+  if (boot.tone.policy !== 'from-look' || boot.lookStorage === null || !runsPlayLooks(boot.entry)) return boot
   return { ...boot, tone: { policy: boot.tone.policy, value: parseThemeTone(readCookie(LOOK_TONE_COOKIE)) } }
 }
 

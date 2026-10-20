@@ -28,6 +28,7 @@ import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
 import { STUDIO_HTML_CLASS, parseUiStyle, type UiStyle } from '@/lib/ui-style'
 
 import { cookieReader, runThemeBoot, runThemeBootScriptAlone } from './boot-harness'
+import { HELLO_PACKAGE_ENTRY, PLAY_PACKAGE_ENTRY } from './installed-entry-fixture'
 
 const INSTALL_STYLE: UiStyle = 'theme:install:0b7e4c1a-9f3d-4c2e-8a51-3d2f6b7a9c10'
 const NO_COOKIES = cookieReader()
@@ -221,13 +222,22 @@ describe("PRD-261 W-A6b (gap G2) — an installed theme's stored look and tone b
     expect(html().style.getPropertyValue(SAMPLE_VAR)).toBe(COLD)
   })
 
+  const resolve = (cookies: Record<string, string>, boot: ThemeBoot) => createThemeBootResolver(cookieReader(cookies), async () => boot)(INSTALL_STYLE)
+
   it("starts a 'from-look' installed boot that names its look keys on the tone cookie, strictly", async () => {
-    const resolve = (cookies: Record<string, string>, boot: ThemeBoot) => createThemeBootResolver(cookieReader(cookies), async () => boot)(INSTALL_STYLE)
-    const fromLook = installedBoot({ tone: FROM_LOOK })
+    // Play's package: the theme the look runtime runs under, which keeps the tone cookie.
+    const fromLook = installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY })
     expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, fromLook)).tone).toEqual({ policy: 'from-look', value: 'light' })
     expect((await resolve({ [PLAY_TONE_COOKIE]: 'bogus' }, fromLook)).tone.value).toBeNull()
     expect((await resolve({}, fromLook)).tone.value).toBeNull()
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot({ tone: FROM_LOOK, lookStorage: null }))).tone.value).toBeNull()
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY, lookStorage: null }))).tone.value).toBeNull()
     expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot())).tone).toEqual({ policy: 'user', value: null })
+  })
+
+  it("leaves a 'from-look' installed boot whose class isn't Play's, or that carries no entry, off the tone cookie", async () => {
+    const acme = { ...HELLO_PACKAGE_ENTRY, tone: 'from-look' as const }
+    expect(acme.htmlClass).not.toBe(BUILTIN_PLAY_HTML_CLASS)
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'dark' }, installedBoot({ tone: FROM_LOOK, entry: acme }))).tone).toEqual(FROM_LOOK)
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'dark' }, installedBoot({ tone: FROM_LOOK, entry: null }))).tone).toEqual(FROM_LOOK)
   })
 })

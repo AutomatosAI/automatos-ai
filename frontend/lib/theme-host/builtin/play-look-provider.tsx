@@ -19,7 +19,7 @@ import {
 import { toneOfGround, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
-import { BUILTIN_PLAY_HTML_CLASS } from './play-entry'
+import { runsPlayLooks } from './play-entry'
 import { LookRuntimeBridge } from './play-look-bridge'
 import { BUILTIN_PLAY_LOOK_THEME } from './play-look-keys'
 import { useLookStore, type LookStore } from './play-look-store'
@@ -156,7 +156,7 @@ interface RuntimeTheme {
  */
 function useRuntimeTheme(enabled: boolean): RuntimeTheme {
   const entry = useUiStyleOptional()?.activeTheme ?? null
-  const active = enabled && entry?.htmlClass === BUILTIN_PLAY_HTML_CLASS
+  const active = enabled && runsPlayLooks(entry)
   const themeId = active && entry?.kind === 'installed' ? entry.themeId ?? null : null
   return useMemo(() => {
     const theme = themeId === null ? undefined : installedLookTheme(themeId)
