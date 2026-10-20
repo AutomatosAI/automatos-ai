@@ -33,19 +33,32 @@ REDIS_PORT=6379
 ENVIRONMENT=development
 LOG_LEVEL=INFO
 
-# Run the wait-migrate-seed lifecycle (orchestrator/docker-entrypoint.sh)
-# before the app starts. The image default is off, so Railway and Kubernetes
-# app pods start the app directly; Kubernetes migrates in a separate Job.
+# Run the whole wait-migrate-seed lifecycle (orchestrator/docker-entrypoint.sh)
+# before the server starts: migrations, then the seed loader and the local
+# workspace and operator. Without it (Railway) the entrypoint only migrates;
+# AUTOMATOS_SKIP_MIGRATIONS=true (the Helm api pods, where a Job migrates) runs
+# none of it. One-off commands (`docker compose run backend <cmd>`) run neither.
 AUTOMATOS_MIGRATE_ON_BOOT=true
+
+# uvicorn's worker processes (PRD-262 US-029). uvicorn reads WEB_CONCURRENCY when
+# the command names no --workers; the production image defaults to 4 (Railway's).
+# One worker locally: one app import, one process's memory. A single process has
+# no manager, so a worker that dies ends the container, and restart:
+# unless-stopped brings it back. The development stage's --reload ignores it.
+WEB_CONCURRENCY=1
+
+# uvicorn reads every CLI option from UVICORN_<OPTION> (--timeout-graceful-shutdown
+# here). The browser's SSE streams (notifications, board events) never close, so
+# without a limit a stop or restart of the production stage waits for Docker's
+# 10 s kill. The development stage's CMD passes the same 5 s as a flag; the image
+# sets no limit, so Railway's shutdown is unchanged.
+UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=5
 
 # Stop a backend that has stopped serving (orchestrator/docker-entrypoint.sh,
 # F416): after 3 failed /health probes 30 s apart the server is stopped and the
 # container exits, so restart: unless-stopped brings it back. Docker alone never
 # restarts a container that is only unhealthy. Off in the image (Railway).
 AUTOMATOS_LIVENESS_WATCHDOG=true
-
-# Document conversion sidecar (compose profile: all) [ACTIVE]
-GOTENBERG_URL=http://gotenberg:3000
 
 # -----------------------------------------------------------------------------
 # Edition & auth [ACTIVE] — the ONE shipped flag (PRD-175)
@@ -69,6 +82,13 @@ CREDENTIAL_KEY_FILE=/app/data/.credential_key
 # re-processed from its source. Existing files move with
 # scripts/reingest_documents.py --move-uploads --apply.
 DOCUMENT_UPLOAD_DIR=/app/data/uploads
+
+# [ACTIVE] Generated documents, their thumbnails and the brand kit's files, on the
+# same volume (PRD-262 US-017). The code default `documents` is /app/documents, which
+# the source bind mount put in your checkout, so every source build sent them to
+# Docker. It is a cache: object storage (MinIO locally) keeps the persistent copy and
+# the app reads it back from there when the file is not on disk.
+DOCUMENT_STORAGE_DIR=/app/data/documents
 
 # [ACTIVE] The single local workspace every anonymous request resolves to.
 # This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
@@ -161,8 +181,9 @@ LOG_RELAY_URL=
 LOKI_URL=
 PROMETHEUS_URL=
 AGENT_OPT_WORKER_URL=
-# Observability (Loki/Prometheus/Grafana) is not part of this compose file — see the
-# automatos-monitoring repo; envs/observability.defaults documents the variables.
+# Observability (Loki/Prometheus/Grafana) is not part of this compose file; it lives in
+# the automatos-monitoring repo. To use a stack you run, set LOKI_URL and PROMETHEUS_URL
+# in envs/api.local.
 
 # PRD-234 Session mode (local edition only). Off by default; enable in .env:
 #   CLI_RUNTIME_ENABLED=true

@@ -1,7 +1,7 @@
 """F416 (night 14): a backend that stops serving ends its container, so it restarts.
 
 The nightly EdgeBuilder ran the backend out of memory; the kernel killed the
-uvicorn worker, and uvicorn's supervisor (``--reload``, as compose runs it)
+uvicorn worker, and uvicorn's supervisor (``--reload``, as compose ran it then)
 stayed up serving nothing. The container stayed "running" and unhealthy for
 ~5 h: Docker's ``restart: unless-stopped`` never applies to a container that is
 only unhealthy.
@@ -38,6 +38,7 @@ _ENTRYPOINT = _ORCH / "docker-entrypoint.sh"
 _HEALTHCHECK = _ORCH / "docker-healthcheck.sh"
 _DOCKERFILE = _ORCH / "Dockerfile"
 _COMPOSE = _REPO / "docker-compose.yml"
+_DEV_COMPOSE = _REPO / "docker-compose.dev.yml"
 _API_DEFAULTS = _REPO / "envs" / "api.defaults"
 
 _RUN_TIMEOUT_SECONDS = 30
@@ -241,8 +242,8 @@ def test_the_healthcheck_fails_when_nothing_serves():
 # --- the wiring: compose and the image run the same probe, and restart --------
 
 
-def _compose_backend() -> dict:
-    return yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["backend"]
+def _compose_backend(path: Path = _COMPOSE) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["services"]["backend"]
 
 
 def _seconds(value: str) -> int:
@@ -261,7 +262,11 @@ def test_compose_runs_the_probe_restarts_and_turns_the_watchdog_on():
     backend = _compose_backend()
     assert backend["restart"] == "unless-stopped"
     assert backend["healthcheck"]["test"] == ["CMD", "docker-healthcheck.sh"]
-    assert "./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro" in backend["volumes"]
+    # PRD-262 US-035: the default stack runs the image's own probe; `make dev` mounts the
+    # checkout's copy over it, so an edit to it applies without a rebuild.
+    mount = "./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro"
+    assert not any("docker-healthcheck.sh" in str(volume) for volume in backend["volumes"])
+    assert mount in _compose_backend(_DEV_COMPOSE)["volumes"]
     lines = _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
     assert "AUTOMATOS_LIVENESS_WATCHDOG=true" in lines
 
@@ -276,11 +281,15 @@ def test_the_watchdog_matches_compose_and_restarts_within_about_two_minutes():
     assert worst_case <= _RESTART_BUDGET_SECONDS
 
 
-def test_the_image_carries_the_probe_and_the_dev_server_replaces_its_shell():
+def test_the_image_carries_the_probe_and_both_servers_replace_their_shell():
     text = _DOCKERFILE.read_text(encoding="utf-8")
     assert text.count("COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh") == 2
     assert text.count("CMD docker-healthcheck.sh") == 2
     assert "curl -f http://localhost" not in text, "one probe, not a second copy"
     development = text.split("FROM base as development", 1)[1].split("FROM base as production", 1)[0]
-    cmd = next(line for line in development.splitlines() if line.startswith("CMD "))
-    assert "&& exec uvicorn" in cmd, "the watchdog and docker stop must signal uvicorn, not a shell"
+    production = text.split("FROM base as production", 1)[1]
+    for stage in (development, production):
+        cmd = next(line for line in stage.splitlines() if line.startswith("CMD "))
+        assert cmd.startswith("CMD exec uvicorn "), f"the watchdog and docker stop must signal uvicorn, not a shell: {cmd}"
+        # PRD-262 US-029: the entrypoint is the only owner of migrations.
+        assert "alembic" not in cmd, f"the CMD runs alembic, which the entrypoint already ran: {cmd}"

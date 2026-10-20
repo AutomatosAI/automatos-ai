@@ -1,0 +1,147 @@
+suite: Image references and pull policies (PRD-262 US-042)
+set:
+  existingSecret: automatos-secrets
+tests:
+  # The default: the chart's appVersion, edge, which moves with main. IfNotPresent would
+  # keep whichever edge a node pulled first, so every pod that runs an image pulls Always.
+  - it: pulls the API's edge Always
+    template: templates/api-deployment.yaml
+    chart:
+      appVersion: edge
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api:edge
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+  - it: pulls the migration Job's edge Always
+    template: templates/migrate-job.yaml
+    chart:
+      appVersion: edge
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api:edge
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+  - it: pulls the web app's edge Always
+    template: templates/frontend.yaml
+    documentIndex: 0
+    chart:
+      appVersion: edge
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-frontend:edge
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+  - it: pulls the worker's edge Always
+    template: templates/worker.yaml
+    documentIndex: 0
+    chart:
+      appVersion: edge
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-workspace-worker:edge
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+  - it: pulls a MAJOR.MINOR release line Always, because it moves too
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        image:
+          tag: "1.4"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api:1.4
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+
+  # A tag that never moves.
+  - it: pulls a sha tag IfNotPresent
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        image:
+          tag: sha-1a2b3c4
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api:sha-1a2b3c4
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+  - it: pulls an appVersion stamped at package time IfNotPresent
+    template: templates/worker.yaml
+    documentIndex: 0
+    chart:
+      appVersion: sha-1a2b3c4
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-workspace-worker:sha-1a2b3c4
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+
+  # A digest: the exact build, whatever the tag.
+  - it: renders repository@digest, over the tag, and pulls it IfNotPresent
+    template: templates/frontend.yaml
+    documentIndex: 0
+    chart:
+      appVersion: edge
+    set:
+      frontend:
+        image:
+          tag: edge
+          digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-frontend@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+  - it: runs the API's digest in the migration Job too
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        image:
+          digest: sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-api@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+  - it: fails clearly on a digest that is not sha256:<64 hex>
+    template: templates/worker.yaml
+    set:
+      worker:
+        image:
+          digest: "0123456789abcdef"
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.digest must be sha256:<64 hex digits>"
+
+  # The operator's choice wins.
+  - it: uses a pull policy that is set, whatever the tag
+    template: templates/api-deployment.yaml
+    chart:
+      appVersion: edge
+    set:
+      api:
+        image:
+          pullPolicy: Never
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Never

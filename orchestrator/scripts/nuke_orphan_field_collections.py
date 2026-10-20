@@ -33,61 +33,57 @@ guard_request_logs()  # no request URL or SDK request body in this script's logs
 logger = logging.getLogger("nuke-orphan-fields")
 
 
-async def main(dry_run: bool) -> int:
-    from config import config  # noqa: F401 — ensures env validation
-    from core.database.database import SessionLocal
-    from modules.context.adapters.vector_field import SHARED_COLLECTION
-    from qdrant_client import AsyncQdrantClient
+# The Qdrant this sweeps when config names none, and how many legacy drops between progress lines.
+DEFAULT_QDRANT_URL = "http://localhost:6333"
+PROGRESS_EVERY = 25
+# Exit codes: the node could not list its collections.
+EXIT_NO_LISTING = 2
 
-    qdrant_url = getattr(config, "QDRANT_URL", None) or "http://localhost:6333"
-    qdrant_api_key = getattr(config, "QDRANT_API_KEY", None) or None
 
-    client = AsyncQdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+async def _drop_collections(client, names: list) -> None:
+    """Drop each legacy collection; a failed one is logged and the rest still go."""
+    deleted = failures = 0
+    for name in names:
+        try:
+            await client.delete_collection(name)
+        except Exception as exc:  # one failed drop is counted and logged; the rest still go
+            failures += 1
+            logger.exception("Failed to delete %s: %s", name, exc)
+            continue
+        deleted += 1
+        if deleted % PROGRESS_EVERY == 0:
+            logger.info("Legacy drop progress: %d / %d", deleted, len(names))
+    logger.info("Legacy drop done — deleted=%d failures=%d", deleted, failures)
 
-    # ── Pass 1: legacy per-mission collections ────────────────────
+
+async def _drop_legacy_collections(client, shared: str, dry_run: bool) -> bool:
+    """Pass 1: the per-mission ``field_<uuid>`` collections (listed on a dry run, dropped
+    otherwise). False when the node can't list its collections."""
     try:
         collections_resp = await client.get_collections()
-    except Exception as exc:
-        logger.error("Failed to list Qdrant collections: %s", exc)
-        return 2
-
+    except Exception as exc:  # the run stops with EXIT_NO_LISTING and says why
+        logger.exception("Failed to list Qdrant collections: %s", exc)
+        return False
     legacy = sorted(
         c.name for c in collections_resp.collections
-        if c.name.startswith("field_") and c.name != SHARED_COLLECTION
+        if c.name.startswith("field_") and c.name != shared
     )
     logger.info("Legacy field_<uuid> collections: %d", len(legacy))
+    if dry_run:
+        for name in legacy:
+            print(name)
+    elif legacy:
+        await _drop_collections(client, legacy)
+    return True
 
-    if legacy:
-        if dry_run:
-            for name in legacy:
-                print(name)
-        else:
-            deleted = 0
-            failures = 0
-            for name in legacy:
-                try:
-                    await client.delete_collection(name)
-                    deleted += 1
-                    if deleted % 25 == 0:
-                        logger.info("Legacy drop progress: %d / %d", deleted, len(legacy))
-                except Exception as exc:
-                    failures += 1
-                    logger.warning("Failed to delete %s: %s", name, exc)
-            logger.info("Legacy drop done — deleted=%d failures=%d", deleted, failures)
 
-    # ── Pass 2: orphan points in the shared collection ────────────
-    try:
-        exists = await client.collection_exists(SHARED_COLLECTION)
-    except Exception:
-        exists = False
-
-    if not exists:
-        logger.info("Shared collection %s not present yet — nothing to sweep", SHARED_COLLECTION)
-        return 0
+def _referenced_field_ids() -> set:
+    """Every field_id an orchestration run still names."""
+    from core.database.database import SessionLocal
 
     db = SessionLocal()
     try:
-        referenced_ids = {
+        return {
             row[0] for row in db.execute(
                 text(
                     "SELECT config->>'field_id' FROM orchestration_runs "
@@ -99,41 +95,70 @@ async def main(dry_run: bool) -> int:
     finally:
         db.close()
 
-    logger.info("Referenced field_ids: %d", len(referenced_ids))
 
+async def _present_field_ids(client, shared: str) -> set:
+    """Every field_id with a point in the shared collection; none when the scroll fails."""
     try:
         scrolled, _ = await client.scroll(
-            collection_name=SHARED_COLLECTION,
+            collection_name=shared,
             limit=100000,
             with_payload=["field_id"],
             with_vectors=False,
         )
-    except Exception as exc:
-        logger.warning("Scroll on %s failed: %s", SHARED_COLLECTION, exc)
+    except Exception as exc:  # logged; the sweep then finds no orphan and deletes nothing
+        logger.exception("Scroll on %s failed: %s", shared, exc)
         scrolled = []
-
-    present_ids = {
+    return {
         p.payload.get("field_id") for p in scrolled
         if p.payload and p.payload.get("field_id")
     }
-    orphan_ids = sorted(present_ids - referenced_ids)
-    logger.info("Orphan field_ids in shared collection: %d", len(orphan_ids))
 
+
+async def _destroy_fields(orphan_ids: list) -> None:
+    """Delete every point of each orphan field through the field adapter."""
+    from modules.context.adapters.vector_field import VectorFieldSharedContext
+
+    adapter = VectorFieldSharedContext()
+    for fid in orphan_ids:
+        try:
+            await adapter.destroy_context(fid)
+        except Exception as exc:  # one failed field is logged; the sweep goes on
+            logger.exception("Failed to destroy orphan %s: %s", fid, exc)
+    logger.info("Orphan point sweep done — %d field_ids cleared", len(orphan_ids))
+
+
+async def _sweep_orphan_points(client, shared: str, dry_run: bool) -> None:
+    """Pass 2: the points in the shared collection whose field no orchestration run names."""
+    try:
+        exists = await client.collection_exists(shared)
+    except Exception:  # an unreachable collection is swept as an absent one, as before, and logged
+        logger.exception("collection_exists failed on %s", shared)
+        exists = False
+    if not exists:
+        logger.info("Shared collection %s not present yet — nothing to sweep", shared)
+        return
+    referenced_ids = _referenced_field_ids()
+    logger.info("Referenced field_ids: %d", len(referenced_ids))
+    orphan_ids = sorted(await _present_field_ids(client, shared) - referenced_ids)
+    logger.info("Orphan field_ids in shared collection: %d", len(orphan_ids))
     if dry_run:
         for fid in orphan_ids:
             print(f"orphan_field_id: {fid}")
-        return 0
+    elif orphan_ids:
+        await _destroy_fields(orphan_ids)
 
-    if orphan_ids:
-        from modules.context.adapters.vector_field import VectorFieldSharedContext
-        adapter = VectorFieldSharedContext()
-        for fid in orphan_ids:
-            try:
-                await adapter.destroy_context(fid)
-            except Exception as exc:
-                logger.warning("Failed to destroy orphan %s: %s", fid, exc)
-        logger.info("Orphan point sweep done — %d field_ids cleared", len(orphan_ids))
 
+async def main(dry_run: bool) -> int:
+    from config import config  # noqa: F401 — ensures env validation
+    from core.qdrant import QdrantRestClient
+    from modules.context.adapters.vector_field import SHARED_COLLECTION
+
+    qdrant_url = getattr(config, "QDRANT_URL", None) or DEFAULT_QDRANT_URL
+    qdrant_api_key = getattr(config, "QDRANT_API_KEY", None) or None
+    client = QdrantRestClient(url=qdrant_url, api_key=qdrant_api_key)
+    if not await _drop_legacy_collections(client, SHARED_COLLECTION, dry_run):
+        return EXIT_NO_LISTING
+    await _sweep_orphan_points(client, SHARED_COLLECTION, dry_run)
     return 0
 
 

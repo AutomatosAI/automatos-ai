@@ -272,17 +272,22 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     themes = (versions / "prd261_themes.py").read_text()
     assert 'down_revision = "prd258_voice_timings"' in themes
     # 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto prd261_themes — the HARNESS
-    # run table (harness_runs), a new table only; the guard follows it.
+    # run table (harness_runs), a new table only.
     harness_runs = (versions / "prd263_harness_runs.py").read_text()
     assert 'down_revision = "prd261_themes"' in harness_runs
     # 2026-10-19: auto_haiku_default_20261019 chains onto it — a data migration (the
-    # platform default for Auto becomes Haiku 5.5, the Auto rows on it move); the guard follows it.
+    # platform default for Auto becomes Haiku 5.5, the Auto rows on it move).
     haiku_default = (versions / "auto_haiku_default_20261019.py").read_text()
     assert 'down_revision = "prd263_harness_runs"' in haiku_default
-    # 2026-10-19 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto it — the HARNESS
+    # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
+    # main.py's per-boot ALTERs (futureagi_eval_enabled, skills.content_hash) become a
+    # revision.
+    boot_columns = (versions / "prd262_boot_columns.py").read_text()
+    assert 'down_revision = "auto_haiku_default_20261019"' in boot_columns
+    # 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto it — the HARNESS
     # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
     ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
-    assert 'down_revision = "auto_haiku_default_20261019"' in ledger_grants
+    assert 'down_revision = "prd262_boot_columns"' in ledger_grants
     assert 'EXPECTED_HEAD = "prd263_harness_ledger_grants"' in guard
 
 

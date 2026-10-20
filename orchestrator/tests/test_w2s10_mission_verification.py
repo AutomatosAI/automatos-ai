@@ -23,8 +23,6 @@ the deterministic layer already has a verdict (the cost guard).
 from __future__ import annotations
 
 import os
-import sys
-import types
 from uuid import uuid4
 
 # config import pulls Postgres env; seed harmless defaults. Nothing here
@@ -33,10 +31,6 @@ for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
     os.environ.setdefault(_k, "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
-
-# Defensive: some coordination imports can reach the RAG package, which pulls
-# camelot (an optional PDF dep absent from the test env). Stub it.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from unittest.mock import AsyncMock  # noqa: E402
 

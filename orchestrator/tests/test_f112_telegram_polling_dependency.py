@@ -12,7 +12,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements.txt"
+# PRD-262 US-022: requirements.in is the dependency list; the image and CI install
+# requirements.lock, which test_prd262_api_locks.py holds to it.
+REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements.in"
 
 
 def test_requirements_install_python_telegram_bot():

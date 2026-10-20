@@ -31,7 +31,9 @@ PROD_DEFAULTS = {
         # F237: where presigned media loads from (CSP img-src/media-src): the hosted product's AWS S3.
         "NEXT_PUBLIC_MEDIA_ORIGINS": "https://*.amazonaws.com",
     },
-    "orchestrator/Dockerfile": {"INSTALL_GRAPH_EXTRAS": "true"},
+    # PRD-262 US-027: no defaulted ARG. Leiden comes from graspologic-native in every
+    # build, so no arg picks a second dependency set.
+    "orchestrator/Dockerfile": {},
     "services/workspace-worker/Dockerfile": {"INSTALL_BROWSER": "true"},
     # TARGETARCH is BuildKit's, never defaulted. PRD-262 US-053: the Kokoro files and
     # the music tracks are fetched (sha256-checked) until the media assets image is
@@ -42,7 +44,6 @@ PROD_DEFAULTS = {
 # What the LOCAL edition must pass explicitly (docker-compose.yml build args).
 LOCAL_BUILD_ARGS = {
     "frontend": {"NEXT_PUBLIC_AUTH_EDITION": "local", "NEXT_PUBLIC_MEDIA_ORIGINS": "http://localhost:9000"},
-    "backend": {"INSTALL_GRAPH_EXTRAS": "false"},
     "workspace-worker": {"INSTALL_BROWSER": "false"},
 }
 

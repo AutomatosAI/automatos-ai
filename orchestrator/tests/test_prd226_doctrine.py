@@ -225,12 +225,25 @@ def _boot_phase_1_body() -> str:
 
 def test_boot_phase_invokes_sync_auto_personas():
     """AC1: a NON-test production path runs the backfill when Auto rows already
-    exist. Fails if the boot wiring is ever removed (reachability regression)."""
+    exist. Fails if the boot wiring is ever removed (reachability regression).
+
+    PRD-262 US-031: the leader's seed block moved to core/seeds/leader_stage.py, which
+    _boot_phase_1_core runs as the boot leader; a new doctrine is a change to
+    seed_auto_agent.py, which the leader stage's fingerprint hashes."""
+    import inspect
+
+    from core.seeds import fingerprint, leader_stage
+
     body = _boot_phase_1_body()
-    assert "sync_auto_personas" in body, (
-        "_boot_phase_1_core no longer invokes sync_auto_personas — the doctrine "
+    assert body.index("if not is_leader") < body.index("run_leader_seeds()"), (
+        "_boot_phase_1_core no longer runs the leader's seeds — the doctrine "
         "backfill is unreachable for existing workspaces again"
     )
+    sections = [inspect.getsource(section) for _name, section in leader_stage.SECTIONS]
+    assert any("sync_auto_personas(db)" in source for source in sections), (
+        "the leader stage no longer invokes sync_auto_personas"
+    )
+    assert "core/seeds" in fingerprint.INPUT_TREES, "a doctrine change must change the leader's fingerprint"
 
 
 def test_backfill_reaches_pre_existing_alembic_row_via_real_caller():

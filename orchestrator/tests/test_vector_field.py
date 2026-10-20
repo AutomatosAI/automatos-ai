@@ -3,8 +3,9 @@ Unit tests for VectorFieldSharedContext — PRD-108
 ==================================================
 
 Strategy:
-  - AsyncQdrantClient and EmbeddingManager are patched at import-time so no
-    real network calls are made.
+  - QdrantRestClient (core.qdrant, PRD-262 row #20) and EmbeddingManager are
+    patched at import-time so no real network calls are made; the request
+    models are core.qdrant's own.
   - config values are fixed to their documented defaults (decay_rate=0.1,
     reinforce_bonus=0.05, reinforce_cap=2.0, archival_threshold=0.05,
     boundary_permeability=1.0, dimension=2048).
@@ -35,39 +36,18 @@ if _orchestrator_root not in sys.path:
 # Monkey-patching the instance (not the constructor) avoids re-import races.
 # ---------------------------------------------------------------------------
 def _import_vector_field_isolated():
-    """Load VectorFieldSharedContext with qdrant_client / core.llm / core.ports
+    """Load VectorFieldSharedContext with config / core.llm / core.ports
     stubbed, then restore sys.modules.
 
     The adapter captures the real SharedContextPort base at class-definition
     time, so the stubs can be torn down once the import completes. Restoring
-    sys.modules stops the MagicMock ``core.ports.context`` (and the qdrant /
+    sys.modules stops the MagicMock ``core.ports.context`` (and the config /
     core.llm stubs) from leaking into sibling modules' collection. (PRD-142
     W2-S2b.)
     """
-    _keys = (
-        "qdrant_client", "qdrant_client.models", "qdrant_client.http", "qdrant_client.http.exceptions",
-        "config", "core.llm", "core.llm.embedding_manager", "core.ports.context", "core.qdrant_writes",
-    )
+    _keys = ("config", "core.llm", "core.llm.embedding_manager", "core.ports.context", "core.qdrant_writes")
     _saved = {k: sys.modules.get(k) for k in _keys}
     try:
-        _qdrant_stub = MagicMock()
-        _qdrant_stub.AsyncQdrantClient = MagicMock
-        # Expose every qdrant_client.models symbol the adapter uses
-        _models_stub = MagicMock()
-        for _sym in ("Distance", "FieldCondition", "Filter", "MatchValue",
-                     "PayloadSchemaType", "PointStruct", "VectorParams"):
-            setattr(_models_stub, _sym, MagicMock())
-        _qdrant_stub.models = _models_stub
-        # ... and the exceptions core.qdrant_writes (the F103 write retry) reads
-        _exceptions_stub = MagicMock()
-        for _exc in ("UnexpectedResponse", "ResponseHandlingException"):
-            setattr(_exceptions_stub, _exc, type(_exc, (Exception,), {}))
-        _qdrant_stub.http.exceptions = _exceptions_stub
-        sys.modules.setdefault("qdrant_client", _qdrant_stub)
-        sys.modules.setdefault("qdrant_client.models", _models_stub)
-        sys.modules.setdefault("qdrant_client.http", _qdrant_stub.http)
-        sys.modules.setdefault("qdrant_client.http.exceptions", _exceptions_stub)
-
         _fake_config_for_import = MagicMock()
         _fake_config_for_import.QDRANT_URL = "http://localhost:6333"
         _fake_config_for_import.QDRANT_API_KEY = ""
@@ -98,7 +78,7 @@ def _import_vector_field_isolated():
         sys.modules["core.ports.context"] = _ports_ctx_mod
 
         with (
-            patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
+            patch("modules.context.adapters.vector_field.QdrantRestClient", return_value=MagicMock()),
             patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
             patch("modules.context.adapters.vector_field.config", _fake_config_for_import),
         ):
@@ -163,7 +143,7 @@ def _mock_query_response(points: list) -> MagicMock:
 
 @pytest.fixture
 def mock_qdrant():
-    """Patch AsyncQdrantClient for every test that uses it."""
+    """A stand-in for the adapter's QdrantRestClient in every test that uses it."""
     client = MagicMock()
     # Every method the adapter awaits must be an AsyncMock
     client.collection_exists = AsyncMock(return_value=False)

@@ -10,9 +10,23 @@ seconds to its first 200 and last status, any ``--fetch``ed JSON (the backend's
 ``/health/bootstrap``) and the ``--meta`` values the caller recorded. Exit 1 when a
 URL never answered 200 within ``--timeout``.
 
+``--within SECONDS`` makes the boot a bar (PRD-262 US-033's egress smoke): it also
+exits 1 when a URL first answered 200 later than SECONDS after the container started.
+``--timeout`` counts from the first poll, so it can run past the bar and the record
+shows how late a slow boot was.
+
     smoke_boot.py --label fresh --container automatos_backend \\
         --url health=http://localhost:8000/health --url ready=http://localhost:8000/health/ready \\
         --fetch bootstrap=http://localhost:8000/health/bootstrap --out boots.jsonl
+
+When another process starts the container (``make up`` in the published-image smoke,
+PRD-262 US-036, ``make build`` in the fresh-clone smoke, US-039), ``--wait-start`` first
+waits for it to start, so the boot is timed while it runs rather than after it returns;
+``--stop-file`` names the file that process writes when it ends, so a start that will
+never come stops the wait at once. ``--start-timeout`` bounds that wait on its own
+(``make build`` builds three images first); it defaults to ``--timeout``.
+``--published-port`` records where Docker published one of the container's ports, as
+``address``, once it has started.
 
 ``scripts/ci/smoke_report.py`` turns the records into the step summary. The standard
 library only: the runner's own ``python3`` runs both, with no install step.
@@ -30,7 +44,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 POLL_INTERVAL_SECONDS = 1
 REQUEST_TIMEOUT_SECONDS = 5
@@ -67,6 +81,39 @@ def container_started_at(container: str) -> str:
         capture_output=True, text=True, check=True,
     )
     return result.stdout.strip()
+
+
+def has_started(started_at: Optional[str]) -> bool:
+    """Whether ``State.StartedAt`` says the container has started (not Docker's zero time)."""
+    return bool(started_at) and not started_at.startswith(NEVER_STARTED_PREFIX)
+
+
+def wait_for_start(
+    container: str,
+    timeout_s: float,
+    stop_file: Optional[Path] = None,
+    read: Callable[[str], Optional[str]] = lambda name: _started_at_or_none(name, quiet=True),
+    clock: Callable[[], int] = time.time_ns,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Poll once a second until ``container`` has started; False on timeout, or once
+    ``stop_file`` exists (the process that starts it has ended) and it still has not."""
+    deadline = clock() + int(timeout_s * NS_PER_SECOND)
+    while True:
+        if has_started(read(container)):
+            return True
+        if stop_file is not None and stop_file.exists():
+            return has_started(read(container))
+        if clock() >= deadline:
+            return False
+        sleep(POLL_INTERVAL_SECONDS)
+
+
+def published_address(container: str, port: str) -> Optional[str]:
+    """``docker port <container> <port>``'s first address, or None when Docker has none."""
+    result = subprocess.run(["docker", "port", container, port], capture_output=True, text=True)
+    lines = result.stdout.split() if result.returncode == 0 else []
+    return lines[0] if lines else None
 
 
 def probe(url: str) -> Tuple[int, str]:
@@ -137,12 +184,35 @@ def _pair(text: str) -> Tuple[str, str]:
     return name, value
 
 
-def _started_at_or_none(container: str) -> Optional[str]:
+def _started_at_or_none(container: str, quiet: bool = False) -> Optional[str]:
+    """``State.StartedAt``, or None when it cannot be read (``quiet``: the container may not exist yet)."""
     try:
         return container_started_at(container)
     except (subprocess.CalledProcessError, OSError) as exc:
-        print(f"::warning title=Smoke boot::could not re-read {container}'s start time: {exc}")
+        if not quiet:
+            print(f"::warning title=Smoke boot::could not re-read {container}'s start time: {exc}")
         return None
+
+
+def late_probes(probes: Dict[str, dict], within_s: Optional[float]) -> List[str]:
+    """The probes that answered 200, but more than ``within_s`` after the start; none without a bar."""
+    if within_s is None:
+        return []
+    return sorted(name for name, result in probes.items()
+                  if result["seconds"] is not None and result["seconds"] > within_s)
+
+
+def check_bar(args: argparse.Namespace) -> int:
+    """``--within``: 1 when the boot ``wait`` just recorded answered a URL later than the bar."""
+    if args.within is None:
+        return 0
+    record = json.loads(args.out.read_text(encoding="utf-8").splitlines()[-1])
+    late = late_probes(record["probes"], args.within)
+    for name in late:
+        print(f"FAIL: {name} ({record['probes'][name]['url']}) answered 200 "
+              f"{record['probes'][name]['seconds']:.1f}s after {record['container']} started, "
+              f"over the {args.within:g}s bar [{record['label']}]")
+    return 1 if late else 0
 
 
 def _say(record: dict) -> None:
@@ -156,6 +226,11 @@ def _say(record: dict) -> None:
 
 def wait(args: argparse.Namespace) -> int:
     """Time one boot of ``--container`` and append its record to ``--out``."""
+    start_timeout = args.timeout if args.start_timeout is None else args.start_timeout
+    if args.wait_start and not wait_for_start(args.container, start_timeout, args.stop_file):
+        print(f"::error title=Smoke boot::{args.container} did not start within {start_timeout:.0f}s, "
+              "or the process that starts it ended first")
+        return 1
     try:
         started_at = container_started_at(args.container)
         started_ns = parse_timestamp(started_at)
@@ -174,13 +249,19 @@ def wait(args: argparse.Namespace) -> int:
         "started_at_after": _started_at_or_none(args.container),
         "probes": probes,
         "fetched": {name: fetch_json(url) for name, url in args.fetch or []} if answered else {},
-        "meta": dict(args.meta or []),
+        "meta": {**_published_meta(args), **dict(args.meta or [])},
         "ok": answered,
     }
     with open(args.out, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     _say(record)
     return 0 if answered else 1
+
+
+def _published_meta(args: argparse.Namespace) -> Dict[str, Optional[str]]:
+    if not args.published_port:
+        return {}
+    return {"address": published_address(args.container, args.published_port)}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -192,12 +273,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fetch", type=_pair, action="append", help="name=url, JSON fetched once all are 200")
     parser.add_argument("--meta", type=_pair, action="append", help="name=value, recorded as given")
     parser.add_argument("--timeout", type=float, default=300, help="seconds before giving up")
+    parser.add_argument("--within", type=float, default=None,
+                        help="a bar: fail when a URL answered 200 later than this after the container started")
     parser.add_argument("--out", type=Path, required=True, help="JSON-lines file the record is appended to")
+    parser.add_argument("--wait-start", action="store_true",
+                        help="another process starts the container: wait for it (within --start-timeout) first")
+    parser.add_argument("--stop-file", type=Path,
+                        help="with --wait-start: the file that process writes when it ends")
+    parser.add_argument("--start-timeout", type=float, default=None,
+                        help="with --wait-start: seconds to wait for the start (default: --timeout)")
+    parser.add_argument("--published-port", help="record `docker port <container> <port>` as meta address")
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    return wait(build_parser().parse_args(argv))
+    args = build_parser().parse_args(argv)
+    return wait(args) or check_bar(args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,84 @@
+"""Green coffee stock for the roastery: lots in, roasts out, and what to reorder."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Dict, List
+
+LOW_STOCK_KG = 20.0
+BOX_KG = 12.0
+
+
+@dataclass(frozen=True)
+class Lot:
+    """One lot of green coffee as it arrived: where it is from and how much came."""
+
+    lot_id: str
+    origin: str
+    arrived: date
+    kg: float
+
+    def label(self) -> str:
+        return f"{self.lot_id} {self.origin} ({self.kg:.1f} kg)"
+
+
+class Inventory:
+    """Kilograms on the shelf for each origin, kept up to date as lots arrive and roasts run."""
+
+    def __init__(self) -> None:
+        self._kg: Dict[str, float] = {}
+        self._lots: List[Lot] = []
+
+    def receive(self, lot: Lot) -> None:
+        """Book a delivered lot onto the shelf."""
+        self._lots.append(lot)
+        self._kg[lot.origin] = self._kg.get(lot.origin, 0.0) + lot.kg
+
+    def roast(self, origin: str, kg: float) -> None:
+        """Take green coffee off the shelf for a roast; refuse to go below zero."""
+        on_hand = self._kg.get(origin, 0.0)
+        if kg > on_hand:
+            raise ValueError(f"only {on_hand:.1f} kg of {origin} on the shelf, not {kg:.1f}")
+        self._kg[origin] = on_hand - kg
+
+    def on_hand(self, origin: str) -> float:
+        return self._kg.get(origin, 0.0)
+
+    def origins(self) -> List[str]:
+        return sorted(self._kg)
+
+    def low(self) -> List[str]:
+        """Origins at or under the reorder line, lowest first."""
+        low = [origin for origin in self._kg if self._kg[origin] <= LOW_STOCK_KG]
+        return sorted(low, key=lambda origin: self._kg[origin])
+
+    def history(self, origin: str) -> List[Lot]:
+        """Every lot of one origin, oldest first."""
+        return sorted((lot for lot in self._lots if lot.origin == origin), key=lambda lot: lot.arrived)
+
+
+def boxes_to_order(shortfall_kg: float) -> int:
+    """Whole boxes that cover a shortfall: the warehouse only sends full boxes."""
+    boxes = int(shortfall_kg // BOX_KG)
+    return boxes + 1 if shortfall_kg % BOX_KG else boxes
+
+
+def reorder_list(inventory: Inventory, target_kg: float = 60.0) -> Dict[str, int]:
+    """Boxes to order per origin to bring every low origin back up to the target."""
+    return {
+        origin: boxes_to_order(target_kg - inventory.on_hand(origin))
+        for origin in inventory.low()
+    }
+
+
+def main() -> None:
+    inventory = Inventory()
+    inventory.receive(Lot("lot0001", "Brazil", date(2026, 10, 6), 96.0))
+    inventory.receive(Lot("lot0002", "Colombia", date(2026, 10, 6), 24.0))
+    inventory.roast("Colombia", 12.0)
+    for origin, boxes in reorder_list(inventory).items():
+        print(f"{origin}: order {boxes} boxes")
+
+
+if __name__ == "__main__":
+    main()

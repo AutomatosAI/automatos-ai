@@ -167,9 +167,6 @@ class _FakeService:
 
 @pytest.mark.asyncio
 async def test_resume_tool_handler_formats_payload(monkeypatch):
-    import types as _types
-
-    sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
     import modules.memory.unified_memory_service as ums
     from modules.tools.discovery.handlers_workspace import resume_context
 
