@@ -28,8 +28,9 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-play`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
-uploads `automatos.play-1.0.0.autotheme` as the `play-package` artifact. Play's build fetches Auto's
-clips from core at the commit its `mascot.lock.json` pins. The two jobs run side by side (no
+uploads `automatos.play-1.1.0.autotheme` as the `play-package` artifact (the job's summary shows its
+size and sha256). The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with
+the rest of Play. The two jobs run side by side (no
 `needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
 downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
 `PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,

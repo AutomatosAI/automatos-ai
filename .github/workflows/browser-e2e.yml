@@ -187,16 +187,18 @@ concurrency:
 permissions:
   contents: read
 
-# PRD-261 A-17a: the Design Kit commit the lane packs Play from. W-K2's merge on the kit's main
-# (Play packed as automatos/play 1.0.0; kit CI run 39375088068 built it). Move it with the kit,
-# in the same pull request as the Play change it brings (the mirror rule,
+# PRD-261 A-17a: the Design Kit commit the lane packs Play from. PRD-261 A-19d2 (PB-17): W-K4's
+# merge on the kit's main (AutomatosAI/automatos-play#11: Play packed as automatos/play 1.1.0, on
+# the SDK's storage area, with its clips committed, the tone rule and the generic motion and
+# heading marks the host's generic look runtime reads). Move it with the kit, in the same pull
+# request as the Play change it brings, and only forward in kit history (the mirror rule,
 # docs/frontend-architecture/play-theme.md). npm is pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-play
-  KIT_REF: 2aacd0a4721062d61c625a8b1178cfe5aadf6ab4
+  KIT_REF: W-K4-MERGE-SHA
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
-  PLAY_PACKAGE: automatos.play-1.0.0.autotheme
+  PLAY_PACKAGE: automatos.play-1.1.0.autotheme
   PLAY_PACKAGE_ARTIFACT: play-package
   # The package job's name (jobs.package.name, below), which the lane waits on, and how long it
   # waits: the package job's own 15-minute timeout and a few minutes to be picked up.
@@ -205,8 +207,8 @@ env:
 
 jobs:
   # PRD-261 A-17a: Play's .autotheme, built and packed with the kit's own scripts from its
-  # committed lockfile. No install script runs (--ignore-scripts); Play's build fetches Auto's
-  # clips from core at the commit its mascot.lock.json pins, checking each one's sha256.
+  # committed lockfile. No install script runs (--ignore-scripts), and the build fetches nothing:
+  # since 1.1.0 Auto's clips are committed in the kit with the rest of Play (PB-4).
   # It runs beside browser-e2e, not before it: the lane waits for it only just before it downloads
   # the package, so the kit's build overlaps the lane's docker and frontend builds.
   package:
