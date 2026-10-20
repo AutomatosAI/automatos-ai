@@ -989,6 +989,11 @@ class Config:
     # (default 09:00 every day; services.harness_grants).
     HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
     HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
+    # PRD-263 US-056: each change HARNESS applied is judged week by week against the
+    # HARNESS_REF_DAYS before it (services.harness_post_change). A metric waits for a week
+    # of at least HARNESS_MIN_SAMPLES for up to HARNESS_POST_CHANGE_MAX_WEEKS weeks after
+    # the change; otherwise the report says it was not judged.
+    HARNESS_POST_CHANGE_MAX_WEEKS: int = int(os.getenv("HARNESS_POST_CHANGE_MAX_WEEKS", "4"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:

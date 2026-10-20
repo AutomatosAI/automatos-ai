@@ -439,14 +439,14 @@ class HarnessService:
     async def _phase_diagnose(
         self, workspace_id: UUID, metrics: "HarnessMetrics", db: "Session"
     ) -> Dict[str, Any]:
-        """Judge each agent x metric on its real counts (US-014a) against the clean
-        reference, with the week-by-week verdict history (US-014b).
+        """Judge each agent x metric on its real counts (US-014a) against the clean reference
+        and verdict history (US-014b), and each applied change against its frozen one (US-056).
 
         The history is the workspace's completed harness_runs rows; post-change
         weeks come from harness_task_ledger. Each agent's tool failures in the
         judged week, from its production tool logs, are issues (US-019).
         """
-        from services import harness_diagnose, harness_runs
+        from services import harness_diagnose, harness_post_change, harness_runs
 
         window = metrics.window
         logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s, week %s", workspace_id, window.cur_week)
@@ -455,11 +455,10 @@ class HarnessService:
         settings = harness_diagnose.settings_from_config()
         diagnosis = harness_diagnose.diagnose(metrics, history, changes, settings)
         issues = harness_diagnose.tool_failure_issues(metrics, settings)
-        logger.info(
-            "[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
-            diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues),
-        )
-        return {**diagnosis, "issues": issues}
+        post_change = await harness_post_change.check(db, workspace_id, window.cur_week)
+        logger.info("[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
+                    diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues))
+        return {**diagnosis, "issues": issues, harness_post_change.KEY: post_change}
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
@@ -581,16 +580,17 @@ class HarnessService:
         prescriptions: List[Dict[str, Any]],
     ) -> str:
         """Build the human-readable audit report: coverage and every agent's verdict
-        with its n first (services.harness_diagnose.report_lines), then the issues
-        and the changes HARNESS suggests, each a report line and nothing more
-        (PRD-263 US-016). It never calls an unjudged agent stable (PRD-263 FR-7)."""
-        from services import harness_diagnose
+        with its n first (services.harness_diagnose.report_lines), how each applied change
+        is doing (US-056), then the issues and the changes HARNESS suggests, each a report
+        line and nothing more (PRD-263 US-016). It never calls an unjudged agent stable (FR-7)."""
+        from services import harness_diagnose, harness_post_change
 
         lines = [
             f"# {AUDIT_REPORT_TITLE.format(iteration=iteration)}",
             f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
             *harness_diagnose.report_lines(diagnosis),
             "",
+            *harness_post_change.report_lines(diagnosis),
         ]
 
         # Issues
