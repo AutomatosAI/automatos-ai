@@ -63,13 +63,15 @@ LOOK_SCHEMA = {
         "accent": {"kind": "choice", "label": "Accent", "choices": ["sea", "ember"], "default": "sea"},
     },
 }
+# Studio tokens as triplets, the one form the web paints them in (hexToTriplet of #F4F4F5 and #1d6fd8).
+INK_TEXT, SEA = "240 4.76% 95.88%", "213.69 76.33% 48.04%"
 PREPAINT = {
     "knobs": {
         "ground": {
             "paper": {"--background": "0 0% 100%", "--foreground": "222 47% 11%", "--hello-glow": "0px"},
-            "ink": {"--background": "222 47% 8%", "--foreground": "#F4F4F5"},
+            "ink": {"--background": "222 47% 8%", "--foreground": INK_TEXT},
         },
-        "accent": {"sea": {"--primary": "#1d6fd8", "--ring": "#1d6fd8"}, "ember": {"--primary": "16 85% 55%"}},
+        "accent": {"sea": {"--primary": SEA, "--ring": SEA}, "ember": {"--primary": "16 85% 55%"}},
     },
     # boot.ts fits (:159): a pair table needs a cell for every pair of values a painted look names, or the web
     # paints the defaults instead (and drops the whole table when the defaults have none, boot-sanitize.ts :231).
@@ -81,9 +83,9 @@ PREPAINT = {
     "tone": {"knob": "ground", "values": {"paper": "light", "ink": "dark"}},
 }
 # The defaults (paper, sea) painted: Studio tokens only, as the table writes them; and Alice's night (ink, ember).
-DEFAULT_LIGHT = {"--background": "0 0% 100%", "--foreground": "222 47% 11%", "--primary": "#1d6fd8", "--ring": "#1d6fd8"}
+DEFAULT_LIGHT = {"--background": "0 0% 100%", "--foreground": "222 47% 11%", "--primary": SEA, "--ring": SEA}
 INK_EMBER = {
-    "--background": "222 47% 8%", "--foreground": "#F4F4F5", "--primary": "16 85% 55%", "--primary-foreground": "0 0% 100%",
+    "--background": "222 47% 8%", "--foreground": INK_TEXT, "--primary": "16 85% 55%", "--primary-foreground": "0 0% 100%",
 }
 FROM_LOOKS = {"fromLooks": True, "fonts": {"sans": SANS, "mono": MONO}, "mascot": "clips"}
 LIGHT_ONLY = {"--background": "0 0% 100%", "--foreground": "#14181c", "--primary": "221 83% 53%"}
@@ -291,10 +293,14 @@ def test_from_look_takes_the_tone_rule_and_otherwise_the_painted_ground(world, p
     assert (mobile["tone"], mobile["tokens"][tone]) == (tone, INK_EMBER)
 
 
-def test_a_stored_look_that_paints_no_ground_is_never_served_the_defaults_are(world, caplog):
+@pytest.mark.parametrize("ink", [
+    {"--foreground": INK_TEXT},
+    # the web reads every Studio token as hsl(var(--x)), so a #rrggbb ground paints nothing there, nor here
+    {"--background": "#0F1115", "--foreground": INK_TEXT},
+], ids=["no-ground", "hex-ground"])
+def test_a_stored_look_that_paints_no_ground_is_never_served_the_defaults_are(world, caplog, ink):
     # The rule the reader (M-02) and the review (M-03) hold: a phone needs --background and --foreground.
-    ground = PREPAINT["knobs"]["ground"]
-    install = _install(world, _package(world, prepaint=_knobs(ground={**ground, "ink": {"--foreground": "#F4F4F5"}})))
+    install = _install(world, _package(world, prepaint=_knobs(ground={**PREPAINT["knobs"]["ground"], "ink": ink})))
     _store_looks(world, ALICE, _look("night", "ink", "ember"))
     mobile = _mobile(world, _person("alice"), install.id).json()["mobile"]
     assert (mobile["tone"], mobile["tokens"]) == ("light", {"light": DEFAULT_LIGHT, "dark": None})
@@ -302,7 +308,7 @@ def test_a_stored_look_that_paints_no_ground_is_never_served_the_defaults_are(wo
 
 
 def test_defaults_that_paint_no_ground_answer_mobile_null(world, caplog):
-    bare = {name: {"--foreground": "#F4F4F5"} for name in PREPAINT["knobs"]["ground"]}
+    bare = {name: {"--foreground": INK_TEXT} for name in PREPAINT["knobs"]["ground"]}
     install = _install(world, _package(world, prepaint=_knobs(ground=bare)))
     assert _mobile(world, _person("alice"), install.id).json()["mobile"] is None
     assert "defaults paint no ground or text for a phone" in caplog.text

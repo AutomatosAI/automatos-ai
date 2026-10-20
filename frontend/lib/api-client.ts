@@ -1033,7 +1033,8 @@ export interface ThemeLooks {
 /**
  * PRD-261 M-04: GET /api/themes/mobile/{installId} (services/themes/mobile.py mobile_theme), the
  * member's theme as data for the phone; the phone app copies these types. Token keys keep their
- * leading `--` (Studio's names); each value is `H S% L%` or `#rrggbb`, as the theme wrote it.
+ * leading `--` (Studio's names); each value is `H S% L%` or `#rrggbb`, as the theme wrote it (`fromLooks`:
+ * `H S% L%` only, the one form the web paints a Studio token in).
  */
 export type MobileThemeScheme = 'light' | 'dark'
 export type MobileThemeTokens = Record<string, string>

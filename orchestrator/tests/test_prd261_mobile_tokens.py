@@ -8,7 +8,8 @@
   ``sanitizePrepaint``): knob tables, then pair tables, in table order; a look that doesn't fit the
   table (boot.ts :158-:159 ``fits``) paints the defaults WHOLE (boot.ts :164), the cases
   ``frontend/lib/looks/__tests__/prepaint.test.ts`` holds the script to; a numeric rule's variable is
-  painted last with rgba() (boot.ts :167); only mobile tokens whose final value parses are kept; every
+  painted last with rgba() (boot.ts :167); only mobile tokens whose final value is a triplet the phone reads
+  are kept (the web reads Studio tokens as hsl(var(--x)), so a #rrggbb paints nothing there); every
   number is the double JSON.parse gives the web (a 310-digit literal is Infinity), and nothing raises;
 * ``missing_tokens`` names the required tokens a painting lacks;
 * ``look_tone``: theme.json's fixed tone first (boot.ts :57-:60, :69), then under ``from-look`` the
@@ -34,22 +35,27 @@ if str(ORCH_ROOT) not in sys.path:
 from services.themes import contract  # noqa: E402
 from services.themes.manifest import referenced_files, validate_manifest  # noqa: E402
 from services.themes.mobile_tokens import (  # noqa: E402
-    boot_table, ground_tone, look_fits, look_tone, missing_tokens, paint_look, parse_colour,
+    boot_table, ground_tone, is_studio_triplet, look_fits, look_tone, missing_tokens, paint_look, parse_colour,
 )
 from tests.fixtures.themes import build  # noqa: E402
 
 CASES = json.loads((Path(build.__file__).with_name("cases.json")).read_text(encoding="utf-8"))
 MOBILE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.0.0"}
 
+# Studio tokens as triplets, the one form the web paints them in (hexToTriplet of #1a1814, #f0f4f8, #2a3038,
+# #2f6fed, #2e9e5b and #04201d); --zinc-ground is the theme's own variable, so a hex there is the theme's business.
 PAPER = {
-    "--background": "40 33.33% 94.12%", "--foreground": "#1a1814", "--card": "0 0% 100%",
+    "--background": "40 33.33% 94.12%", "--foreground": "40 13.04% 9.02%", "--card": "0 0% 100%",
     "--paper": "hsl(0 0% 100%)", "--zinc-ground": "#f4efe6", "--border": "30 10% 80%",
 }
-INK = {"--background": "210 20% 7.84%", "--foreground": "#f0f4f8", "--card": "hsl(210 20% 12%)", "--border": "#2a3038"}
-BLUE = {"--primary": "#2f6fed", "--ring": "#2f6fed", "--border": "221 50% 70%"}
-GREEN = {"--primary": "#2e9e5b", "--ring": "#2e9e5b"}
+INK = {
+    "--background": "210 20% 7.84%", "--foreground": "210 36.36% 95.69%", "--card": "hsl(210 20% 12%)",
+    "--border": "214.29 14.29% 19.22%",
+}
+BLUE = {"--primary": "219.79 84.07% 55.69%", "--ring": "219.79 84.07% 55.69%", "--border": "221 50% 70%"}
+GREEN = {"--primary": "144.11 54.9% 40%", "--ring": "144.11 54.9% 40%"}
 PAPER_BLUE = {"--primary": "221.21 83.19% 53.33%", "--primary-foreground": "0 0% 100%"}
-INK_GREEN = {"--primary-foreground": "#04201d", "--muted": "#fff"}
+INK_GREEN = {"--primary-foreground": "173.57 77.78% 7.06%", "--muted": "#fff"}
 GLOW = {"var": "--hello-glow", "knob": "glow", "min": 0, "max": 30, "integer": True, "scale": 100, "capTable": None,
         "template": "rgba-alpha", "color": {"knob": "accent", "rgb": {"blue": "47,111,237", "green": "46,158,91"}}}
 # The pair table has a cell for paper/blue and ink/green only, so paper/green and ink/blue don't fit it.
@@ -135,9 +141,9 @@ def test_the_contrast_section_measures_text_and_ui_minimums_both_ways():
 def test_a_look_paints_mobile_tokens_only_knob_tables_then_pair_tables():
     tokens = paint_look(TABLE, PAPER_LOOK)
     assert tokens == {
-        "--background": "40 33.33% 94.12%", "--foreground": "#1a1814", "--card": "0 0% 100%",
+        "--background": "40 33.33% 94.12%", "--foreground": "40 13.04% 9.02%", "--card": "0 0% 100%",
         # the accent table comes after the ground table, and the pair table after both (boot.ts :165-:166)
-        "--border": "221 50% 70%", "--primary": "221.21 83.19% 53.33%", "--ring": "#2f6fed",
+        "--border": "221 50% 70%", "--primary": "221.21 83.19% 53.33%", "--ring": "219.79 84.07% 55.69%",
         "--primary-foreground": "0 0% 100%",
     }
     assert set(tokens) <= set(contract.MOBILE_TOKEN_NAMES)
@@ -174,7 +180,26 @@ def test_a_value_that_does_not_parse_is_dropped():
     tokens = paint_look(TABLE, INK_LOOK)
     assert tokens["--background"] == INK["--background"]
     assert "--card" not in tokens and "--muted" not in tokens  # hsl(...) and #fff: CSS, but no phone colour
-    assert tokens["--primary-foreground"] == "#04201d" and tokens["--ring"] == GREEN["--ring"]
+    assert tokens["--primary-foreground"] == INK_GREEN["--primary-foreground"] and tokens["--ring"] == GREEN["--ring"]
+
+
+def test_a_hex_studio_token_paints_nothing_on_the_web_so_it_is_not_painted_for_the_phone():
+    # tailwind.config.ts and globals.css read every Studio token as hsl(var(--x)): hsl(#1a1814) paints nothing
+    paper = {**PAPER, "--foreground": "#1a1814", "--card": "#ffffff"}
+    hexed = {**TABLE, "knobs": {**TABLE["knobs"], "ground": {**TABLE["knobs"]["ground"], "paper": paper}}}
+    tokens = paint_look(hexed, PAPER_LOOK)
+    assert "--foreground" not in tokens and "--card" not in tokens
+    assert tokens["--background"] == PAPER["--background"] and missing_tokens(tokens) == ["--foreground"]
+    # mobile.tokens, which only the phone reads, still takes a hex (the manifest check's parse_colour)
+    assert parse_colour("#1a1814") == "#1A1814" and missing_tokens({**PAPER, "--foreground": "#1a1814"}) == []
+
+
+@pytest.mark.parametrize("value, painted", [
+    ("40 13.04% 9.02%", True), ("0 0% 100%", True), ("#1a1814", False), ("#FFFFFF", False),
+    ("360 0% 0%", False), ("hsl(0 0% 100%)", False), ("", False), (None, False), (0, False),
+])
+def test_only_a_triplet_the_phone_reads_is_a_value_the_web_paints_a_studio_token_with(value, painted):
+    assert is_studio_triplet(value) is painted
 
 
 def test_a_numeric_rule_paints_its_variable_last_with_rgba_so_the_phone_gets_no_value_for_it():
@@ -197,15 +222,15 @@ def test_a_numeric_rule_the_boot_s_gate_drops_neither_paints_nor_holds_a_look_to
 
 
 def test_a_knob_whose_name_is_no_look_field_is_dropped_and_paints_nothing():
-    table = {**TABLE, "knobs": {**TABLE["knobs"], "ground-2": {"x": {"--card": "#000000"}}}}
+    table = {**TABLE, "knobs": {**TABLE["knobs"], "ground-2": {"x": {"--card": "0 0% 0%"}}}}
     assert paint_look(table, PAPER_LOOK) == paint_look(TABLE, PAPER_LOOK)
 
 
 def test_a_later_value_the_boot_s_gate_refuses_never_overwrites_and_one_it_passes_does():
-    knobs = {"ground": {"paper": {**PAPER, "--primary": "#2f6fed"}}, "accent": {"blue": {}}}
+    knobs = {"ground": {"paper": {**PAPER, "--primary": BLUE["--primary"]}}, "accent": {"blue": {}}}
     refused = {"knobs": {**knobs, "accent": {"blue": {"--primary": "color-mix(in srgb, red, blue)"}}}, "defaults": PAPER_LOOK}
     passed = {"knobs": {**knobs, "accent": {"blue": {"--primary": "hsl(221 83% 53%)"}}}, "defaults": PAPER_LOOK}
-    assert paint_look(refused, PAPER_LOOK)["--primary"] == "#2f6fed"  # the web drops color-mix(), keeps paper's
+    assert paint_look(refused, PAPER_LOOK)["--primary"] == BLUE["--primary"]  # the web drops color-mix(), keeps paper's
     assert "--primary" not in paint_look(passed, PAPER_LOOK)  # the web paints hsl(), which no phone reads
 
 

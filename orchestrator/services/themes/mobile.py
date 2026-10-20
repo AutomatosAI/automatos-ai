@@ -22,13 +22,14 @@ draw the theme a member chose without loading any of its code::
 * **``fromLooks``.** The member's active look for the theme in the install's workspace
   (``looks.read_looks``, carried to the current schema), painted exactly as the web's first paint
   paints it (``mobile_tokens.paint_look``: the look when it fits the table, else the table's
-  ``defaults`` whole; Studio token names only, values as the table writes them), placed under the
-  tone ``mobile_tokens.look_tone`` gives it (theme.json's fixed tone first); the other scheme is
-  null. No stored look, or a look store that can't be read (logged), paints the defaults, as the
-  boot does. A stored look whose painting gives no ``--background`` or ``--foreground``
-  (``mobile_tokens.missing_tokens``, the rule the reader and the review hold too) is not served: the
-  phone gets the defaults (logged). Defaults that paint neither (a package imported before the
-  reader held this rule) give ``mobile`` null (logged).
+  ``defaults`` whole; Studio token names only, each an ``H S% L%`` triplet as the table writes it:
+  the web reads them as ``hsl(var(--x))``, so a ``#rrggbb`` paints nothing and is not served),
+  placed under the tone ``mobile_tokens.look_tone`` gives it (theme.json's fixed tone first); the
+  other scheme is null. No stored look, or a look store that can't be read (logged), paints the
+  defaults, as the boot does. A stored look whose painting gives no ``--background`` or
+  ``--foreground`` (``mobile_tokens.missing_tokens``, the rule the reader and the review hold too) is
+  not served: the phone gets the defaults (logged). Defaults that paint neither (a package imported
+  before the reader held this rule) give ``mobile`` null (logged).
 * **Files.** Font and mascot URLs are ``serve.module_url(digest, path)``, served by
   ``GET /api/themes/files/...`` under the same membership. A URL is given only for a path the
   package's file manifest lists, never for a JS or CSS file. A mascot clip is the state's ``.mp4``

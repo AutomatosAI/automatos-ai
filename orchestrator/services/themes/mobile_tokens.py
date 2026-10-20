@@ -5,11 +5,13 @@ way the web's first paint paints it: ``frontend/lib/theme-host/boot-sanitize.ts`
 (every installed boot passes it, ``boot.ts`` :129) and then ``THEME_BOOT_SCRIPT`` (``boot.ts`` :156-:167).
 
 * :func:`parse_colour` reads one ``mobile`` token value: Studio's ``H S% L%`` triplet (H from 0 up to,
-  not including, 360; S and L 0 to 100; at most two decimals, the form ``hexToTriplet`` writes) or
-  ``#rrggbb``. It answers ``#RRGGBB``, the hex ``frontend/lib/look-kit/hsl.ts`` ``tripletToHex`` gives
-  for a triplet (and ``contrast.ts`` ``toHex(parseHex(...))`` for a hex), or None. The manifest check
-  (``mobile_manifest.py``) refuses exactly the values this returns None for, so a checked block always
-  parses, here and on the phone, which vendors ``hsl.ts``.
+  not including, 360; S and L 0 to 100; at most two decimals, as ``hexToTriplet`` writes) or ``#rrggbb``,
+  as the ``#RRGGBB`` look-kit's ``hsl.ts`` ``tripletToHex`` (and ``contrast.ts`` for a hex) gives, or None.
+  ``mobile_manifest.py`` refuses exactly what this returns None for, so a checked block always parses,
+  here and on the phone, which vendors ``hsl.ts``.
+* :func:`is_studio_triplet`: a value the web paints a Studio token with. ``frontend/tailwind.config.ts``
+  and ``globals.css`` read every ``MOBILE_TOKEN_NAMES`` token as ``hsl(var(--x))``, so a ``#rrggbb``
+  paints nothing there; ``mobile.tokens``, which only the phone reads, keeps it (``parse_colour``).
 * :func:`relative_luminance` is ``contrast.ts`` ``relativeLuminance`` (WCAG 2.x), step for step.
 * :func:`boot_table` is a ``boot/prepaint.json`` table as the boot script gets it (``sanitizePrepaint``):
   knobs named like a look field (``KNOB_NAME``), option keys of 1 to 64 UTF-16 units, each option's
@@ -18,9 +20,8 @@ way the web's first paint paints it: ``frontend/lib/theme-host/boot-sanitize.ts`
   ``integer``, ``min`` <= ``max``, ``scale`` > 0, ``capTable`` null or two look fields, a colour knob),
   other rules dropped; ``defaults`` with text or finite number values; the tone rule kept only when
   every choice of its knob has a tone. None when the defaults don't fit what is left (boot-sanitize.ts
-  :231): the web then paints nothing from the table. Every number is the one ``JSON.parse`` gives the
-  web (``contract.js_number``): compared as a double, and not finite past the double's range, where
-  Python would keep a 310-digit literal whole and JavaScript reads Infinity.
+  :231): the web then paints nothing from the table. A number is the double ``JSON.parse`` gives the
+  web (``contract.js_number``): a 310-digit literal is Infinity, so not finite.
 * :func:`look_fits` is the boot script's ``fits`` (boot.ts :158-:159; ``lookFitsPrepaint``): the look
   names an option of every knob table and a cell of every pair table, and for every numeric rule its
   knob is a finite number in range (whole when ``integer``), its colour knob a key of the rule's
@@ -28,8 +29,8 @@ way the web's first paint paints it: ``frontend/lib/theme-host/boot-sanitize.ts`
 * :func:`paint_look` is what the web paints for a look, as the phone takes it: the look when it fits,
   else the table's ``defaults`` WHOLE (boot.ts :164; never value by value); every knob table's entry,
   then every pair table's, a later one overwriting (:165-:166); a numeric rule's variable painted last
-  with ``rgba()`` (:167), which is no phone colour, so that variable is not painted for the phone. The
-  ``MOBILE_TOKEN_NAMES`` whose final value parses are kept, as the table writes them.
+  with ``rgba()`` (:167), no phone colour, so not painted for the phone. Kept: the ``MOBILE_TOKEN_NAMES``
+  whose final value ``is_studio_triplet``, as the table writes them (a ``#rrggbb`` is not painted).
 * :func:`missing_tokens` names the ``MOBILE_REQUIRED_TOKENS`` a painting or scheme lacks: the one rule
   the reader (M-02), the review (M-03) and the answer (M-04) share.
 * :func:`look_tone`: theme.json's fixed ``light`` or ``dark`` wins (the boot's tone value is the
@@ -54,21 +55,16 @@ from services.themes.contract import (
 # hsl.ts TRIPLET and contrast.ts HEX, with ASCII digits ([0-9]: Python's \d also takes other scripts' digits).
 TRIPLET_PATTERN = re.compile(r"([0-9]{1,3}(?:\.[0-9]{1,2})?) ([0-9]{1,3}(?:\.[0-9]{1,2})?)% ([0-9]{1,3}(?:\.[0-9]{1,2})?)%")
 HEX_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}")
-FULL_TURN = 360.0
-PERCENT = 100.0
-CHANNEL_MAX = 255
-HUE_STEPS = 12
+FULL_TURN, PERCENT = 360.0, 100.0
+CHANNEL_MAX, HUE_STEPS = 255, 12
 # hslToHex's channel offsets, in red, green, blue order.
 CHANNEL_OFFSETS = (0, 8, 4)
 ROUND_HALF = 0.5
 # contrast.ts relativeLuminance (WCAG 2.x), with its constants.
 HEX_BASE = 16
 HEX_CHANNEL_STARTS: Tuple[int, ...] = (1, 3, 5)
-LINEAR_KNEE = 0.04045
-LINEAR_SLOPE = 12.92
-GAMMA_OFFSET = 0.055
-GAMMA_SCALE = 1.055
-GAMMA = 2.4
+LINEAR_KNEE, LINEAR_SLOPE = 0.04045, 12.92
+GAMMA_OFFSET, GAMMA_SCALE, GAMMA = 0.055, 1.055, 2.4
 RED_WEIGHT, GREEN_WEIGHT, BLUE_WEIGHT = 0.2126, 0.7152, 0.0722
 
 # boot-sanitize.ts: KNOB_NAME, OPTION_KEY_MAX_LENGTH, CSS_VAR_NAME_PATTERN (boot.ts V), the CSS-value
@@ -128,6 +124,11 @@ def parse_colour(value: Any) -> Optional[str]:
     if hue >= FULL_TURN or saturation > PERCENT or lightness > PERCENT:
         return None
     return _hsl_to_hex(hue, saturation, lightness)
+
+
+def is_studio_triplet(value: Any) -> bool:
+    """``value`` is an ``H S% L%`` triplet the phone reads: the one form the web paints a Studio token in (module docstring)."""
+    return isinstance(value, str) and TRIPLET_PATTERN.fullmatch(value) is not None and parse_colour(value) is not None
 
 
 def _linear(channel: int) -> float:
@@ -357,7 +358,7 @@ def _phone_tokens(table: BootTable, look: Mapping[str, Any]) -> Dict[str, str]:
     glows = {rule.var for rule in table.numeric}
     return {
         name: value for name, value in painted.items()
-        if name in MOBILE_TOKEN_NAMES and name not in glows and parse_colour(value) is not None
+        if name in MOBILE_TOKEN_NAMES and name not in glows and is_studio_triplet(value)
     }
 
 

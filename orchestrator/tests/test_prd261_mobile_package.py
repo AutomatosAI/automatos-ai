@@ -7,7 +7,8 @@ Plan §2.2.11, package rules (host 1.1.0):
   collection refused), 1 to 64 tables, the table directory and every table inside the file; anything
   else is ``BAD_FILE_TYPE`` with the reason. A .woff2 in that folder and a .ttf outside it match no kind;
 * ``fromLooks`` paints from ``boot/prepaint.json``: no table, or a table whose ``defaults`` look, painted
-  as the web paints it (``mobile_tokens.paint_look``), gives no ``--background`` or ``--foreground``, is
+  as the web paints it (``mobile_tokens.paint_look``: a Studio token only as an ``H S% L%`` triplet, since
+  the web reads them as ``hsl(var(--x))``), gives no ``--background`` or ``--foreground``, is
   ``MOBILE_CANNOT_PAINT``; defaults that don't fit the table paint nothing (boot-sanitize.ts drops the
   whole table, :231), so they can't paint either;
 * ``clips`` needs every state's ``assets/mascot/<state>.mp4`` and ``.png`` (PB-36), ``stills`` its
@@ -183,8 +184,11 @@ def test_a_stored_mobile_font_is_served_as_the_type_it_is_listed_with():
 # ---------------------------------------------------------------------------
 
 
-GROUND = {"paper": {"--background": "40 33.33% 94.12%", "--foreground": "#1a1814"},
-          "ink": {"--background": "210 20% 7.84%", "--foreground": "#f0f4f8"}}
+# Studio tokens as triplets, the one form the web paints them in (hexToTriplet of #1a1814, #f0f4f8, #f4efe6
+# and #2f6fed); --hello-bg is the theme's own variable, so a hex there is the theme's business.
+PAPER_TEXT, CREAM, BLUE = "40 13.04% 9.02%", "38.57 38.89% 92.94%", "219.79 84.07% 55.69%"
+GROUND = {"paper": {"--background": "40 33.33% 94.12%", "--foreground": PAPER_TEXT},
+          "ink": {"--background": "210 20% 7.84%", "--foreground": "210 36.36% 95.69%"}}
 
 
 def test_from_looks_with_no_prepaint_table_cannot_paint():
@@ -197,8 +201,8 @@ def test_from_looks_whose_defaults_paint_the_ground_and_its_text_passes():
 
 
 def test_a_pair_table_counts_toward_the_painted_tokens():
-    knobs = {"ground": {"paper": {"--background": "#f4efe6"}}, "accent": {"blue": {"--primary": "#2f6fed"}}}
-    pairs = [{"a": "ground", "b": "accent", "table": {"paper": {"blue": {"--foreground": "#1a1814"}}}}]
+    knobs = {"ground": {"paper": {"--background": CREAM}}, "accent": {"blue": {"--primary": BLUE}}}
+    pairs = [{"a": "ground", "b": "accent", "table": {"paper": {"blue": {"--foreground": PAPER_TEXT}}}}]
     assert _errors(_looks_package(_table(knobs, {"ground": "paper", "accent": "blue"}, pairs))) == []
 
 
@@ -214,18 +218,27 @@ def test_from_looks_whose_defaults_paint_no_ground_or_no_text_cannot_paint(drop,
 
 
 def test_only_the_defaults_look_counts_not_another_choice_that_paints():
-    table = _table({"ground": {"paper": {"--foreground": "#1a1814"}, "ink": GROUND["ink"]}}, {"ground": "paper"})
+    table = _table({"ground": {"paper": {"--foreground": PAPER_TEXT}, "ink": GROUND["ink"]}}, {"ground": "paper"})
     _only_error(_looks_package(table), "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
 
 
 def test_a_ground_value_that_is_not_a_mobile_colour_paints_nothing():
-    paper = {"--background": "hsl(40 33% 94%)", "--foreground": "#1a1814"}  # CSS, but not "H S% L%" or #rrggbb
+    paper = {"--background": "hsl(40 33% 94%)", "--foreground": PAPER_TEXT}  # CSS, but not "H S% L%"
     message = _only_error(_looks_package(_table({"ground": {"paper": paper}}, {"ground": "paper"})),
                           "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
     assert "paints no --background," in message
 
 
-ACCENT = {"blue": {"--primary": "#2f6fed"}}
+@pytest.mark.parametrize("token", ["--background", "--foreground"])
+def test_a_hex_ground_or_text_paints_nothing_on_the_web_so_from_looks_cannot_paint(token):
+    # tailwind.config.ts and globals.css read every Studio token as hsl(var(--x)): a #rrggbb there paints nothing
+    paper = {**GROUND["paper"], token: "#f4efe6"}
+    message = _only_error(_looks_package(_table({"ground": {"paper": paper}}, {"ground": "paper"})),
+                          "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
+    assert f"paints no {token}," in message and '"H S% L%" triplets' in message
+
+
+ACCENT = {"blue": {"--primary": BLUE}}
 
 
 @pytest.mark.parametrize("defaults, pairs, numeric", [

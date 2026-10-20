@@ -13,7 +13,8 @@ measures exactly what ``GET /api/themes/mobile/{id}`` (``mobile.py``) can serve 
 * :func:`measure_mobile` measures every pair of each subject the phone can be served: each scheme of
   ``mobile.tokens`` (``light``, then ``dark`` when given) or, under ``fromLooks``, the prepaint table's
   ``defaults`` (id ``defaults``: what every member with no readable stored look gets) and then each
-  preset in ``looks/presets/``, each painted as the web paints it (``mobile_tokens.paint_look``). A
+  preset in ``looks/presets/``, each painted as the web paints it (``mobile_tokens.paint_look``: Studio
+  tokens as ``H S% L%`` triplets only, the one form the web paints them in). A
   subject that gives no colour for a ``MOBILE_REQUIRED_TOKENS`` token (``mobile_tokens.missing_tokens``)
   fails, named with the tokens it lacks: a phone can't draw it. Otherwise a pair whose two tokens are
   not both set is ``not_measured``; a measured pair is ``pass`` at or over its minimum (the unrounded

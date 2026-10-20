@@ -21,7 +21,7 @@ never loads a theme's `dist/entry.js` or `dist/theme.css`: an app may not downlo
 |---|---|
 | `tokens` or `fromLooks` | Exactly one. `fromLooks` is only ever `true`. |
 | `tokens.light`, `tokens.dark` | `light` is required, `dark` optional. Keys are Studio's 24 colour tokens (`MOBILE_TOKEN_NAMES` in `services/themes/contract.py`), spelled with the leading `--`, and must include `--background` and `--foreground`. Each value is `H S% L%` (such as `0 0% 100%`) or `#rrggbb`. |
-| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground`. Defaults that don't fit the table paint nothing, on the web or the phone. |
+| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. Defaults that don't fit the table paint nothing, on the web or the phone, and neither does a Studio token written `#rrggbb` in the table. |
 | `fonts` | Any of `sans`, `serif`, `mono`; each a different `assets/fonts/mobile/<name>.ttf` or `.otf` in the package (one sfnt face, at most 400 KB). |
 | `mascot` | `clips`, `stills` or `none` (absent means `none`). `clips` needs each state of the top-level `mascot.states` to have `assets/mascot/<state>.mp4` and `.png`; `stills` needs the `.png`. |
 | `engines.automatos` | Must not admit a host older than 1.1.0. |
@@ -64,8 +64,9 @@ phone app copies it.
   its tone (the table below). The other scheme is null. A saved look whose painting gives no
   `--background` or `--foreground` is not served: the phone gets the defaults (logged on the
   server), the same rule the import check and the review hold.
-- **Token values** are `H S% L%` or `#rrggbb`, as the theme wrote them; the phone turns them into
-  colours with look-kit's `hsl.ts`.
+- **Token values** are `H S% L%` or `#rrggbb` for `tokens`, as `theme.json` writes them, and `H S% L%`
+  only for `fromLooks`, as the table writes them; the phone turns them into colours with look-kit's
+  `hsl.ts`.
 - **`mobile` is null** when the theme has no `mobile` block, when the member may not run it
   (a workspace's own or unreviewed theme the member has not opted in to), when it is revoked, or
   when a `fromLooks` theme's prepaint table can't be read (logged on the server).
@@ -91,8 +92,12 @@ the answer:
    defaults.
 3. **The walk.** Every knob table's entry, then every pair table's, a later one overwriting. A
    numeric rule paints its variable last with `rgba()`, which is no phone colour, so the phone gets
-   no value for it. Only Studio's colour tokens whose final value is `H S% L%` or `#rrggbb` are
-   kept.
+   no value for it. Only Studio's colour tokens whose final value is an `H S% L%` triplet are kept:
+   the web reads every one of them as `hsl(var(--x))` (`frontend/tailwind.config.ts`, `globals.css`),
+   so a `#rrggbb` there paints nothing, on the web or the phone. A web-only theme may still write one
+   (the import check doesn't refuse it); a `fromLooks` theme whose defaults give `--background` or
+   `--foreground` only that way can't paint (`MOBILE_CANNOT_PAINT`), and the review fails a preset
+   that does.
 
 The tone the tokens go under, by `theme.json` `tone`:
 

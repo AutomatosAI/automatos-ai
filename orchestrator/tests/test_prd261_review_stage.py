@@ -100,11 +100,13 @@ def test_contrast_is_listed_per_preset_as_not_measured_and_never_moves_the_verdi
 # holds the measuring itself), for the table's defaults and then each preset. hello's two presets painted for
 # the phone: default (paper, blue) reads, night (ink, green) puts white text on a green at 3.41:1.
 MOBILE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.0.0"}
-WHITE, INK_TEXT, GREEN = "0 0% 100%", "#14181c", "#2e9e5b"
+WHITE, INK_TEXT = "0 0% 100%", "#14181c"
+# The table paints Studio tokens as triplets only (the web reads them as hsl(var(--x))): #14181c and #2e9e5b.
+INK_TRIPLET, GREEN = "210 16.67% 9.41%", "144.11 54.9% 40%"
 LOOK_TABLE = {
     "knobs": {
         "ground": {
-            "paper": {"--background": WHITE, "--foreground": INK_TEXT},
+            "paper": {"--background": WHITE, "--foreground": INK_TRIPLET},
             "ink": {"--background": "220 13% 9%", "--foreground": "210 20% 96%"},
         },
         "accent": {

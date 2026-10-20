@@ -39,12 +39,14 @@ PASSING_LIGHT = {"--background": WHITE, "--foreground": INK_TEXT}
 # The corpus's colours at about 3:1 (3.03), 3.2:1 (3.19) and under 3:1 (2.85) on white.
 ABOUT_THREE, ABOUT_THREE_TWO, UNDER_THREE = "0 0% 58%", "0 0% 56.5%", "0 0% 60%"
 DARK_GROUND, DARK_TEXT, DIM_TEXT = "220 13% 9%", "210 20% 96%", "0 0% 30%"
-BLUE, GREEN = "221.21 83.19% 53.33%", "#2e9e5b"
+# A prepaint table paints Studio tokens as triplets only (the web reads them as hsl(var(--x))): #14181c and
+# #2e9e5b as hexToTriplet writes them, so the ratios are the hexes' own.
+INK_TRIPLET, BLUE, GREEN = "210 16.67% 9.41%", "221.21 83.19% 53.33%", "144.11 54.9% 40%"
 PREPAINT = "boot/prepaint.json"
 TABLE = {
     "knobs": {
         "ground": {
-            "paper": {"--background": WHITE, "--foreground": INK_TEXT, "--hello-bg": "#f4efe6"},
+            "paper": {"--background": WHITE, "--foreground": INK_TRIPLET, "--hello-bg": "#f4efe6"},
             "ink": {"--background": DARK_GROUND, "--foreground": DARK_TEXT},
         },
         # White on this green is 3.41:1: a text pair under AA.
@@ -207,6 +209,21 @@ def test_from_looks_a_preset_that_paints_no_ground_fails_naming_what_it_lacks():
     assert measured["problems"] == ['Preset "night": gives no --background, so a phone can\'t draw it.']
     assert measured["reason"].startswith("1 of the mobile block's colour sets give no --background or --foreground")
     assert [subject["missing"] for subject in measured["presets"][:2]] == [[], []]
+
+
+def test_from_looks_a_hex_ground_paints_nothing_on_the_web_so_the_preset_fails_as_unpainted():
+    # tailwind.config.ts reads every Studio token as hsl(var(--x)): the answer never serves a #rrggbb from a table
+    hexed = {**TABLE, "knobs": {**TABLE["knobs"], "ground": {**TABLE["knobs"]["ground"], "ink": {
+        "--background": "#14161a", "--foreground": DARK_TEXT,
+    }}}}
+    files = _look_files(hexed, default={"accent": "blue", "ground": "paper"}, night={"accent": "blue", "ground": "ink"})
+    measured = measure_mobile({"mobile": {"fromLooks": True}}, files)
+    assert [(subject["status"], subject["missing"]) for subject in measured["presets"]] == [
+        ("pass", []), ("pass", []), ("fail", ["--background"]),
+    ]
+    assert measured["problems"] == ['Preset "night": gives no --background, so a phone can\'t draw it.']
+    # mobile.tokens, which only the phone reads, keeps its hex
+    assert measure_mobile(_tokens(light={"--background": "#ffffff", "--foreground": INK_TEXT}), {})["status"] == "pass"
 
 
 def test_a_scheme_that_gives_no_text_colour_fails_rather_than_going_unmeasured():

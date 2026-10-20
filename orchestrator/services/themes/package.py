@@ -21,8 +21,9 @@ with a code, the path and a plain sentence:
   manifest names that is not in the package;
 * M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
   code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look, painted as
-  the web paints it (``mobile_tokens.paint_look``: nothing when the defaults don't fit the table),
-  gives no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
+  the web paints it (``mobile_tokens.paint_look``: nothing when the defaults don't fit the table, and
+  a Studio token only as an ``H S% L%`` triplet, since the web reads them as ``hsl(var(--x))``), gives
+  no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
   mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``).
 
 The result carries every file with its checked type, the file manifest
@@ -461,7 +462,8 @@ def _cannot_paint(table: Mapping[str, Any], missing: List[str]) -> str:
         )
     return (
         f'{PREPAINT_PATH}: the default look paints no {" or ".join(missing)}, so a phone can\'t draw the theme '
-        'from its looks. Give the default choices those tokens, or give "mobile.tokens" instead.'
+        'from its looks. Give the default choices those tokens as "H S% L%" triplets (the web reads Studio tokens '
+        'as hsl(var(--x)), so a #rrggbb paints nothing), or give "mobile.tokens" instead.'
     )
 
 
