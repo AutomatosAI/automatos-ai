@@ -110,7 +110,7 @@ def _repair_stubbed_package_bindings():
     Many unit tests inject ``types.ModuleType`` stubs straight into
     ``sys.modules`` (for ``consumers``, ``consumers.chatbot``, ``modules``,
     ``modules.tools`` ...) to dodge a heavy package __init__ that pulls optional
-    deps (asyncpg / pdfplumber / tiktoken / camelot). A real ``import a.b`` binds
+    deps (asyncpg / pdfplumber / tiktoken). A real ``import a.b`` binds
     ``b`` as an attribute on package ``a``; a manual ``sys.modules['a.b'] = stub``
     does NOT. Worse, replacing ``sys.modules['a']`` with a bare stub drops every
     real child attribute it used to carry.

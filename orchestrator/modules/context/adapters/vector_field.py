@@ -25,8 +25,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import (
+from config import config
+from core.llm.embedding_manager import EmbeddingManager
+from core.ports.context import SharedContextPort
+from core.qdrant import (
     Distance,
     FieldCondition,
     Filter,
@@ -35,12 +37,9 @@ from qdrant_client.models import (
     MatchValue,
     PayloadSchemaType,
     PointStruct,
+    QdrantRestClient,
     VectorParams,
 )
-
-from config import config
-from core.llm.embedding_manager import EmbeddingManager
-from core.ports.context import SharedContextPort
 from core.qdrant_writes import upsert_retrying_a_timeout_once
 from modules.context import field_scoring
 
@@ -84,7 +83,7 @@ class VectorFieldSharedContext(SharedContextPort):
         # dialling a host that does not exist on every operation.
         if not config.QDRANT_URL:
             raise RuntimeError("field memory not configured (QDRANT_URL empty)")
-        self._client = AsyncQdrantClient(
+        self._client = QdrantRestClient(
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY or None,
             timeout=30,  # Default 5s too short for index creation with wait=True

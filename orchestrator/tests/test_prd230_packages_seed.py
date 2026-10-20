@@ -222,10 +222,14 @@ def test_create_only_seeds_missing_and_never_touches_existing_rows():
 
 def test_boot_lane_runs_the_packages_seed_create_only():
     # The seed only exists in prod if something calls it — the boot leader
-    # block must carry it, in the create-only posture (grep-proof, the
-    # established wiring-test style).
+    # stage must carry it, in the create-only posture (grep-proof, the
+    # established wiring-test style). Since PRD-262 US-031 the leader's seeds
+    # live in core/seeds/leader_stage.py's SECTIONS, which main.py runs.
     from pathlib import Path
 
-    src = (Path(__file__).resolve().parents[1] / "main.py").read_text()
-    assert "from core.seeds.seed_packages import seed_packages" in src
-    assert "seed_packages(db, create_only=True)" in src
+    orchestrator = Path(__file__).resolve().parents[1]
+    stage = (orchestrator / "core" / "seeds" / "leader_stage.py").read_text()
+    assert "from core.seeds.seed_packages import seed_packages" in stage
+    assert "seed_packages(db, create_only=True)" in stage
+    assert '("Marketplace packages", _seed_packages_create_only)' in stage
+    assert "from core.seeds.leader_stage import run_leader_seeds" in (orchestrator / "main.py").read_text()

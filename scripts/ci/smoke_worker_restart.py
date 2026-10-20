@@ -18,8 +18,9 @@ count check:
    restart count and start time, so the container itself never restarted.
 
 A single uvicorn process (one worker) has no manager to restart it, so the step
-refuses to run on one: once PRD-262 US-029 takes the worker count from
-WEB_CONCURRENCY (envs/api.defaults sets 1), the job sets WEB_CONCURRENCY=2 for it.
+refuses to run on one. The worker count comes from WEB_CONCURRENCY (PRD-262 US-029),
+which envs/api.defaults sets to 1, so smoke-fresh-clone.sh gives this variant's backend
+WEB_CONCURRENCY=2 through a compose override (``use_restart_workers``).
 
 The standard library only, like the other smoke tools. Exit 0 = replaced, 1 = not.
 

@@ -14,9 +14,9 @@ import logging
 from typing import Any, List
 
 import httpx
-from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from config import config
+from core.qdrant.errors import ResponseHandlingException, UnexpectedResponse
 
 logger = logging.getLogger(__name__)
 

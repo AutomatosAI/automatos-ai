@@ -24,43 +24,10 @@ gate without confirmation/admin short-circuits.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
-import sys as _sys
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-# Lean-venv shim: importing any modules.tools submodule runs modules/tools/__init__.py,
-# which eagerly pulls modules.rag's ingestion chain — its multimodal PDF processor does
-# ``import camelot`` at module top. camelot is a declared dep installed in CI
-# (requirements.txt: camelot-py, opencv-python-headless) but often absent from a lean
-# local venv, where it breaks collection — wholly unrelated to the authz gate under test.
-#
-# Stub the missing *leaf* (camelot), never the whole ``modules.rag`` package. A package
-# stub with no ``__path__`` poisons ``sys.modules['modules.rag']`` for every later test
-# that imports the real ``modules.rag.service`` (e.g. the W2-S10 RAG suite), failing
-# their collection with "'modules.rag' is not a package". Stubbing the leaf lets the real
-# package import normally. This is the blessed pattern used across the suite
-# (test_w2s9/test_w2s10/test_golden_journeys all setdefault a camelot ModuleType).
-#
-# Probe defensively. A sibling module (tests/test_l3_distill_input.py) seeds a bare
-# ``types.ModuleType("camelot")`` into ``sys.modules`` to dodge the same heavy import.
-# That stub's ``__spec__`` is ``None``, and ``find_spec`` *raises*
-# ``ValueError: camelot.__spec__ is None`` on a spec-less cached module rather than
-# returning it. Treat both "raised" and "found" as "import chain already satisfied"
-# (real dep or sibling stub) and skip our shim; only stub when camelot is truly absent.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False  # spec-less camelot stub already present → chain satisfied
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from core.security.hierarchy_permissions import PermissionDecision
 import modules.tools.discovery.platform_executor as pe

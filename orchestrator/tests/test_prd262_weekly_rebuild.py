@@ -238,7 +238,8 @@ def test_a_schedule_run_tags_weekly_and_never_re_pushes_a_sha_tag():
 
 
 def test_no_other_tag_is_pushed_on_a_schedule_run():
-    """sha-<7>, and US-036's tree-<12> when it lands, stay immutable: a schedule run pushes neither."""
+    """sha-<7> stays immutable: a schedule run never pushes it. US-036's tree-<12> is pushed by
+    its own merge-job step, which skips schedule runs too (test_compose_published_images.py)."""
     for tag in _merge_tags():
         kind = tag.split(",", 1)[0]
         if kind in ("type=schedule", "type=semver"):  # semver applies to v* tag pushes only
@@ -312,7 +313,8 @@ def test_the_target_command_takes_the_trigger_and_the_creation_time(tmp_path):
     argv = ["target", "--event", "workflow_run", "--sha", SHA, "--trigger", "schedule", "--created", CREATED,
             "--outputs", str(outputs)]
     assert smoke.main(argv) == 0
-    assert outputs.read_text().splitlines() == [f"tag={WEEKLY}", f"revision={SHA}"]
+    # The weekly tag is pinned for make up, which would pick the commit's own sha-<7> (PRD-262 US-036).
+    assert outputs.read_text().splitlines() == [f"tag={WEEKLY}", f"revision={SHA}", f"pin={WEEKLY}"]
 
 
 def test_edge_moves_to_the_weekly_rebuild_of_the_commit_it_already_runs(monkeypatch):

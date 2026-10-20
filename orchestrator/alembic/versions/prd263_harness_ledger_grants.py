@@ -22,13 +22,13 @@ reads only ``applied``) and restores that CHECK. ``board_task_id`` stays nullabl
 because a row raised without a card has none.
 
 Revision ID: prd263_harness_ledger_grants
-Revises: auto_haiku_default_20261019
+Revises: prd262_boot_columns
 Create Date: 2026-10-19
 """
 from alembic import op
 
 revision = "prd263_harness_ledger_grants"
-down_revision = "auto_haiku_default_20261019"
+down_revision = "prd262_boot_columns"
 branch_labels = None
 depends_on = None
 

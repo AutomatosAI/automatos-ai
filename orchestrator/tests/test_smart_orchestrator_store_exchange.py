@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 # Stub the consumers / consumers.chatbot package inits so importing
 # smart_orchestrator does NOT pull the full chain (asyncpg / pdfplumber /
-# tiktoken / camelot — not installed in the unit-test env). Mirrors the
+# tiktoken — not installed in the unit-test env). Mirrors the
 # pattern in ``test_memory_single_write_path``.
 _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
@@ -46,8 +46,6 @@ if _ic_stub_installed:
     _ic_stub.IntentResult = MagicMock()
     _ic_stub.get_intent_classifier = lambda: MagicMock()
     sys.modules["consumers.chatbot.intent_classifier"] = _ic_stub
-
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from consumers.chatbot.smart_orchestrator import SmartChatOrchestrator  # noqa: E402
 

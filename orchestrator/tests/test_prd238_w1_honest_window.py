@@ -184,7 +184,7 @@ def test_durable_store_is_off_without_a_url(monkeypatch):
     def _must_not_dial(**kw):
         raise AssertionError("must not dial Qdrant")
 
-    monkeypatch.setattr(ds, "AsyncQdrantClient", _must_not_dial)
+    monkeypatch.setattr(ds, "QdrantRestClient", _must_not_dial)
     store = ds.DurableMemoryStore()
     assert store.enabled is False
 

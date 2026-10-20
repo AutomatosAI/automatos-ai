@@ -15,7 +15,7 @@ The following files were used as context for generating this wiki page:
 - [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/services/audit_retention.py](orchestrator/services/audit_retention.py)
 - [orchestrator/services/board_events.py](orchestrator/services/board_events.py)
 - [orchestrator/services/chat_messenger.py](orchestrator/services/chat_messenger.py)
@@ -42,7 +42,7 @@ This page details the real-time update architecture of Automatos AI, focusing on
 Automatos AI utilizes a multi-tiered real-time update system designed for high concurrency and sub-second UI responsiveness:
 
 1.  **Postgres LISTEN/NOTIFY**: Acts as the sub-second push spine for the Command Centre and Board. It proves lower latency than polling by using a dedicated raw connection to bridge database mutations directly to SSE streams `[orchestrator/services/board_events.py:1-18]()`.
-2.  **Redis Pub/Sub**: Manages distributed event broadcasting between the FastAPI backend and independent workers (like the `workspace-worker`) `[orchestrator/requirements.txt:72-73]()`.
+2.  **Redis Pub/Sub**: Manages distributed event broadcasting between the FastAPI backend and independent workers (like the `workspace-worker`) `[orchestrator/requirements.in:72-73]()`.
 3.  **AI SDK Data Stream Protocol**: A specialized SSE implementation that streams structured data chunks (text, tool calls, and metadata) from the `StreamingChatService` to the frontend `[orchestrator/consumers/chatbot/streaming.py:102-103]()`.
 4.  **Workflow Event Pipeline**: Uses dedicated Redis channels and the `WorkflowStageTracker` to track execution progress across multi-agent recipes and dynamic PRD-59 phases `[orchestrator/api/workflows.py:38-70]()`.
 

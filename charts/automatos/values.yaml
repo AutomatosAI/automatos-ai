@@ -42,11 +42,17 @@ config:
   LOKI_URL: ""              # log search
   PROMETHEUS_URL: ""        # metrics queries
 
+# Each component's image. `tag` defaults to the chart's appVersion (edge, which moves
+# with main). `digest` (sha256:...) pins one exact build and wins over the tag: the pod
+# runs repository@digest. `pullPolicy` empty lets the chart choose: Always for a tag that
+# moves (edge, or a MAJOR.MINOR release line), so a node never keeps an older build under
+# it, and IfNotPresent for a digest or a fixed tag (sha-<7>, tree-<12>, a full version).
 api:
   image:
     repository: ghcr.io/automatosai/automatos-api
     tag: ""            # defaults to the chart's appVersion
-    pullPolicy: IfNotPresent
+    digest: ""         # sha256:<64 hex>; wins over the tag
+    pullPolicy: ""     # empty: Always for a moving tag, IfNotPresent otherwise
   # Keep ONE replica for now: the in-process schedulers (heartbeats, Playbook
   # schedules, the reconciler) use a per-container lock, so a second replica would
   # run every scheduled job twice.
@@ -67,7 +73,8 @@ api:
 # The schema lifecycle runs once per install and upgrade, in a Job, before the
 # API pods start: `docker-entrypoint.sh migrate` waits for PostgreSQL, builds an
 # empty database, migrates, seeds, and (local edition) creates the workspace and
-# operator. API pods start uvicorn directly and never migrate.
+# operator. API pods start uvicorn with AUTOMATOS_SKIP_MIGRATIONS=true and never
+# migrate.
 migrations:
   backoffLimit: 1
   activeDeadlineSeconds: 900
@@ -83,7 +90,8 @@ frontend:
   image:
     repository: ghcr.io/automatosai/automatos-frontend
     tag: ""
-    pullPolicy: IfNotPresent
+    digest: ""
+    pullPolicy: ""
   replicas: 1
   resources:
     requests:
@@ -97,7 +105,8 @@ worker:
   image:
     repository: ghcr.io/automatosai/automatos-workspace-worker
     tag: ""
-    pullPolicy: IfNotPresent
+    digest: ""
+    pullPolicy: ""
   concurrency: 3
   defaultQuotaGb: 5
   resources:

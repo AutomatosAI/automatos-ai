@@ -1,6 +1,12 @@
 # DEV ONLY — throwaway PostgreSQL (pgvector) and Redis for the kind end-to-end test.
 # No persistence, no backups, no TLS. Production uses managed services, reached
 # through the chart's existingSecret (DATABASE_URL, REDIS_URL).
+#
+# Both images are pinned as name:tag@sha256:<digest> (PRD-262 US-042), on the same tag
+# lines as docker-compose.yml's postgres and redis, so every run gets the same bytes.
+# deploy/kind/e2e.sh pulls and loads these exact references (DATASTORE_IMAGES), and
+# orchestrator/tests/test_prd262_kind_pins.py holds the two files together. Dependabot
+# moves compose's digests, not these: copy compose's here, and into e2e.sh, to update.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,7 +22,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: pgvector/pgvector:pg16
+          image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
           env:
             - name: POSTGRES_DB
               value: orchestrator_db
@@ -59,7 +65,7 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:7-alpine
+          image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
           args: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\""]
           env:
             - name: REDIS_PASSWORD
