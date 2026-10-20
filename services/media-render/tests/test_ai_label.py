@@ -6,14 +6,16 @@
   read back from the pixels the image's ffmpeg drew (a black video: white text in the top
   left while it shows, black when it does not);
 - its text reaches ffmpeg through a file, so quotes, colons and per cent signs are text;
-- the real pipeline burns it into ``render.mp4`` before the AI mark, and the mark is still
-  read back after it; a bundle without one gets none;
+- the real pipeline burns it into ``render.mp4`` before the AI mark and the C2PA signature
+  (EUAI-06b): the mark and the manifest are read back from the labelled file, and the job's
+  ``sha256`` is that final file's; a bundle without one gets none;
 - the image's ffmpeg has ``drawtext`` and the label's font is where the config says.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import subprocess
 from dataclasses import replace
@@ -22,6 +24,7 @@ from typing import Any, Dict
 
 import pytest
 
+from c2pa_checks import assert_signed
 from helpers import VOICES, bundle
 from media_render import boot
 from media_render.ai_label import (
@@ -31,10 +34,10 @@ from media_render.bundle import parse_bundle
 from media_render.fixture import fixture_bundle
 from media_render.jobs import JobStore
 from media_render.pipeline import RenderPipeline
-from media_render.provenance import COMPOSITE
+from media_render.provenance import COMPOSITE, INSTANCE_PREFIX
 from media_render.tts import Speaker
 from media_render.validate import BundleError
-from provenance_checks import ffmpeg, seconds_of, source_type_of
+from provenance_checks import ffmpeg, instance_id_of, packet_of, seconds_of, source_type_of
 
 LABEL = {"text": "AI-generated", "seconds": 3, "interval": 30}
 # Brightest pixel of the top-left label area: white text over black, or black alone.
@@ -170,7 +173,7 @@ def _render(settings, body: Dict[str, Any]):
     return job, asyncio.run(go())
 
 
-def test_the_pipeline_burns_the_label_in_before_the_mark(settings):
+def test_the_pipeline_burns_the_label_in_before_the_mark_and_the_signature(settings):
     inputs = {"footage": False, "stills": False, "voice": True, "uploads": False, "template": True}
     body = {**fixture_bundle(), "ai_inputs": inputs, "ai_label": {"text": "AI-generated", "seconds": 1, "interval": 2}}
     job, result = _render(settings, body)
@@ -179,6 +182,10 @@ def test_the_pipeline_burns_the_label_in_before_the_mark(settings):
     assert output["name"] == "render.mp4" and output["bytes"] == video.stat().st_size
     assert "label_seconds" in result.timings
     assert source_type_of(settings, video) == COMPOSITE, "the mark follows the label's encode"
+    instance_id = f"{INSTANCE_PREFIX}{instance_id_of(packet_of(settings, video))}"
+    store = assert_signed(video, COMPOSITE, instance_id=instance_id)
+    assert output["manifest_id"] == store["active_manifest"], "the signed file is the labelled one"
+    assert output["sha256"] == hashlib.sha256(video.read_bytes()).hexdigest(), "the record is the final file's"
     assert _brightest(settings, video, 0.5) >= SHOWN
     assert _brightest(settings, video, 1.5) <= HIDDEN
 

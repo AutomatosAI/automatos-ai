@@ -13,7 +13,9 @@ whose label is on, its text in the post's language
 Only the video render, ``render.mp4``, carries it: a still and a preview's frames and
 reel are snapshots of the composition as it is, and their post carries the label in its
 caption. The pipeline burns it in after ``hyperframes render`` and before the file is
-marked (``provenance.py``), so the IPTC mark still comes after the last encode.
+marked (``provenance.py``) and signed (``content_credentials.py``), so the IPTC mark and the
+C2PA manifest still come after the last encode: the signed file, and its recorded SHA-256,
+are the labelled one.
 
 ffmpeg's ``drawtext`` draws it top left, white on a dark box, sized to the frame's shorter
 side, in the image's DejaVu Sans Bold (``MEDIA_RENDER_AI_LABEL_FONT``). The text reaches
