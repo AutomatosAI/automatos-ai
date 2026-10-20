@@ -9,7 +9,7 @@ import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/components/play/shell/play-frame-lazy', () => ({
+vi.mock('@/lib/theme-host/builtin/play-frame-lazy', () => ({
   PlayFrame: ({ children, fullBleed, autoWidget }: { children?: React.ReactNode; fullBleed?: boolean; autoWidget?: React.ReactNode }) => (
     <section data-testid="play-frame" data-full-bleed={String(fullBleed)}>
       {children}

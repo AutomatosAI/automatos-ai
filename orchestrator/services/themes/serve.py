@@ -30,6 +30,19 @@ The boot is the §2.2 ``ThemeBoot``: the theme's classes and tone policy, ``boot
 checked again by ``css_value.py``, and ``integrity`` (module URL → ``sha256-<base64>``, from the
 stored hex) for every JS module, which ``active`` (A-07b) carries too. A caller who has not
 opted in, or a revoked version, gets the base boot: the theme's base classes and nothing else.
+
+PRD-261 W-A6b (gap G1): the boot of a theme that runs also carries ``entry``, what the host's
+theme registry needs of it (``theme_entry``: its name, base, class, width, tone, pages, routes,
+nav and slots, from the checked ``theme.json``), so the root layout hands the client the same
+registry entry on the server render and the first client render. The base boot's is null.
+
+PRD-261 W-A6b (gap G2): the boot of a theme that runs paints the member's stored look before first
+paint, as builtin Play's does. ``lookStorage`` names the browser keys the host's look store keeps
+the theme's active look under (``look_storage``, the frontend's ``installedLookKeys`` format,
+``tests/fixtures/themes/look-storage.json`` holds the two equal), and ``lookGuard`` is the look
+header of the theme's checked ``looks/schema.json``, so only a look of this theme's format paints.
+A package with no readable schema gets neither: its default look paints. The entry carries the
+theme id (``themeId``), the one the host's look store and the looks API key the looks by.
 """
 
 from __future__ import annotations
@@ -49,6 +62,7 @@ from services.themes.choices import is_private
 from services.themes.contract import HTML_CLASS_OWNERS, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import sha256_hex
+from services.themes.look_schema import SCHEMA_PATH as LOOK_SCHEMA_PATH, LookSchema, validate_look_schema
 from services.themes.membership import Membership
 from services.themes.optin import has_opted_in
 from services.themes.revocations import is_disabled
@@ -76,7 +90,19 @@ STUDIO_HTML_CLASS = "studio"
 # and each builtin theme's.
 STYLE_HTML_CLASSES: Tuple[str, ...] = (STUDIO_HTML_CLASS, *sorted(HTML_CLASS_OWNERS))
 USER_TONE = "user"
+# theme.json requires minWidth; a manifest stored before it was required draws at every width.
+DEFAULT_MIN_WIDTH = 0
 FIXED_TONES = frozenset({"light", "dark"})
+# Where the host's look store keeps an installed theme's active look in the browser (frontend
+# lib/theme-host/builtin/play-look-storage.ts installedLookKeys and bootLookStorage):
+# `automatos-theme.<theme id>.look`, with `:<scope>` appended per account, and `.current` naming
+# the scope the boot script paints.
+INSTALLED_LOOK_KEY_PREFIX = "automatos-theme."
+ACTIVE_LOOK_SUFFIX = ".look"
+LOOK_POINTER_SUFFIX = ".current"
+LOOK_SCOPE_SEPARATOR = ":"
+# The boot fields theme_looks answers.
+LOOK_BOOT_FIELDS = ("lookStorage", "lookGuard")
 
 # (storage prefix, package path) -> the stored bytes, or None when the object is gone.
 FileReader = Callable[[str, str], Optional[bytes]]
@@ -261,6 +287,7 @@ def _boot(add_classes: List[str], extra_remove: Tuple[str, ...], policy: str) ->
         "lookStorage": None,
         "lookGuard": None,
         "integrity": None,
+        "entry": None,
     }
 
 
@@ -290,12 +317,91 @@ def theme_prepaint(package: ThemePackage, reader: FileReader) -> Optional[Dict[s
     return document
 
 
-def theme_boot(package: ThemePackage, prepaint: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The boot of a theme that runs: its base's classes and its own, its tone, prepaint and integrity."""
+def look_storage(theme_id: str) -> Dict[str, str]:
+    """The browser keys the boot script reads a theme's stored active look from (``ThemeLookStorage``)."""
+    active = f"{INSTALLED_LOOK_KEY_PREFIX}{theme_id}{ACTIVE_LOOK_SUFFIX}"
+    return {
+        "pointerKey": f"{active}{LOOK_POINTER_SUFFIX}",
+        "scopedPrefix": f"{active}{LOOK_SCOPE_SEPARATOR}",
+        "fallbackKey": active,
+    }
+
+
+def _theme_id(package: ThemePackage) -> str:
+    return str((package.manifest or {}).get("id") or package.theme_id)
+
+
+def theme_look_schema(package: ThemePackage, reader: FileReader) -> Optional[LookSchema]:
+    """``looks/schema.json`` re-hashed and checked by ``look_schema.py``; None when the package has none or it fails.
+
+    A failure is logged: the boot then paints the theme's default look, never an unguarded stored one.
+    """
+    if LOOK_SCHEMA_PATH not in (package.file_manifest or {}):
+        return None
+    try:
+        data, _type, _sha = verified_file(package, LOOK_SCHEMA_PATH, reader)
+    except ThemeFileMissing:
+        logger.error("Package %s's %s can't be read: its boot paints the default look", package.id, LOOK_SCHEMA_PATH)
+        return None
+    document, error = parse_json(data, LOOK_SCHEMA_PATH)
+    schema, errors = validate_look_schema(document) if error is None else (None, [error])
+    if schema is None:
+        logger.error("Package %s's %s fails its check on read: %s", package.id, LOOK_SCHEMA_PATH, errors[0]["message"])
+    return schema
+
+
+def theme_looks(package: ThemePackage, reader: FileReader) -> Dict[str, Any]:
+    """The boot's ``lookStorage`` and ``lookGuard``: where the stored look is, and the format it must have.
+
+    The guard is the schema's look header; one with no interface has no guard (the boot script checks
+    both), so any stored look that fits the prepaint table paints, as the keys are this theme's own.
+    """
+    schema = theme_look_schema(package, reader)
+    if schema is None:
+        return dict.fromkeys(LOOK_BOOT_FIELDS)
+    guard = {"schema": schema.look_schema, "iface": schema.interface} if schema.interface else None
+    return {"lookStorage": look_storage(_theme_id(package)), "lookGuard": guard}
+
+
+def theme_entry(package: ThemePackage) -> Dict[str, Any]:
+    """The theme's registry entry, as the host reads it (frontend ``lib/theme-host/installed-entry.ts``).
+
+    Every field comes from the ``theme.json`` checked on import (``manifest.py``); ``ownsPages`` lists
+    the core pages the theme draws (``pages``' routes), and ``reviewed`` is the package's review, the
+    rule ``choices.is_private`` reads. The frontend checks the answer again before it uses it.
+    """
+    manifest = package.manifest or {}
+    pages = manifest.get("pages")
+    return {
+        "themeId": _theme_id(package),
+        "name": str(manifest.get("name", "")),
+        "base": str(manifest.get("base", STUDIO_BASE)),
+        "htmlClass": str(manifest["htmlClass"]),
+        "minWidth": manifest.get("minWidth", DEFAULT_MIN_WIDTH),
+        "tone": str(manifest.get("tone", USER_TONE)),
+        "reviewed": not is_private(package),
+        "ownsPages": sorted(pages) if isinstance(pages, dict) else [],
+        "routes": list(manifest.get("routes", [])),
+        "nav": [dict(item) for item in manifest.get("nav", []) if isinstance(item, dict)],
+        "slots": list(manifest.get("slots", [])),
+    }
+
+
+def theme_boot(
+    package: ThemePackage, prepaint: Optional[Dict[str, Any]], looks: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """The boot of a theme that runs: its base's classes and its own, its tone, prepaint, looks, integrity and entry.
+
+    ``looks`` is ``theme_looks``' answer; without it the boot paints the default look only.
+    """
     manifest = package.manifest or {}
     classes = [*_base_classes(manifest), str(manifest["htmlClass"])]
     boot = _boot(classes, (), str(manifest.get("tone", USER_TONE)))
-    return {**boot, "prepaint": prepaint, "integrity": module_integrity(package)}
+    chosen = {field: (looks or {}).get(field) for field in LOOK_BOOT_FIELDS}
+    return {
+        **boot, **chosen,
+        "prepaint": prepaint, "integrity": module_integrity(package), "entry": theme_entry(package),
+    }
 
 
 def install_boot(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Dict[str, Any]:
@@ -308,11 +414,12 @@ def install_boot(db: Any, membership: Membership, target: BootTarget, reader: Fi
         prepaint = theme_prepaint(package, reader)
     except ThemeFileMissing:
         return base_boot(manifest)
-    return theme_boot(package, prepaint)
+    return theme_boot(package, prepaint, theme_looks(package, reader))
 
 
 __all__ = [
     "BootTarget", "FileReader", "ThemeFileMissing", "ThemeStorageUnavailable", "authorised_package", "base_boot",
     "belongs_to_install", "boot_target", "file_cache_seconds", "install_boot", "integrity_value", "is_private",
-    "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_prepaint", "verified_file",
+    "look_storage", "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_entry",
+    "theme_look_schema", "theme_looks", "theme_prepaint", "verified_file",
 ]

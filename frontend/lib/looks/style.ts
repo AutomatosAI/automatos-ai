@@ -1,7 +1,7 @@
-import { AA_TEXT, contrastRatio, relativeLuminance } from '@/lib/look-kit/contrast'
-import type { CssVars } from '@/lib/look-kit/css'
-import { ringColour, ringTone, type RingTone } from '@/lib/mascot/ring'
-import { MASCOT_STATES, type MascotName } from '@/lib/mascot/types'
+import { AA_TEXT, contrastRatio, relativeLuminance } from '../look-kit/contrast'
+import type { CssVars } from '../look-kit/css'
+import { ringColour, ringTone, type RingTone } from '../mascot/ring'
+import { MASCOT_STATES, type MascotName } from '../mascot/types'
 
 import { ACCENTS, ERROR_COLOUR, GROUNDS, TYPE_STYLES } from './catalogue'
 import { lookToCssVars } from './engine'

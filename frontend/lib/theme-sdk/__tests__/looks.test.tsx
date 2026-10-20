@@ -3,14 +3,18 @@
  * (internal/look-runtime.ts). Outside a runtime every name answers "no looks here" and none throws; inside one,
  * useLook reads the runtime through context and the plain functions reach the runtime registered now, which a
  * stale runtime's cleanup never drops. The host's real runtime is proved by
- * components/theme-host/__tests__/theme-look-runtime.test.tsx.
+ * components/theme-host/__tests__/theme-look-runtime.test.tsx. useLookScope reads the scope the host's
+ * AccountLookScope provides (components/looks/__tests__/look-scope.test.tsx runs the real one under Play's shelf).
  */
 import { renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { LookScopeContext } from '@/components/theme-host/look-scope'
+import { DEFAULT_LOOK_SCOPE, lookScope } from '@/lib/looks/scope'
+
 import { LookRuntimeContext, currentLookRuntime, registerLookRuntime, type HostLookRuntime } from '../internal/look-runtime'
-import { exportLook, importLook, listLooks, saveLook, useLook, type HostLook, type HostLookState } from '../looks'
+import { exportLook, importLook, listLooks, saveLook, useLook, useLookScope, type HostLook, type HostLookState } from '../looks'
 
 const NOT_AVAILABLE = { ok: false, errors: ["Looks aren't available here."] }
 const LOOK: HostLook = { schema: 'automatos-interface-look/v1', id: 'look-1', name: 'Mine', sub: 'Your look' }
@@ -99,5 +103,20 @@ describe('PRD-261 A-13c — looks on a mounted look runtime', () => {
     dropSecond()
     expect(currentLookRuntime()).toBeNull()
     expect(saveLook(LOOK)).toEqual(NOT_AVAILABLE)
+  })
+})
+
+describe("PRD-261 W-A5 — useLookScope, whose looks these are", () => {
+  it("reads the scope the host's AccountLookScope provides, and null while the account isn't known", () => {
+    for (const scope of [lookScope('ws-1', 'user_a'), null]) {
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <LookScopeContext.Provider value={scope}>{children}</LookScopeContext.Provider>
+      )
+      expect(renderHook(() => useLookScope(), { wrapper }).result.current).toBe(scope)
+    }
+  })
+
+  it("answers the host's default scope outside it (an isolated mount)", () => {
+    expect(renderHook(() => useLookScope()).result.current).toBe(DEFAULT_LOOK_SCOPE)
   })
 })

@@ -1,5 +1,5 @@
-import { lookToCssVars } from '@/lib/looks/engine'
-import type { Look } from '@/lib/looks/types'
+import { lookToCssVars } from '../looks/engine'
+import type { Look } from '../looks/types'
 
 import type { MascotName } from './types'
 

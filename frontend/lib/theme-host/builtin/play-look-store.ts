@@ -16,7 +16,7 @@ import {
   writeSavedLooks,
   type LookTheme,
   type StorageSource,
-} from '@/lib/looks/storage'
+} from '@/lib/theme-host/builtin/play-look-storage'
 import {
   createLookOutbox,
   INITIAL_LOOK_STATE,
@@ -27,7 +27,7 @@ import {
   lookReducer,
   mergeLooks,
   sameLookSet,
-} from '@/lib/looks/store'
+} from '@/lib/theme-host/builtin/play-look-state'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 import { validateLook } from '@/lib/looks/engine'
 import { BUILTIN_PLAY_REF } from '@/lib/theme-host/builtin/play-entry'
@@ -40,7 +40,7 @@ import { BUILTIN_PLAY_LOOK_THEME } from '@/lib/theme-host/builtin/play-look-keys
  * (GET /api/themes/looks/{themeId}), which is the truth; a change is written
  * to the copy at once and sent to the server (PUT, useLookServerSync). Other
  * tabs follow through the copy (M25). The theme gives the keys
- * (lib/looks/storage.ts): an installed theme's are `automatos-theme.<id>.*`;
+ * (play-look-storage.ts): an installed theme's are `automatos-theme.<id>.*`;
  * with none given, the looks are builtin Play's under its PRD-260 keys, kept
  * in step with the server while Play is the style.
  */

@@ -2,22 +2,33 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
+import { useLookScope } from '@/components/theme-host/look-scope'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
-import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
-import { BUILTIN_PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
-import { clearPlayToneCookie, toneOfGround, writePlayToneCookie, type PlayTone } from '@/lib/looks/tone'
+import {
+  browserStorage,
+  installedLookTheme,
+  readPrepaintLook,
+  rememberLookScope,
+  type LookKeyBases,
+  type LookTheme,
+  type StorageSource,
+} from '@/lib/theme-host/builtin/play-look-storage'
+import { toneOfGround, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
-import { useLookScope } from './look-scope'
-import { useLookStore, type LookStore } from './use-look-store'
+import { runsPlayLooks } from './play-entry'
+import { LookRuntimeBridge } from './play-look-bridge'
+import { BUILTIN_PLAY_LOOK_THEME } from './play-look-keys'
+import { useLookStore, type LookStore } from './play-look-store'
+import { clearPlayToneCookie, writePlayToneCookie } from './play-tone-cookie'
 
 /**
  * PRD-260 K3, K4 — the active look for the whole app, applied only while the
  * style is play. Its variables live on <html>, so every screen follows a
- * change at once; the pre-paint script (lib/looks/prepaint.ts) has already
+ * change at once; the pre-paint script (play-prepaint.ts) has already
  * set them before first paint, and this takes over once storage is read.
  * Until then, under Play, it paints what the pre-paint script paints
  * (readPrepaintLook), so Play is never without its variables: the account's
@@ -33,7 +44,20 @@ import { useLookStore, type LookStore } from './use-look-store'
  * (useLookScope, from account-look-scope.tsx); another account in this
  * browser reads its own, and under Play the pre-paint script is pointed at
  * this account's active look for the next page load. M25: a change made in
- * another tab arrives here (use-look-store.ts), and the tone follows it.
+ * another tab arrives here (./play-look-store.ts), and the tone follows it.
+ *
+ * PRD-261 A-13c, A-14d: this is the host's look runtime (PA-9), mounted by
+ * ThemeLookRuntime (components/theme-host/theme-look-runtime.tsx); it lives
+ * with builtin Play's registrations, out of Play's folders, since it reads the
+ * host's style and storage. It hands itself to the SDK's `looks` area
+ * (./play-look-bridge.tsx) for everything below it, which is how Play's look
+ * editor reads it (components/looks/use-play-look.ts).
+ *
+ * PRD-261 W-A6b (gap G2): the looks are the active theme's. Under Play's package (an installed
+ * theme whose class is Play's) they are kept under that theme's id (its registry entry's themeId):
+ * `automatos-theme.<id>.*` in this browser (installedLookTheme), the keys its boot names to the
+ * boot script, and GET/PUT /api/themes/looks/<id> on the server. Builtin Play keeps its PRD-260
+ * keys, as before.
  */
 
 export interface LookContextValue extends Omit<LookStore, 'scope'> {
@@ -79,6 +103,8 @@ interface DocumentLook {
   /** The look to paint; null leaves what is on <html> (the first render, before the pre-paint look is read). */
   readonly look: Look | null
   readonly reducedMotion: boolean
+  /** Switched off, leave <html> as the root layout's boot painted it (LookProviderProps.keepFirstPaint). */
+  readonly keepFirstPaint: boolean
 }
 
 /**
@@ -86,33 +112,56 @@ interface DocumentLook {
  * paints, read after mount (so the server's render and the first one agree);
  * null otherwise. Never the default over a stored look: that would flash it.
  */
-function usePrepaintLook(storage: StorageSource, waiting: boolean): Look | null {
+function usePrepaintLook(storage: StorageSource, waiting: boolean, keys: LookKeyBases): Look | null {
   const [prepaint, setPrepaint] = useState<Look | null>(null)
   useEffect(() => {
-    setPrepaint(waiting ? readPrepaintLook(storage) : null)
-  }, [storage, waiting])
+    setPrepaint(waiting ? readPrepaintLook(storage, keys) : null)
+  }, [storage, waiting, keys])
   return prepaint
 }
 
-function useLookOnDocument({ active, look, reducedMotion }: DocumentLook): void {
+function useLookOnDocument({ active, look, reducedMotion, keepFirstPaint }: DocumentLook): void {
   useEffect(() => {
     const root = document.documentElement
     if (!active) {
-      clearLook(root)
+      if (!keepFirstPaint) clearLook(root)
       return
     }
     applyMotion(root, reducedMotion)
     if (look !== null) applyLook(root, look)
-  }, [active, look, reducedMotion])
+  }, [active, look, reducedMotion, keepFirstPaint])
 
   useEffect(() => () => clearLook(document.documentElement), [])
 }
 
-/** Under Play, the next page load's pre-paint script paints this account's active look (lib/looks/prepaint.ts). */
-function useLookPointer(storage: StorageSource, active: boolean, scope: string | null): void {
+/** Under Play, the next page load's pre-paint script paints this account's active look (play-prepaint.ts). */
+function useLookPointer(storage: StorageSource, active: boolean, scope: string | null, keys: LookKeyBases): void {
   useEffect(() => {
-    if (active && scope !== null) rememberLookScope(storage, scope)
-  }, [storage, active, scope])
+    if (active && scope !== null) rememberLookScope(storage, scope, keys)
+  }, [storage, active, scope, keys])
+}
+
+interface RuntimeTheme {
+  /** The look runtime paints: it is switched on and the active theme's class is Play's. */
+  readonly active: boolean
+  /** Whose looks: an installed theme's (by its id), or undefined for builtin Play's. */
+  readonly theme: LookTheme | undefined
+  readonly keys: LookKeyBases
+}
+
+/**
+ * PRD-261 A-02b, PA-8: Play's look runs under the theme whose <html> class is Play's. W-A6b (G2):
+ * under an installed one the looks are that theme's own; one object per theme id, so the store and
+ * the effects below never read again on a re-render.
+ */
+function useRuntimeTheme(enabled: boolean): RuntimeTheme {
+  const entry = useUiStyleOptional()?.activeTheme ?? null
+  const active = enabled && runsPlayLooks(entry)
+  const themeId = active && entry?.kind === 'installed' ? entry.themeId ?? null : null
+  return useMemo(() => {
+    const theme = themeId === null ? undefined : installedLookTheme(themeId)
+    return { active, theme, keys: (theme ?? BUILTIN_PLAY_LOOK_THEME).keys }
+  }, [active, themeId])
 }
 
 /** Until a look is painted the server's tone (from its cookie) stands, so a reload never flips it. */
@@ -141,27 +190,39 @@ export interface LookProviderProps {
    * switched in place never remounts the page below it (M69).
    */
   readonly enabled?: boolean
+  /**
+   * PRD-261 W-A6: while it paints no look (switched off, or a theme whose class isn't Play's), leave
+   * the look's properties on <html> as they are instead of clearing them. ThemeLookRuntime sets it
+   * while the host loads or runs an installed theme: the root layout's boot painted that theme's
+   * first paint (its prepaint table, Studio's tokens among it) under the same names, and nothing
+   * paints it again. Leaving a look this provider painted, or a failed load, clears as before.
+   */
+  readonly keepFirstPaint?: boolean
 }
 
-export function LookProvider({ children, storage = browserStorage, onToneChange, enabled = true }: LookProviderProps) {
-  const store = useLookStore(storage, useLookScope())
+export function LookProvider({ children, storage = browserStorage, onToneChange, enabled = true, keepFirstPaint = false }: LookProviderProps) {
+  const { active, theme, keys } = useRuntimeTheme(enabled)
+  const store = useLookStore(storage, useLookScope(), { theme })
   const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
-  // PRD-261 A-02b, PA-8: Play's look runs under the theme whose <html> class is Play's.
-  const playStyle = useUiStyleOptional()?.activeTheme?.htmlClass === BUILTIN_PLAY_HTML_CLASS
-  const active = enabled && playStyle
-  const prepaint = usePrepaintLook(storage, active && !loaded)
+  const prepaint = usePrepaintLook(storage, active && !loaded, keys)
   const painted = loaded ? look : prepaint
   const tone = active && painted !== null ? toneOfGround(painted.ground) : undefined
 
-  useLookOnDocument({ active, look: painted, reducedMotion })
+  useLookOnDocument({ active, look: painted, reducedMotion, keepFirstPaint })
   useLookTone(active, tone, onToneChange)
-  useLookPointer(storage, active, scope)
+  useLookPointer(storage, active, scope, keys)
 
   const value = useMemo<LookContextValue>(
     () => ({ look, saved, loaded, persisted, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook }),
     [look, saved, loaded, persisted, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook],
   )
 
-  return <LookContext.Provider value={value}>{children}</LookContext.Provider>
+  return (
+    <LookContext.Provider value={value}>
+      <LookRuntimeBridge value={value} enabled={active}>
+        {children}
+      </LookRuntimeBridge>
+    </LookContext.Provider>
+  )
 }
