@@ -408,7 +408,7 @@ if [ "$MODE" != "negative" ]; then
   check "US-003b POST pairing-codes and POST pair are in route-manifest.json" "routes_in_manifest 'POST /api/v1/mobile/pairing-codes' 'POST /api/v1/mobile/pair'"
   check "US-003b/US-005a the five W1 settings are in config.py and config-surface.json" "settings_declared $SETTINGS"
   check "US-003b the pairing tests are new" "new_files $TESTS/test_prd266_mobile_pairing.py $TESTS/test_prd266_mobile_pairing_routes.py"
-  check "US-004a the registry, the lane, the decorator on hybrid; the lane is local-only" "has 'amd_' $AUTH/credentials.py && has 'AUTH_EDITION' $AUTH/device.py && has 'device_revoked' $AUTH/device.py && has 'core\\.auth\\.credentials|from core\\.auth import credentials' $AUTH/hybrid.py && has 'mobile_device' $AUTH/principal.py && grep -qE 'device' $AUTH/dependencies.py"
+  check "US-004a the registry, the lane, the decorator on hybrid; the lane is local-only" "has 'amd_' $AUTH/bearer_registry.py && has 'AUTH_EDITION' $AUTH/device.py && has 'device_revoked' $AUTH/device.py && has 'core\\.auth\\.bearer_registry|from core\\.auth import bearer_registry' $AUTH/hybrid.py && has 'mobile_device' $AUTH/principal.py && grep -qE 'device' $AUTH/dependencies.py"
   check "US-004a the device-lane test is new" "new_files $TESTS/test_prd266_device_lane.py"
   check "US-003c the device routes are in route-manifest.json" "routes_in_manifest 'POST /api/v1/mobile/devices' 'GET /api/v1/mobile/devices' 'PATCH /api/v1/mobile/devices/\{[a-z_]+\}' 'DELETE /api/v1/mobile/devices/\{[a-z_]+\}' 'POST /api/v1/mobile/devices/\{[a-z_]+\}/rotate'"
   check "US-003c the devices service and its test are new" "all_exist $MOBILE/devices.py && new_files $TESTS/test_prd266_mobile_devices_routes.py"
