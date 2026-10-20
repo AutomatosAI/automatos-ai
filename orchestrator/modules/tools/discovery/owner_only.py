@@ -277,7 +277,12 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
         if not composio:
             return await execute_tool(*call.args, **call.kwargs)
         if not is_composio_send(slug):
-            return await _ResolvedSend(self, call.arguments, inner).runs(lambda: execute_tool(*call.args, **call.kwargs))
+            return await _ResolvedSend(self, call.arguments, inner, slug).runs(lambda: execute_tool(*call.args, **call.kwargs))
+        call, inner = _told(self, signature, call, slug, inner)  # PRD-264 EUAI-07: the AI line, before the card
+        untold = _carries_no_line(call.arguments, slug)
+        if untold is not None:
+            return {"success": False, "error": untold}
+        params = call.arguments["parameters"]
         db = getattr(self, "db", None)
         ticket = _whose_click(db, workspace_id, slug, ctx, composio)
         if ticket is None:
@@ -289,6 +294,30 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
     return wrapped
 
 
+def _told(executor: Any, signature: inspect.Signature, call: inspect.BoundArguments, slug: str,
+          inner: Any) -> tuple:
+    """PRD-264 EUAI-07: ``(call, inner)`` with the AI line at the top of the send's body
+    (``send_notice.told_call``), so the card shows, and the grant's hash covers, what goes out;
+    the call as it is when the line is already there or it has no body."""
+    from modules.tools.discovery.send_notice import told_call
+
+    arguments = call.arguments
+    told = told_call(getattr(executor, "db", None), arguments["workspace_id"], arguments["tool_name"],
+                     arguments["parameters"], slug, arguments["caller_context"])
+    if told is arguments["parameters"]:
+        return call, inner
+    rebound = signature.bind(**{**arguments, "parameters": told})
+    return rebound, executor._resolve_effective_call(arguments["tool_name"], told)[1]
+
+
+def _carries_no_line(arguments: Dict[str, Any], slug: str) -> Optional[str]:
+    """PRD-264 EUAI-07: why the told send may not go out (it has no text parameter to carry the AI
+    line), refused before any card; None when what it sends starts with the line or needs none."""
+    from modules.tools.discovery.send_notice import untold_send
+
+    return untold_send(arguments["tool_name"], arguments["parameters"], slug, arguments["caller_context"])
+
+
 class _ResolvedSend:
     """P256-FIX-RVW-3: a Composio call asked for under a name that is not a send, watched
     while it runs. Where the executor resolves that name onto another action (a slug form,
@@ -297,10 +326,11 @@ class _ResolvedSend:
     waits for the owner's click exactly as one asked for by name. Without the click the card
     is raised, the action never runs and the call's answer is the card; with it, it runs once."""
 
-    def __init__(self, executor: Any, arguments: Dict[str, Any], inner: Any) -> None:
-        self.executor, self.arguments, self.inner = executor, arguments, inner
+    def __init__(self, executor: Any, arguments: Dict[str, Any], inner: Any, asked: str = "") -> None:
+        self.executor, self.arguments, self.inner, self.asked = executor, arguments, inner, asked
         self.card: Optional[Dict[str, Any]] = None
         self.grant: Any = None
+        self.untold: Optional[str] = None   # PRD-264 EUAI-07: why a resolved send with words was refused
 
     async def runs(self, run: Callable[[], Awaitable[Dict[str, Any]]]) -> Dict[str, Any]:
         """The call's answer: the card when a resolved send raised one, else what ran."""
@@ -310,6 +340,8 @@ class _ResolvedSend:
             result = await run()
         if self.card is not None:
             return self.card
+        if self.untold is not None:
+            return {"success": False, "error": self.untold}
         return result if self.grant is None else after_the_click(self._db(), self.grant, result)
 
     async def check(self, action: str) -> Optional[str]:
@@ -320,6 +352,9 @@ class _ResolvedSend:
         if self.grant is not None or not is_composio_send(action):
             return None  # a read never touches the executor's session (F088)
         args, db = self.arguments, self._db()
+        self.untold = self.untold or _untold(args, self.asked, action)  # PRD-264 EUAI-07: no AI line here
+        if self.untold:
+            return self.untold
         ticket = _whose_click(db, args["workspace_id"], action, args["caller_context"], True)
         if ticket is None:
             return None
@@ -336,6 +371,13 @@ class _ResolvedSend:
 
     def _db(self) -> Any:
         return getattr(self.executor, "db", None)
+
+
+def _untold(arguments: Dict[str, Any], asked: str, action: str) -> Optional[str]:
+    """Why a send the executor resolved onto from another name (``asked``) may not run (``send_notice``)."""
+    from modules.tools.discovery.send_notice import untold_resolved_send
+
+    return untold_resolved_send(asked or arguments["tool_name"], action, arguments["caller_context"])
 
 
 def _send_card(db: Any, arguments: Dict[str, Any], slug: str, ticket: Dict[str, Any], inner: Any) -> Dict[str, Any]:
