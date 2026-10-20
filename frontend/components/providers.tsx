@@ -128,11 +128,11 @@ export function Providers({ children, initialUiStyle, initialTone }: ProvidersPr
                   where Auto opens (OnboardingOpener) — no first-login modal or
                   guided tour (both retired in W2·S5). */}
               <ThemeHostProvider>
-                {/* PRD-261 A-13c: the active theme's look runtime, at every width, only while
-                    the theme declares looks (Classic and Studio mount none). PRD-260 F5: looks
-                    are the signed-in user's in this workspace, so it sits inside the
-                    WorkspaceProvider; inside the theme host too, so a switch that mounts or
-                    unmounts it never resets the host's own state (its notices, its revert). */}
+                {/* PRD-261 A-13c: the active theme's look runtime, at every width, switched on only
+                    while the theme declares looks (Classic and Studio get none); it stays mounted
+                    either way, so a style switched in place never remounts the page (M69).
+                    PRD-260 F5: looks are the signed-in user's in this workspace, so it sits inside
+                    the WorkspaceProvider. */}
                 <ThemeLookRuntime onToneChange={setPlayTone}>{children}</ThemeLookRuntime>
               </ThemeHostProvider>
               <GlobalSearch />

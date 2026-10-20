@@ -3,15 +3,16 @@
  * whenever the theme declares looks, as components/providers.tsx wires it (the tone it forces goes to
  * ThemeProvider's forcedTheme). Classic and Studio mount none: no scope, no storage read, nothing on
  * <html>. Builtin Play below its 1024 px minWidth, where its frame gives way to the core's, still paints
- * its look and forces the look's tone. Leaving Play unmounts the runtime and the host gives the tone
- * back. The SDK's looks area reads the mounted runtime, every look it hands in checked first.
+ * its look and forces the look's tone. Leaving Play switches the runtime off and the host gives the tone
+ * back; the page below never remounts on that switch (M69). The SDK's looks area reads the mounted
+ * runtime, every look it hands in checked first.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mounts = vi.hoisted(() => ({ lookProvider: 0, accountScope: 0 }))
+const pageMounts = vi.hoisted(() => ({ count: 0 }))
 
 vi.mock('@/lib/auth-hooks', () => ({
   useUser: () => ({ isLoaded: true, isSignedIn: true, user: { id: 'user_a' } }),
@@ -19,25 +20,8 @@ vi.mock('@/lib/auth-hooks', () => ({
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' }, isLoading: false, error: null, refreshWorkspace: async () => undefined }),
 }))
-vi.mock('@/components/looks/look-provider', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/looks/look-provider')>()
-  const { createElement } = await import('react')
-  const LookProvider = (props: Parameters<typeof actual.LookProvider>[0]) => {
-    mounts.lookProvider += 1
-    return createElement(actual.LookProvider, props)
-  }
-  return { ...actual, LookProvider }
-})
-vi.mock('@/components/looks/account-look-scope', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/looks/account-look-scope')>()
-  const { createElement } = await import('react')
-  const AccountLookScope = (props: Parameters<typeof actual.AccountLookScope>[0]) => {
-    mounts.accountScope += 1
-    return createElement(actual.AccountLookScope, props)
-  }
-  return { ...actual, AccountLookScope }
-})
 
+import { useLookScope } from '@/components/looks/look-scope'
 import { declaresLooks, ThemeLookRuntime } from '@/components/theme-host/theme-look-runtime'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
@@ -51,6 +35,7 @@ import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { lookJson } from '@/lib/looks/transfer'
 import type { ThemeTone } from '@/lib/theme-host/boot'
 import { BUILTIN_PLAY_ENTRY, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { BUILTIN_PLAY_LOOK_KEYS } from '@/lib/theme-host/builtin/play-look-keys'
 import { exportLook, importLook, listLooks, saveLook, useLook, type HostLook, type HostLookResult } from '@/lib/theme-sdk/looks'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 
@@ -90,19 +75,27 @@ function Appearance({ style, children }: { readonly style: UiStyle; readonly chi
   )
 }
 
-/** A theme's view of its looks, through the SDK only. */
+/** Every key builtin Play keeps its looks under starts with this one (lib/theme-host/builtin/play-look-keys.ts). */
+const LOOK_KEY_PREFIX = BUILTIN_PLAY_LOOK_KEYS.active
+
+/** A theme's view of its looks, through the SDK only; it counts its own mounts, as a page's state would see them. */
 function Probe() {
   const { available, look, saved, tone, setLook } = useLook()
   const { setStyle } = useUiStyle()
+  useEffect(() => {
+    pageMounts.count += 1
+  }, [])
   return (
     <div>
       <p>Layout: {useThemeLayout()}</p>
+      <p>Scope: {useLookScope() ?? 'none'}</p>
       <p>Looks: {available ? 'available' : 'none'}</p>
       <p>Look: {look?.id ?? 'none'}</p>
       <p>Saved: {saved.map((entry) => entry.name).join(', ') || 'none'}</p>
       <p>Tone: {tone ?? 'not forced'}</p>
       <button type="button" onClick={() => setLook(DAYLIGHT)}>Use Daylight</button>
       <button type="button" onClick={() => setStyle('studio')}>Go Studio</button>
+      <button type="button" onClick={() => setStyle(BUILTIN_PLAY_STYLE)}>Go Play</button>
     </div>
   )
 }
@@ -137,8 +130,7 @@ function stubWidth(width: number): void {
 
 beforeEach(() => {
   queryClient = quietQueryClient()
-  mounts.lookProvider = 0
-  mounts.accountScope = 0
+  pageMounts.count = 0
   window.localStorage.clear()
   // A browser already moved to the current defaults, so the provider keeps the given style.
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -166,9 +158,11 @@ describe('PRD-261 A-13c — which themes get a look runtime', () => {
   })
 
   it.each<UiStyle>(['classic', 'studio'])('%s: no look runtime, no scope, nothing read or painted', async (style) => {
+    const reads = vi.spyOn(Storage.prototype, 'getItem')
     renderApp(style)
     expect(await screen.findByText('Looks: none')).toBeInTheDocument()
-    expect(mounts).toEqual({ lookProvider: 0, accountScope: 0 })
+    expect(screen.getByText('Scope: none')).toBeInTheDocument()
+    expect(reads.mock.calls.map(([key]) => key).filter((key) => key.startsWith(LOOK_KEY_PREFIX))).toEqual([])
     expect(screen.getByText('Look: none')).toBeInTheDocument()
     expect(lookNamesLeft()).toEqual([])
     expect(window.localStorage.getItem(LOOK_SCOPE_KEY)).toBeNull()
@@ -184,13 +178,13 @@ describe('PRD-261 A-13c — builtin Play below its minWidth', () => {
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DAYLIGHT)))
     await waitFor(() => expect(htmlTone()).toBe('light'))
     expect(toneCookie()).toBe('light')
-    expect(mounts.lookProvider).toBeGreaterThan(0)
+    expect(screen.getByText(`Scope: ${lookScope('ws-1', 'user_a')}`)).toBeInTheDocument()
     expect(screen.getByText('Look: daylight')).toBeInTheDocument()
     expect(await screen.findByText('Tone: light')).toBeInTheDocument()
     expect(window.localStorage.getItem(TONE_STORAGE_KEY)).toBe('dark')
   })
 
-  it('leaving Play unmounts the runtime: the look comes off <html>, the user tone returns, the cookie goes', async () => {
+  it('leaving Play switches the runtime off: the look comes off <html>, the user tone returns, the cookie goes', async () => {
     renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(htmlTone()).toBe('light'))
     click('Go Studio')
@@ -200,6 +194,21 @@ describe('PRD-261 A-13c — builtin Play below its minWidth', () => {
     expect(toneCookie()).toBeUndefined()
     expect(listLooks()).toEqual([])
     expect(saveLook(myLook())).toEqual({ ok: false, errors: [NOT_AVAILABLE] })
+  })
+})
+
+describe('PRD-261 A-13c, M69 — a style switched in place never remounts the page', () => {
+  it('keeps the page mounted across Studio -> Play -> Studio, while the runtime turns on and off', async () => {
+    renderApp('studio')
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    click('Go Play')
+    expect(await screen.findByText('Look: daylight')).toBeInTheDocument()
+    await waitFor(() => expect(htmlTone()).toBe('light'))
+    click('Go Studio')
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    await waitFor(() => expect(htmlTone()).toBe('dark'))
+    expect(lookNamesLeft()).toEqual([])
+    expect(pageMounts.count).toBe(1)
   })
 })
 

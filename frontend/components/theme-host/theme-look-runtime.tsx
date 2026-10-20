@@ -11,10 +11,12 @@
  * (useThemeLayout), but the look and the forced tone still paint, so Studio's tokens and dark:
  * classes match the look's ground there too (PRD-260 K4).
  *
- * Classic, Studio and a theme without looks get no look runtime at all: no scope, no storage read,
- * nothing on <html>. Leaving a theme with looks unmounts it (its own cleanup takes the look off
- * <html>), and the host gives the tone back to the user and deletes the forced tone's cookie,
- * which the unmounted runtime can no longer do.
+ * Classic, Studio and a theme without looks get no look runtime: no scope, no storage read, no look
+ * on <html>, nothing for the SDK. The runtime's components stay mounted either way and are only
+ * switched off (`enabled`), so the tree above the page has one shape: a style switched in place
+ * (Studio and builtin Play, or the server's stored choice) never remounts the page below (M69).
+ * Leaving a theme with looks switches it off: the LookProvider takes the look off <html>, and the
+ * host gives the tone back to the user and deletes the forced tone's cookie.
  *
  * LookRuntimeBridge hands the runtime to the SDK's `looks` area (lib/theme-sdk/looks.ts) as a
  * theme-neutral copy: every look a theme hands in is checked against the theme's look spec first.
@@ -101,11 +103,17 @@ function hostLookRuntime(runtime: LookContextValue): HostLookRuntime {
   })
 }
 
+interface LookRuntimeBridgeProps {
+  readonly children: ReactNode
+  /** False while no look runtime is on: the SDK gets none (null), and nothing is registered. */
+  readonly enabled: boolean
+}
+
 /** Gives the SDK the mounted runtime: to useLook through context, to the plain functions as the current one. */
-function LookRuntimeBridge({ children }: { readonly children: ReactNode }) {
+function LookRuntimeBridge({ children, enabled }: LookRuntimeBridgeProps) {
   const value = useRuntimeLook()
-  const runtime = useMemo(() => hostLookRuntime(value), [value])
-  useEffect(() => registerLookRuntime(runtime), [runtime])
+  const runtime = useMemo(() => (enabled ? hostLookRuntime(value) : null), [enabled, value])
+  useEffect(() => (runtime === null ? undefined : registerLookRuntime(runtime)), [runtime])
   return <LookRuntimeContext.Provider value={runtime}>{children}</LookRuntimeContext.Provider>
 }
 
@@ -121,11 +129,11 @@ function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | unde
 export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimeProps) {
   const mounted = declaresLooks(useActiveTheme())
   useToneReleased(mounted, onToneChange)
-  if (!mounted) return <>{children}</>
+  // One shape for both values of `mounted`: a different tree here would remount every page (M69).
   return (
-    <AccountLookScope>
-      <LookProvider onToneChange={onToneChange}>
-        <LookRuntimeBridge>{children}</LookRuntimeBridge>
+    <AccountLookScope enabled={mounted}>
+      <LookProvider onToneChange={onToneChange} enabled={mounted}>
+        <LookRuntimeBridge enabled={mounted}>{children}</LookRuntimeBridge>
       </LookProvider>
     </AccountLookScope>
   )
