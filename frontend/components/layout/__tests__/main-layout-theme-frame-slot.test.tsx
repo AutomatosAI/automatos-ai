@@ -3,8 +3,10 @@
  * theme host (every build with the spike off) the shell is exactly as before: `.sh-shell`, the
  * full-bleed main, or the padded main with its max-width wrapper. With an active frame, the frame
  * wraps the page instead of the shell; while the host loads an installed theme, nothing draws (the
- * page never mounts in the shell and again in the frame, M69). Only builtin Play's entry draws
- * Play's frame; an installed theme's goes through the slot.
+ * page never mounts in the shell and again in the frame, M69). A theme's frame comes from the
+ * theme host, never from its registry entry: the fixture theme (PRD-261 A-19b) stands in for one
+ * whose registrations the host handed over; below the theme's width MainLayout draws the core's
+ * chrome before it reaches the frame slot.
  */
 import React from 'react'
 import { render, screen } from '@testing-library/react'
@@ -32,23 +34,21 @@ vi.mock('@/components/ui/sheet', () => ({
   Sheet: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   SheetContent: () => null,
 }))
-// A desktop width, in the Studio style (the core's chrome, not another style's frame).
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMobile: () => false }))
+// A desktop width by default, in the Studio style (the core's chrome, not another style's frame).
+const viewport = vi.hoisted(() => ({ tabletOrBelow: false }))
+vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => viewport.tabletOrBelow, useIsMobile: () => false }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useActiveTheme: () => theme.entry, useThemeLayout: () => theme.layout }))
-// Builtin Play's frame behind its lazy slot (play-frame.test.tsx renders the real one through
-// MainLayout); it arrives a moment after the first render (findBy*).
-vi.mock('@/components/play/shell/play-frame', () => ({
-  PlayFrame: ({ children }: { children?: React.ReactNode }) => <section data-testid="play-frame">{children}</section>,
-}))
 
 import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 import type { FrameProps } from '@/lib/theme-host/types'
 
 import { MainLayout } from '../main-layout'
 
-/** An installed theme's entry, once the registry has one (A-02c): the theme layout, no builtin frame. */
-const INSTALLED_ENTRY: ThemeEntry = { ...BUILTIN_PLAY_ENTRY, ref: 'install:00000000-0000-4000-8000-00000000e2e1', kind: 'installed' }
+/** An installed theme's entry, once the registry has one (A-02c): the theme layout, its frame from the host only. */
+const INSTALLED_ENTRY: ThemeEntry = { ...FIXTURE_THEME_ENTRY, ref: 'install:00000000-0000-4000-8000-00000000e2e1' }
+/** The fixture theme's own frame: drawn only where the host hands its registrations over. */
+const FIXTURE_FRAME = FIXTURE_THEME_TEST_IDS.frame
 
 /** MainLayout under the theme host's current value (none: no provider, as in an isolated mount). */
 function renderLayout(props: { fullBleed?: boolean } = {}) {
@@ -80,6 +80,7 @@ function PropsFrame({ children, fullBleed, autoWidget }: FrameProps) {
 
 afterEach(() => {
   host.current = null
+  viewport.tabletOrBelow = false
   theme.entry = null
   theme.layout = 'fallback'
 })
@@ -126,16 +127,16 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
     expect(container.innerHTML).toBe('')
   })
 
-  it("draws an installed theme's frame through the slot, never builtin Play's, under the theme layout", () => {
+  it("draws an installed theme's frame through the slot, never one its entry names, under the theme layout", () => {
     theme.entry = INSTALLED_ENTRY
     theme.layout = 'theme'
     host.current = { status: 'active', reason: null, frame: HelloFrame, slots: null, reportRenderFailure: vi.fn() }
     renderPage()
     expect(screen.getByTestId('theme-frame')).toContainElement(screen.getByTestId('page'))
-    expect(screen.queryByTestId('play-frame')).toBeNull()
+    expect(screen.queryByTestId(FIXTURE_FRAME)).toBeNull()
   })
 
-  it("draws nothing while an installed theme with a layout loads, never builtin Play's frame", () => {
+  it("draws nothing while an installed theme with a layout loads, never a frame its entry names", () => {
     theme.entry = INSTALLED_ENTRY
     theme.layout = 'theme'
     host.current = { status: 'loading', reason: null, frame: null, slots: null, reportRenderFailure: vi.fn() }
@@ -143,35 +144,40 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
     expect(container.innerHTML).toBe('')
   })
 
-  it("draws builtin Play's frame under Play at the theme layout, and not the slot's", async () => {
-    theme.entry = BUILTIN_PLAY_ENTRY
+  it("draws the theme's frame its host handed over at the theme layout, and not another", async () => {
+    theme.entry = FIXTURE_THEME_ENTRY
     theme.layout = 'theme'
+    host.current = fixtureThemeHost()
     renderPage()
-    expect(await screen.findByTestId('play-frame')).toContainElement(screen.getByTestId('page'))
+    expect(await screen.findByTestId(FIXTURE_FRAME)).toContainElement(screen.getByTestId('page'))
     expect(screen.queryByTestId('theme-frame')).toBeNull()
   })
 
-  it("draws builtin Play's frame through the frame slot: the page inside it keeps its own boundary", async () => {
-    theme.entry = BUILTIN_PLAY_ENTRY
+  it("draws the theme's frame through the frame slot: the page inside it keeps its own boundary", async () => {
+    theme.entry = FIXTURE_THEME_ENTRY
     theme.layout = 'theme'
+    host.current = fixtureThemeHost()
     const { container } = renderPage()
     // The frame slot's own page boundary adds no element: the page sits directly in the frame.
-    const frame = await screen.findByTestId('play-frame')
+    const frame = await screen.findByTestId(FIXTURE_FRAME)
     expect(screen.getByTestId('page').parentElement).toBe(frame)
     expect(container.querySelector('.sh-shell')).toBeNull()
   })
 
-  it("draws the Studio shell, never Play's frame, under Play below its width", () => {
-    theme.entry = BUILTIN_PLAY_ENTRY
+  it("draws the core's chrome, never the theme's frame, under the theme below its width (D7)", () => {
+    viewport.tabletOrBelow = true
+    theme.entry = FIXTURE_THEME_ENTRY
     theme.layout = 'fallback'
-    const { container } = renderPage()
-    expect(container.querySelector('.sh-shell.safe-bottom')).not.toBeNull()
-    expect(screen.queryByTestId('play-frame')).toBeNull()
+    host.current = fixtureThemeHost()
+    renderPage()
+    expect(screen.getByTestId('page')).toBeInTheDocument()
+    expect(screen.queryByTestId(FIXTURE_FRAME)).toBeNull()
   })
 
-  it("draws nothing under Play while the width is not known (M69)", () => {
-    theme.entry = BUILTIN_PLAY_ENTRY
+  it("draws nothing under the theme while the width is not known (M69)", () => {
+    theme.entry = FIXTURE_THEME_ENTRY
     theme.layout = 'pending'
+    host.current = fixtureThemeHost()
     const { container } = renderPage()
     expect(container.innerHTML).toBe('')
   })

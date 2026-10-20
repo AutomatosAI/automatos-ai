@@ -4,6 +4,8 @@
  * /looks/style) MainLayout used to fall through to 'dashboard', so the open
  * widget said "Ask me anything about Dashboard" and a bug report sent page
  * 'dashboard'. The real AutoWidget renders here; its data sources are stubbed.
+ * The pages are drawn under a theme at a laptop's width, in its frame: the fixture theme
+ * (PRD-261 A-19b), whose frame the theme host hands MainLayout with the widget.
  */
 import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -20,22 +22,12 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMobile: () => false }))
-// Under Play at a laptop's width: Play's frame (P260-FX-25, PRD-261 A-02b: useThemeLayout is MainLayout's width source,
-// and builtin Play's entry is what picks Play's frame).
+// Under a theme at a laptop's width: its frame (P260-FX-25, PRD-261 A-02b: useThemeLayout is MainLayout's width
+// source). The frame is the fixture theme's, from the theme host: the page and the widget MainLayout hands it.
 vi.mock('@/hooks/use-studio-theme', async () => {
-  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
-  return { useIsStudio: () => true, useActiveTheme: () => BUILTIN_PLAY_ENTRY, useThemeLayout: () => 'theme' }
+  const { FIXTURE_THEME_ENTRY } = await import('@/lib/theme-host/__tests__/fixture-theme-entry')
+  return { useIsStudio: () => true, useActiveTheme: () => FIXTURE_THEME_ENTRY, useThemeLayout: () => 'theme' }
 })
-
-// Play's frame: the page and the widget MainLayout hands it (play-frame.test.tsx covers the frame).
-vi.mock('@/components/play/shell/play-frame', () => ({
-  PlayFrame: ({ children, autoWidget }: { children?: React.ReactNode; autoWidget?: React.ReactNode }) => (
-    <>
-      {children}
-      {autoWidget}
-    </>
-  ),
-}))
 vi.mock('@/components/layout/sidebar', () => ({ Sidebar: () => null }))
 vi.mock('@/components/layout/mobile-sidebar', () => ({ MobileSidebar: () => null }))
 vi.mock('@/components/layout/header', () => ({ Header: () => null }))
@@ -71,13 +63,17 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { MainLayout } from '@/components/layout/main-layout'
+import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
+import { fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 
 async function openWidgetOn(pathname: string) {
   state.pathname = pathname
   render(
-    <MainLayout>
-      <div data-testid="page" />
-    </MainLayout>,
+    <ThemeHostContext.Provider value={fixtureThemeHost()}>
+      <MainLayout>
+        <div data-testid="page" />
+      </MainLayout>
+    </ThemeHostContext.Provider>,
   )
   fireEvent.click(await screen.findByTitle('Ask Auto'))
   return screen.findByText(/^Ask me anything about/)
@@ -87,7 +83,7 @@ afterEach(() => {
   state.pathname = '/looks'
 })
 
-describe("the floating Auto widget on Play's pages (PRD-260 M70)", () => {
+describe("the floating Auto widget on a theme's pages (PRD-260 M70)", () => {
   it.each(['/looks', '/looks/style'])("says 'Make it yours' on %s, not 'Dashboard'", async (pathname) => {
     const greeting = await openWidgetOn(pathname)
     expect(greeting).toHaveTextContent('Ask me anything about Make it yours, or tell me what you need help with.')

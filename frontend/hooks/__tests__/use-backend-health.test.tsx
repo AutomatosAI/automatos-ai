@@ -18,7 +18,7 @@ const api = vi.hoisted(() => ({ request: vi.fn(), getBaseUrl: () => 'http://loca
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
 
 // PRD-261 A-02b: the tab reads the frame's poll where the theme's layout renders and its entry
-// has the asleep slot (builtin Play's does); `theme` stands in for the active entry.
+// has the asleep slot (the fixture theme's does, PRD-261 A-19b); `theme` stands in for the active entry.
 const layout = vi.hoisted(() => ({
   current: 'fallback' as 'pending' | 'theme' | 'fallback',
   theme: null as ThemeEntry | null,
@@ -31,7 +31,7 @@ vi.mock('@/hooks/use-studio-theme', async (importOriginal) => ({
 
 import { SessionModeTab } from '@/components/settings/SessionModeTab'
 import { BACKEND_HEALTH_POLL_MS, useBackendHealth } from '@/hooks/use-backend-health'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { FIXTURE_THEME_ENTRY } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 
 /** How long after the poller the reader mounts: well inside one period, out of phase with it. */
 const READER_LATE_MS = 5_000
@@ -122,9 +122,9 @@ describe('Settings → Session mode reads the same /health query', () => {
     expect(screen.getByText(SESSION_MODE_OFF)).toBeInTheDocument()
   })
 
-  it("inside Play's frame it reads the frame's poll: one /health per period, mounted 5 s apart", async () => {
+  it("inside a theme's frame with the asleep slot it reads the frame's poll: one /health per period, mounted 5 s apart", async () => {
     layout.current = 'theme'
-    layout.theme = BUILTIN_PLAY_ENTRY
+    layout.theme = FIXTURE_THEME_ENTRY
     const client = newClient()
     renderWith(client, <FramePoll />)
     await elapse(READER_LATE_MS)
@@ -136,7 +136,7 @@ describe('Settings → Session mode reads the same /health query', () => {
 
   it("under a theme at its width whose entry has no asleep slot, the tab still polls /health itself", async () => {
     layout.current = 'theme'
-    layout.theme = { ...BUILTIN_PLAY_ENTRY, slots: BUILTIN_PLAY_ENTRY.slots.filter((slot) => slot !== 'asleep@1') }
+    layout.theme = { ...FIXTURE_THEME_ENTRY, slots: FIXTURE_THEME_ENTRY.slots.filter((slot) => slot !== 'asleep@1') }
     renderWith(newClient(), <SessionModeTab />)
     await elapse(0)
     expect(healthCalls()).toBe(1)
