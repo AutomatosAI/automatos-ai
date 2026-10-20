@@ -442,7 +442,6 @@ class ToolResultFormatter:
     def format_database(result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Format database query results consistently.
-        
         Input: Raw database query result
         Output: Standardized format
         """
@@ -454,6 +453,7 @@ class ToolResultFormatter:
             'columns': result.get('columns', []),
             'execution_time_ms': result.get('execution_time_ms', 0),
             'pandas_ai': result.get('pandas_ai'),  # Optional insight
+            'notes': result.get('notes') or [],  # F460: F301's notes reach the model
         }
     
     @staticmethod
