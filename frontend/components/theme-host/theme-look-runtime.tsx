@@ -24,6 +24,13 @@
  * core-owned one Play's looks run on (PA-9: lib/look-kit bound to Play's catalogue in
  * lib/looks/engine.ts, lib/looks/transfer.ts for files); PRD-261 A-14d moved its files out of Play's
  * folders (./account-look-scope.tsx, lib/theme-host/builtin/play-look-{provider,store,bridge}).
+ *
+ * PRD-261 W-A6: an installed theme gets no look runtime yet (its style has no registry entry, so
+ * useActiveTheme() is null: gap G1 of e2e/browser/parity-checklist.md). While the host loads or
+ * runs one, the switched-off LookProvider leaves <html> as the root layout's boot painted it (the
+ * theme's prepaint table, under the same names as Play's look), so the installed theme keeps its
+ * first-paint look after hydration instead of losing every look variable. A failed load, safe mode
+ * and every other style clear as before.
  */
 import { useEffect, type ReactNode } from 'react'
 
@@ -32,11 +39,16 @@ import type { ThemeTone } from '@/lib/theme-host/boot'
 import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
 import { clearPlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 import type { SlotId, ThemeEntry } from '@/lib/theme-host/registry-types'
+import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
 import { AccountLookScope } from './account-look-scope'
+import { useThemeHost } from './theme-host-context'
 
 /** The slot a theme with looks fills (PA-14: every installable theme ships one). */
 const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
+
+/** The host's states in which an installed theme owns <html>'s first paint: it is loading or running. */
+const HOST_RUNS_INSTALLED_THEME: readonly ThemeHostStatus[] = ['loading', 'active']
 
 export interface ThemeLookRuntimeProps {
   readonly children: ReactNode
@@ -58,13 +70,23 @@ function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | unde
   }, [mounted, onToneChange])
 }
 
+/**
+ * With no look runtime, whether <html> keeps the root layout's first paint: only while the host
+ * loads or runs an installed theme (it is off under Classic, Studio and builtin Play).
+ */
+function useKeepsFirstPaint(mounted: boolean): boolean {
+  const status = useThemeHost()?.status ?? null
+  return !mounted && status !== null && HOST_RUNS_INSTALLED_THEME.includes(status)
+}
+
 export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimeProps) {
   const mounted = declaresLooks(useActiveTheme())
+  const keepFirstPaint = useKeepsFirstPaint(mounted)
   useToneReleased(mounted, onToneChange)
   // One shape for both values of `mounted`: a different tree here would remount every page (M69).
   return (
     <AccountLookScope enabled={mounted}>
-      <LookProvider onToneChange={onToneChange} enabled={mounted}>
+      <LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>
         {children}
       </LookProvider>
     </AccountLookScope>

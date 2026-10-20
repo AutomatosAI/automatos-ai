@@ -88,6 +88,8 @@ interface DocumentLook {
   /** The look to paint; null leaves what is on <html> (the first render, before the pre-paint look is read). */
   readonly look: Look | null
   readonly reducedMotion: boolean
+  /** Switched off, leave <html> as the root layout's boot painted it (LookProviderProps.keepFirstPaint). */
+  readonly keepFirstPaint: boolean
 }
 
 /**
@@ -103,16 +105,16 @@ function usePrepaintLook(storage: StorageSource, waiting: boolean): Look | null 
   return prepaint
 }
 
-function useLookOnDocument({ active, look, reducedMotion }: DocumentLook): void {
+function useLookOnDocument({ active, look, reducedMotion, keepFirstPaint }: DocumentLook): void {
   useEffect(() => {
     const root = document.documentElement
     if (!active) {
-      clearLook(root)
+      if (!keepFirstPaint) clearLook(root)
       return
     }
     applyMotion(root, reducedMotion)
     if (look !== null) applyLook(root, look)
-  }, [active, look, reducedMotion])
+  }, [active, look, reducedMotion, keepFirstPaint])
 
   useEffect(() => () => clearLook(document.documentElement), [])
 }
@@ -150,9 +152,17 @@ export interface LookProviderProps {
    * switched in place never remounts the page below it (M69).
    */
   readonly enabled?: boolean
+  /**
+   * PRD-261 W-A6: while switched off, leave the look's properties on <html> as they are instead of
+   * clearing them. ThemeLookRuntime sets it while the host loads or runs an installed theme: the
+   * root layout's boot painted that theme's first paint (its prepaint table, Studio's tokens among
+   * it) under the same names, and nothing paints it again. Leaving a look this provider painted, or
+   * a failed load, clears as before.
+   */
+  readonly keepFirstPaint?: boolean
 }
 
-export function LookProvider({ children, storage = browserStorage, onToneChange, enabled = true }: LookProviderProps) {
+export function LookProvider({ children, storage = browserStorage, onToneChange, enabled = true, keepFirstPaint = false }: LookProviderProps) {
   const store = useLookStore(storage, useLookScope())
   const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
@@ -163,7 +173,7 @@ export function LookProvider({ children, storage = browserStorage, onToneChange,
   const painted = loaded ? look : prepaint
   const tone = active && painted !== null ? toneOfGround(painted.ground) : undefined
 
-  useLookOnDocument({ active, look: painted, reducedMotion })
+  useLookOnDocument({ active, look: painted, reducedMotion, keepFirstPaint })
   useLookTone(active, tone, onToneChange)
   useLookPointer(storage, active, scope)
 
