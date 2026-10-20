@@ -7,7 +7,8 @@ completed ``harness_runs.verdicts``, so a rerun of a week already judged (Auto c
 came from, and is never a second flag. The reference is the weeks of HARNESS_REF_DAYS
 before the judged one, less weeks already flagged for that agent and metric (a bad
 week is never absorbed into it) and less the weeks from a change HARNESS applied to
-that agent (``harness_task_ledger``).
+that agent (``harness_task_ledger``: an F156 row by ``entry.target_id`` and ``created_at``,
+a governed change by ``target_agent_id`` and ``applied_at``, US-051).
 
 Each case runs the real pipeline on the transactional ``db_session``
 (``helpers_harness_diagnose.judge``), one harness_runs row per judged week. The
@@ -19,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 
 from tests import helpers_harness_diagnose as hdx
 from tests import helpers_harness_runs as hr
@@ -121,6 +123,29 @@ def test_weeks_after_a_ledger_applied_change_are_left_out_of_that_agents_referen
 
     assert hdx.metric(run, changed)["ref_weeks"] == ["2026-W38", "2026-W39"]
     assert hdx.metric(run, untouched)["ref_weeks"] == ["2026-W38", "2026-W39", "2026-W40", "2026-W41"]
+
+
+def _governed_change(db, ws, agent_id, *, raised, applied, state):
+    """A change raised as an Approvals card and applied on the owner's click (PRD-263 US-051):
+    its agent is target_agent_id and its moment applied_at; its entry names no target_id."""
+    db.execute(text("INSERT INTO harness_task_ledger (workspace_id, state, entry, rx_id, kind, target_agent_id, "
+                    "applied_at, created_at) VALUES (CAST(:ws AS uuid), :state, CAST(:entry AS jsonb), 'rx-9-001', "
+                    "'heartbeat_tune', :agent, :applied, :raised)"),
+               {"ws": str(ws), "state": state, "entry": '{"evidence_task_id": 1}', "agent": agent_id,
+                "applied": applied, "raised": raised})
+
+
+@pytest.mark.parametrize("state", ["applied", "rolled_back"])
+def test_weeks_after_a_governed_change_are_left_out_of_that_agents_reference(db_session, ws, state):
+    """Raised in W39 and applied in W40: the reference stops at W40, by applied_at. A change
+    later rolled back still changed the agent from that week on."""
+    changed = hdx.agent(db_session, ws, "Changed on a click")
+    _steady_then(db_session, ws, changed, judged_weeks=(0,))
+    _governed_change(db_session, ws, changed, raised=hdx.at(-3), applied=hdx.at(-2), state=state)
+
+    run = hdx.judge(db_session, ws)
+
+    assert hdx.metric(run, changed)["ref_weeks"] == ["2026-W38", "2026-W39"]
 
 
 def test_a_change_older_than_the_reference_leaves_it_whole(db_session, ws):
