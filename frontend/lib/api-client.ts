@@ -1030,6 +1030,36 @@ export interface ThemeLooks {
   dropped: number
 }
 
+/**
+ * PRD-261 M-04: GET /api/themes/mobile/{installId} (services/themes/mobile.py mobile_theme), the
+ * member's theme as data for the phone; the phone app copies these types. Token keys keep their
+ * leading `--` (Studio's names); each value is `H S% L%` or `#rrggbb`, as the theme wrote it.
+ */
+export type MobileThemeScheme = 'light' | 'dark'
+export type MobileThemeTokens = Record<string, string>
+
+/** One mascot state: its `.mp4` clip (clips mode only) and its `.png` still, as files-route URLs. */
+export interface MobileThemeMascotState { name: string; clip: string | null; still: string | null }
+
+export interface MobileThemeBlock {
+  source: 'tokens' | 'fromLooks'
+  /** The look's tone for `fromLooks` (its scheme is the one filled); null for `tokens`: follow the device. */
+  tone: MobileThemeScheme | null
+  tokens: Record<MobileThemeScheme, MobileThemeTokens | null>
+  /** Only the roles the theme declares; each URL is relative to the API base. */
+  fonts: Partial<Record<'sans' | 'serif' | 'mono', string>>
+  mascot: { mode: 'clips' | 'stills' | 'none'; states: MobileThemeMascotState[] }
+}
+
+export interface MobileTheme {
+  schema: 1
+  installId: string
+  themeId: string
+  version: string
+  /** Null when the theme has no mobile block, may not run for this member, or is revoked. */
+  mobile: MobileThemeBlock | null
+}
+
 // ===== PRD-261 W-C2: the answers of api/marketplace_themes*.py and api/admin_themes.py (plan §2.2) =====
 /** services/themes/listings.py _publisher: the id's publisher; `official` for a reserved one. */
 export interface ThemeListingPublisher { name: string; official: boolean }
@@ -3759,6 +3789,14 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify({ looks: looks.looks, active: looks.active }),
     })
+  }
+
+  /**
+   * GET /api/themes/mobile/{installId}: the install's theme as data for the phone (colours, font and
+   * mascot file URLs, never code). Authorised by membership of the install's workspace; 404 otherwise.
+   */
+  async getMobileTheme(installId: string): Promise<MobileTheme> {
+    return this.request<MobileTheme>(`/api/themes/mobile/${encodeURIComponent(installId)}`)
   }
 
   // ===== PRD-261 W-C2: the Marketplace's Themes tab and the admin review queue (W-C1 routes, plan §2.2) =====
