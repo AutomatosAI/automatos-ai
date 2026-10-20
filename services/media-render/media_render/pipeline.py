@@ -32,10 +32,11 @@ output names them, and the job drops them when its render ends), and the mix and
 video they reach carry the mark. So the timed voice step runs no exiftool.
 
 Each marked file is then signed with a C2PA manifest (EUAI-06b, content_credentials.py),
-keeping as ingredients the job's inputs that carry one (and, in the video, the signed
-mix). A file whose signing fails still ships with its XMP mark, and the failure is logged
-with the job and counted. Each marked output names its ``digital_source_type``, its
-``sha256`` and its ``manifest_id`` (``None`` when unsigned), for the provenance rows.
+keeping as ingredients the job's AI-made inputs that carry one (and, in the video, the
+signed mix); a person's own upload is never an ingredient (FR-10). A file whose signing
+fails still ships with its XMP mark, and the failure is logged with the job and counted.
+Each marked output names its ``digital_source_type``, its ``sha256`` and its
+``manifest_id`` (``None`` when unsigned), for the provenance rows.
 """
 
 from __future__ import annotations
@@ -74,7 +75,7 @@ FIT_DIR = "fit"
 CHUNK_BYTES = 1 << 16
 # How far one voice line may run into the next, or past the end, before it counts.
 VOICE_TOLERANCE_SECONDS = 0.05
-# Which inputs may be a file's ingredients (EUAI-06b): the video takes any, a picture the visuals, the mix the audio.
+# Which AI-made inputs may be a file's ingredients (EUAI-06b): the video takes any, a picture the visuals, the mix the audio.
 ANY_INPUT = VISUAL_PREFIXES + (AUDIO_PREFIX,)
 AUDIO_INPUTS = (AUDIO_PREFIX,)
 
@@ -254,6 +255,26 @@ def mix_plan(bundle: Bundle, lines: Sequence[PlacedLine], project_dir: Path) -> 
     )
 
 
+def ai_made_inputs(bundle: Bundle) -> Tuple[str, ...]:
+    """The paths of the job's media that are AI-made: the only inputs a signed file may keep
+    as ingredients (EUAI-06b, FR-10). A person's own upload never is one: its own manifest
+    (a camera's or a phone's) can hold a place, EXIF data or who took it.
+
+    A voice line's file is AI-made when the job says its voice is (``ai_inputs.voice``). The
+    visual media are the slots' files: AI footage, AI stills and the person's uploads.
+    ``ai_inputs`` declares them together, not file by file, so they count as AI-made only when
+    the job declares AI footage or stills and no upload; a render that shows an upload keeps
+    none of them. SFX are never AI-made, and a job without ``ai_inputs`` declares nothing."""
+    inputs, voice = bundle.ai_inputs, bundle.audio.voice
+    voice_files = tuple(line.path for line in voice.lines if line.path is not None) if voice is not None else ()
+    slot_files = tuple(
+        item.path for item in bundle.media
+        if (content_credentials.mime_type(Path(item.path)) or "").startswith(VISUAL_PREFIXES)
+    )
+    slots_ai_made = (inputs.footage or inputs.stills) and not inputs.uploads
+    return (voice_files if inputs.voice else ()) + (slot_files if slots_ai_made else ())
+
+
 def _mark_fields(record: Optional[MarkRecord]) -> Dict[str, Any]:
     """What an output says about its mark: nothing when it carries none."""
     return record.fields() if record is not None else {}
@@ -348,10 +369,11 @@ class RenderPipeline:
     async def _ingredients(
         self, job: Job, kind: Optional[str], prefixes: Tuple[str, ...], extra: Sequence[Path] = ()
     ) -> Tuple[Ingredient, ...]:
-        """EUAI-06b: the job's inputs (and ``extra``) of these types that carry a C2PA manifest; none for an unmarked file."""
+        """EUAI-06b: the job's AI-made inputs (:func:`ai_made_inputs`, never an upload) and ``extra``,
+        of these types, that carry a C2PA manifest; none for an unmarked file."""
         if kind is None:
             return ()
-        paths = [*(job.project_dir / item.path for item in job.bundle.media), *extra]
+        paths = [*(job.project_dir / path for path in ai_made_inputs(job.bundle)), *extra]
         return await asyncio.to_thread(content_credentials.ingredients_in, paths, prefixes)
 
     async def _mark(
