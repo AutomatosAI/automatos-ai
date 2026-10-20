@@ -2,8 +2,8 @@
 
 One place for the host and SDK versions a package's ``engines`` is checked against, the
 names no package may take, the slots and pages a package may fill, and the files a cloned
-page is tracked against. It also holds the error shape every check returns and the JSON
-and plain-text rules they share.
+page is tracked against, and the lists theme.json's ``mobile`` block is checked against (M-01).
+It also holds the error shape every check returns and the JSON and plain-text rules they share.
 
 This module uses the standard library only, on purpose:
 
@@ -20,6 +20,7 @@ through ``config`` and falls back to the defaults below until B2-wire adds them.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from pathlib import Path
@@ -30,6 +31,33 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
 THEME_HOST_VERSION = "1.1.0"
 SDK_VERSION = "1.1.0"
+
+# PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
+# theme from (services/themes/mobile_manifest.py checks it; frontend/lib/theme-host/mobile-manifest.ts is
+# its twin, and validator-parity.test.ts reads every MOBILE_* name below as text). The tokens are the 24
+# Studio tokens lib/look-kit/studio-tokens.ts lookToStudioTokens writes as 'H S% L%' triplets, never its
+# eight pre-wrapped aliases; a scheme needs MOBILE_REQUIRED_TOKENS. MOBILE_CONTRAST_PAIRS are
+# (text or mark, fill, kind): a "text" pair is measured against MOBILE_AA_TEXT, a "ui" pair against
+# MOBILE_AA_UI (WCAG 2.x). A theme with a block must not admit a host below MOBILE_MIN_HOST.
+MOBILE_TOKEN_NAMES: Tuple[str, ...] = (
+    "--background", "--foreground", "--card", "--card-foreground", "--popover", "--popover-foreground",
+    "--primary", "--primary-foreground", "--secondary", "--secondary-foreground", "--muted", "--muted-foreground",
+    "--accent", "--accent-foreground", "--destructive", "--destructive-foreground", "--border", "--input", "--ring",
+    "--background-gradient-from", "--background-gradient-to", "--glass-border-hover", "--cc-hover", "--cc-hover-border",
+)
+MOBILE_REQUIRED_TOKENS: Tuple[str, ...] = ("--background", "--foreground")
+MOBILE_FONT_ROLES: Tuple[str, ...] = ("sans", "serif", "mono")
+MOBILE_MASCOT_MODES: Tuple[str, ...] = ("clips", "stills", "none")
+MOBILE_CONTRAST_PAIRS: Tuple[Tuple[str, str, str], ...] = (
+    ("--foreground", "--background", "text"), ("--card-foreground", "--card", "text"),
+    ("--popover-foreground", "--popover", "text"), ("--secondary-foreground", "--secondary", "text"),
+    ("--muted-foreground", "--muted", "text"), ("--primary-foreground", "--primary", "text"),
+    ("--accent-foreground", "--accent", "text"), ("--destructive-foreground", "--destructive", "text"),
+    ("--primary", "--background", "ui"), ("--ring", "--background", "ui"),
+)
+MOBILE_AA_TEXT = 4.5
+MOBILE_AA_UI = 3.0
+MOBILE_MIN_HOST = "1.1.0"
 
 MANIFEST_SCHEMA = "automatos-theme/v1"
 LOOK_SCHEMA_SCHEMA = "automatos-look-schema/v1"
@@ -196,9 +224,26 @@ def is_whole_number(value: Any) -> bool:
     return isinstance(value, int) or value.is_integer()
 
 
+def js_number(value: Any) -> Optional[float]:
+    """A JSON number as JavaScript's ``JSON.parse`` reads it, when that is finite; else None (a bool is no number).
+
+    Python keeps an integer literal whole however long it is, where JavaScript reads the nearest
+    double: past 2**53 a rounded one, past the double range Infinity. So the value is compared as
+    ``float(value)``, and one that overflows (a 310-digit literal) or is infinite (``1e400``) is not
+    finite, as ``Number.isFinite`` says of what ``JSON.parse`` gives for it.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def is_finite_number(value: Any) -> bool:
-    """A JSON number that is not a bool (the parser below refuses NaN and the infinities)."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) != float("inf")
+    """A JSON number that JavaScript reads as finite (``js_number``); never a bool. The parser below refuses NaN."""
+    return js_number(value) is not None
 
 
 # ---------------------------------------------------------------------------

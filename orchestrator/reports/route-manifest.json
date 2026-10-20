@@ -1,5 +1,5 @@
 {
-  "route_count": 944,
+  "route_count": 945,
   "routes": [
     {
       "method": "GET",
@@ -2700,6 +2700,10 @@
     {
       "method": "PUT",
       "path": "/api/themes/looks/{theme_id:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/mobile/{install_id}"
     },
     {
       "method": "GET",

@@ -8,6 +8,7 @@
  * (`orchestrator/tests/fixtures/themes/cases.json`, `manifests`) and reads contract.py as text, so
  * the lists below must equal the server's. The host version is `hostVersion` in
  * shared-modules.json (PA-2), next to the SDK's; a theme's `engines` is checked against both.
+ * M-01 (host 1.1.0): the optional `mobile` block is checked in `mobile-manifest.ts`, with its own lists.
  * Nothing here throws on bad input: every refusal is a ThemeError.
  */
 import { HTML_CLASS_PATTERN, THEME_HOST_VERSION } from './constants'
@@ -17,6 +18,7 @@ import {
 } from './css-value'
 import { satisfiesSdkRange } from './engines'
 import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
+import { mobileErrors, type ThemeMobileBlock } from './mobile-manifest'
 import { SDK_VERSION } from './sdk'
 
 /** PA-2: the host contract's version (slots, pages, routes, boot data). */
@@ -63,13 +65,13 @@ export const MANIFEST_ERROR_CODES: readonly string[] = [
   'BAD_ENGINES', 'ENGINES_MISMATCH', 'BAD_HTML_CLASS', 'RESERVED_HTML_CLASS', 'BAD_BASE', 'BAD_MIN_WIDTH',
   'BAD_TONE', 'BAD_SLOTS', 'UNKNOWN_SLOT', 'MISSING_SLOT', 'BAD_PAGE', 'BAD_PAGE_MODE', 'BAD_KEEP_CORE_PAGE',
   'BAD_CLONED_FROM', 'CLONED_FROM_OUT_OF_SCOPE', 'PAGE_OUT_OF_SCOPE', 'HOST_OWNED_PAGE', 'BAD_ROUTES', 'BAD_NAV',
-  'BAD_USES', 'BAD_ASSET_PATH', 'BAD_BRAND', 'BAD_LOOK_ID', 'BAD_MASCOT',
+  'BAD_USES', 'BAD_ASSET_PATH', 'BAD_BRAND', 'BAD_LOOK_ID', 'BAD_MASCOT', 'BAD_MOBILE',
 ]
 const REQUIRED_FIELDS: readonly string[] = [
   'schema', 'id', 'name', 'version', 'engines', 'base', 'htmlClass', 'minWidth', 'tone', 'slots',
 ]
 const OPTIONAL_FIELDS: readonly string[] = [
-  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'fonts', 'brand', 'look', 'mascot',
+  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'fonts', 'brand', 'look', 'mascot', 'mobile',
 ]
 const ALL_FIELDS: readonly string[] = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]
 const ENGINE_FIELDS = ['automatos', 'sdk'] as const
@@ -137,6 +139,7 @@ export interface ThemePackageManifest {
   readonly brand?: { readonly name?: string; readonly wordmark?: string }
   readonly look?: string
   readonly mascot?: { readonly states: readonly string[] } | null
+  readonly mobile?: ThemeMobileBlock
 }
 
 /** The checked manifest (a frozen copy of the input) when `errors` is empty, else null. */
@@ -367,6 +370,7 @@ function extraErrors(document: JsonRecord): ThemeError[] {
     ...(hasOwn(document, 'pricing') ? textErrors(document.pricing, 'pricing', LABEL_MAX) : []),
     ...errorIf(!lookOk, 'BAD_LOOK_ID', 'look', '"look" must be the id of one of the theme\'s presets.'),
     ...(hasOwn(document, 'brand') ? brandErrors(document.brand) : []),
+    ...(hasOwn(document, 'mobile') ? mobileErrors(document) : []),
     ...mascotErrors(own(document, 'mascot')),
   ]
 }
