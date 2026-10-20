@@ -1,21 +1,23 @@
-import { deliverableLabel } from '@/components/icons/deliverable-icon'
 import {
+  deliverableLabel,
+  DELIVERABLE_FEED_FILTERS,
+  DELIVERABLE_PARAM,
+  DELIVERABLES_HREF,
   type Deliverable,
+  type DeliverableFilters,
   type DeliverableListResponse,
-  FEED_DEFAULT_FILTERS,
-  type FilterState,
-} from '@/hooks/use-deliverables-api'
+} from '@automatos/theme-sdk'
 
 import { groupOf, relativeTime } from './conversations'
 
 /**
  * PRD-260 §4 — Play's Deliverables shelf (Ember mock 04) as pure data, ported
- * from Automatos Play's lib/deliverables/shelf.ts onto the core's Deliverables
- * (hooks/use-deliverables-api.ts): the type chips as the core's artifact_type
- * filter, the type badge, the card date, the count line, Auto's caption, the
- * empty states, and what the list query's pages amount to on screen. Heartbeat
- * outputs stay off the shelf, as on the core's feed (FEED_DEFAULT_FILTERS).
- * "Now" is always passed in, so tests pin it.
+ * from Automatos Play's lib/deliverables/shelf.ts onto the core's Deliverables,
+ * read through the theme SDK's deliverables area (PRD-261 A-14b): the type
+ * chips as the core's artifact_type filter, the type badge, the card date, the
+ * count line, Auto's caption, the empty states, and what the list query's pages
+ * amount to on screen. Heartbeat outputs stay off the shelf, as on the core's
+ * feed (DELIVERABLE_FEED_FILTERS). "Now" is always passed in, so tests pin it.
  */
 
 export type ShelfFilter = {
@@ -48,8 +50,29 @@ export const SHELF_REFRESH_MS = 30_000
 const KIND_LABELS: Readonly<Record<string, string>> = { slide: 'Slides', blog_post: 'Blog post' }
 
 /** The list query's filters for one chip: the core's feed, heartbeats hidden, narrowed to the type. */
-export function shelfFilters(filter: ShelfFilter): FilterState {
-  return { ...FEED_DEFAULT_FILTERS, artifact_type: filter.artifactType }
+export function shelfFilters(filter: ShelfFilter): DeliverableFilters {
+  return { ...DELIVERABLE_FEED_FILTERS, artifact_type: filter.artifactType }
+}
+
+// --- Copied with Play (sdk-surface-map.md: pure utilities and wording) ---------------
+// lib/__tests__/prd261-port-deliverables.test.ts holds each copy to the core's own.
+
+/** A Deliverable id the shelf links to or opens (K8): the core's pattern (lib/chat/deliverables.ts). */
+const DELIVERABLE_ID = /^[A-Za-z0-9_-]{1,128}$/
+
+/** The title a Deliverable without one is shown under (lib/chat/deliverables.ts). */
+export const UNTITLED = 'Your Deliverable'
+
+/** What a failed Download says on a Deliverable's page (lib/deliverables/download.ts). */
+export const DOWNLOAD_FAILED = "Couldn't download the file. Try again in a moment."
+
+export function isDeliverableId(id: string): boolean {
+  return DELIVERABLE_ID.test(id)
+}
+
+/** The core's page for one Deliverable (K8): /deliverables?deliverable=<id>. */
+export function deliverableHref(id: string): string {
+  return `${DELIVERABLES_HREF}?${DELIVERABLE_PARAM}=${encodeURIComponent(id)}`
 }
 
 export function kindOf(deliverable: Pick<Deliverable, 'artifact_type'>): string {
@@ -102,7 +125,7 @@ export type ShelfView =
       readonly total: number
     }
 
-/** What useDeliverables(filters) gives the shelf: react-query's infinite result, read only. */
+/** What the SDK's useDeliverables(filters) gives the shelf: the list's pages, read only. */
 export interface ShelfQuery {
   readonly data?: { readonly pages: readonly DeliverableListResponse[] }
   readonly isError: boolean

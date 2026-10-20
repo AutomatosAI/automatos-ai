@@ -1,6 +1,4 @@
 import { GLOW_SCALE, rgbList } from '@/lib/look-kit/css'
-import type { PrepaintKnobTable, PrepaintPairTable, PrepaintTable, PrepaintVars } from '@/lib/theme-host/boot-types'
-
 import {
   ACCENTS,
   ACCENT_KEYS,
@@ -8,7 +6,7 @@ import {
   LIGHT_KEYS,
   SHELL_KEYS,
   TYPE_STYLE_KEYS,
-} from './catalogue'
+} from '@/lib/looks/catalogue'
 import {
   GLOW_VAR,
   accentTextVars,
@@ -20,16 +18,20 @@ import {
   shellVars,
   studioAccentTokens,
   studioGroundTokens,
-} from './engine'
-import { DEFAULT_LOOK } from './presets'
-import { GLOW_MAX, GLOW_MIN, type Look } from './types'
+} from '@/lib/looks/engine'
+import { DEFAULT_LOOK } from '@/lib/looks/presets'
+import { GLOW_MAX, GLOW_MIN, type Look } from '@/lib/looks/types'
+
+import type { PrepaintKnobTable, PrepaintPairTable, PrepaintTable, PrepaintVars } from '../boot-types'
 
 /**
  * PRD-260 D4, K3; PRD-261 A-03 — a look's first paint as data. The theme boot script
  * (lib/theme-host/boot.ts, THEME_BOOT_SCRIPT) reads the stored active look and paints it from
  * this table before first paint: Play's --pl-* variables AND Studio's tokens, so a Studio page
  * under Play paints in the look's colours from the first frame. builtin Play's boot
- * (lib/theme-host/builtin/play-boot.ts) carries it; nothing else does.
+ * (play-boot.ts) carries it; nothing else does. Host code, so it sits here and not in Play's
+ * lib/looks (W-A5): it builds the host's boot tables (../boot-types), and an installed theme
+ * ships the same tables as data in its package instead (A-16c compiles Play's).
  *
  * Every entry is built here from the catalogue through the same builders as lookToCssVars() and
  * lookToStudioTokens(), so the two can never drift. The script paints a stored look only after

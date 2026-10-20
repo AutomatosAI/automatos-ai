@@ -1,0 +1,9 @@
+{
+  "_comment": "PRD-261 W-A6b (gap G2): where the host's look store keeps an installed theme's active look in the browser, as the boot names it (lookStorage). orchestrator serve.py look_storage and frontend play-look-storage.ts bootLookStorage(installedLookKeys(themeId)) are both held to it.",
+  "themeId": "automatos/play",
+  "lookStorage": {
+    "pointerKey": "automatos-theme.automatos/play.look.current",
+    "scopedPrefix": "automatos-theme.automatos/play.look:",
+    "fallbackKey": "automatos-theme.automatos/play.look"
+  }
+}

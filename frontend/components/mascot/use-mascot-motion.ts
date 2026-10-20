@@ -2,8 +2,9 @@
 
 import { useCallback, useSyncExternalStore } from 'react'
 
-import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
-import { isMascotPaused, setMascotPaused, subscribeMascotPause } from '@/lib/mascot/pause'
+import { useMediaPreferences } from '@automatos/theme-sdk'
+
+import { isMascotPaused, setMascotPaused, subscribeMascotPause } from '../../lib/mascot/pause'
 
 /**
  * PRD-261 A-13b (F10, WCAG 2.2.2) — whether Auto may move: not under the OS
@@ -29,7 +30,7 @@ const notPausedOnServer = (): boolean => false
 const pausedNow = (): boolean => isMascotPaused()
 
 export function useMascotMotion(): MascotMotion {
-  const reducedMotion = usePrefersReducedMotion()
+  const { reducedMotion } = useMediaPreferences()
   const paused = useSyncExternalStore(subscribeMascotPause, pausedNow, notPausedOnServer)
   const togglePaused = useCallback(() => setMascotPaused(!isMascotPaused()), [])
   return { reducedMotion, paused, still: reducedMotion || paused, togglePaused }

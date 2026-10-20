@@ -2,11 +2,9 @@
 
 import { type ReactNode, type RefObject, useRef } from 'react'
 import { Search } from 'lucide-react'
+import { HeaderUtilities, openGlobalSearch } from '@automatos/theme-sdk'
 
-import { StudioHeaderUtilities } from '@/components/layout/studio-header'
-import { AsleepGate } from '@/components/play/edges/asleep-gate'
-import { openGlobalSearch } from '@/lib/global-search-event'
-
+import { AsleepGate } from '../edges/asleep-gate'
 import { PlaySidebar } from './play-sidebar'
 import styles from './play-frame.module.css'
 
@@ -17,6 +15,8 @@ import styles from './play-frame.module.css'
  * page. Studio's pages render inside it as they do in the Studio shell, recoloured
  * by the look (D3); Play's own pages bring their own columns. MainLayout renders
  * it, and hands over the floating Auto widget as the Studio shell has it.
+ * PRD-261 A-14f: the utilities are the SDK's HeaderUtilities (the Studio header's
+ * cluster, PRD §4.4) and search is the SDK's openGlobalSearch.
  */
 
 export interface PlayFrameProps {
@@ -70,7 +70,7 @@ function FrameLayout({ children, fullBleed = false, autoWidget, mainRef }: Frame
   )
 }
 
-/** The header row: search (the ⌘K dialog) and the Studio header's utilities cluster. */
+/** The header row: search (the ⌘K dialog) and the host's header utilities (the Studio header's cluster). */
 function PlayHeader() {
   return (
     <header className={styles.header}>
@@ -80,7 +80,7 @@ function PlayHeader() {
         <kbd className={styles.kbd}>⌘K</kbd>
       </button>
       <div className={styles.utilities}>
-        <StudioHeaderUtilities />
+        <HeaderUtilities />
       </div>
     </header>
   )

@@ -9,11 +9,20 @@
  */
 import type { ChatApprovals, ChatControllerView, ChatConversationView } from '@/lib/chat-controller/view-model'
 import type { FiledApproval } from '@/lib/chat/approvals'
-import { activityLines, chatTitle, latestReply, messageText, taskCardsOf } from '@/lib/chat/message-text'
+import { deliverablesFromReceipts } from '@/lib/chat/deliverables'
+import {
+  activityLines,
+  chatTitle,
+  latestReply,
+  messageText,
+  provenanceOf,
+  savedTurnError,
+  taskCardsOf,
+} from '@/lib/chat/message-text'
 import { receiptsOf } from '@/lib/chat/receipts'
-import type { Chat, ChatMessage } from '@/types'
+import type { Chat, ChatMessage, ToolCall } from '@/types'
 
-import type { HostChatApproval, HostChatConversation, HostChatMessage, HostChatSummary } from '../chat'
+import type { HostChatApproval, HostChatConversation, HostChatMessage, HostChatSummary, HostToolCall } from '../chat'
 
 /** What the SDK keeps on a conversation it handed out. */
 export interface OpenedConversation {
@@ -75,9 +84,49 @@ function hostError(message: ChatMessage): HostChatMessage['error'] {
   return error ? Object.freeze({ message: error.message, code: error.code ?? null }) : null
 }
 
+function hostToolCall(call: ToolCall): HostToolCall {
+  const { toolCallId, toolName, state, input, error, durationMs, summary } = call
+  return Object.freeze({
+    toolCallId,
+    toolName,
+    state,
+    input,
+    error,
+    durationMs,
+    summary,
+    skipped: call.skipped === true,
+    waiting: call.waiting === true,
+  })
+}
+
+/** What a reply carries beyond its words and cards: its tool calls, who wrote it, a saved failure, a cap, its reasoning. */
+type ReplyDetails = Pick<
+  HostChatMessage,
+  'toolCalls' | 'provenance' | 'savedError' | 'limitReached' | 'reasoningChars' | 'withdrawOffer' | 'linkedDeliverables'
+>
+
+function hostWithdrawOffer(offer: ChatMessage['withdrawOffer']): HostChatMessage['withdrawOffer'] {
+  if (!offer) return null
+  const requests = Object.freeze(offer.requests.map((request) => Object.freeze({ ...request })))
+  return Object.freeze({ message: offer.message, requests })
+}
+
+function replyDetails(message: ChatMessage): ReplyDetails {
+  return {
+    toolCalls: Object.freeze((message.toolCalls ?? []).map(hostToolCall)),
+    provenance: provenanceOf(message),
+    savedError: savedTurnError(message),
+    limitReached: message.limitReached?.message || null,
+    reasoningChars: message.reasoning?.length ?? 0,
+    withdrawOffer: hostWithdrawOffer(message.withdrawOffer),
+    linkedDeliverables: Object.freeze(deliverablesFromReceipts(receiptsOf(message))),
+  }
+}
+
 function hostMessage(message: ChatMessage, core: ControllerReading, chatId: string, writingId: string | null): HostChatMessage {
   const { id } = message
   return Object.freeze({
+    ...replyDetails(message),
     id,
     role: message.role,
     text: messageText(message),

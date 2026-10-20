@@ -1,7 +1,8 @@
-import { freshLookId } from './editor'
-import { DEFAULT_LOOK, isPresetId } from './presets'
-import type { StoredLooks } from './storage'
-import type { Look } from './types'
+import { freshLookId } from '@/lib/looks/editor'
+import { DEFAULT_LOOK, isPresetId } from '@/lib/looks/presets'
+import type { Look } from '@/lib/looks/types'
+
+import type { StoredLooks } from './play-look-storage'
 
 /**
  * PRD-260 — what the LookProvider holds, as a pure reducer. `lookChanged` /
@@ -15,7 +16,7 @@ import type { Look } from './types'
  * PRD-261 A-09b: the looks also belong to one theme (`themeId`, the id the
  * server keeps them under), and `served` takes the server's copy: the server
  * is the truth, but never over a change the user made since the last read,
- * which the store sends to the server instead (use-look-store.ts).
+ * which the store sends to the server instead (lib/theme-host/builtin/play-look-store.ts).
  */
 
 export interface LookState {

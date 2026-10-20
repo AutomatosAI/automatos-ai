@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { refocusWhenShown } from '@/lib/play/focus'
+import { takeHeadingFocusAfterReload } from '@/lib/theme-host/switch-focus'
 import type { SlotId } from '@/lib/theme-host/registry-types'
 
 import { registeredComponent, useActiveThemeSlots } from './theme-slot-registrations'
@@ -20,7 +21,10 @@ import { registeredComponent, useActiveThemeSlots } from './theme-slot-registrat
  *
  * After a note offered the switch to a theme, the screen's heading (`headingSelector`, an element
  * with tabIndex={-1}) takes the focus that dropped to <body> when the note went, as soon as the
- * screen renders, however late its code loads (P260-FX-22, M21).
+ * screen renders, however late its code loads (P260-FX-22, M21). A switch onto an installed theme
+ * reloads the page (PA-13), so the note's switch leaves word in this tab's sessionStorage just
+ * before the reload, and the next load takes it once, as if the note had been shown (G3,
+ * lib/theme-host/switch-focus.ts).
  */
 
 export interface ThemeSlotPageProps {
@@ -34,9 +38,13 @@ export interface ThemeSlotPageProps {
   readonly headingSelector: string
 }
 
-/** Remembers that a note was shown; once the theme's screen shows, its heading takes focus. */
+/** Remembers that a note was shown (on this load, or before the switch reloaded it); once the theme's screen shows, its heading takes focus. */
 function useHeadingFocusAfterSwitch(themed: boolean, showsScreen: boolean, headingSelector: string): void {
   const offered = useRef(false)
+  // G3: declared first, so the word left before the reload is taken before the screen is looked for.
+  useEffect(() => {
+    if (takeHeadingFocusAfterReload()) offered.current = true
+  }, [])
   useEffect(() => {
     if (!themed) {
       offered.current = true

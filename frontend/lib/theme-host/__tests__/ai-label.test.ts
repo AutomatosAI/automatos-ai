@@ -44,7 +44,7 @@ vi.mock('@/hooks/use-studio-theme', () => ({
   useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
 }))
-vi.mock('@/components/play/chat/play-chat-lazy', () => ({
+vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({
   PlayChat: () => (state.slot ? state.slot() : null),
 }))
 /** The theme's frame around an installed theme's page: its content alone here. */

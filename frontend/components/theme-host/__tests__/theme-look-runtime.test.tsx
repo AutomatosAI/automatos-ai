@@ -21,7 +21,7 @@ vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' }, isLoading: false, error: null, refreshWorkspace: async () => undefined }),
 }))
 
-import { useLookScope } from '@/components/looks/look-scope'
+import { useLookScope } from '@/components/theme-host/look-scope'
 import { declaresLooks, ThemeLookRuntime } from '@/components/theme-host/theme-look-runtime'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
@@ -30,7 +30,7 @@ import { clearRoot, lookNamesLeft, myLook, rootVars } from '@/lib/looks/__tests_
 import { lookDocumentVars } from '@/lib/looks/document'
 import { DAYLIGHT } from '@/lib/looks/presets'
 import { lookScope } from '@/lib/looks/scope'
-import { LOOK_SCOPE_KEY, lookKeys } from '@/lib/looks/storage'
+import { LOOK_SCOPE_KEY, lookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { lookJson } from '@/lib/looks/transfer'
 import type { ThemeTone } from '@/lib/theme-host/boot'

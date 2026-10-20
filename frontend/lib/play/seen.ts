@@ -1,10 +1,12 @@
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { moveUnscopedOnce, scopedKey } from '@/lib/looks/scope'
+import type { Deliverable } from '@automatos/theme-sdk'
+
+import { moveUnscopedOnce, scopedKey } from '../looks/scope'
 
 /**
  * PRD-260 §4 — which Deliverables this browser has already shown on Play's
  * shelf, so a new one makes Auto celebrate once; ported from Automatos Play's
- * lib/deliverables/seen.ts onto the core's Deliverable (created_at). A
+ * lib/deliverables/seen.ts onto the core's Deliverable (created_at, the SDK's
+ * Deliverable type). A
  * Deliverable is new when its id hasn't been seen and it is newer than the
  * newest one seen: old rows met for the first time (a chip, Load more) don't
  * count. The first visit only remembers, it doesn't celebrate.

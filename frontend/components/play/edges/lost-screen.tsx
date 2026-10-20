@@ -1,8 +1,6 @@
-import Link from 'next/link'
+import { CHAT_HREF, HostLink } from '@automatos/theme-sdk'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { CHAT_HREF } from '@/lib/ticket-links'
-
+import { AutoMascot } from '../../mascot/auto-mascot'
 import styles from './edges.module.css'
 import { EdgeWordmark } from './wordmark'
 
@@ -11,6 +9,7 @@ import { EdgeWordmark } from './wordmark'
  * components/edges/LostScreen.tsx: the whole window, Auto lost in front of a
  * giant hollow "404", and one way back, to the chat. app/not-found.tsx renders
  * it under Play at >= 1024 px; every other style and width keeps the plain 404.
+ * PRD-261 A-14f: the way back is the SDK's HostLink to its CHAT_HREF.
  */
 
 export const LOST_TITLE = 'This page wandered off'
@@ -34,9 +33,9 @@ export function LostScreen() {
         </div>
         <h1 className={styles.title}>{LOST_TITLE}</h1>
         <p className={styles.text}>{LOST_LINE}</p>
-        <Link href={CHAT_HREF} className={styles.primary}>
+        <HostLink href={CHAT_HREF} className={styles.primary}>
           {BACK_TO_CHAT}
-        </Link>
+        </HostLink>
       </main>
     </div>
   )
