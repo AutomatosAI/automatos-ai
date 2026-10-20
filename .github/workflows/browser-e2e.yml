@@ -430,6 +430,20 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-package
         run: npx playwright test --grep "@package|@parity" --project=chromium --project=webkit --workers=1 --output=test-results-package
 
+      # PRD-261 C-06q1 (PB-24, PB-26): installed Play 1.1.0's preview shots, which
+      # specs/play-previews.spec.ts saves in the step above (each preset's /chat frame, and the
+      # default preset's /deliverables and /looks), for the owner to pick from. They are never
+      # committed here: the kit commits the picked files into themes/play/assets/previews/ (C-06q2).
+      # Uploaded when the specs failed too, so the shots that were saved can still be seen; a run
+      # that saved none fails here.
+      - name: Upload Play's preview shots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: play-previews
+          path: e2e/browser/previews
+          if-no-files-found: error
+
       # The theme-host record (React version, import-map integrity support), pass or fail.
       - name: Summarise the theme-host record
         if: always()

@@ -47,6 +47,25 @@ which every other spec's tab reads, so they run in their own step, one test at a
 To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the Play
 change it carries (the mirror rule, `docs/frontend-architecture/play-theme.md`).
 
+## Play's preview shots (PRD-261 C-06q1)
+
+`specs/play-previews.spec.ts` (`@package`, Chromium only, in the package step) shoots the installed
+Play 1.1.0 for its listing previews (PB-24, PB-26). For each preset the page's boot carries (Ember,
+Obsidian, Aurora, Workshop, Daylight), picked on Make it yours as a member picks it, it saves the frame
+on `/chat` as `<preset>.png`, and under the default preset also `/deliverables` and `/looks` as
+`ember-deliverables.png` and `ember-looks.png`, in `previews/`: 1280×800 at device scale 1, one image
+pixel per CSS pixel (`scale: 'css'`). A shot is taken under reduced motion (Auto is his still, never a
+clip frame), once his still and the fonts have loaded, Auto is at rest (the first open's hello is over)
+and the look's variables are on `<html>`, with animations off, and only when two shots in a row are
+equal. The conversations list and the shelf are answered with none, so the shots show only the lane's
+own member and workspace. The spec fails when a file is missing, is not a PNG of that size, is over
+512 KB (`package.py` `IMAGE_MAX_BYTES`), or has a name the manifest's `previews` pattern refuses or no
+preset claims by the listing's longest-match rule (`manifest.py` `PREVIEW_PATTERN`, `listings.py`
+`_owner_preset`). The step after it uploads `previews/` as the `play-previews` artifact, also when the
+specs failed; a run that saved none fails there. Nothing here commits a shot: the owner picks from a
+run's artifact and the kit commits the picks into `themes/play/assets/previews/` (C-06q2), so a
+package's bytes, and its signature, stay the same from build to build.
+
 ## Play parity (PRD-261 A-17b)
 
 `specs/play-parity/*.spec.ts` hold builtin Play and the installed package to the same assertions.
