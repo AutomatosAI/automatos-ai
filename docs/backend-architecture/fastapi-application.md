@@ -5,7 +5,6 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/config.py](orchestrator/config.py)
 - [orchestrator/main.py](orchestrator/main.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)

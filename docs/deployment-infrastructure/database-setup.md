@@ -23,7 +23,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/modules/search/tests/test_math_foundations.py](orchestrator/modules/search/tests/test_math_foundations.py)
 - [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
 - [orchestrator/modules/tools/discovery/handlers_documents.py](orchestrator/modules/tools/discovery/handlers_documents.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/scripts/init_test_db.py](orchestrator/scripts/init_test_db.py)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_document_pinning.py](orchestrator/tests/test_document_pinning.py)
@@ -46,7 +46,7 @@ For application-level data models and ORM patterns, see [Backend Architecture](1
 
 Automatos AI uses **PostgreSQL** with the **pgvector extension** for vector similarity search. The system relies on native vector operations for semantic routing and memory retrieval across its 5-layer memory architecture.
 
-The `pgvector` dependency is specified in `orchestrator/requirements.txt` [orchestrator/requirements.txt:17](). The Docker Compose setup uses the `pgvector/pgvector:pg16` image for the `postgres` service, ensuring the extension is available [docker-compose.yml:31]().
+pgvector is the Postgres extension only: the code casts to `vector` in SQL and never imports the Python package, so the API does not install it (PRD-262 US-015) [orchestrator/requirements.in](). The Docker Compose setup uses the `pgvector/pgvector:pg16` image for the `postgres` service, ensuring the extension is available [docker-compose.yml:31]().
 
 ### Connection Management
 
@@ -63,7 +63,7 @@ To prevent "idle in transaction" states that can block DDL and hold row locks du
 *   **`get_db()`**: A FastAPI dependency that ensures a `rollback()` is performed before `close()` in the `finally` block, ensuring no transaction lingers [orchestrator/core/database/database.py:105-116]().
 *   **`end_open_transaction()`**: A utility to explicitly commit a transaction before an `await` block (e.g., an LLM call), sitting idle instead of idle-in-transaction [orchestrator/core/database/database.py:132-146]().
 
-**Sources:** [orchestrator/core/database/database.py:23-146](), [orchestrator/tests/test_w1s8_get_db_lifecycle.py:1-13](), [orchestrator/requirements.txt:17](), [docker-compose.yml:31]()
+**Sources:** [orchestrator/core/database/database.py:23-146](), [orchestrator/tests/test_w1s8_get_db_lifecycle.py:1-13](), [orchestrator/requirements.in](), [docker-compose.yml:31]()
 
 ---
 

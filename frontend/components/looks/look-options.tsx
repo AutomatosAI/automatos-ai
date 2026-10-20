@@ -13,10 +13,10 @@ import {
   SHELL_KEYS,
   TYPE_STYLES,
   TYPE_STYLE_KEYS,
-} from '@/lib/looks/catalogue'
-import { safeGlow } from '@/lib/looks/engine'
-import { clampGlow, glowLabel, type LookValues } from '@/lib/looks/editor'
-import { GLOW_MIN, type Look } from '@/lib/looks/types'
+} from '../../lib/looks/catalogue'
+import { clampGlow, glowLabel, type LookValues } from '../../lib/looks/editor'
+import { safeGlow } from '../../lib/looks/engine'
+import { GLOW_MIN, type Look } from '../../lib/looks/types'
 
 import styles from './editor.module.css'
 import { colourStyle, typeStyle } from './swatch-style'

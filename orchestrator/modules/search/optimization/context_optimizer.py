@@ -28,7 +28,6 @@ import asyncio
 import json
 from collections import Counter
 import math
-import tiktoken
 
 # OpenAI for embeddings
 from openai import OpenAI  # For sync LLM calls only (not embeddings)
@@ -91,11 +90,9 @@ class PromptTemplate:
 
 logger = logging.getLogger(__name__)
 
-# Token counter for OpenAI models
-try:
-    encoding = tiktoken.encoding_for_model("gpt-4")
-except Exception:
-    encoding = tiktoken.get_encoding("cl100k_base")
+# Token counting: the platform's one counter, whose tokenizer loads on first use and
+# never at import (PRD-262 US-033). gpt-4's encoding is the same cl100k_base.
+from core.context_guard import count_tokens
 
 @dataclass
 class ContextItem:
@@ -111,7 +108,7 @@ class ContextItem:
     def __post_init__(self):
         """Calculate token count on initialization"""
         if not self.token_count:
-            self.token_count = len(encoding.encode(self.content))
+            self.token_count = count_tokens(self.content)
 
 @dataclass
 class Example:
@@ -127,7 +124,7 @@ class Example:
         """Calculate total token count"""
         if not self.token_count:
             full_text = f"Input: {self.input_text}\nOutput: {self.output_text}"
-            self.token_count = len(encoding.encode(full_text))
+            self.token_count = count_tokens(full_text)
 
 @dataclass
 class OptimizedContext:
@@ -151,7 +148,7 @@ class AtomicPrompt:
     def __post_init__(self):
         if not self.token_count:
             full_prompt = self._build_prompt()
-            self.token_count = len(encoding.encode(full_prompt))
+            self.token_count = count_tokens(full_prompt)
     
     def _build_prompt(self) -> str:
         """Build the full atomic prompt"""
@@ -447,7 +444,7 @@ class ContextOptimizer:
         entropy = self._calculate_shannon_entropy(text)
         
         # Get token count
-        token_count = len(encoding.encode(text))
+        token_count = count_tokens(text)
         
         if token_count == 0:
             return 0.0

@@ -2,7 +2,22 @@
 
 One offline eval replays the customer nights' real asks against Auto and scores each one from what Auto **did**, not from what it said. Every wave and every model is measured against the same "before". The spec is `docs/PRDS/PRD-256-AUTO-RECEIPTS-GATES-CONTRACTS.md` (US-007, FR-8, §8, §10); this page is how to run it and how to read it.
 
-**It spends real money, and only the owner runs it.** No CI job, Ralph loop or agent session runs the eval, reads its folder or writes a results line (PRD-256 Decision D7).
+**It spends real money, and only the owner runs it.** No CI job, Ralph loop or agent session runs the eval, reads its folder or writes a results line (PRD-256 Decision D7). PRD-263 has one scoped exception, in the next section.
+
+## The PRD-263 exception (PRD-263 D5)
+
+This applies to PRD-263 work only. CI jobs and Ralph loops stay out, and so does every agent session not named here.
+
+- **Build sessions.** A build session that Gerard (the owner) launches and names for a PRD-263 local group may edit `replay.py` (LOCAL-2, LOCAL-3, LOCAL-4) and `phase.sh` (LOCAL-5). It edits them; it does not run them.
+- **The Lab driver.** The Skill Lab driver Gerard launches (`~/.automatos-analyst/harness-lab/lab.py` and `monitor.py`) may run `replay.py`. Its improver sessions may not.
+- **Improver sessions** never read `~/.automatos-analyst/auto-eval/`. They read only the stripped exports under `~/.automatos-analyst/harness-lab/exports/<run>/`.
+
+**Proposed extension, for Gerard to accept or strike before merging (PRD-263 D5, second paragraph; §11-Q1).** Merged as written, it is accepted. Struck, each step in it stays Gerard's own operator step.
+
+- The build session may also edit `compare-arms.py`, `rescore.py` and `arm-report.py`; create `make_split.py` and `split.json`; and run `replay.py`, `compare-arms.py`, `rescore.py`, `arm-report.py` and `lab.py` in fixture mode only (no backend request, no model call, no DB write).
+- The Lab driver may also run `phase.sh --reset-only`, `compare-arms.py --gate` and `arm-report.py`, and read `split.json`, the aggregate outputs under `runs/` and `auto-eval.jsonl` (for its gold scan only). The only thing it writes where improver sessions can read it is the accept/reject bit.
+- Set v2 rows may be authored by a row-author session Gerard names (never an improver session), and the build session may run the $0 rescore. The calibration runs are covered too; Gerard still launches every pass that spends, with his own `--max-spend` and `--cost-factor` (PRD-263 D4).
+- Checks that touch the local DB or a live session (the US-036 dry run, the US-041 planted rows, the US-076 lockdown session) stay Gerard's.
 
 ## Where it lives
 

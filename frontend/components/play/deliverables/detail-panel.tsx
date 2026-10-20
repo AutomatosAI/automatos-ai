@@ -1,14 +1,17 @@
 'use client'
 
-import Link from 'next/link'
 import { useId } from 'react'
+import {
+  deliverableDownloadUrl,
+  deliverableFilename,
+  HostLink,
+  useFileDownload,
+  type Deliverable,
+} from '@automatos/theme-sdk'
 
-import { useApiFileDownload } from '@/hooks/use-api-file-download'
-import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { deliverableDownloadUrl, deliverableFilename, DOWNLOAD_FAILED } from '@/lib/deliverables/download'
-import { askAboutText, madeBy, sourceLabel, sourcesOf } from '@/lib/play/detail'
-import { draftHref } from '@/lib/play/draft'
-import { typeLabel } from '@/lib/play/shelf'
+import { askAboutText, madeBy, sourceLabel, sourcesOf } from '../../../lib/play/detail'
+import { draftHref } from '../../../lib/play/draft'
+import { DOWNLOAD_FAILED, typeLabel } from '../../../lib/play/shelf'
 
 import page from './deliverable-detail.module.css'
 import styles from './detail-panel.module.css'
@@ -45,9 +48,9 @@ export function DetailPanel({ deliverable, kind, title, date }: DetailPanelProps
   return (
     <aside className={styles.panel} aria-label={ABOUT}>
       <div className={styles.actions}>
-        <Link href={draftHref(askAboutText(title))} className={page.primary}>
+        <HostLink href={draftHref(askAboutText(title))} className={page.primary}>
           {ASK_AUTO}
-        </Link>
+        </HostLink>
         <DownloadButton deliverable={deliverable} />
       </div>
       <section className={styles.panelSection} aria-labelledby={aboutId}>
@@ -80,7 +83,7 @@ function Sources({ sources }: { readonly sources: readonly string[] }) {
 }
 
 function DownloadButton({ deliverable }: { readonly deliverable: Deliverable }) {
-  const { download, downloading } = useApiFileDownload(DOWNLOAD_FAILED)
+  const { download, downloading } = useFileDownload(DOWNLOAD_FAILED)
   const url = deliverableDownloadUrl(deliverable)
   if (!url) return null
   return (

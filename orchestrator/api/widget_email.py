@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -169,6 +169,16 @@ async def _execute_email_action(
             "surface": "widget_email",
         },
     )
+
+
+async def _told_if_an_agent_asked(request: Request, db: Session, ctx: RequestContext, action: str,
+                                  params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-264 EUAI-07: the send's params with the AI line at the top of its body when an
+    agent's ``http_request`` tool made the request (``modules/tools/execution/agent_request``);
+    a person's own Send is unchanged. The public name is read off the event loop."""
+    from modules.tools.discovery.send_notice import told_if_an_agent_asked
+
+    return await run_in_threadpool(told_if_an_agent_asked, request.headers, db, ctx.workspace_id, action, params)
 
 
 def _get_entity_id(db: Session, workspace_id: UUID) -> str:
@@ -445,6 +455,7 @@ async def get_email(
 @router.post("", response_model=SendEmailResponse, dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def send_email(
     payload: SendEmailRequest,
+    request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> SendEmailResponse:
@@ -466,6 +477,7 @@ async def send_email(
         params["bcc"] = payload.bcc
     if payload.is_html:
         params["is_html"] = True
+    params = await _told_if_an_agent_asked(request, db, ctx, "GMAIL_SEND_EMAIL", params)  # PRD-264 EUAI-07
 
     try:
         result = await _execute_email_action(ctx, "GMAIL_SEND_EMAIL", params)
@@ -494,6 +506,7 @@ async def send_email(
 async def reply_to_email(
     email_id: str,
     payload: ReplyEmailRequest,
+    request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> ReplyEmailResponse:
@@ -514,6 +527,7 @@ async def reply_to_email(
         params["bcc"] = payload.bcc
     if payload.is_html:
         params["is_html"] = True
+    params = await _told_if_an_agent_asked(request, db, ctx, "GMAIL_REPLY_TO_EMAIL", params)  # PRD-264 EUAI-07
 
     try:
         result = await _execute_email_action(ctx, "GMAIL_REPLY_TO_EMAIL", params)

@@ -24,7 +24,6 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
 - [orchestrator/tests/test_harness_power_mode.py](orchestrator/tests/test_harness_power_mode.py)
 - [orchestrator/tests/test_harness_routing_rule.py](orchestrator/tests/test_harness_routing_rule.py)
-- [orchestrator/tests/test_harness_self_management.py](orchestrator/tests/test_harness_self_management.py)
 - [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
 - [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 - [orchestrator/tests/test_w1s9_idle_in_tx.py](orchestrator/tests/test_w1s9_idle_in_tx.py)

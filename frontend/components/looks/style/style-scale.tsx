@@ -1,5 +1,5 @@
-import type { SwatchStyle } from '@/components/looks/swatch-style'
-import { RADII, SPACING_STEPS, radiusToken } from '@/lib/looks/style'
+import { RADII, SPACING_STEPS, radiusToken } from '../../../lib/looks/style'
+import type { SwatchStyle } from '../swatch-style'
 
 import styles from './style.module.css'
 

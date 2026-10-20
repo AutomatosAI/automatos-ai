@@ -6,9 +6,11 @@ served a route manifest of about a dozen routes. Since FastAPI 0.137 an included
 router stays one node of ``app.routes`` with no path, so every walk over the routes
 flattens them with ``iter_route_contexts``.
 
-- requirements.txt pins fastapi, starlette (>= 1.0.1), uvicorn[standard] 0.50.1 and
-  websockets 13.1 (google-genai needs >= 13, #1169) exactly, uvicorn's [standard] extra
-  accepts that websockets, and this suite runs on those versions;
+- requirements.in (requirements.txt until PRD-262 US-022; requirements.lock, which the
+  image and CI install, is held to it by test_prd262_api_locks.py) pins fastapi,
+  starlette (>= 1.0.1), uvicorn[standard] 0.50.1 and websockets 13.1 (google-genai needs
+  >= 13, #1169) exactly, uvicorn's [standard] extra accepts that websockets, and this
+  suite runs on those versions;
 - in a FRESH process (tests/web_stack_probe.py, DB unreachable), every router of
   router_manifest.py is mounted: the app serves each of its endpoints, and the app's
   routing answers each of its HTTP paths (405 to a method no route takes, never 404);
@@ -34,7 +36,7 @@ from packaging.requirements import Requirement
 from pydantic import BaseModel
 
 ORCH_ROOT = Path(__file__).resolve().parents[1]
-REQUIREMENTS = ORCH_ROOT / "requirements.txt"
+REQUIREMENTS = ORCH_ROOT / "requirements.in"
 PROBE = ORCH_ROOT / "tests" / "web_stack_probe.py"
 # Read at collection, before any test runs: test_route_manifest.py rewrites this file
 # with a fresh dump, and this module checks the COMMITTED one.

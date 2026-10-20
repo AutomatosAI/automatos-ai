@@ -1,4 +1,4 @@
-import type { Chat } from '@/types'
+import type { HostChatSummary } from '@automatos/theme-sdk'
 
 /**
  * PRD-260 §4 — Play's Conversations list as pure data, ported from Automatos
@@ -10,10 +10,24 @@ import type { Chat } from '@/types'
  * The core's preview is the newest message of either side (orchestrator
  * api/chat.py _last_message_previews), so the line is shown without Play's
  * "Auto:" speaker: it may be the user's own words.
+ *
+ * PRD-261 A-14c: Play reads the core only through '@automatos/theme-sdk'. The
+ * page's list is the SDK's chat.useConversationList, whose rows are
+ * HostChatSummary; summaryOfHostChat turns one into the row read here.
  */
 
-/** The fields of a history row the list reads. */
-export type ConversationSummary = Pick<Chat, 'id' | 'title' | 'createdAt' | 'updatedAt' | 'lastMessagePreview'>
+/**
+ * The fields of a history row the list reads: the core's Chat fields, as Play's
+ * own type (PRD-261 surface map: types are copied into Play). createdAt is only
+ * the fallback when updatedAt is unreadable, and the SDK's summary carries none.
+ */
+export interface ConversationSummary {
+  id: string
+  title: string
+  createdAt?: string | null
+  updatedAt: string
+  lastMessagePreview?: string | null
+}
 
 export type GroupLabel = 'Today' | 'This week' | 'Earlier'
 
@@ -102,6 +116,15 @@ export function conversationTitle(chat: ConversationSummary): string {
 export function previewLine(chat: ConversationSummary): string | null {
   const preview = chat.lastMessagePreview?.replace(/\s+/g, ' ').trim()
   return preview || null
+}
+
+/**
+ * One of the SDK's conversations as the list reads it. The SDK hands no start
+ * time; the history's updatedAt is always set (chats.updated_at is NOT NULL),
+ * so lastActive reads the same date it read from the core's Chat.
+ */
+export function summaryOfHostChat(chat: HostChatSummary): ConversationSummary {
+  return { id: chat.id, title: chat.title, updatedAt: chat.updatedAt, lastMessagePreview: chat.preview }
 }
 
 /** A case-insensitive match on the title; an empty query keeps everything. */

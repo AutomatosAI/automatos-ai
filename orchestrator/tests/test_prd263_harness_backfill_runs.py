@@ -1,15 +1,20 @@
-"""PRD-263 US-023 — the HARNESS history on tenant volumes is imported into harness_runs once.
+"""PRD-263 US-023, US-059 — the HARNESS history on tenant volumes is imported into
+harness_runs once, and the files leave the volume only after a verified import.
 
 Runs before PRD-263 left their outcome in files on the workspace volume: one baseline
 per completed run under ``harness/baselines/<day>.json`` (the newest copied to
 ``baseline_latest.json``) and the latest outcome in ``harness/runs/last_run.json``.
 ``scripts/harness_backfill_runs.py`` copies them into harness_runs, one row per
-workspace and ISO week, insert-if-absent; it defaults to a dry run, never writes or
-deletes a file, and ``--summary-only`` prints totals that name no workspace.
+workspace and ISO week, insert-if-absent; it defaults to a dry run, never writes a
+file, and ``--summary-only`` prints totals that name no workspace. Without
+``--remove-files`` it deletes no file; with it (and ``--apply``) a workspace's JSON
+files go only once every week they hold is in harness_runs.
 """
 from __future__ import annotations
 
+import errno
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -217,3 +222,86 @@ def test_only_known_integer_sufficiency_keys_reach_counts(workspace, volume, new
 
     last = {row["cur_window"]: row for row in hr.runs(new_session, workspace)}[LAST_RUN_WEEK]
     assert last["counts"] == {"active_agents": 2, "min_required_agents": 3}
+
+
+def test_remove_files_only_after_verified_import(workspace, volume, new_session, monkeypatch, capsys):
+    """A dry run, and an import whose rows never land, remove nothing; once every week
+    the files hold is in harness_runs, --apply --remove-files deletes every JSON file
+    under harness/ (a trace the import never reads too) and nothing else."""
+    from services import harness_runs
+
+    harness = volume / str(workspace) / "harness"
+    (harness / "traces").mkdir()
+    (harness / "traces" / "2026-09-13_trace.json").write_text("{}")
+    (harness / "notes.txt").write_text("not HARNESS JSON")
+    before = _snapshot(volume)
+
+    assert _backfill("--remove-files") == 0  # the default dry run, before any import
+    assert _snapshot(volume) == before
+    assert "would remove 0 JSON files, import count not verified (files kept)" in capsys.readouterr().out
+
+    with monkeypatch.context() as patch:
+        patch.setattr(harness_runs, "record_imported_runs", lambda db, ws, runs: 0)  # the rows never land
+        assert _backfill("--apply", "--remove-files") == 0
+    assert _snapshot(volume) == before and hr.runs(new_session, workspace) == []
+    assert "removed 0 JSON files, import count not verified in 1 workspaces (files kept)" in capsys.readouterr().out
+
+    assert _backfill("--apply") == 0
+    assert _backfill("--remove-files") == 0  # verified now, but still a dry run
+    assert _snapshot(volume) == before
+    assert "would remove 6 JSON files, import count not verified in 0 workspaces" in capsys.readouterr().out
+
+    assert _backfill("--apply", "--remove-files") == 0
+    assert (f"workspace {workspace}: 5 files (1 unusable), 3 weeks, inserted 0, already in harness_runs 3, "
+            "removed 6 JSON files") in capsys.readouterr().out
+    assert list(harness.rglob("*.json")) == []
+    assert (harness / "notes.txt").read_text() == "not HARNESS JSON"
+    assert len(hr.runs(new_session, workspace)) == 3
+
+
+def test_remove_files_never_follows_or_removes_a_link(workspace, volume, tmp_path_factory):
+    # A workspace's tools write to its volume: a link there could point at another workspace's files.
+    elsewhere = tmp_path_factory.mktemp("another-workspace")
+    (elsewhere / "victim.json").write_text("{}")
+    harness = volume / str(workspace) / "harness"
+    (harness / "linked.json").symlink_to(elsewhere / "victim.json")
+    (harness / "linked-dir").symlink_to(elsewhere, target_is_directory=True)
+
+    assert _backfill("--apply", "--remove-files") == 0
+
+    assert (elsewhere / "victim.json").read_text() == "{}"
+    assert (harness / "linked.json").is_symlink() and (harness / "linked-dir").is_symlink()
+    assert not (harness / "runs" / "last_run.json").exists()
+
+
+def test_remove_files_never_opens_a_linked_directory(workspace, volume, tmp_path_factory, monkeypatch):
+    # Opening a linked directory opens its target: one the script cannot read would stop every run.
+    harness = volume / str(workspace) / "harness"
+    (harness / "linked-dir").symlink_to(tmp_path_factory.mktemp("unreadable"), target_is_directory=True)
+    real_open = os.open
+
+    def unreadable_target(path, flags, mode=0o777, *, dir_fd=None):
+        if os.fspath(path) == "linked-dir":
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", unreadable_target)
+        assert _backfill("--apply", "--remove-files") == 0
+
+    assert (harness / "linked-dir").is_symlink()
+    assert not (harness / "runs" / "last_run.json").exists()
+
+
+def test_remove_files_summary_holds_no_workspace_id(workspace, volume, capsys):
+    assert _backfill("--apply") == 0
+    capsys.readouterr()
+
+    assert _backfill("--apply", "--remove-files", "--summary-only") == 0
+
+    captured = capsys.readouterr()
+    printed = captured.out + captured.err
+    assert ("total over 1 workspaces: 5 files (1 unusable), 3 weeks, inserted 0, already in harness_runs 3, "
+            "removed 5 JSON files, import count not verified in 0 workspaces (files kept)") in printed
+    for identifying in (str(workspace), workspace.hex, WORKSPACE_NAME):
+        assert identifying not in printed

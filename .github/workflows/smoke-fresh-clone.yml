@@ -1,7 +1,8 @@
 name: smoke-fresh-clone
 
 # PRD-176 Headline B / PRD-209 S3 — the deployability bar: a fresh clone boots to
-# a green /health with NO external credentials via `docker compose up`.
+# a green /health with NO external credentials, built from source by `make build`
+# (PRD-262 US-039; smoke-images.yml boots the published images through `make up`).
 #
 # HARD (fails red on boot death) as of PRD-209 US-004: W5 (AUTH_EDITION) has landed,
 # US-001 committed the entrypoint exec bit, US-002 stamped the initdb schema, and
@@ -9,6 +10,72 @@ name: smoke-fresh-clone
 # green /health and a boot death must fail this lane, not report success. The
 # allowed-to-fail mask is removed. Still NON-REQUIRED in branch protection;
 # flipping it to required is the owner's Q2 action.
+#
+# PRD-262 US-017 — before the build, dummy uploads and caches go where a
+# self-hoster's checkout collects them (scripts/ci/build_context.py seed), and the
+# smoke fails if the backend's build sent more than the context budget.
+#
+# PRD-262 US-021 — the image keeps only botocore's models for the services we call.
+# Before the warm restarts the smoke uploads a document, which the backend puts in
+# MinIO through that botocore, and fetches it back from the host by its presigned URL
+# (scripts/ci/smoke_document_presign.py).
+#
+# PRD-262 US-029 — the entrypoint is the only owner of migrations. After the warm
+# restarts the database is stamped one revision behind head and the backend boots once
+# more; every boot must show the entrypoint's banner, no alembic after it and at most
+# one alembic run, and the behind-head boot exactly one (scripts/ci/smoke_alembic.py).
+#
+# PRD-262 US-030 — a boot at head runs no alembic: the entrypoint compares the code's
+# head(s), read statically by orchestrator/scripts/alembic_heads.py, with alembic_version.
+# The fresh boot and the warm restarts must log `schema at head — alembic skipped` and
+# run none.
+#
+# PRD-262 US-031 — a warm restart redoes no seed work: each warm restart must log
+# `seeds unchanged (fingerprint …) — skipped` for the entrypoint's seed loader and the
+# lifespan leader's seeds, start no seed loader, and leave credential_types' rows as
+# they were (scripts/ci/smoke_seeds.py; the fingerprints, orchestrator/core/seeds/).
+#
+# PRD-262 US-034 — the API answers once its core is up and boots the rest in the
+# background, off the event loop: in every boot's /health/bootstrap the stages up to and
+# including trust_gate sum to 3 s or less, and no APScheduler `Run time of job … was
+# missed` warning appears in a boot's first 60 s (scripts/ci/smoke_ready.py). /health 200
+# and /health/ready 200 are timed separately.
+#
+# PRD-262 US-041 — MinIO runs as its image's own user, uid 65532, not root. Before the
+# document check the smoke needs MinIO healthy as that user on this fresh volume, and the
+# one-shot minio-volume-owner, which re-owns a volume root wrote, exited 0
+# (scripts/ci/smoke_minio.py server).
+#
+# PRD-262 US-035 — compose runs the backend's production stage; hot reload is `make dev`.
+# After the fresh boot the smoke checks that no bind mount lays the checkout over /app,
+# nothing runs --reload, and the entrypoint's watchdog signals uvicorn itself (docker
+# top). After the warm restarts, a key written only to envs/api.local reaches the backend
+# that `docker compose up -d --no-deps backend` recreates, and `docker compose stop
+# backend` finishes in under 8 s with an SSE client connected
+# (scripts/ci/smoke_production_backend.py).
+#
+# PRD-262 US-038 — compose probes each service every second while it starts
+# (start_interval). Once the frontend answers, scripts/ci/smoke_health_gates.py reads
+# Docker's start and health_status events: redis and minio must turn healthy within 2 s
+# of their start, and postgres's time on this fresh volume is reported. make build's
+# compose starts the frontend once the backend is healthy, so the frontend must start
+# within 3 s of that (US-039, below); only smoke-images.yml's pull-request boot, which
+# starts the frontend itself after its own checks, reports the gap instead.
+#
+# PRD-262 US-036 — docker-compose.yml names the published images, so the build here is
+# tagged local-<sha7> and labelled org.opencontainers.image.revision=HEAD, as make build
+# does; the smoke checks that every app container runs such an image
+# (scripts/ci/smoke_images.py images --mode build).
+#
+# PRD-262 US-039 — the smoke runs `make build` itself, which starts postgres, redis and
+# minio before it builds. From Docker's events, postgres must turn healthy before the
+# backend's image is built (scripts/ci/smoke_build_overlap.py), and compose, not the
+# smoke, starts the frontend, so it must start within 3 s of a healthy backend. The
+# source-build-cache job shows whether a rebuild after a one-line change reuses the npm
+# and pip installs: after a plain `docker builder prune -f` it records them, and after
+# `make clean` (a week of build cache kept) it needs both CACHED
+# (scripts/ci/build-cache-experiment.sh). It does not run nightly: only a push or pull
+# request changes what it measures.
 #
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
@@ -20,12 +87,21 @@ name: smoke-fresh-clone
 # bar here yet; the workspace worker must report healthy within 20 s of its start
 # and answer /metrics 200 (PRD-262 US-045).
 #
+# PRD-262 US-033 — the API boots with no internet egress (FR-7). Unlike the measurements
+# above, the egress-boot job holds one time to a bar. It boots the backend twice with its
+# egress cut, once per way (scripts/ci/smoke-egress.sh): refused, through a proxy at
+# 127.0.0.1:9 where nothing listens, and blackholed, by a DOCKER-USER rule that silently
+# drops TCP from the stack's network to anywhere outside it, which is where a
+# timeout-less download hangs. The first boot is on an empty database; a new container
+# must then answer /health 200 within the §8 fresh-boot bar (30 s), and the tokenizer
+# must load from the image's own cache.
+#
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
-# stack builds or boots from: compose, the Makefile, the env defaults, the
-# backend's image, entrypoint, requirements, boot module, seeds and migrations, the
-# worker, the frontend's image and lock file, the script and this workflow. Not on
-# every push, since it builds and boots the full stack.
+# stack builds or boots from: compose, the Makefile and the scripts it runs, .env.example,
+# the env defaults, the backend's image, .dockerignore, entrypoint, requirements, boot
+# module and boot stages, seeds and migrations, the worker, the frontend's image and
+# lock file, the scripts and this workflow. Not on every push, since it builds and boots the full stack.
 
 on:
   workflow_dispatch:
@@ -40,26 +116,51 @@ on:
       - "Makefile"
       - "envs/*.defaults"
       - "orchestrator/Dockerfile"
+      - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/requirements*.txt"
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
+      - "orchestrator/scripts/split_lock.py"
       - "orchestrator/main.py"
+      - "orchestrator/core/boot/**"
+      - "orchestrator/core/models/bootstrap.py"
       - "orchestrator/core/seeds/**"
       - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/alembic.ini"
       - "orchestrator/alembic/**"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
+      - "orchestrator/scripts/alembic_heads.py"
       - "services/workspace-worker/**"
       - "frontend/Dockerfile"
       - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-egress.sh"
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/smoke_worker_health.py"
+      - "scripts/ci/build_context.py"
+      - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_alembic.py"
+      - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
+      - "scripts/ci/smoke_ready.py"
+      - "scripts/ci/smoke_minio.py"
+      - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
+      - "scripts/ci/smoke_build_overlap.py"
+      - "scripts/ci/build-cache-experiment.sh"
+      - "scripts/ci/build_cache.py"
+      - "scripts/stack_images.py"
+      - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
+      - ".env.example"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -70,26 +171,51 @@ on:
       - "Makefile"
       - "envs/*.defaults"
       - "orchestrator/Dockerfile"
+      - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/requirements*.txt"
       - "orchestrator/requirements.in"
       - "orchestrator/requirements*.lock"
+      - "orchestrator/scripts/split_lock.py"
       - "orchestrator/main.py"
+      - "orchestrator/core/boot/**"
+      - "orchestrator/core/models/bootstrap.py"
       - "orchestrator/core/seeds/**"
       - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/alembic.ini"
       - "orchestrator/alembic/**"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
+      - "orchestrator/scripts/alembic_heads.py"
       - "services/workspace-worker/**"
       - "frontend/Dockerfile"
       - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-egress.sh"
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/smoke_worker_health.py"
+      - "scripts/ci/build_context.py"
+      - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_alembic.py"
+      - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
+      - "scripts/ci/smoke_ready.py"
+      - "scripts/ci/smoke_minio.py"
+      - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
+      - "scripts/ci/smoke_build_overlap.py"
+      - "scripts/ci/build-cache-experiment.sh"
+      - "scripts/ci/build_cache.py"
+      - "scripts/stack_images.py"
+      - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
+      - ".env.example"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
@@ -104,7 +230,7 @@ permissions:
 
 jobs:
   fresh-clone-boot:
-    name: Fresh-clone docker compose up -> /health 200 (non-required)
+    name: Fresh-clone make build -> /health 200 (non-required)
     # A fixed runner image, so the five-run baselines and later runs compare like with like.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -114,6 +240,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # PRD-262 US-017: generated documents under orchestrator/documents, nested
+      # __pycache__ and the eval and import-linter caches, each a file of random bytes
+      # as large as the context budget. The smoke reads what the backend's build sent.
+      - name: Seed dummy uploads and caches in the backend's build context
+        run: python3 scripts/ci/build_context.py seed orchestrator
 
       # Local-only secrets — throwaway values for an ephemeral stack. No external
       # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the
@@ -138,5 +270,80 @@ jobs:
         with:
           name: smoke-fresh-clone-boot
           path: ${{ runner.temp }}/smoke-fresh-clone/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # PRD-262 US-033 (FR-7): the backend boots with its internet egress cut, refused or
+  # blackholed (scripts/ci/smoke-egress.sh). Each way is its own job, so a failure
+  # names the way. ubuntu-24.04, like the job above: the blackholed way adds a rule to
+  # the runner's firewall with sudo iptables.
+  egress-boot:
+    name: Backend boot with egress ${{ matrix.egress }} -> /health 200 (non-required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        egress: [refused, blackholed]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same throwaway local-only values as the fresh-clone job, and no external
+      # credential.
+      - name: Boot the backend with egress ${{ matrix.egress }}
+        env:
+          POSTGRES_PASSWORD: smoke_pg_pw
+          REDIS_PASSWORD: smoke_redis_pw
+          API_KEY: smoke_api_key
+          AUTH_EDITION: local
+          REQUIRE_AUTH: "false"
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          SMOKE_EGRESS: ${{ matrix.egress }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-egress
+        run: bash scripts/ci/smoke-egress.sh
+
+      - name: Upload boot records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-egress-${{ matrix.egress }}
+          path: ${{ runner.temp }}/smoke-egress/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # PRD-262 US-039: a source rebuild after a one-line change, once after a plain
+  # `docker builder prune -f` (what make clean ran before, recorded) and once after
+  # `make clean` itself (a week of build cache kept), which must leave the frontend's npm
+  # install and the backend's pip install CACHED. The layer cache only: no Railway-built
+  # Dockerfile has a BuildKit cache mount (PRD-262 §10). Not nightly: only a push or a pull
+  # request changes the Makefile or the Dockerfiles it measures.
+  source-build-cache:
+    name: Source rebuild reuses the npm and pip installs after make clean (non-required)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build, prune, change a line, rebuild
+        env:
+          BUILD_CACHE_OUT_DIR: ${{ runner.temp }}/build-cache
+        run: bash scripts/ci/build-cache-experiment.sh
+
+      # The three build logs and the two arms' records, pass or fail.
+      - name: Upload the build logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source-build-cache
+          path: ${{ runner.temp }}/build-cache/
           if-no-files-found: warn
           retention-days: 30

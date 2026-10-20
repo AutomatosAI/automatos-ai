@@ -1,7 +1,7 @@
-import * as kitCss from '@/lib/look-kit/css'
-import * as kitStudio from '@/lib/look-kit/studio-tokens'
-import type { LookCatalogue } from '@/lib/look-kit/types'
-import { validateLook as validateWithSpec, type LookKnobSpec, type LookSpec } from '@/lib/look-kit/validate'
+import * as kitCss from '../look-kit/css'
+import * as kitStudio from '../look-kit/studio-tokens'
+import type { LookCatalogue } from '../look-kit/types'
+import { validateLook as validateWithSpec, type LookKnobSpec, type LookSpec } from '../look-kit/validate'
 
 import {
   ACCENTS,

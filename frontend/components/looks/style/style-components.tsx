@@ -1,10 +1,9 @@
-import chat from '@/components/play/chat/chat.module.css'
-import composer from '@/components/play/chat/composer.module.css'
-import { JUST_NOW, OPEN } from '@/components/play/chat/deliverable-card'
-import { KIND_WORDS } from '@/lib/chat/deliverables'
-import { MARK_DONE, MARK_FAILED } from '@/components/play/chat/labels'
-import { BADGE_DONE, RECEIPTS_TITLE } from '@/components/play/chat/receipts'
-import turn from '@/components/play/chat/turn.module.css'
+import chat from '../../play/chat/chat.module.css'
+import composer from '../../play/chat/composer.module.css'
+import { JUST_NOW, OPEN } from '../../play/chat/deliverable-card'
+import { MARK_DONE, MARK_FAILED } from '../../play/chat/labels'
+import { BADGE_DONE, RECEIPTS_TITLE } from '../../play/chat/receipts'
+import turn from '../../play/chat/turn.module.css'
 
 import gallery from './gallery.module.css'
 import styles from './style.module.css'
@@ -22,6 +21,12 @@ import styles from './style.module.css'
 export const COMPONENTS_LABEL = 'Components'
 export const SAMPLE_TITLE = 'Laptop shortlist'
 export const MESSAGE_PLACEHOLDER = 'Message Auto'
+/**
+ * The sample card's kind, in the words the core's Deliverable cards use (KIND_WORDS.document in
+ * lib/chat/deliverables.ts): copied into Play, since Play imports no core module (PRD-261 A-14d);
+ * components/looks/__tests__/copied-helpers.test.tsx holds it equal.
+ */
+export const SAMPLE_KIND = 'Document'
 
 function Messages() {
   return (
@@ -102,7 +107,7 @@ function DeliverableSample() {
         <div className={turn.deliverableText}>
           <p className={turn.deliverableTitle}>{SAMPLE_TITLE}</p>
           <p className={turn.deliverableMeta}>
-            {KIND_WORDS.document} · {JUST_NOW}
+            {SAMPLE_KIND} · {JUST_NOW}
           </p>
         </div>
         <span className={turn.openButton}>{OPEN}</span>

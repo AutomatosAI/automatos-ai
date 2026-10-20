@@ -40,7 +40,7 @@ import { toast } from 'sonner'
 
 import { PRIVATE_NOT_REVIEWED, isDisabled, themeName } from '@/components/settings/themes/theme-labels'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
-import { persistUiStyle, useUiStyleOptional, type UiStyleContextValue } from '@/contexts/ui-style-context'
+import { persistUiStyle, useUiStyleOptional, type StyleSwitchOptions, type UiStyleContextValue } from '@/contexts/ui-style-context'
 import { choiceOf, choiceSourceOf, themeQueryKeys, useInstalledThemes } from '@/hooks/use-installed-themes'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
@@ -347,8 +347,10 @@ interface StoreChoice {
   /** This pick's number in `picksMade`: a newer pick is never undone by this one's failure. */
   readonly pick: number
   readonly workspaceId: string
-  readonly setStyle: (style: UiStyle) => void
+  readonly setStyle: (style: UiStyle, options?: StyleSwitchOptions) => void
   readonly refresh: () => void
+  /** What the pick carries across the reload into an installed theme (G3), handed to setStyle. */
+  readonly options?: StyleSwitchOptions
 }
 
 /**
@@ -356,7 +358,7 @@ interface StoreChoice {
  * after. When the PUT fails, a pick already showing is undone (style and cookie), so the tab never
  * keeps a choice the server does not hold.
  */
-async function storeChoice({ next, previous, pick, workspaceId, setStyle, refresh }: StoreChoice): Promise<void> {
+async function storeChoice({ next, previous, pick, workspaceId, setStyle, refresh, options }: StoreChoice): Promise<void> {
   const installed = isInstalledThemeStyle(next)
   if (!installed) setStyle(next)
   try {
@@ -368,28 +370,29 @@ async function storeChoice({ next, previous, pick, workspaceId, setStyle, refres
   }
   recordCheck(workspaceId, CHECKED)
   refresh()
-  if (installed) setStyle(next)
+  if (installed) setStyle(next, options)
 }
 
 /**
  * The theme menu's and ⌘K's pick: stored on the server in a workspace, then applied (above).
- * Outside a workspace (isolated mounts) it only applies the style, as before PA-12.
+ * Outside a workspace (isolated mounts) it only applies the style, as before PA-12. `options` go
+ * to setStyle with the pick (G3: what the pick carries across the reload into an installed theme).
  */
-export function useChooseStyle(): (next: UiStyle) => void {
+export function useChooseStyle(): (next: UiStyle, options?: StyleSwitchOptions) => void {
   const ui = useUiStyleOptional()
   const workspaceId = useWorkspaceOptional()?.workspace?.id ?? null
   const queryClient = useContext(defaultContext)
 
   return useCallback(
-    (next: UiStyle) => {
+    (next: UiStyle, options?: StyleSwitchOptions) => {
       if (ui === null || next === ui.style) return
       picksMade += 1
       if (workspaceId === null) {
-        ui.setStyle(next)
+        ui.setStyle(next, options)
         return
       }
       const refresh = () => void queryClient?.invalidateQueries({ queryKey: themeQueryKeys.active(workspaceId) })
-      void storeChoice({ next, previous: ui.style, pick: picksMade, workspaceId, setStyle: ui.setStyle, refresh })
+      void storeChoice({ next, previous: ui.style, pick: picksMade, workspaceId, setStyle: ui.setStyle, refresh, options })
     },
     [ui, workspaceId, queryClient],
   )

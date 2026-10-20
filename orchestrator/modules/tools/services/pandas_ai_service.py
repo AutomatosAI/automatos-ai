@@ -3,9 +3,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-import pandas as pd
-
 logger = logging.getLogger(__name__)
+
+# pandas, bound by PandasAIService._init_pandasai once pandasai imports (PRD-262 US-025).
+# Importing this module never loads it: modules/tools/services/__init__.py and
+# modules/nl2sql/service.py import it at boot, and the image no longer installs pandas.
+pd: Any = None
 
 _pandasai_service: Optional["PandasAIService"] = None
 
@@ -43,6 +46,8 @@ class PandasAIService:
             from pandasai_litellm.litellm import LiteLLM  # type: ignore
         except ImportError as exc:
             raise RuntimeError("pandasai and pandasai-litellm packages are required") from exc
+        global pd  # generate_insight reads pandas as this module's pd
+        import pandas as pd  # pandasai requires it, so it is installed wherever pandasai is
 
         from config import config
         api_key = config.PANDASAI_API_KEY or config.OPENAI_API_KEY

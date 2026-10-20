@@ -1,23 +1,25 @@
 'use client'
 
-import { type ChangeEvent, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
+import {
+  CHAT_HREF,
+  type HostConversationListState,
+  useConversationList,
+  useHostRouter,
+  useStartChat,
+  useThemeLayout,
+} from '@automatos/theme-sdk'
 
-import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { MascotColumn, PageColumns } from '@/components/play/shell/page-columns'
-import { type ConversationListState, useConversationList } from '@/hooks/use-conversation-list'
-import { useStartChat } from '@/hooks/use-start-chat'
-import { useThemeLayout } from '@/hooks/use-studio-theme'
-import { type ConversationSummary, filterByTitle } from '@/lib/play/conversations'
-import { CHAT_HREF } from '@/lib/ticket-links'
-
+import { type ConversationSummary, filterByTitle, summaryOfHostChat } from '../../../lib/play/conversations'
+import { AutoMascot } from '../../mascot/auto-mascot'
+import { MascotColumn, PageColumns } from '../shell/page-columns'
 import { ConversationList } from './conversation-list'
 import styles from './conversations.module.css'
 
 /**
  * PRD-260 §4 — Play's Conversations page (Ember mock 03), ported from Automatos
  * Play's components/conversations/ConversationsScreen.tsx onto the core's
- * history (useConversationList: getChatHistory): every conversation grouped
+ * history (the SDK's useConversationList: getChatHistory): every conversation grouped
  * into Today, This week and Earlier, a search on the title, and New chat. A row
  * opens the conversation in the chat (/chat?chatId=<id>). The title and New
  * chat head the list's own column, over the search box, as in the Play app
@@ -34,7 +36,8 @@ import styles from './conversations.module.css'
  * Play on this page, and below 1024 px, where Play's pages don't render (D7)
  * and the core chat's own history is the list. Until the width is known (the
  * server, hydration) it shows nothing and sends nowhere, so a phone never asks
- * for the list (P260-FX-25, M69).
+ * for the list (P260-FX-25, M69). The width is the SDK's useThemeLayout (the host's own value):
+ * ThemeSlotRoute renders a theme route at any width and leaves the phone to the route.
  */
 
 export const CONVERSATIONS_TITLE = 'Conversations'
@@ -67,7 +70,7 @@ export interface PlayConversationsProps {
 /** The page under Play at >= 1024 px; anywhere else, the chat. */
 export function PlayConversations({ now }: PlayConversationsProps) {
   const layout = useThemeLayout()
-  const router = useRouter()
+  const router = useHostRouter()
   const elsewhere = layout === 'fallback'
   useEffect(() => {
     if (elsewhere) router.replace(CHAT_HREF)
@@ -80,7 +83,8 @@ export function ConversationsScreen({ now }: PlayConversationsProps) {
   const { startChat, ready } = useStartChat()
   const [query, setQuery] = useState('')
   const onSearch = (event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)
-  const shown = list.status === 'loaded' ? filterByTitle(list.chats, query) : []
+  const chats = useMemo(() => (list.status === 'loaded' ? list.chats.map(summaryOfHostChat) : []), [list])
+  const shown = filterByTitle(chats, query)
   const line = statusLine(list, shown.length, query)
   return (
     <PageColumns
@@ -123,7 +127,7 @@ interface StatusLine {
 }
 
 /** What the one status line under the search box says for the list and the search. */
-function statusLine(list: ConversationListState, shown: number, query: string): StatusLine {
+function statusLine(list: HostConversationListState, shown: number, query: string): StatusLine {
   if (list.status === 'loading') return { text: LOADING_LIST, hidden: false }
   // The failure is the alert below; the line stays, empty, for the next change.
   if (list.status === 'failed') return { text: '', hidden: true }
@@ -133,7 +137,7 @@ function statusLine(list: ConversationListState, shown: number, query: string): 
 }
 
 interface ListBodyProps {
-  readonly list: ConversationListState
+  readonly list: HostConversationListState
   /** The conversations whose titles match the search. */
   readonly shown: readonly ConversationSummary[]
   readonly now: Date

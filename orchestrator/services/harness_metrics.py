@@ -370,8 +370,9 @@ def _week_of(week_start: Any) -> str:
     return iso_week_label(day)
 
 
-def _interval_minutes(heartbeat: Mapping[str, Any], agent_id: int) -> int:
-    """The interval the heartbeat service would use: ``interval_minutes``, else 60."""
+def heartbeat_interval(heartbeat: Mapping[str, Any], agent_id: int) -> int:
+    """The interval the heartbeat service would use: ``interval_minutes``, else 60. The
+    change registry reads a heartbeat's prior value through it too (PRD-263 US-050)."""
     raw = heartbeat.get("interval_minutes", DEFAULT_HEARTBEAT_INTERVAL_MINUTES)
     try:
         return int(float(raw))
@@ -381,7 +382,7 @@ def _interval_minutes(heartbeat: Mapping[str, Any], agent_id: int) -> int:
         return DEFAULT_HEARTBEAT_INTERVAL_MINUTES
 
 
-def _heartbeat_config(raw: Any, agent_id: int) -> Dict[str, Any]:
+def heartbeat_setting(raw: Any, agent_id: int) -> Dict[str, Any]:
     """``configuration -> 'heartbeat'`` as a dict. psycopg2 decodes JSON itself, so
     anything else here (a string such as ``"on"``, a list) is a setting that is not an
     object: it reads as no heartbeat, as the heartbeat service skips it, and is logged
@@ -395,17 +396,17 @@ def _heartbeat_config(raw: Any, agent_id: int) -> Dict[str, Any]:
 
 def _roster(db: Session, workspace_id: str) -> List[Dict[str, Any]]:
     """Active, non-system agents of this workspace (Auto is the workspace's system agent:
-    every candidate ``HarnessService._resolve_auto_agent`` can return is one)."""
+    every candidate ``harness_grants.resolve_auto_agent`` can return is one)."""
     rows = db.execute(_ROSTER_SQL, {"workspace_id": workspace_id, "active_status": ACTIVE_AGENT_STATUS})
     roster = []
     for row in rows:
-        heartbeat = _heartbeat_config(row.heartbeat, row.agent_id)
+        heartbeat = heartbeat_setting(row.heartbeat, row.agent_id)
         roster.append({
             "agent_id": row.agent_id,
             "agent_name": row.agent_name,
             "model_id": row.model_id,
             "heartbeat_enabled": bool(heartbeat.get("enabled")),
-            "heartbeat_interval_minutes": _interval_minutes(heartbeat, row.agent_id),
+            "heartbeat_interval_minutes": heartbeat_interval(heartbeat, row.agent_id),
         })
     return roster
 
@@ -591,6 +592,8 @@ __all__ = [
     "Window",
     "build_window",
     "classify_tool_error",
+    "heartbeat_interval",
+    "heartbeat_setting",
     "iso_week_label",
     "read",
     "read_sync",

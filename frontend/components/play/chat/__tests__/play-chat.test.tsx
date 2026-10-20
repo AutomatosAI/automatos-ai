@@ -134,7 +134,8 @@ vi.mock('@/stores/chat-session-store', async () => {
   return { useChatSessionStore: store }
 })
 
-import { OPENING, PlayChat } from '@/components/play/chat/play-chat'
+import { MainLayout } from '@/components/layout/main-layout'
+import { OPENING, PlayChat as PlayChatPage } from '@/components/play/chat/play-chat'
 import { EXAMPLES, HELLO_TITLE } from '@/components/play/chat/first-open'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
 import { ASLEEP_TITLE } from '@/components/play/edges/asleep-screen'
@@ -144,6 +145,18 @@ import { useStartChat } from '@/hooks/use-start-chat'
 import { chatSessionKey, EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
+
+/**
+ * Play's chat as builtin Play's slot draws it (lib/theme-host/builtin/play-chat-lazy.tsx): in the
+ * host's frame, full bleed (PRD-261 A-14a moved MainLayout out of Play's chat into the slot).
+ */
+function PlayChat() {
+  return (
+    <MainLayout fullBleed>
+      <PlayChatPage />
+    </MainLayout>
+  )
+}
 
 // --- core fixtures: the ChatMessage shape of types/chat.ts --------------------------------
 

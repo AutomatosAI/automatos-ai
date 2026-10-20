@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class BootstrapStage(str, Enum):
     CONFIG_LOAD = "config_load"
     DATABASE_INIT = "database_init"
     SCHEMA_MIGRATION = "schema_migration"
-    SEED_SYSTEM_DATA = "seed_system_data"
+    SEED_SYSTEM_DATA = "seed_system_data"  # the starters pass, in the background boot (PRD-262 US-034)
     TRUST_GATE = "trust_gate"
     SKILL_SOURCES = "skill_sources"
     TOOL_SYNC = "tool_sync"
@@ -49,6 +49,10 @@ class StageResult:
     status: str  # 'success' | 'failed' | 'skipped'
     duration_ms: int
     error: Optional[str] = None
+    # What the stage's callable returned (None when it failed or was skipped), for
+    # the boot steps after it (PRD-262 US-034: the core phase's leader seeds). It
+    # is not part of the report.
+    value: Any = field(default=None, compare=False, repr=False)
 
     def as_dict(self) -> dict:
         return {
@@ -105,7 +109,7 @@ async def run_stage(
         skip_condition: If True, skip execution and record as 'skipped'.
 
     Returns:
-        The StageResult for this stage.
+        The StageResult for this stage, carrying what ``func`` returned.
     """
     if skip_condition:
         result = StageResult(stage=stage, status="skipped", duration_ms=0)
@@ -118,11 +122,11 @@ async def run_stage(
         import asyncio
 
         if asyncio.iscoroutinefunction(func):
-            await func()
+            value = await func()
         else:
-            func()
+            value = func()
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        result = StageResult(stage=stage, status="success", duration_ms=elapsed_ms)
+        result = StageResult(stage=stage, status="success", duration_ms=elapsed_ms, value=value)
         logger.info("Bootstrap [%s] completed in %dms", stage.value, elapsed_ms)
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - start) * 1000)

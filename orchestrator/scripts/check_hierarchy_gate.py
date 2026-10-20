@@ -71,6 +71,13 @@ ALLOW_LIST: Set[str] = {
     "platform_send_notification",
     "platform_update_auto_reporting_prefs",
     "platform_harness_trigger",
+    # PRD-263 US-004 (#1150): applies one HARNESS change only on its owner's granted,
+    # unexpired approval, over a setting that still reads its prior value (the handler's
+    # own checks). Its inner heartbeat or unassign call runs as the workspace's Auto
+    # through the executor, where can_actor_modify checks only that Auto exists, is in
+    # the workspace and is active (system_actor_bypass), and the rate limit and the
+    # destructive backstop still run.
+    "platform_harness_apply",
     "platform_acknowledge_report",
     "platform_link_report_to_task",
     "platform_submit_report",

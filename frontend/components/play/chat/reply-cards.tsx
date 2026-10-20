@@ -1,11 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
-
-import { TaskCard } from '@/components/chatbot/task-card'
-import { WithdrawOfferCard } from '@/components/chatbot/withdraw-offer-card'
-import { taskCardsOf } from '@/lib/chat/message-text'
-import type { ChatMessage } from '@/types'
+import { type HostChatMessage, TaskCard, WithdrawOfferCard } from '@automatos/theme-sdk'
 
 import styles from './reply-cards.module.css'
 
@@ -16,19 +11,19 @@ import styles from './reply-cards.module.css'
  * denies the request still waiting on a yes through the core's useDenyApproval,
  * and the card then reads "Withdrawn."), and the tickets the reply filed or
  * checked (PRD-238 S6 live, PRD-239 S2 stored), each the core's TaskCard, which
- * follows the board and opens its ticket there. The cards draw on Studio's
+ * follows the board and opens its ticket there; both are the SDK's cards on the
+ * SDK's message (PRD-261 A-14a). The cards draw on Studio's
  * tokens, which the look writes under Play (D3); Play only frames them.
  */
 
 export const TICKETS_LABEL = 'Tickets'
 
 export interface ReplyCardsProps {
-  readonly message: ChatMessage
+  readonly message: HostChatMessage
 }
 
 export function ReplyCards({ message }: ReplyCardsProps) {
-  const { parts, taskCards, withdrawOffer } = message
-  const tickets = useMemo(() => taskCardsOf({ parts, taskCards }), [parts, taskCards])
+  const { taskCards: tickets, withdrawOffer } = message
   if (!withdrawOffer && tickets.length === 0) return null
   return (
     <div className={styles.cards}>

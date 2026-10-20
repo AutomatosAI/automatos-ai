@@ -11,7 +11,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 
 </details>
 
@@ -25,9 +25,9 @@ This page covers Redis configuration for caching, real-time pub/sub messaging, a
 *   **Real-time workflow updates**: Pub/Sub channels stream execution progress to WebSocket clients [orchestrator/core/redis/client.py:2-4]().
 *   **Task Queues**: ARQ-style Redis queues for the `WorkspaceWorker` to consume agent tasks [docker-compose.yml:178-182]().
 *   **Session & Cache Storage**: Centralized store for transient data across distributed backend workers [docker-compose.yml:46-47]().
-*   **Heartbeat Service**: Supports `APScheduler` with a Redis job store for proactive agent checks [orchestrator/requirements.txt:37-38]().
+*   **Heartbeat Service**: Supports `APScheduler` with a Redis job store for proactive agent checks [orchestrator/requirements.in:37-38]().
 
-Sources: [orchestrator/core/redis/client.py:1-198](), [docker-compose.yml:46-74](), [orchestrator/requirements.txt:37-38]()
+Sources: [orchestrator/core/redis/client.py:1-198](), [docker-compose.yml:46-74](), [orchestrator/requirements.in:37-38]()
 
 ---
 
