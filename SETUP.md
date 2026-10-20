@@ -4,8 +4,8 @@ This is the step-by-step install for the **local edition**, written so that you,
 **or an AI coding agent working for you** (Claude Code, Codex, Cursor, Copilot…),
 can follow it from start to finish on macOS, Linux or Windows.
 
-> **Not technical?** You don't have to install anything:
-> [automatos.app](https://automatos.app) runs the same platform as a hosted service.
+> **Not technical?** Automatos Studio, the same platform as a hosted service,
+> opens as a beta in November 2026: [join the waitlist](https://studio.automatos.app/#waitlist).
 > Or open an AI coding agent in an empty folder and say:
 > *"Install Automatos by following https://github.com/AutomatosAI/automatos-ai/blob/main/SETUP.md"*.
 

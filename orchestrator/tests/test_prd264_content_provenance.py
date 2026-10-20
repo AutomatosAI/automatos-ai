@@ -151,7 +151,7 @@ def test_the_model_and_the_migration_declare_one_shape():
 
     src = MIGRATION.read_text()
     assert 'revision = "prd264_content_provenance"' in src
-    assert 'down_revision = "auto_haiku_default_20261019"' in src
+    assert 'down_revision = "prd263_harness_ledger_grants"' in src
     (ddl,) = re.findall(r"CREATE TABLE IF NOT EXISTS content_provenance \((.*?)\n\s*\)\n", src, re.S)
     lines = [line.strip() for line in ddl.strip().splitlines()]
     assert tuple(line.split()[0] for line in lines if not line.startswith("CONSTRAINT")) == COLUMNS

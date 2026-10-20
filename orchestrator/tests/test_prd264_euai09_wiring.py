@@ -261,7 +261,8 @@ def test_a_post_an_agent_wrote_is_ai_generated_and_a_persons_is_not():
     from core.services.blog_post_view import is_ai_generated, post_view
 
     agent_post, person_post = _post(12), _post(None)
-    assert post_view(agent_post) == {"slug": "harbour-blend", "author_agent_id": 12, "ai_generated": True}
+    assert post_view(agent_post) == {"slug": "harbour-blend", "author_agent_id": 12, "ai_generated": True,
+                                     "reviewed_at": None}  # EUAI-08b: unreviewed
     assert post_view(person_post)["ai_generated"] is False
     assert is_ai_generated(agent_post) and not is_ai_generated(person_post)
 
