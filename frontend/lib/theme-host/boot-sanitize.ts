@@ -233,6 +233,38 @@ export function sanitizePrepaint(prepaint: unknown): PrepaintTable | null {
   return tone === null ? table : { ...table, tone }
 }
 
+export function sanitizeLookStorage(storage: unknown): ThemeLookStorage | null {
+  if (!isRecord(storage)) return null
+  const { pointerKey, scopedPrefix, fallbackKey } = storage
+  const isKey = (key: unknown): key is string => typeof key === 'string' && STORAGE_KEY.test(key)
+  return isKey(pointerKey) && isKey(scopedPrefix) && isKey(fallbackKey) ? { pointerKey, scopedPrefix, fallbackKey } : null
+}
+
+export function sanitizeLookGuard(guard: unknown): ThemeLookGuard | null {
+  if (!isRecord(guard)) return null
+  const { schema, iface } = guard
+  const fits = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= GUARD_MAX_LENGTH
+  return fits(schema) && fits(iface) ? { schema, iface } : null
+}
+
+const TONE_POLICIES: readonly ThemeTonePolicy[] = ['from-look', 'user', 'light', 'dark']
+const TONES: readonly ThemeTone[] = ['light', 'dark']
+/** A boot whose tone is not one of the above leaves the tone to the user. */
+const FALLBACK_TONE: ThemeBoot['tone'] = { policy: 'user', value: null }
+
+/** A tone, strictly: 'light' or 'dark', anything else → none. */
+export function parseThemeTone(value: unknown): ThemeTone | null {
+  return TONES.find((tone) => tone === value) ?? null
+}
+
+/** The tone as a strict pair: a known policy, and 'light', 'dark' or null. */
+export function sanitizeTone(tone: unknown): ThemeBoot['tone'] {
+  if (!isRecord(tone)) return FALLBACK_TONE
+  const policy = TONE_POLICIES.find((known) => known === tone.policy)
+  if (policy === undefined) return FALLBACK_TONE
+  return { policy, value: parseThemeTone(tone.value) }
+}
+
 function isPresetEntry(entry: [string, unknown]): entry is [string, string | number] {
   return typeof entry[1] === 'string' || isFiniteNumber(entry[1])
 }
