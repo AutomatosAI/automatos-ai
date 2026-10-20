@@ -3,6 +3,11 @@
 Every validator names the field it rejects (``where``), so a refused request
 says exactly what to fix. A refusal is a ``BundleError``: the server answers it
 with HTTP 400 before any file is fetched or any process is started.
+
+A voice and a language follow the image's data (PRD-262 US-052): a voice is one
+the image's voices file holds, its names read at boot, and a language is one the
+image's espeak-ng data speaks. Anything else would pass here and then fail
+inside Kokoro or espeak-ng.
 """
 
 from __future__ import annotations
@@ -13,9 +18,9 @@ import math
 import re
 from typing import AbstractSet, Any, Iterable, Mapping, Optional
 
+from .espeak_build import LANGUAGES
+
 LINE_ID = re.compile(r"^[a-z0-9_-]{1,32}$")
-VOICE_NAME = re.compile(r"^[a-z]{2}_[a-z0-9]{1,32}$")
-LANGUAGE = re.compile(r"^[a-z]{2,3}(?:-[a-z]{2,4})?$")
 _PATH = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 MAX_PATH_CHARS = 200
@@ -89,8 +94,11 @@ def pattern(value: Any, where: str, regex: re.Pattern, expected: str) -> str:
     return value
 
 
-def voice_name(value: Any, where: str) -> str:
-    return pattern(value, where, VOICE_NAME, "a Kokoro voice name such as af_heart")
+def voice_name(value: Any, where: str, voices: AbstractSet[str]) -> str:
+    """A voice the image's voices file holds (``voices``, read at boot)."""
+    if not isinstance(value, str) or value not in voices:
+        raise BundleError(f"{where} must be one of the renderer's Kokoro voices: {', '.join(sorted(voices))}")
+    return value
 
 
 def speed(value: Any, where: str) -> float:
@@ -98,7 +106,10 @@ def speed(value: Any, where: str) -> float:
 
 
 def language(value: Any, where: str) -> str:
-    return pattern(value, where, LANGUAGE, "a language code such as en-us")
+    """A language the image's espeak-ng data speaks: en-us or en-gb."""
+    if not isinstance(value, str) or value not in LANGUAGES:
+        raise BundleError(f"{where} must be one of {', '.join(LANGUAGES)}")
+    return value
 
 
 def line_id(value: Any, where: str) -> str:

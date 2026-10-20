@@ -18,8 +18,10 @@ import {
   installedThemeSource,
   installIdOf,
   loadThemeForStyle,
+  rememberActiveDigest,
   sourceForStyle,
 } from '../sources'
+import { THEME_DIGEST_COOKIE } from '../types'
 import type { LoaderDeps, ThemeHostGlobal, ThemeLoadResult, ThemeRegistrationHost } from '../types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 
@@ -108,6 +110,32 @@ describe('PRD-261 A-07b seam — a 200 answer that names no theme for this insta
     expect(deps.fetchJson).not.toHaveBeenCalled()
     expect(deps.importModule).not.toHaveBeenCalled()
     expect(error).not.toHaveBeenCalled()
+  })
+})
+
+const ACTIVE_DIGEST = 'c'.repeat(64)
+
+describe('PRD-261 A-08c — the active digest left for the boot cache of the next request', () => {
+  afterEach(() => {
+    document.cookie = `${THEME_DIGEST_COOKIE}=; Path=/; Max-Age=0`
+  })
+
+  it('hands on the digest the active-theme answer names for this install, and nothing for another', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const rememberDigest = vi.fn()
+    const active = { choice: INSTALL_ID, theme: { installId: INSTALL_ID, digest: ACTIVE_DIGEST, manifest: {} } }
+    await installedThemeSource(INSTALL_ID).load(depsWith({ fetchActive: vi.fn(async () => active), rememberDigest }))
+    expect(rememberDigest).toHaveBeenCalledWith(INSTALL_ID, ACTIVE_DIGEST)
+    rememberDigest.mockClear()
+    const other = { choice: OTHER_INSTALL_ID, theme: { installId: OTHER_INSTALL_ID, digest: ACTIVE_DIGEST } }
+    await installedThemeSource(INSTALL_ID).load(depsWith({ fetchActive: vi.fn(async () => other), rememberDigest }))
+    expect(rememberDigest).not.toHaveBeenCalled()
+  })
+
+  it('writes `<installId>.<digest>` to the cookie the root layout reads, by default', () => {
+    expect(defaultLoaderDeps().rememberDigest).toBe(rememberActiveDigest)
+    rememberActiveDigest(INSTALL_ID, ACTIVE_DIGEST)
+    expect(document.cookie.split('; ')).toContain(`${THEME_DIGEST_COOKIE}=${INSTALL_ID}.${ACTIVE_DIGEST}`)
   })
 })
 

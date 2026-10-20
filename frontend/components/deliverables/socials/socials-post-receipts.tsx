@@ -9,13 +9,19 @@
  * step the publish skipped (a thumbnail with no public storage) is noted. A failed
  * or partially published post offers Retry, which publishes only the failed
  * targets again (POST /retry). Before it publishes, a TikTok target shows the
- * privacy level and AI label publish will use (US-304).
+ * privacy level publish will use (US-304).
+ *
+ * PRD-264 EUAI-05: every channel states its AI label decision (Art. 50): TikTok's
+ * AI-generated label, YouTube Studio's setting, or the caption for a channel that takes
+ * no AI flag. The words are the backend's (GET /ai-labels, useSocialPostAiLabels): the
+ * line a publish used once one ran, else the line it will use.
  */
 import { Button } from '@/components/ui/button'
 import { badgeVariants } from '@/components/ui/badge'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost, SocialPostTarget } from '@/lib/api-client'
 import { useRetrySocialPost } from '@/hooks/use-socials-publish-api'
+import { useSocialPostAiLabels } from '@/hooks/use-socials-ai-labels'
 import { canAuthorPosts, channelLabel } from './socials-status'
 
 const TARGET_STATUS_LABELS: Record<SocialPostTarget['status'], string> = {
@@ -28,24 +34,18 @@ const RETRYABLE: ReadonlySet<SocialPost['status']> = new Set(['failed', 'partial
 const BEFORE_PUBLISH: ReadonlySet<SocialPost['status']> = new Set(['approved', 'scheduled', 'missed'])
 const MOST_PRIVATE = 'the most private level the account allows'
 
-/** Whether a render recorded AI-made footage for the post (D12): TikTok's AI label. */
-function hasGeneratedFootage(post: SocialPost): boolean {
-  return Object.values(post.footage ?? {}).some((slot) => (slot as { status?: string } | null)?.status === 'done')
-}
-
 /**
- * What TikTok's publish will use (US-304): the chosen privacy when the account
+ * The privacy TikTok's publish will use (US-304): the chosen level when the account
  * allows it (publish reads the creator's allowed levels), else the most private
  * level it allows. Never a public default.
  */
-export function tiktokSettings(post: SocialPost, target: SocialPostTarget): string {
+export function tiktokPrivacy(target: SocialPostTarget): string {
   const chosen = target.options.privacy_level
   const privacy = typeof chosen === 'string' ? `${chosen} if the account allows it, else ${MOST_PRIVATE}` : MOST_PRIVATE
-  const aigc = hasGeneratedFootage(post) || target.options.is_aigc === true
-  return `Privacy: ${privacy}. AI-generated label: ${aigc ? 'on' : 'off'}.`
+  return `Privacy: ${privacy}.`
 }
 
-function Receipt({ post, target }: { post: SocialPost; target: SocialPostTarget }) {
+function Receipt({ post, target, aiLabel }: { post: SocialPost; target: SocialPostTarget; aiLabel?: string }) {
   return (
     <li className="space-y-1 rounded-lg border border-border/60 px-3 py-2" data-testid={`socials-receipt-${target.toolkit}-${target.post_kind}`}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -68,7 +68,12 @@ function Receipt({ post, target }: { post: SocialPost; target: SocialPostTarget 
         </p>
       ))}
       {target.toolkit === 'tiktok' && BEFORE_PUBLISH.has(post.status) && (
-        <p className="text-xs text-muted-foreground">{tiktokSettings(post, target)}</p>
+        <p className="text-xs text-muted-foreground">{tiktokPrivacy(target)}</p>
+      )}
+      {aiLabel && (
+        <p className="text-xs text-muted-foreground" data-testid={`socials-ai-label-${target.toolkit}-${target.post_kind}`}>
+          {aiLabel}
+        </p>
       )}
     </li>
   )
@@ -76,7 +81,9 @@ function Receipt({ post, target }: { post: SocialPost; target: SocialPostTarget 
 
 export function SocialsPostReceipts({ post, role }: { post: SocialPost; role: Workspace['role'] }) {
   const retry = useRetrySocialPost()
+  const aiLabels = useSocialPostAiLabels(post)
   const targets = post.targets ?? []
+  const labelOf = new Map((aiLabels.data?.targets ?? []).map((t) => [t.id, t.ai_label] as const))
   if (targets.length === 0) return null
   const canRetry = canAuthorPosts(role) && RETRYABLE.has(post.status) && targets.some((t) => t.status === 'failed')
   return (
@@ -84,7 +91,7 @@ export function SocialsPostReceipts({ post, role }: { post: SocialPost; role: Wo
       <p className="text-sm font-medium text-foreground">Publish status</p>
       <ul className="space-y-2">
         {targets.map((target) => (
-          <Receipt key={target.id} post={post} target={target} />
+          <Receipt key={target.id} post={post} target={target} aiLabel={labelOf.get(target.id)} />
         ))}
       </ul>
       {canRetry && (

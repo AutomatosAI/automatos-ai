@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
-import type { ThemeNavItem } from '@/lib/theme-host/registry-types'
+import type { ThemeChoiceEntry } from '@/lib/theme-host/choice-sync'
+import type { ThemeNavItem, UiStyle } from '@/lib/theme-host/registry-types'
 import { feedItemHref } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
 import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
@@ -18,6 +19,15 @@ export interface SearchResult {
   icon?: string
   /** More text the result was found by (a post's brief): the dialog keeps it listed when the query matches it. */
   keywords?: string
+}
+
+/** PRD-261 A-02c: a style ⌘K switches to (Classic, Studio, a builtin or installed theme). */
+export interface ThemeSearchResult {
+  id: string
+  label: string
+  /** 'Private · not reviewed' for an install nobody reviewed. */
+  description?: string
+  style: UiStyle
 }
 
 // PRD-251 S2.1: the Socials page is listed only while the platform offers Socials.
@@ -53,6 +63,30 @@ const NO_THEME_NAV: readonly ThemeNavItem[] = []
  */
 function themePages(nav: readonly ThemeNavItem[]): SearchResult[] {
   return nav.map((item) => ({ id: item.id, label: item.label, category: 'pages' as const, path: item.path }))
+}
+
+/** No style choices given (outside the style provider): ⌘K lists no themes. */
+const NO_STYLE_CHOICES: readonly ThemeChoiceEntry[] = []
+
+/** Words that list every style, as a page's name lists that page. */
+export const THEME_SEARCH_WORDS: readonly string[] = ['theme', 'style', 'appearance']
+
+/**
+ * PRD-261 A-02c: the styles ⌘K offers, by name; all of them with no query, or when a query of
+ * MIN_QUERY_CHARS or more starts one of THEME_SEARCH_WORDS.
+ */
+function filterThemes(query: string, choices: readonly ThemeChoiceEntry[]): ThemeSearchResult[] {
+  const lower = query.toLowerCase()
+  const byWord = lower.length >= MIN_QUERY_CHARS && THEME_SEARCH_WORDS.some((word) => word.startsWith(lower))
+  const everyStyle = lower === '' || byWord
+  return choices
+    .filter((choice) => everyStyle || choice.name.toLowerCase().includes(lower))
+    .map((choice) => ({
+      id: `theme-${choice.style}`,
+      label: choice.name,
+      description: choice.note ?? undefined,
+      style: choice.style,
+    }))
 }
 
 /** The query waits this long after the last keystroke, and needs this many characters. */
@@ -206,14 +240,20 @@ function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
  * The global search. `socials` is the workspace's Socials state (PRD-251 D1): the
  * Socials page is listed while the platform offers it, and posts are searched while
  * this workspace has it on too. Without it (outside a workspace), neither. `themeNav`
- * (PRD-260 M90, PRD-261 A-02b) is the active theme's own pages, listed too.
+ * (PRD-260 M90, PRD-261 A-02b) is the active theme's own pages, listed too. `styleChoices`
+ * (PRD-261 A-02c, choice-sync.ts) are the styles it can switch to, returned as `themes`.
  */
-export function useGlobalSearch(socials?: WorkspaceSocialsState | null, themeNav: readonly ThemeNavItem[] = NO_THEME_NAV) {
+export function useGlobalSearch(
+  socials?: WorkspaceSocialsState | null,
+  themeNav: readonly ThemeNavItem[] = NO_THEME_NAV,
+  styleChoices: readonly ThemeChoiceEntry[] = NO_STYLE_CHOICES,
+) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const socialsAvailable = socials?.available === true
   const socialsOn = socialsAvailable && socials?.enabled === true
   const pages = useMemo(() => filterPages(query, socialsAvailable, themeNav), [query, socialsAvailable, themeNav])
+  const themes = useMemo(() => filterThemes(query, styleChoices), [query, styleChoices])
   const { results, loading, error } = useSourceResults(query, socialsOn)
   useSearchShortcut(setOpen)
 
@@ -223,5 +263,5 @@ export function useGlobalSearch(socials?: WorkspaceSocialsState | null, themeNav
     if (!next) setQuery('')
   }, [])
 
-  return { open, query, setQuery, loading, error, pages, ...results, handleOpenChange }
+  return { open, query, setQuery, loading, error, pages, themes, ...results, handleOpenChange }
 }

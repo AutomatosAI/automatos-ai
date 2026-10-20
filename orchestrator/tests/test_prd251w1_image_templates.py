@@ -79,8 +79,11 @@ from core.social_templates import (  # noqa: E402
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
 from media_render.validate import BundleError  # noqa: E402
+from media_render.voices_build import load_catalogue  # noqa: E402
 from modules.documents.social_starters import SOCIAL_IMAGE_STARTER_SLUGS, social_starters  # noqa: E402
 
+# media-render's voices: the catalogue its voices file holds (PRD-262 US-052).
+VOICES = frozenset(load_catalogue())
 WS = "00000000-0000-0000-0000-0000000001a7"
 # automatos-social/schema.json "sizes": ig_post, ig_story, linkedin, twitter.
 SCHEMA_SIZES = ["1080x1350", "1080x1920", "1200x628", "1600x900"]
@@ -237,7 +240,7 @@ def test_every_image_builds_a_still_bundle_media_render_takes_at_every_size(slug
         assert bundle["still"] == {"at": still_moments(starter["blocks"], _values(starter))}
         assert "audio" not in bundle and "preview" not in bundle
         assert set(PAPER_TOKENS) <= set(bundle["brand"]["tokens"])
-        parsed = parse_bundle(bundle, settings, {})
+        parsed = parse_bundle(bundle, settings, {}, VOICES)
         assert (parsed.composition.width, parsed.composition.height) == parse_size(size)
         assert parsed.still.at == tuple(bundle["still"]["at"])
         assert parsed.composition.duration == root_duration(starter["blocks"]["html"])
@@ -317,15 +320,15 @@ def test_stills_are_for_an_image_and_a_well_formed_list_passes():
 def test_media_render_refuses_a_still_it_could_not_take(extra, message):
     bundle = {**_bundle(_starter("title-card")), **extra}
     with pytest.raises(BundleError, match=message):
-        parse_bundle(bundle, _renderer_settings(), {})
+        parse_bundle(bundle, _renderer_settings(), {}, VOICES)
 
 
 def test_media_render_takes_as_many_stills_as_its_setting_allows():
     settings = replace(_renderer_settings(), still_max_frames=2)
     bundle = _bundle(_starter("carousel"))
     with pytest.raises(BundleError, match="still.at"):
-        parse_bundle(bundle, settings, {})
-    assert parse_bundle({**bundle, "still": {"at": [0.5, 1.5]}}, settings, {}).still.at == (0.5, 1.5)
+        parse_bundle(bundle, settings, {}, VOICES)
+    assert parse_bundle({**bundle, "still": {"at": [0.5, 1.5]}}, settings, {}, VOICES).still.at == (0.5, 1.5)
     assert _renderer_settings().still_max_frames == MAX_STILLS == 10
 
 
@@ -394,7 +397,7 @@ def test_the_ci_driver_renders_every_image_at_every_size_and_probes_the_stripe()
     for starter in driver.social_starters("social_image"):
         for size in starter["blocks"]["sizes"]:
             bundle = driver.image_bundle_for(starter, kit, size)
-            parsed = parse_bundle(bundle, settings, {})
+            parsed = parse_bundle(bundle, settings, {}, VOICES)
             assert (parsed.composition.width, parsed.composition.height) == parse_size(size)
             assert [f.path for f in parsed.files] == ["assets/brand/logo.png"]
         probe = starter["preview"].get("probe")

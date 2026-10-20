@@ -9,9 +9,8 @@ gate (only the caller's workspace role is stubbed) and the REAL step-up dependen
 * a caller the permission gate refuses gets the plain 403, never a reverification prompt;
 * rollback (it switches the running theme code, like update) runs with a fresh step-up in
   SaaS and with none in the local edition;
-* the workspace role change (``members:change_role``) carries NO step-up yet: its only client
-  cannot show Clerk's reverification prompt, so the step-up lands with that flow
-  (PRD-261 W-A2, #1157); a SaaS owner with no fresh step-up still changes a role.
+* the workspace role change, the invite and SDK key creation carry the same step-up since
+  PRD-261 A-07f (W-A2, #1157): their refusals are ``test_prd261_a07f_account_step_up.py``.
 
 The route table facts (which routes carry the dependency, in which order) are
 ``test_prd261_b2_wire.py``.
@@ -40,7 +39,6 @@ if str(ORCH) not in sys.path:
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import api.team as team_api  # noqa: E402
 import api.themes_import as import_api  # noqa: E402
 import api.themes_install as install_api  # noqa: E402
 import api.themes_settings as settings_api  # noqa: E402
@@ -164,51 +162,3 @@ def test_rollback_runs_with_a_fresh_step_up_in_saas_and_with_none_locally(monkey
     resp = _app(install_api.router, ctx=ctx, db=db).post(f"/api/themes/installs/{INSTALL_ID}/rollback")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"install": "row"} and rolled == [(WS, UUID(INSTALL_ID))] and db.commits == 1
-
-
-# ---------------------------------------------------------------------------
-# Behaviour: the workspace role change (step-up deferred to W-A2, #1157)
-# ---------------------------------------------------------------------------
-
-
-class _RoleDb:
-    """Just enough session for ``update_member_role``: one editor row, and commits counted."""
-
-    def __init__(self):
-        self.member = SimpleNamespace(id=5, role="editor")
-        self.commits = 0
-
-    def query(self, model):
-        return self
-
-    def filter(self, *conditions):
-        return self
-
-    def first(self):
-        return self.member
-
-    def commit(self):
-        self.commits += 1
-
-
-@pytest.fixture
-def role_change(monkeypatch):
-    audits = []
-    monkeypatch.setattr(team_api, "_resolve_internal_user_id", lambda db, ctx: 1)
-    monkeypatch.setattr(team_api, "AuditService", lambda db: SimpleNamespace(log=lambda **entry: audits.append(entry)))
-    monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: "owner")
-    db = _RoleDb()
-
-    def change(ctx):
-        client = _app(team_api.router, ctx=ctx, db=db)
-        return client.patch(f"/api/workspaces/{WS}/team/members/5/role", json={"role": "admin"})
-
-    return SimpleNamespace(change=change, db=db, audits=audits)
-
-
-def test_a_role_change_needs_no_step_up_until_its_client_can_reverify(role_change, monkeypatch):
-    # PRD-261 W-A2 (#1157) adds the step-up together with team-management's reverification flow.
-    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
-    resp = role_change.change(_clerk(None))
-    assert resp.status_code == 200, resp.text
-    assert role_change.db.member.role == "admin" and role_change.audits[0]["action"] == "member:role_changed"

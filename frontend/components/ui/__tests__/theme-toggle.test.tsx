@@ -1,4 +1,8 @@
-/** PRD-244 W3 — the picker carries two axes; picking on one never touches the other. */
+/**
+ * PRD-244 W3 — the picker carries two axes; picking on one never touches the other.
+ * PRD-261 A-02c: a style pick goes through useChooseStyle (choice-sync.ts), which stores it on the
+ * server and then sets the style context, so the Style group is bound to that pick.
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { readFileSync } from 'fs'
@@ -23,10 +27,17 @@ describe('ThemeToggle', () => {
   it('has a Style group bound to the style context and a Tone group bound to next-themes', () => {
     expect(src.match(/<DropdownMenuRadioGroup/g)).toHaveLength(2)
     expect(src).toContain('value={style}')
-    expect(src).toContain('setStyle(v)')
+    expect(src).toContain('const chooseStyle = useChooseStyle()')
+    expect(src).toContain('chooseStyle(v)')
     expect(src).toContain("value={theme ?? 'system'} onValueChange={setTheme}")
     for (const v of ['classic', 'studio', 'light', 'dark', 'system']) expect(src).toContain(`value="${v}"`)
     expect(src).not.toContain("setTheme('studio')")
     expect(src).not.toContain("setStyle('light'")
+    expect(src).not.toContain("chooseStyle('light'")
+  })
+
+  it('asks for the workspace installs once the menu opens (PRD-261 A-02c)', () => {
+    expect(src).toContain('<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>')
+    expect(src).toContain('useWantInstalledThemes(menuOpen)')
   })
 })

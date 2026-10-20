@@ -66,20 +66,25 @@ def test_default_config_is_copyable():
 # 2. ``build_widget_config`` — public projection from workspace.settings
 # ---------------------------------------------------------------------------
 
-def test_build_widget_config_returns_none_for_missing_workspace():
+# PRD-264 EUAI-02a: the public config always carries the server-built AI
+# notice, so "nothing configured" is the notice alone, never None.
+_NOTICE_UNNAMED = {"badge": "AI", "line": "You are chatting with an AI assistant.", "locale": "en"}
+
+
+def test_build_widget_config_carries_the_ai_notice_for_missing_workspace():
     from api.widgets.config import build_widget_config
 
-    assert build_widget_config(None) is None
+    assert build_widget_config(None) == {"ai_disclosure": _NOTICE_UNNAMED}
 
 
-def test_build_widget_config_returns_none_when_no_settings():
+def test_build_widget_config_carries_the_ai_notice_when_no_settings():
     from api.widgets.config import build_widget_config
 
     ws = SimpleNamespace(settings=None)
-    assert build_widget_config(ws) is None
+    assert build_widget_config(ws) == {"ai_disclosure": _NOTICE_UNNAMED}
 
     ws_empty = SimpleNamespace(settings={})
-    assert build_widget_config(ws_empty) is None
+    assert build_widget_config(ws_empty) == {"ai_disclosure": _NOTICE_UNNAMED}
 
 
 def test_build_widget_config_projects_only_public_keys():
@@ -94,16 +99,19 @@ def test_build_widget_config_projects_only_public_keys():
         }
     )
     result = build_widget_config(ws)
-    assert result == {"widget_proactive": {"enabled": True, "page_types": ["product"]}}
+    assert result == {
+        "widget_proactive": {"enabled": True, "page_types": ["product"]},
+        "ai_disclosure": _NOTICE_UNNAMED,
+    }
     assert "shopify_access_token" not in result
     assert "shopify_domain" not in result
 
 
-def test_build_widget_config_returns_none_when_no_public_keys_set():
+def test_build_widget_config_carries_only_the_ai_notice_when_no_public_keys_set():
     from api.widgets.config import build_widget_config
 
     ws = SimpleNamespace(settings={"shopify_domain": "x.myshopify.com"})
-    assert build_widget_config(ws) is None
+    assert build_widget_config(ws) == {"ai_disclosure": _NOTICE_UNNAMED}
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +357,12 @@ def test_public_widget_config_keys_whitelist_is_minimal():
     - cart_idle:        PRD-008-A C1 cart-idle popup (must be whitelisted or
                         the SDK silently no-ops and the popup never arms)
     - callback:         PRD-008-A B/C1 callback-form config
+    - ai_disclosure:    PRD-264 EUAI-02a AI notice, built by the server
+                        (never projected raw from settings)
     """
     from api.widgets.config import PUBLIC_WIDGET_CONFIG_KEYS
 
-    assert PUBLIC_WIDGET_CONFIG_KEYS == ("widget_proactive", "cart_idle", "callback")
+    assert PUBLIC_WIDGET_CONFIG_KEYS == ("widget_proactive", "cart_idle", "callback", "ai_disclosure")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+{
+  "schema": "automatos-interface-look/v1",
+  "id": "hello-a09b",
+  "name": "Hello a09b",
+  "sub": "Saved in one browser",
+  "interface": "play",
+  "ground": "indigo",
+  "accent": "periwinkle",
+  "font": "round",
+  "shell": "cobalt",
+  "light": "ice",
+  "glow": 18
+}

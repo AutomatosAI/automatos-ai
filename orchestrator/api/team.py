@@ -10,6 +10,8 @@ from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
+from core.auth.step_up import require_step_up
+from config import config
 from modules.policy.roles import WorkspaceRole
 from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
 from core.workspaces.audit import AuditService
@@ -24,6 +26,15 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/team", tags=["team"])
+
+# PRD-261 A-07f (Gerard D1-d, #1157): an invitation and a role change each grant a person
+# rights in this workspace, so in SaaS each needs a sign-in from the last
+# STEP_UP_MAX_AGE_MINUTES minutes (core/auth/step_up.py; the local edition passes). Theme
+# code runs in the page as the signed-in user, and this stops it inviting or promoting
+# someone silently. It is layered AFTER the permission gate, so a caller the gate refuses
+# gets the plain 403, never a reverification prompt. The client answers the refusal with
+# Clerk's reverification and retries once (components/team/*, lib/theme-host/api.ts).
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 # Public router for accept-invitation — uses Clerk JWT directly without going
 # through workspace resolution (the invitee may not yet be a member of any workspace).
@@ -194,7 +205,10 @@ async def list_team_members(
 @router.post(
     "/invite",
     response_model=InvitationResponse,
-    dependencies=[Depends(require_workspace_permission("members:invite"))],
+    # A-07f asks for step-up when the role is not 'member'. 'member' is not a WorkspaceRole:
+    # invite_member_to_workspace answers 400 for it, the body's default included. So every
+    # invite that can succeed (admin, editor, viewer) grants access, and every invite needs it.
+    dependencies=[Depends(require_workspace_permission("members:invite")), Depends(STEP_UP)],
 )
 async def invite_member(
     workspace_id: str,
@@ -231,10 +245,9 @@ async def invite_member(
         created_at=invitation.created_at.isoformat()
     )
 
-# Step-up (Clerk reverification) for role changes lands with its client flow: PRD-261 W-A2, issue #1157.
 @router.patch(
     "/members/{member_id}/role",
-    dependencies=[Depends(require_workspace_permission("members:change_role"))],
+    dependencies=[Depends(require_workspace_permission("members:change_role")), Depends(STEP_UP)],
 )
 async def update_member_role(
     workspace_id: str,

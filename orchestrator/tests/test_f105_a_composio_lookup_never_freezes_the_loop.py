@@ -14,6 +14,7 @@ loop around each of the three callers. No database, no SDK.
 import asyncio
 import contextvars
 import copy
+import gc
 import logging
 import threading
 import time
@@ -97,7 +98,12 @@ def sessions(monkeypatch):
 
 async def _watched(step):
     """``step()``'s result (awaited when it is a coroutine) and the longest the
-    loop stood still while it ran."""
+    loop stood still while it ran.
+
+    The collector is emptied first and paused while the step runs: in a shard of a
+    few thousand collected tests, a full collection takes about half a second, and
+    where it lands depends on what else the shard collected, not on the code under
+    test."""
     gaps, done = [], asyncio.Event()
 
     async def heartbeat():
@@ -108,13 +114,18 @@ async def _watched(step):
             gaps.append(now - last)
             last = now
 
-    beat = asyncio.create_task(heartbeat())
-    await asyncio.sleep(0)
-    result = step()
-    if asyncio.iscoroutine(result):
-        result = await result
-    done.set()
-    await beat
+    gc.collect()
+    gc.disable()
+    try:
+        beat = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0)
+        result = step()
+        if asyncio.iscoroutine(result):
+            result = await result
+        done.set()
+        await beat
+    finally:
+        gc.enable()
     return result, max(gaps)
 
 
