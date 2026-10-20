@@ -1,10 +1,10 @@
 /**
  * PRD-260 T-007b, K8 — Play's page for one Deliverable at the core's
  * /deliverables?deliverable=<id>, over a mocked useDeliverable
- * (hooks/use-deliverables-api.ts), ported from Automatos Play's
+ * (the theme SDK's, lib/theme-sdk/deliverables.ts, since PRD-261 A-14b), ported from Automatos Play's
  * tests/deliverables/DeliverableScreen.test.tsx: a markdown Deliverable on its
  * sheet (no raw HTML), a picture and a video through the core's authenticated
- * path (useAuthenticatedBlobUrl), the file card with the core's download, the
+ * path (the SDK's useAuthenticatedBlobUrl), the file card with the core's download, the
  * side panel's facts, Ask Auto about this (a new chat with the words waiting),
  * the not-found and failed states, the shelf switch (a bad id falls back to the
  * shelf with a notice), and DeliverableDeepLink staying closed under Play. One
@@ -23,15 +23,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Deliverable, DeliverableDetailResponse } from '@/hooks/use-deliverables-api'
 
 const hook = vi.hoisted(() => ({ real: false, detail: vi.fn(), list: vi.fn() }))
-vi.mock('@/hooks/use-deliverables-api', async () => {
-  const actual = await vi.importActual<typeof import('@/hooks/use-deliverables-api')>('@/hooks/use-deliverables-api')
-  return {
-    ...actual,
-    useDeliverable: (id: string | null, includeContent?: boolean) =>
-      hook.real ? actual.useDeliverable(id, includeContent) : hook.detail(id, includeContent),
-    useDeliverables: (filters: unknown) => hook.list(filters),
-  }
-})
 
 const api = vi.hoisted(() => ({ request: vi.fn() }))
 // The real raw-file route builder: Download swaps a text file's content route for it (P260-FX-12, M49).
@@ -45,17 +36,25 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 
 const media = vi.hoisted(() => ({ blobUrl: vi.fn((url: string | undefined) => ({ src: null as string | null, error: null as string | null, url })) }))
-vi.mock('@/components/widgets/FileWidget/FilePreview', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/components/widgets/FileWidget/FilePreview')>()),
-  useAuthenticatedBlobUrl: media.blobUrl,
-}))
 const files = vi.hoisted(() => {
   const download = vi.fn(async (_url: string, _filename: string) => undefined)
   // Each use of the hook, with the toast a failed download shows.
   const hook = vi.fn((_failedMessage?: string) => ({ download, downloading: false }))
   return { download, hook }
 })
-vi.mock('@/hooks/use-api-file-download', () => ({ useApiFileDownload: (failedMessage?: string) => files.hook(failedMessage) }))
+// PRD-261 A-14b: Play's Deliverable page reads the Deliverable, its media and its download through
+// '@automatos/theme-sdk', whose deliverables area (lib/theme-sdk/deliverables.ts) stands in here.
+vi.mock('@/lib/theme-sdk/deliverables', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/theme-sdk/deliverables')>('@/lib/theme-sdk/deliverables')
+  return {
+    ...actual,
+    useDeliverable: (id: string | null, includeContent?: boolean) =>
+      hook.real ? actual.useDeliverable(id, includeContent) : hook.detail(id, includeContent),
+    useDeliverables: (filters: unknown) => hook.list(filters),
+    useAuthenticatedBlobUrl: media.blobUrl,
+    useFileDownload: (failedMessage?: string) => files.hook(failedMessage),
+  }
+})
 
 const nav = vi.hoisted(() => ({ search: '', pathname: '/deliverables', push: vi.fn(), replace: vi.fn() }))
 vi.mock('next/navigation', () => ({
@@ -73,7 +72,10 @@ vi.mock('@/hooks/use-studio-theme', async () => {
     useThemeLayout: () => (style.play && !style.narrow ? 'theme' : 'fallback'),
   }
 })
-vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
+vi.mock('@/lib/theme-sdk/context', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/theme-sdk/context')>('@/lib/theme-sdk/context')),
+  useHealth: () => ({ connection: 'connected', check: vi.fn() }),
+}))
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: { newDraft: () => void }) => unknown) => select({ newDraft: vi.fn() }),
 }))
