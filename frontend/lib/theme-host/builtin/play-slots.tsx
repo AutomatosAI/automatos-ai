@@ -19,8 +19,6 @@
  * Play's frame itself (AsleepGate), so it is not registered on its own.
  */
 import { PlayConversations } from '@/components/play/conversations/play-conversations-lazy'
-import { LostScreen } from '@/components/play/edges/lost-screen-lazy'
-import { PlayFrame } from '@/components/play/shell/play-frame-lazy'
 import { LooksScreen } from '@/lib/theme-host/builtin/play-looks-lazy'
 import { StyleScreen } from '@/lib/theme-host/builtin/play-style-lazy'
 import { CHAT_HREF, DELIVERABLES_HREF } from '@/lib/ticket-links'
@@ -30,6 +28,8 @@ import type { SlotId } from '../registry-types'
 import type { FrameProps, ThemeRegistrations } from '../types'
 
 import { PlayChat } from './play-chat-lazy'
+import { PlayFrame } from './play-frame-lazy'
+import { LostScreen } from './play-lost-screen-lazy'
 import { PlayShelf } from './play-shelf-lazy'
 
 /** Builtin Play's route for its Conversations page: /x/conversations. */

@@ -8,11 +8,12 @@
  * library (lib/mascot). Never '@/…', 'next/*', '@tanstack/react-query', 'sonner', 'api-client' or a
  * zustand store (PRD §4.3 item 7), so W-K2 can copy the area into the Design Kit with the Play package.
  *
- * Two files are the core's own seam into builtin Play, not Play's code: the lazy slots
- * (play-frame-lazy.tsx, lost-screen-lazy.tsx) that lib/theme-host/builtin/play-slots.tsx registers,
- * each a next/dynamic import() of one Play screen (PRD-260 M17; prd260-play-guards.test.ts holds
- * them where they are). They load nothing else; an installed Play registers its screens with
- * defineTheme instead (A-16b), so they never leave the core.
+ * The core's seams into the area, the lazy slots of Play's frame and 404, are host code in
+ * lib/theme-host/builtin/ (play-frame-lazy.tsx, play-lost-screen-lazy.tsx), as the chat's and the
+ * shelf's are: each a next/dynamic import() of one Play screen (PRD-260 M17;
+ * prd260-play-guards.test.ts holds the seams to them). The area holds no slot of its own, and
+ * each slot loads next/dynamic and its one Play screen, nothing else; an installed Play registers
+ * its screens with defineTheme instead (A-16b), so the slots never leave the core.
  *
  * The specifiers are read through the TypeScript compiler (./module-references), so a comment or a
  * string naming a path never counts. Tests are not part of the scan: they drive the core around Play.
@@ -32,9 +33,14 @@ const FRONTEND = path.resolve(__dirname, '../..')
 const AREA_DIRS: readonly string[] = ['components/play/shell', 'components/play/edges']
 /** Play's own hook only the asleep screen uses (PRD-260 §4): no lane lists it, so it is scanned with the area. */
 const AREA_EXTRA_FILES: readonly string[] = ['hooks/use-recheck-countdown.ts']
-/** The core's lazy slots inside the area (see the header). */
+/** A lazy slot (see the header): none may sit inside the area. */
 const LAZY_SLOT = /-lazy\.tsx$/
 const LAZY_LOADER = 'next/dynamic'
+/** The core's lazy slots of the area's screens, each with the one Play screen it loads. */
+const SLOT_SCREENS: ReadonlyArray<readonly [string, string]> = [
+  ['lib/theme-host/builtin/play-frame-lazy.tsx', '@/components/play/shell/play-frame'],
+  ['lib/theme-host/builtin/play-lost-screen-lazy.tsx', '@/components/play/edges/lost-screen'],
+]
 
 const SOURCE_FILE = /\.tsx?$/
 const TEST_DIR = '__tests__'
@@ -100,12 +106,12 @@ function refusalsIn(file: string): string[] {
   })
 }
 
-/** A lazy slot loads next/dynamic and one module of its own folder, nothing else. */
-function slotProblems(file: string): string[] {
+/** A lazy slot loads next/dynamic and its one Play screen, nothing else. */
+function slotProblems(file: string, screen: string): string[] {
   const specifiers = specifiersOf(file)
-  const own = specifiers.filter((specifier) => specifier.startsWith('./') && !specifier.slice(2).includes('/'))
-  const other = specifiers.filter((specifier) => specifier !== LAZY_LOADER && !own.includes(specifier))
-  return [...other.map((specifier) => `${file}: '${specifier}'`), ...(own.length === 1 ? [] : [`${file}: ${own.length} own modules`])]
+  const other = specifiers.filter((specifier) => specifier !== LAZY_LOADER && specifier !== screen)
+  const missing = [LAZY_LOADER, screen].filter((specifier) => !specifiers.includes(specifier))
+  return [...other.map((specifier) => `${file}: '${specifier}'`), ...missing.map((specifier) => `${file}: no '${specifier}'`)]
 }
 
 describe('PRD-261 A-14f — the frame and edges import the core only through the SDK', () => {
@@ -114,20 +120,16 @@ describe('PRD-261 A-14f — the frame and edges import the core only through the
     expect(AREA_EXTRA_FILES.filter((file) => !existsSync(path.join(FRONTEND, file)))).toEqual([])
     const files = areaFiles()
     expect(files).toEqual(expect.arrayContaining(['components/play/shell/play-frame.tsx', 'components/play/edges/asleep-gate.tsx']))
-    expect(files.filter((file) => LAZY_SLOT.test(file)).sort()).toEqual([
-      'components/play/edges/lost-screen-lazy.tsx',
-      'components/play/shell/play-frame-lazy.tsx',
-    ])
+    expect(files.filter((file) => LAZY_SLOT.test(file))).toEqual([])
   })
 
   it('no file of the area imports a banned module or reaches past Play and the mascot library', () => {
-    const files = areaFiles().filter((file) => !LAZY_SLOT.test(file))
-    expect(files.flatMap(refusalsIn)).toEqual([])
+    expect(areaFiles().flatMap(refusalsIn)).toEqual([])
   })
 
-  it("the core's lazy slots load next/dynamic and one Play screen beside them, nothing else", () => {
-    const slots = areaFiles().filter((file) => LAZY_SLOT.test(file))
-    expect(slots.flatMap(slotProblems)).toEqual([])
+  it("the core's lazy slots load next/dynamic and one Play screen, nothing else", () => {
+    expect(SLOT_SCREENS.filter(([slot]) => !existsSync(path.join(FRONTEND, slot)))).toEqual([])
+    expect(SLOT_SCREENS.flatMap(([slot, screen]) => slotProblems(slot, screen))).toEqual([])
   })
 
   it('the scan refuses every banned kind, by alias and by a relative path out of Play', () => {

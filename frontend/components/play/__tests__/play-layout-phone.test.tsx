@@ -126,10 +126,10 @@ vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({
     return <Screen />
   },
 }))
-vi.mock('@/components/play/shell/play-frame-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-frame-lazy', async () => ({
   PlayFrame: (await import('@/components/play/shell/play-frame')).PlayFrame,
 }))
-vi.mock('@/components/play/edges/lost-screen-lazy', async () => ({
+vi.mock('@/lib/theme-host/builtin/play-lost-screen-lazy', async () => ({
   LostScreen: (await import('@/components/play/edges/lost-screen')).LostScreen,
 }))
 
