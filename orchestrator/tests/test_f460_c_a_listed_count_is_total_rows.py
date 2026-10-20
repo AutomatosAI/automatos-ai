@@ -68,3 +68,14 @@ def test_the_results_shaped_answer_keeps_its_notes():
     shaped = ToolResultFormatter.format_database(_answer(_rows(3)))
 
     assert shaped["notes"] == NOTES
+
+
+def test_a_database_answer_never_says_it_has_0_items():
+    """FIXER review: the header said "Results: 0 items" above "Total Rows: 30" (no ``results`` list)."""
+    text = ToolResultFormatter.format_for_llm(_answer(_rows(30)), TOOL)
+    assert "Results: 0 items" not in text and "Total Rows: 30" in text
+
+
+def test_a_search_keeps_its_results_line():
+    found = {"success": True, "results": [{"content": "Harbour Blend £26.00/kg", "source": "terms.md"}]}
+    assert "Results: 1 items" in ToolResultFormatter.format_for_llm(found, "search_knowledge")

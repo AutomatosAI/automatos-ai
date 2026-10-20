@@ -167,6 +167,15 @@ def composio_lines(standardized: Dict[str, Any]) -> List[str]:
     return ["\nAPI result preview (use this to answer):", preview_json]
 
 
+def count_lines(tool_name: str, standardized: Dict[str, Any]) -> List[str]:
+    """The header's "Results: N items" line. F460 (night 18): none for a database tool, whose answer
+    has no ``results`` list, so the header said "Results: 0 items" above "Total Rows: 30" on every
+    count; its own lines give the count (``database_lines``)."""
+    if tool_name in DATABASE_TOOLS:
+        return []
+    return [f"Results: {standardized['metadata']['count']} items"]
+
+
 def tool_lines(tool_name: str, standardized: Dict[str, Any], results: List[Dict[str, Any]]) -> List[str]:
     """The lines ``format_for_llm`` writes for ``tool_name``'s results after its header."""
     if tool_name in SEARCH_TOOLS:
@@ -180,4 +189,4 @@ def tool_lines(tool_name: str, standardized: Dict[str, Any], results: List[Dict[
     return []
 
 
-__all__ = ["SEARCH_INSTRUCTION", "source_line", "tool_lines"]
+__all__ = ["SEARCH_INSTRUCTION", "count_lines", "source_line", "tool_lines"]
