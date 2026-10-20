@@ -19,6 +19,7 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
 from services.onboarding_state import public_snapshot
+from services.workspace_view import ai_providers_or_none, masked_settings
 from services.harness_mode import harness_settings_view, merge_harness_update, validate_harness_update
 from services.orchestrator_auto_agent import (
     AUTO_CONFIG_FIELDS,
@@ -67,7 +68,7 @@ _TRIGGER_MODE_INTEGRATION_KEYS = {"telegram_trigger_mode", "slack_trigger_mode"}
 
 
 @router.get("/current")
-async def get_current_workspace(
+def get_current_workspace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -95,15 +96,7 @@ async def get_current_workspace(
     webhook_url = f"{backend_url}/api/webhooks/ws/{workspace.webhook_key}" if workspace.webhook_key else None
 
     # Mask sensitive integration tokens for the GET response
-    settings = dict(workspace.settings or {})
-    integrations = dict(settings.get("integrations", {}))
-    masked = {}
-    for k, v in integrations.items():
-        if isinstance(v, str) and len(v) > 8 and "token" in k:
-            masked[k] = v[:4] + "..." + v[-4:]
-        else:
-            masked[k] = v
-    settings["integrations"] = masked
+    settings = masked_settings(workspace.settings)
 
     # PRD-195 S8 (C.1): this used to return the SYSTEM-role twin
     # (ctx.user.role) while the frontend typed it as a workspace role — the
@@ -151,6 +144,9 @@ async def get_current_workspace(
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
         "settings": settings,
+        # PRD-266 US-017c (D23): the AI providers for the app's consent sheet; null
+        # on a read failure. Last, so a failed read leaves no later read to break.
+        "ai_providers": ai_providers_or_none(db, workspace.id),
     }
 
 
