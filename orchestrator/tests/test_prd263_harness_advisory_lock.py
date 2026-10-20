@@ -72,7 +72,7 @@ def _status(new_session, ws):
 
 @pytest.mark.asyncio
 async def test_two_concurrent_ticks_for_one_workspace_run_the_phases_once(workspace, calls, new_session):
-    """The first tick holds the lock while its faked platform calls yield; the second,
+    """The first tick holds the lock while its faked audit report yields; the second,
     on its own connection and session, finds the lock held and does nothing."""
     from services.harness_service import HarnessService
 

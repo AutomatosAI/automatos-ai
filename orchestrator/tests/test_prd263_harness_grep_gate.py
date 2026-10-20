@@ -11,6 +11,10 @@ weekly run files no card and sends no channel notice.
 
 US-047 deletes the always-approving /approve path (api/harness_commands.py) and the
 owner-only bypass key it set: no source outside the tests names either again.
+
+US-048 deletes the direct apply helper, the card parsers and the F156 legacy ledger-file
+importer from services.harness_service, and submits the audit report straight through
+ReportService, so harness_service.py joins GATED and names none of them again.
 """
 from __future__ import annotations
 
@@ -20,10 +24,12 @@ from pathlib import Path
 from typing import List, Tuple
 
 _ORCH = Path(__file__).resolve().parents[1]
+HARNESS_SERVICE = "services/harness_service.py"
 GATED = (
     "services/harness_metrics.py",
     "services/harness_mode.py",
     "core/stats/harness_verdicts.py",
+    HARNESS_SERVICE,
 )
 EXECUTORS = re.compile(r"\b(PlatformActionExecutor|UnifiedToolExecutor|execute_tool)\b")
 # An import of any of these modules, or of these names, is an LLM client import.
@@ -40,6 +46,13 @@ DELETED = (
 DELETED_APPROVE = (
     "harness_commands", "handle_harness_command", "_governed_verdict", "_find_task_by_rx",
     "OWNERS_OWN_DECISION", "owners_own_decision",
+)
+# What US-048 deleted from services.harness_service (grep in harness_service.py returns 0).
+DELETED_APPLY = (
+    "_auto_apply_prescription", "_PLACEHOLDER_PROPOSED_VALUE", "review_needed", "_snapshot_current_value",
+    "_resolve_agents_by_name", "_extract_agents_list", "_parse_harness_task", "_extract_json_section",
+    "_extract_text_section", "_extract_risk_score", "_read_applied_tasks", "_write_applied_tasks",
+    "LEGACY_LEDGER_FILE", "UNREADABLE_LEDGER_", "_import_legacy_ledger", "_file_unreadable_ledger_card",
 )
 # Skipped by that grep: the tests, and caches and tool state (__pycache__, dot directories).
 SKIPPED_PARTS = ("tests", "__pycache__")
@@ -110,5 +123,10 @@ def test_no_source_names_the_deleted_approve_path_or_its_bypass_key():
 
 
 def test_the_weekly_run_files_no_card_and_sends_no_notice():
-    source = (_ORCH / "services/harness_service.py").read_text(encoding="utf-8")
+    source = (_ORCH / HARNESS_SERVICE).read_text(encoding="utf-8")
     assert [name for name in RUN_SENDS if name in source] == []
+
+
+def test_harness_service_names_none_of_the_deleted_apply_helpers():
+    source = (_ORCH / HARNESS_SERVICE).read_text(encoding="utf-8")
+    assert [name for name in DELETED_APPLY if name in source] == []
