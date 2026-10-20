@@ -112,6 +112,7 @@ def test_the_record_holds_the_slots_the_voice_and_the_rendered_files_only():
     post = _post_of(footage={"hook": _done("fal_ai"), "photo": _done("upload", "image/png")}, voice=FISH)
     assert ai_media.render_record(post, SPOKEN, RENDERED) == {
         "footage": ["hook"], "stills": [], "own": ["photo"], "voice": "fish_audio", "files": [SHA_RENDER],
+        "labelled": False,  # PRD-264 EUAI-08a: this bundle asked for no AI-generated label
     }
     report = {"check": {"ok": True}}
     marked = ai_media.with_record(report, post, SILENT, RENDERED)
@@ -192,12 +193,17 @@ def test_a_finished_render_records_its_synthetic_voice_and_files(env):
 
     done = _post(env, post["id"]).review_log[-1]
     assert done["action"] == "render_done" and done["report"]["check"] == {"ok": True, "errors": 0}
-    assert done["report"]["ai_media"] == {"footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [MP4_SHA]}
+    # PRD-264 EUAI-08a: its synthetic voice puts the AI-generated label on by default, and the render burned it in.
+    assert done["report"]["ai_media"] == {
+        "footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [MP4_SHA], "labelled": True,
+    }
 
     env.session.expire_all()
     resp = env.client.get(f"/api/socials/posts/{post['id']}/ai-labels")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"ai_media": _expect(voice="kokoro"), "targets": []}
+    answer = resp.json()
+    assert answer["ai_media"] == _expect(voice="kokoro") and answer["targets"] == []
+    assert answer["deepfake_label"]["on"] is True and answer["deepfake_label"]["video_labelled"] is True
 
 
 def test_a_template_render_that_speaks_nothing_carries_no_ai_media(env):

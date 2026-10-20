@@ -11,7 +11,10 @@ with its receipt.
 
 ``GET /api/socials/posts/{post_id}/ai-labels`` (PRD-264 EUAI-05) answers each channel's
 AI label decision for the receipt (``modules/socials/ai_media.py``): the line a target's
-publish used, once one ran, else the line its publish will use, and the post's AI media.
+publish used, once one ran, else the line its publish will use, the post's AI media, and
+its AI-generated label setting (PRD-264 EUAI-08a, ``modules/socials/deepfake_label.py``).
+``PUT /api/socials/posts/{post_id}/ai-label`` (EUAI-08a) is where a person switches that
+label on or off for the post: approved content, so an approved post goes back for approval.
 
 The approval guard runs first (D6): a post whose approval no longer matches its
 content answers 409 and nothing reaches Composio. The claim is a compare-and-set
@@ -32,13 +35,14 @@ from uuid import UUID
 
 import anyio
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict, StrictBool
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.socials import ai_media, publisher, schedule_jobs, service
+from modules.socials import ai_media, deepfake_label, publisher, schedule_jobs, service
 
 router = APIRouter()
 
@@ -100,3 +104,33 @@ def social_post_ai_labels(
     ``{"ai_media": {...}, "targets": [{"id", "toolkit", "post_kind", "ai_label", "at_publish"}]}``.
     404 for a post outside the caller's workspace."""
     return ai_media.labels_for(_posts_api()._load(db, ctx, post_id))
+
+
+class AiLabelRequest(BaseModel):
+    """The post's AI-generated label: on or off (unknown fields are refused)."""
+
+    model_config = ConfigDict(extra="forbid")
+    on: StrictBool
+
+
+@router.put("/posts/{post_id}/ai-label", dependencies=[CAN_UPDATE])
+def set_social_post_ai_label(
+    post_id: UUID,
+    body: AiLabelRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """Switch the post's "Realistic AI people, places, products or voice: label as
+    AI-generated" on or off (PRD-264 EUAI-08a), as the signed-in person; the post as
+    saved. The setting is approved content: an approved or scheduled post goes back for
+    approval. 404 for a post outside the caller's workspace; 409 while it renders or
+    publishes, or when another write committed first."""
+    posts_api = _posts_api()
+    post = posts_api._load(db, ctx, post_id)
+    actor = posts_api._actor(ctx)
+    status, content_hash = post.status, post.content_hash
+    try:
+        deepfake_label.set_label(post, actor, body.on)
+        return posts_api._commit_unchanged(db, post, status=status, content_hash=content_hash)
+    except service.SocialsError as exc:
+        posts_api._raise_for(exc)

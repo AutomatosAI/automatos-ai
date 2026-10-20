@@ -141,7 +141,7 @@ async def run_publish(
     if work is None:
         return None
     with tempfile.TemporaryDirectory(prefix="socials-publish-") as workdir:
-        stager = Stager(Path(workdir))
+        stager = Stager(Path(workdir), job.workspace_id)
         chosen = executor or SessionPerCall(factory)
         rt = runtime(chosen, stager) if runtime else Runtime(executor=chosen, stager=stager)
         ended = await _run(job, work, rt, factory)

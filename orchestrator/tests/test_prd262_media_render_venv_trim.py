@@ -58,6 +58,19 @@ def test_the_py_stage_trims_and_strips_before_the_espeak_build_and_the_probes():
     assert "binutils" not in _stage("runtime")
 
 
+def test_c2pas_static_library_goes_before_the_strip_and_the_signer_loads_after_it():
+    # PRD-264 EUAI-06b (D14): c2pa-python signs every marked file, so the trim keeps
+    # its shared library (stripped with the rest) and the probe loads it and cryptography.
+    run = _run_with("py", "uv pip install")
+    install = run.index("uv pip install")
+    static = run.index('rm "$site"/c2pa/libs/libc2pa_c.rlib "$site"/c2pa/libs/libc2pa_c.d;')
+    strip = run.index("find \"$site\" -type f \\( -name '*.so' -o -name '*.so.*' \\) -exec strip --strip-unneeded {} +;")
+    probe = run.index("/opt/venv/bin/python -c 'import c2pa, cryptography.x509; print(\"c2pa\", c2pa.sdk_version())'")
+    assert install < static < strip < probe
+    assert "libc2pa_c.so" not in run
+    assert re.search(r"^c2pa-python==", REQUIREMENTS_LOCK, re.M) and re.search(r"^cryptography==", REQUIREMENTS_LOCK, re.M)
+
+
 def test_the_in_image_suite_checks_the_venv():
     suite = (MEDIA_RENDER / "tests" / "test_image_venv.py").read_text()
     for needle in (

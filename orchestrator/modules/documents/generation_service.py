@@ -566,8 +566,7 @@ class DocumentGenerationService:
         started = time.monotonic()
         try:
             finished = await self._render_client().render_to_file(
-                bundle,
-                output_path,
+                bundle, output_path, workspace_id=workspace_id,  # PRD-264 EUAI-06b: its provenance row
                 max_wait_seconds=config.SOCIALS_RENDER_MAX_WAIT_SECONDS,
                 poll_seconds=config.SOCIALS_RENDER_POLL_SECONDS,
             )

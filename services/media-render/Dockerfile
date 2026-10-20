@@ -235,6 +235,12 @@ RUN set -eux; \
 #   links to it (the build fails if they differ); every shared library is stripped
 #   (binutils here alone). The espeak build below then speaks through the stripped
 #   library, and the probes load every native part before the layer is kept.
+# - PRD-264 EUAI-06b: c2pa-python's wheel ships the Rust static library and its
+#   dependency file beside the shared one (libc2pa_c.rlib, 30 MB, and .d), which
+#   only a Rust build links; Python loads libc2pa_c.so through ctypes. Its shared
+#   library and cryptography's are stripped with the rest; c2pa and cryptography
+#   are imported and the SDK's version printed before the layer is kept, so a
+#   release that needs the deleted files, or a library the strip broke, fails here.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
@@ -251,6 +257,7 @@ RUN set -eux; \
     find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
     rm -r "$site"/onnxruntime/transformers "$site"/onnxruntime/quantization "$site"/onnxruntime/tools \
         "$site"/numpy/f2py /opt/venv/bin/f2py; \
+    rm "$site"/c2pa/libs/libc2pa_c.rlib "$site"/c2pa/libs/libc2pa_c.d; \
     for lib in "$site"/espeakng_loader/libespeak-ng.so.*; do \
         cmp "$lib" "$site"/espeakng_loader/libespeak-ng.so; \
         ln -sf libespeak-ng.so "$lib"; \
@@ -262,7 +269,8 @@ RUN set -eux; \
     /opt/venv/bin/python /opt/media-render/build/espeak_build.py /opt/espeak /opt/media-render/espeak-phonemes.json; \
     chmod -R a+rX /opt/espeak; \
     /opt/venv/bin/python -c 'import ctypes, aiohttp, numpy, soundfile, espeakng_loader; ctypes.CDLL(espeakng_loader.get_library_path()).espeak_Initialize'; \
-    /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'
+    /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'; \
+    /opt/venv/bin/python -c 'import c2pa, cryptography.x509; print("c2pa", c2pa.sdk_version())'
 ENV PATH=/opt/venv/bin:$PATH
 
 # The music library (PRD-251 S1.6), on py (numpy) plus ffmpeg (to decode). Every
@@ -371,8 +379,13 @@ COPY media_render/__init__.py media_render/versions.py /app/media_render/
 RUN python -m media_render.versions --browser /opt/chrome/chrome-headless-shell \
         --node-modules /opt/media-render/js/node_modules --write /opt/media-render/versions.json
 
+# PRD-264 EUAI-06b: /var/lib/media-render is where the local edition keeps its own
+# C2PA signing certificate (MEDIA_RENDER_C2PA_DATA_DIR, compose's media_render_data
+# volume, which takes this directory's owner and mode when it is first created). The
+# image holds the empty directory only: the certificate is made on first use, never at build.
 RUN useradd -m -u 1000 render \
-    && install -d -o render -g render /opt/media-render/node-cache
+    && install -d -o render -g render /opt/media-render/node-cache \
+    && install -d -m 0700 -o render -g render /var/lib/media-render
 USER render
 # NODE_COMPILE_CACHE is set only now, so nothing that ran as root wrote into it.
 ENV HOME=/home/render \

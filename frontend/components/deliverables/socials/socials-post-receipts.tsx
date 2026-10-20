@@ -18,6 +18,10 @@
  * AI-generated label, YouTube Studio's setting, or the caption for a channel that takes
  * no AI flag. The words are the backend's (GET /ai-labels, useSocialPostAiLabels): the
  * line a publish used once one ran, else the line it will use.
+ *
+ * PRD-264 EUAI-08a: the receipt shows the post's "Realistic AI people, places, products or
+ * voice: label as AI-generated" setting, on or off, in the backend's words; while it is on,
+ * a caption channel's line says the caption label was added.
  */
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
@@ -102,6 +106,9 @@ export function SocialsPostReceipts({ post, role }: { post: SocialPost; role: Wo
   return (
     <section aria-label="Publish status" className="space-y-2">
       <p className="text-sm font-medium text-foreground">Publish status</p>
+      {aiLabels.data?.deepfake_label && (
+        <p className="text-xs text-muted-foreground" data-testid="socials-ai-label-setting">{aiLabels.data.deepfake_label.line}</p>
+      )}
       <ul className="space-y-2">
         {targets.map((target) => (
           <Receipt key={target.id} post={post} target={target} aiLabel={labelOf.get(target.id)} />

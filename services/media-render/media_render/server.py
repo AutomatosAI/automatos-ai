@@ -1,6 +1,6 @@
 """The media-render HTTP service (aiohttp, as the workspace worker is).
 
-    GET  /health                     open: the image's versions and the queue
+    GET  /health                     open: the image's versions, the queue and the signing counts
     POST /render                     a composition bundle -> 202 job | 422 findings | 400 | 429 | 502 | 503
     GET  /render/{id}                the job: status, check report, timings, outputs
     GET  /render/{id}/output/{name}  the rendered file (Range requests work)
@@ -11,6 +11,12 @@ A WAV /tts hands out is marked AI-made after it is spoken and before the answer
 is built (PRD-264 EUAI-06a, tts.mark_audio): one that cannot be marked is a 500
 ``voice_unmarked`` and no WAV goes out. Without ``include_audio`` no WAV leaves,
 and none is marked.
+
+Every marked file this service hands out is also signed with a C2PA manifest (EUAI-06b,
+content_credentials.py): a render's outputs and each /tts line name their ``sha256``
+and ``manifest_id``, and a marked /jpeg answer carries them as the ``X-Content-SHA256``
+and ``X-C2PA-Manifest-Id`` headers. A file whose signing fails still goes out with its
+XMP mark; /health counts those.
 
 Every path but /health needs X-Internal-Token when one is configured, copied
 from the worker (services/workspace-worker/main.py). Boot refuses production
@@ -48,12 +54,13 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, Mapping, Optional, Sequence, Set
+from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set
 
 from aiohttp import web
 
 from .bundle import parse_bundle
 from .config import Settings
+from .content_credentials import ContentSigner, MarkRecord, sign_converted
 from .hyperframes import LOG_TAIL_CHARS
 from .jpeg import JPEG_CONTENT_TYPE, JpegError, to_jpeg
 from .jobs import DONE, FAILED, QUEUED, REJECTED, RENDERING, Job, JobStore, delete_files, job_json, remove_working_files, reset_work_dir
@@ -61,7 +68,7 @@ from .kokoro_tts import SpokenLine
 from .lanes import Lane
 from .music import Track, load_library
 from .pipeline import CheckOutcome, Pipeline, PipelineError, RenderPipeline
-from .provenance import ProvenanceError, carry_mark
+from .provenance import CarriedMark, ProvenanceError, carry_mark
 from .tts import Speaker, line_report, mark_audio, parse_tts_request
 from .validate import BundleError
 from .versions import read_versions
@@ -71,6 +78,11 @@ logger = logging.getLogger(__name__)
 
 TOKEN_HEADER = "X-Internal-Token"
 PUBLIC_PATHS = frozenset({"/health"})
+# A marked /jpeg answer's record (EUAI-06b): the body is the JPEG itself.
+SHA256_HEADER = "X-Content-SHA256"
+MANIFEST_HEADER = "X-C2PA-Manifest-Id"
+SOURCE_TYPE_HEADER = "X-Digital-Source-Type"
+JPEG_SUFFIX = ".jpg"
 
 
 @dataclass
@@ -84,6 +96,7 @@ class ServiceState:
     check_lane: Lane
     render_lane: Lane
     versions: Mapping[str, str]
+    signer: ContentSigner
     tasks: Set["asyncio.Task[None]"] = field(default_factory=set)
 
 
@@ -223,7 +236,14 @@ async def get_music(request: web.Request) -> web.Response:
 async def health(request: web.Request) -> web.Response:
     state = request.app[STATE]
     queue = {"running": state.render_lane.running, "queued": len(state.render_lane.waiting())}
-    return web.json_response({"status": "healthy", "service": "media-render", "versions": state.versions, "renders": queue})
+    body = {
+        "status": "healthy",
+        "service": "media-render",
+        "versions": state.versions,
+        "renders": queue,
+        "content_credentials": state.signer.counts(),
+    }
+    return web.json_response(body)
 
 
 async def post_render(request: web.Request) -> web.Response:
@@ -282,14 +302,14 @@ async def get_output(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path)
 
 
-async def _unmarked_refusal(settings: Settings, spoken: Sequence[SpokenLine]) -> Optional[web.Response]:
-    """EUAI-06a: mark the WAVs a /tts answer will carry; a 500 when one cannot be, so none leaves unmarked."""
+async def _mark_spoken(state: ServiceState, spoken: Sequence[SpokenLine]) -> Optional[List[MarkRecord]]:
+    """EUAI-06a/b: mark and sign the WAVs a /tts answer will carry; ``None`` when one cannot be
+    marked, so none leaves unmarked."""
     try:
-        await asyncio.to_thread(mark_audio, spoken, settings)
+        return await asyncio.to_thread(mark_audio, spoken, state.settings, state.signer)
     except ProvenanceError as exc:
         logger.error("tts: the spoken lines could not be marked as AI-made: %s", exc)
-        return _error(500, "voice_unmarked", "the spoken lines could not be marked as AI-made")
-    return None
+        return None
 
 
 async def post_tts(request: web.Request) -> web.Response:
@@ -305,11 +325,15 @@ async def post_tts(request: web.Request) -> web.Response:
             spoken = await state.speaker.speak(spec.lines, Path(scratch), voice=spec.voice, speed=spec.speed, lang=spec.lang)
         except ValueError as exc:  # Kokoro's refusal: an unknown voice, a line with nothing to say
             return _error(400, "voice_refused", f"Kokoro could not speak the lines: {exc}")
-        refusal = await _unmarked_refusal(state.settings, spoken) if spec.include_audio else None
-        if refusal is not None:
-            return refusal
+        records: Sequence[Optional[MarkRecord]] = [None] * len(spoken)
+        if spec.include_audio:
+            marked = await _mark_spoken(state, spoken)
+            if marked is None:
+                return _error(500, "voice_unmarked", "the spoken lines could not be marked as AI-made")
+            records = marked
         lines = [
-            line_report(line_id, said, include_audio=spec.include_audio) for (line_id, _), said in zip(spec.lines, spoken)
+            line_report(line_id, said, include_audio=spec.include_audio, record=record)
+            for (line_id, _), said, record in zip(spec.lines, spoken, records)
         ]
     body = {
         "voice": spec.voice,
@@ -321,11 +345,26 @@ async def post_tts(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
+async def _signed_jpeg(state: ServiceState, image: bytes, carried: CarriedMark) -> web.Response:
+    """A marked JPEG signed (EUAI-06b), keeping the image's manifest as an ingredient only when
+    this service signed it (FR-10, content_credentials.sign_converted); its record in the headers."""
+    jpeg, record = await asyncio.to_thread(
+        sign_converted, state.signer, carried.data, JPEG_SUFFIX, carried.kind,
+        job="POST /jpeg", instance_id=carried.instance_id, source=image,
+    )
+    headers = {SHA256_HEADER: record.sha256, SOURCE_TYPE_HEADER: record.digital_source_type}
+    if record.manifest_id is not None:
+        headers[MANIFEST_HEADER] = record.manifest_id
+    return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE, headers=headers)
+
+
 async def post_jpeg(request: web.Request) -> web.Response:
     """``POST /jpeg``: the image in the body, answered as a JPEG (US-303: Instagram
     takes JPEG only, and the stills are PNG). The conversion drops metadata, so the
-    JPEG is given the AI mark the image carried, after its encode (PRD-264 EUAI-06a)."""
-    settings = request.app[STATE].settings
+    JPEG is given the AI mark the image carried, after its encode (PRD-264 EUAI-06a),
+    and then signed (EUAI-06b)."""
+    state = request.app[STATE]
+    settings = state.settings
     image = await request.read()
     try:
         jpeg = await asyncio.to_thread(
@@ -334,13 +373,15 @@ async def post_jpeg(request: web.Request) -> web.Response:
     except JpegError as exc:
         return _error(400, "not_an_image", str(exc))
     try:
-        jpeg = await asyncio.to_thread(
+        carried = await asyncio.to_thread(
             carry_mark, image, jpeg, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
         )
     except ProvenanceError as exc:
         logger.error("jpeg: the image's AI mark could not be carried to the JPEG: %s", exc)
         return _error(500, "mark_failed", "the JPEG could not be given the image's AI mark")
-    return web.Response(body=jpeg, content_type=JPEG_CONTENT_TYPE)
+    if carried.kind is None:
+        return web.Response(body=carried.data, content_type=JPEG_CONTENT_TYPE)
+    return await _signed_jpeg(state, image, carried)
 
 
 async def _sweep(state: ServiceState) -> None:
@@ -378,8 +419,9 @@ def create_app(
     library: Optional[Mapping[str, Track]] = None,
     voices: Optional[AbstractSet[str]] = None,
     clock: Callable[[], float] = time.time,
+    signer: Optional[ContentSigner] = None,
 ) -> web.Application:
-    """The app. Tests pass a stub pipeline or speaker; the service uses the real ones.
+    """The app. Tests pass a stub pipeline, speaker or signer; the service uses the real ones.
 
     The music library and the voices are read from the image unless given.
     """
@@ -395,7 +437,8 @@ def create_app(
         return await handler(request)
 
     speaker = speaker or Speaker(settings)
-    real_pipeline = RenderPipeline(settings, speaker) if pipeline is None else None
+    signer = signer or ContentSigner(settings)
+    real_pipeline = RenderPipeline(settings, speaker, signer) if pipeline is None else None
     state = ServiceState(
         settings=settings,
         store=JobStore(Path(settings.work_dir), clock),
@@ -406,6 +449,7 @@ def create_app(
         check_lane=Lane(settings.max_concurrent_checks, settings.max_checks_per_workspace),
         render_lane=Lane(settings.max_concurrent_renders, settings.max_renders_per_workspace),
         versions=read_versions(settings.versions_path),
+        signer=signer,
     )
     app = web.Application(middlewares=[internal_token], client_max_size=settings.max_bundle_bytes)
     app[STATE] = state

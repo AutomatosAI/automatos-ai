@@ -12,11 +12,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import c2pa
 import pytest
 
 from media_render import boot
 from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, load_settings
-from media_render.versions import read_versions
+from media_render.versions import SERVICE_VERSION, read_versions
 from media_render.voices_build import load_catalogue, voice_names
 
 HYPERFRAMES_PIN = "0.8.62"
@@ -110,6 +111,21 @@ def test_exiftool_the_ai_marks_writer_is_installed_and_recorded():
     live = subprocess.run([settings.exiftool_bin, "-ver"], capture_output=True, text=True, timeout=60)
     assert live.returncode == 0 and live.stdout.strip()
     assert read_versions(settings.versions_path)["exiftool"] == live.stdout.strip()
+
+
+def test_c2pa_the_manifests_signer_is_installed_trimmed_and_recorded_with_no_certificate_in_the_image():
+    """PRD-264 EUAI-06b (D14, D15): c2pa-python loads its native SDK; the static library only a
+    Rust build links is gone; the build recorded it and the service's own version; and the
+    data directory for an install's own certificate is empty, the runtime user's, 0700."""
+    assert c2pa.sdk_version()
+    libs = Path(c2pa.__file__).parent / "libs"
+    assert (libs / "libc2pa_c.so").is_file()
+    assert not (libs / "libc2pa_c.rlib").exists() and not (libs / "libc2pa_c.d").exists()
+    versions = read_versions(load_settings().versions_path)
+    assert versions["c2pa-python"] == c2pa.__version__ and versions["media-render"] == SERVICE_VERSION
+    data = Path(load_settings().c2pa_data_dir).parent
+    assert data.is_dir() and data.stat().st_uid == 1000 and (data.stat().st_mode & 0o777) == 0o700
+    assert list(data.iterdir()) == [], "the image carries a signing certificate"
 
 
 def test_gsap_and_the_kokoro_files_are_in_the_image():
