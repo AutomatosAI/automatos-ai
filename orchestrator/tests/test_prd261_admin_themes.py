@@ -13,7 +13,8 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
   only, and only when an active key of the keys file verifies it (C-05b: the keys path points at
   an RFC 8032 public key, whose published seed signs the request's canonical text here); one no
   active key verifies is a 400 and nothing is stored; the ``signed`` event and the report carry
-  ``verified`` and the keyId from ``signature_verify``;
+  ``verified`` and the keyId from ``signature_verify``; a stored signature an active key still
+  verifies refuses another (409), one that no longer does takes an active key's (QB-28);
 * the reviewer's isolated-job note is stored and gates approval on the hosted edition;
 * reject needs a reason; deactivate writes a ``disable`` revocation of the digest;
 * every route refuses a non-admin, and a workspace's private upload is 404 here;
@@ -407,6 +408,59 @@ def test_the_report_reads_signature_verified_and_key_id_from_signature_verify(ap
     _keys(monkeypatch, tmp_path, case=OTHER_RFC_KEY)  # a keys file without the signer's key
     report = api.client.get(f"{BASE}/{package.id}/report").json()
     assert (report["signatureVerified"], report["keyId"]) == (False, None)
+
+
+def _key_file(monkeypatch, tmp_path, *held):
+    """Point the verifier at a keys file holding each ``(case, status)`` of ``held``."""
+    keys = [{"keyId": case["keyId"], "spki": case["spki"], "status": status, "added": "2026-10-20"}
+            for case, status in held]
+    path = tmp_path / "signing-keys-held.json"
+    path.write_text(json.dumps({"schema": 1, "keys": keys}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", path)
+
+
+def _report_check(api, package):
+    """The report's check on the stored signature: ``(signatureVerified, keyId)``."""
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    return report["signatureVerified"], report["keyId"]
+
+
+def test_a_signature_whose_key_was_retired_takes_an_active_keys_and_one_that_verifies_never(
+        api, monkeypatch, tmp_path):
+    first, second = _keys(monkeypatch, tmp_path), OTHER_RFC_KEY["keyId"]
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, canonical = request["requestId"], request["canonical"]
+    assert _signature(api, package, request_id, _signed(canonical)).status_code == 200
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # still verifies
+    _key_file(monkeypatch, tmp_path, (RFC_KEY, "retired"), (OTHER_RFC_KEY, "active"))
+    assert _report_check(api, package) == (False, first)
+    resp = _signature(api, package, request_id, _signed(canonical))  # the retired key's again: 400, kept as it was
+    assert resp.status_code == 400 and resp.json()["detail"] == signing.NOT_VERIFIED, resp.text
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical)
+
+    resp = _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY))
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["signature"]["verified"], resp.json()["signature"]["keyId"]) == (True, second)
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical, OTHER_RFC_KEY)
+    replaced = {row.detail["keyId"]: row.detail["replaces"] for row in _events(api.db, package, signing.EVENT_SIGNED)}
+    assert replaced == {first: None, second: {"state": "invalid", "keyId": first}}
+    assert _report_check(api, package) == (True, second)
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # as before
+
+
+def test_a_signature_stored_before_c05b_checked_takes_one_an_active_key_verifies(api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    package.signature = GOOD_SIGNATURE  # 64 bytes no key signed, as a row stored unverified before C-05b
+    api.db.commit()
+    resp = _signature(api, package, request["requestId"], _signed(request["canonical"]))
+    assert resp.status_code == 200, resp.text
+    [signed] = _events(api.db, package, signing.EVENT_SIGNED)
+    assert (signed.detail["keyId"], signed.detail["replaces"]) == (key_id, {"state": "invalid", "keyId": None})
 
 
 # --- gates, shape and the no-key rule ----------------------------------------------------

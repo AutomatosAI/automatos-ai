@@ -16,7 +16,8 @@ with the REAL workspace-permission gate (only the caller's workspace role is stu
 * (C-05b, QB-21) ``publisher.official`` is true only for a reserved publisher whose shown
   version's signature an active key verifies (the keys path points at an RFC 8032 public key,
   whose published seed signs here); a local operator's own approval of ``automatos/x`` is never
-  Official; the card, the detail and every versions-map entry carry ``signature {state, keyId}``.
+  Official; the card, the detail and every versions-map entry carry ``signature {state, keyId}``;
+  a version whose key was retired is Official again once an active key's signature is pasted (QB-28).
 """
 from __future__ import annotations
 
@@ -509,6 +510,38 @@ def test_a_keys_file_that_does_not_load_fails_closed_and_the_listings_still_answ
     assert detail.status_code == 200, detail.text
     assert detail.json()["publisher"]["official"] is False
     assert detail.json()["versions"]["1.0.0"]["signature"]["state"] == "invalid"
+
+
+def _key_file(monkeypatch, tmp_path, *held):
+    """Point the verifier at a keys file holding each ``(case, status)`` of ``held``."""
+    keys = [{"keyId": case["keyId"], "spki": case["spki"], "status": status, "added": "2026-10-20"}
+            for case, status in held]
+    path = tmp_path / "signing-keys-held.json"
+    path.write_text(json.dumps({"schema": 1, "keys": keys}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", path)
+
+
+def test_a_version_whose_key_was_retired_is_official_again_once_an_active_key_re_signs_it(
+        api, monkeypatch, tmp_path):
+    _keys(monkeypatch, tmp_path)
+    play = _signable(api.db)
+    request_id = uuid.UUID(signing.request_signature(api.db, play, OPERATOR_PK)["requestId"])
+    _sign(api.db, play)  # key A
+    assert _listings(api)[PLAY_LISTING]["publisher"]["official"] is True
+    with pytest.raises(signing.SigningError) as refused:  # A still verifies, so nothing replaces it
+        review.sign(api.db, play.id, request_id, play.signature, OPERATOR_PK)
+    assert refused.value.status_code == 409
+
+    _key_file(monkeypatch, tmp_path, (RFC_KEY, "retired"), (OTHER_RFC_KEY, "active"))  # A retired, B added
+    assert _listings(api)[PLAY_LISTING]["publisher"]["official"] is False
+    seed = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(OTHER_RFC_KEY["seed"]))
+    text = signing.canonical_text(signing.signing_payload(play)).encode("ascii")
+    stored = review.sign(api.db, play.id, request_id, base64.b64encode(seed.sign(text)).decode("ascii"), OPERATOR_PK)
+    api.db.commit()
+    assert stored["signature"]["keyId"] == OTHER_RFC_KEY["keyId"]
+    card = _listings(api)[PLAY_LISTING]
+    assert card["publisher"]["official"] is True
+    assert card["signature"] == {"state": "verified", "keyId": OTHER_RFC_KEY["keyId"]}
 
 
 def test_a_local_operator_who_approves_automatos_x_unsigned_is_not_official(api, monkeypatch):

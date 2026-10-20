@@ -15,7 +15,11 @@ third-party client, no new secret). So signing is two hand-offs a person makes:
    module checks its shape, that it answers the version's open request and that an active
    Automatos signing key verifies it over the canonical text (C-05b), and only then stores it
    in ``theme_packages.signature``; the ``signed`` event names that key. A signature no active
-   key verifies is a 400 and nothing is stored.
+   key verifies is a 400 and nothing is stored. A version whose stored signature an active key
+   still verifies refuses another (409); one whose stored signature no longer verifies (its key
+   retired or revoked since, QB-28, or a row stored before C-05b checked) takes a new one for its
+   open request, so it can be Official again without a database edit, and the ``signed`` event
+   records what it replaced.
 
 The check itself is ``signature_verify.verify`` (the keys file and the Ed25519 verifier, C-05a),
 which ``review.sign`` hands to ``store_signature``: this module reads no key and imports no
@@ -32,7 +36,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
@@ -59,7 +63,7 @@ _BASE64_TEXT = re.compile(r"[A-Za-z0-9+/_-]+={0,2}")
 FILE_WITHOUT_HASH = "This version's file list has no sha256 for {path}, so it can't be signed. Reject it."
 DIGEST_MISMATCH = "This version's file hashes don't add up to its digest, so it can't be signed. Reject it."
 NOT_APPROVED = "Only an approved version can be signed. Approve it first."
-ALREADY_SIGNED = "This version already has a signature."
+ALREADY_SIGNED = "This version already has a signature an active Automatos signing key verifies."
 NO_OPEN_REQUEST = "This version has no signature request. Approve it first."
 WRONG_REQUEST = "That isn't this version's open signature request. Use the request id the approval showed."
 BAD_SIGNATURE = (
@@ -157,17 +161,23 @@ def normalised_signature(text: str) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
-def _check_can_sign(db: Session, package: ThemePackage, request_id: UUID) -> ThemeReviewEvent:
+def _check_can_sign(
+    db: Session, package: ThemePackage, request_id: UUID, check: SignatureCheck,
+) -> Tuple[ThemeReviewEvent, Optional["Verdict"]]:
+    """The open request a paste answers, and ``check``'s verdict on the stored signature it would
+    replace (None when there is none). A stored signature an active key still verifies is never
+    replaced (409); one that no longer verifies may be."""
     if package.status != STATUS_APPROVED:
         raise SigningError(CONFLICT, NOT_APPROVED)
-    if package.signature:
+    replaced = check(signing_payload(package), package.signature) if package.signature else None
+    if replaced is not None and replaced.verified:
         raise SigningError(CONFLICT, ALREADY_SIGNED)
     request = open_request(db, package.id)
     if request is None:
         raise SigningError(CONFLICT, NO_OPEN_REQUEST)
     if request.id != request_id:
         raise SigningError(CONFLICT, WRONG_REQUEST)
-    return request
+    return request, replaced
 
 
 def store_signature(
@@ -175,8 +185,9 @@ def store_signature(
     check: SignatureCheck,
 ) -> Dict[str, Any]:
     """Store the pasted signature for the version's open request once ``check`` finds an active key
-    that verifies it, and record a ``signed`` event naming that key; otherwise 400, nothing stored."""
-    request = _check_can_sign(db, package, request_id)
+    that verifies it, and record a ``signed`` event naming that key and the verdict on the stored
+    signature it replaced (``replaces``, None for the first); otherwise 400, nothing stored."""
+    request, replaced = _check_can_sign(db, package, request_id, check)
     signature = normalised_signature(signature_text)
     verdict = check(signing_payload(package), signature)
     if not verdict.verified:
@@ -189,8 +200,12 @@ def store_signature(
         package_id=package.id, event=EVENT_SIGNED, from_status=package.status, to_status=package.status,
         actor_user_id=actor_pk, created_at=now_utc(),
         detail={"requestId": str(request_id), "payloadSha256": detail.get("payloadSha256"),
-                "algorithm": SIGNATURE_ALGORITHM, "verified": True, "keyId": verdict.key_id},
+                "algorithm": SIGNATURE_ALGORITHM, "verified": True, "keyId": verdict.key_id,
+                "replaces": None if replaced is None else replaced.view()},
     ))
+    if replaced is not None:
+        logger.info("theme package %s re-signed with %s; its stored signature no longer verified (%s, %s)",
+                    package.id, verdict.key_id, replaced.state, replaced.key_id)
     return {"requestId": str(request_id), "signature": signature, "algorithm": SIGNATURE_ALGORITHM,
             "verified": True, "keyId": verdict.key_id}
 
