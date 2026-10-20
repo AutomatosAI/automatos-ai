@@ -104,6 +104,7 @@ from .socials import (  # noqa: F401
 from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger; PRD-263 run table
 from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
+from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

@@ -452,10 +452,13 @@ def test_the_model_and_the_migration_add_three_nullable_columns():
 
 
 def test_both_head_pins_name_the_revision():
+    # Clerk production readiness (#1198) chained clerk_user_relinks_20261019 onto
+    # this revision after it merged, so it is no longer EXPECTED_HEAD itself — the
+    # two guard files now name it as the head's ancestor instead.
     guard = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text()
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text()
-    assert 'EXPECTED_HEAD = "prd264_blog_review"' in guard
-    assert 'assert \'EXPECTED_HEAD = "prd264_blog_review"\' in guard' in chain
+    assert "prd264_blog_review" in guard
+    assert 'down_revision = "prd264_blog_review"' in chain
     assert '(versions / "prd264_blog_review.py")' in chain
 
 

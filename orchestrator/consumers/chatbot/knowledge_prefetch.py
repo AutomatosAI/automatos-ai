@@ -22,6 +22,13 @@ five passages without searching (F088KB 3/8, was 8/8). A numbered or bulleted
 list of questions, or several sentences ending in "?", is now searched once per
 question (up to MAX_QUESTIONS, in order), each with its own passages; the header
 tells the model to search for itself any question its passages do not answer.
+
+P256-FIX-N17-11 (F443, night 16, ask 318): "the November price letter" is an instruction,
+so the turn searched nothing first; Auto's own platform_search_documents calls read the
+October terms, and the letter quoted October prices and said no November change was in the
+documents, while the November sheet was there. A turn that writes from the documents (a
+customer draft, or prices, terms or rates near a letter, note, list or sheet; a newsletter)
+is searched first too, whole, under a drafting header with the absence rule.
 """
 from __future__ import annotations
 
@@ -74,6 +81,20 @@ MULTI_HEADER = (
     "name the file. Where a question's passages are missing or do not answer it, call search_knowledge for that "
     f"question before you answer it; never answer it from another question's passages. {ABSENCE_RULE}"
 )
+# P256-FIX-N17-11 (F443): what a drafting turn's passages are for.
+DRAFTING_HEADER = (
+    "Passages from this workspace's documents, found for what the owner asked you to write, before you wrote "
+    "it (search_knowledge ran automatically). Take its prices, terms, dates and facts from them where they "
+    "apply, from the newest document, and name the file; call search_knowledge again for anything they do "
+    f"not cover. {ABSENCE_RULE}"
+)
+DRAFTING_WINDOW = 40   # characters between the price word and the kind of writing
+_PRICED = r"\b(?:prices?|terms|wholesale|rates)\b"
+_WRITING = r"\b(?:letters?|notes?|notices?|lists?|sheets?|e-?mails?|quotes?|lines?)\b"
+_DRAFTS_FROM_DOCUMENTS = re.compile(
+    rf"{_PRICED}.{{0,{DRAFTING_WINDOW}}}{_WRITING}|{_WRITING}.{{0,{DRAFTING_WINDOW}}}{_PRICED}|\bnewsletters?\b",
+    re.IGNORECASE | re.DOTALL,
+)
 QUESTION_HEADING = "Question {number}: {question}"
 NOTHING_FOR_QUESTION = "No passage cleared the relevance floor: search for it yourself before you answer it."
 # Linear on any input (no lazy run before a trailing \s*, no unanchored scan for "?").
@@ -119,6 +140,31 @@ def asks_the_documents(message: Optional[str]) -> bool:
     from consumers.chatbot.board_questions import about_the_board
 
     return is_question(message) and not about_the_board(message)
+
+
+def drafts_from_the_documents(message: Optional[str]) -> bool:
+    """A message, not a question, that asks Auto to write something the documents should feed:
+    a customer draft (``services.draft_guides.is_customer_draft``), or prices, terms or rates
+    within ``DRAFTING_WINDOW`` characters of a letter, note, notice, list, sheet, email, quote or
+    line, or a newsletter (P256-FIX-N17-11, F443). Never one about the board or a card: as for
+    a question (F263), the board's own tools give its live state."""
+    from consumers.chatbot.board_questions import about_the_board
+    from services.draft_guides import is_customer_draft
+
+    text = (message or "").strip()
+    if not text or is_question(text) or about_the_board(text):
+        return False
+    return is_customer_draft(text) or bool(_DRAFTS_FROM_DOCUMENTS.search(text))
+
+
+def searched_first(message: Optional[str]) -> Optional[Dict[str, Any]]:
+    """How a chat turn searches its documents before the first model call: a question as one
+    ({} — the prefetch's own reading), a drafting turn whole under the drafting header, or None."""
+    if is_question(message):
+        return {}
+    if drafts_from_the_documents(message):
+        return {"question_only": False, "drafting": True}
+    return None
 
 
 def split_questions(message: Optional[str]) -> List[str]:
@@ -175,6 +221,13 @@ def _has_database(db: Any, workspace_id: Any) -> bool:
     except Exception:  # noqa: BLE001 — a note must never be why a turn fails
         logger.warning("[F085] retrieval first: could not read the database sources", exc_info=True)
         return False
+
+
+def _header(db: Any, workspace_id: Any, questions: List[str], found: bool, drafting: bool) -> str:
+    """The passages' header (a drafting turn's, several questions', or one question's), with the
+    database note when something was found and the workspace has a database."""
+    base = DRAFTING_HEADER if drafting else (MULTI_HEADER if questions else PREFETCH_HEADER)
+    return f"{base} {PREFETCH_DATABASE_NOTE}" if found and _has_database(db, workspace_id) else base
 
 
 @dataclass(frozen=True)
@@ -241,6 +294,7 @@ async def prefetch(
     question_only: bool = True,
     header: Optional[str] = None,
     viewer: Optional[str] = None,
+    drafting: bool = False,
 ) -> Optional[Prefetch]:
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
@@ -248,7 +302,8 @@ async def prefetch(
     and returns the tool router's result (``raw_result`` / ``frontend_data``).
     A message asking several questions is searched once per question (F227).
     ``viewer`` (the turn's person, P256-FIX-N13-3): their standing rules go
-    above the passages, which they outrank."""
+    above the passages, which they outrank. ``drafting`` (P256-FIX-N17-11): the passages
+    are for something the owner asked Auto to write (``DRAFTING_HEADER``)."""
     if not enabled or (question_only and not asks_the_documents(message)):
         return None
     try:
@@ -280,9 +335,7 @@ async def prefetch(
         "in %d ms — booked to this turn",
         workspace_id, len(searches), len(kept), sum(f.found for f in searches), min_score, len(files), elapsed,
     )
-    if header is None:
-        base = MULTI_HEADER if questions else PREFETCH_HEADER
-        header = f"{base} {PREFETCH_DATABASE_NOTE}" if kept and _has_database(db, workspace_id) else base
+    header = header or _header(db, workspace_id, questions, bool(kept), drafting)
     content = await _rules_first(workspace_id, viewer, questions, searches, header) if kept else None
     return Prefetch(args=searches[0].args if not questions else {"query": (message or "").strip()[:MAX_QUERY_CHARS],
                                                                 "limit": limit},

@@ -284,6 +284,10 @@ actions:
     source: example
   - text: did we post about this before?
     source: example
+  - text: what did I post today and when?
+    source: example
+  - text: which posts went out this week, and where are the links?
+    source: example
   - text: what went out on LinkedIn last month?
     source: authored
   - text: list the posts that already went out

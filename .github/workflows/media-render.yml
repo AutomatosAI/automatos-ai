@@ -274,6 +274,22 @@ jobs:
             echo "::error::the fixture MP4 carries no random InstanceID (FR-16)"; exit 1
           fi
           echo "the fixture MP4 carries DigitalSourceType $expected and a random InstanceID: PASS"
+      # PRD-264 EUAI-06b: the same MP4 carries a signed C2PA manifest, read back with the
+      # image's own c2pa (the signer, D14): c2pa.created with the same digital source type,
+      # the claim generator "Automatos AI media-render/<version>", and the job names the
+      # file's SHA-256 and the manifest's id for the provenance row. The container signs
+      # with a certificate it makes on first use (no chain configured, D15). Every format's
+      # read-back runs in tests/test_content_credentials.py above.
+      - name: The MP4 carries a signed C2PA manifest (c2pa reads it back), and the job names its SHA-256 and manifest id
+        run: |
+          out="$RUNNER_TEMP/out"
+          docker run --rm -v "$out:/out:ro" --entrypoint python "$IMAGE" -c \
+            'import json, pathlib; from media_render.content_credentials import read_store; print(json.dumps(read_store(pathlib.Path("/out/fixture.mp4"), "video/mp4")))' \
+            > "$out/manifest.json"
+          python3 -m json.tool "$out/manifest.json" | head -n 80
+          python3 services/media-render/ci/assert_manifest.py "$out/manifest.json" --job "$out/job.json" \
+            --file "$out/fixture.mp4" --name render.mp4 \
+            --expected http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"

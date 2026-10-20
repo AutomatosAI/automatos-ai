@@ -13,8 +13,10 @@ it instead of loading the model a second time (PRD-262 US-053).
 
 A WAV POST /tts hands out is AI-made audio, so ``mark_audio`` gives it the IPTC
 "AI-generated" mark and a fresh instance id before the answer is built (PRD-264
-EUAI-06a). Synthesis itself writes no mark: a render's lines never leave the
-service, and the mix and the video they reach are marked after their last encode.
+EUAI-06a), then signs it with a C2PA manifest under the same instance id (EUAI-06b,
+content_credentials.py); each line's report names its ``sha256`` and ``manifest_id``.
+Synthesis itself writes no mark: a render's lines never leave the service, and the mix
+and the video they reach are marked after their last encode.
 """
 
 from __future__ import annotations
@@ -23,10 +25,11 @@ import asyncio
 import base64
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AbstractSet, Any, Callable, Dict, List, Mapping, Sequence, Tuple
+from typing import AbstractSet, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from . import provenance, validate
 from .config import Settings
+from .content_credentials import ContentSigner, MarkRecord
 from .kokoro_tts import SpokenLine, load_model, synthesize_line
 from .validate import BundleError
 
@@ -99,19 +102,31 @@ class Speaker:
         ]
 
 
-def mark_audio(spoken: Sequence[SpokenLine], settings: Settings) -> None:
+def _mark_line(line: SpokenLine, settings: Settings) -> str:
+    """The line's WAV marked AI-made: its instance id."""
+    return provenance.mark(
+        line.path, provenance.TRAINED, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
+    )
+
+
+def mark_audio(spoken: Sequence[SpokenLine], settings: Settings, signer: ContentSigner) -> List[MarkRecord]:
     """Mark each line's WAV AI-made (IPTC ``trainedAlgorithmicMedia``, its own random instance id)
-    before it leaves the service. Blocking: run it in a thread.
+    and sign it, before it leaves the service: each one's record. Blocking: run it in a thread.
 
-    :class:`provenance.ProvenanceError` when one cannot be marked: the caller hands none of them out.
+    Every line is marked before any is signed. :class:`provenance.ProvenanceError` when one
+    cannot be marked: the caller hands none of them out. A line whose signing fails keeps its
+    mark, and its record has no manifest id.
     """
-    for line in spoken:
-        provenance.mark(
-            line.path, provenance.TRAINED, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
-        )
+    instance_ids = [_mark_line(line, settings) for line in spoken]
+    return [
+        signer.sign(line.path, provenance.TRAINED, job="POST /tts", instance_id=instance_id)
+        for line, instance_id in zip(spoken, instance_ids)
+    ]
 
 
-def line_report(line_id: str, spoken: SpokenLine, *, include_audio: bool = False) -> Mapping[str, Any]:
+def line_report(
+    line_id: str, spoken: SpokenLine, *, include_audio: bool = False, record: Optional[MarkRecord] = None
+) -> Mapping[str, Any]:
     report: Dict[str, Any] = {
         "id": line_id,
         "seconds": spoken.seconds,
@@ -120,4 +135,6 @@ def line_report(line_id: str, spoken: SpokenLine, *, include_audio: bool = False
     }
     if include_audio:
         report["audio_base64"] = base64.b64encode(spoken.path.read_bytes()).decode("ascii")
+    if record is not None:
+        report.update(record.fields())
     return report

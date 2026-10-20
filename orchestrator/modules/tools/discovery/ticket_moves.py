@@ -105,7 +105,7 @@ def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dic
     for task in _tickets(db, workspace_id, refs):
         if task.status == new_status:
             continue
-        if _sends_it_back(task, new_status, params):
+        if sends_it_back(task, new_status, params):
             answers[task.id] = _send_back(db, workspace_id, task, params)
             continue
         refusal = _refusal(db, task, new_status)
@@ -114,9 +114,10 @@ def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dic
     return answers
 
 
-def _sends_it_back(task: Any, new_status: str, params: Dict[str, Any]) -> bool:
+def sends_it_back(task: Any, new_status: str, params: Dict[str, Any]) -> bool:
     """An answered ticket moved to Assigned, or (F318) to In progress with a note: the
-    board's Reject, the note its correction."""
+    board's Reject, the note its correction. P256-FIX-N17-2: the chat's card reads it too
+    (``send_back_checks``), so it asks only about a send-back the Reject would take."""
     if task.status not in ANSWERED:
         return False
     return new_status == SEND_BACK or (new_status == RERUN and bool(str(params.get("note") or "").strip()))
@@ -217,4 +218,4 @@ def _bulk_answer(status: Any, requested: int, decided: Dict[int, Dict[str, Any]]
             "requested": requested, "updated_count": len(updated), "updated": updated, "failed": failed}
 
 
-__all__ = ["keeps_the_board_rules"]
+__all__ = ["keeps_the_board_rules", "sends_it_back"]

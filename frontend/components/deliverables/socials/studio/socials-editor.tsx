@@ -5,8 +5,9 @@
  * the first Save draft) or ?post=<id>. The header holds Save draft, Render preview and
  * Submit for approval; the cards, in order: Brief (Redraft with Auto), Format, Channels and
  * sizes, Look (Template · Upload · Library · AI-made), Claims and sources, When; beside them the
- * copy and the preview. Save draft writes the post's fields (POST or PATCH), its channels
- * (PUT /targets) and its slot (PUT /slot, only when it moved); the server checks it all.
+ * copy and the preview. PRD-264 EUAI-08a: a post with a visual has the AI-generated label card
+ * (EditorAiLabelCard), on by default while it carries AI media. Save draft writes the post's
+ * fields (POST or PATCH), its channels (PUT /targets) and its slot (PUT /slot, only when it moved); the server checks it all.
  * F254: a new post is one post: once a Save, Render or Submit has created it, every later
  * try edits it, and a try that failed after creating it opens it.
  */
@@ -21,6 +22,7 @@ import {
 } from '@/hooks/use-socials-editor'
 import { autoNeeds, channelsOverLimit } from '../socials-composer-model'
 import { schemaAtLength } from '../socials-variables-form'
+import { EditorAiLabelCard } from './editor-ai-label-card'
 import { EditorBriefCard } from './editor-brief-card'
 import { EditorChannelsCard } from './editor-channels-card'
 import { EditorClaimsCard } from './editor-claims-card'
@@ -151,6 +153,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
               }}
             />
           )}
+          {draft.format !== 'text' && <EditorAiLabelCard post={post} role={role} />}
           <EditorClaimsCard
             schema={chosen ? schemaAtLength(chosen.variables_schema, chosen.fields_cut_out, draft.lengthSeconds) : null}
             variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}

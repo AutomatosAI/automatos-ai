@@ -221,9 +221,9 @@ export interface HostChatController {
   readonly looseApprovals: readonly HostChatApproval[]
   /** A card still waits for the owner. */
   readonly approvalWaiting: boolean
-  /** Sends the words; false (nothing sent) while a turn runs. */
+  /** Sends the words; false (nothing sent) while a turn runs, or while the host's AI label isn't on screen (PRD-264). */
   readonly send: (text: string) => boolean
-  /** Asks the owner's last message again; false while a turn runs. */
+  /** Asks the owner's last message again; false while a turn runs, or while the host's AI label isn't on screen. */
   readonly retry: () => boolean
   /** Keeps the reply being written, then stops the turn (here and on the server). */
   readonly stop: () => void

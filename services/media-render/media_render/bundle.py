@@ -17,7 +17,9 @@
       "preview": {"at": [1.2, 10.0, 36.5]},     optional: snapshot these moments, not the full render
       "still": {"at": [0.5, 1.5]},              optional: an image, one full-size PNG per moment
       "ai_inputs": {"footage": true, "stills": false, "voice": true,
-                    "uploads": false, "template": true}   optional: which inputs are AI-made
+                    "uploads": false, "template": true},  optional: which inputs are AI-made
+      "ai_label": {"text": "AI-generated", "seconds": 3, "interval": 30}
+                                                optional: the video's visible AI label
     }
 
 ``files`` are inlined as data: URIs (the brand kit's logo and font files, small
@@ -42,6 +44,10 @@ A still has no sound, so it takes no audio plan, and it is its own preview.
 footage, AI stills, a synthetic voice) and which are not (the person's own uploads, the
 template). Every output with an AI element carries the IPTC "AI-generated" mark that
 follows from it (provenance.py). A bundle without it (an older caller) is still taken.
+
+``ai_label`` (PRD-264 EUAI-08a) asks for a visible "AI-generated" label on the video: its
+text, how long it shows from the start, and how often it shows again (ai_label.py). The
+video render burns it in; a still and a preview are snapshots of the composition as it is.
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ from pathlib import Path
 from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from . import audio, validate
+from .ai_label import AiLabel, parse_ai_label
 from .composition import VARIABLE_NAME, Composition, FontFace, brand_stylesheet, build_document, inspect_document
 from .config import Settings
 from .media_urls import redact, url_allowed
@@ -167,6 +174,7 @@ class Bundle:
     preview: Optional[Preview] = None
     still: Optional[Still] = None
     ai_inputs: AiInputs = UNDECLARED
+    ai_label: Optional[AiLabel] = None
 
 
 def _file_path(value: Any, where: str, extensions: FrozenSet[str]) -> str:
@@ -370,7 +378,7 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track],
         body,
         "the bundle",
         required=("workspace_id", "composition"),
-        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still", "ai_inputs"),
+        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still", "ai_inputs", "ai_label"),
     )
     if body.get("still") is not None:
         if body.get("preview") is not None:
@@ -400,4 +408,5 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track],
         preview=_preview(body.get("preview"), composition.duration, settings),
         still=_still(body.get("still"), composition.duration, settings),
         ai_inputs=parse_ai_inputs(body.get("ai_inputs")),
+        ai_label=parse_ai_label(body.get("ai_label")),
     )

@@ -60,7 +60,7 @@ const HIGH_DENSITY_SCALE = 2
 // The pages that show the mark through next/image (git grep "src=\"/brand/automatos-mark.png\"").
 const MARK_PAGES = [
   'components/auth/sign-in-form.tsx',
-  'components/auth/sign-up-form.tsx',
+  'components/auth/sign-up-parts.tsx',
   'app/reset-password/page.tsx',
 ]
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])

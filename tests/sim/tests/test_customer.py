@@ -126,3 +126,39 @@ def test_preflight_refuses_a_night_it_cannot_pay_for(monkeypatch, tmp_path, caps
 
     assert customer.cmd_preflight(argparse.Namespace(deliverables_dir=str(tmp_path))) == code
     assert ("REFUSED" in capsys.readouterr().out) is (code == 2)
+
+
+def test_a_grant_records_what_the_click_ran():
+    """P256-FIX-N17-2 (F444): night 17's #2827 was granted (200) and its call refused; answers.jsonl said only granted."""
+    refused = {"grant": {"id": 2827, "status": "granted", "details": {"executed_result": {
+        "success": False, "error": "Cannot reject a task with no assigned agent"}}}}
+    outcome = ops.grant_outcome(refused)
+    assert outcome == {"executed_success": False, "executed_error": "Cannot reject a task with no assigned agent"}
+    assert ops.grant_outcome_line(2827, outcome) == ("granted #2827 · executed_result.success=False · error: "
+                                                     "Cannot reject a task with no assigned agent")
+    ran = ops.grant_outcome({"grant": {"details": {"executed_result": {"success": True}}}})
+    assert ran == {"executed_success": True, "executed_error": None}
+    assert ops.grant_outcome_line(12, ran) == "granted #12 · executed_result.success=True"
+    assert ops.grant_outcome({"grant": {"details": {}}}) == {"executed_success": None, "executed_error": None}
+    assert ops.grant_outcome(None) == {"executed_success": None, "executed_error": None}
+
+
+def test_cmd_grant_writes_the_outcome_into_answers_jsonl(tmp_path, monkeypatch, capsys):
+    import argparse
+    import json
+
+    from tests.sim import customer
+
+    class GrantApi:
+        def post(self, path, body):
+            assert path == "/api/v1/approval-grants/2827/grant"
+            return {"grant": {"details": {"executed_result": {"success": False, "error": "no agent"}}}}
+
+    monkeypatch.setenv(customer.NIGHT_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(customer, "_api", lambda args: (GrantApi(), None))
+
+    assert customer.cmd_grant(argparse.Namespace(grant_id=2827)) == 0
+
+    row = json.loads((tmp_path / "answers.jsonl").read_text(encoding="utf-8").strip())
+    assert (row["grant_id"], row["granted"], row["executed_success"], row["executed_error"]) == (2827, True, False, "no agent")
+    assert "executed_result.success=False · error: no agent" in capsys.readouterr().out

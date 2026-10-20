@@ -284,11 +284,16 @@ def is_authorising(grant: ApprovalGrant, *, now: Optional[datetime] = None) -> b
     """
     if grant.status != GrantStatus.GRANTED.value:
         return False
-    if grant.expires_at is not None:
-        exp = grant.expires_at
-        # tolerate naive datetimes from a fake/session by assuming UTC
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        if _now(now) >= exp:
-            return False
-    return True
+    return not is_lapsed(grant, now=now)
+
+
+def is_lapsed(grant: Any, *, now: Optional[datetime] = None) -> bool:
+    """True iff the grant is past its ``expires_at``, whatever its status (P256-FIX-N17-3: a
+    pending card nobody clicked in time is not the call's card any more). A row with no
+    ``expires_at`` (or a stand-in that has none) never lapses; a naive time is read as UTC."""
+    exp = getattr(grant, "expires_at", None)
+    if exp is None:
+        return False
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return _now(now) >= exp

@@ -9,6 +9,13 @@
   top 5 competitors…" (#0437): the example goal in Auto's own skill, not the owner's.
   A mission with the goal of one made in the last hour that still waits for the owner
   is not made twice, and a goal none of whose words the owner said is not made.
+
+P256-FIX-N17-2 (F444, night 17): from the owner's chat a mission waits for their click, and
+these rules ran only on the click. #2816, Auto's 115-word goal (6 of its words the owner's),
+raised "start a mission"; the owner clicked it, the click refused NOT_THEIR_GOAL, the grant
+was given back, and they learned it only by asking. Now the rules run before the card
+(``refused_before_the_mission_card``, read by ``owner_only``), and the click itself checks
+only for a copy still waiting (``clicked``): words said after the card do not undo it.
 """
 from __future__ import annotations
 
@@ -24,6 +31,7 @@ ASKS_FOR_A_MISSION = re.compile(r"\b(?:start|create|make|set up|launch|begin|new
 # Night 8: "Don't make a mission this time. Run my saved playbook…" is no ask for one.
 NOT_A_MISSION = re.compile(r"\b(?:don'?t|do not|never|no need to|not)\s+(?:\w+\s+){0,2}?(?:start|create|make|set up|"
                            r"launch|begin|new)\s+(?:a\s+|another\s+|the\s+)?mission\b", re.I)
+MISSION_ACTION = "platform_create_mission"
 RUNS_A_PLAYBOOK = re.compile(r"\b(?:run|use|start|kick off|do)\b[^.!?\n]{0,40}\bplaybook\b", re.I)
 MIN_PLAYBOOK_NAME = 4
 WAITING = ("pending", "planning", "awaiting_approval")
@@ -44,12 +52,29 @@ NOT_THEIR_GOAL = ("The goal isn't what the owner asked for (none of '{goal}' is 
                   "made. Use their words for the goal.")
 
 
-def refusal_for_mission(db: Session, workspace_id: Any, params: Dict[str, Any], said: Sequence[str]) -> Optional[str]:
+def refusal_for_mission(db: Session, workspace_id: Any, params: Dict[str, Any], said: Sequence[str], *,
+                        clicked: bool = False) -> Optional[str]:
     """Why this mission is not made, or None. Outside a chat the owner drives (no
-    words of theirs), only the copy check applies."""
+    words of theirs), only the copy check applies; on the owner's click (``clicked``)
+    too, as the word rules ran before the card (N17-2)."""
     goal = str((params or {}).get("goal") or "").strip()
+    if clicked:
+        return _already_waiting(db, workspace_id, goal)
     return (_a_playbook(db, workspace_id, goal, said) or _already_waiting(db, workspace_id, goal)
             or _not_their_goal(goal, said))
+
+
+def refused_before_the_mission_card(db: Session, workspace_id: Any, action: str,
+                                    params: Any) -> Optional[Dict[str, Any]]:
+    """The refusal of a mission the click would refuse, read before the owner is asked
+    (N17-2), else None. ``params``: the call as its handler gets it, whose server-set
+    ``_origin_chat_id`` names the chat the owner's words are read from."""
+    if action != MISSION_ACTION or not isinstance(params, dict):
+        return None
+    from modules.tools.discovery.mission_owner_words import owners_words
+
+    refusal = refusal_for_mission(db, workspace_id, params, owners_words(db, workspace_id, params))
+    return {"success": False, "error": refusal} if refusal else None
 
 
 def _a_playbook(db: Session, workspace_id: Any, goal: str, said: Sequence[str]) -> Optional[str]:
@@ -122,4 +147,4 @@ def _short(text: Any, limit: int = 80) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-__all__: List[str] = ["refusal_for_mission", "share_of_words"]
+__all__: List[str] = ["refusal_for_mission", "refused_before_the_mission_card", "share_of_words"]

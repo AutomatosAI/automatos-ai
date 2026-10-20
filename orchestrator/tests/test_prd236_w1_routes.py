@@ -298,7 +298,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # guard follows it.
     blog_review = (versions / "prd264_blog_review.py").read_text()
     assert 'down_revision = "prd264_content_provenance"' in blog_review
-    assert 'EXPECTED_HEAD = "prd264_blog_review"' in guard
+    # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
+    # prd264_blog_review — a new table only (the audit record of the one-time
+    # relink); the guard follows it.
+    relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
+    assert 'down_revision = "prd264_blog_review"' in relinks
+    assert 'EXPECTED_HEAD = "clerk_user_relinks_20261019"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

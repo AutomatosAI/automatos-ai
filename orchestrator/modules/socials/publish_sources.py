@@ -4,7 +4,8 @@ A target's ``action_plan`` holds its kind's steps as the channel registry resolv
 them (``modules/socials/targets.py``), each param mapped to a source
 (``channel_adapters.py``). This module turns those sources into values for one call:
 
-* ``$copy``: the channel's own copy, else the post's base copy; ``$title``: the post's
+* ``$copy``: the channel's own copy, else the post's base copy, starting with "AI-generated."
+  while the post is labelled (PRD-264 EUAI-08a, ``deepfake_label.py``); ``$title``: the post's
   title; ``$option.<name>``: the target's option; ``$idempotency_key``: the target's
   key; ``$steps.<id>``: the ``id`` an earlier step returned (``step_results.py``).
 * ``$media`` / ``$media[]``: the post's rendered file(s) of the target's kind (a
@@ -32,7 +33,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from modules.socials import channel_sizes
 from modules.socials.capabilities import SEEDED_CHANNELS, ChannelStep
 from modules.socials.media_urls import MediaFile
-from modules.socials import ai_media
+from modules.socials import ai_media, deepfake_label
 from modules.socials.ai_media import AiMedia
 from modules.socials.step_results import ID
 from modules.socials.step_sources import reads_steps
@@ -105,30 +106,26 @@ def media_for(files: Sequence[MediaFile], toolkit: str, post_kind: str) -> Tuple
     return tuple(f for f in mine if aspect is None or f.aspect == aspect)
 
 
-def copy_for(copy: Any, toolkit: str) -> str:
-    """The channel's own copy, else the base copy."""
-    copy = copy if isinstance(copy, Mapping) else {}
-    channels = copy.get("channels") if isinstance(copy.get("channels"), Mapping) else {}
-    return str(channels.get(toolkit) or copy.get("base") or "")
-
-
 def context_for(post: Any, target: Any, files: Sequence[MediaFile]) -> TargetContext:
     """A target's context: ``files`` are the post's media (``media_urls.resolve_post_media``); its
-    AI media and AI label are decided now, at publish, from the post's render record (PRD-264)."""
+    AI media and AI label are decided now, at publish, from the post's render record (PRD-264), and
+    so is its caption: it starts with "AI-generated." while the post is labelled (EUAI-08a)."""
     ai = ai_media.for_post(post)
+    labelled = deepfake_label.is_on(deepfake_label.setting_of(post), ai.carries)
+    caption = deepfake_label.caption_for(post.copy, target.toolkit, labelled)
     return TargetContext(
         workspace_id=post.workspace_id,
         post_id=post.id,
         toolkit=target.toolkit,
         post_kind=target.post_kind,
-        copy=copy_for(post.copy, target.toolkit),
+        copy=caption.text,
         title=post.title or "",
         options=MappingProxyType(dict(target.options)),
         idempotency_key=target.idempotency_key,
         media=media_for(files, target.toolkit, target.post_kind),
         thumbnail=next((f for f in files if _family(f) == IMAGE), None),
         ai_media=ai,
-        ai_label=ai_media.label_line(target.toolkit, ai, target.options),
+        ai_label=ai_media.label_line(target.toolkit, ai, target.options, caption),
         setup_note=_setup_note(target.toolkit),
     )
 

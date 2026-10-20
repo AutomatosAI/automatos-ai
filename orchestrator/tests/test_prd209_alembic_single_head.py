@@ -118,7 +118,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto prd264_content_provenance
 # — blog_posts.reviewed_by_user_id, reviewed_at and reviewed_content_sha256: who took editorial
 # responsibility, when, and for which text.
-EXPECTED_HEAD = "prd264_blog_review"
+# 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
+# prd264_blog_review — a new table only, the audit record of the one-time relink
+# of returning users to production IDs.
+EXPECTED_HEAD = "clerk_user_relinks_20261019"
 
 
 def _literal(node: ast.AST):

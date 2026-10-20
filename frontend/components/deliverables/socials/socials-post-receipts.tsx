@@ -9,13 +9,21 @@
  * step the publish skipped (a thumbnail with no public storage) is noted. A failed
  * or partially published post offers Retry, which publishes only the failed
  * targets again (POST /retry). Before it publishes, a TikTok target shows the
- * privacy level publish will use (US-304).
+ * privacy level and AI label publish will use (US-304).
+ *
+ * P256-FIX-SOC-4 (F432-a): a published target also says when it went out and the
+ * id the platform gave it (`published_at`, `remote_id`), which the publish records.
  *
  * PRD-264 EUAI-05: every channel states its AI label decision (Art. 50): TikTok's
  * AI-generated label, YouTube Studio's setting, or the caption for a channel that takes
  * no AI flag. The words are the backend's (GET /ai-labels, useSocialPostAiLabels): the
  * line a publish used once one ran, else the line it will use.
+ *
+ * PRD-264 EUAI-08a: the receipt shows the post's "Realistic AI people, places, products or
+ * voice: label as AI-generated" setting, on or off, in the backend's words; while it is on,
+ * a caption channel's line says the caption label was added.
  */
+import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { badgeVariants } from '@/components/ui/badge'
 import type { Workspace } from '@/components/workspace-provider'
@@ -33,6 +41,7 @@ const TARGET_STATUS_LABELS: Record<SocialPostTarget['status'], string> = {
 const RETRYABLE: ReadonlySet<SocialPost['status']> = new Set(['failed', 'partially_published'])
 const BEFORE_PUBLISH: ReadonlySet<SocialPost['status']> = new Set(['approved', 'scheduled', 'missed'])
 const MOST_PRIVATE = 'the most private level the account allows'
+const PUBLISHED_AT_FORMAT = 'd MMM yyyy, HH:mm'
 
 /**
  * The privacy TikTok's publish will use (US-304): the chosen level when the account
@@ -59,6 +68,14 @@ function Receipt({ post, target, aiLabel }: { post: SocialPost; target: SocialPo
           <a href={target.permalink} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">
             View the post
           </a>
+        )}
+        {target.published_at && (
+          <span className="text-xs text-muted-foreground">Published {format(new Date(target.published_at), PUBLISHED_AT_FORMAT)}</span>
+        )}
+        {target.remote_id && (
+          <span className="text-xs text-muted-foreground">
+            {channelLabel(target.toolkit)} id {target.remote_id}
+          </span>
         )}
       </div>
       {target.error && <p className="text-xs text-destructive">{target.error}</p>}
@@ -89,6 +106,9 @@ export function SocialsPostReceipts({ post, role }: { post: SocialPost; role: Wo
   return (
     <section aria-label="Publish status" className="space-y-2">
       <p className="text-sm font-medium text-foreground">Publish status</p>
+      {aiLabels.data?.deepfake_label && (
+        <p className="text-xs text-muted-foreground" data-testid="socials-ai-label-setting">{aiLabels.data.deepfake_label.line}</p>
+      )}
       <ul className="space-y-2">
         {targets.map((target) => (
           <Receipt key={target.id} post={post} target={target} aiLabel={labelOf.get(target.id)} />

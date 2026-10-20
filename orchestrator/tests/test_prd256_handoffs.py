@@ -744,7 +744,7 @@ def test_the_note_hands_it_to_the_right_agent_with_the_owners_facts():
     assert note.startswith("The owner asked for a price list for their customers and named none of their templates.")
     assert "don't write it yourself in this reply" in note
     assert "platform_recommend_agent" in note and "platform_create_task with assigned_agent_name" in note
-    assert "exactly as the owner gave them and invents none" in note
+    assert "as the owner gave them in this request, or names the document that holds them, and invents none" in note  # F449
     assert "who has it and its card number" in note and "on one of their templates" in note
     assert DISPATCH_CONTRACT_FRAGMENT in note
 

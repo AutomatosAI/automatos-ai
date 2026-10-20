@@ -82,3 +82,15 @@ def test_the_action_documents_paging():
 
     assert {"offset", "limit"} <= set(action.parameters["properties"])
     assert "next_offset" in action.description and "'total'" in action.description
+    assert "never with offsets worked out ahead" in action.description          # F442 (night 17 row 199)
+
+
+def test_where_the_page_sits_comes_before_its_rows(db_session, seed_workspace):
+    """F442: a page cut short still says its total and next_offset (they came after the rows)."""
+    ws = UUID(seed_workspace())
+    _cards(db_session, ws, "review", 3)
+
+    keys = list(_list(db_session, ws))
+
+    assert keys.index("total") < keys.index("tasks") and keys.index("next_offset") < keys.index("tasks")
+    assert keys == ["success", "total", "offset", "limit", "returned", "next_offset", "tasks"]

@@ -84,6 +84,14 @@ def is_cli_agent(configuration: Optional[Mapping[str, Any]]) -> bool:
     return runtime_kind_of(configuration) == RUNTIME_CLI
 
 
+def session_cli(configuration: Optional[Mapping[str, Any]]) -> str:
+    """The CLI a session agent runs on (``provider``); ``claude`` when absent or not a name,
+    what every session agent ran on before the field. One rule for the CLI host's ticket lane
+    and for what Auto's agent tools say an agent runs on (PRD-256 N17-8)."""
+    provider = configuration.get(CONFIG_PROVIDER_KEY) if isinstance(configuration, Mapping) else None
+    return provider if isinstance(provider, str) and provider else PROVIDER_CLAUDE
+
+
 def validate_working_directory(value: Any) -> List[str]:
     """PRD-239 S6: the errors for a cli agent's ``working_directory``.
 

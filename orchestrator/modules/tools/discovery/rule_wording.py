@@ -15,12 +15,17 @@ check cannot weigh never passes for the owner's. A word that sets a condition ('
 'ask', 'before') in the owner's sentence is kept in the rule, or it is not theirs. The negations
 and conditions known are English: an owner's sentence with any other word ('café', 'لا', 'नहीं')
 is the rule only word for word, none left out.
+
+P256-FIX-N17-4 (nights 16-17, F447): the owner's lead-in ('New standing rule, remember this one:',
+'The only one that counts:') sits inside their sentence, so Auto's shorter copy of the rule keeps
+too little of it and is no rule. ``their_sentence`` names the owner's own sentence that holds what
+Auto stored, which Auto may store as it stands: the check itself (``in_their_words``) is unchanged.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 NEGATION = "not"
 NEGATIONS = frozenset({"not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "without"})
@@ -33,6 +38,10 @@ MAX_RULE_WORDS = 80
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
 _WORD = re.compile(r"[\w£$€%][\w'£$€%.,:/-]*")
 _TRAILING = "'.,:/-"
+# What surrounds a sentence the owner quoted, taken off the copy ``their_sentence`` gives back.
+_QUOTES = "\"'\u201c\u201d\u2018\u2019\u00ab\u00bb"
+_END_MARKS = ".!?"
+_FULL_STOP = "."
 
 
 def in_their_words(text: str, owner_turns: Sequence[str], coverage: float) -> bool:
@@ -44,6 +53,54 @@ def in_their_words(text: str, owner_turns: Sequence[str], coverage: float) -> bo
         return False
     stored = [seq for seq in stored if seq]
     return bool(stored) and all(any(_held(seq, theirs, coverage) for theirs in said) for seq in stored)
+
+
+def their_sentence(text: str, owner_turns: Sequence[str], coverage: float) -> Optional[str]:
+    """``text`` with each sentence the owner's messages do not hold (``_held``) put back as the
+    owner's own sentence that holds all its words in their order: the shortest in their newest
+    message that has one, never a question, in their casing (NFKC), its surrounding quotes off,
+    a full stop added when it has no end mark. A scope or a 'not' Auto left out comes back with
+    their sentence. None when a sentence cannot be weighed, is past the cap, or holds a word no
+    sentence of theirs holds in order (an added 'not', 'Noted.')."""
+    said = [_their_sentences(turn) for turn in owner_turns]
+    pieces: List[str] = []
+    for sentence in _SENTENCE.findall(unicodedata.normalize("NFKC", text or "")):
+        seq = _weighed(_normal(sentence))
+        if seq is None or len(seq) > MAX_RULE_WORDS:
+            return None
+        piece = _as_held(sentence, seq, said, coverage) if seq else ""
+        if piece is None:
+            return None
+        pieces.append(piece)
+    return " ".join(dict.fromkeys(piece for piece in pieces if piece)) or None
+
+
+def _their_sentences(turn: str) -> List[Tuple[str, List[str]]]:
+    """Each sentence of a message that is no question, nor past the cap: its text (NFKC) and its
+    words (``_statements``' sentences, with the text they were read from)."""
+    sentences = (s for s in _SENTENCE.findall(unicodedata.normalize("NFKC", turn or "")) if "?" not in s)
+    pairs = [(sentence, _words(_normal(sentence))) for sentence in sentences]
+    return [(sentence, seq) for sentence, seq in pairs if seq and len(seq) <= MAX_RULE_WORDS]
+
+
+def _as_held(sentence: str, seq: List[str], said: List[List[Tuple[str, List[str]]]],
+             coverage: float) -> Optional[str]:
+    """The stored sentence as stored when a sentence of theirs holds it; else their sentence that
+    holds all its words in order, from their newest message with one; None when none does."""
+    if any(_held(seq, theirs, coverage) for message in said for _text, theirs in message):
+        return sentence.strip()
+    for message in said:
+        holding = [(len(theirs), text) for text, theirs in message
+                   if set(seq) <= set(theirs) and _in_order(seq, theirs) == len(seq)]
+        if holding:
+            return _as_said(min(holding, key=lambda pair: pair[0])[1])
+    return None
+
+
+def _as_said(sentence: str) -> str:
+    """The owner's sentence as a rule is stored: trimmed, its surrounding quotes off, ended."""
+    trimmed = sentence.strip().strip(_QUOTES).strip()
+    return trimmed if trimmed.endswith(tuple(_END_MARKS)) else f"{trimmed}{_FULL_STOP}"
 
 
 def words(text: Optional[str]) -> List[str]:
@@ -106,4 +163,4 @@ def _in_order(a: List[str], b: List[str]) -> int:
     return row[-1]
 
 
-__all__ = ["MAX_RULE_WORDS", "NEGATION", "in_their_words", "words"]
+__all__ = ["MAX_RULE_WORDS", "NEGATION", "in_their_words", "their_sentence", "words"]

@@ -25,14 +25,13 @@
   checked. So an edit another worker commits mid-request is never approved,
   an approval never lands on copy nobody reviewed, and a stale copy of
   ``review_log`` never overwrites entries another writer committed.
-* **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry
-  in ``sources``. ``approve`` refuses unsourced claims unless the approver
-  overrides, and the override is stored and named in ``review_log``. Wave 1
-  (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``):
-  a claim whose source no longer resolves, a deleted Deliverable say, counts as
-  unsourced, and the approval record names why.
-* **The publish guard.** ``assert_publishable`` passes only an approved or
-  scheduled post whose approval matches its content as it is NOW.
+* **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry in ``sources``. ``approve``
+  refuses unsourced claims unless the approver overrides, and the override is stored and named in
+  ``review_log``. Wave 1 (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``): a
+  claim whose source no longer resolves, a deleted Deliverable say, counts as unsourced, and the approval record names why.
+* **The publish guard.** ``assert_publishable`` passes only an approved or scheduled post
+  whose approval matches its content as it is NOW and whose rendered video shows the
+  AI-generated label as the post sets it (PRD-264 EUAI-08a, ``ai_media.label_mismatch``).
 * **Rendered media (D6).** A finished render writes ``media`` as
   ``{aspect: [file records]}``, each with its Deliverable id and the sha256 of
   its bytes, so the content hash (and an approval) binds to the exact files.
@@ -84,7 +83,7 @@ from sqlalchemy import func, or_, update
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
-from modules.socials import ai_media, post_text, text_search
+from modules.socials import ai_media, deepfake_label, post_text, text_search
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
@@ -317,11 +316,11 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
-    # PRD-251B (B5): a chosen length is content; a post without one hashes as before,
-    # so no existing approval moves when the field arrives.
+    # PRD-251B (B5): a chosen length is content; a post without one hashes as before (no approval moves).
     length = getattr(post, "length_seconds", None)
     if length is not None:
         content["length_seconds"] = int(length)
+    content = deepfake_label.hashed(content, post)  # PRD-264 EUAI-08a: the AI label setting, once a person set it
     # Only a post with targets hashes them: one with none hashes as before (US-204).
     # With channels, the title is content too: a channel publishes it (YouTube's
     # video title, $title in channel_adapters.py), and so is whether its footage is
@@ -338,12 +337,12 @@ def compute_content_hash(post: Any) -> str:
     and media, and the post's targets, title and whether its footage is AI-made
     when it has any targets.
 
-    Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
-    ``ensure_ascii=False``, so key order never changes the hash.
+    Canonical = ``sort_keys=True``, ``separators=(',', ':')``, ``ensure_ascii=False``, so key order never changes it.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
     also binds to the exact rendered bytes; Wave 2 adds where the post goes.
     PRD-251B adds ``length_seconds`` when the post has one (B5) and never
-    ``planned_for`` (B11): a slot move is not a content change.
+    ``planned_for`` (B11): a slot move is not a content change. PRD-264 EUAI-08a
+    adds ``ai_label`` once a person set it (``deepfake_label.hashed``).
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
@@ -672,6 +671,11 @@ def with_credits(copy: Any, lines: Iterable[str]) -> Any:
 
 
 # ── the lifecycle ───────────────────────────────────────────────────────────
+def _validated(**fields: Any) -> Dict[str, Any]:
+    """Each content field as its validator (``_VALIDATORS``) returns it, checked in the order given."""
+    return {name: _VALIDATORS[name](value) for name, value in fields.items()}
+
+
 def create_draft(
     db: Any,
     *,
@@ -690,28 +694,19 @@ def create_draft(
     length_seconds: Optional[int] = None,
     agent: Optional[str] = None,
     music: Optional[Mapping[str, Any]] = None,
+    targets: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
 
     ``agent`` names the agent drafting it (US-116): ``review_log`` then opens
-    with a ``draft`` entry by ``created_by`` that names it.
+    with a ``draft`` entry by ``created_by`` that names it. ``targets`` are its
+    channels, resolved by the caller (P256-FIX-SOC-4: an agent's tool sets them
+    with the post, so its render sizes for them).
     """
-    fields = {
-        "title": title,
-        "brief": brief,
-        "copy": copy,
-        "format": format,
-        "template_id": template_id,
-        "variables": variables,
-        "sources": sources,
-        "media": media,
-        "voice": voice,
-        "footage": footage,
-        "length_seconds": length_seconds,
-        "music": music,
-    }
-    clean = {name: _VALIDATORS[name](value) for name, value in fields.items()}
+    clean = _validated(title=title, brief=brief, copy=copy, format=format, template_id=template_id,
+                       variables=variables, sources=sources, media=media, voice=voice, footage=footage,
+                       length_seconds=length_seconds, music=music)
     post = SocialPost(
         id=uuid4(),
         workspace_id=workspace_id,
@@ -721,6 +716,8 @@ def create_draft(
         override_unsourced=False,
         **clean,
     )
+    if targets:
+        post_targets.replace_targets(post, validate_targets(targets))
     post.content_hash = compute_content_hash(post)
     if agent:  # PRD-251C US-C406: what the agent wrote is kept with it, the voice examples' draft
         _log(post, created_by, ACTION_DRAFT, f"Drafted by {agent}.", agent=agent, **draft_entry(post.copy))
@@ -831,19 +828,19 @@ def approve(
 ) -> SocialPost:
     """needs_approval → approved, bound to the content the approver saw (D6).
 
-    ``content_hash`` is the hash of the version the approver was shown. When the
-    post's content is not that version any more, :class:`StaleContent` (with the
-    current hash) and the post is unchanged. Refuses unsourced claims (D7)
-    unless ``override_unsourced``; an override is stored on the post and names
-    the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the
-    sources the caller found missing from the workspace (S1.4): their claims
-    count as unsourced, and an override records why.
+    ``content_hash`` is the hash of the version the approver was shown; when the post is not that version
+    any more, :class:`StaleContent` (with the current hash) and the post is unchanged. A video whose label
+    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a).
+    Refuses unsourced claims (D7) unless ``override_unsourced``; an override is stored on the post and names
+    the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the sources the caller found
+    missing from the workspace (S1.4): their claims count as unsourced, and an override records why.
     """
     target = _target(post, ACTION_APPROVE)
     comment = _validate_comment(comment, required=False, what="comment")
     current = compute_content_hash(post)
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
+    ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video shows the label as the post sets it
     unsourced = unsourced_claims(post, unresolved_sources)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced, unresolved_sources)
@@ -1058,8 +1055,8 @@ def fail_render(
 
 # ── the publish guard ───────────────────────────────────────────────────────
 def assert_publishable(post: Any) -> None:
-    """Pass only an approved or scheduled post whose approval matches its
-    content as it is NOW. Every publish path calls this first."""
+    """Pass only an approved or scheduled post whose approval matches its content as it is NOW, and
+    whose video shows the AI-generated label as the post sets it (PRD-264). Every publish path calls this first."""
     if post.status not in PUBLISHABLE_STATUSES:
         raise NotPublishable(f"a post that is {post.status} cannot be published")
     approved_hash = getattr(post, "approved_hash", None)
@@ -1067,6 +1064,7 @@ def assert_publishable(post: Any) -> None:
         raise NotPublishable("the post has no approval")
     if approved_hash != getattr(post, "content_hash", None) or approved_hash != compute_content_hash(post):
         raise NotPublishable("the content changed after it was approved")
+    ai_media.assert_label_rendered(post)  # EUAI-08a: approved before the label was switched, or rendered before it existed
 
 
 # ── the write guard ─────────────────────────────────────────────────────────

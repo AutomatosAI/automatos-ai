@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from .action_registry import ActionDefinition, ActionRegistry
 from .agent_refs import agent_id_property
+from .send_backs import REBRIEF_WAITS
 
 
 def _board_statuses() -> list:
@@ -202,6 +203,8 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
             "The result's 'total' is how many tasks match the filter, on every page: that is "
             "the count to give. When 'next_offset' is not null there are more: call again with "
             "offset=next_offset (same filters) until it is null before listing every one. "
+            "A page lists as many cards as fit; while next_offset is not null, call again with "
+            "offset=next_offset, never with offsets worked out ahead from limit. "
             "Each ticket has a number (#0042): name tickets by it, never by their place in a list. "
             "When the owner names a piece of work without its number ('the Guji blog draft', "
             "'the Westmoor invoice'), pass search with its name: work waiting on the owner is "
@@ -288,7 +291,13 @@ def _register_get_task(registry: ActionRegistry) -> None:
         name="platform_get_task",
         description=(
             "Get full details of a specific task by ID. Returns title, description, "
-            "status, assigned agent, result, error message, and timestamps."
+            "status, assigned agent, result, error message, and timestamps. "
+            # P256-FIX-N17-6 (F445): "did that go through?" was answered from the status alone.
+            "On the owner's own chat it also says whether the card was sent back (times_sent_back; "
+            "sent_back: when, by whom, the notes, and `said`) and the newest send-back asked for on it, "
+            "with its approval approved, declined, lapsed or still waiting (send_back_card). Answer "
+            "\"did that go through?\" from sent_back.said and send_back_card, never from the status alone. "
+            "For the clicks on several cards use platform_my_actions {ticket}."
         ),
         category="tasks",
         parameters={
@@ -415,7 +424,8 @@ def _update_task_parameters() -> dict:
                 "description": (
                     "A new brief, in the owner's words. On a card its agent has already worked on, this is the "
                     "board's Re-brief: the card goes back to its agent to redo it from this brief, and the old "
-                    "brief and the last draft stay on record. For 'update #0377 with this brief: …'."
+                    "brief and the last draft stay on record. For 'update #0377 with this brief: …'. "
+                    + REBRIEF_WAITS   # P256-FIX-N17-1 (F438)
                 ),
             },
             "priority": {
@@ -452,7 +462,8 @@ def _register_update_task(registry: ActionRegistry) -> None:
             "moves it as platform_update_task_status does, its note kept with the move; "
             "send_back is the board's Reject (the owner's words in note, the brief kept); "
             "a new description on a card already worked on is its Re-brief; and agent_id "
-            "(or agent_name) gives the card to that agent as platform_assign_task does."
+            "(or agent_name) gives the card to that agent as platform_assign_task does. "
+            + REBRIEF_WAITS   # P256-FIX-N17-1 (F438)
         ),
         category="tasks",
         parameters=_update_task_parameters(),

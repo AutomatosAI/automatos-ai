@@ -13,7 +13,10 @@ the workspace that the ticket's agent (``agent:<id>``, the actor its Socials too
 write) created, or changed, since the run started. Then:
 
 * no such post: the ticket goes to review, saying no Socials post was saved, and that a
-  generate_document image is a Deliverable, not a post, when the run made one;
+  generate_document image is a Deliverable, not a post, when the run made one. When the brief
+  names an existing post by its id (P256-FIX-SOC-4, #2962: "do not create a new one"), the
+  note says what that post is and still needs instead. Either note is a fact, never a tool
+  instruction: a redo's agent reads it back as "Your last attempt:";
 * a post whose render failed: review, with the render's own reason and how to fix it;
 * a post saved without a render (draft, changes requested, or submitted unrendered):
   the platform starts its render now, as ``platform_create_social_post`` does by
@@ -35,6 +38,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
@@ -56,9 +60,18 @@ POSTS_SCANNED = 50   # the workspace's posts changed since the run started, newe
 POSTS_CHECKED = 5    # of those, the run's own that are checked
 TITLE_CHARS = 120
 
+# P256-FIX-SOC-4 (F431-a): a fact the owner and a redo's agent ("Your last attempt:") read alike,
+# never a tool instruction: on #2962 it told the agent to make a new post its brief said not to.
 NO_POST_NOTE = (NOTHING_DONE_NOTE_PREFIX + " no Socials post was saved in this run, so there is nothing to approve "
-                "in the Socials tab.{image} Make the post with platform_create_social_post, which saves it and "
-                "renders it. Sent to review instead of done.")
+                "in the Socials tab.{image} Sent to review instead of done.")
+# A ticket whose brief names an existing post by its id: what that post is, and what it still needs.
+NAMED_POST_NOTE = (NOTHING_DONE_NOTE_PREFIX + " no Socials post was saved in this run. {named} Sent to review "
+                   "instead of done.")
+NAMED_POST = 'The post this ticket names, "{title}" ({id}), was not changed: it is {status}; it still needs {needs}.'
+NAMED_POST_DONE = 'The post this ticket names, "{title}" ({id}), was not changed: it is {status}.'
+UNFILLED = "these fields filled in: {fields}"
+NAMED_POSTS_READ = 3  # the most posts a brief's ids are read for
+_POST_ID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 IMAGE_IS_NOT_A_POST = (" A generate_document image is a Deliverable, not a Socials post: it cannot be approved or "
                        "published from the Socials tab.")
 NOT_RENDERED_NOTE = (NOTHING_DONE_NOTE_PREFIX + ' the post "{title}" was saved but did not render: {reason} Fix '
@@ -140,6 +153,15 @@ def made_or_changed_by(post: Any, actor: str, since: datetime) -> bool:
     return False
 
 
+def changed_since(post: Any, since: datetime) -> bool:
+    """Anyone wrote an entry of ``post``'s history since ``since`` (a render, an edit, an approval)."""
+    for entry in getattr(post, "review_log", None) or []:
+        at = _as_utc(entry.get("at")) if isinstance(entry, dict) else None
+        if at is not None and at >= since:
+            return True
+    return False
+
+
 def run_start(task: Any) -> datetime:
     """When this run of the ticket started (a re-run resets it), less the clocks' slack."""
     started = _as_utc(getattr(task, "started_at", None)) or _as_utc(getattr(task, "created_at", None))
@@ -154,6 +176,48 @@ def runs_posts(db: Any, workspace_id: UUID, actor: str, since: datetime) -> List
             .filter(SocialPost.workspace_id == workspace_id, SocialPost.updated_at >= since)
             .order_by(SocialPost.updated_at.desc()).limit(POSTS_SCANNED).all())
     return [post for post in rows if made_or_changed_by(post, actor, since)][:POSTS_CHECKED]
+
+
+def named_posts(db: Any, workspace_id: Any, task: Any) -> List[Any]:
+    """P256-FIX-SOC-4 (F431-a): the posts of the workspace whose ids the ticket's title or brief
+    names (#2962: "post f1b1719a-…, do not create a new one"), in the order named, read for at
+    most ``NAMED_POSTS_READ`` ids. A brief that names no id reads nothing."""
+    from modules.socials import service
+
+    brief = f"{getattr(task, 'title', None) or ''}\n{getattr(task, 'description', None) or ''}"
+    ids = list(dict.fromkeys(found.lower() for found in _POST_ID.findall(brief)))[:NAMED_POSTS_READ]
+    posts = [service.get_post(db, UUID(str(workspace_id)), UUID(post_id)) for post_id in ids]
+    return [post for post in posts if post is not None]
+
+
+def unfilled_template_fields(db: Any, post: Any) -> List[str]:
+    """The fields of ``post``'s template it leaves empty, as its render reads them
+    (``post_fields.unfilled_fields``); [] when it has no template, or the workspace has none by that id."""
+    from modules.documents.template_service import DocumentTemplateService
+    from modules.socials.post_fields import unfilled_fields
+    from modules.socials.render import composition_of
+
+    template_id = getattr(post, "template_id", None)
+    if template_id is None:
+        return []
+    template = DocumentTemplateService(db).get_template(template_id, post.workspace_id)
+    return unfilled_fields(composition_of(template), post)
+
+
+def _named_line(db: Any, post: Any) -> str:
+    """What a named post is and still needs (``social_post_list.what_it_needs``, its template's empty fields)."""
+    from modules.tools.discovery.social_post_list import what_it_needs
+
+    needs = what_it_needs(post.to_dict())
+    fields = unfilled_template_fields(db, post)
+    needs = [*needs, UNFILLED.format(fields=", ".join(fields))] if fields else needs
+    said = {"title": str(post.title or "")[:TITLE_CHARS], "id": post.id, "status": str(post.status).replace("_", " ")}
+    return NAMED_POST.format(needs="; ".join(needs), **said) if needs else NAMED_POST_DONE.format(**said)
+
+
+def named_post_note(db: Any, posts: List[Any]) -> PostCheck:
+    """The note of a run that saved no post on a ticket naming ``posts``: each one as it stands, for review."""
+    return PostCheck(NAMED_POST_NOTE.format(named=" ".join(_named_line(db, post) for post in posts)), review=True)
 
 
 def socials_on(db: Any, workspace_id: Any) -> Any:
@@ -241,6 +305,9 @@ async def social_post_check(
     posts = runs_posts(db, workspace.id, actor, run_start(task))
     if posts:
         return await _posts_check(db, workspace, posts, actor)
+    named = named_posts(db, workspace.id, task)
+    if named:
+        return named_post_note(db, named)
     ran = (exec_result.get("execution") or {}).get("actions") or ()
     image = IMAGE_IS_NOT_A_POST if made_a_document_image(answer, ran) else ""
     return PostCheck(NO_POST_NOTE.format(image=image), review=True)
@@ -276,4 +343,4 @@ def a_social_card_has_its_post(finalize: Async) -> Async:
     return wrapped
 
 
-__all__ = ["PostCheck", "a_social_card_has_its_post", "render_state", "social_post_check"]
+__all__ = ["PostCheck", "a_social_card_has_its_post", "named_posts", "render_state", "social_post_check"]

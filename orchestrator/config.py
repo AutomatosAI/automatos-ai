@@ -735,6 +735,10 @@ class Config:
     # burst waits for a slot holding no pool connection; keep it well under the
     # pool (10 + 20), since each call can hold its own connection plus one more.
     SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
+    # P256-FIX-N17-9 (F448): how long, from the call's arrival, a session's document or memory
+    # read (services/session_read_deadline.DEADLINED_TOOLS) may take before it answers with a
+    # worded failure, so the session's own client never gives up first ("The operation timed out.").
+    SESSION_TOOL_READ_DEADLINE_S: float = float(os.getenv("SESSION_TOOL_READ_DEADLINE_S", "45"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
@@ -2130,6 +2134,12 @@ class Config:
     # declared duration against the monthly quota while it runs, at most this;
     # one whose duration cannot be read holds this much.
     SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
+    # PRD-264 EUAI-08a (EU AI Act Art. 50(4)): a labelled video shows "AI-generated" for
+    # its first this many seconds, and again for as long every interval after
+    # (modules/socials/deepfake_label.py; media-render burns it in). An interval no longer
+    # than the label shows it the whole video.
+    SOCIALS_AI_LABEL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_SECONDS", "3"))
+    SOCIALS_AI_LABEL_INTERVAL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_INTERVAL_SECONDS", "30"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
@@ -2167,6 +2177,11 @@ class Config:
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")
     BRAND_STYLE_READ_TIMEOUT_SECONDS: int = int(os.getenv("BRAND_STYLE_READ_TIMEOUT_SECONDS", "90"))
+    # PRD-264 ART5-1 (EU AI Act Art. 5): the model read that checks every image, video and voice
+    # request before it goes to a provider (core/generation_guard.py; empty model: the
+    # workspace's own), and how long it may take. A read that fails refuses the request.
+    GENERATION_GUARD_MODEL: str = os.getenv("GENERATION_GUARD_MODEL", "")
+    GENERATION_GUARD_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_GUARD_TIMEOUT_SECONDS", "30"))
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation

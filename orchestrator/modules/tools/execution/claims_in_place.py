@@ -26,6 +26,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import logging
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -33,19 +34,33 @@ logger = logging.getLogger(__name__)
 Run = Callable[..., Awaitable[Any]]
 
 UNBACKED_LOGGED = "[tool-loop] unbacked claim family=%s sentence=%r — replaced by the not-done line"
+# P256-FIX-N17-5 (F446): whether the chat turn read before its loop (retrieval first, the board): recorded with
+# record_execution, never as an outcome, so its loop's check saw a turn that read nothing. Set for the loop by
+# receipts.the_loop_writes_receipts, taken by the first executor made while it runs (the chat's own, ``reads_ahead``).
+READ_AHEAD: ContextVar[bool] = ContextVar("tool_loop_read_ahead", default=False)
+
+
+def reads_ahead() -> bool:
+    """Whether the chat loop running now read before it, said once: the executor made first takes it, so an
+    agent's run made later in the turn keeps its own default."""
+    ahead = READ_AHEAD.get()
+    READ_AHEAD.set(False)
+    return ahead
 
 
 def in_place(loop: Any, reply: Any) -> Optional[Any]:
     """A copy of ``reply`` with its unbacked claims taken out and the not-done line in the first one's
     place (``claim_removed``), logged with the claim and its sentence; None when it calls a tool, says
-    nothing or claims nothing the run's calls did not do (``loop.promises``: whose voice it is, RVW-7)."""
+    nothing or claims nothing the run's calls did not do (``loop.promises``: whose voice it is, RVW-7;
+    ``loop.read_ahead``: the turn read before the loop, N17-5)."""
     text = getattr(reply, "content", None)
     if not isinstance(text, str) or not text.strip() or getattr(reply, "tool_calls", None):
         return None
     from consumers.chatbot.claim_removed import in_place_of, without_unbacked_claims
     from core.llm.taken_out import kept_for_the_run
 
-    removed = without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)
+    removed = without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises,
+                                      read_ahead=getattr(loop, "read_ahead", False))
     if removed is None:
         return None
     logger.warning(UNBACKED_LOGGED, removed.family, removed.sentence)
@@ -77,4 +92,4 @@ def its_answer_is_checked(run: Run) -> Run:
     return checked
 
 
-__all__ = ["UNBACKED_LOGGED", "in_place", "its_answer_is_checked"]
+__all__ = ["READ_AHEAD", "UNBACKED_LOGGED", "in_place", "its_answer_is_checked", "reads_ahead"]

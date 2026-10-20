@@ -58,6 +58,7 @@ if str(_ORCH) not in sys.path:
 
 import httpx  # noqa: E402
 
+import core.generation_guard as generation_guard  # noqa: E402
 import core.llm  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
 import core.services.blog_service as blog_service  # noqa: E402
@@ -737,3 +738,26 @@ def test_the_image_key_is_where_the_store_saves_it():
     assert image_store.image_key("i-1", "image/jpeg", "ws-1") == "generated-images/ws-1/i-1.jpg"
     assert image_store.image_key("i-1", "image/unknown") == "generated-images/default/i-1.png"
     assert image_store.generated_image_path("i-1") == "/api/generated-images/i-1"
+
+
+def test_art5_a_refused_image_prompt_never_reaches_the_image_model(image_env, monkeypatch):
+    """PRD-264 ART5-1: the image tool's whole prompt (with a blog post, its title too) goes through the
+    generation guard before the image model; a refusal makes, saves and registers nothing."""
+    asked = []
+
+    async def read(request, workspace_id):
+        asked.append((request, workspace_id))
+        return {"sexual": True, "minor": False, "real_person": True}
+
+    monkeypatch.setattr(generation_guard, "read_answers", read)
+    db = MagicMock()
+    for params in ({"prompt": "a named actor, undressed", "aspect_ratio": "4:5"},
+                   {"prompt": "the founder, undressed", "post_id": str(uuid.uuid4())}):
+        assert _image(db, params) == {"success": False, "error": generation_guard.REFUSED_MESSAGE}
+
+    assert image_env.model.prompts == [] and image_env.saved == [] and image_env.registered == []
+    assert not [entry for entry in image_env.blog if entry[0] == "update"], "no cover attached"
+    assert [(request.path, workspace_id) for request, workspace_id in asked] == [("tools.image", WS)] * 2
+    (still, cover) = (request.texts[0] for request, _ in asked)
+    assert "a named actor, undressed" in still
+    assert "the founder, undressed" in cover and "RAG in production" in cover

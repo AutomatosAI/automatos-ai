@@ -11,7 +11,10 @@ A card's kind is read from its own brief, with the detectors the platform alread
 * a **social post** card: the brief asks for a Socials post
   (``social_post_asks.asks_for_a_social_post``). It needs a post its agent made or changed
   since the run started (``social_ticket_post.runs_posts``, the actor its Socials tools
-  write) that has rendered, needs no render, or a person has already approved. With
+  write), or one the brief names by its id that something happened to since then
+  (``social_ticket_post.named_posts``, P256-FIX-SOC-4), that has rendered, needs no render, or
+  a person has already approved.
+  "Make the post in the Socials tab" is said only of a card that names no post. With
   Socials off for the workspace no post can be made, so nothing is checked, as in F380;
 * a **document** card: the brief asks for customer paperwork
   (``handoffs.asks_for_paperwork``, the paperwork row's words), or names ``generate_document``, which is
@@ -55,6 +58,9 @@ NOT_RENDERED = ('{label} can\'t be Done: its Socials post "{title}" {why}. {stay
                 "tab, then approve the card.")
 STILL_RENDERING = "is still rendering"
 DID_NOT_RENDER = "has not rendered"
+# P256-FIX-SOC-4: a post the brief names that nothing has touched since the card's run started.
+UNCHANGED = "unchanged"
+NOT_CHANGED = "has not changed since this card's run started"
 NO_DELIVERABLE = ("{label} can't be Done: it asks for {what}, and no Deliverable is linked to it. {stays} "
                   "Send it back so its agent makes {what}, then approve the card.")
 STAYS_IN_REVIEW = "It stays in Review."
@@ -108,20 +114,31 @@ def has_a_deliverable(db: Any, task: Any) -> bool:
 def post_shortfall(db: Any, task: Any, said: Dict[str, str]) -> Optional[str]:
     """Why the card's Socials post is not there yet, in ``said``'s words (the card's label and
     where it stays), or None when one has rendered, needs no render or was approved, or
-    Socials is off for the workspace."""
+    Socials is off for the workspace. A post the brief names by its id counts as the card's
+    (P256-FIX-SOC-4): its agent was told to work on it, not to make another. It makes the card
+    only once something happened to it since the run started (a render, an edit, an approval):
+    a post named as an example, made long before, is not this card's work."""
     if stp.socials_on(db, task.workspace_id) is None:
         return None
-    agent = getattr(task, "assigned_agent_id", None)
-    posts = stp.runs_posts(db, task.workspace_id, stp.AGENT_ACTOR.format(agent_id=agent),
-                           stp.run_start(task)) if agent else []
-    states = [(stp.render_state(post)[0], post) for post in posts]
+    agent, since = getattr(task, "assigned_agent_id", None), stp.run_start(task)
+    posts = stp.runs_posts(db, task.workspace_id, stp.AGENT_ACTOR.format(agent_id=agent), since) if agent else []
+    run_ids = {post.id for post in posts}
+    named = [post for post in stp.named_posts(db, task.workspace_id, task) if post.id not in run_ids]
+    states = [(stp.render_state(post)[0], post) for post in posts] + [(_named_state(post, since), post) for post in named]
     if any(state in MADE_STATES for state, _ in states):
         return None
     if not states:
         return NO_POST.format(**said)
     state, post = states[0]
-    why = STILL_RENDERING if state == stp.UNDER_WAY else DID_NOT_RENDER
+    why = {stp.UNDER_WAY: STILL_RENDERING, UNCHANGED: NOT_CHANGED}.get(state, DID_NOT_RENDER)
     return NOT_RENDERED.format(title=str(getattr(post, "title", "") or "")[:TITLE_CHARS], why=why, **said)
+
+
+def _named_state(post: Any, since: Any) -> str:
+    """Where a post the brief names stands for this card: its render state, or ``UNCHANGED`` when
+    it was made already and nothing has happened to it since the run started."""
+    state = stp.render_state(post)[0]
+    return state if state not in MADE_STATES or stp.changed_since(post, since) else UNCHANGED
 
 
 def missing_artifact(db: Any, task: Any) -> Optional[str]:

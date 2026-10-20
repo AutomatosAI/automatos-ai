@@ -37,6 +37,7 @@ import asyncio
 import hashlib
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
@@ -44,6 +45,7 @@ from urllib.parse import quote
 import httpx
 
 from config import config
+from core.media_render_provenance import MarkedFile, marked_file, marked_from_headers, record_marked
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,21 @@ class MediaRenderError(Exception):
 
 class MediaRenderUnavailable(MediaRenderError):
     """No renderer is configured, or it cannot be reached."""
+
+
+@dataclass(frozen=True)
+class ConvertedJpeg:
+    """``POST /jpeg``'s answer: the JPEG, and its mark when the image carried one (PRD-264 EUAI-06b)."""
+
+    data: bytes
+    mark: Optional[MarkedFile] = None
+
+
+def _checked_mark(mark: Optional[MarkedFile], digest: str, what: str) -> None:
+    """Refuse a file whose bytes are not the ones media-render marked: its provenance row would
+    name a hash no copy of the file has (EUAI-10)."""
+    if mark is not None and not mark.names(digest):
+        raise MediaRenderError(BAD_RESPONSE, f"media-render's mark does not match the {what} it sent")
 
 
 def new_http_client() -> httpx.AsyncClient:
@@ -226,15 +243,19 @@ class MediaRenderClient:
             raise _error_for(resp, "render")
         return resp.json()
 
-    async def to_jpeg(self, image: bytes) -> bytes:
+    async def to_jpeg(self, image: bytes) -> ConvertedJpeg:
         """``POST /jpeg`` (PRD-251 US-303): ``image`` as a JPEG, made by the
-        renderer's ffmpeg. Instagram takes JPEG only, and the stills are PNG."""
+        renderer's ffmpeg. Instagram takes JPEG only, and the stills are PNG.
+        A marked image's JPEG comes with its mark (PRD-264 EUAI-06b), checked
+        against the bytes that arrived, for its provenance row."""
         resp = await self._send(
             "POST", "/jpeg", "jpeg", content=image, headers={"Content-Type": "application/octet-stream"}
         )
         if resp.status_code != 200:
             raise _error_for(resp, "jpeg")
-        return resp.content
+        mark = marked_from_headers(resp.headers)
+        _checked_mark(mark, hashlib.sha256(resp.content).hexdigest(), "JPEG")
+        return ConvertedJpeg(resp.content, mark)
 
     async def job(self, job_id: str) -> Dict[str, Any]:
         """``GET /render/{id}``: status, check report, timings and outputs."""
@@ -285,7 +306,8 @@ class MediaRenderClient:
         return current
 
     async def render_to_file(
-        self, bundle: Mapping[str, Any], target: Path, *, max_wait_seconds: float, poll_seconds: float
+        self, bundle: Mapping[str, Any], target: Path, *, workspace_id: Any, max_wait_seconds: float,
+        poll_seconds: float,
     ) -> Dict[str, Any]:
         """Render ``bundle`` start to finish and stream its first output to
         ``target``: the finished job record.
@@ -293,7 +315,9 @@ class MediaRenderClient:
         For a caller that waits for its file (``generate_document`` with a social
         format). A busy renderer is asked again, the job is polled, and a job
         that ends other than done raises the renderer's own code and message.
-        ``max_wait_seconds`` bounds all of it, the download included.
+        ``max_wait_seconds`` bounds all of it, the download included. A marked
+        file is checked against its mark and recorded as ``workspace_id``'s
+        (PRD-264 EUAI-06b, ``core/media_render_provenance.py``).
         """
         async def run() -> Dict[str, Any]:
             deadline = time.monotonic() + max_wait_seconds
@@ -304,9 +328,11 @@ class MediaRenderClient:
             outputs = [o for o in (finished.get("outputs") or []) if isinstance(o, dict) and o.get("name")]
             if not outputs:
                 raise MediaRenderError(NO_OUTPUT, "media-render finished the render but returned no file")
-            size, _digest = await self.download(str(finished["id"]), str(outputs[0]["name"]), target)
+            mark = marked_file(outputs[0])
+            size, _digest = await self.download(str(finished["id"]), str(outputs[0]["name"]), target, mark=mark)
             if size <= 0:
                 raise MediaRenderError(NO_OUTPUT, "media-render returned an empty file")
+            record_marked(workspace_id, mark, str(outputs[0]["name"]))
             return finished
 
         try:
@@ -314,11 +340,15 @@ class MediaRenderClient:
         except asyncio.TimeoutError:
             raise MediaRenderError(TIMEOUT, f"the render did not finish within {max_wait_seconds:g} s") from None
 
-    async def download(self, job_id: str, name: str, target: Path) -> Tuple[int, str]:
+    async def download(
+        self, job_id: str, name: str, target: Path, *, mark: Optional[MarkedFile] = None
+    ) -> Tuple[int, str]:
         """Stream a finished job's output to ``target``; ``(bytes, sha256)``.
 
         The file is never held in memory, and its digest is taken on the way
-        through, so the approval can bind to these exact bytes (D6).
+        through, so the approval can bind to these exact bytes (D6). An output
+        media-render marked (``mark``) must be the bytes it marked, or
+        ``bad_response`` is raised (PRD-264 EUAI-06b).
         """
         url = f"{_base_url()}/render/{quote(job_id, safe='')}/output/{quote(name, safe='')}"
         digest = hashlib.sha256()
@@ -335,4 +365,5 @@ class MediaRenderClient:
                         handle.write(chunk)
         except httpx.HTTPError as err:
             raise _transport_error("output download", err) from err
+        _checked_mark(mark, digest.hexdigest(), "file")
         return size, digest.hexdigest()

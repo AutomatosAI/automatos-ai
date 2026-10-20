@@ -8,6 +8,7 @@ from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
 from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import get_clerk_auth
+from core.auth.user_link import user_id_for_invitee
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.auth.step_up import require_step_up
@@ -452,6 +453,58 @@ def _verify_clerk_user_only(request: Request) -> dict:
     return clerk.extract_user_info(claims)
 
 
+def _acceptable_invitation(db: Session, token: str):
+    """``(invitation, workspace)`` for a token that can still be accepted; an HTTP error otherwise."""
+    invitation = db.query(WorkspaceInvitation).filter(
+        WorkspaceInvitation.token == token,
+    ).first()
+    if not invitation:
+        raise HTTPException(404, "Invitation not found")
+    if invitation.expires_at < datetime.utcnow():
+        raise HTTPException(410, "Invitation has expired")
+    # F152: an invitation never makes a second owner, including one stored before
+    # invitations refused the role — its role is checked again here.
+    if invitation.role not in {r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER}:
+        raise HTTPException(400, "This invitation can no longer be accepted: ask the workspace for a new one.")
+
+    workspace = db.query(Workspace).get(invitation.workspace_id)
+    if not workspace:
+        raise HTTPException(404, "Workspace no longer exists")
+    return invitation, workspace
+
+
+def _join_from_invitation(db: Session, invitation: WorkspaceInvitation, user_id: int) -> bool:
+    """Make ``user_id`` an active member in the invitation's role; True when they already were.
+
+    Idempotent: an existing inactive row is reactivated. Marks the invitation accepted
+    the first time. Not committed: the caller commits.
+    """
+    member = db.query(WorkspaceMember).filter(
+        WorkspaceMember.workspace_id == invitation.workspace_id,
+        WorkspaceMember.user_id == user_id,
+    ).first()
+
+    already_member = bool(member and member.is_active)
+    if member:
+        member.is_active = True
+        member.role = invitation.role
+    else:
+        db.add(WorkspaceMember(
+            workspace_id=invitation.workspace_id,
+            user_id=user_id,
+            role=invitation.role,
+            invited_by=invitation.invited_by,
+            invited_at=invitation.created_at,
+            joined_at=datetime.utcnow(),
+            is_active=True,
+        ))
+
+    if not invitation.accepted_at:
+        invitation.accepted_at = datetime.utcnow()
+        invitation.accepted_by_user_id = user_id
+    return already_member
+
+
 @public_router.post("/accept-invitation", response_model=AcceptInvitationResponse)
 async def accept_invitation(
     payload: AcceptInvitationRequest,
@@ -471,65 +524,13 @@ async def accept_invitation(
     if not clerk_user_id:
         raise HTTPException(401, "Clerk user ID missing from token")
 
-    invitation = db.query(WorkspaceInvitation).filter(
-        WorkspaceInvitation.token == payload.token,
-    ).first()
-    if not invitation:
-        raise HTTPException(404, "Invitation not found")
-    if invitation.expires_at < datetime.utcnow():
-        raise HTTPException(410, "Invitation has expired")
-    # F152: an invitation never makes a second owner, including one stored before
-    # invitations refused the role — its role is checked again here.
-    if invitation.role not in {r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER}:
-        raise HTTPException(400, "This invitation can no longer be accepted: ask the workspace for a new one.")
+    invitation, workspace = _acceptable_invitation(db, payload.token)
 
-    workspace = db.query(Workspace).get(invitation.workspace_id)
-    if not workspace:
-        raise HTTPException(404, "Workspace no longer exists")
-
-    # Resolve or create the User row for this Clerk user.
-    user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
-    if not user and user_email:
-        user = db.query(User).filter(User.email == user_email).first()
-        if user and not user.clerk_user_id:
-            user.clerk_user_id = clerk_user_id
-            db.flush()
-    if not user:
-        user = User(
-            username=user_email or clerk_user_id,
-            email=user_email or f"{clerk_user_id}@pending",
-            clerk_user_id=clerk_user_id,
-            name=user_name,
-            is_active=True,
-        )
-        db.add(user)
-        db.flush()
-
-    # Idempotent membership: existing inactive row gets reactivated.
-    member = db.query(WorkspaceMember).filter(
-        WorkspaceMember.workspace_id == invitation.workspace_id,
-        WorkspaceMember.user_id == user.id,
-    ).first()
-
-    already_member = bool(member and member.is_active)
-    if member:
-        member.is_active = True
-        member.role = invitation.role
-    else:
-        member = WorkspaceMember(
-            workspace_id=invitation.workspace_id,
-            user_id=user.id,
-            role=invitation.role,
-            invited_by=invitation.invited_by,
-            invited_at=invitation.created_at,
-            joined_at=datetime.utcnow(),
-            is_active=True,
-        )
-        db.add(member)
-
-    if not invitation.accepted_at:
-        invitation.accepted_at = datetime.utcnow()
-        invitation.accepted_by_user_id = user.id
+    # Resolve or create the User row for this Clerk user: by Clerk ID, else a new
+    # row. A row that already has the email (case-insensitive), linked to a Clerk
+    # ID or not, is a 409: the token's email never attaches an existing row.
+    user_id = user_id_for_invitee(db, clerk_user_id, user_email or None, name=user_name)
+    already_member = _join_from_invitation(db, invitation, user_id)
 
     db.commit()
 
@@ -537,7 +538,7 @@ async def accept_invitation(
         audit = AuditService(db)
         audit.log(
             workspace_id=str(invitation.workspace_id),
-            user_id=user.id,
+            user_id=user_id,
             action="invitation:accepted",
             resource_type="invitation",
             resource_id=str(invitation.id),

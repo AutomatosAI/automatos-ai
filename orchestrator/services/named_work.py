@@ -11,6 +11,11 @@ order, and words that name nothing (the, my, of…) are left out. "Draft" names 
 not the work (a card waiting in Review IS a draft, whatever its title says), so it is
 left out too when other words remain. Each word is letters and digits only, so it never
 carries a LIKE wildcard. Pure: callers bind the patterns.
+
+P256-FIX-N17-10 (F449): what a piece of the owner's work is called. ``PAPER_KINDS``, the
+customer paperwork the hand-off table sends to the team (F337(c), consumers/chatbot/handoffs.py),
+and ``WORK_NOUNS``, those and the other made work the owner asks to change ("make the Tidewater
+quote shorter", "tweak the newsletter intro"): modules/tools/discovery/described_work.py.
 """
 from __future__ import annotations
 
@@ -27,6 +32,12 @@ STAGE_WORDS = frozenset({"draft", "drafts"})
 # The most words one search matches on: each is one bound pattern in the query.
 MAX_SEARCH_WORDS = 8
 _WORD = re.compile(r"[^\W_]+")
+# Customer paperwork, by what it is called (a regex alternation; F337(c)).
+PAPER_KINDS = (r"letters?|invoices?|quotes?|quotations?|estimates?|proposals?|agreements?|contracts?|"
+               r"flyers?|leaflets?|posters?|brochures?|price ?lists?|welcome sheets?|receipts?|newsletters?|"
+               r"one-pagers?|menus?")
+# Made work the owner names to change it: the paperwork and the rest (a regex alternation; F449).
+WORK_NOUNS = PAPER_KINDS + r"|drafts?|posts?|intros?|introductions?|notes?|reports?|write-?ups?"
 
 
 def search_words(raw: Any) -> List[str]:
@@ -45,4 +56,5 @@ def search_patterns(raw: Any) -> List[str]:
     return [f"%{word}%" for word in search_words(raw)]
 
 
-__all__ = ["FILLER_WORDS", "MAX_SEARCH_WORDS", "STAGE_WORDS", "search_patterns", "search_words"]
+__all__ = ["FILLER_WORDS", "MAX_SEARCH_WORDS", "PAPER_KINDS", "STAGE_WORDS", "WORK_NOUNS", "search_patterns",
+           "search_words"]

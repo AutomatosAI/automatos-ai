@@ -142,6 +142,7 @@ import { ASLEEP_TITLE } from '@/components/play/edges/asleep-screen'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { CONVERSATION_LIMIT, useConversationList } from '@/hooks/use-conversation-list'
 import { useStartChat } from '@/hooks/use-start-chat'
+import { PAGE_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { chatSessionKey, EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -219,6 +220,7 @@ function HistoryTitles() {
 
 beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [PAGE_AI_LABEL] }) // the host's AI label is on screen, as under app/chat/layout.tsx (PRD-264)
   useChatSessionStore.setState({ key: chatSessionKey(null, ids.user), hydrated: true })
   setSession({ activeChatId: null, draftOpen: true, openChatIds: [] })
   Object.values(api).forEach((fn) => fn.mockReset())
@@ -227,6 +229,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', isLoading: false, messages: null, mounts: 0 })
   nav.search = ''

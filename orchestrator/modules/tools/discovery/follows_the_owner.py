@@ -56,6 +56,13 @@ card, which shows the call's note, and the click signs the move (``CLICKED_BY``)
 rule still judges every write that is not owner-only (a note on a card it does not close),
 and a note or brief longer than the card shows whole.
 
+P256-FIX-N17-10 (F449, night 17): "make the guji quote 8kg fortnightly instead" filed #1754 to find the
+quote while #1751, the quote, waited in Review. A new card about made work the owner described for a change
+("the Guji quote", ``described_work``) is refused with that work's card: send it back with their words, wait
+for it while it runs, or, when several cards hold it, ask which. Asked for a new card outright, the brief
+names the card and its file. Each refusal here carries the owner's reason and the card it is about
+(``owner_reasons.Refusal``), which the receipts show in place of the text written for the model.
+
 Outside a person's chat (a ticket, a playbook step, a heartbeat) nothing is checked.
 """
 from __future__ import annotations
@@ -71,7 +78,10 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words
 from modules.tools.discovery.click_resume import on_the_click
+from modules.tools.discovery.described_work import EDITS, DescribedCard, described, described_cards
+from modules.tools.execution.owner_reasons import Refusal, refused
 from modules.tools.discovery.owner_only import human_driven, is_owner_only
+from modules.tools.discovery.send_backs import REBRIEF_WAITS, WAITS_FOR_THE_CLICK
 from modules.tools.formatting.card_digest import fits_on_the_card
 from modules.tools.discovery.owner_turn import (
     AGAIN, GIVE, MISSION_CARD, NEW_CARD, NEW_MISSION, OTHER_VERB, RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD,
@@ -135,6 +145,22 @@ CARD_CALLS_SAID = ("To approve it: platform_update_task_status {{task_id: \"{ref
 MISSION_CALLS_SAID = ("To approve its plan: platform_approve_mission {{mission_id: \"{ref}\"}}; to cancel it: "
                       "platform_cancel_mission {{mission_id: \"{ref}\"}}. Either waits for the owner's click on the "
                       "approval card. To read it: platform_get_mission {{mission_id: \"{ref}\"}}.")
+# P256-FIX-N17-10 (F449): what the owner reads for each refusal here (the receipts' reason).
+ALREADY_ON_THE_BOARD = "{ref} is already on your board, so no new card was made"
+ALREADY_MADE = "that work is already on your board, so no new card was made"
+NOT_FOR_A_CARD = "{ref} is a card on your board, and that request wasn't for a card"
+NOTE_NOT_YOURS = "the note wasn't word for word what you wrote"
+BRIEF_NOT_YOURS = "the new brief wasn't what you wrote"
+BRIEF_NAMES_NOT = "the new card's brief didn't name {ref}{file}, so it wasn't made"
+# F449: a described piece of work's card, and what to do with it.
+IS_THE_WORK = ("{card} is the work the owner means and is already on their board: act on that card, "
+               "don't make a new one.")
+STILL_RUNNING = "It is running: wait for its result, then send it back with the owner's words."
+SEVERAL_HOLD_IT = ("The work the owner means is already on their board, on more than one card: {cards}. Act on the "
+                   "one they mean, or ask them; don't make a new card.")
+NEW_CARD_NAMES_IT = ("The owner asked for a new card for work already on their board: {card}{file}. Put {ref}{file} in "
+                     "the new card's description, so its agent starts from that work.")
+IN_PROGRESS = "in_progress"
 
 
 def follows_the_owner(execute: Execute) -> Execute:
@@ -147,7 +173,7 @@ def follows_the_owner(execute: Execute) -> Execute:
                    or refusal_for(self.db, self.workspace_id, action_name, params, caller_context))
         if refusal:
             logger.info("[follows_the_owner] %s refused: %s", action_name, refusal[:160])
-            return {"success": False, "error": refusal}
+            return refused(refusal)   # F449: with the owner's reason and the card it is about, when it says them
         return await execute(self, action_name, params, caller_context)
     return wrapped
 
@@ -207,8 +233,8 @@ def _wrong_kind(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, pa
         return None
     for card in turn.found():
         if any(names_card(value, card) for value in values_in(params)):
-            return (f"{card_words(card)} is a card on the owner's board, not {_kind_of(action)}.{NOTHING_DONE} "
-                    f"{right_call(turn, card)}")
+            return Refusal(f"{card_words(card)} is a card on the owner's board, not {_kind_of(action)}.{NOTHING_DONE} "
+                           f"{right_call(turn, card)}", NOT_FOR_A_CARD.format(ref=card.ref), card.ref)
     return None
 
 
@@ -274,12 +300,22 @@ def _writes(action: str) -> bool:
 
 
 def _a_copy(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, params: Dict[str, Any]) -> Optional[str]:
-    """A new card or mission made for a card or mission the owner named."""
+    """A new card or mission made for a card or mission the owner named, or for made work they
+    described for a change (F449)."""
     found = turn.found()
     if action == "platform_create_task" and found and not says(NEW_CARD, turn.said) and _acts_on_it(turn):
         card = found[0]
-        return (f"{card_words(card)} is already on the owner's board: act on that card, don't make a new one."
-                f"{NOTHING_DONE} {right_call(turn, card)}")
+        return Refusal(f"{card_words(card)} is already on the owner's board: act on that card, don't make a new one."
+                       f"{NOTHING_DONE} {right_call(turn, card)}", ALREADY_ON_THE_BOARD.format(ref=card.ref), card.ref)
+    if action == "platform_create_task" and not found and _acts_on_it(turn):
+        return _a_copy_of_described_work(db, workspace_id, turn, params)
+    return _a_second_mission(db, workspace_id, turn, action, params)
+
+
+def _a_second_mission(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
+                      params: Dict[str, Any]) -> Optional[str]:
+    """A second mission made for the mission the owner named, unless they asked for a new one."""
+    found = turn.found()
     missions = [card for card in found if card_kind(card) == MISSION_CARD]
     if action != "platform_create_mission" or not missions or says(NEW_MISSION, turn.said):
         return None
@@ -294,8 +330,57 @@ def _a_copy(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, params
 
 def _acts_on_it(turn: OwnerTurn) -> bool:
     """The owner's latest message asks for something done to the card it names: a new card
-    for it would be a copy. A card named as a source ("(card 1970)") is not acted on (F319)."""
-    return says(OTHER_VERB, (turn.latest,)) or says(AGAIN, (turn.latest,))
+    for it would be a copy. A card named as a source ("(card 1970)") is not acted on (F319).
+    F449: "make it shorter", "tweak the intro" ask for a change too (``described_work.EDITS``)."""
+    return says(OTHER_VERB, (turn.latest,)) or says(AGAIN, (turn.latest,)) or says(EDITS, (turn.latest,))
+
+
+def _a_copy_of_described_work(db: Session, workspace_id: Any, turn: OwnerTurn,
+                              params: Dict[str, Any]) -> Optional[str]:
+    """F449: a new card about made work the owner described for a change ("make the Guji quote
+    shorter"), when its own title and brief are about that work and a card on the board holds it."""
+    words = described(turn.latest)
+    if not words or not _about(params, words):
+        return None
+    cards = described_cards(db, workspace_id, words)
+    if not cards:
+        return None
+    if says(NEW_CARD, turn.said):
+        return _brief_names_the_work(cards, params)
+    if len(cards) > 1:
+        return Refusal(SEVERAL_HOLD_IT.format(cards="; ".join(card.listed() for card in cards)) + NOTHING_DONE,
+                       ALREADY_MADE)
+    return _act_on_the_described(turn, cards[0])
+
+
+def _about(params: Dict[str, Any], words: Any) -> bool:
+    """Whether a new card's title and brief hold every word that describes the work."""
+    text = f"{params.get('title') or ''} {params.get('description') or ''}".lower()
+    return all(re.search(rf"\b{re.escape(word)}", text) for word in words)
+
+
+def _act_on_the_described(turn: OwnerTurn, card: DescribedCard) -> Refusal:
+    """The one card holding the described work: send it back with the owner's words when its agent has
+    answered it, wait for it while it runs, else the card's own calls."""
+    named, status = card.named(), getattr(card.task, "status", None)
+    if status in SENDABLE_BACK:
+        step = _send_back_call(card.ref, _words_for_card(turn) or turn.latest)
+    else:
+        step = STILL_RUNNING if status == IN_PROGRESS else right_call(turn, named)
+    return Refusal(f"{IS_THE_WORK.format(card=card_words(named))}{NOTHING_DONE} {step}",
+                   ALREADY_ON_THE_BOARD.format(ref=card.ref), card.ref)
+
+
+def _brief_names_the_work(cards: Any, params: Dict[str, Any]) -> Optional[str]:
+    """Asked for a new card, the brief names the card that holds the work and its file, so its agent
+    starts from that work; None when it names one of them so."""
+    brief = str(params.get("description") or "")
+    if any(card.ref in brief and (not card.file_path or card.file_path in brief) for card in cards):
+        return None
+    card = cards[0]
+    file = f" and its file {card.file_path}" if card.file_path else ""
+    return Refusal(NEW_CARD_NAMES_IT.format(card=card_words(card.named()), ref=card.ref, file=file) + NOTHING_DONE,
+                   BRIEF_NAMES_NOT.format(ref=card.ref, file=file), card.ref)
 
 
 def _mission_goal(db: Session, card: NamedCard) -> str:
@@ -314,17 +399,18 @@ def _not_their_words(db: Session, workspace_id: Any, turn: OwnerTurn, action: st
     note = _signed_note(action, params)
     if note and not _theirs(db, workspace_id, turn, note, NOTE_SHARE):
         words = _their_words_for(db, workspace_id, turn, note)
-        return ("A note on the card is signed as the owner's, so it is their own words, exactly as they wrote them "
-                f"in this chat.{NOTHING_DONE} Make the same call again with these words as the note, word for word, "
-                f"not shortened or reworded: {_quoted(words)}. Or make it without a note.")
+        return Refusal("A note on the card is signed as the owner's, so it is their own words, exactly as they wrote "
+                       f"them in this chat.{NOTHING_DONE} Make the same call again with these words as the note, word "
+                       f"for word, not shortened or reworded: {_quoted(words)}. Or make it without a note.",
+                       NOTE_NOT_YOURS)
     brief = str(params.get("description") or "")
     if action != "platform_update_task" or not brief or params.get("send_back"):
         return None
     extra = (*_the_cards_words(db, workspace_id, params), autos_proposal(db, workspace_id, turn))
     if _theirs(db, workspace_id, turn, brief, BRIEF_SHARE, extra):
         return None
-    return ("A new brief is the owner's words, not yours: put the brief they wrote in this chat as the description, "
-            f"word for word, or ask them for the brief.{NOTHING_DONE}")
+    return Refusal("A new brief is the owner's words, not yours: put the brief they wrote in this chat as the "
+                   f"description, word for word, or ask them for the brief.{NOTHING_DONE}", BRIEF_NOT_YOURS)
 
 
 def _signed_note(action: str, params: Dict[str, Any]) -> str:
@@ -426,7 +512,8 @@ def _owners_note(words: str) -> str:
 
 def _send_back_call(ref: str, words: str = "") -> str:
     return (f"To send it back: platform_update_task_status {{task_id: \"{ref}\", status: \"assigned\", "
-            f"note: {_owners_note(words)}}}: its brief stays, and the agent redoes it on the same card.")
+            f"note: {_owners_note(words)}}}: its brief stays, and the agent redoes it on the same card. "
+            f"{WAITS_FOR_THE_CLICK}")
 
 
 # F309 (night 9): giving comes before sending back, so "Give card 1859 to the Analyst
@@ -435,9 +522,9 @@ _CARD_CALLS = (
     (GIVE, "To give it to an agent: platform_assign_task {{task_id: \"{ref}\", agent_name: …}}: a card its agent "
            "already answered goes to the new agent and runs again."),
     (SEND_BACK, "To send it back: platform_update_task_status {{task_id: \"{ref}\", status: \"assigned\", "
-                "note: {note}}}: its brief stays, and the agent redoes it on the same card."),
+                "note: {note}}}: its brief stays, and the agent redoes it on the same card. " + WAITS_FOR_THE_CLICK),
     (UPDATE, "To give it a new brief: platform_update_task {{task_id: \"{ref}\", description: the owner's "
-             "brief, word for word}}."),
+             "brief, word for word}}. " + REBRIEF_WAITS),   # P256-FIX-N17-1 (F438): the Re-brief waits too
 )
 
 

@@ -35,7 +35,7 @@ if str(_ORCH) not in sys.path:
 
 import tests.test_prd251w3_publisher as harness  # noqa: E402
 from api import socials_publish  # noqa: E402
-from modules.socials import ai_media, service  # noqa: E402
+from modules.socials import ai_media, deepfake_label, service  # noqa: E402
 from modules.socials.capabilities import SEEDED_CHANNELS  # noqa: E402
 from tests.test_prd251w3_publisher import IMAGE, MANIFEST, VIDEO, WS, FakeExecutor, _approved_post, _publish, _target  # noqa: E402
 from tests.test_prd251w3_tiktok import _tiktok, _upload_params  # noqa: E402
@@ -47,9 +47,11 @@ env = harness.env
 SHA = "c" * 64
 RENDERED = {"9:16": [{"deliverable_id": "d-video-1", "name": "video-9x16.mp4", "sha256": SHA, "bytes": 99,
                       "content_type": "video/mp4"}]}
-SPOKE_ONLY = {"footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [SHA]}
+# PRD-264 EUAI-08a: a render of AI media burned the AI-generated label in (on by default), or the
+# video is not published (test_prd264_euai08a_label_guard.py); one of the person's own files needs none.
+SPOKE_ONLY = {"footage": [], "stills": [], "own": [], "voice": "kokoro", "files": [SHA], "labelled": True}
 OWN_FILES_ONLY = {"footage": [], "stills": [], "own": ["photo"], "voice": None, "files": [SHA]}
-AI_FOOTAGE = {"footage": ["hook"], "stills": [], "own": [], "voice": "kokoro", "files": [SHA]}
+AI_FOOTAGE = {"footage": ["hook"], "stills": [], "own": [], "voice": "kokoro", "files": [SHA], "labelled": True}
 YOUTUBE_SCHEMA = {"title", "description", "categoryId", "privacyStatus", "tags", "videoFilePath"}
 STUDIO = "Set 'Altered or synthetic content' in YouTube Studio for this video."
 WHAT = "AI footage and a synthetic voice (Kokoro)"
@@ -192,8 +194,12 @@ def test_the_route_states_every_channels_decision_before_and_after_publish(env):
     lines = {(t["toolkit"], t["post_kind"]): t for t in answer["targets"]}
     assert set(lines) == {("tiktok", "video"), ("youtube", "video"), ("linkedin", "text"), ("twitter", "text"),
                           ("instagram", "image")}
+    # PRD-264 EUAI-08a: the post carries AI media, so its AI-generated label is on by default and a
+    # caption channel's line says the caption label was added (test_prd264_euai08a_deepfake_label.py).
+    assert answer["deepfake_label"]["on"] is True
     for (toolkit, _), target in lines.items():
-        assert target["ai_label"] == ai_media.label_line(toolkit, ai_media.AiMedia(footage=("hook",), voice="kokoro"), {})
+        caption = deepfake_label.caption_for({"base": "Harvest Club opens Friday."}, toolkit, True)
+        assert target["ai_label"] == ai_media.label_line(toolkit, ai_media.AiMedia(footage=("hook",), voice="kokoro"), {}, caption)
         assert target["at_publish"] is False
 
     # Once a publish ran a target, its receipt keeps the line that publish used.

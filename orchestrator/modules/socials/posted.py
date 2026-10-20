@@ -5,11 +5,13 @@ Every post of the workspace that went out on at least one channel (``published``
 Posted view shows: its title, format and plan, its topic (the bank's topic it was made from,
 else its brief's first line), when it went out, each channel's receipt (the link and the id
 the platform gave) and its numbers (``results.post_numbers``: empty until the first read).
-Filtered by plan, channel and format; at most ``MAX_POSTED`` a page. Another workspace's
-posts are never read.
+Filtered by plan, channel and format, and (P256-FIX-SOC-4) by when it went out (``since``: what
+went out today, for Auto's "what did I post today and when?"); at most ``MAX_POSTED`` a page.
+Another workspace's posts are never read.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -37,13 +39,16 @@ def _plan_names(db: Any, workspace_id: UUID, posts: List[SocialPost]) -> Dict[UU
     return {row.id: row.name for row in rows}
 
 
-def _query(db: Any, workspace_id: UUID, plan_id: Optional[UUID], channel: Optional[str], fmt: Optional[str]) -> Any:
+def _query(db: Any, workspace_id: UUID, plan_id: Optional[UUID], channel: Optional[str], fmt: Optional[str],
+           since: Optional[datetime] = None) -> Any:
     went_out = func.max(SocialPostTarget.published_at)
     query = (
         db.query(SocialPost, went_out.label("went_out"))
         .join(SocialPostTarget, SocialPostTarget.post_id == SocialPost.id)
         .filter(SocialPost.workspace_id == workspace_id, SocialPost.status.in_(POSTED_STATUSES), SocialPostTarget.published_at.isnot(None))
     )
+    if since is not None:
+        query = query.filter(SocialPostTarget.published_at >= since)
     if plan_id is not None:
         query = query.filter(SocialPost.campaign_id == plan_id)
     if fmt:
@@ -56,11 +61,11 @@ def _query(db: Any, workspace_id: UUID, plan_id: Optional[UUID], channel: Option
 
 def posted(
     db: Any, workspace_id: UUID, *, plan_id: Optional[UUID] = None, channel: Optional[str] = None, fmt: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: Optional[int] = None, since: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
-    """What went out (the module docstring), newest first."""
+    """What went out (the module docstring), newest first; only what went out from ``since`` when given."""
     count = max(1, min(limit or DEFAULT_POSTED, MAX_POSTED))
-    rows = _query(db, workspace_id, plan_id, channel, fmt).limit(count).all()
+    rows = _query(db, workspace_id, plan_id, channel, fmt, since).limit(count).all()
     posts = [post for post, _ in rows]
     topics = history.topics_by_post(db, workspace_id, [post.id for post in posts])
     numbers = results.post_numbers(db, workspace_id, [post.id for post in posts])

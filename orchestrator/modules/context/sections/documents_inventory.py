@@ -42,10 +42,15 @@ logger = logging.getLogger(__name__)
 TITLES_SHOWN = 10
 DATABASES_SHOWN = 5          # PRD-231: past five, the count alone; platform_query_data lists them
 _READY = "status IN ('completed', 'processed')"
+# P256-FIX-N17-11 (F443, night 16): the November price letter quoted October prices and said the
+# documents held no November change, after three platform_search_documents calls; the November
+# sheet was there. An absence is said only after search_knowledge, in the thing's own words.
+_ABSENCE = ("Never tell the owner a document does not give something until search_knowledge, in the thing's own "
+            "words, finds nothing either; platform_search_documents calls do not count.")
 _ASK_DOCUMENTS = ("For a question about the business, a document, or how the product works, "
-                  "search them with search_knowledge first and name the file you used.")
+                  f"search them with search_knowledge first and name the file you used. {_ABSENCE}")
 _ASK_DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, "
-                              "search them with search_knowledge first and name the file you used.")
+                              f"search them with search_knowledge first and name the file you used. {_ABSENCE}")
 # F302 (night 9): what the database answers, and that its tables are the tool's to read.
 _ASK_DATA = ("For the business's own records (counts, totals, stock, orders, members, sales, rankings), "
              "call platform_query_data with the owner's question in their words: it returns the database's "
@@ -165,8 +170,9 @@ class DocumentsInventorySection(BaseSection):
     priority: int = 4
     # The budget truncates past this, from the end: the database sentences come last,
     # so the cap holds ten long titles, the spreadsheet rule and five database names whole
-    # (F302 measured 350 tokens with all three; the longer data sentence needed the room).
-    max_tokens: Optional[int] = 380
+    # (F302 measured 350 tokens with all three; the longer data sentence needed the room;
+    # P256-FIX-N17-11's absence rule adds about 40).
+    max_tokens: Optional[int] = 440
 
     async def render(self, ctx: SectionContext) -> str:
         if ctx.db_session is None or not ctx.workspace_id:
