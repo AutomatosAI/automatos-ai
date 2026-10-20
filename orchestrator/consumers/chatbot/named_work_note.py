@@ -66,10 +66,16 @@ def named_work_note(cards: List[Any]) -> str:
     return "\n".join([NOTE_HEAD, *rows, NOTE_RULE])
 
 
-def reads_the_named_work(chat: Any, latest_text: str, prefetched: List[Any]) -> Optional[str]:
-    """The note for the work the owner names, or None. The read goes in ``prefetched``."""
+def _not_in(said: str, cards: List[Any]) -> List[Any]:
+    """The cards ``said`` (the turn's F317 note) does not already name by number."""
+    return [card for card in cards if not re.search(rf"(?<![\w.]){re.escape(str(card.ref))}(?!\d)", said)]
+
+
+def reads_the_named_work(chat: Any, latest_text: str, prefetched: List[Any], already: str = "") -> Optional[str]:
+    """The note for the work the owner names, or None. The read goes in ``prefetched``. Code review: a card
+    the turn's board findings note (``already``) names is left out, so no card is named twice in one turn."""
     words = _searched_for(chat, latest_text)
-    cards = _cards(chat, words) if words else []
+    cards = _not_in(already, _cards(chat, words)) if words else []
     if not cards:
         return None
     prefetched.append((READ_TOOL, {"automatic": True, "search": " ".join(words)}))

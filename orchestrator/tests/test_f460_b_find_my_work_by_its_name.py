@@ -142,7 +142,7 @@ def test_the_card_titled_for_the_work_outranks_an_old_answer_that_mentions_it(bo
     _frames, messages, _ran = _turn(board, BELL_YARD)
     team_note = next(m["content"] for m in messages if "already found on the board" in m["content"])
     assert team_note.index("#1848") < team_note.index("#1702")              # both answer; the titled one first
-    assert "#1848" in _named_notes(messages)[0]
+    assert not any("#1848" in named for named in _named_notes(messages))    # review: never named twice a turn
 
 
 def test_how_the_owner_asks_is_not_what_about():

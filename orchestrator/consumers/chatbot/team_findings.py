@@ -131,7 +131,7 @@ def reads_what_the_team_found(retrieval_first: Turn) -> Turn:
     async def wrapped(chat: Any, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime: Any,
                       chat_id: str, prefetched: List[Any]) -> AsyncGenerator[Any, None]:
         note, frames = reads_the_team(chat, latest_text, prefetched)
-        named = reads_the_named_work(chat, latest_text, prefetched)
+        named = reads_the_named_work(chat, latest_text, prefetched, already=note or "")
         for frame in frames:
             yield frame
         async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
