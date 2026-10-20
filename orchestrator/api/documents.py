@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from services.document_downloads import media_type_for, stored_object_link, workspace_file
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -339,75 +340,36 @@ async def handle_request(
         logger.error(f"Error uploading document: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/{document_id}/download")
-async def download_document_by_id(
+# F453: both downloads are the caller's own workspace's, behind documents:read. Another
+# workspace's document id answers 404, the same as a missing one (no existence oracle).
+@router.get("/{document_id}/download", dependencies=[Depends(require_workspace_permission("documents:read"))])
+def download_document_by_id(
     document_id: int,
     mode: str = Query("url", description="'url' returns JSON with pre-signed URL, 'redirect' does 302"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Download a document by ID. Generates a pre-signed S3 URL.
+    Download a document of the caller's workspace by ID. Generates a pre-signed S3 URL.
 
     mode=url (default): returns JSON {"url": "...", "filename": "..."} — safe for fetch().
-    mode=redirect: returns 302 redirect — for direct browser navigation / <a> tags.
+    mode=redirect: returns 302 redirect. The request itself needs the caller's auth
+    headers, so a plain <a href> to this route is refused in SaaS: fetch with apiClient.
+    A plain ``def``: the lookup and the storage calls are synchronous (threadpool).
     """
-    doc = db.query(Document).filter(Document.id == document_id).first()
+    doc = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id)
+        .first()
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     filename = doc.original_filename or doc.filename
-
-    # Try S3 first
-    try:
-        from config import config as app_config
-        from core.storage import (
-            StorageNotConfigured,
-            get_public_s3_client,
-            get_s3_client,
-            is_storage_configured,
-        )
-        from fastapi.responses import RedirectResponse
-
-        if not is_storage_configured():
-            raise StorageNotConfigured()
-
-        bucket = app_config.S3_DOCUMENTS_BUCKET
-        # file_path formats:
-        #   s3://bucket-name/workspaces/ws-id/documents/123_file.md  (normal upload)
-        #   /local/path/file.md  (legacy local)
-        #   workspaces/ws-id/documents/file.md  (bare key)
-        raw_path = doc.file_path or ""
-        if raw_path.startswith("s3://"):
-            # Strip "s3://bucket-name/" to get bare S3 key
-            without_scheme = raw_path[5:]  # remove "s3://"
-            s3_key = without_scheme.split("/", 1)[1] if "/" in without_scheme else without_scheme
-        elif raw_path.startswith("/"):
-            # Local path — construct S3 key (upload uses {id}_{filename})
-            s3_key = f"workspaces/{doc.workspace_id}/documents/{doc.id}_{doc.filename}"
-        else:
-            s3_key = raw_path
-
-        get_s3_client().head_object(Bucket=bucket, Key=s3_key)
-
-        # Presign against the browser-reachable host (PRD-151 US-006).
-        presigned_url = get_public_s3_client().generate_presigned_url(
-            "get_object",
-            Params={
-                "Bucket": bucket,
-                "Key": s3_key,
-                "ResponseContentDisposition": f'attachment; filename="{filename}"',
-            },
-            ExpiresIn=3600,
-        )
-
-        if mode == "redirect":
-            return RedirectResponse(url=presigned_url, status_code=302)
-
-        # Default: return URL as JSON (avoids CORS issues with S3 redirects)
-        return {"url": presigned_url, "filename": filename}
-
-    except Exception as e:
-        logger.warning(f"S3 download failed for doc {document_id}: {e}")
+    # S3 first (services.document_downloads: the key from file_path, a pre-signed link).
+    link = stored_object_link(doc, filename, mode)
+    if link is not None:
+        return link
 
     # Fallback: local file
     if doc.file_path and os.path.exists(doc.file_path):
@@ -420,58 +382,29 @@ async def download_document_by_id(
     raise HTTPException(status_code=404, detail="Document file not found in storage")
 
 
-@router.get("/download")
-async def download_document(path: str = Query(..., description="Full path to document")):
+@router.get("/download", dependencies=[Depends(require_workspace_permission("documents:read"))])
+def download_document(
+    path: str = Query(..., description="Full path to a document in this workspace's folder"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
-    Download a document from storage.
-    
-    Args:
-        path: Full path to document (e.g., /var/automatos/documents/filename.md)
-    
+    Download a file from this workspace's own folder under the documents root
+    (``<root>/<workspace_id>/``, services.document_downloads). A path anywhere else,
+    reached through ``..`` or a symlink included, answers 404 like a missing file.
+
     Returns:
         FileResponse with the document
     """
-    try:
-        # Security: Only allow files from /var/automatos/documents/
-        allowed_base = Path("/var/automatos/documents").resolve()
-        requested_path = Path(path).resolve()
+    requested_path = workspace_file(path, ctx.workspace_id)
+    if requested_path is None:
+        raise HTTPException(status_code=404, detail="Document not found")
 
-        try:
-            requested_path.relative_to(allowed_base)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
-        
-        # Check if file exists
-        if not os.path.exists(requested_path):
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Get filename
-        filename = os.path.basename(requested_path)
-        
-        # Determine media type
-        media_type = "application/octet-stream"
-        if str(requested_path).endswith('.pdf'):
-            media_type = "application/pdf"
-        elif str(requested_path).endswith('.md'):
-            media_type = "text/markdown"
-        elif str(requested_path).endswith('.txt'):
-            media_type = "text/plain"
-        elif str(requested_path).endswith('.json'):
-            media_type = "application/json"
-        
-        logger.info(f"Serving document: {filename}")
-        
-        return FileResponse(
-            path=str(requested_path),
-            filename=filename,
-            media_type=media_type
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error downloading document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    logger.info("Serving document: %s", requested_path.name)
+    return FileResponse(
+        path=str(requested_path),
+        filename=requested_path.name,
+        media_type=media_type_for(requested_path),
+    )
 
 @router.get("/content")
 async def get_document_content_by_path(
