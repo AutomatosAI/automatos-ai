@@ -60,6 +60,10 @@ for _name in [n for n, m in list(_sys_guard.modules.items())
 from modules.tools import tool_router as tr
 from modules.tools.discovery.action_registry import ActionDefinition, ActionRegistry
 
+# rank_actions bounds the index build by SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S (2.5 s); a busy
+# CI runner can miss it on a cold index and the ranking comes back empty. <= 0 waits instead.
+WAIT_FOR_INDEX = 0
+
 _SU = "platform_su_obs_probe"
 _SU_PROMOTED = "platform_su_promoted_probe"
 _ADMIN = "platform_admin_probe"
@@ -333,14 +337,16 @@ def test_semantic_rank_never_returns_su_for_operator():
     for an operator; include_super_admin=True is the only way in."""
     index = _make_index(_surface_registry())
 
-    ranked = asyncio.run(index.rank_actions("show me the loki logs", top_k=10))
+    ranked = asyncio.run(index.rank_actions("show me the loki logs", top_k=10, embed_timeout_s=WAIT_FOR_INDEX))
     names = [n for n, _ in ranked]
     assert names, "ranking returned nothing — fixture broken"
     assert _SU not in names
     assert _SU_PROMOTED not in names
 
     ranked_su = asyncio.run(
-        index.rank_actions("show me the loki logs", top_k=10, include_super_admin=True)
+        index.rank_actions(
+            "show me the loki logs", top_k=10, include_super_admin=True, embed_timeout_s=WAIT_FOR_INDEX
+        )
     )
     su_names = [n for n, _ in ranked_su]
     assert _SU in su_names
