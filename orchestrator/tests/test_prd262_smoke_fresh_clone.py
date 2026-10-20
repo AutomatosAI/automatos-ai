@@ -444,7 +444,16 @@ def test_script_times_boots_from_the_container_start_not_its_own_sleeps():
     text = _script()
     assert boot.STARTED_AT_FORMAT == "{{.State.StartedAt}}"
     assert "POLL_INTERVAL_SECONDS=5" not in text
-    assert not re.search(r"^\s*sleep\b", text, re.M), "boots are timed by smoke_boot.py, never by the script's sleeps"
+    # One sleep is allowed (US-034): check_ready_after_core waits until the last boot's
+    # first 60 s, counted from the container's StartedAt, are in its log. That waits for
+    # log lines, it times no boot. Any other sleep would mean the script times boots itself.
+    sleeps = re.findall(r"^[ \t]*sleep\b.*$", text, re.M)
+    assert sleeps == ['    sleep "$left"'], \
+        "boots are timed by smoke_boot.py, never by the script's sleeps; the only sleep waits out the log window"
+    ready = _function(text, "check_ready_after_core")
+    assert 'sleep "$left"' in ready
+    assert re.search(r'left="\$\(python3 "\$READY_TOOL" [^)]*--window-left\)"', ready), \
+        "the one sleep's length comes from smoke_ready.py --window-left"
     assert 'BOOT_TOOL="scripts/ci/smoke_boot.py"' in text
     assert f'--url "{boot.HEALTH}=${{HEALTH_URL}}" --url "{boot.READY}=${{READY_URL}}"' in text
     assert f'--fetch "{boot.BOOTSTRAP}=${{BOOTSTRAP_URL}}"' in text
