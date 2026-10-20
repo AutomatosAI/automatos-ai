@@ -13,7 +13,9 @@ a decline says nothing ran. It goes through the existing store-memory path (the
 ``decision``, workspace-shared, owned by the user who clicked (``granted_by`` / ``revoked_by``,
 set by the server from the request) and evidenced by its grant.
 
-Only a call's card is remembered (``tool_call``, never a question: an answer has its own path).
+Only a call's card is remembered (``tool_call``, never a question: an answer has its own path),
+and never a HARNESS change's card (``platform_harness_apply``, PRD-263 US-055): weekly loop
+decisions would pile up in recall, and the HARNESS ledger and the audit rows are their record.
 A click the route refuses (already decided, 422) raises before this runs, so one grant is one
 memory. A memory that is not stored is logged with its reason; the click has already run.
 
@@ -140,7 +142,8 @@ def owner_of(grant: Any, decision: str) -> Optional[str]:
 
 
 def _a_calls_card(db: Any, workspace_id: Any, grant_id: Any) -> Any:
-    """The grant, in this workspace only, when it is a call's approval card (not a question)."""
+    """The grant, in this workspace only, when it is a call's approval card (not a question)
+    for a call that is remembered (not a HARNESS change's, PRD-263 US-055)."""
     from core.models.approval_grants import KIND_QUESTION, SUBJECT_TOOL_CALL, ApprovalGrant
 
     if db is None or workspace_id is None or grant_id is None:
@@ -149,7 +152,16 @@ def _a_calls_card(db: Any, workspace_id: Any, grant_id: Any) -> Any:
              .filter(ApprovalGrant.id == int(grant_id), ApprovalGrant.workspace_id == workspace_id).first())
     if grant is None or grant.kind == KIND_QUESTION or grant.subject_type != SUBJECT_TOOL_CALL:
         return None
-    return grant
+    return None if _a_harness_change(grant) else grant
+
+
+def _a_harness_change(grant: Any) -> bool:
+    """Whether the card approves a HARNESS change (``platform_harness_apply``), by its stored
+    call or its tool name."""
+    from services.harness_grants import APPLY_ACTION
+
+    details = grant.details if isinstance(grant.details, dict) else {}
+    return APPLY_ACTION in (details.get("action"), grant.tool_name)
 
 
 async def _store(db: Any, grant: Any, content: str, owner: Optional[str]) -> Dict[str, Any]:
