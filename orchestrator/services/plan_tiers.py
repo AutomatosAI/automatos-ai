@@ -465,8 +465,8 @@ def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict
     if (size is not None and size >= 6) or any(s in text for s in _BUSINESS_SIGNALS):
         return "business", "you're running multiple teams or pods"
     if any(s in text for s in _OWN_KEYS_SIGNALS):
-        return ENTRY_PLAN, "you're technical and can run the AI on your own keys"
-    return "pro", "the AI credits are included, so you don't need keys of your own"
+        return ENTRY_PLAN, "they can run it on their own AI keys"
+    return "pro", "AI credits are included, no keys needed"
 
 
 def _price_phrase(name: str, tier: dict) -> str:
@@ -489,15 +489,10 @@ def plan_proposal_copy(segment: Optional[dict], team_size=None, tiers: Optional[
     tier = resolved.get(plan) or {}
     name = tier.get("display_name") or plan.title()
     options = " · ".join(_price_phrase(p, t) for p, t in assignable_tiers(resolved).items())
-    terms = (
-        " (beta pricing: nothing is charged until billing opens; during the beta every "
-        "plan runs on the trial credits and then on the user's own AI keys)"
-        if price_label() else ""
-    )
+    beta = " Beta pricing: nothing is charged yet." if price_label() else ""
+    # Kept short: this line rides the proposal stage's prompt, capped at 800 tokens.
     return (
-        f"Recommend the **{name} plan — ${tier.get('display_price_usd')}/mo**{terms} "
-        f"because {reason}. Show the options — {options} — and note Enterprise is "
-        "coming soon. You never put a workspace on a paid plan yourself: on an "
-        f"explicit yes, record the choice with `platform_update_onboarding` "
-        f"(plan: \"{plan}\"); it answers with how the owner buys it."
+        f"Recommend the **{name} plan — ${tier.get('display_price_usd')}/mo** because {reason}. "
+        f"Options: {options}; Enterprise is coming soon.{beta} On a yes, record it via "
+        f"`platform_update_onboarding` (plan: \"{plan}\"); never assign a plan yourself."
     )

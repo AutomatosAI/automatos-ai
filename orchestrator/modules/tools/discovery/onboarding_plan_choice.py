@@ -43,7 +43,7 @@ def _refusal(plan: str) -> Optional[Dict[str, Any]]:
         return None
     return {"success": False, "error": (
         "Enterprise is coming soon — it can't be chosen yet. Choose Own keys, Pro or Business."
-        if plan == "enterprise" else f"'{plan}' isn't a plan — choose Own keys, Pro or Business."
+        if plan == "enterprise" else f"'{plan}' isn't a plan tier — choose Own keys, Pro or Business."
     )}
 
 
