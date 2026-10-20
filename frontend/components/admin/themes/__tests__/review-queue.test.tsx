@@ -51,12 +51,14 @@ import { NOT_READY, READY } from '../pending-list'
 import { SAVE_NOTE } from '../report-note-form'
 import { APPROVE, REJECT } from '../review-actions'
 import { ThemeReviewQueue } from '../review-queue'
-import { ADMIN_ONLY, LOCAL_REVIEW_NOTE, QUEUE_EMPTY, SCAN_BLOCKED, SCAN_NOT_RUN } from '../review-words'
-import { SAVE_SIGNATURE } from '../signature-panel'
+import { ADMIN_ONLY, LOCAL_REVIEW_NOTE, QUEUE_EMPTY, SCAN_BLOCKED, SCAN_NOT_RUN, SIGNATURE_INVALID } from '../review-words'
+import { SAVE_SIGNATURE, SIGN_AGAIN } from '../signature-panel'
 import {
   DIGEST,
+  KEY_ID,
   PACKAGE_ID,
   REQUEST_ID,
+  RETIRED_KEY_ID,
   httpError,
   kitSummary,
   pendingRow,
@@ -276,10 +278,53 @@ describe('after approval', () => {
     await waitFor(() => expect(api.storeThemeSignature).toHaveBeenCalledWith(PACKAGE_ID, REQUEST_ID, 'c2lnbmF0dXJl'))
   })
 
-  it('a signed version says the signature is stored, not verified', async () => {
-    api.getThemeReport.mockResolvedValue(reportOf({ status: 'approved', reviewed: true, signed: true }))
+  it('a signed version an active Automatos key verifies says so, naming the key (C-05b)', async () => {
+    api.getThemeReport.mockResolvedValue(
+      reportOf({ status: 'approved', reviewed: true, signed: true, signatureVerified: true, keyId: KEY_ID }),
+    )
     await openReport()
-    expect(screen.getByTestId('theme-signed')).toHaveTextContent('not verified')
+    const signed = screen.getByTestId('theme-signed')
+    expect(signed).toHaveTextContent(`Signed. Verified with the active Automatos key ${KEY_ID}.`)
+    expect(signed).not.toHaveTextContent(/not verified|does not verify/)
+  })
+
+  it.each([null, RETIRED_KEY_ID])(
+    'a signed version no active key verifies says it does not verify against one (key %s)',
+    async (keyId) => {
+      api.getThemeReport.mockResolvedValue(reportOf({ status: 'approved', reviewed: true, signed: true, keyId }))
+      await openReport()
+      const signed = screen.getByTestId('theme-signed')
+      expect(signed).toHaveTextContent(`Signed. ${SIGNATURE_INVALID}`)
+      expect(signed.textContent?.includes(RETIRED_KEY_ID)).toBe(keyId !== null)
+    },
+  )
+
+  it.each([null, RETIRED_KEY_ID])(
+    'a signed version no active key verifies offers its open request to sign again (key %s)',
+    async (keyId) => {
+      api.getThemeReport.mockResolvedValue(
+        reportOf({ status: 'approved', reviewed: true, signed: true, keyId, signatureRequest: signatureRequest() }),
+      )
+      api.storeThemeSignature.mockResolvedValue({})
+      await openReport()
+      expect(screen.getByText(SIGN_AGAIN)).toBeInTheDocument()
+      expect(screen.getByTestId('theme-signature-request')).toHaveTextContent(REQUEST_ID)
+      fireEvent.change(screen.getByLabelText(/Paste the signature/), { target: { value: 'c2lnbmF0dXJl' } })
+      fireEvent.click(screen.getByRole('button', { name: SAVE_SIGNATURE }))
+      await waitFor(() => expect(api.storeThemeSignature).toHaveBeenCalledWith(PACKAGE_ID, REQUEST_ID, 'c2lnbmF0dXJl'))
+    },
+  )
+
+  it('a signed version an active key verifies offers no request, even with one open', async () => {
+    api.getThemeReport.mockResolvedValue(
+      reportOf({
+        status: 'approved', reviewed: true, signed: true, signatureVerified: true, keyId: KEY_ID,
+        signatureRequest: signatureRequest(),
+      }),
+    )
+    await openReport()
+    expect(screen.queryByTestId('theme-signature-request')).toBeNull()
+    expect(screen.queryByText(SIGN_AGAIN)).toBeNull()
   })
 
   it('deactivates an approved version with a reason', async () => {
