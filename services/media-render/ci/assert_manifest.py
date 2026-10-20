@@ -18,9 +18,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger("assert_manifest")
 
 ACTIONS_LABELS = ("c2pa.actions", "c2pa.actions.v2")
 GENERATOR = "Automatos AI media-render"
@@ -52,13 +55,14 @@ def check(store: dict, job: dict, media: Path, name: str, expected: str) -> List
     ]
     failures = []
     for label, held in expectations:
-        print(f"{'PASS' if held else 'FAIL'}: {label}")
+        logger.info("%s: %s", "PASS" if held else "FAIL", label)
         if not held:
             failures.append(label)
     return failures
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("manifest", type=Path, help="the manifest store c2pa printed, as JSON")
     parser.add_argument("--job", type=Path, required=True, help="the render job, as GET /render/{id} returned it")
@@ -68,7 +72,7 @@ def main() -> int:
     args = parser.parse_args()
     store = json.loads(args.manifest.read_text() or "null")
     if not isinstance(store, dict):
-        print(f"FAIL: {args.file.name} carries no C2PA manifest")
+        logger.info("FAIL: %s carries no C2PA manifest", args.file.name)
         return 1
     failures = check(store, json.loads(args.job.read_text()), args.file, args.name, args.expected)
     return 1 if failures else 0
