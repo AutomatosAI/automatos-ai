@@ -2,7 +2,7 @@
 /** PRD-260 — the Looks page's rules: edited or not, Save as new look, Duplicate, rename, delete. */
 import { describe, expect, it } from 'vitest'
 
-import { safeGlow } from '@/lib/looks/css'
+import { LOOK_ID_PATTERN, LOOK_TEXT_MAX } from '@/lib/look-kit/validate'
 import {
   SAVED_SUB,
   asDuplicate,
@@ -18,9 +18,8 @@ import {
   statusLine,
   withValues,
 } from '@/lib/looks/editor'
+import { safeGlow, validateLook } from '@/lib/looks/engine'
 import { AURORA, EMBER, WORKSHOP } from '@/lib/looks/presets'
-import { LOOK_ID_PATTERN, LOOK_TEXT_MAX } from '@/lib/looks/types'
-import { validateLook } from '@/lib/looks/validate'
 
 import { myLook } from './helpers'
 

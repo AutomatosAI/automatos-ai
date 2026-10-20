@@ -18,6 +18,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+NO_ROUTE_REPLY = "I'm not sure how to handle that request. Please try rephrasing."
+
 
 class BaseChannelAdapter(ABC):
     """Abstract base for platform channel adapters."""
@@ -116,7 +118,8 @@ class BaseChannelAdapter(ABC):
         1. Convert platform message to RequestEnvelope
         2. Route via UniversalRouter -> RoutingDecision (agent_id)
         3. Execute via AgentFactory.execute_with_prompt()
-        4. Send result back via send_message()
+        4. Send result back via _send_reply(), which adds the AI notice
+           (PRD-264 EUAI-03) and is the only caller of send_message()
         5. Update activity stats on the channel connection
 
         PRD-127: If platform_message contains 'attachment_ids' (list of UUIDs),
@@ -134,13 +137,9 @@ class BaseChannelAdapter(ABC):
             if not envelope:
                 return
 
-            # PRD-127: Extract attachment_ids from platform_message
-            attachment_ids: List[str] = platform_message.get("attachment_ids", [])
-
             # Lazy imports to avoid circular dependency at module load
             from core.routing.engine import UniversalRouter
             from core.database.database import SessionLocal
-            from modules.agents.factory.agent_factory import AgentFactory
 
             db = SessionLocal()
             try:
@@ -157,56 +156,18 @@ class BaseChannelAdapter(ABC):
                         "[Channel:%s] No route found for message, sending fallback",
                         self.connection_id,
                     )
-                    reply_channel = (
-                        platform_message.get("reply_channel_id")
-                        or platform_message.get("channel_id")
-                    )
-                    if reply_channel:
-                        await self.send_message(
-                            reply_channel,
-                            "I'm not sure how to handle that request. Please try rephrasing.",
-                        )
+                    await self._send_reply(db, platform_message, NO_ROUTE_REPLY, inbound_text=envelope.content)
                     self._emit_channel_heartbeat(success=True, detail="no_route_fallback")
                     return
 
                 # ── Execute ──
-                # PRD-234 S3: a Claude Code agent's mention becomes a board ticket the
-                # paired host runs as the user's own session; the channel hears that
-                # it is queued (the factory refuses cli agents by design).
-                from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
-                if is_cli_agent(db, decision.agent_id):
-                    _text = (envelope.content or "").strip()
-                    _first = _text.splitlines()[0][:80] if _text else "request"
-                    _src = envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source)
-                    _msg_key = platform_message.get("message_id") or platform_message.get("ts") or platform_message.get("id") or str(id(envelope))
-                    ticket = file_cli_ticket(
-                        db, workspace_id=envelope.workspace_id, agent_id=decision.agent_id,
-                        title=f"{_src}: {_first}", prompt=envelope.content,
-                        source_type="channel", source_id=source_id_for("channel", f"{self.connection_id}:{_msg_key}"),
-                    )
-                    response_text = queued_line(ticket)
-                else:
-                    factory = AgentFactory(db_session=db)
-                    result = await factory.execute_with_prompt(
-                        agent=decision.agent_id,
-                        prompt=envelope.content,
-                        context={
-                            "source": envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source),
-                            "workspace_id": str(envelope.workspace_id),
-                            "connection_id": self.connection_id,
-                        },
-                        attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
-                        conversation=True,  # F182: a person's message recalls as a chat turn does
-                    )
-                    response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
+                response_text = await self._run_agent(
+                    db, decision.agent_id, envelope, platform_message,
+                    workspace_id=str(envelope.workspace_id),
+                )
 
                 # ── Respond ──
-                reply_channel = (
-                    platform_message.get("reply_channel_id")
-                    or platform_message.get("channel_id")
-                )
-                if reply_channel and response_text:
-                    await self.send_message(reply_channel, response_text)
+                await self._send_reply(db, platform_message, response_text, inbound_text=envelope.content)
 
                 # ── Update activity stats ──
                 await self._update_activity_stats(db)
@@ -223,6 +184,80 @@ class BaseChannelAdapter(ABC):
                 e,
             )
             self._emit_channel_heartbeat(success=False, detail=f"{type(e).__name__}: {e}")
+
+    async def _run_agent(
+        self,
+        db,
+        agent_id: Any,
+        envelope: Any,
+        platform_message: Dict[str, Any],
+        *,
+        workspace_id: str,
+    ) -> str:
+        """Run the routed agent on the message and return its reply text.
+
+        PRD-234 S3: a Claude Code agent's mention becomes a board ticket the
+        paired host runs as the user's own session; the channel hears that it
+        is queued (the factory refuses cli agents by design).
+        """
+        from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
+
+        source = envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source)
+        if is_cli_agent(db, agent_id):
+            _text = (envelope.content or "").strip()
+            _first = _text.splitlines()[0][:80] if _text else "request"
+            _msg_key = platform_message.get("message_id") or platform_message.get("ts") or platform_message.get("id") or str(id(envelope))
+            ticket = file_cli_ticket(
+                db, workspace_id=envelope.workspace_id, agent_id=agent_id,
+                title=f"{source}: {_first}", prompt=envelope.content,
+                source_type="channel", source_id=source_id_for("channel", f"{self.connection_id}:{_msg_key}"),
+            )
+            return queued_line(ticket)
+
+        from modules.agents.factory.agent_factory import AgentFactory
+
+        # PRD-127: attachment_ids from platform_message reach the factory.
+        attachment_ids: List[str] = platform_message.get("attachment_ids", [])
+        factory = AgentFactory(db_session=db)
+        result = await factory.execute_with_prompt(
+            agent=agent_id,
+            prompt=envelope.content,
+            context={"source": source, "workspace_id": workspace_id, "connection_id": self.connection_id},
+            attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
+            conversation=True,  # F182: a person's message recalls as a chat turn does
+        )
+        return (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
+
+    async def _send_reply(
+        self,
+        db,
+        platform_message: Dict[str, Any],
+        text: str,
+        *,
+        inbound_text: Optional[str] = None,
+    ) -> None:
+        """Send ``text`` back to where ``platform_message`` came from.
+
+        The adapter path's one outbound point (PRD-264 EUAI-03): the reply
+        carries "AI assistant for {principal}." on first contact with the
+        person, after the idle gap, and whenever they ask if it is a human.
+        Nothing else calls :meth:`send_message` (an architecture test holds it).
+        """
+        reply_channel = platform_message.get("reply_channel_id") or platform_message.get("channel_id")
+        if not reply_channel or not text:
+            return
+        from channels.ai_notice import notice_for, record_notice_sent
+
+        notice = await notice_for(
+            db,
+            workspace_id=self.workspace_id,
+            connection_id=self.connection_id,
+            person_id=platform_message.get("user_id") or reply_channel,
+            inbound_text=inbound_text,
+        )
+        sent = await self.send_message(reply_channel, notice.apply(text))
+        if sent is not False:
+            await record_notice_sent(notice)
 
     def _emit_channel_heartbeat(self, *, success: bool, detail: str = "") -> None:
         """Emit the ``channels`` primitive finding for this adapter's

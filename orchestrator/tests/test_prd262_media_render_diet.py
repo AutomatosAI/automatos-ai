@@ -31,10 +31,11 @@ from tests.test_prd262_media_render_stages import DOCKERFILE, MEDIA_RENDER, ROOT
 # The packages only mesa-libgallium needs, from the Depends/Pre-Depends closure of
 # the runtime's apt line over trixie main, updates and security, on top of
 # python:3.12-slim's own packages (18 Oct 2026). libdrm-intel1 and libpciaccess0
-# are amd64's alone.
+# are amd64's alone. libxshmfence1 joined when it left the apt line (PRD-262 #47,
+# 19 Oct): only mesa-libgallium depends on it there.
 MESA_ONLY = {
     "mesa-libgallium", "libllvm19", "libz3-4", "libelf1t64", "libedit2", "libdrm-amdgpu1",
-    "libsensors5", "libsensors-config", "libxcb-randr0", "libxcb-sync1",
+    "libsensors5", "libsensors-config", "libxcb-randr0", "libxcb-sync1", "libxshmfence1",
 }
 MESA_ONLY_AMD64 = {"libdrm-intel1", "libpciaccess0"}
 SIZE_STEP = "The image is at most 1.30 GB on disk (amd64)"
@@ -110,12 +111,16 @@ def test_the_chrome_stage_installs_binutils_first_and_strips_the_arm64_shell():
     amd64 = run.index("else", arm64)
     assert binutils < arm64
     assert 'strip --strip-unneeded "$BIN";' in run[arm64:amd64]
-    # On either arch, after the branches: a .symtab left fails the build.
-    assert 'fi; test -x "$BIN"; if readelf -SW "$BIN" | grep -F .symtab; then' in run
+    # On either arch, after the branches: a .symtab left in the shell or a library
+    # beside it (PRD-262 #38) fails the build.
+    assert 'fi; test -x "$BIN"; for elf in "$BIN" $(find "$(dirname "$BIN")" -maxdepth 1 -type f' in run
+    assert 'do if readelf -SW "$elf" | grep -F .symtab; then' in run
     check = run.index("readelf -SW")
     assert "exit 1" in run[check : run.index("mv ", check)]
-    # strip and readelf stay in this builder stage.
-    assert "binutils" not in _stage("runtime") and "strip" not in _stage("runtime")
+    # strip and readelf stay in the builder stages; the runtime only names the
+    # node-stripped stage it copies node from (PRD-262 #22).
+    runtime = _stage("runtime").replace("--from=node-stripped ", "--from=<node> ")
+    assert "binutils" not in runtime and "strip" not in runtime and "readelf" not in runtime
 
 
 def test_the_chrome_stage_keeps_only_en_us_pak():
@@ -139,8 +144,9 @@ def test_the_py_stage_trims_the_venv_in_the_run_that_installs_the_lock():
     onnxruntime = run.index('rm "$site"/onnxruntime/capi/libonnxruntime.so.*;')
     numpy = run.index('find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +;')
     probe = run.index("/opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'")
-    assert install < run.index("site=/opt/venv/lib/python3.12/site-packages;") < move < onnxruntime < probe
-    assert install < numpy < probe
+    # PRD-262 #18: the deletions come first, so the strip after them skips what goes.
+    assert install < run.index("site=/opt/venv/lib/python3.12/site-packages;") < onnxruntime < move < probe
+    assert install < numpy < move
     assert "cp -r" not in _stage("py")
     # libonnxruntime_providers_shared.so stays: the pattern is the unlinked library's.
     assert "libonnxruntime_providers" not in run

@@ -1,7 +1,8 @@
 /**
  * PRD-261 A-04b — a theme's own routes at /x/<route> (registerRoute). The server page answers the
  * 404 for an address no theme of the style can serve (a bad route, Classic, Studio, a builtin
- * theme without the route) and otherwise renders ThemeSlotRoute full bleed inside MainLayout.
+ * theme without the route) and otherwise renders ThemeSlotRoute full bleed inside MainLayout,
+ * which sits inside the host's AI label gate (PRD-264 EUAI-11a).
  * ThemeSlotRoute renders the active theme's route (builtin Play's Conversations through its lazy
  * slot, findBy*; an installed theme's from the theme host), nothing while an installed theme
  * loads, and calls notFound() when nothing is registered by that name.
@@ -36,6 +37,7 @@ vi.mock('@/components/play/conversations/play-conversations', () => ({
 }))
 
 import ThemeRoutePage from '@/app/x/[...path]/page'
+import { AiLabelGate } from '@/components/ai-label/ai-label'
 import { MainLayout } from '@/components/layout/main-layout'
 import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
 
@@ -132,9 +134,13 @@ describe('app/x/[...path]/page.tsx', () => {
     ['a legacy play cookie', 'play', ['conversations']],
     ["an installed theme's style (its routes are known in the browser)", INSTALLED_STYLE, ['hello']],
     ['an installed theme, a nested route', INSTALLED_STYLE, ['hello', 'there']],
-  ])('renders the route full bleed in MainLayout under %s', async (_label, style, path) => {
+  ])('renders the route full bleed in MainLayout, inside the host AI label gate, under %s', async (_label, style, path) => {
     state.style = style
-    const page = await ThemeRoutePage(params(...path))
+    const gate = await ThemeRoutePage(params(...path))
+    // PRD-264 EUAI-11a: the gate wraps the theme's frame, so the label sits outside it, on the left
+    expect(gate.type).toBe(AiLabelGate)
+    expect(gate.props.placement).toBe('bottom-left')
+    const page = gate.props.children
     expect(page.type).toBe(MainLayout)
     expect(page.props.fullBleed).toBe(true)
     expect(page.props.children).toEqual(<ThemeSlotRoute route={path.join('/')} />)

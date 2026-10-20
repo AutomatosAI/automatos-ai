@@ -6,10 +6,11 @@ The session behind ``WS /api/voice/retell/llm-websocket/{call_id}``. The route
 (``api/voice_retell.py``) refuses unminted and superseded calls before accept;
 this class runs the accepted socket. Protocol: the server speaks FIRST with a
 ``config`` frame; ``call_details`` delivers the dynamic variables once and is
-answered by an empty response 0 (the human has the floor); ``ping_pong`` must
-be echoed; ``update_only`` owes nothing; ``response_required`` /
-``reminder_required`` start a turn — a newer one supersedes a still-streaming
-turn (barge-in), so the old turn task is cancelled.
+answered by response 0, the begin frame, whose content Retell speaks as the
+opening line (Auto speaks first); ``ping_pong`` must be echoed;
+``update_only`` owes nothing; ``response_required`` / ``reminder_required``
+start a turn — a newer one supersedes a still-streaming turn (barge-in), so
+the old turn task is cancelled.
 
 PRD-258 US-001: every turn writes ONE ``voice_turns`` row once its stream ends
 (or it is superseded), with the moments this side of the socket sees — the
@@ -19,6 +20,11 @@ agent stream reports in-band (``modules/voice/turn_timing.py``).
 Moved out of ``api/voice_retell.py`` by PRD-258 US-001 (D6: that file never
 grows); the route lends the session its turn stream and the call-status read,
 late-bound, so the agent loop stays where it is.
+
+PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto speaks first and says it is an
+AI (the begin frame carries the greeting the route lends, never empty);
+after an automatic reconnect, and every ``VOICE_AI_REMINDER_MINUTES`` of call
+time, the next response opens with the reminder (``modules/voice/ai_notice.py``).
 """
 
 from __future__ import annotations
@@ -29,10 +35,10 @@ import functools
 import logging
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from config import config
-from modules.voice import telemetry, turn_timing
+from modules.voice import ai_notice, telemetry, turn_timing
 from modules.voice.providers.retell import (
     INTERACTION_CALL_DETAILS,
     INTERACTION_PING_PONG,
@@ -56,20 +62,38 @@ CALL_STATUS_SUPERSEDED = "superseded"
 WS_CLOSE_NORMAL = 1000
 # Handshake per Retell's own demo: ask for call_details; enable auto_reconnect.
 CONFIG_FRAME = {"response_type": "config", "config": {"auto_reconnect": True, "call_details": True}}
-# The begin frame: an empty response 0 — the human opens.
+# The begin frame: response 0, whose content Retell speaks as the opening line.
 BEGIN_RESPONSE_ID = 0
 
 
 @dataclass(frozen=True)
 class SocketPorts:
-    """What the route lends a call: Auto's turn stream and the call's live status."""
+    """What the route lends a call: Auto's turn stream, the call's live status and
+    the AI notice texts.
+
+    ``ai_greeting`` is Auto's opening line and ``ai_reminder`` the line that
+    opens a response when a reminder is due (PRD-264 EUAI-04). The route builds
+    both in ``modules/policy/ai_disclosure.py``; this feature module never
+    imports another one. ``socket_reconnected`` says whether this socket is an
+    automatic reconnect of the call; ``clock`` reads call time in seconds. Both
+    default to the real ones; tests pass fakes.
+    """
 
     stream_turn: Callable[[RetellLLMRequest], AsyncIterator[dict]]
     call_status: Callable[[str], Optional[str]]
+    ai_greeting: str
+    ai_reminder: str
+    socket_reconnected: Callable[[str], Awaitable[bool]] = ai_notice.socket_reconnected
+    clock: Callable[[], float] = monotonic
 
 
 def _closing_frame(response_id: int) -> dict:
     return wrap_ws_response({"response_id": response_id, "content": "", "content_complete": True})
+
+
+def _begin_frame(greeting: str) -> dict:
+    """Response 0: Auto's opening line, which says it is an AI (never empty)."""
+    return wrap_ws_response({"response_id": BEGIN_RESPONSE_ID, "content": greeting, "content_complete": True})
 
 
 class _TurnMarks:
@@ -111,6 +135,10 @@ class LiveCallSocket:
         # One moment. One moment." over itself — the "five people talking"
         # Gerard heard. Once tells the caller the line is alive; twice is a stutter.
         self._ack_spent = False
+        # Art. 50(1) reminders: when the caller last heard that Auto is an AI,
+        # and whether this socket is a reconnect still owed a reminder.
+        self._last_ai_notice_at = ports.clock()
+        self._reminder_owed = False
         self.stats = {"pings": 0, "updates": 0, "turns": 0, "frames": 0}
 
     async def safe_send(self, payload: dict) -> bool:
@@ -180,7 +208,13 @@ class LiveCallSocket:
         if self._begun:
             return True
         self._begun = True
-        return await self.safe_send(_closing_frame(BEGIN_RESPONSE_ID))
+        sent = await self.safe_send(_begin_frame(self._ports.ai_greeting))
+        self._last_ai_notice_at = self._ports.clock()
+        self._reminder_owed = await self._ports.socket_reconnected(self._call_id)
+        logger.info(
+            "voice_live_ws_ai_greeting call=%s sent=%s reconnected=%s", self._call_id, sent, self._reminder_owed
+        )
+        return sent
 
     async def _on_turn(self, message: dict, itype: str) -> bool:
         self.stats["turns"] += 1
@@ -214,10 +248,16 @@ class LiveCallSocket:
             self._speaking.cancel()
 
     async def respond(self, req: RetellLLMRequest) -> None:
-        """Stream one turn to Retell, then record where its time went."""
+        """Stream one turn to Retell, then record where its time went.
+
+        A due AI reminder goes out before the slow-turn ack is armed, so the
+        reminder is always the response's first frame (PRD-264 EUAI-04).
+        """
         turn = _TurnMarks()
-        ack_task = self._arm_ack(req, turn)
+        ack_task: Optional[asyncio.Task] = None
         try:
+            await self._remind_if_due(req, turn)
+            ack_task = self._arm_ack(req, turn)
             await self._relay(req, turn, ack_task)
         except asyncio.CancelledError:
             # Superseded turn (barge-in): Retell has moved on — stop quietly.
@@ -229,6 +269,22 @@ class LiveCallSocket:
             if ack_task is not None and not ack_task.done():
                 ack_task.cancel()
             self._record_turn(req, turn)
+
+    async def _remind_if_due(self, req: RetellLLMRequest, turn: _TurnMarks) -> None:
+        """Open this response with "Just so you know, I'm an AI assistant." when it
+        is owed (a reconnect, or the reminder interval passed). The reminder
+        counts once it reached the socket; a failed send leaves it owed."""
+        now = self._ports.clock()
+        if not ai_notice.reminder_due(reconnected=self._reminder_owed, last_notice_at=self._last_ai_notice_at, now=now):
+            return
+        content = ai_notice.reminder_frame_text(self._ports.ai_reminder)
+        frame = {"response_id": req.response_id, "content": content, "content_complete": False}
+        if not await self.safe_send(wrap_ws_response(frame)):
+            return
+        turn.content_sent()
+        self._reminder_owed = False
+        self._last_ai_notice_at = now
+        logger.info("voice_live_ws_ai_reminder call=%s rid=%s", self._call_id, req.response_id)
 
     async def _relay(self, req: RetellLLMRequest, turn: _TurnMarks, ack_task: Optional[asyncio.Task]) -> None:
         async for frame in self._ports.stream_turn(req):
