@@ -331,11 +331,12 @@ ACTION_SEPARATOR = "_"
 # PRD-263 US-057: each roster agent's app links, from existing tables only. Assigned: an
 # active agent_app_assignments row. Playbook (workflow_recipes; a Playbook has no status
 # column, so every Playbook of the workspace counts): a step routed to the agent while the
-# Playbook lists the app in required_tools, or a recorded run (recipe_executions) in which
-# the agent's step called one of the app's actions. Mission: a run not yet ended
-# (orchestration_runs.state) with a task assigned or pinned to the agent, while one of its
-# tasks lists the app in input_context.required_tools. Each cast sits inside a CASE, as in
-# _HEARTBEAT_SQL.
+# Playbook lists the app in required_tools, or a run (recipe_executions) started since the
+# read window began, in which the agent's step called one of the app's actions (only those
+# runs are unnested, so the read does not grow with a workspace's whole run history).
+# Mission: a run not yet ended (orchestration_runs.state) with a task assigned or pinned
+# to the agent, while one of its tasks lists the app in input_context.required_tools. Each
+# cast sits inside a CASE, as in _HEARTBEAT_SQL.
 _APP_LINKS_SQL = text("""
     WITH links AS (
         SELECT aa.agent_id, aa.app_name, :assigned AS link, NULL AS source
@@ -354,7 +355,7 @@ _APP_LINKS_SQL = text("""
       UNION
         SELECT aa.agent_id, aa.app_name, :playbook, r.name
         FROM agent_app_assignments aa
-        JOIN recipe_executions e ON e.workspace_id = CAST(:workspace_id AS uuid)
+        JOIN recipe_executions e ON e.workspace_id = CAST(:workspace_id AS uuid) AND e.started_at >= :start
         JOIN workflow_recipes r ON r.id = e.recipe_id AND r.workspace_id = CAST(:workspace_id AS uuid)
         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.step_results) = 'array'
                                                      THEN e.step_results ELSE CAST('[]' AS jsonb) END) AS s(step)
@@ -693,7 +694,7 @@ def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
 
 async def read(db: Session, workspace_id: Union[UUID, str], cur_week: str,
                *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
-    """:func:`read_sync` on a worker thread, so the six statements never hold the event loop."""
+    """:func:`read_sync` on a worker thread, so the seven statements never hold the event loop."""
     return await asyncio.to_thread(read_sync, db, workspace_id, cur_week, ref_weeks=ref_weeks)
 
 

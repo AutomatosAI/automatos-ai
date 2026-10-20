@@ -93,15 +93,17 @@ def _listed_in_required_tools(db, crew):
     _playbook(db, crew, steps=[_step_routed_to_scout(crew)], required_tools=["GMAIL"])
 
 
-def _called_in_a_recorded_run(db, crew):
-    """A Playbook that lists no tools, whose last run's step by Scout sent an email."""
+def _called_in_a_recorded_run(db, crew, started_at=None):
+    """A Playbook that lists no tools, whose last run's step by Scout sent an email (the run
+    started now unless ``started_at``, naive UTC as recipe_executions stores it)."""
     from core.models.core import RecipeExecution
 
     playbook = _playbook(db, crew, steps=[_step_routed_to_scout(crew)], required_tools=[])
     db.add(RecipeExecution(execution_id=f"exec-{uuid.uuid4().hex[:8]}", recipe_id=playbook.id,
                            workspace_id=UUID(crew.ws), status="completed", triggered_by="us057",
                            step_results=[{"step_id": "s1", "agent_id": crew.scout,
-                                          "tool_calls_summary": ["GMAIL_SEND_EMAIL (success)"]}]))
+                                          "tool_calls_summary": ["GMAIL_SEND_EMAIL (success)"]}],
+                           **({"started_at": started_at} if started_at else {})))
     db.flush()
 
 
@@ -138,6 +140,18 @@ def test_an_app_used_by_an_active_playbook_step_routed_to_the_agent_yields_a_rep
     assert (rx["apply_kind"], rx["report_only"]) == (False, kept)
     assert f"Reported only: {kept}." in run["report_md"]
     assert _grants(db_session, crew) == 0 and _ledger(db_session, crew) == []
+
+
+def test_a_playbook_run_from_before_the_weeks_read_no_longer_keeps_the_app(db_session, crew):
+    """COLLECT reads W38 to W42; a run in W37 whose step by Scout called GMAIL is not read
+    (the scan stays bounded), so with nothing else needing GMAIL the removal is a card."""
+    _failing(db_session, crew)
+    _called_in_a_recorded_run(db_session, crew, started_at=hdx.at(-5).replace(tzinfo=None))
+
+    (rx,) = _removals(hdx.judge(db_session, crew.ws))
+
+    assert rx["apply_kind"] is True and "report_only" not in rx
+    assert _grants(db_session, crew) == 1 and _ledger(db_session, crew) == [REMOVAL]
 
 
 @pytest.mark.parametrize("state, blocks", [("running", True), ("completed", False)])
