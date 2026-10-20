@@ -23,7 +23,7 @@ Get each Play:
 1. **Builtin Play first.** Theme menu (the Appearance button) › Style › Play. The style cookie
    `automatos-style` reads `theme:builtin:play`. Do every item now, in a workspace that has **not**
    installed Play's package: once it has, the menu hides the builtin entry (D1-c).
-2. **Then the package.** Download `automatos.play-1.0.0.autotheme` from the `play-package` artifact
+2. **Then the package.** Download `automatos.play-1.1.0.autotheme` from the `play-package` artifact
    of a green browser-e2e run (or build it in the kit at `KIT_REF`: `npm ci --ignore-scripts`, then
    `npm run build` and `npm run pack` in `themes/play`). Settings › Appearance › Themes › Install
    theme, upload it, opt in to its private code, choose it. The style cookie reads
