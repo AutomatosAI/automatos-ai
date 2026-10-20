@@ -17,7 +17,9 @@ with the REAL workspace-permission gate (only the caller's workspace role is stu
   version's signature an active key verifies (the keys path points at an RFC 8032 public key,
   whose published seed signs here); a local operator's own approval of ``automatos/x`` is never
   Official; the card, the detail and every versions-map entry carry ``signature {state, keyId}``;
-  a version whose key was retired is Official again once an active key's signature is pasted (QB-28).
+  a version whose key was retired is Official again once an active key's signature is pasted (QB-28);
+* (C-05c, QB-28) a version whose signature fails, or whose key was revoked, is not listed at all
+  (``tests/test_prd261_signature_on_load.py`` pins the rest of that disable); a retired key's is.
 """
 from __future__ import annotations
 
@@ -77,6 +79,7 @@ from core.models.themes import (  # noqa: E402
     ThemePublisher,
     ThemeReviewEvent,
     ThemeRevocation,
+    ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
 from services.themes.serve import module_url  # noqa: E402
@@ -87,7 +90,7 @@ PLAY = "automatos/play"
 PLAY_LISTING = "automatos.play"
 TABLES = [m.__table__ for m in (
     ThemePackage, ThemeInstallation, ThemeChoice, ThemeLook, ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation,
-    ThemePublisher, ThemeReviewEvent,
+    ThemePublisher, ThemeReviewEvent, ThemeRevocationSync,  # C-05c reads the feed's revoked keys in the local edition
 )]
 ENGINES = {"automatos": "^1.0.0", "sdk": "^1.0.0"}
 FUTURE_ENGINES = {"automatos": "^2.0.0", "sdk": "^1.0.0"}
@@ -477,9 +480,14 @@ def test_a_signature_that_does_not_verify_is_never_official(api, monkeypatch, tm
     if why == "tampered files":
         play.file_manifest = {**play.file_manifest, "README.md": _file("99")}
         api.db.commit()
-    card = _listings(api)[PLAY_LISTING]
-    assert card["publisher"]["official"] is False and card["signature"]["state"] == "invalid"
-    assert card["signature"]["keyId"] == (RFC_KEY["keyId"] if key_out_of_use else None)  # the key that signed
+    verdict = signature_verify.package_verdict(play).view()  # what the listing shows of the signature
+    assert verdict == {"state": "invalid", "keyId": RFC_KEY["keyId"] if key_out_of_use else None}  # the key that signed
+    card = _listings(api).get(PLAY_LISTING)
+    if why == "retired key":  # still its signer's: listed, never Official
+        assert card["publisher"]["official"] is False and card["signature"] == verdict
+    else:  # C-05c (QB-28): a signature that fails, or a revoked key's, disables the version, so it isn't listed
+        assert card is None
+        assert api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}").status_code == 404
 
 
 def test_a_publisher_marked_reserved_needs_the_signature_too_and_an_unreserved_one_never_is_official(
