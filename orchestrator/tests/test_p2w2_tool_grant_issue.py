@@ -24,9 +24,7 @@ fake registry, no DB / network / Redis. Notification dispatch is stubbed.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import os
-import sys as _sys
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,18 +36,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from core.models.approval_grants import ApprovalGrant, GrantStatus, SUBJECT_TOOL_CALL
 from modules.tools.discovery.action_registry import ActionDefinition

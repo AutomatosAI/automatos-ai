@@ -534,7 +534,7 @@ describe('the asleep screen', () => {
     expect(screen.getByText(START_COMMAND)).toBeInTheDocument()
     expect(START_COMMAND).toBe('make up')
     expect(screen.getByText(START_HINT)).toBeInTheDocument()
-    expect(START_HINT).toBe('Installed with the published images? Run make up-images. No make? docker compose up -d')
+    expect(START_HINT).toBe('No make? docker compose up -d')
     expect(screen.getByText('automatos-ai')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: COPY_LABEL }))
     expect(await screen.findByRole('button', { name: COPIED_LABEL })).toBeInTheDocument()

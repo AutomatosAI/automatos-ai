@@ -1,10 +1,9 @@
 """PRD-163 S4 — the mission approval card is emitted to chat (backend half)."""
 from __future__ import annotations
-import os, sys, types
+import os
 for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
     os.environ.setdefault(_k, "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost"); os.environ.setdefault("POSTGRES_PORT", "5432")
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from modules.tools.formatting.result_formatter import ToolResultFormatter  # noqa: E402
 

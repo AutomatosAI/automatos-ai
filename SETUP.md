@@ -67,7 +67,8 @@ session paths won't line up with Explorer.
    - **Docker Engine inside Ubuntu**: follow Docker's *Install Docker Engine on
      Ubuntu* guide, inside the Ubuntu terminal.
 
-   *Check:* in the Ubuntu terminal, `docker compose version` prints `v2.x` or later.
+   *Check:* in the Ubuntu terminal, `docker version --format '{{.Server.Version}}'`
+   prints 25 or later, and `docker compose version --short` prints 2.24.4 or later.
 3. **Install git and make inside Ubuntu:**
    ```bash
    sudo apt update && sudo apt install -y git make python3
@@ -86,11 +87,11 @@ forwards the ports.
 
 | Need | Check | Install if missing |
 |---|---|---|
-| Docker with Compose v2 | `docker compose version` | macOS: Docker Desktop · Linux: Docker Engine + compose plugin |
+| Docker Engine 25 or later with Compose 2.24.4 or later | `docker version --format '{{.Server.Version}}'` prints 25 or later; `docker compose version --short` prints 2.24.4 or later | macOS: Docker Desktop (update it if older) · Linux: Docker Engine + compose plugin from Docker's repository (docs.docker.com/engine/install); a distribution's `docker.io` package can be older |
 | Docker is running | `docker info` shows no error | Start Docker Desktop, or `sudo systemctl start docker` |
 | git | `git --version` | macOS: `xcode-select --install` · Linux: your package manager |
 | make | `make --version` | macOS: comes with the Xcode tools · Linux: `sudo apt install make` |
-| ~5 GB free disk | `df -h .` | The images are about 3.7 GB |
+| ~5 GB free disk | `df -h .` | The first `make up` downloads about 1.33 GB of images (amd64, compressed; 1.28 GB on arm64), which Docker unpacks to more; your data comes on top |
 | Free ports 3000, 8000, 5432, 6379, 9000, 9001 | `lsof -i :3000 -i :8000 -i :5432 -i :6379 -i :9000 -i :9001` prints nothing | Pick other ports in step 3 |
 
 On Linux, if `docker info` says *permission denied*, add the user to the `docker`
@@ -100,7 +101,7 @@ group (`sudo usermod -aG docker $USER`), then log out and back in.
 
 ```bash
 cd ~
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 ```
 
@@ -109,22 +110,31 @@ cd automatos-ai
 ### 3. Create `.env` with the three secrets
 
 The stack refuses to start without `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and
-`API_KEY`. Generate random values; nobody needs to remember them.
-
-This block is safe to run again: it creates `.env` only if it's missing and
-fills in a secret only while it is still empty or a `CHANGE_ME` placeholder.
-**Never replace a secret on an install that has already started**: the database
-keeps the password it was created with, and the stack stops connecting.
+`API_KEY`, and refuses the `CHANGE_ME` placeholders `.env.example` ships.
+`make env` generates random values; nobody needs to remember them. (`make up`
+runs it first anyway; running it now lets you add the settings below.)
 
 ```bash
-[ -f .env ] || cp .env.example .env
-for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
+make env
+```
+
+It is safe to run again: it creates `.env` from `.env.example` only if it's
+missing, and fills in a secret only while it is still empty or a `CHANGE_ME`
+placeholder, and only before the first start. **Never replace a secret on an
+install that has already started**: the database keeps the password it was
+created with, and the stack stops connecting. On such an install `make env`
+changes nothing; if it finds a placeholder there it stops and prints how to
+rotate it.
+
+No `make`? The same by hand:
+
+```bash
+[ -f .env ] || { cp .env.example .env && chmod 600 .env; }
+docker volume inspect automatos_postgres_data > /dev/null 2>&1 || for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
   if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
-    value=$(openssl rand -hex 24)
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+    sed -i.bak "s|^${key}=.*|${key}=$(openssl rand -hex 24)|" .env && rm -f .env.bak
   fi
 done
-rm -f .env.bak
 ```
 
 Then set where Automatos keeps its files, as an **absolute path**. This is the
@@ -143,8 +153,14 @@ Optional, in the same way:
   (9000), `MINIO_CONSOLE_PORT` (9001). Two of them need a companion setting:
   - `API_PORT`: also set `NEXT_PUBLIC_API_URL=http://localhost:<port>` and
     `NEXT_PUBLIC_WS_URL=ws://localhost:<port>/ws` in `.env`.
-  - `MINIO_PORT`: also set `S3_PUBLIC_ENDPOINT_URL=http://localhost:<port>` in
+  - `MINIO_PORT`: also set `NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:<port>` in
+    `.env`, and `S3_PUBLIC_ENDPOINT_URL=http://localhost:<port>` in
     `envs/api.local` (create the file if it doesn't exist).
+
+  The published web app is built for ports 8000 and 9000, so with these set
+  `make up` builds the web app on this machine instead (a few minutes), and says
+  so. A moved port without its companion setting stops `make up` with the line
+  to add.
 
   The rest of this guide uses the defaults, 3000 and 8000; use your ports
   wherever it shows those.
@@ -158,14 +174,17 @@ prints `3`, and `grep -c CHANGE_ME .env` prints `0`.
 make up
 ```
 
-The first run builds the images and the database, which takes 5–15 minutes
-depending on the machine. Later starts take seconds.
+`make up` downloads the images CI publishes for this commit instead of
+building them: about 1.3 GB the first time, so about a minute at 200 Mbit/s or
+three to four at 50 Mbit/s, plus the first boot, which builds the database. It
+prints the image tag it picked and why. Later starts take seconds.
 
-No `make`? Run the equivalent, from the repository folder:
+No `make`? Run the equivalent, from the repository folder. It runs the `edge`
+images, the newest main build that booted in CI:
 
 ```bash
 mkdir -p "$HOME/automatos-deliverables/projects"
-docker compose up -d --build --remove-orphans
+docker compose up -d --remove-orphans
 ```
 
 *Check:* `docker compose ps` shows every service `running` or `healthy`, and
@@ -265,7 +284,8 @@ Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting
 - [ ] Optional: session mode paired, and `make cli-host-status` shows running
 
 Day to day: `make up` starts it, `make down` stops it (your data is kept), and
-`make status` shows what's running.
+`make status` shows what's running. To update: `git pull && make up`, which also
+brings the weekly rebuild with fresh OS packages.
 
 ---
 
@@ -275,8 +295,10 @@ Day to day: `make up` starts it, `make down` stops it (your data is kept), and
 |---|---|---|
 | `exec /usr/local/bin/docker-entrypoint.sh: no such file or directory` | The code was checked out on Windows with CRLF line endings | Clone inside WSL2 (Path W). An old Windows checkout: re-clone inside Ubuntu |
 | `make: command not found` | make isn't installed | `sudo apt install make`, or use the plain `docker compose` command in step 4 |
+| `Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later` (from `make up`), or `can't set healthcheck.start_interval as feature require Docker Engine v25 or later` (from `docker compose up`) | Docker is older than the floor | Update Docker Desktop, or install Docker Engine and its compose plugin from Docker's repository (step 1), then run `make up` again |
 | `port is already allocated` / `address already in use` | Something else uses 5432, 3000 or 8000 (often a local Postgres) | Set `POSTGRES_PORT`, `FRONTEND_PORT` or `API_PORT` in `.env` (step 3) |
 | `required variable POSTGRES_PASSWORD is missing` | `.env` is missing or the secrets are empty | Redo step 3 |
+| `Placeholder secrets: … Each still starts with CHANGE_ME` (from `make env`, or the backend keeps restarting with it in its log) | An install that already started on the `.env.example` placeholders | Rotate them as it prints ([self-hosting guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)). On the install you just made, with nothing in it yet: `docker compose down -v`, then `make up` |
 | Backend stays `unhealthy` | Usually a slow first boot | Wait 2–3 minutes, then `docker compose logs backend --tail 50` |
 | Session files don't appear under their session in Explorer | `AUTOMATOS_WORKSPACE_DIR` is relative (`./workspaces`), or the code is under `/mnt/c` while Docker sees `C:\` | Use an absolute Linux path (step 3) and keep everything inside WSL2 |
 | `Session mode on Windows needs Windows 10 version 1809 or later` | The host was started on an older Windows | Run it inside Ubuntu (WSL2) |

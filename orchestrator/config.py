@@ -1719,7 +1719,6 @@ class Config:
     # =============================================================================
     AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
-    GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
     # F353: draw a document Deliverable's first page for its card, after it is made.
     DOCUMENT_THUMBNAILS_ENABLED: bool = os.getenv("DOCUMENT_THUMBNAILS_ENABLED", "true").lower() == "true"

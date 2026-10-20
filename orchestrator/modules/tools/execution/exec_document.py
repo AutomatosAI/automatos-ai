@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from modules.tools.execution.document_brand_check import a_documents_banned_words_are_said
+from modules.tools.execution.xlsx_from_table_file import an_xlsx_is_made_from_csv_or_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ async def execute_generate_document(
     return await with_session_copy(result, caller_context, workspace_id)
 
 
+@an_xlsx_is_made_from_csv_or_json  # PRD-262 US-025: create_xlsx without pandas
 async def execute_document_tool(
     executor,
     tool_name: str,
@@ -131,41 +133,6 @@ async def execute_document_tool(
                 return {
                     "success": False,
                     "error": f"Failed to create DOCX: {result.stderr}",
-                    "tool": tool_name
-                }
-
-        elif tool_name == 'create_xlsx':
-            # Create Excel file from CSV or JSON
-            try:
-                import pandas as pd
-
-                # Detect source file type
-                if source_file.endswith('.csv'):
-                    df = pd.read_csv(source_file)
-                elif source_file.endswith('.json'):
-                    df = pd.read_json(source_file)
-                else:
-                    return {
-                        "success": False,
-                        "error": "Source file must be CSV or JSON for XLSX creation",
-                        "tool": tool_name
-                    }
-
-                # Write to Excel
-                sheet_name = parameters.get('sheet_name', 'Sheet1')
-                df.to_excel(output_file, sheet_name=sheet_name, index=False)
-
-                return {
-                    "success": True,
-                    "action": "create_xlsx",
-                    "params": parameters,
-                    "result": f"Excel file created successfully: {output_file}",
-                    "output_file": output_file
-                }
-            except ImportError:
-                return {
-                    "success": False,
-                    "error": "pandas library not available. Install with: pip install pandas openpyxl",
                     "tool": tool_name
                 }
 
