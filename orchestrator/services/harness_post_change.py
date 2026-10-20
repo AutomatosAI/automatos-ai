@@ -25,6 +25,11 @@ the apply action), week by week over the ISO weeks after the week it applied in 
   applies, :func:`close_rolled_back` moves the change it undoes ``applied → rolled_back``
   (FR-15). A rollback is never judged or rolled back (FR-16), and a change gets no new
   rollback while an earlier one for it waits, is applied, or was declined or withdrawn.
+  An agent has one rollback card open at a time (FR-14: one open card per agent and kind),
+  so a run suggests at most one per agent, for its newest change to undo (when two changes
+  moved one setting, only the newest one's prior value reads now), and none while one of
+  its rollback cards is open. Each other change to undo waits for a later run; its line
+  says so.
 
 Reads only, apart from that one move: no platform action, no tool executor, no model call (FR-12).
 """
@@ -51,7 +56,7 @@ from core.models.harness import (
 )
 from core.stats import harness_verdicts as hv
 from services import harness_changes as hc
-from services import harness_metrics
+from services import harness_grants, harness_metrics
 from services.harness_diagnose import METRIC_BY_NAME, RateMetric
 from services.harness_metrics import TOOL_SUCCESS, HarnessMetrics, build_window
 
@@ -72,6 +77,10 @@ DAYS_PER_WEEK = 7
 APPLIED_LINE = "- {change}, applied {day}: {parts}.{tail}"
 ROLLBACK_TAIL = " HARNESS suggests undoing it (see the suggested changes): {why}"
 SETTLED_TAIL = " An earlier card to undo it is {state}."
+WAITS_TAIL = " HARNESS suggests undoing it after the card to undo another change to {agent}, one at a time: {why}"
+# A rollback card in these states is open: waiting for its click, or being applied (the
+# states in which harness_grants raises no second card for the agent and kind, FR-14).
+OPEN_ROLLBACK_STATES = frozenset(harness_grants.OPEN_STATES)
 FELL = "{label} {moved} from {before:.0%} ({x_ref} of {n_ref}) in the {days} days before the change to " \
        "{after:.0%} ({x} of {n}) in week {week} after it, p={p:.2g}."
 # A control compares rates, so its drops are in percentage points.
@@ -142,7 +151,8 @@ class Judged:
 @dataclass(frozen=True)
 class Check:
     """One applied change and its judged metrics; ``settled`` is the state of an earlier
-    rollback of it that stops a new one."""
+    rollback of it that stops a new one, and ``waits`` is set while another change to the
+    same agent is undone first."""
 
     rx_id: str
     kind: str
@@ -153,11 +163,18 @@ class Check:
     applied_at: datetime
     judged: Tuple[Judged, ...]
     settled: Optional[str] = None
+    waits: bool = False
 
     @property
     def undo_on(self) -> Optional[Judged]:
         """The first metric whose trigger beat the control, if any."""
         return next((judged for judged in self.judged if judged.raises_rollback), None)
+
+    @property
+    def undo_due(self) -> bool:
+        """Whether its rollback is suggested this run: a metric beat the control, no earlier
+        rollback of it stops a new one, and it does not wait for another change."""
+        return self.undo_on is not None and self.settled is None and not self.waits
 
 
 @dataclass(frozen=True)
@@ -303,6 +320,12 @@ def _settled_rollbacks(rows: Iterable[HarnessTaskLedger]) -> Dict[str, str]:
             if (undone := _undone_rx(row)) is not None and row.state in SETTLED_ROLLBACK_STATES}
 
 
+def _open_rollbacks(rows: Iterable[HarnessTaskLedger]) -> FrozenSet[int]:
+    """Agents with a rollback card open."""
+    return frozenset(row.target_agent_id for row in rows
+                     if row.kind == hc.ROLLBACK and row.state in OPEN_ROLLBACK_STATES)
+
+
 def _changed_since(rows: Iterable[HarnessTaskLedger], moment: datetime) -> FrozenSet[int]:
     """Agents HARNESS changed (or rolled back) at or after ``moment``."""
     return frozenset(row.target_agent_id for row in rows
@@ -361,6 +384,8 @@ def _line(check: Check, settings: PostChangeSettings, weeks_seen: int) -> str:
     undo = check.undo_on
     if check.settled is not None and undo is not None:
         tail = SETTLED_TAIL.format(state=check.settled)
+    elif check.waits and undo is not None:
+        tail = WAITS_TAIL.format(agent=check.agent_name, why=_why_undo(undo, settings))
     else:
         tail = ROLLBACK_TAIL.format(why=_why_undo(undo, settings)) if undo is not None else ""
     parts = "; ".join(_part(judged, weeks_seen, settings) for judged in check.judged)
@@ -403,6 +428,19 @@ def _check(db: Session, ws: UUID, row: HarnessTaskLedger, post: HarnessMetrics, 
                  row.applied_at, judged)
 
 
+def _newest_undo_first(checks: List[Check], busy: FrozenSet[int]) -> List[Check]:
+    """Per agent, only the newest change whose rollback is due keeps it, and none of an agent
+    in ``busy`` (a rollback card open); each other one waits."""
+    newest: Dict[int, Check] = {}
+    for check in checks:
+        kept = newest.get(check.agent_id)
+        if check.undo_due and check.agent_id not in busy and (kept is None or check.applied_at >= kept.applied_at):
+            newest[check.agent_id] = check
+    keep = {check.rx_id for check in newest.values()}
+    return [replace(check, waits=True) if check.undo_due and check.rx_id not in keep else check
+            for check in checks]
+
+
 def check_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
                settings: PostChangeSettings) -> PostChange:
     """Judge each change HARNESS applied in the workspace whose check is not over, for the
@@ -417,13 +455,14 @@ def check_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
         return PostChange()
     post = harness_metrics.read_window(db, ws, build_window(cur_week, settings.max_weeks - 1))
     settled = _settled_rollbacks(rows)
-    checks = [(replace(_check(db, ws, row, post, rows, weeks, settings), settled=settled.get(row.rx_id)),
-               len(weeks)) for row, weeks in due]
-    rollbacks = tuple(_rollback(check, settings) for check, _ in checks
-                      if check.undo_on is not None and check.settled is None)
+    checks = _newest_undo_first([replace(_check(db, ws, row, post, rows, weeks, settings),
+                                         settled=settled.get(row.rx_id)) for row, weeks in due],
+                                _open_rollbacks(rows))
+    rollbacks = tuple(_rollback(check, settings) for check in checks if check.undo_due)
     logger.info("[HARNESS] Post-change check in %s for %s: %d change(s) judged, %d rollback(s) suggested",
                 ws, cur_week, len(checks), len(rollbacks))
-    return PostChange(tuple(_line(check, settings, seen) for check, seen in checks), rollbacks)
+    lines = (_line(check, settings, len(weeks)) for check, (_, weeks) in zip(checks, due))
+    return PostChange(tuple(lines), rollbacks)
 
 
 async def check(db: Session, workspace_id: Union[UUID, str], cur_week: str) -> PostChange:
@@ -435,8 +474,6 @@ def close_rolled_back(db: Session, rollback: HarnessTaskLedger) -> bool:
     """Once a rollback applies, move the change it undoes ``applied → rolled_back``, the one
     move out of a final state (FR-15). True when it moved. Not committed: the apply action's
     caller owns the transaction."""
-    from services import harness_grants
-
     undone = _undone_rx(rollback)
     original = harness_grants.ledger_row(db, rollback.workspace_id, undone) if undone else None
     if original is None or original.kind not in JUDGED_KINDS:

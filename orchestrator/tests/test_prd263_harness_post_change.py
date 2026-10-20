@@ -38,7 +38,7 @@ from tests import helpers_harness_runs as hr
 
 APPLIED_AT = hdx.at(0)            # Wednesday 14 Oct 2026, 10:00 UTC (W42)
 ONE_WEEK_ON, TWO_WEEKS_ON = "2026-W43", "2026-W44"
-ORIGINAL = "rx-1-001"
+ORIGINAL, LATER = "rx-1-001", "rx-2-001"
 HEARTBEAT, REMOVAL = "heartbeat_tune", "tool_assignment_remove"
 GMAIL_BEFORE, GMAIL_AFTER = {"app_name": "GMAIL", "assigned": True}, {"app_name": "GMAIL", "assigned": False}
 UNDO = {"kind": HEARTBEAT, "value": {"interval_minutes": hgx.PRIOR}, "rx_id": ORIGINAL}
@@ -81,16 +81,15 @@ def crew(db_session, seed_workspace, monkeypatch):
     return NS(ws=ws, auto=auto, scout=scout, analyst=hdx.agent(db_session, ws, "Analyst"))
 
 
-def _applied(db, crew, *, kind=HEARTBEAT, prior=None, proposed=None) -> int:
-    """A change HARNESS applied to Scout at APPLIED_AT, as the apply action records it."""
+def _applied(db, crew, *, kind=HEARTBEAT, prior=None, proposed=None, rx_id=ORIGINAL, at=APPLIED_AT) -> int:
+    """A change HARNESS applied to Scout at ``at``, as the apply action records it."""
     from core.models.harness import HarnessTaskLedger
 
     prior = prior or {"interval_minutes": hgx.PRIOR}
     row = HarnessTaskLedger(
-        workspace_id=UUID(crew.ws), state="applied", rx_id=ORIGINAL, run_id=1, kind=kind,
+        workspace_id=UUID(crew.ws), state="applied", rx_id=rx_id, run_id=1, kind=kind,
         target_agent_id=crew.scout, prior_value=prior, proposed_value=proposed or {"interval_minutes": hgx.PROPOSED},
-        applied_at=APPLIED_AT, value_at_apply=prior, frozen_ref_start=APPLIED_AT - timedelta(days=28),
-        frozen_ref_end=APPLIED_AT,
+        applied_at=at, value_at_apply=prior, frozen_ref_start=at - timedelta(days=28), frozen_ref_end=at,
     )
     db.add(row)
     db.flush()
@@ -245,6 +244,40 @@ def test_a_declined_rollback_is_not_raised_again(db_session, crew):
 
     assert result.rollbacks == ()
     assert result.lines[0].endswith("An earlier card to undo it is denied.")
+
+
+WAITS = "HARNESS suggests undoing it after the card to undo another change to Scout, one at a time: "
+
+
+def test_two_changes_to_undo_on_one_agent_give_one_rollback_for_the_newest(db_session, crew):
+    """Scout's heartbeat went 60 → 120, then a day later 120 → 240, and its Tasks collapsed.
+    Only the newer change's prior value (120) reads now, and an agent has one rollback card
+    open at a time, so the run undoes the newer change and the older one waits."""
+    _applied(db_session, crew)
+    _applied(db_session, crew, rx_id=LATER, at=APPLIED_AT + timedelta(days=1),
+             prior={"interval_minutes": hgx.PROPOSED}, proposed={"interval_minutes": 2 * hgx.PROPOSED})
+    _tasks(db_session, crew, crew.scout, after=COLLAPSED)
+    _tasks(db_session, crew, crew.analyst, after=STEADY)
+
+    result = _check(db_session, crew)
+
+    (rollback,) = result.rollbacks
+    assert rollback.proposed_value == {"kind": HEARTBEAT, "value": {"interval_minutes": hgx.PROPOSED}, "rx_id": LATER}
+    older, newer = result.lines
+    assert WAITS in older and "HARNESS suggests undoing it (see the suggested changes): " in newer
+
+
+def test_no_rollback_for_an_agent_while_one_of_its_rollback_cards_is_open(db_session, crew):
+    _applied(db_session, crew)
+    hgx.ledger(db_session, crew.ws, "rx-0-001", crew.scout, None, kind="rollback", prior=GMAIL_AFTER,
+               proposed={"kind": REMOVAL, "value": GMAIL_BEFORE, "rx_id": "rx-0-000"})
+    _tasks(db_session, crew, crew.scout, after=COLLAPSED)
+    _tasks(db_session, crew, crew.analyst, after=STEADY)
+
+    result = _check(db_session, crew)
+
+    assert result.rollbacks == ()
+    assert WAITS in result.lines[0]
 
 
 # ── the frozen reference and the weeks judged ────────────────────────────────
