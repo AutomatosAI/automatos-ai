@@ -17,8 +17,8 @@ workspace as the installer does. Pinned:
 * Research again puts a missing playbook back and runs it (a deleted one too); it is 409,
   with why, only when it cannot: no marketplace playbook, a plan full of agents, another
   install under way;
-* the weekly run never installs: it says why research is off, once a day; a trial
-  workspace on the hosted edition gets no weekly run;
+* the weekly run never installs: it says why research is off, once a day; a hosted
+  workspace with no background credits gets no weekly run (PRD-265);
 * whoever may save a plan may also add the agent and playbook its save installs: the role
   matrix keeps the two together, so a role that splits them fails here first.
 """
@@ -301,13 +301,15 @@ def test_the_weekly_run_never_puts_the_playbook_back_and_says_why_once_a_day(res
     assert research.told == [("social_plan_research_unavailable", f"{plan['name']}: {setup.REMOVED}")]
 
 
-def test_a_hosted_trial_gets_no_weekly_run(research, monkeypatch):
+def test_a_hosted_workspace_without_credits_gets_no_weekly_run(research, monkeypatch):
+    # PRD-265: the trial-record predicate is gone — background work (including
+    # the weekly research run) now consults services.credits.routing.background_allowed.
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
-    monkeypatch.setattr("services.trial_ledger.is_trial_active_workspace", lambda workspace: True)
+    monkeypatch.setattr("services.credits.routing.background_allowed", lambda db, workspace_id: False)
     _create_plan(research, starts_on="2026-10-12")
     assert _weekly() == 0 and research.launched == [] and research.told == []
-    monkeypatch.setattr("services.trial_ledger.is_trial_active_workspace", lambda workspace: False)
-    assert _weekly() == 1 and len(research.launched) == 1  # a paid workspace's research comes round
+    monkeypatch.setattr("services.credits.routing.background_allowed", lambda db, workspace_id: True)
+    assert _weekly() == 1 and len(research.launched) == 1  # a funded workspace's research comes round
 
 
 def test_every_role_that_saves_a_plan_may_add_what_its_save_installs():

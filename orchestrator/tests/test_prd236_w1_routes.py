@@ -303,7 +303,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # relink); the guard follows it.
     relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
     assert 'down_revision = "prd264_blog_review"' in relinks
-    assert 'EXPECTED_HEAD = "clerk_user_relinks_20261019"' in guard
+    # 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto it — the credit ledger and
+    # balances (new tables), llm_usage.ask_id, and trials as credit grants; the guard follows it.
+    credit_ledger = (versions / "prd265_credit_ledger.py").read_text()
+    assert 'down_revision = "clerk_user_relinks_20261019"' in credit_ledger
+    assert 'EXPECTED_HEAD = "prd265_credit_ledger"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

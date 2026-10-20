@@ -2,8 +2,12 @@
 
 Pure tests: the exposure block derived from PLAN_TIERS per tier, a config
 override flipping a nav key with no code change (config-driven proof), and the
-tool-surface family filter — basic drops the CodeGraph first-class schemas and
-prunes the dispatcher enum of nl2sql/team actions, business is untouched.
+tool-surface family filter — a tier with codegraph/nl2sql/team OFF drops the
+CodeGraph first-class schemas and prunes the dispatcher enum of nl2sql/team
+actions, business is untouched. PRD-265 US-001 made ``basic`` (Own keys)
+carry EXACTLY Pro's (permissive) families, so the trimming-MECHANISM tests
+below inject a restricted override (``_RESTRICTED_BASIC_TIERS``) to keep
+direct coverage of that machinery now that basic itself trims nothing live.
 
 The two paths fail open DIFFERENTLY, and that asymmetry is deliberate (RVW-1):
 the UI's ``exposure_for_plan`` falls back to the entry tier for an unknown plan
@@ -18,21 +22,34 @@ import copy
 from config import TOOL_FAMILIES, load_plan_tiers
 from services import plan_tiers as pt
 
+# PRD-265 US-001 made basic (Own keys) non-restrictive by default — it now
+# carries EXACTLY Pro's families. The mechanism tests below exist to prove
+# the trimming/override machinery itself, not basic's live numbers, so they
+# inject this RESTRICTED override (the tier's OLD shape) to keep direct
+# coverage of that machinery now that basic itself trims nothing out of the box.
+_RESTRICTED_BASIC_TIERS = load_plan_tiers(
+    env_override='{"basic": {"families": {"codegraph": false, "nl2sql": false, "team": false}}}'
+)
+
 
 # --------------------------------------------------------------------------- #
 # Exposure block per tier
 # --------------------------------------------------------------------------- #
 
 
-def test_exposure_basic_hides_gated_nav_and_families():
+def test_exposure_basic_shows_pro_profile_with_beta_label():
+    # PRD-265 US-001: Own keys (basic) carries EXACTLY Pro's limits/families —
+    # it is no longer a trimming tier. price_label is "beta" while
+    # config.BILLING_OPEN is False (the default in tests).
     exp = pt.exposure_for_plan("basic")
     assert exp["plan"] == "basic"
-    assert exp["display_name"] == "Basic"
-    assert exp["display_price_usd"] == 19
-    assert exp["marketplace_depth"] == 1
-    # basic: nl2sql + team OFF ⇒ both gated nav items hidden.
-    assert exp["nav"] == {"analytics": False, "team": False}
-    assert exp["families"]["codegraph"] is False
+    assert exp["display_name"] == "Own keys"
+    assert exp["display_price_usd"] == 9
+    assert exp["price_label"] == "beta"
+    assert exp["marketplace_depth"] == 2
+    # basic: nl2sql + team ON ⇒ both nav items visible, same as Pro.
+    assert exp["nav"] == {"analytics": True, "team": True}
+    assert exp["families"]["codegraph"] is True
     assert exp["families"]["voice"] is False
 
 
@@ -54,18 +71,24 @@ def test_exposure_business_shows_everything():
 def test_exposure_unknown_plan_falls_back_to_entry_tier():
     exp = pt.exposure_for_plan("nonexistent")
     # Falls back to basic's profile so the UI is never left without one.
-    assert exp["nav"] == {"analytics": False, "team": False}
-    assert exp["display_name"] == "Basic"
+    # PRD-265: that profile is now the permissive, Pro-equivalent one.
+    assert exp["nav"] == {"analytics": True, "team": True}
+    assert exp["display_name"] == "Own keys"
 
 
 def test_config_override_flips_a_nav_key_without_code_change():
-    # Turn nl2sql ON for basic via a config/env override → the analytics nav key
-    # flips to visible with no code change (US-024 AC5).
-    override = load_plan_tiers(env_override='{"basic": {"families": {"nl2sql": true}}}')
-    exp = pt.exposure_for_plan("basic", tiers=override)
-    assert exp["nav"]["analytics"] is True
-    # The module default is unaffected.
-    assert pt.exposure_for_plan("basic")["nav"]["analytics"] is False
+    # basic now defaults to Pro's permissive families, so this proof starts
+    # from an injected RESTRICTED basic (the mechanism fixture above, with
+    # analytics/team off) and flips just nl2sql ON — the analytics nav key
+    # flips to visible with no code change (US-024 AC5), keeping direct
+    # coverage of the override mechanism now that basic itself isn't restrictive.
+    assert pt.exposure_for_plan("basic", tiers=_RESTRICTED_BASIC_TIERS)["nav"]["analytics"] is False
+    flipped = load_plan_tiers(
+        env_override='{"basic": {"families": {"codegraph": false, "nl2sql": true, "team": false}}}'
+    )
+    assert pt.exposure_for_plan("basic", tiers=flipped)["nav"]["analytics"] is True
+    # The module default (permissive) is unaffected by either override.
+    assert pt.exposure_for_plan("basic")["nav"]["analytics"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -102,7 +125,9 @@ def _surface():
 
 
 def test_basic_drops_codegraph_schema_and_prunes_enum():
-    trimmed = pt.filter_tools_by_plan(_surface(), "basic")
+    # PRD-265: basic's live default no longer trims anything, so this proof
+    # of the TRIMMING MECHANISM injects the restricted override fixture.
+    trimmed = pt.filter_tools_by_plan(_surface(), "basic", tiers=_RESTRICTED_BASIC_TIERS)
     names = [t["function"]["name"] for t in trimmed]
     # The CodeGraph first-class schema is dropped; core tools + dispatcher stay.
     assert "platform_codegraph_search" not in names
@@ -130,9 +155,11 @@ def test_business_surface_is_unchanged():
 
 
 def test_filter_does_not_mutate_input_schemas():
+    # Restricted override again — the fast (no-op) path on a permissive basic
+    # would prove nothing about rebuild-don't-mutate on the trimming branch.
     surface = _surface()
     original = copy.deepcopy(surface)
-    pt.filter_tools_by_plan(surface, "basic")
+    pt.filter_tools_by_plan(surface, "basic", tiers=_RESTRICTED_BASIC_TIERS)
     assert surface == original  # rebuild-don't-mutate: inputs untouched
 
 
@@ -165,7 +192,7 @@ def test_tool_families_map_covers_all_analytics_and_team_names():
 
 
 def test_get_tier_distinguishes_unknown_from_known():
-    # The renamed-away entry tier is unresolvable; 'basic' is a real trimming tier.
+    # The renamed-away entry tier is unresolvable; 'basic' is a real, known tier.
     assert pt.get_tier("starter") is None
     assert pt.get_tier("basic") is not None
 
@@ -241,11 +268,18 @@ def test_apply_tier_exposure_unknown_plan_keeps_full_surface():
     assert len(enum) == 6  # nothing pruned
 
 
-def test_apply_tier_exposure_basic_still_trims_at_the_seam():
+def test_apply_tier_exposure_basic_still_trims_at_the_seam(monkeypatch):
     # A KNOWN gated tier still trims through the seam — the fail-open guard did
-    # not disable real gating.
+    # not disable real gating. basic's live default no longer trims anything
+    # (PRD-265), so patch the LIVE config.PLAN_TIERS to the restricted fixture:
+    # _apply_tier_exposure takes no ``tiers`` param — it reads ``config.PLAN_TIERS``
+    # fresh on every call (``services.plan_tiers._tiers`` does
+    # ``from config import PLAN_TIERS`` inside the function body), so patching
+    # the module attribute is the correct seam to flip for this proof.
     from modules.tools.tool_router import _apply_tier_exposure
+    import config as config_module
 
+    monkeypatch.setattr(config_module, "PLAN_TIERS", _RESTRICTED_BASIC_TIERS)
     out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("basic")), "ws-1", _surface(), "t")
     assert "platform_codegraph_search" not in [t["function"]["name"] for t in out]
 

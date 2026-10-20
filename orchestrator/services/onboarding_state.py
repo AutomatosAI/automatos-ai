@@ -2,10 +2,10 @@
 
 The Wave-1 funnel record. Every workspace carries a single ``onboarding`` JSONB
 document (added by the ``prd222_w1s1_onboarding_jsonb`` migration); this service
-is the ONLY writer of that document's stage machine. There is no second table
-and there will be no second migration on this branch — the $5 trial ledger
-(W1S9), the segment answers, and the per-stage funnel timestamps all live inside
-this one JSONB blob.
+is the ONLY writer of that document's stage machine. The segment answers and
+the per-stage funnel timestamps live inside this one JSONB blob. The trial lived
+here too (W1S9) until PRD-265 moved it to the credit ledger (``services/credits``);
+a legacy ``trial`` key may remain on older documents, and nothing reads it.
 
 Two hard rules are encoded here:
 
@@ -29,7 +29,7 @@ Document shape::
       "started_at": "<iso>",               # first advance away from not_started
       "updated_at": "<iso>",               # every write
       "completed_at": "<iso>",             # set when reaching completed/skipped
-      # "trial": {...}                     # added by W1S9 (US-004/005)
+      # "trial": {...}                     # legacy (W1S9); credits since PRD-265
     }
 """
 from __future__ import annotations
@@ -174,23 +174,15 @@ def _stage_is_stale(workspace: Any) -> bool:
 
 
 def public_snapshot(workspace: Any) -> dict[str, Any]:
-    """The client-facing onboarding view: ``{stage, trial}``.
+    """The client-facing onboarding view: ``{stage}``.
 
     Shared by ``GET /api/workspaces/current`` (W1S2/US-002) and the
     ``platform_update_onboarding`` tool (W1S3/US-003) so both speak one shape.
-    ``trial`` is ``None`` until W1S9 grants it; only the three client-safe trial
-    fields are exposed — never internal ledger bookkeeping.
+    The trial is credits in the ledger since PRD-265; the balance is served by
+    ``GET /api/v1/billing/summary``, not by the onboarding document.
     """
     doc = get_onboarding(workspace)
-    trial = doc.get("trial")
-    trial_out = None
-    if trial:
-        trial_out = {
-            "granted_usd": trial.get("granted_usd"),
-            "spent_usd": trial.get("spent_usd", 0),
-            "state": trial.get("state"),
-        }
-    return {"stage": doc.get("stage", INITIAL_STAGE), "trial": trial_out}
+    return {"stage": doc.get("stage", INITIAL_STAGE)}
 
 
 def _stage_index(stage: str) -> int:
@@ -741,22 +733,19 @@ def update_checklist(
 
 
 def _regrant_trial(db: Any, workspace: Any) -> tuple[Optional[dict[str, Any]], str]:
-    """Re-grant the one-time trial after ``reset_trial`` stripped it.
+    """Bring the trial back to full after a reset (PRD-265: the trial is credits).
 
-    REUSES the provisioning grant (``grant_trial_at_provisioning``) — never a
-    second grant implementation. The workspace's onboarding doc must already be
-    trial-less AND flushed to the DB when this runs, so the grant's one-per-user
-    check sees the strip. A kill-switch / daily-cap / already-held decline is a
-    reported PAUSE, not an error: the grant returns ``None`` and we surface it.
+    Uses ``services.credits.trial.reset_trial`` — never a second grant
+    implementation: an adjustment back up to the full trial for a workspace that
+    held one, the ordinary grant for one that never did. A kill-switch /
+    daily-cap decline is a reported PAUSE, not an error.
     """
-    from services.trial_ledger import grant_trial_at_provisioning
+    from services.credits.trial import reset_trial
 
-    trial = grant_trial_at_provisioning(
-        db, getattr(workspace, "id", None), owner_id=getattr(workspace, "owner_id", None)
-    )
-    if trial is None:
-        return None, "paused (trial disabled, daily cap reached, or already held)"
-    return trial, "granted"
+    credits = reset_trial(db, getattr(workspace, "id", None), owner_id=getattr(workspace, "owner_id", None))
+    if credits is None:
+        return None, "paused (trial disabled, or daily cap reached)"
+    return {"credits": credits}, "granted"
 
 
 def reset_onboarding(

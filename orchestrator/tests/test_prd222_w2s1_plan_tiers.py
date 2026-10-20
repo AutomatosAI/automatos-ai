@@ -49,8 +49,10 @@ def _script_dir():
 @pytest.mark.parametrize(
     "name,price,seats,agents,concurrency,watchers,depth",
     [
-        ("basic", 19, 1, 5, 1, 1, 1),
-        ("pro", 49, 5, 20, 3, 5, 2),
+        # PRD-265 US-001: Own keys (basic) is repriced to $9 and carries EXACTLY
+        # Pro's limits — only who pays for the AI differs (facts sheet §4).
+        ("basic", 9, 5, 20, 3, 5, 2),
+        ("pro", 29, 5, 20, 3, 5, 2),
         ("business", 99, 25, 0, 10, 0, 3),
     ],
 )
@@ -68,7 +70,8 @@ def test_plan_tiers_numbers_match_strawman(name, price, seats, agents, concurren
 @pytest.mark.parametrize(
     "name,codegraph,nl2sql,team,voice",
     [
-        ("basic", False, False, False, False),
+        # Own keys (basic) now matches Pro's families exactly (PRD-265 US-001).
+        ("basic", True, True, True, False),
         ("pro", True, True, True, False),
         ("business", True, True, True, True),
     ],
@@ -78,11 +81,22 @@ def test_capability_families_match_strawman(name, codegraph, nl2sql, team, voice
     assert fam == {"codegraph": codegraph, "nl2sql": nl2sql, "team": team, "voice": voice}
 
 
-def test_display_prices_are_early_access_labels_only():
-    # Q5: display pricing only — every assignable tier carries an early-access
-    # label so repricing stays free; there is no charge/amount field.
-    for name in ("basic", "pro", "business"):
-        assert PLAN_TIERS[name]["price_label"] == "early access"
+def test_plan_tiers_carry_no_price_label():
+    # PRD-265: price_label is no longer a static tier field — it's derived at
+    # read time by services.plan_tiers.price_label() from config.BILLING_OPEN,
+    # so one flag flips every tier's label with no redeploy or data migration.
+    for name in ("basic", "pro", "business", "enterprise"):
+        assert "price_label" not in PLAN_TIERS[name]
+
+
+def test_price_label_is_beta_while_billing_closed_then_none_when_open(monkeypatch):
+    # PRD-265 US-001: beta pricing until config.BILLING_OPEN flips (facts sheet §4).
+    from config import config as app_config
+
+    monkeypatch.setattr(app_config, "BILLING_OPEN", False)
+    assert pt.price_label() == pt.BETA_PRICE_LABEL == "beta"
+    monkeypatch.setattr(app_config, "BILLING_OPEN", True)
+    assert pt.price_label() is None
 
 
 def test_enterprise_is_coming_soon_and_not_assignable():
@@ -100,20 +114,24 @@ def test_enterprise_is_coming_soon_and_not_assignable():
 
 
 def test_env_override_flips_price_and_family_without_redeploy():
-    override = '{"basic": {"display_price_usd": 29, "families": {"codegraph": true}}}'
+    # basic now carries Pro's families (all True except voice), so flip a
+    # family the override can actually move: turn codegraph OFF and prove the
+    # deep-merge still leaves nl2sql (untouched by the override) at its
+    # default True — a field flip, not a tier-wide replace.
+    override = '{"basic": {"display_price_usd": 15, "families": {"codegraph": false}}}'
     tiers = load_plan_tiers(env_override=override)
-    assert tiers["basic"]["display_price_usd"] == 29
-    assert tiers["basic"]["families"]["codegraph"] is True
+    assert tiers["basic"]["display_price_usd"] == 15
+    assert tiers["basic"]["families"]["codegraph"] is False
     # Untouched fields keep their defaults (deep-merge, not replace).
-    assert tiers["basic"]["seats"] == 1
-    assert tiers["basic"]["families"]["nl2sql"] is False
+    assert tiers["basic"]["seats"] == 5
+    assert tiers["basic"]["families"]["nl2sql"] is True
     # The module constant is not mutated by an override load.
-    assert PLAN_TIERS["basic"]["display_price_usd"] == 19
+    assert PLAN_TIERS["basic"]["display_price_usd"] == 9
 
 
 def test_malformed_env_override_falls_back_to_defaults():
     tiers = load_plan_tiers(env_override="{not valid json")
-    assert tiers["basic"]["display_price_usd"] == 19
+    assert tiers["basic"]["display_price_usd"] == 9
     assert tiers["pro"]["seats"] == 5
 
 
@@ -128,16 +146,17 @@ def test_assignable_tiers_excludes_enterprise():
 
 
 def test_plan_limits_for_tier_maps_seats_to_max_members_and_budget():
-    # basic: seats→max_members, a positive budget lands under plan_limits.budget.
+    # basic (Own keys): seats→max_members, a positive budget lands under
+    # plan_limits.budget. PRD-265: basic now carries EXACTLY Pro's limits.
     basic = pt.plan_limits_for_tier("basic")
-    assert basic["max_members"] == 1  # the LIVE seat key (invitations + checklist)
-    assert basic["max_agents"] == 5
-    assert basic["mission_concurrency"] == 1
-    assert basic["watcher_limit"] == 1
-    assert basic["marketplace_depth"] == 1
+    assert basic["max_members"] == 5  # the LIVE seat key (invitations + checklist)
+    assert basic["max_agents"] == 20
+    assert basic["mission_concurrency"] == 3
+    assert basic["watcher_limit"] == 5
+    assert basic["marketplace_depth"] == 2
     # A tier-derived ceiling is tagged source="tier" so a later move to a
     # no-ceiling tier can clear it without wiping an admin custom budget (RVW-4).
-    assert basic["budget"] == {"window": "month", "max_cost_usd": 25.0, "source": "tier"}
+    assert basic["budget"] == {"window": "month", "max_cost_usd": 100.0, "source": "tier"}
     # business: seats 25, unlimited agents (0), custom budget (0) ⇒ no budget key
     biz = pt.plan_limits_for_tier("business")
     assert biz["max_members"] == 25
@@ -196,9 +215,9 @@ def test_assign_business_after_pro_clears_stale_tier_ceiling():
 def test_assign_business_after_basic_clears_stale_tier_ceiling():
     ws = SimpleNamespace(plan="basic", plan_limits={})
     pt.assign_plan(None, ws, "basic")
-    assert ws.plan_limits["budget"]["max_cost_usd"] == 25.0
+    assert ws.plan_limits["budget"]["max_cost_usd"] == 100.0  # PRD-265: basic = Pro's $100
     pt.assign_plan(None, ws, "business")
-    assert "budget" not in ws.plan_limits  # basic's $25 ceiling gone too
+    assert "budget" not in ws.plan_limits  # basic's $100 ceiling gone too
 
 
 def test_assign_business_preserves_admin_custom_budget():
@@ -242,6 +261,87 @@ def test_load_budget_shows_no_ceiling_after_upgrade_to_business(monkeypatch):
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = ws
     assert load_budget(db, "ws-rvw4") == {}  # no ceiling surfaced, not a stale $100
+
+
+# --------------------------------------------------------------------------- #
+# PRD-265 US-001 — new commerce helpers: platform_ai_allowed, is_metered,
+# monthly_credits, is_self_serve, purchase_path. Pure reads off PLAN_TIERS.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "plan,allowed",
+    [("basic", False), ("pro", True), ("business", True), ("enterprise", True)],
+)
+def test_platform_ai_allowed_by_tier(plan, allowed):
+    # Own keys runs on the customer's own AI keys only (PRD-265 FR-3); every
+    # other tier may spend platform credits.
+    assert pt.platform_ai_allowed(plan) is allowed
+
+
+def test_platform_ai_allowed_unknown_plan_resolves_to_basic_false():
+    # An unknown/stale plan string resolves to the entry tier (basic), which
+    # is platform_ai=False — so an unresolvable plan never gets platform AI.
+    assert pt.platform_ai_allowed("nope") is False
+
+
+@pytest.mark.parametrize(
+    "plan,metered",
+    [("basic", True), ("pro", True), ("business", True), ("enterprise", False)],
+)
+def test_is_metered_only_enterprise_false(plan, metered):
+    # enterprise runs on an explicit platform allowance: calls are recorded but
+    # never gated by credits. Every other tier is metered.
+    assert pt.is_metered(plan) is metered
+
+
+@pytest.mark.parametrize(
+    "plan,credits",
+    [("basic", 0), ("pro", 2000), ("business", 8000), ("enterprise", 0)],
+)
+def test_monthly_credits_by_tier(plan, credits):
+    assert pt.monthly_credits(plan) == credits
+
+
+@pytest.mark.parametrize(
+    "plan,self_serve",
+    [("basic", True), ("pro", True), ("business", False), ("enterprise", False)],
+)
+def test_is_self_serve_by_tier(plan, self_serve):
+    # Business is by-invite only; Enterprise is coming-soon (not assignable at all).
+    assert pt.is_self_serve(plan) is self_serve
+
+
+def test_is_self_serve_unknown_plan_is_false():
+    # Unlike platform_ai_allowed/monthly_credits, is_self_serve does NOT fall
+    # back to the entry tier — an unassignable plan is never self-serve.
+    assert pt.is_self_serve("nope") is False
+
+
+def test_purchase_path_self_serve_plans_only():
+    assert pt.purchase_path("basic") == "/settings?tab=billing&plan=basic"
+    assert pt.purchase_path("pro") == "/settings?tab=billing&plan=pro"
+    assert pt.purchase_path("business") is None  # by invite — no self-serve checkout
+    assert pt.purchase_path("enterprise") is None
+    assert pt.purchase_path("nope") is None
+
+
+def test_own_keys_matches_pro_limits_and_families():
+    """PRD-265 facts sheet §4: Own keys (basic) = Pro, only credits differ —
+    basic runs on the customer's own AI keys (no platform credits granted),
+    Pro's are included. Every seat/agent/concurrency/watcher/depth/budget/
+    render limit and every capability family must be identical."""
+    basic = PLAN_TIERS["basic"]
+    pro = PLAN_TIERS["pro"]
+    shared_limit_keys = (
+        "seats", "max_agents", "mission_concurrency", "watcher_limit",
+        "marketplace_depth", "budget_usd", "render_minutes_month", "families",
+    )
+    for key in shared_limit_keys:
+        assert basic[key] == pro[key], f"Own keys and Pro must match on {key!r}"
+    # ...and only the commerce facts the facts sheet calls out actually differ.
+    assert basic["platform_ai"] is False and pro["platform_ai"] is True
+    assert basic["monthly_credits"] == 0 and pro["monthly_credits"] == 2000
 
 
 # --------------------------------------------------------------------------- #

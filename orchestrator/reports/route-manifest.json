@@ -1,5 +1,5 @@
 {
-  "route_count": 944,
+  "route_count": 947,
   "routes": [
     {
       "method": "GET",
@@ -180,6 +180,10 @@
     {
       "method": "GET",
       "path": "/api/admin/workspaces/{workspace_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/credits"
     },
     {
       "method": "POST",
@@ -2804,6 +2808,14 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/ledger"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/summary"
     },
     {
       "method": "GET",
