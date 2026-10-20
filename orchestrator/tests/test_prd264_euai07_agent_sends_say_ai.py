@@ -6,8 +6,9 @@ workspace's public name, else "... of the sender."); an HTML body gets it as its
 paragraph. The line goes on before the owner's card is built, so the card shows it and the
 grant's params hash covers it; the click runs that exact call and never removes the line (D9).
 A person's own send through the platform's email routes is unchanged, unless an agent's
-``http_request`` tool made it. A send the executor resolves from another name can't take the
-line, so one with words of its own is refused.
+``http_request`` tool made it. A message of blocks, attachments or embeds gets the line as its
+text parameter; a send with no text parameter to hold it is refused before any card. A send the
+executor resolves from another name can't take the line, so any that sends words is refused.
 
 The gate here is the real ``owner_only.asks_before_a_send`` over the executor's own reading of a
 call (``UnifiedToolExecutor._resolve_effective_call``); the executor beneath it records what each
@@ -29,14 +30,22 @@ from modules.policy.ai_disclosure import (
     send_action_key,
     send_body_key,
     send_notice,
+    sends_words,
     split_send_notice,
+    starts_with_send_notice,
     with_send_notice,
 )
 from modules.socials.capabilities import SEEDED_CHANNELS
 from modules.tools.discovery import owner_only
 from modules.tools.discovery.card_question import send_question
 from modules.tools.discovery.owner_only import asks_before_a_send, is_composio_send
-from modules.tools.discovery.send_notice import RESOLVED_SEND_UNTOLD, told_call, untold_resolved_send
+from modules.tools.discovery.send_notice import (
+    RESOLVED_SEND_UNTOLD,
+    SEND_UNTOLD,
+    told_call,
+    untold_resolved_send,
+    untold_send,
+)
 from modules.tools.execution.agent_request import AGENT_REQUEST_HEADER, marked_request, marks_an_agent_request
 from modules.tools.execution.composio_params import sent_params
 from modules.tools.execution.unified_executor import UnifiedToolExecutor
@@ -147,7 +156,13 @@ def _send(sender: _Sender, call: Any, context: Any, tool: str = "composio_execut
 
 def _went_out(sender: _Sender) -> List[dict]:
     """What each call that ran sent to the action, as exec_composio sends it."""
-    return [sent_params(params) if tool == "composio_execute" else params for tool, params in sender.ran]
+    return [sent_params(params) if tool == "composio_execute" else _per_action(params) for tool, params in sender.ran]
+
+
+def _per_action(params: dict) -> dict:
+    """What a per-action tool sends: its nested params object when it has one, else its own params."""
+    nested = params.get("params")
+    return params if nested is None else nested
 
 
 @pytest.fixture
@@ -380,25 +395,129 @@ def test_a_session_that_cant_be_read_names_no_one():
     assert told["params"]["body"] == f"{UNNAMED}\n\n{LETTER}"
 
 
+# ── A send whose words are not in a text parameter (blocks, attachments, embeds) ──────
+
+BLOCKS = [{"type": "section", "text": {"type": "mrkdwn", "text": "*Spring order*: 12 kilos of the Guji"}}]
+SLACK_BLOCKS = {"action": "SLACK_SEND_MESSAGE", "params": {"channel": "#orders", "blocks": BLOCKS}}
+SLACK_ATTACHMENTS = {"action": "SLACK_SEND_MESSAGE",
+                     "params": {"channel": "#orders", "attachments": [{"fallback": "Spring order"}], "text": "  "}}
+EMBEDS = {"channel_id": "1201", "embeds": [{"title": "Spring order", "description": "12 kilos of the Guji"}]}
+
+
+@pytest.mark.parametrize("call, tool, text_key", [
+    (SLACK_BLOCKS, "composio_execute", "text"),
+    (SLACK_ATTACHMENTS, "composio_execute", "text"),
+    (EMBEDS, "composio_DISCORDBOT_CREATE_MESSAGE", "content"),
+    ({"params": EMBEDS}, "composio_DISCORDBOT_CREATE_MESSAGE", "content"),
+], ids=["slack-blocks", "slack-attachments-blank-text", "discord-embeds", "discord-embeds-nested"])
+def test_a_message_with_no_text_body_goes_out_with_the_line_as_its_text(call, tool, text_key):
+    sender = _Sender(FakeDb(company="Harbour Coffee"))
+
+    reply = _send(sender, call, AGENTS_RUN, tool=tool)
+
+    assert reply["success"] is True
+    (sent,) = _went_out(sender)
+    asked = sent_params(call) if tool == "composio_execute" else _per_action(call)
+    assert sent == {**asked, text_key: HARBOUR}                  # the blocks, attachments or embeds as they were
+    slug = call["action"] if tool == "composio_execute" else tool
+    assert untold_send(tool, call, slug, AGENTS_RUN) is not None   # as asked, it would have gone out unlabelled
+
+
+def test_a_blocks_messages_card_shows_the_line_and_the_grant_covers_it(card):
+    sender = _Sender(FakeDb(company="Harbour Coffee"))
+
+    reply = _send(sender, SLACK_BLOCKS, OWNERS_CHAT)
+
+    assert sender.ran == [] and reply["requires_confirmation"] is True
+    assert f"- AI notice: {HARBOUR}" in reply["question_md"].splitlines()
+    assert card["params"] == {**SLACK_BLOCKS, "params": {**SLACK_BLOCKS["params"], "text": HARBOUR}}
+
+
+def test_the_click_on_a_blocks_message_sends_the_line_once(clicked):
+    sender = _Sender(FakeDb(company="Harbour Coffee"))
+
+    _send(sender, SLACK_BLOCKS, OWNERS_CHAT)
+    stored = clicked[0]
+    _send(sender, stored, OWNERS_CHAT)                       # the resume runs the grant's own call
+
+    first, again = _went_out(sender)
+    assert first["text"] == again["text"] == HARBOUR and first["blocks"] == again["blocks"] == BLOCKS
+    assert clicked == [stored, stored]                       # one params hash for the card and the click
+
+
+def test_an_html_email_with_no_body_gets_the_line_as_its_one_paragraph():
+    db = FakeDb(company="Harbour Coffee")
+    call = {"action": "GMAIL_SEND_EMAIL", "params": {"recipient_email": ANA, "subject": "Spring order", "is_html": True}}
+
+    told = told_call(db, WS, "composio_execute", call, "GMAIL_SEND_EMAIL", AGENTS_RUN)
+
+    assert told["params"]["body"] == f"<p>{HARBOUR}</p>"
+    assert told_call(db, WS, "composio_execute", told, "GMAIL_SEND_EMAIL", AGENTS_RUN) is told   # never twice
+    assert untold_send("composio_execute", told, "GMAIL_SEND_EMAIL", AGENTS_RUN) is None
+
+
+def test_a_per_action_tools_nested_params_are_the_ones_told():
+    told = told_call(FakeDb(company="Harbour Coffee"), WS, "GMAIL_SEND_EMAIL", {"params": EMAIL}, "GMAIL_SEND_EMAIL",
+                     AGENTS_RUN)
+
+    assert told == {"params": {**EMAIL, "body": f"{HARBOUR}\n\n{LETTER}"}}
+
+
+@pytest.mark.parametrize("call, tool, action", [
+    ({"action": "ACME_SEND_CARD", "params": {"to": ANA, "card": {"title": "Spring order"}}}, "composio_execute",
+     "ACME_SEND_CARD"),                                                   # the map names no text parameter for it
+    ({"action": "GMAIL_SEND_EMAIL", "params": {**EMAIL, "body": ["Hi Ana"]}}, "composio_execute",
+     "GMAIL_SEND_EMAIL"),                                                 # its text parameter holds something else
+    ({"params": "12 kilos of the Guji"}, "composio_DISCORDBOT_CREATE_MESSAGE",
+     "DISCORDBOT_CREATE_MESSAGE"),                                        # params the executor sends as they are
+], ids=["no-text-parameter", "not-text-in-it", "params-not-an-object"])
+@pytest.mark.parametrize("context", [AGENTS_RUN, OWNERS_CHAT], ids=["agents-run", "owners-chat"])
+def test_a_send_that_cant_carry_the_line_is_refused_before_any_card(card, call, tool, action, context):
+    db = FakeDb(company="Harbour Coffee")
+    sender = _Sender(db)
+
+    reply = _send(sender, call, context, tool=tool)
+
+    assert reply == {"success": False, "error": SEND_UNTOLD.format(action=action)}
+    assert "this send can't carry the AI notice" in reply["error"]
+    assert sender.ran == [] and card == {}                  # nothing sent, no grant asked for
+    assert db.reads == []                                    # no line went on, so no name was read
+
+
+def test_what_starts_with_the_line_and_what_sends_words():
+    assert starts_with_send_notice(HARBOUR) and starts_with_send_notice(f"{HARBOUR}\n\n{LETTER}")
+    assert starts_with_send_notice(f"<p>{HARBOUR}</p><p>Hi</p>")
+    assert starts_with_send_notice(with_send_notice('<html><body class="mail"><p>Hi</p></body></html>', HARBOUR, True))
+    assert not starts_with_send_notice(LETTER) and not starts_with_send_notice(f"Hi Ana,\n\n{HARBOUR}")
+    assert not starts_with_send_notice(None) and not starts_with_send_notice(["Hi"])
+    assert with_send_notice("", HARBOUR, False) == with_send_notice("  ", HARBOUR, False) == HARBOUR
+    assert with_send_notice("", HARBOUR, True) == f"<p>{HARBOUR}</p>"
+    assert sends_words("GMAIL_SEND_EMAIL") and sends_words("ACME_SEND_NOTE") and sends_words("composio_SLACK_SEND_MESSAGE")
+    assert not sends_words("SHOPIFY_CREATE_ORDER") and not sends_words("GMAIL_SEND_DRAFT")
+
+
 # ── A send resolved from another name ────────────────────────────────────────────────
 
-def test_a_resolved_send_with_words_of_its_own_is_refused():
-    refusal = untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", EMAIL, AGENTS_RUN)
+def test_a_resolved_send_that_sends_words_is_refused_with_a_body_or_without_one():
+    """The executor resolves the name after the gate, so the line can't go on there: an empty body
+    would go out unlabelled as surely as a written one."""
+    refusal = untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", AGENTS_RUN)
 
     assert refusal == RESOLVED_SEND_UNTOLD.format(asked="GMAIL_SNED_EMAIL", action="GMAIL_SEND_EMAIL")
     assert "Call GMAIL_SEND_EMAIL by that name" in refusal
-    assert untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", {"params": EMAIL}, AGENTS_RUN) == refusal
-    assert untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", {"recipient_email": ANA}, AGENTS_RUN) is None
-    assert untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", EMAIL, PERSONS_OWN) is None
-    assert untold_resolved_send("SHOPIFY_ORDR", "SHOPIFY_CREATE_ORDER", {"note": "x"}, AGENTS_RUN) is None
+    assert untold_resolved_send("ACME_SNED_NOTE", "ACME_SEND_NOTE", OWNERS_CHAT) is not None   # a send the map does not name
+    assert untold_resolved_send("GMAIL_SNED_EMAIL", "GMAIL_SEND_EMAIL", PERSONS_OWN) is None
+    assert untold_resolved_send("SHOPIFY_ORDR", "SHOPIFY_CREATE_ORDER", AGENTS_RUN) is None   # an order sends no words
 
 
+@pytest.mark.parametrize("params", [resolved.EMAIL, {"recipient_email": resolved.SUPPLIER, "subject": "Order confirmation"}],
+                         ids=["with-a-body", "without-one"])
 @pytest.mark.parametrize("where", ["autos-ticket", "a-persons-ticket", "owners-chat"])
-def test_a_near_miss_onto_a_send_with_a_body_runs_nothing_and_raises_no_card(desk, where):
+def test_a_near_miss_onto_a_send_runs_nothing_and_raises_no_card(desk, where, params):
     context = {"autos-ticket": resolved._session(desk), "a-persons-ticket": {"session_task_id": desk.theirs.id},
                "owners-chat": OWNERS_CHAT}[where]
 
-    reply = resolved._call(desk, context, resolved.NEAR_MISS, resolved.EMAIL)
+    reply = resolved._call(desk, context, resolved.NEAR_MISS, params)
 
     assert resolved._ran(desk) == [] and resolved._grants(desk) == []
     assert reply["success"] is False and not reply.get("requires_confirmation")
@@ -469,6 +588,17 @@ def test_the_reply_route_tells_only_an_agents_request(monkeypatch, agent, body):
     assert result.success is True
     (call,) = calls
     assert call["action"] == "GMAIL_REPLY_TO_EMAIL" and call["params"]["body"] == body
+
+
+def test_an_agents_reply_of_only_spaces_through_the_route_is_the_line_alone(monkeypatch):
+    widget_email, ctx, calls = _route(monkeypatch)
+    payload = widget_email.ReplyEmailRequest(body="   ")
+
+    asyncio.run(widget_email.reply_to_email("18f2a9c4d1e0b7a3", payload, NS(headers=_headers(True)), ctx,
+                                            FakeDb(company="Harbour Coffee")))
+
+    (call,) = calls
+    assert call["params"]["body"] == HARBOUR
 
 
 def test_every_http_request_an_agent_makes_says_so_whatever_headers_it_wrote():

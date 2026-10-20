@@ -442,15 +442,26 @@ def send_action_key(slug: Any) -> str:
     return bare if bare != key and bare in SEND_BODY_PARAMS else key
 
 
+def sends_words(slug: Any) -> bool:
+    """Whether ``slug`` delivers words of its own, so what it sends starts with the AI line: every
+    send but one :data:`SEND_BODY_PARAMS` maps to ``None`` (an order, a payment, a send by reference)."""
+    action = send_action_key(slug)
+    return not (action in SEND_BODY_PARAMS and SEND_BODY_PARAMS[action] is None)
+
+
+def send_text_param(slug: Any) -> Optional[str]:
+    """The text parameter ``slug`` documents for its words (its :data:`SEND_BODY_PARAMS` entry: Slack's
+    ``text`` and Discord's ``content`` are also the text a message of blocks or embeds shows beside
+    them), or ``None`` for an action the map does not name or one that sends no words."""
+    return SEND_BODY_PARAMS.get(send_action_key(slug))
+
+
 def send_body_key(slug: Any, params: Any) -> Optional[str]:
     """The parameter of ``params`` that holds the body ``slug`` sends, or ``None`` (the action
     sends no words of its own, or the call carries no text body)."""
-    if not isinstance(params, Mapping):
+    if not isinstance(params, Mapping) or not sends_words(slug):
         return None
-    action = send_action_key(slug)
-    if action in SEND_BODY_PARAMS and SEND_BODY_PARAMS[action] is None:
-        return None
-    named = SEND_BODY_PARAMS.get(action)
+    named = send_text_param(slug)
     keys = (named, *SEND_BODY_FALLBACK) if named else SEND_BODY_FALLBACK
     return next((key for key in keys if isinstance(params.get(key), str) and params[key].strip()), None)
 
@@ -467,8 +478,11 @@ def with_send_notice(text: str, notice: str, html: bool) -> str:
     """``text`` with ``notice`` as its first line, or for HTML its first paragraph (inside
     ``<body>`` when the document has one). A body that already starts with this exact notice
     (a call sent again on the owner's click) is returned as it is, so the line is never doubled;
-    any other line, one naming someone else included, gets the notice above it."""
+    any other line, one naming someone else included, gets the notice above it. A text with no words
+    (a message of blocks or embeds) becomes the notice alone."""
     if not html:
+        if not text.strip():
+            return notice
         if text == notice or text.startswith(f"{notice}{NOTICE_SEPARATOR}"):
             return text
         return prepend_notice(notice, text)
@@ -478,6 +492,16 @@ def with_send_notice(text: str, notice: str, html: bool) -> str:
     if text[at:].lstrip().startswith(paragraph):
         return text
     return f"{text[:at]}{paragraph}{text[at:]}"
+
+
+def starts_with_send_notice(text: Any) -> bool:
+    """Whether ``text`` starts with a send notice: as its first line, or as its first paragraph
+    (inside ``<body>`` when the document has one)."""
+    if not isinstance(text, str):
+        return False
+    opened = _HTML_BODY_OPEN.search(text)
+    starts = (text, text[opened.end():]) if opened else (text,)
+    return any(pattern.match(start) for pattern in (_PLAIN_SEND_NOTICE, _HTML_SEND_NOTICE) for start in starts)
 
 
 def split_send_notice(text: str) -> tuple[Optional[str], str]:

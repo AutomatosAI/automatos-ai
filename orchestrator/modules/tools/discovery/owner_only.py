@@ -283,6 +283,9 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
         if not is_composio_send(slug):
             return await _ResolvedSend(self, call.arguments, inner, slug).runs(lambda: execute_tool(*call.args, **call.kwargs))
         call, inner = _told(self, signature, call, slug, inner)  # PRD-264 EUAI-07: the AI line, before the card
+        untold = _carries_no_line(call.arguments, slug)
+        if untold is not None:
+            return {"success": False, "error": untold}
         params = call.arguments["parameters"]
         db = getattr(self, "db", None)
         ticket = _whose_click(db, workspace_id, slug, ctx, composio)
@@ -309,6 +312,14 @@ def _told(executor: Any, signature: inspect.Signature, call: inspect.BoundArgume
         return call, inner
     rebound = signature.bind(**{**arguments, "parameters": told})
     return rebound, executor._resolve_effective_call(arguments["tool_name"], told)[1]
+
+
+def _carries_no_line(arguments: Dict[str, Any], slug: str) -> Optional[str]:
+    """PRD-264 EUAI-07: why the told send may not go out (it has no text parameter to carry the AI
+    line), refused before any card; None when what it sends starts with the line or needs none."""
+    from modules.tools.discovery.send_notice import untold_send
+
+    return untold_send(arguments["tool_name"], arguments["parameters"], slug, arguments["caller_context"])
 
 
 class _ResolvedSend:
@@ -345,7 +356,7 @@ class _ResolvedSend:
         if self.grant is not None or not is_composio_send(action):
             return None  # a read never touches the executor's session (F088)
         args, db = self.arguments, self._db()
-        self.untold = self.untold or _untold(args, self.asked, action, self.inner)  # PRD-264 EUAI-07: no AI line here
+        self.untold = self.untold or _untold(args, self.asked, action)  # PRD-264 EUAI-07: no AI line here
         if self.untold:
             return self.untold
         ticket = _whose_click(db, args["workspace_id"], action, args["caller_context"], True)
@@ -366,11 +377,11 @@ class _ResolvedSend:
         return getattr(self.executor, "db", None)
 
 
-def _untold(arguments: Dict[str, Any], asked: str, action: str, inner: Any) -> Optional[str]:
+def _untold(arguments: Dict[str, Any], asked: str, action: str) -> Optional[str]:
     """Why a send the executor resolved onto from another name (``asked``) may not run (``send_notice``)."""
     from modules.tools.discovery.send_notice import untold_resolved_send
 
-    return untold_resolved_send(asked or arguments["tool_name"], action, params_object(inner), arguments["caller_context"])
+    return untold_resolved_send(asked or arguments["tool_name"], action, arguments["caller_context"])
 
 
 def _send_card(db: Any, arguments: Dict[str, Any], slug: str, ticket: Dict[str, Any], inner: Any) -> Dict[str, Any]:
