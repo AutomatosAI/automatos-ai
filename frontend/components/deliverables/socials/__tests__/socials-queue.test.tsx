@@ -14,6 +14,8 @@
  * * PRD-251C US-C204: a plan's week is one section, in slot order, first; Approve the week
  *   approves its posts by their hashes (series switch off) and names one that changed; a
  *   viewer sees the week without the button.
+ * * P256-FIX-SOC-2: a plan's draft that waits for the owner's input is listed apart, "Waits for
+ *   you": it opens its editor and offers no Approve; the Queue still lists only needs_approval.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -46,7 +48,7 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({ FilePreview: () 
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
-import { queueHeading, timeLeft } from '@/components/deliverables/socials/studio/queue-model'
+import { queueHeading, queuedPosts, timeLeft, waitingForInput } from '@/components/deliverables/socials/studio/queue-model'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 import { NO_CHANNEL_HINT } from '@/components/deliverables/socials/socials-post-review'
 import { UNDO_TAKE } from '@/components/deliverables/socials/studio/queue-pane'
@@ -70,8 +72,8 @@ const TODAY = [waiting('a', '2026-10-14T12:00:00Z'), waiting('b', '2026-10-14T18
 const LATER = waiting('c', '2026-10-16T09:00:00Z')
 const UNSLOTTED = waiting('d', null)
 
-function renderQueue(posts: any[]) {
-  return renderWith(<SocialsQueue role={state.role as any} posts={posts} selectedId={null} onSelect={select} />)
+function renderQueue(posts: any[], onEdit?: (postId: string) => void) {
+  return renderWith(<SocialsQueue role={state.role as any} posts={posts} selectedId={null} onSelect={select} onEdit={onEdit} />)
 }
 
 const pane = () => screen.getByRole('region', { name: 'Post to approve' })
@@ -247,3 +249,31 @@ describe("PRD-251C: the week's review", () => {
   })
 })
 
+describe('P256-FIX-SOC-2: a planned post that waits for you', () => {
+  const asked = {
+    at: '2026-10-14T07:00:00Z', by: 'the plan', action: 'needs_input', comment: 'Fill in Figure 1 before rendering.',
+    fields: ['Figure 1', 'Figure 1 meaning'],
+  }
+  const WAITS = waiting('w', '2026-10-15T09:00:00Z', { status: 'draft', review_log: [asked] })
+  const PLAIN_DRAFT = waiting('p', null, { status: 'draft' })
+
+  it('keeps the drafts whose last entry asks for input; the Queue still lists only needs_approval', () => {
+    expect(waitingForInput([PLAIN_DRAFT, WAITS, ...TODAY]).map((post) => post.id)).toEqual(['w'])
+    const rendered = { at: '2026-10-14T08:00:00Z', by: 'owner', action: 'render', comment: null }
+    expect(waitingForInput([{ ...WAITS, review_log: [asked, rendered] }])).toEqual([])
+    expect(queuedPosts([PLAIN_DRAFT, WAITS, ...TODAY]).map((post) => post.id)).toEqual(['a', 'b'])
+  })
+
+  it('a waiting row opens the editor and offers no Approve', () => {
+    const edit = vi.fn()
+    renderQueue([WAITS, ...TODAY], edit)
+    const group = screen.getByRole('region', { name: 'Waits for you' })
+    expect(within(group).getByText('Fill in: Figure 1, Figure 1 meaning')).toBeInTheDocument()
+    expect(within(group).queryByRole('button', { name: /Approve/ })).toBeNull()
+    const list = screen.getByRole('complementary', { name: 'Waiting for approval' })
+    expect(within(list).queryByText('Post w')).toBeNull()
+    expect(within(pane()).getByText('Post a')).toBeInTheDocument()
+    fireEvent.click(within(group).getByRole('button', { name: /Post w/ }))
+    expect(edit).toHaveBeenCalledWith('w')
+  })
+})

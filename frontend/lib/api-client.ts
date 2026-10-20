@@ -485,6 +485,9 @@ export interface SocialReviewEntry {
   /** F378: a `retake` entry keeps the take it replaced; a `retake_undone` one names the retake it undid. */
   previous?: Record<string, unknown>
   undid?: string
+  /** P256-FIX-SOC-2: a `needs_input` entry names the fields to fill in (their labels) and the composer's questions. */
+  fields?: string[]
+  questions?: string[]
 }
 
 /**

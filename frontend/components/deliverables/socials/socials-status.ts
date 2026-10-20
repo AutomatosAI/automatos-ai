@@ -42,6 +42,8 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   retake_undone: 'Earlier take restored',
   // PRD-264 EUAI-08a: a person switched the post's AI-generated label on or off (the comment says which).
   ai_label: 'AI-generated label changed',
+  // P256-FIX-SOC-2: the render refused a plan's post; it waits for the owner's input.
+  needs_input: 'Waits for you',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {
