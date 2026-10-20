@@ -54,7 +54,9 @@ const LOOKS_CODES: ReadonlySet<string> = new Set([
   'BAD_KNOB', 'BAD_LOOK_SCHEMA', 'NO_PRESET', 'PRESET_ID_MISMATCH', 'UNKNOWN_DEFAULT_LOOK', 'TOO_MANY_LOOKS',
 ])
 const SIZE_CODES: ReadonlySet<string> = new Set(['TOO_MANY_FILES'])
-const MANIFEST_CODES: ReadonlySet<string> = new Set(MANIFEST_ERROR_CODES)
+/** Package codes whose fix is in theme.json: a `mobile` block that cannot paint without code (M-02). */
+const MANIFEST_PACKAGE_CODES: readonly string[] = ['MOBILE_CANNOT_PAINT']
+const MANIFEST_CODES: ReadonlySet<string> = new Set([...MANIFEST_ERROR_CODES, ...MANIFEST_PACKAGE_CODES])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

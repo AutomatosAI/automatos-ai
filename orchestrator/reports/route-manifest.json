@@ -2707,6 +2707,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/themes/mobile/{install_id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/themes/settings"
     },
     {

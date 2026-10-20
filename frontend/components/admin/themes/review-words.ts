@@ -20,7 +20,21 @@ export const LOCAL_REVIEW_NOTE =
 export const NOTE_NEEDS_DIGEST = 'A passing note must hold the kit summary line'
 /** api/admin_themes.py REASON_MAX: the longest reject or deactivate reason the server takes. */
 export const REASON_MAX = 2000
-export const SIGNATURE_NOT_VERIFIED = 'Stored, not verified: no edition verifies theme signatures yet (C-05).'
+/** A stored signature an active Automatos signing key verifies, when the report names no key. */
+export const SIGNATURE_VERIFIED = 'Verified with an active Automatos key.'
+/** A stored signature no active Automatos signing key verifies (signature_verify.py `invalid`). */
+export const SIGNATURE_INVALID = 'The signature does not verify against an active Automatos key.'
+
+/**
+ * A stored signature in words, by the report's check on it (review.py report: `signatureVerified`
+ * and `keyId`, from signature_verify.package_verdict, C-05b). Verified names the active key that
+ * verifies it. Invalid says no active key does, and names the retired or revoked key that does
+ * verify it when there is one (signature_verify.verify).
+ */
+export function storedSignatureWords(verified: boolean, keyId: string | null): string {
+  if (verified) return keyId ? `Verified with the active Automatos key ${keyId}.` : SIGNATURE_VERIFIED
+  return keyId ? `${SIGNATURE_INVALID} Only ${keyId}, a retired or revoked key, verifies it.` : SIGNATURE_INVALID
+}
 
 /** The kit's summary line naming the version (`services/themes/review.py` NOTE_DIGEST_LINE). */
 export function noteDigestLine(digest: string): string {

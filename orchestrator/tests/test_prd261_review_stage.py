@@ -5,7 +5,8 @@ Packages are the hello fixture, read by ``read_theme_package`` and then changed 
 Messages API would; the SDK's names are a small test surface, so these tests don't depend on the
 generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/),
 except E3d's storage tests, which review on this host's own list: they prove the SDK's storage area
-is one this host's review accepts.
+is one this host's review accepts. M-03's cases give hello a ``mobile`` block, whose colour pairs the
+contrast check measures (an error under AA blocks the verdict).
 The routes that run the stage are covered in ``test_prd261_theme_import.py`` (private upload) and
 by C-01a's submit tests.
 """
@@ -93,6 +94,91 @@ def test_contrast_is_listed_per_preset_as_not_measured_and_never_moves_the_verdi
     contrast = _review()["checks"]["contrast"]
     assert contrast["level"] == "not_measured" and contrast["reason"]
     assert [preset["id"] for preset in contrast["presets"]] == ["default", "night"]
+
+
+# M-03 (PB-35): a theme with a mobile block has its ten colour pairs measured (test_prd261_mobile_contrast.py
+# holds the measuring itself), for the table's defaults and then each preset. hello's two presets painted for
+# the phone: default (paper, blue) reads, night (ink, green) puts white text on a green at 3.41:1.
+MOBILE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.0.0"}
+WHITE, INK_TEXT = "0 0% 100%", "#14181c"
+# The table paints Studio tokens as triplets only (the web reads them as hsl(var(--x))): #14181c and #2e9e5b.
+INK_TRIPLET, GREEN = "210 16.67% 9.41%", "144.11 54.9% 40%"
+LOOK_TABLE = {
+    "knobs": {
+        "ground": {
+            "paper": {"--background": WHITE, "--foreground": INK_TRIPLET},
+            "ink": {"--background": "220 13% 9%", "--foreground": "210 20% 96%"},
+        },
+        "accent": {
+            "blue": {"--primary": "221.21 83.19% 53.33%", "--primary-foreground": WHITE},
+            "green": {"--primary": GREEN, "--primary-foreground": WHITE},
+        },
+    },
+    "defaults": {"accent": "blue", "ground": "paper", "radius": 6},
+}
+
+
+def _review_mobile(mobile, files=None):
+    """The review of hello with a ``mobile`` block (and any files added), its engines at the block's lowest host."""
+    fields = {"uses": ["theme"], "engines": MOBILE_ENGINES, "mobile": mobile}
+    data = build.build_package(replace={build.MANIFEST: build.changed_manifest(fields), **(files or {})})
+    return run_review_stage(read_theme_package(data), len(data), llm_call=_llm(), surface=SURFACE)
+
+
+def test_a_mobile_pair_under_aa_makes_contrast_an_error_naming_it_and_blocks():
+    report = _review_mobile({"tokens": {"light": {"--background": WHITE, "--foreground": "0 0% 58%"}}})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["status"]) == ("blocked", "error", "fail")
+    assert contrast["problems"] == [
+        "mobile.tokens.light: --foreground on --background is 3.03:1, under the AA minimum of 4.5:1 for text.",
+    ]
+    assert report["summary"]["error"] == 1 and report["checks"]["llm"]["level"] == "pass"
+    assert member_view(report)["checks"]["contrast"] == contrast  # the uploader sees why it is blocked
+
+
+def test_a_mobile_block_whose_measured_pairs_meet_aa_passes_contrast():
+    report = _review_mobile({"tokens": {"light": {"--background": WHITE, "--foreground": INK_TEXT, "--ring": "0 0% 56.5%"}}})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["source"]) == ("pass", "pass", "tokens")
+    assert [scheme["id"] for scheme in contrast["schemes"]] == ["light"] and "presets" not in contrast
+    assert report["summary"] == {"pass": 7, "warning": 0, "error": 0, "not_measured": 0}
+
+
+def test_from_looks_a_preset_under_aa_blocks_and_is_named():
+    report = _review_mobile({"fromLooks": True}, {"boot/prepaint.json": json.dumps(LOOK_TABLE).encode("utf-8")})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["source"]) == ("blocked", "error", "fromLooks")
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("boot/prepaint.json#defaults", "pass"), ("default", "pass"), ("night", "fail"),
+    ]
+    assert contrast["problems"] == [
+        'Preset "night": --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.',
+    ]
+
+
+def test_from_looks_defaults_under_aa_block_while_every_preset_passes():
+    # The answer serves the table's defaults to every member with no stored look, so the review measures them too.
+    table = {**LOOK_TABLE, "defaults": {"accent": "green", "ground": "paper", "radius": 6}}
+    night = {
+        "schema": "automatos-e2e-hello-look/v1", "id": "night", "name": "Night", "sub": "",
+        "accent": "blue", "ground": "ink", "radius": 0,
+    }
+    report = _review_mobile({"fromLooks": True}, {
+        "boot/prepaint.json": json.dumps(table).encode("utf-8"),
+        "looks/presets/night.look.json": json.dumps(night).encode("utf-8"),
+    })
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"]) == ("blocked", "error")
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("boot/prepaint.json#defaults", "fail"), ("default", "pass"), ("night", "pass"),
+    ]
+    assert contrast["problems"] == [
+        "boot/prepaint.json#defaults: --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.",
+    ]
 
 
 # ---------------------------------------------------------------------------

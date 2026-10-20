@@ -20,6 +20,11 @@ never in the queue and answers 404 here, exactly as a missing row does):
   and ``reviewed``, offers the version to the listing installs that run an older one
   (``listing_updates.py``; an install never switches by itself) and records a signature
   request (``signing.py``); it never signs;
+* **sign**: stores the signature the kit's sign workflow returned for the open request, only
+  when an active Automatos signing key verifies it (``signature_verify``, C-05b); the report's
+  ``signatureVerified`` and ``keyId`` are that check on the stored signature. A keys file that
+  does not load reads ``invalid`` in the report (it still answers), and the paste raises
+  ``SigningKeysError``, which the router answers as a 503 with its plain message;
 * **reject** with a reason, for a pending version;
 * **deactivate** an approved version with a reason: status ``deactivated`` and a ``disable``
   revocation of its digest, so every install falls back to its base on the next load.
@@ -33,6 +38,7 @@ Every action writes a ``theme_review_events`` row. Synchronous; nothing here com
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
@@ -40,10 +46,12 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
-from services.themes import signing
+from services.themes import signature_verify, signing
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
 from services.themes.listing_updates import offer_listed_update, withdraw_offers
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
+
+logger = logging.getLogger(__name__)
 
 MARKETPLACE_OWNER = "marketplace"
 STATUS_PENDING, STATUS_APPROVED = "pending", "approved"
@@ -212,17 +220,28 @@ def _history(db: Session, package_id: UUID) -> List[Dict[str, Any]]:
     ]
 
 
+def _stored_verdict(package: ThemePackage) -> signature_verify.Verdict:
+    """The report's check on the stored signature. A keys file that does not load reads ``invalid``
+    (as ``listings._signature_verdict`` does), so the report still answers; the paste refuses."""
+    try:
+        return signature_verify.package_verdict(package)
+    except signature_verify.SigningKeysError as bad:
+        logger.error("Theme signing keys did not load; the report shows %s unverified: %s", package.id, bad)
+        return signature_verify.Verdict(signature_verify.STATE_INVALID)
+
+
 def report(db: Session, package_id: UUID) -> Dict[str, Any]:
     """One version's report: summary, scan report, latest note, approval state, history, signing."""
     package = queued_package(db, package_id)
     note = latest_notes(db, [package.id]).get(package.id)
+    verdict = _stored_verdict(package)
     return {
         **package_summary(package),
         "manifest": package.manifest, "scanReport": package.scan_report,
         "reportNote": note_view(note), "approval": _approval(db, package, note),
         "history": _history(db, package.id),
         "signatureRequest": signing.request_view(signing.open_request(db, package.id)),
-        "signatureVerified": False,  # verification is C-05 (PRD §10); no edition verifies yet
+        "signatureVerified": verdict.verified, "keyId": verdict.key_id,
     }
 
 
@@ -333,9 +352,10 @@ def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[in
 
 
 def sign(db: Session, package_id: UUID, request_id: UUID, signature: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Store the signature the kit's sign workflow returned for this version's open request."""
+    """Store the signature the kit's sign workflow returned for this version's open request, once an
+    active Automatos signing key verifies it (``signature_verify.verify``); otherwise 400, nothing stored."""
     package = queued_package(db, package_id, lock=True)
-    stored = signing.store_signature(db, package, request_id, signature, actor_pk)
+    stored = signing.store_signature(db, package, request_id, signature, actor_pk, signature_verify.verify)
     return {**package_summary(package), "signature": stored}
 
 
