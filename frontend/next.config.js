@@ -94,8 +94,68 @@ const MASCOT_CACHE_RULE = {
   ],
 }
 
+// PRD-262 US-046: what the standalone server never loads stays out of its trace, and so out of
+// the image: sharp and its libvips builds (image optimisation is off, below), TypeScript (this
+// config is .js and only `next build` reads TypeScript) and Next's AMP validator (no page is AMP).
+// PRD-262 #29: Next's own build and dev internals, which the trace reaches through requires the
+// production server never runs: next/font's loader and the capsize metrics only it reads, Babel,
+// browserslist and caniuse-lite, the CSS tools, webpack's crypto polyfill, Next's file tracer, the
+// dev overlay, and the route runtimes Next picks only for experimental React or Turbopack (turning
+// either on needs those two globs gone first, or every page fails with MODULE_NOT_FOUND). The
+// server does load compiled/babel/code-frame.js, babel-code-frame, next/dist/build and the edge
+// runtime, so they stay. PRD-262 #47: React's development builds and Next's React Refresh, which
+// the server never loads: the standalone server.js sets NODE_ENV=production, and the Dockerfile
+// does too. frontend/scripts/check-standalone-image.sh looks for each glob in every built image
+// (test.yml's prod-image-parity job, images.yml) and requests every page.
+const STANDALONE_TRACE_EXCLUDES = [
+  'node_modules/@img/**',
+  'node_modules/sharp/**',
+  'node_modules/typescript/**',
+  'node_modules/next/dist/compiled/amphtml-validator/**',
+  'node_modules/next/dist/server/capsize-font-metrics.json',
+  'node_modules/next/dist/server/font-utils.js',
+  'node_modules/next/dist/compiled/@next/font/**',
+  'node_modules/next/dist/compiled/babel/bundle.js',
+  'node_modules/next/dist/compiled/babel-packages/**',
+  'node_modules/next/dist/compiled/browserslist/**',
+  'node_modules/caniuse-lite/**',
+  'node_modules/next/dist/compiled/postcss-preset-env/**',
+  'node_modules/next/dist/compiled/cssnano-simple/**',
+  'node_modules/next/dist/compiled/crypto-browserify/**',
+  'node_modules/next/dist/compiled/@vercel/nft/**',
+  'node_modules/next/dist/compiled/next-devtools/**',
+  'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js',
+  'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js',
+  'node_modules/react/cjs/*.development.js',
+  'node_modules/react-dom/cjs/*.development.js',
+  'node_modules/scheduler/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-is/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-refresh/**',
+]
+
+// PRD-262 #47: packages only the browser runs, loaded on demand inside a handler or an effect
+// (hooks/use-retell-call.ts's voice call, which brings LiveKit, and FilePreview's spreadsheet
+// preview), never during a server render. The server builds resolve them to an empty module, so
+// their code (0.96 MB of server chunks) stays out of the image; the browser bundle keeps them.
+// Not `externals`: the trace would then copy each package into node_modules.
+const CLIENT_ONLY_PACKAGES = ['retell-client-js-sdk', 'livekit-client', 'xlsx']
+
+/** The webpack config with each client-only package resolved to an empty module on the server. */
+function withoutClientOnlyPackagesOnTheServer(config, { isServer }) {
+  if (!isServer) return config
+  const absent = Object.fromEntries(CLIENT_ONLY_PACKAGES.map((name) => [name, false]))
+  return { ...config, resolve: { ...config.resolve, alias: { ...config.resolve?.alias, ...absent } } }
+}
+
 const nextConfig = {
   output: 'standalone',
+  // PRD-262 US-046 (§9-Q12): no image optimisation, so the server never loads sharp and
+  // /_next/image answers 404. The only optimised image was the 48 px brand mark on the hosted
+  // sign-in pages, which public/brand/ now holds at that size (96 px wide, for 2x screens).
+  images: { unoptimized: true },
+  // '*' matches every route and the server's own trace ('next-server').
+  outputFileTracingExcludes: { '*': STANDALONE_TRACE_EXCLUDES },
+  webpack: withoutClientOnlyPackagesOnTheServer,
   reactStrictMode: false,
   // SECURITY: Disable X-Powered-By header to reduce information leakage (OWASP A05:2021)
   poweredByHeader: false,

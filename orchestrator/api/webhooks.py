@@ -200,12 +200,14 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         # message it replies to (a reply to a correlated question answers it).
         ctx["message_id"] = msg.get("message_id")
         ctx["reply_to_message_id"] = (msg.get("reply_to_message") or {}).get("message_id")
+        ctx["inbound_text"] = msg.get("text")  # PRD-264 EUAI-03: "are you human?" gets the AI notice
 
     elif platform == "slack":
         event = body.get("event", {})
         ctx["channel"] = event.get("channel")
         ctx["thread_ts"] = event.get("thread_ts") or event.get("ts")
         ctx["user"] = event.get("user")
+        ctx["inbound_text"] = event.get("text")
 
     elif platform == "whatsapp":
         entries = body.get("entry", [{}])
@@ -214,10 +216,12 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         messages = value.get("messages", [{}])
         ctx["from_phone"] = messages[0].get("from") if messages else None
         ctx["phone_number_id"] = value.get("metadata", {}).get("phone_number_id")
+        ctx["inbound_text"] = (messages[0].get("text") or {}).get("body") if messages else None
 
     elif platform == "twilio":
         ctx["from_phone"] = body.get("From")
         ctx["to_phone"] = body.get("To")
+        ctx["inbound_text"] = body.get("Body")
 
     return ctx
 
@@ -705,11 +709,7 @@ async def _deliver_reply(
         logger.warning("[reply] _deliver_reply: workspace_id is required")
         return False
 
-    target = (
-        reply_ctx.get("chat_id")
-        or reply_ctx.get("channel")
-        or reply_ctx.get("from_phone")
-    )
+    target = reply_ctx.get("chat_id") or reply_ctx.get("channel") or reply_ctx.get("from_phone")
     if target is not None:
         target = str(target)
 
@@ -719,11 +719,8 @@ async def _deliver_reply(
     db = SessionLocal()
     try:
         result = await send_to_channel(
-            db=db,
-            workspace_id=workspace_id,
-            platform=platform,
-            text=reply_text,
-            target=target,
+            db=db, workspace_id=workspace_id, platform=platform,
+            text=reply_text, target=target, in_reply_to=reply_ctx.get("inbound_text"),
         )
     finally:
         try:

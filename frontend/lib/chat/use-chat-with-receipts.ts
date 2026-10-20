@@ -15,8 +15,13 @@
  *
  * PRD-260: `reload` (Studio's regenerate, Play's Try again) is built here on each render's own
  * `sendMessage` (./retry), so a turn that failed can be asked again.
+ *
+ * PRD-264 EUAI-11a: the agent the owner picked goes to the host's AI label (lib/ai-label), which
+ * says "{agent name} is an AI" while that agent answers. The default chat and the chat controller
+ * (Play's chat, a theme's) both stream through here.
  */
 import { useCallback, useRef } from 'react'
+import { usePublishAnsweringAgent } from '@/lib/ai-label/store'
 import { useChat } from '@/lib/chat/hooks'
 import { liveReceiptsFromToolData, withReceiptsOnTheReply } from '@/lib/chat/receipts'
 import { lastTurn } from '@/lib/chat/retry'
@@ -57,6 +62,7 @@ export function useChatWithReceipts(options: ChatOptions): ChatWithReceipts {
     },
   })
   setMessagesRef.current = chat.setMessages
+  usePublishAnsweringAgent(options.selectedAgentId)
   const reload = useAskAgain(chat)
   return { ...chat, reload }
 }

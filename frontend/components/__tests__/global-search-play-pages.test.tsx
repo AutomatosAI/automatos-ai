@@ -44,7 +44,7 @@ afterEach(() => {
 describe("global search · Play's pages (hook)", () => {
   it("under Play, 'conv' finds Conversations; under Studio it doesn't", () => {
     vi.spyOn(apiClient, 'request').mockResolvedValue([] as never)
-    expect(pagesFor('conv', true)).toEqual(['/conversations'])
+    expect(pagesFor('conv', true)).toEqual(['/x/conversations'])
     expect(pagesFor('conv', false)).toEqual([])
   })
 
@@ -59,9 +59,9 @@ describe("global search · Play's pages (hook)", () => {
   it('lists them with no query only under Play, after the core pages', () => {
     const play = pagesFor('', true)
     const studio = pagesFor('', false)
-    expect(play.slice(-3)).toEqual(['/conversations', '/looks', '/looks/style'])
+    expect(play.slice(-3)).toEqual(['/x/conversations', '/looks', '/looks/style'])
     expect(play.slice(0, -3)).toEqual(studio)
-    expect(studio).not.toContain('/conversations')
+    expect(studio).not.toContain('/x/conversations')
   })
 
   it("lists another theme's own pages from its entry, and none of Play's", () => {
@@ -97,7 +97,7 @@ describe("global search · Play's pages (the dialog reads the style)", () => {
     nav.play = true
     await searchInDialog('conv')
     fireEvent.click(await screen.findByText('Conversations'))
-    expect(nav.push).toHaveBeenCalledWith('/conversations')
+    expect(nav.push).toHaveBeenCalledWith('/x/conversations')
   })
 
   it('under Studio, typing "conv" offers no Conversations page', async () => {

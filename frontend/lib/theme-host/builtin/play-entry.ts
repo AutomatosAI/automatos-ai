@@ -14,6 +14,10 @@ export const BUILTIN_PLAY_REF = 'builtin:play'
 export const BUILTIN_PLAY_STYLE = 'theme:builtin:play'
 export const BUILTIN_PLAY_HTML_CLASS = 'play'
 
+/** Play's Conversations page: its theme route `conversations` (PRD-261 A-04b); /conversations redirects here. */
+export const PLAY_CONVERSATIONS_ROUTE_NAME = 'conversations'
+export const PLAY_CONVERSATIONS_HREF = `/x/${PLAY_CONVERSATIONS_ROUTE_NAME}`
+
 /** PRD-260 D7: Play's frame and pages render from this width up; below it, the core's fallback. */
 export const BUILTIN_PLAY_MIN_WIDTH_PX = 1024
 
@@ -33,10 +37,10 @@ export const BUILTIN_PLAY_ENTRY: ThemeEntry = {
   kind: 'builtin',
   reviewed: true,
   ownsPages: ['/chat', '/deliverables'],
-  routes: ['conversations'],
+  routes: [PLAY_CONVERSATIONS_ROUTE_NAME],
   // PRD-260 M90: Play's own pages, listed in the search dialog only while Play is the style.
   nav: [
-    { id: 'nav-play-conversations', label: 'Conversations', path: '/conversations' },
+    { id: 'nav-play-conversations', label: 'Conversations', path: PLAY_CONVERSATIONS_HREF },
     { id: 'nav-play-looks', label: 'Make it yours', path: LOOKS_HREF },
     { id: 'nav-play-style-sheet', label: 'Style sheet', path: LOOK_STYLE_HREF },
   ],

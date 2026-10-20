@@ -19,7 +19,7 @@
  * (P260-FX-24, M74). Copy tokens twice, or refused twice, is announced twice:
  * a new node each time (M22).
  * The width is a real window's (window-width.ts) read by Play's width source,
- * usePlayLayout (P260-FX-25, M69): on a phone the sheet never mounts at all.
+ * useThemeLayout (P260-FX-25, M69): on a phone the sheet never mounts at all.
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
@@ -42,6 +42,11 @@ vi.mock('@/components/layout/main-layout', () => ({
     </div>
   ),
 }))
+// PRD-261 A-04b: builtin Play's style sheet comes through its lazy slot (styleSheet@1); here as it
+// is once its chunk has loaded, so the sheet renders in the same pass (and on the server).
+vi.mock('@/components/looks/style/style-screen-lazy', async () => ({
+  StyleScreen: (await import('@/components/looks/style/style-screen')).StyleScreen,
+}))
 
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
@@ -55,8 +60,8 @@ import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth } from '@/hooks/__tests__/window-width'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
-import { lookToCssVars } from '@/lib/looks/css'
 import { lookDocumentVars } from '@/lib/looks/document'
+import { lookToCssVars } from '@/lib/looks/engine'
 import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
 import { lookKeys } from '@/lib/looks/storage'
