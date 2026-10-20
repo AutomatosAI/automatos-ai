@@ -1,8 +1,7 @@
 'use client'
 
 import { type FormEvent, type KeyboardEvent, forwardRef, useState } from 'react'
-
-import { AiLabelFence } from '@/components/ai-label/ai-label-fence'
+import { AiLabelFence } from '@automatos/theme-sdk'
 
 import styles from './composer.module.css'
 
@@ -12,7 +11,7 @@ import styles from './composer.module.css'
  * IME composition is never cut short), Send becomes Stop while Auto answers.
  * Focus and blur tell Auto you're typing. The ref is the textarea: Try again
  * puts focus back in it as its snag box goes (P260-FX-22, M20). PRD-264 EUAI-11a: the host's
- * AI label fence disables it while a theme hides the label.
+ * AI label fence (the SDK's `cards.AiLabelFence`) disables it while a theme hides the label.
  */
 
 export const PLACEHOLDER = 'Message Auto'

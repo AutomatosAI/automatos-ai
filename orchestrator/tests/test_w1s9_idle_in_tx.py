@@ -32,12 +32,6 @@ ORCH_ROOT = Path(__file__).resolve().parent.parent
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
-# The heartbeat tool loop imports consumers.chatbot.personality, whose package
-# __init__ eagerly pulls the chatbot stack → RAG → camelot, an optional PDF dep
-# not installed in the unit-test env. Stub it so the import chain resolves.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
-
 def _stub(name, **attrs):
     """Register a stub module in sys.modules (only if absent) with attrs set."""
     if name in sys.modules:

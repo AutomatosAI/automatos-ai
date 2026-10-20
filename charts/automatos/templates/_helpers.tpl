@@ -36,9 +36,42 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- end }}
 
-{{/* repository:tag, the tag defaulting to the chart's appVersion: (dict "ctx" $ "image" .Values.api.image). */}}
+{{/*
+A component's image: (dict "ctx" $ "image" .Values.api.image). repository@digest when
+image.digest is set, so the node runs exactly that build; otherwise repository:tag,
+the tag defaulting to the chart's appVersion.
+*/}}
 {{- define "automatos.image" -}}
-{{- printf "%s:%s" .image.repository (default .ctx.Chart.AppVersion .image.tag) }}
+{{- with .image.digest }}
+{{- if not (regexMatch `^sha256:[0-9a-f]{64}$` .) }}
+{{- fail (printf "%s: image.digest must be sha256:<64 hex digits>, got %q" $.image.repository .) }}
+{{- end }}
+{{- end }}
+{{- if .image.digest }}
+{{- printf "%s@%s" .image.repository .image.digest }}
+{{- else }}
+{{- printf "%s:%s" .image.repository (toString (default .ctx.Chart.AppVersion .image.tag)) }}
+{{- end }}
+{{- end }}
+
+{{/*
+A component's imagePullPolicy: (dict "ctx" $ "image" .Values.api.image). image.pullPolicy
+when set. Otherwise Always for a tag that moves (edge, or a MAJOR.MINOR release line),
+so a node never keeps an older build under it, and IfNotPresent for a digest or a tag
+that never moves (sha-<7>, tree-<12>, weekly-<date>, a full version, or an appVersion
+stamped at package time).
+*/}}
+{{- define "automatos.imagePullPolicy" -}}
+{{- $tag := toString (default .ctx.Chart.AppVersion .image.tag) -}}
+{{- if .image.pullPolicy -}}
+{{ .image.pullPolicy }}
+{{- else if .image.digest -}}
+IfNotPresent
+{{- else if or (eq $tag "edge") (regexMatch `^[0-9]+\.[0-9]+$` $tag) -}}
+Always
+{{- else -}}
+IfNotPresent
+{{- end -}}
 {{- end }}
 
 {{- define "automatos.secretName" -}}

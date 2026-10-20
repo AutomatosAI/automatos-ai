@@ -15,7 +15,7 @@ import {
   lookReducer,
   mergeLooks,
   sameLookSet,
-} from '@/lib/looks/store'
+} from '@/lib/theme-host/builtin/play-look-state'
 import type { Look } from '@/lib/looks/types'
 
 import { myLook } from './helpers'

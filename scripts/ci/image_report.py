@@ -1,6 +1,6 @@
 """Image size, layers, update delta and budget reports for images.yml (PRD-262 US-001).
 
-Four commands, each run by one images.yml step:
+Five commands, each run by one images.yml step:
 
 * ``measure`` (each build job, after the push) reads the pushed digest back from its
   registry, picks the job's architecture out of the index, and writes a JSON report:
@@ -11,9 +11,15 @@ Four commands, each run by one images.yml step:
   adds ``on_disk_bytes``, the Size ``docker image inspect`` reports once the image is
   pulled from the job's registry, to that report.
 * ``budget`` (each build job) checks that report against ``.github/image-budgets.json``:
-  the compressed size against ``max_mb``, and the on-disk size against
-  ``on_disk_max_mb`` where an entry has one. In the file's ``warn`` mode an
-  over-budget build prints a warning; ``fail`` mode (PRD-262 US-004) fails the job.
+  the compressed size against ``max_mb``, the on-disk size against ``on_disk_max_mb``
+  where an entry has one, and its update delta against the image's update bar, if it
+  has one (PRD-262 US-016: a code-only API update is one layer of 6 MB or less). In
+  the file's ``warn`` mode a miss prints a warning; ``fail`` mode (PRD-262 US-004)
+  fails the job.
+* ``layer`` (the API's build jobs, PRD-262 US-014) checks that one layer of that
+  report holds only files of one suffix below one directory: the stdlib compile's
+  layer holds stdlib ``.pyc`` and nothing under site-packages. It fails the job
+  otherwise, or when that layer could not be listed.
 * ``report`` (the report job) reads every build's JSON and works out, per arch, the
   layers the API and the worker share and what the default stack's app images cost
   to pull. An image this run did not build counts as its current ``edge``.
@@ -80,7 +86,9 @@ def _listing(session, row: dict) -> dict:
 
 
 def read_edge(ref: str, arch: str) -> Tuple[Optional[dict], str]:
-    """``edge``'s layers for ``arch``, or None and why (an unpublished image has none)."""
+    """``edge``'s layers for ``arch``, each with the instruction that made it, or None and
+    why (an unpublished image has none). image_pip_layers.py finds edge's pip layers by
+    their instruction (PRD-262 US-022)."""
     if not ref:
         return None, "no `edge`: this image is not published, so only its size is reported"
     try:
@@ -93,7 +101,8 @@ def read_edge(ref: str, arch: str) -> Tuple[Optional[dict], str]:
         "manifest": manifest["digest"],
         "revision": _revision(config),
         "bytes": sum(layer["size"] for layer in manifest["layers"]),
-        "layers": [{"digest": layer["digest"], "size": layer["size"]} for layer in manifest["layers"]],
+        "layers": [{key: row[key] for key in ("digest", "size", "media_type", "instruction")}
+                   for row in layers.layer_rows(manifest, config)],
     }, ""
 
 
@@ -195,17 +204,22 @@ def disk(args: argparse.Namespace) -> int:
 
 
 def budget(args: argparse.Namespace) -> int:
-    """The compressed size against its budget, and the on-disk size against an on-disk bar."""
+    """The compressed size against its budget, the on-disk size against an on-disk bar, and
+    the update delta against the image's update bar."""
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     budgets = json.loads(Path(args.budgets).read_text(encoding="utf-8"))
+    mode = budgets.get("mode", "warn")
     name, arch = report["name"], report["arch"]
-    verdicts = [layers.budget_verdict(name, arch, report["bytes"], budgets),
-                layers.on_disk_verdict(name, arch, report.get("on_disk_bytes"), budgets)]
-    for verdict in (item for item in verdicts if item):
+    checks = [(title, label, verdict) for title, label, verdict in (
+        ("Image size budget", "Budget", layers.budget_verdict(name, arch, report["bytes"], budgets)),
+        ("Image size budget", "Budget", layers.on_disk_verdict(name, arch, report.get("on_disk_bytes"), budgets)),
+        ("Update budget", "Update bar", layers.update_verdict(report, budgets)),
+    ) if verdict]
+    for title, label, verdict in checks:
         if verdict.level != "ok":
-            print(f"::{verdict.level} title=Image size budget::{verdict.message}")
-        _append(args.summary, f"**Budget** ({budgets.get('mode', 'warn')} mode): {verdict.message}.")
-    return 1 if any(item and item.level == "error" for item in verdicts) else 0
+            print(f"::{verdict.level} title={title}::{verdict.message}")
+        _append(args.summary, f"**{label}** ({mode} mode): {verdict.message}.")
+    return 1 if any(verdict.level == "error" for _, _, verdict in checks) else 0
 
 
 def _byte_count(value: str) -> int:
@@ -213,6 +227,15 @@ def _byte_count(value: str) -> int:
     if count <= 0:
         raise argparse.ArgumentTypeError(f"{value} is not a size in bytes")
     return count
+
+
+def layer(args: argparse.Namespace) -> int:
+    report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+    verdict = layers.layer_verdict(report["layers"], args.instruction, args.under, args.not_under, args.suffix)
+    if verdict.level != "ok":
+        print(f"::{verdict.level} title=Layer contents::{report['name']} ({report['arch']}): {verdict.message}")
+    _append(args.summary, f"**Layer check:** {verdict.message}.")
+    return 1 if verdict.level == "error" else 0
 
 
 def _stack_layers(name: str, arch: str, built: dict, edge_prefix: str) -> Tuple[List[dict], str]:
@@ -307,6 +330,10 @@ def parser() -> argparse.ArgumentParser:
     check.add_argument("--report", required=True)
     check.add_argument("--budgets", required=True)
     check.add_argument("--summary")
+    one_layer = commands.add_parser("layer", help="check what one layer of a report holds")
+    for flag in ("--report", "--instruction", "--under", "--not-under", "--suffix"):
+        one_layer.add_argument(flag, required=True)
+    one_layer.add_argument("--summary")
     every = commands.add_parser("report", help="the shared-layer and first-pull report")
     every.add_argument("--dir", required=True, help="the build jobs' JSON reports")
     every.add_argument("--edge-prefix", required=True, help="ghcr.io/<owner>/automatos-")
@@ -318,7 +345,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: List[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    return {"measure": measure, "disk": disk, "budget": budget, "report": report}[args.command](args)
+    return {"measure": measure, "disk": disk, "budget": budget, "layer": layer, "report": report}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ Pure + one mocked retrieve_memories integration test.
 """
 import os
 import sys
-import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,8 +26,6 @@ for _k, _v in {
     "POSTGRES_DB": "test",
 }.items():
     os.environ.setdefault(_k, _v)
-
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from modules.memory.injection_filter import filter_injectable_memories  # noqa: E402
 from modules.memory.recall_ranking import (  # noqa: E402

@@ -4,6 +4,7 @@
   "story": "A-11b",
   "status": "built",
   "names": [
+    "liveReceiptsOf",
     "movedSomethingOnTheBoard",
     "receiptLine",
     "receiptLink",

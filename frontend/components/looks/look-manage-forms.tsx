@@ -2,7 +2,7 @@
 
 import { type FormEvent, useId, useState } from 'react'
 
-import type { Look } from '@/lib/looks/types'
+import type { Look } from '../../lib/looks/types'
 
 import styles from './manage.module.css'
 
@@ -10,7 +10,7 @@ import styles from './manage.module.css'
  * PRD-260 — the two small forms of 'This look' on the Looks page, ported from
  * Automatos Play's components/looks/LookManager.tsx (split out so the manager
  * stays small): renaming a saved look, and confirming its deletion. The name
- * typed here goes through validateLook (useLook().renameLook) before it is kept.
+ * typed here goes through validateLook (usePlayLook().renameLook) before it is kept.
  * Each takes focus as it opens: the name field, or Keep it, the safe choice, so
  * the question is read out with it (P260-FX-22, M20).
  */

@@ -89,9 +89,9 @@ def object_key(prefix: str, collection: str, snapshot_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _build_qdrant_client():
-    from qdrant_client import AsyncQdrantClient
+    from core.qdrant import QdrantRestClient
 
-    return AsyncQdrantClient(
+    return QdrantRestClient(
         url=config.QDRANT_URL,
         api_key=config.QDRANT_API_KEY or None,
         timeout=120,  # snapshot creation is heavier than a search
@@ -108,7 +108,7 @@ def _build_s3_client():
 async def _download_snapshot(collection: str, snapshot_name: str) -> bytes:
     """Pull the snapshot file off the Qdrant node over its REST API.
 
-    The client library exposes create/list/delete but not download; the
+    The REST client (core.qdrant) creates, lists and deletes snapshots; the
     file itself is served at /collections/{c}/snapshots/{name}. Memory
     collections are small (thousands of points), so buffering in memory
     is fine here — revisit only if a collection outgrows that.

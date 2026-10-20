@@ -1,7 +1,8 @@
 """PRD-261 A-09a — a member's looks for one theme, kept on the server (Q5).
 
 One ``theme_looks`` row per (workspace, user, theme id): the saved looks and the active one,
-exactly as the look editor holds them (``frontend/lib/looks/storage.ts`` ``StoredLooks``).
+exactly as the look editor holds them (``StoredLooks`` in
+``frontend/lib/theme-host/builtin/play-look-storage.ts``).
 They are keyed by the theme id (``publisher/slug``), never by a version, so an update or a
 rollback keeps them.
 

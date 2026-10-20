@@ -6,6 +6,7 @@ import { parseUiStyle, UI_STYLE_COOKIE } from '@/lib/ui-style'
 import { createThemeBootResolver, type CookieReader } from '@/lib/theme-host/boot'
 import { CORE_FONT_VARIABLE_CLASSES } from '@/app/core-fonts'
 import { installedThemeBootResolver } from '@/lib/theme-host/boot-server'
+import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { PLAY_FONT_VARIABLE_CLASSES } from '@/lib/theme-host/builtin/play-fonts'
 import { ThemeBootScripts } from '@/components/theme-host/theme-boot'
 import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
@@ -49,6 +50,9 @@ export default async function RootLayout({
   const readCookie: CookieReader = (name) => store.get(name)?.value
   const uiStyle = parseUiStyle(readCookie(UI_STYLE_COOKIE))
   const boot = await createThemeBootResolver(readCookie, installedThemeBootResolver)(uiStyle)
+  // PRD-261 W-A6b: an installed theme that runs is a registry entry from its boot, the same on the
+  // server render and the client's first render (null for every other style, and a base boot).
+  const installedTheme = installedThemeEntry(uiStyle, boot.entry)
 
   return (
     <html
@@ -64,7 +68,7 @@ export default async function RootLayout({
         <ThemeBootScripts boot={boot} />
       </head>
       <body>
-        <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined}>
+        <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined} initialTheme={installedTheme}>
           {children}
         </Providers>
       </body>

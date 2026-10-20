@@ -37,6 +37,13 @@ stage. ``--created`` (a schedule run's ``created_at``) adds
 ``sha-<7>``. smoke-images.yml works the tag out from the same timestamp, so the two
 agree even when the run is re-run on a later day.
 
+A reproducible build (PRD-262 US-022): an image definition with ``source_date_epoch``
+gets ``SOURCE_DATE_EPOCH=<it>`` among its build args, which BuildKit stamps the image
+and its history with, and ``rewrite_timestamp`` (``,rewrite-timestamp=true``, appended
+to the build step's ``outputs``), which clamps every file's mtime in the layers it
+writes to that time. A layer rebuilt from the same inputs is then the same bytes.
+Every other entry gets neither.
+
 Patterns follow GitHub's path filters: ``*`` stops at ``/``, ``**`` does not.
 
     image_matrix.py --images JSON --shared-inputs JSON --runners JSON \\
@@ -60,6 +67,7 @@ UNSUPPORTED = re.compile(r"[?+\[\]!\\]")
 GLOB_PART = re.compile(r"\*\*|\*|\?|[^*?]+")
 WEEKLY_TAG_PREFIX = "weekly-"
 WEEKLY_DATE_FORMAT = "%Y%m%d"
+REWRITE_TIMESTAMP = ",rewrite-timestamp=true"
 CACHE_BACKENDS = ("gha", "registry")
 BUILDCACHE_TAG_PREFIX = "buildcache-"
 
@@ -120,12 +128,14 @@ def entry(image: dict, arch: str, runner: str, publish_run: bool, owner: str, lo
     name = image["name"]
     published = f"ghcr.io/{owner.lower()}/automatos-{name}"
     to_ghcr = publish_run and image["publish"]
+    epoch = image.get("source_date_epoch")
     cache_from, cache_to = cache_refs(image, arch, publish_run, published)
     return {
         "name": name,
         "context": image["context"],
         "target": image["target"],
-        "build_args": "\n".join(image["build_args"]),
+        "build_args": "\n".join(image["build_args"] + ([f"SOURCE_DATE_EPOCH={int(epoch)}"] if epoch else [])),
+        "rewrite_timestamp": REWRITE_TIMESTAMP if epoch else "",
         "cache_from": cache_from,
         "cache_to": cache_to,
         "no_cache_filters": ",".join(image["no_cache_filters"]) if no_cache else "",
