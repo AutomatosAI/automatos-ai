@@ -86,7 +86,7 @@ def test_18_of_20_non_auth_errors_flag_as_a_tool_failure(db_session, ws):
     assert ("- **Scout**: GMAIL failed 18 of 20 calls this week (a failure rate of at least 70%) "
             "(root cause: tool_failure)") in run["report_md"]
     assert "reconnect" not in run["report_md"].lower()
-    assert run["prescriptions"] == []  # no removal is proposed before its gate (US-057)
+    assert run["prescriptions"] == []  # Scout holds no GMAIL assignment: the removal gate (US-057) proposes none
     _no_removal(run)
 
 
