@@ -147,6 +147,20 @@ def test_a_bulk_take_back_leaves_off_the_card_still_running(desk):
     assert t3._status(desk, idle) == "in_progress" and t3._status(desk, running) == "in_progress"
 
 
+def test_a_missions_step_in_progress_is_refused_before_any_card(desk):
+    """Code review: the status tool refuses Assigned on any mission ticket (``mission_runs_it``), so the
+    take-back of a step in progress is refused in its words, never a card whose click it would refuse."""
+    task = _at_work(desk)
+    task.source_type = "orchestration_task"
+    desk.db.flush()
+
+    reply = t3._call(desk, _turned_down(task), t3._owners_chat())
+
+    assert reply["success"] is False and not reply.get("requires_confirmation"), reply
+    assert "a step of the mission" in reply["error"] and "Nothing was asked or done" in reply["error"]
+    assert t3._grants(desk) == [] and t3._status(desk, task) == "in_progress"
+
+
 def test_a_new_brief_on_a_card_in_progress_is_refused_at_once_with_no_card(desk):
     """The board's Re-brief refuses every In progress card, so that call is no send-back."""
     task = _at_work(desk)

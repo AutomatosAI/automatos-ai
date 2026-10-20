@@ -141,11 +141,15 @@ def _refused(db: Any, action: str, params: Dict[str, Any], card: Any) -> Optiona
 def _at_work_refused(db: Any, action: str, params: Dict[str, Any], card: Any, said: Tuple[str, str]
                      ) -> Optional[_Refused]:
     """F457: why the board would not take ``card``, which its agent is working on, off it (a
-    run still going waits for its result or is cancelled), or None. ``said``: (number, named)."""
+    run still going waits for its result or is cancelled; a mission's step goes back only from its
+    mission, as the status tool's own ``mission_runs_it`` refuses), or None. ``said``: (number, named)."""
+    from api.board_tasks import STARTING_STATUSES, mission_runs_it
     from modules.tools.discovery.send_backs import moved_to
     from modules.tools.discovery.ticket_moves import board_refusal
 
-    refused = board_refusal(db, card, moved_to(action, params))
+    new_status = moved_to(action, params)
+    refused = (mission_runs_it(db, card) if new_status in STARTING_STATUSES else None) \
+        or board_refusal(db, card, new_status)
     if refused is None:
         return None
     number, named = said
