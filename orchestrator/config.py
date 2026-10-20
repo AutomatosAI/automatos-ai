@@ -658,6 +658,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
+    # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
+    # takes no account, so each client IP gets this many checks a minute (at least one).
+    PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.

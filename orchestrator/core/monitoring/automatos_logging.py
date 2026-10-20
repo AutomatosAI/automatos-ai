@@ -46,6 +46,8 @@ from contextvars import ContextVar
 from typing import Optional
 
 from config import config
+# PRD-264 FR-17: no file hash from a request path in a log line (logging and re only).
+from core.monitoring.path_digests import guard_access_log_digests, redact_digest_segments
 # The request-log guard (#1051, #1178): its own module, which imports nothing but logging,
 # so a script that sets up logging itself can use it without config.
 from core.monitoring.request_log_guard import REQUEST_LIBRARIES, guard_request_logs
@@ -205,7 +207,8 @@ class LogRelayHandler(logging.Handler):
         for var_name, ctx_var in _CONTEXT_VARS.items():
             val = ctx_var.get("")
             if val:
-                context[var_name] = val
+                # A request path never leaves with a file hash in it (PRD-264 FR-17).
+                context[var_name] = redact_digest_segments(val) if var_name == "path" else val
 
         # Override with explicit extra fields (extra={} takes precedence)
         for key in _EXTRA_FIELDS:
@@ -400,6 +403,7 @@ def setup_logging(
         root.addHandler(relay)
 
     guard_request_logs()
+    guard_access_log_digests()   # PRD-264 FR-17: no checked file hash in the access log
     return root
 
 

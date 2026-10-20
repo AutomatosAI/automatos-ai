@@ -41,9 +41,8 @@ import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { sessionTabs, threadTimeAgo } from '@/lib/chat/chat-session'
+import { WidgetMessage } from './widget-message'
 import type { Chat, ChatMessage } from '@/types'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { useRouter } from 'next/navigation'
 
 // =============================================================================
@@ -410,28 +409,7 @@ function WidgetConversation({
         )}
 
         {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                msg.role === 'user'
-                  ? 'bg-primary/15 text-foreground'
-                  : 'bg-secondary/40 text-foreground'
-              }`}
-            >
-              {msg.role === 'assistant' ? (
-                <div className="prose prose-sm prose-invert max-w-none [&_p]:mb-1.5 [&_p]:last:mb-0 [&_ul]:mb-1.5 [&_li]:mb-0.5 [&_code]:text-xs [&_pre]:text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content || ''}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
-              )}
-            </div>
-          </div>
+          <WidgetMessage key={msg.id} message={msg} />
         ))}
 
         {isLoading && messages[messages.length - 1]?.role === 'user' && (

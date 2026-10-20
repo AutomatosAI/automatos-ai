@@ -1,5 +1,5 @@
 {
-  "route_count": 941,
+  "route_count": 942,
   "routes": [
     {
       "method": "GET",
@@ -2044,6 +2044,10 @@
     {
       "method": "PUT",
       "path": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/provenance/{sha256}"
     },
     {
       "method": "POST",

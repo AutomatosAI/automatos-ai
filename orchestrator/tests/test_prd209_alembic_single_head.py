@@ -112,7 +112,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # skills.content_hash) become a revision.
 # 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto prd262_boot_columns
 # — harness_task_ledger gains the governed apply columns, and its held rows become expired.
-EXPECTED_HEAD = "prd263_harness_ledger_grants"
+# 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+# prd263_harness_ledger_grants — the provenance record (content_provenance) the
+# public detection route reads.
+EXPECTED_HEAD = "prd264_content_provenance"
 
 
 def _literal(node: ast.AST):

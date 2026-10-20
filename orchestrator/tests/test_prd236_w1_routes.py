@@ -288,7 +288,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
     ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
     assert 'down_revision = "prd262_boot_columns"' in ledger_grants
-    assert 'EXPECTED_HEAD = "prd263_harness_ledger_grants"' in guard
+    # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+    # prd263_harness_ledger_grants — the provenance record (content_provenance), a
+    # new table only; the guard follows it.
+    provenance = (versions / "prd264_content_provenance.py").read_text()
+    assert 'down_revision = "prd263_harness_ledger_grants"' in provenance
+    assert 'EXPECTED_HEAD = "prd264_content_provenance"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

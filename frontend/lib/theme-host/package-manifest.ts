@@ -52,10 +52,10 @@ export const PAGE_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   '/command-center': ['app/command-center/page.tsx', 'components/command-center/command-center-shell.tsx'],
   '/': ['app/page.tsx'],
 })
-/** PRD §4.4: pages that are always the host's. */
+/** PRD §4.4: pages that are always the host's. PRD-264 EUAI-10: /verify, the public AI-content check. */
 export const HOST_OWNED_ROUTES: readonly string[] = [
   '/sign-in', '/sign-up', '/auth', '/sso-callback', '/reset-password', '/accept-invitation', '/settings', '/team',
-  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev',
+  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev', '/verify',
 ]
 
 export const MANIFEST_ERROR_CODES: readonly string[] = [

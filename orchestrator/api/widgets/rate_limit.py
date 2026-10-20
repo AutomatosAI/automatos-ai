@@ -73,6 +73,8 @@ _IP_CEILING_PATHS: dict[str, str] = {
 # unreachable bumps this counter (and logs an ERROR). A cache outage must be
 # visible in logs/metrics, never silent.
 _redis_failures: int = 0
+# Who the fail-open ERROR line names; another caller of RateLimitStore.check passes its own.
+DEFAULT_LIMITER_LABEL = "widget rate limiter"
 
 
 def get_redis_failure_count() -> int:
@@ -80,13 +82,14 @@ def get_redis_failure_count() -> int:
     return _redis_failures
 
 
-def _count_redis_failure(identifier: str) -> None:
+def _count_redis_failure(identifier: str, label: str = DEFAULT_LIMITER_LABEL) -> None:
     global _redis_failures
     _redis_failures += 1
     logger.error(
-        "widget rate limiter FAIL-OPEN (#%d): Redis unreachable — request "
+        "%s FAIL-OPEN (#%d): Redis unreachable — request "
         "for %s allowed ungated (P2-13: availability beats limiting on a "
         "cache outage, but this must not stay silent)",
+        label,
         _redis_failures,
         identifier,
     )
@@ -131,13 +134,14 @@ class RateLimitStore:
         window: Optional[int] = None,
         *,
         quiet: bool = False,
+        label: str = DEFAULT_LIMITER_LABEL,
     ) -> tuple[bool, int, int, int]:
         """Evaluate whether *key_id* may proceed under *limit* req/window.
 
         Returns ``(allowed, limit, remaining, reset_seconds)``. Redis
-        unreachable ⇒ **fail OPEN** (allowed, loud counter + ERROR log). A
-        ``quiet`` check (a count that gates nothing) skips the fail-open
-        accounting.
+        unreachable ⇒ **fail OPEN** (allowed, loud counter + ERROR log naming
+        ``label``, the limiter the caller runs). A ``quiet`` check (a count that
+        gates nothing) skips the fail-open accounting.
         """
         window = window or config.WIDGET_RATE_LIMIT_WINDOW_SECONDS
 
@@ -147,7 +151,7 @@ class RateLimitStore:
             redis = None
         if redis is None:
             if not quiet:
-                _count_redis_failure(key_id)
+                _count_redis_failure(key_id, label)
             return (True, limit, max(0, limit - 1), window)
 
         key = f"{_KEY_PREFIX}:{key_id}"
@@ -163,7 +167,7 @@ class RateLimitStore:
             results = pipe.execute()
         except Exception:
             if not quiet:
-                _count_redis_failure(key_id)
+                _count_redis_failure(key_id, label)
             return (True, limit, max(0, limit - 1), window)
 
         count = int(results[1])

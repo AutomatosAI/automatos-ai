@@ -293,6 +293,34 @@ def test_wipe_built_spares_survivors_and_scopes_to_workspace():
     assert db.committed and ws.onboarding["stage"] == INITIAL_STAGE
 
 
+def test_wipe_built_keeps_the_provenance_record_of_published_files():
+    """PRD-264 EUAI-10 (security review L4): an onboarding reset never deletes
+    ``content_provenance``. The marked files are already out in the world; wiping their
+    rows would make the public check answer "no" for content the workspace published.
+    Full erasure still deletes them (test_prd181_gdpr)."""
+    ws = _FakeWorkspace(onboarding={"stage": "boom"})
+    db = _FakeDB([*_CANNED_SCOPED, "content_provenance"])
+
+    reset_onboarding(db, ws, wipe_built=True)
+
+    deleted = db.deleted_tables()
+    assert "content_provenance" not in deleted
+    assert {"agents", "documents", "missions"} <= deleted   # the wipe itself still ran
+
+
+def test_full_purge_still_deletes_the_provenance_record():
+    """The survivor list belongs to the reset only: the admin hard delete's scoped
+    delete (``_delete_rows`` with its defaults) still discovers and deletes it."""
+    from services import workspace_purge
+
+    db = _FakeDB(["content_provenance", "documents"])
+
+    counts = workspace_purge._delete_rows(db, uuid.uuid4())
+
+    assert db.deleted_tables() == {"content_provenance", "documents"}
+    assert counts["content_provenance"] == 1
+
+
 def test_wipe_built_agents_survivor_predicate_is_null_safe():
     """The agents survivor filter MUST be NULL-safe.
 
