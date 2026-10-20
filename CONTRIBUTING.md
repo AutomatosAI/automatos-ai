@@ -33,9 +33,9 @@ Other welcome contributions:
 
 ## Picking up an issue
 
-1. **Find one.** [`good first issue`](https://github.com/AutomatosAI/automatos-ai/labels/good%20first%20issue) issues are small and spell out what done looks like; [`help wanted`](https://github.com/AutomatosAI/automatos-ai/labels/help%20wanted) ones are bigger. The `area:` labels (frontend, backend, docs, ci, socials) narrow the list. An issue labelled `needs-triage` hasn't been reviewed by a maintainer yet: wait for that before you start.
-2. **Claim it.** Comment that you'd like to take it, and say in a line how you'll approach it. A maintainer assigns it to you. One issue at a time until your first pull request is merged.
-3. **Open a pull request within 7 days.** A draft pull request counts. A claim with no pull request after 7 days lapses and the issue is open to anyone again; you're welcome to pick it back up if it's still free. If you need longer, say so on the issue.
+1. **Find one.** [`good first issue`](https://github.com/AutomatosAI/automatos-ai/labels/good%20first%20issue) issues are small and spell out what done looks like; [`help wanted`](https://github.com/AutomatosAI/automatos-ai/labels/help%20wanted) ones are bigger. The `area:` labels (frontend, backend, docs, ci, socials) narrow the list. An issue labelled `needs-triage` hasn't been reviewed by a maintainer yet: wait for that before you start. One labelled `question`, `wontfix`, `duplicate` or `invalid` is still an open decision: a maintainer says on the issue whether it's up for grabs.
+2. **Claim it.** Comment that you'd like to take it, and say in a line how you'll approach it. The welcome bot assigns it to you when the issue is triaged and free (a first claim: a `good first issue` or `help wanted` one); a maintainer reads every thread and hands out the rest, including shared `Tracking:` issues. One issue at a time until your first pull request is merged.
+3. **Open a pull request within 7 days.** A draft pull request counts. A claim with no pull request after 7 days lapses and the issue is open to anyone again; you're welcome to pick it back up if it's still free. If you need longer, say so on the issue. If you can't carry on, say that too ("I'm stepping back from this one"), so it opens up for someone else.
 4. **Ask on the issue** if anything in it is unclear. The issue is the place for the conversation about the change; the pull request is the place for the review.
 
 ---
