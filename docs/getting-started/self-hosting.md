@@ -641,16 +641,15 @@ profile and its files live **on your machine**:
   no key, because the terminal it shows is your own Claude Code, launched by
   the host on your machine.
 - **Linux ownership note.** The worker process runs as uid 1000 (`worker`).
-  Its entrypoint re-owns everything under `/workspaces` to that uid, except
-  `projects/`, whenever the volume's root belongs to anyone else, and that
-  includes your files under `AUTOMATOS_WORKSPACE_DIR`. On this stack it does not
-  happen: a new `automatos_workspaces_data` volume takes the owner of the
-  directory it is first mounted on, and both the worker's image and the
-  backend's give `/workspaces` to uid 1000, so the volume is uid 1000 whichever
-  starts first (the core stack, below, starts the backend without the worker).
-  A volume created root-owned some other way would trigger it; then expect to
-  need `sudo` to edit or delete those files, or pre-create the directory owned by
-  uid 1000.
+  Your deliverables folder (`AUTOMATOS_WORKSPACE_DIR`) keeps its owner: when
+  uid 1000 cannot write it, because your Linux user has another uid, the worker
+  runs as the folder's owner instead, so what agents write there is yours, as it
+  is on macOS and Windows. Its entrypoint re-owns the rest of `/workspaces` (the
+  `automatos_workspaces_data` volume) to the worker's uid whenever the volume's
+  root belongs to anyone else; it never enters your deliverables folder or
+  `projects/`. When root owns the folder (`make up` run as root), the worker
+  stays uid 1000 and cannot write it, and its log says so: give the folder to
+  another user with `sudo chown -R <user>: <folder>` and restart the worker.
 - **Running without it.** `make up CORE=1` (or
   `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
   the five other containers and not the worker (§1b). Code Canvas, the

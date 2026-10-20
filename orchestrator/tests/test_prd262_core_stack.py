@@ -388,7 +388,7 @@ def test_the_smoke_runs_the_old_env_the_switch_and_a_fresh_core_stack_in_that_or
     fresh = re.search(r"^check_a_fresh_core_stack\(\) \{\n(.*?)^\}", SCRIPT, re.M | re.S).group(1)
     for step in ("plant_owner_probe", "check_core_config", "make up CORE=1", 'expect_running "$FIVE"',
                  "call_workspace_files 503", "up -d --no-build --wait", "call_workspace_files 200",
-                 '[ "$owner" = "$probe_owner" ]'):
+                 '[ "$owner" = "$probe_owner" ]', '[ "$owner" = "$folder_owner" ]'):
         assert step in fresh, step
     assert fresh.index("call_workspace_files 503") < fresh.index("up -d --no-build --wait"), "error first, worker after"
 
