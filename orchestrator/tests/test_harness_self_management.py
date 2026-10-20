@@ -126,9 +126,9 @@ def test_flag_defaults_false():
 
 
 # ---------------------------------------------------------------------------
-# The apply helpers an owner's /approve uses (api/harness_commands.py). The
-# weekly tick's card-to-Done path that also used them went in PRD-263 US-016,
-# and its cases with it; these pin the guards that path shared with /approve.
+# The apply helpers the owner's /approve and the weekly tick's card-to-Done
+# path used. PRD-263 US-016 deleted the card-to-Done path and US-047 the
+# /approve; nothing calls these now, and US-048 deletes them and these cases.
 # ---------------------------------------------------------------------------
 
 class _FakeExecutor:

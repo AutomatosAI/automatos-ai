@@ -8,13 +8,16 @@ start from them. Later stories add the modules they create to GATED.
 US-016 also deletes the auto-apply loop, the card-to-Done path and escalation, with the
 settings that tuned them: no source outside the tests names them again, and the
 weekly run files no card and sends no channel notice.
+
+US-047 deletes the always-approving /approve path (api/harness_commands.py) and the
+owner-only bypass key it set: no source outside the tests names either again.
 """
 from __future__ import annotations
 
 import ast
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 _ORCH = Path(__file__).resolve().parents[1]
 GATED = (
@@ -32,6 +35,11 @@ DELETED = (
     "_auto_apply_max_risk", "_get_harness_config", "_maybe_escalate", "_build_escalation_message",
     "_workspace_has_channel", "HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "HARNESS_AUTO_APPLY_MAX_RISK_FULL",
     "HARNESS_HIGH_PRIORITY_RISK",
+)
+# What US-047 deleted: the /approve module and its handler, and the bypass key, by constant and by value.
+DELETED_APPROVE = (
+    "harness_commands", "handle_harness_command", "_governed_verdict", "_find_task_by_rx",
+    "OWNERS_OWN_DECISION", "owners_own_decision",
 )
 # Skipped by that grep: the tests, and caches and tool state (__pycache__, dot directories).
 SKIPPED_PARTS = ("tests", "__pycache__")
@@ -83,14 +91,22 @@ def _sources() -> List[Path]:
     return paths + [_ORCH / CONFIG_SURFACE]
 
 
-def test_no_source_names_the_deleted_auto_apply_loop_or_escalation():
-    offenders = [
+def _offenders(names: Tuple[str, ...]) -> List[str]:
+    """Each source outside the tests that still names one of ``names``."""
+    return [
         f"{path.relative_to(_ORCH)}: {name}"
         for path in _sources()
-        for name in DELETED
+        for name in names
         if name in path.read_text(encoding="utf-8", errors="ignore")
     ]
-    assert offenders == []
+
+
+def test_no_source_names_the_deleted_auto_apply_loop_or_escalation():
+    assert _offenders(DELETED) == []
+
+
+def test_no_source_names_the_deleted_approve_path_or_its_bypass_key():
+    assert _offenders(DELETED_APPROVE) == []
 
 
 def test_the_weekly_run_files_no_card_and_sends_no_notice():

@@ -936,10 +936,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
-    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
-    # The weekly run is report_only and applies nothing whatever its value
-    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
+    # PRD-141 Phase 5. HIGH RISK — default OFF. Nothing reads it from PRD-263
+    # US-047, which deleted the owner's /approve it gated, until US-054 redefines
+    # it as the switch for approval grants. The weekly run is report_only and
+    # applies nothing whatever its value (PRD-263 US-016).
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window

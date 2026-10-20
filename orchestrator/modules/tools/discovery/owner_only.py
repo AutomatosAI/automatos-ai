@@ -12,8 +12,8 @@ full-autonomy dial. Their click grants it, and the resume (api/approval_grants
 (``tool_grants.consume_tool_grant``). One click runs the call once: the grant is claimed
 for the run (single-use), and given back when the call did nothing.
 
-Agent runs, playbook steps and heartbeats carry no driving user and are unchanged; so
-is the HARNESS's /approve, the admin's own decision (``OWNERS_OWN_DECISION``). The
+Agent runs, playbook steps and heartbeats carry no driving user and are unchanged. No
+caller-context key lets a person's turn skip the click (PRD-263 US-047). The
 policy plane (AUTOMATOS_POLICY_PLANE) is not needed, on either edition. The ask comes
 after every other check of the call (the role gates, the hierarchy check, the rate limit),
 so a call the owner could not run anyway is refused, not asked about. A Composio send or publish asks the same way (``asks_before_a_send``).
@@ -83,10 +83,8 @@ COMPOSIO_READ_WORDS = frozenset(word.upper() for word in READ_WORDS)
 _SLUG_WORD = re.compile(r"[^A-Z0-9]+")
 MESSAGE_SEND = "message.send"  # the capability classifier's class for a message sent (P256-FIX-RVW-38)
 
-# Server-set keys, never the model's: who clicked (stripped from every call, set after a
-# click), and a caller whose own decision is the click (the HARNESS's /approve).
+# Server-set, never the model's: who clicked (stripped from every call, set after a click).
 CLICKED_BY = "_clicked_by"
-OWNERS_OWN_DECISION = "owners_own_decision"
 USER_ACTOR = "user:"
 PERMISSION_LEVEL = "write"
 DESTRUCTIVE = "destructive"
@@ -211,11 +209,9 @@ def _sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str
 
 
 def human_driven(caller_context: Any) -> bool:
-    """A person drove the turn, and it is not a caller whose own decision is the click."""
+    """A person drove the turn."""
     from core.security.driving_user import driving_user_id
 
-    if isinstance(caller_context, dict) and caller_context.get(OWNERS_OWN_DECISION):
-        return False
     return driving_user_id(caller_context) is not None
 
 
@@ -542,5 +538,5 @@ def _without_a_signer(params: Any) -> Any:
     return params
 
 
-__all__ = ["CLICKED_BY", "OWNERS_OWN_DECISION", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send",
-           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]
+__all__ = ["CLICKED_BY", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send", "asks_the_owner_first",
+           "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]

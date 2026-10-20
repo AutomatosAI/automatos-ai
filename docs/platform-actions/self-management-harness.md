@@ -118,10 +118,6 @@ Sources:
 - [orchestrator/core/services/auto_cadence.py]()
 - [orchestrator/api/harness.py]()
 
-## The /approve routes (removed in PRD-263 phase 3)
-
-`POST /api/harness/prescriptions/{rx_id}/approve` and `/reject` remain until PRD-263 phase 3 removes them (US-047). The weekly run files no Task, so they act only on a [HARNESS] Task filed before PRD-263, and only while `HARNESS_SELF_MANAGEMENT_ENABLED` is on (default off).
-
 ## Idle-in-Transaction Prevention
 
 A run commits its session before each phase (`end_open_transaction(db)`), so the connection never sits idle in a transaction across a phase's long awaits. The `test_w1s9_idle_in_tx.py` suite checks that the commit happens between the database reads and the awaits that follow them.
