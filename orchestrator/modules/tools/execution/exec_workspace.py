@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from .shown_reads import shows_a_read_file
+from .worker_read_paths import reads_in_the_workers_form
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +364,7 @@ async def resolve_repo_dir(client) -> Optional[str]:
     return None
 
 
+@reads_in_the_workers_form  # F460 (night 18): a read's path in the worker's own form
 @shows_a_read_file  # F420 (night 14): in the owner's chat, a file read is theirs to see
 async def execute_workspace_action(
     executor,
