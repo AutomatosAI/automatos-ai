@@ -173,7 +173,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(THEME_CLASS, HOSTILE_CLASS)
-  useAiLabelStore.setState({ agentId: null, hiddenLabels: [] })
+  useAiLabelStore.setState({ agentId: null, hiddenLabels: [], shownLabels: [] })
   state.entry = null
   state.layout = 'fallback'
   state.slot = null
@@ -253,6 +253,21 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual(['page']))
     view.unmount()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
+  })
+
+  it('publishes the label as shown while it can be seen, hidden while it cannot, and neither once the chat route goes (EUAI-11b)', async () => {
+    const view = renderChat('theme')
+    await waitFor(() => expect(useAiLabelStore.getState().shownLabels).toEqual(['page']))
+    expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
+    addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { display: none; }`)
+    document.documentElement.classList.add(HOSTILE_CLASS)
+    await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual(['page']))
+    expect(useAiLabelStore.getState().shownLabels).toEqual([])
+    document.documentElement.classList.remove(HOSTILE_CLASS)
+    await waitFor(() => expect(useAiLabelStore.getState().shownLabels).toEqual(['page']))
+    // the theme SDK's chat starts no turn without a label: a gate that goes leaves none shown
+    view.unmount()
+    expect(useAiLabelStore.getState()).toMatchObject({ hiddenLabels: [], shownLabels: [] })
   })
 
   it('shows the label on a theme route such as Conversations (its own gate, on the left) and says so when it is hidden', async () => {

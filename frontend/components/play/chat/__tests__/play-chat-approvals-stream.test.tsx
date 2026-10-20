@@ -96,6 +96,7 @@ import { PlayChat } from '@/components/play/chat/play-chat'
 import { TRY_AGAIN } from '@/components/play/chat/snag-box'
 import { TOOL_LINES_LABEL } from '@/components/play/chat/tool-lines'
 import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
+import { PAGE_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { apiClient } from '@/lib/api-client'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { HELLO_KEY } from '@/lib/mascot/session'
@@ -251,6 +252,7 @@ async function pressStop() {
 
 beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [PAGE_AI_LABEL] }) // the host's AI label is on screen, as under app/chat/layout.tsx (PRD-264)
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getChat.mockResolvedValue(STORED_CHAT)
   api.getChatMessages.mockResolvedValue([message('m1', 'user', 'Hello'), message('m2', 'assistant', 'Hi.')])
@@ -262,6 +264,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
   vi.clearAllMocks()
   turns.length = 0
   lanes.length = 0
