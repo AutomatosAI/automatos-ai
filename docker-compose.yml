@@ -554,6 +554,10 @@ services:
       # Workspace config — the IN-CONTAINER mount root (worker_config.workspace_root);
       # the host side is the bind mount under `volumes:` below.
       WORKSPACE_VOLUME_PATH: /workspaces
+      # The local workspace's root: your deliverables folder, the bind mount below. When
+      # uid 1000 cannot write it (a Linux host whose user has another uid), the entrypoint
+      # runs the worker as the folder's owner rather than re-owning it (PRD-262 US-040).
+      LOCAL_WORKSPACE_ROOT: /workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}
       WORKSPACE_DEFAULT_QUOTA_GB: ${WORKSPACE_DEFAULT_QUOTA_GB:-5}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
       WORKER_HEALTH_PORT: 8081
