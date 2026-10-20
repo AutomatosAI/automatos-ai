@@ -135,7 +135,7 @@ function given(name: string): Record<string, unknown> {
 
 afterEach(() => {
   host.props.clear()
-  useAiLabelStore.setState({ hiddenLabels: [] })
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
 })
 
 describe('PRD-261 A-12a — ToolApproval', () => {

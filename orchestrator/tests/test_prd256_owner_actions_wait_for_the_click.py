@@ -161,11 +161,15 @@ def test_the_owners_click_runs_the_call_once_signed_by_who_clicked(board):
 
 
 def test_typed_words_never_stand_in_for_the_click(board):
-    """'Approve it' typed after the ask makes the same call: it asks again, on the same card."""
+    """'Approve it' typed after the ask, in the same chat, makes the same call: it asks again, on the
+    same card (P256-FIX-N17-3: another chat's turn raises its own card; this chat's next turn is told
+    the card it already has)."""
     params = {"task_id": board.number, "status": "done"}
-    first = _call(board, params, _owners_chat())
-    second = _call(board, params, _owners_chat())
+    chat = _owners_chat()
+    first = _call(board, params, chat)
+    second = _call(board, params, {**chat, "turn_id": "t-2"})
     assert first["grant_id"] == second["grant_id"] and "approve" in second["message"]
+    assert second["already_waiting"]["grant_id"] == first["grant_id"]
     board.handler.assert_not_called()
 
 

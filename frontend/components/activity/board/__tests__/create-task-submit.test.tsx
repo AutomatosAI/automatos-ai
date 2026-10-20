@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 const push = vi.hoisted(() => vi.fn())
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
 const create = vi.hoisted(() => ({ mutateAsync: vi.fn(), isLoading: false }))
 const schedule = vi.hoisted(() => ({ mutateAsync: vi.fn(), isLoading: false }))
 
@@ -17,7 +17,8 @@ import { filedTicketHref, useCreateTaskSubmit } from '../create-task-submit'
 const payload = { title: 'Welcome email', description: 'For the new café', priority: 'medium' as const }
 
 beforeEach(() => {
-  push.mockClear(); toast.success.mockClear(); toast.error.mockClear(); create.mutateAsync.mockReset()
+  push.mockClear(); toast.success.mockClear(); toast.error.mockClear(); toast.warning.mockClear()
+  create.mutateAsync.mockReset()
 })
 
 describe('filing a task now', () => {
@@ -39,6 +40,26 @@ describe('filing a task now', () => {
   it('opens the board when the create returned no id', () => {
     expect(filedTicketHref(undefined)).toBe('/command-center?tab=board')
     expect(filedTicketHref({ id: '7' })).toBe('/command-center?tab=board&task_id=7')
+  })
+
+  // PRD-256 F430: a ticket for a CLI-session agent that cannot call what it names says so.
+  it('shows the answer\'s warning beside the success, and only when there is one', async () => {
+    const warning = 'Social Media Director runs as a CLI session and cannot call `platform_create_social_post`.'
+    create.mutateAsync.mockResolvedValue({ id: 1207, cannot_call: ['platform_create_social_post'], warning })
+    const options = {
+      buildPayload: () => payload, scheduleMode: 'now' as const, scheduleAt: '', attachmentCount: 0,
+      agentName: 'Social Media Director', onDone: vi.fn(),
+    }
+    const { result } = renderHook(() => useCreateTaskSubmit(options))
+    await act(() => result.current.submit())
+    expect(toast.success).toHaveBeenCalledWith('Task assigned to Social Media Director.', expect.anything())
+    expect(toast.warning).toHaveBeenCalledWith(warning, expect.anything())
+    expect(options.onDone).toHaveBeenCalled()                       // the ticket is filed all the same
+
+    toast.warning.mockClear()
+    create.mutateAsync.mockResolvedValue({ id: 1208 })
+    await act(() => result.current.submit())
+    expect(toast.warning).not.toHaveBeenCalled()
   })
 
   it('refuses an untitled task without filing it', async () => {

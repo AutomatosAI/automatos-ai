@@ -18,6 +18,11 @@ scheduled post voids its approval like any edit, and it commits by the same
 compare-and-set as a PATCH (409 with the current ``content_hash`` when another writer
 committed first). Nothing publishes here: ``api/socials_publish.py`` does (Wave 3).
 
+An agent's Socials tools name channels, not targets (P256-FIX-SOC-4, F431-b: no tool could give
+a post a channel, so a post Auto made published nowhere): ``resolve_channels`` turns
+``["instagram"]`` into the targets for the post's format, with the kinds the plan maker picks,
+checked the same way. The create and update tools write them with the post, in one commit.
+
 This router has no prefix and no gate of its own: ``api/socials.py`` includes it in the
 Socials router, whose ``require_socials_enabled`` answers 404 unless both switches are
 on (D1). Never mount it in the app directly. It reuses that module's post helpers,
@@ -46,6 +51,10 @@ router = APIRouter()
 
 CAN_UPDATE = Depends(require_workspace_permission("documents:update"))
 OPTION_SOURCE = "$option."  # a step parameter's source naming the target's option
+# P256-FIX-SOC-4: an agent's channels (``resolve_channels``), refused in the words the agent can act on.
+NOT_CONNECTED = "{toolkit} is not a channel connected in this workspace: the connected channels are {connected}"
+NO_KIND = "{label} does not post a {format}: it posts {posts}"
+CHANNELS_ARE_A_LIST = 'channels must be a list of connected channels by name, such as ["instagram"]'
 
 
 class SocialPostTargetSpec(BaseModel):
@@ -163,6 +172,36 @@ def resolve_targets(db: Session, workspace_id: Any, requested: Sequence[Mapping[
     if not wanted:
         return []
     channels = {channel.toolkit: channel for channel in social_channels(db, workspace_id)}
+    return [_resolved(channels, target) for target in wanted]
+
+
+def _channel_target(channels: Mapping[str, SocialChannel], name: Any, post_format: Any) -> Dict[str, Any]:
+    """One channel an agent names, as a target: its kind for the post's format (``targets.kind_for``)."""
+    toolkit = str(name or "").strip().lower()
+    channel = channels.get(toolkit)
+    if channel is None:
+        connected = ", ".join(sorted(channels)) or "none"
+        raise service.InvalidPost(NOT_CONNECTED.format(toolkit=toolkit or name, connected=connected))
+    kind = post_targets.kind_for(channel, post_format)
+    if kind is None:
+        posts = ", ".join(offered.kind for offered in channel.post_kinds if offered.available) or "nothing now"
+        raise service.InvalidPost(NO_KIND.format(label=channel.label, format=post_format or "post with no format",
+                                                 posts=posts))
+    return {"toolkit": toolkit, "post_kind": kind, "options": {}}
+
+
+def resolve_channels(db: Session, workspace_id: Any, toolkits: Any, post_format: Any) -> List[Dict[str, Any]]:
+    """P256-FIX-SOC-4 (F431-b): the channels an agent's Socials tool names (``["instagram"]``) as the
+    post's targets, each with the kind its format posts as there (the plan maker's choice), no
+    options, and its resolved steps. ``[]`` clears them. A channel that is not connected, or that
+    posts nothing of the format, raises ``service.InvalidPost`` naming what the workspace has. The
+    registry is read once, and may commit the session: call this before staging any write."""
+    if toolkits is None or toolkits == []:
+        return []
+    if not isinstance(toolkits, list):
+        raise service.InvalidPost(CHANNELS_ARE_A_LIST)
+    channels = {channel.toolkit: channel for channel in social_channels(db, workspace_id)}
+    wanted = service.validate_targets([_channel_target(channels, name, post_format) for name in toolkits])
     return [_resolved(channels, target) for target in wanted]
 
 

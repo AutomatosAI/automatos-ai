@@ -128,7 +128,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(HOSTILE_CLASS)
-  useAiLabelStore.setState({ agentId: null, hiddenLabels: [] })
+  useAiLabelStore.setState({ agentId: null, hiddenLabels: [], shownLabels: [] })
 })
 
 describe("the AI label in Auto's floating widget (PRD-264 EUAI-11a)", () => {
@@ -198,5 +198,7 @@ describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(document.querySelector(LABEL)).toBeNull())
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
+    // released, not marked seen: a closed panel's label is not on screen
+    expect(useAiLabelStore.getState().shownLabels).toEqual([])
   })
 })

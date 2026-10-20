@@ -125,6 +125,7 @@ import { SNAG_TITLE, TRY_AGAIN, TURN_FAILED } from '@/components/play/chat/snag-
 import { MISSION_CREATED_LABEL, SUGGESTION_LABEL } from '@/components/play/chat/mission-suggestion'
 import { TOOL_LINES_LABEL } from '@/components/play/chat/tool-lines'
 import { PlayChat } from '@/components/play/chat/play-chat'
+import { PAGE_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { NO_ACTIONS, NOTHING_ON_THE_BOARD, receiptLine } from '@/lib/chat/receipts'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
@@ -183,6 +184,7 @@ const data = (part: unknown) => act(() => chat.options?.onData(part))
 
 beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [PAGE_AI_LABEL] }) // the host's AI label is on screen, as under app/chat/layout.tsx (PRD-264)
   ;(useChatSessionStore.getState() as unknown as { reset: () => void }).reset()
   useMissionStore.setState({ activePlanningMissionId: null })
   Object.values(api).forEach((fn) => fn.mockReset())
@@ -191,6 +193,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', errorCode: null, messages: null })
 })

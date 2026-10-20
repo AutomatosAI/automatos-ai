@@ -27,7 +27,7 @@ import functools
 import inspect
 import logging
 import re
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 from modules.tools.discovery.agent_binding import names_the_agent_alone
 from modules.tools.discovery.said_instructions import as_the_owner_said
@@ -105,7 +105,7 @@ VERBS = {
     "platform_approve_mission": "approve a mission's plan",
     "platform_cancel_mission": "cancel a mission",
     "platform_publish_blog_post": "publish a blog post",
-    "platform_submit_social_post": "submit a social post to publish",
+    "platform_submit_social_post": "send a social post for approval (nothing posts yet)",  # N17-11 (F443)
     "platform_configure_agent_heartbeat": "change an agent's heartbeat",
     "platform_delete_agent": "delete an agent",
     "platform_assign_skill_to_agent": "give a skill to an agent",
@@ -125,6 +125,9 @@ VERBS = {
     "platform_update_mission_plan": "change a mission's plan",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
+# P256-FIX-N17-11 (F443, night 16 #2705): a blog call that saves a draft says so, never "publish".
+BLOG_POST = "platform_publish_blog_post"
+BLOG_DRAFT = "save a blog post as a draft (nothing is published)"
 QUESTION = "question_md"
 
 
@@ -245,13 +248,18 @@ def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handl
     """``handler`` run on the owner's click on this exact call (``asked``), signed by who
     clicked; without one, the ask. ``gate``: the grant the confirmation gate claimed for
     this call (``Cleared.approved_via_grant_id``). A call naming its agent by name alone
-    has no click: the ask binds it (P256-FIX-RVW-9)."""
+    has no click: the ask binds it (P256-FIX-RVW-9). A mission the click would refuse is
+    refused before the card (P256-FIX-N17-2), read from ``params``: only the call as its
+    handler gets it names the chat the owner's words are in."""
     async def on_the_click(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+        from modules.tools.discovery.mission_create_checks import refused_before_the_mission_card
+
         grant = None
         if not names_the_agent_alone(action, asked):
             grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
         if grant is None:
-            return platform_ask(db, workspace_id, action, asked, caller_context)
+            return (refused_before_the_mission_card(db, workspace_id, action, params)
+                    or platform_ask(db, workspace_id, action, asked, caller_context))
         clicker = _clicker(grant)
         signed = {**params, CLICKED_BY: clicker} if clicker else params
         return after_the_click(db, grant, await handler(db, workspace_id, signed))
@@ -461,23 +469,10 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     saying what the call changes (FX-008). A card that is not on the board is never
     asked about (F091). ``permission_level``: the grant's, the action's own when the
     confirmation gate asks (a destructive yes stays single-use there, P256-FIX-RVW-9)."""
-    from modules.tools.discovery.agent_binding import bound_to_the_agent
-    from modules.tools.discovery.agent_runtime import refused_before_the_card
     from modules.tools.discovery.card_question import platform_question
-    from modules.tools.discovery.card_question_skills import bound_to_the_subject
-    from modules.tools.discovery.mission_targets import bound_to_the_mission
-    from modules.tools.discovery.playbook_binding import bound_to_the_playbook
-    from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
-    params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
-    params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
-    if not refused:  # RVW-14: and on the plugin or skill shown
-        params, refused = bound_to_the_subject(db, workspace_id, action, params)
-    if not refused:  # RVW-45: and on the playbook shown
-        params, refused = bound_to_the_playbook(db, workspace_id, action, params)
-    refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
-    refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
+    params, refused, left_out = _bound_and_checked(db, workspace_id, action, params)
     if refused:
         return refused
     found, missing = _targets(db, workspace_id, action, params)
@@ -487,7 +482,36 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     act = _act(db, workspace_id, action, params, what)
     asked = platform_question(db, workspace_id, action, params, act)
     return _ask(db, workspace_id, action, params, caller_context, act=act, what=what, asked=asked,
-                level=permission_level)
+                level=permission_level, left_out=left_out)
+
+
+def _bound_and_checked(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
+                       ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], List[Dict[str, str]]]:
+    """(the call bound to what its card shows, the refusal of a call its handler would
+    refuse, the cards a bulk send-back leaves off): nothing is asked that the click could
+    not do (F091)."""
+    from modules.tools.discovery.agent_binding import bound_to_the_agent
+    from modules.tools.discovery.agent_runtime import refused_before_the_card
+    from modules.tools.discovery.card_question_skills import bound_to_the_subject
+    from modules.tools.discovery.card_question_socials import bound_to_the_post, submit_refused_before_the_card
+    from modules.tools.discovery.mission_targets import bound_to_the_mission
+    from modules.tools.discovery.playbook_binding import bound_to_the_playbook
+    from modules.tools.discovery.send_back_checks import sendable_back
+    from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
+
+    params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
+    params = bound_to_the_post(db, workspace_id, action, params)  # SOC-4: and on the social post shown
+    params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
+    if not refused:  # RVW-14: and on the plugin or skill shown
+        params, refused = bound_to_the_subject(db, workspace_id, action, params)
+    if not refused:  # RVW-45: and on the playbook shown
+        params, refused = bound_to_the_playbook(db, workspace_id, action, params)
+    refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
+    refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
+    refused = refused or submit_refused_before_the_card(db, workspace_id, action, params)  # SOC-4: a post it can't send
+    if refused:
+        return params, refused, []
+    return sendable_back(db, workspace_id, action, params)  # N17-2 (F444): only cards the board's Reject takes
 
 
 def _act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: str) -> str:
@@ -498,7 +522,17 @@ def _act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: 
     if status:
         return f"{CLOSING_VERBS[status]} {what}".strip()
     sent_back = send_back_act(db, workspace_id, action, params, what) if action in CARD_MOVES else None
-    return sent_back or f"{VERBS.get(action, action)} {what}".strip()
+    return sent_back or f"{_verb(action, params)} {what}".strip()
+
+
+def _verb(action: str, params: Dict[str, Any]) -> str:
+    """The action's verb; a blog post the call does not put live is saved as a draft (handlers_blog.goes_live)."""
+    if action == BLOG_POST:
+        from modules.tools.discovery.handlers_blog import goes_live
+
+        if not goes_live(params):
+            return BLOG_DRAFT
+    return VERBS.get(action, action)
 
 
 def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,
@@ -518,18 +552,21 @@ def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, call
     return _ask(db, workspace_id, tool, params, caller_context, act=act, what=slug, asked=asked)
 
 
-def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, act: str,
-         what: str, asked: str, level: str = PERMISSION_LEVEL) -> Dict[str, Any]:
+def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, act: str, what: str,
+         asked: str, level: str = PERMISSION_LEVEL, left_out: Sequence[Dict[str, str]] = ()) -> Dict[str, Any]:
     from modules.tools.discovery.card_ticket_numbers import CARD_NUMBERS, numbers_on_the_card
+    from modules.tools.discovery.send_back_checks import LEFT_OUT, left_off
     from modules.tools.execution import tool_grants
 
-    message, asked = ASK.format(act=act), f"{asked}\n{REMEMBERED.format(act=act)}"
+    message, asked = ASK.format(act=act) + left_off(left_out), f"{asked}\n{REMEMBERED.format(act=act)}"
     # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004);
     # ``question_md``: what the card shows the owner, the subject and the change (FX-008);
-    # ``card_numbers``: each ticket the call names, by its board number (P256-FIX-N13-7).
+    # ``card_numbers``: each ticket the call names, by its board number (P256-FIX-N13-7);
+    # ``left_out``: the cards a bulk send-back leaves off, and why (P256-FIX-N17-2).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
            "permission_level": level, "message": message, "params": params, ACT: act,
-           QUESTION: asked, CARD_NUMBERS: numbers_on_the_card(db, workspace_id, action, params_object(params))}
+           QUESTION: asked, CARD_NUMBERS: numbers_on_the_card(db, workspace_id, action, params_object(params)),
+           **({LEFT_OUT: list(left_out)} if left_out else {})}
     logger.info("[owner_only] %s waits for the owner's click (%s)", action, what)
     return tool_grants.attach_ask_grant(db, workspace_id, action=action, params=params, ask=ask,
                                         permission_level=level, description=message,

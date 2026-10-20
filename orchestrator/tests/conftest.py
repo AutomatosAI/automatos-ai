@@ -104,6 +104,30 @@ def _reset_composio_lookup_cache():
 
 
 @pytest.fixture(autouse=True)
+def _generation_guard_reads_clean(request, monkeypatch):
+    """PRD-264 ART5-1: every image, video and voice path asks the generation guard
+    (core/generation_guard.py) before it calls a provider, and the guard's read is a
+    model call. Outside the tests that check the guard itself (marked
+    ``real_generation_guard``), the read answers clean, so a test of a generation path
+    tests that path. A test that stubs packages in sys.modules so the guard can't be
+    imported never reaches a generation path: it is left alone."""
+    if request.node.get_closest_marker("real_generation_guard") is not None:
+        yield
+        return
+    try:
+        import core.generation_guard as guard
+    except Exception:
+        yield
+        return
+
+    async def clean(_request, _workspace_id):
+        return {"sexual": False, "minor": False, "real_person": False}
+
+    monkeypatch.setattr(guard, "read_answers", clean)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _repair_stubbed_package_bindings():
     """Repair parent->child module attribute bindings that sibling tests broke.
 

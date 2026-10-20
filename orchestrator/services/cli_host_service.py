@@ -47,6 +47,7 @@ from services.session_denials import classify_denial, forces_review
 from services.session_end_shadow import judged_after_landing
 from services.session_report import APPROVAL_NOT_ON_RECORD
 from services.ticket_numbers import ticket_label  # PRD-252 R4
+from services.named_cards import NAMED_FILES_KEY, claimed_files  # P256-FIX-N17-9 (F448)
 from core.session_permission_modes import (
     MODE_EDITS,
     PERMISSION_MODE_KEY,
@@ -1057,12 +1058,11 @@ def _claim_ref(db: Session, task: BoardTask, host: CliHost, cfg: Dict[str, Any],
     plans = session_plans(prior)
     if plans:
         ref[PLANS_KEY] = plans
-    # F094: the notes on the ticket (the operator's, the session's, the
-    # mission's verdict) are its record too; a claim that resumes the same
-    # run keeps them. A mission step's next run starts with none.
-    prior_notes = prior.get(SESSION_NOTES_KEY)
-    if isinstance(prior_notes, list) and prior_notes:
-        ref[SESSION_NOTES_KEY] = prior_notes
+    # F094: the notes on the ticket (the operator's, the session's, the mission's verdict),
+    # and F448's files on the cards its owner named: its record, kept by a claim that resumes.
+    for key in (SESSION_NOTES_KEY, NAMED_FILES_KEY):
+        if isinstance(prior.get(key), list) and prior[key]:
+            ref[key] = prior[key]
     return ref
 
 
@@ -1077,14 +1077,14 @@ def _claim_one(db: Session, host: CliHost, task: BoardTask, workspace_mode: str)
     agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
     cfg = (getattr(agent, "configuration", None) if agent else None) or {}
     ref = _claim_ref(db, task, host, cfg, task.runtime_ref if isinstance(task.runtime_ref, dict) else {})
-    # PRD-245 S1.1: the session's own credential for the Automatos tools.
-    # Handed over ONCE, in this payload; only its hash stays on the ticket.
+    # PRD-245 S1.1: the session's own credential, handed over ONCE in this payload; only its hash stays.
     session_token = mint_session_token(ref)
     ref[SESSION_TOOLS_OFFERED_KEY] = True
     task.runtime_ref = ref
-    prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
-    # Mark the answers just folded in — to its questions and to its plan — so a
-    # LATER resume of the same ticket does not render them again.
+    named = claimed_files(db, task, ref.get(NAMED_FILES_KEY) or ())  # F448: before the prompt consumes review_feedback
+    task.runtime_ref = ref = named.on(ref)
+    prompt = "\n\n".join(p for p in (_ticket_prompt(task, _field_memory_block(db, task)), named.block) if p)
+    # Mark the answers just folded in (to its questions, to its plan) so a LATER resume does not render them again.
     for key in (SESSION_ASKS_KEY, PLANS_KEY):
         if ref.get(key):
             ref[key] = _mark_answers_folded(ref[key])

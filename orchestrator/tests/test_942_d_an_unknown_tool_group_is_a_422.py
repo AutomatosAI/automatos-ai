@@ -96,7 +96,7 @@ def test_the_agent_detail_carries_the_groups_payload(monkeypatch):
     payload = detail.session_tool_groups
     assert payload["enabled"] == ["data", "graph"] and payload["is_default"] is False
     assert [g["id"] for g in payload["available"]] == ["data", "graph", "documents", "playbooks", "reports",
-                                                       "missions"]
+                                                       "missions", "socials"]
     assert payload["available"][3]["tools"] == ["list_playbooks", "get_playbook", "run_playbook"]
     assert set(payload["enabled"]) <= {g["id"] for g in payload["available"]}
 

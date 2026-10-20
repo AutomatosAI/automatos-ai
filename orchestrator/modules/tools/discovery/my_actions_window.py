@@ -24,6 +24,8 @@ LOOKBACK_SAID = "in the last {days} days"
 SAID = {LAST_DAY: "in the last 24 hours", THIS_WEEK: "this week"}
 WHEN = "{hour:%H:%M} on {day} {hour:%b}"  # "03:04 on 13 Oct", read as history ("at 03:04")
 BAD_WINDOW = "window must be one of: {windows}"
+# P256-FIX-N17-10 (F449): what Auto sent for a window (night 17: '1d' 11 times, '7d' 4), read as the window it means.
+WINDOWS_SAID = {"1d": LAST_DAY, "24h": LAST_DAY, "7d": THIS_WEEK, "week": THIS_WEEK}
 BAD_SINCE = "since must be a time like 2026-10-12T18:00:00Z; got {said!r}"
 
 
@@ -50,6 +52,7 @@ def window_of(params: Dict[str, Any], now: Optional[datetime] = None) -> Tuple[O
     if named in (None, "") and params.get("ticket") not in (None, ""):
         return Window(now - timedelta(days=TICKET_LOOKBACK_DAYS), now, LOOKBACK_SAID.format(days=TICKET_LOOKBACK_DAYS)), None
     named = str(named or DEFAULT_WINDOW).strip().lower()
+    named = WINDOWS_SAID.get(named, named)
     if named not in WINDOWS:
         return None, BAD_WINDOW.format(windows=", ".join(WINDOWS))
     return _named(named, now), None
@@ -88,4 +91,5 @@ def _utc(moment: datetime) -> datetime:
     return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
 
 
-__all__ = ["DEFAULT_WINDOW", "MAX_LOOKBACK_DAYS", "TICKET_LOOKBACK_DAYS", "WINDOWS", "Window", "when_said", "window_of"]
+__all__ = ["DEFAULT_WINDOW", "MAX_LOOKBACK_DAYS", "TICKET_LOOKBACK_DAYS", "WINDOWS", "WINDOWS_SAID", "Window", "when_said",
+           "window_of"]

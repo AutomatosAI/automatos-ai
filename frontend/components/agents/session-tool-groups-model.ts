@@ -26,6 +26,7 @@ export const SESSION_CORE_TOOLS: readonly string[] = [
   'composio_execute',
   'search_knowledge',
   'search_documents',
+  'read_document',
   'record_memory',
   'read_step_file',
 ]

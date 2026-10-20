@@ -159,5 +159,12 @@ shrinks or moves the label therefore never leaves a chat running without it; it 
 wraps only the composer, so a theme can't use the label to switch off the approval cards either. Auto's
 floating widget draws its own label in its panel (`WidgetAiLabelFrame`), and its fence pauses only the widget.
 
+The fence guards the composer, not the call, so the theme SDK's chat reads the same state (EUAI-11b): Send
+and Try again on `useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at
+the moment they are called, and return false, sending nothing, unless the page's label is mounted and was seen
+at its last check (`frontend/lib/theme-sdk/internal/ai-label-gate.ts`). A theme that calls Send from a button
+of its own or a timer, or opens a chat in its frame on a page with no label, starts no turn. Auto's widget's
+label never clears a theme's chat. Stop always runs.
+
 Not checked, and so review rules for the label as for the cards: an element the theme draws over it (an
 overlay, a pseudo-element, a fixed layer), and code the theme runs in the page.

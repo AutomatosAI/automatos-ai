@@ -8,7 +8,8 @@ records, so ``service.py`` (over 800 lines) only gains its table rows:
   has channels to publish to.
 * ``start_retry``: failed or partially_published → publishing, re-running the failed
   targets, under the same approval check (``assert_retryable``). A post that failed
-  its render, or whose content changed since its approval, is not retried.
+  its render, whose content changed since its approval, or whose video shows the
+  AI-generated label other than the post sets it (PRD-264 EUAI-08a), is not retried.
 * ``miss``: scheduled → missed, a slot that passed with nothing published (D10).
 * ``finish_publish``: publishing → published (every target published),
   partially_published (some) or failed (none), with each target's outcome in
@@ -24,7 +25,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from core.models.socials import SocialPost
-from modules.socials import service
+from modules.socials import ai_media, service
 from modules.socials.service import NotPublishable
 
 TARGET_PENDING = "pending"
@@ -55,6 +56,7 @@ def assert_retryable(post: Any) -> None:
         raise NotPublishable(f"a post that is {post.status.replace('_', ' ')} cannot be retried")
     if not approval_matches(post):
         raise NotPublishable("the content changed after it was approved: approve it again to publish")
+    ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video is rendered again first
     if not any(target.status == TARGET_FAILED for target in _targets(post)):
         raise NotPublishable(NOTHING_TO_RETRY)
 

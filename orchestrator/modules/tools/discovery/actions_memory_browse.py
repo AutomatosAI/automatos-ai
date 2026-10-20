@@ -47,7 +47,9 @@ def register_memory_browse_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_delete_memory",
         description=("Permanently delete a specific memory by the id platform_browse_memories "
-                     "shows (a standing rule included). Cannot be undone."),
+                     "shows (a standing rule included). Cannot be undone. Not for replacing a "
+                     "standing rule: store the new one with replaces; never delete a rule before "
+                     "its replacement is stored with standing_rule true."),
         category="memory",
         parameters=_DELETE_PARAMETERS,
         permission_level="destructive",

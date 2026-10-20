@@ -34,6 +34,24 @@ RULE = "From November we post on Tuesdays, not Mondays."
 SAID = f"{RULE} Remember that please."
 F418 = "When you tell me to stop querying the database, I stop for that turn."
 F418_SAID = "Stop querying the database, just answer from the notes."
+# P256-FIX-N17-4 (nights 16-17, F447): the owner's messages and Auto's first stores, rebuilt from the
+# ledger's words and its word counts (the loop never reads the nights' chats): each store kept too
+# little of the owner's sentence, its lead-in left out, and was no rule.
+N17_54 = ("Forget the other posting rules. The only one that counts: from November we post on Wednesdays. "
+          "Replace the lot.")
+N17_54_STORED = "From November we post on Wednesdays."                          # 6 of 11, 'only' left out
+N17_54_THEIRS = "The only one that counts: from November we post on Wednesdays."
+N17_55 = "Only Wednesdays now: from November we post on Wednesdays."             # the owner, again
+N17_162 = "New standing rule, remember this one: the autumn tier launches on 4 November 2026."
+N17_162_STORED = "The autumn tier launches on 4 November 2026."                  # 8 of 14
+N17_159 = ("We settled the autumn launch date. The autumn tier launches 4 November, whatever the two "
+           "documents say.")
+N17_159_STORED = "We settled the autumn launch date. The autumn tier launches 4 November."   # sentence 2: 6 of 11
+N16_104 = "Standing rule for you, write it down: no discounts on the club boxes for anyone."
+N16_104_STORED = "No discounts on the club boxes."                               # 6 of 15
+N16_7 = ("Here is a standing rule for you and the whole team from today: every club box we ship gets a "
+         "handwritten thank-you note.")
+N16_7_STORED = ("Every club box gets a note.", "Every club box we ship gets a handwritten note.")   # 6 and 9 of 23
 
 
 # ---------------------------------------------------------------------------
@@ -249,12 +267,121 @@ def test_in_their_words_needs_every_sentence_wholly_theirs():
     ("We post on Tuesdays.", "Do we post on Tuesdays?!"),
     ("Post on Tuesdays. لا تنشر يوم الأحد", "Post on Tuesdays."),                       # a clause in another script
     ("Post on Tuesdays 🚫", "Post on Tuesdays."),                                       # what cannot be weighed
+    # P256-FIX-N17-4: a scope, a request or someone else's words left out is no rule of theirs.
+    ("Close on Fridays.", "Close on Fridays over the Christmas weeks in December."),
+    ("Post on Tuesdays.", "For the Falmouth shop: post on Tuesdays."),
+    ("Post on Tuesdays.", "Tom wants this: post on Tuesdays."),
+    ("We post on Tuesdays.", 'Draft a reply saying "We post on Tuesdays." to Ruth.'),
+    ("Wednesdays, not Tuesdays.", "Actually, change that \u2014 Wednesdays, not Tuesdays."),
+    ("Price the box at £25.", "For the new one: price the box at £25."),
+    ("Post on Tuesdays.", "For that one: post on Tuesdays."),
+    (N17_54_STORED, N17_54),                                                          # the nights' first stores
+    (N17_162_STORED, N17_162),
+    (N17_159_STORED, N17_159),
+    (N16_104_STORED, N16_104),
 ])
 def test_a_rule_that_turns_the_owners_words_round_is_not_theirs(stored, said):
     from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
     from modules.tools.discovery.rule_wording import in_their_words
 
     assert in_their_words(stored, [said], STANDING_RULE_COVERAGE) is False
+
+
+# ---------------------------------------------------------------------------
+# P256-FIX-N17-4: the owner's own sentence that holds what Auto stored
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("stored, turns, theirs", [
+    (N17_54_STORED, [N17_54], N17_54_THEIRS),
+    (N17_162_STORED, [N17_162], N17_162),
+    (N17_159_STORED, [N17_159], N17_159),                                             # the whole message
+    (N16_104_STORED, [N16_104], N16_104),
+    (N16_7_STORED[0], [N16_7], N16_7),
+    (N16_7_STORED[1], [N16_7], N16_7),
+    (" ".join(N16_7_STORED), [N16_7], N16_7),                                         # one sentence of theirs, once
+    (N17_54_STORED, [N17_55, N17_54], N17_55),                                        # ask 55: their newest message
+    ("Close on Fridays.", ["Close on Fridays over the Christmas weeks in December."],
+     "Close on Fridays over the Christmas weeks in December."),                       # the scope comes back
+    ("Post on Tuesdays.", ["For the Falmouth shop: post on Tuesdays."], "For the Falmouth shop: post on Tuesdays."),
+    ("We post on Tuesdays.", ["We do not post on Tuesdays any more."],
+     "We do not post on Tuesdays any more."),                                         # the 'not' comes back
+    (N17_54_STORED, ["\u201cFrom November we post on Wednesdays, the only day.\u201d"],
+     "From November we post on Wednesdays, the only day."),                           # their quotes off
+    ("Post on Tuesdays.", ["Post on Tuesdays only\nthanks"], "Post on Tuesdays only."),   # an end mark added
+    (RULE, [SAID], RULE),                                                             # theirs already: as stored
+])
+def test_their_sentence_is_the_owners_own_sentence_that_holds_it(stored, turns, theirs):
+    from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
+    from modules.tools.discovery.rule_wording import in_their_words, their_sentence
+
+    assert their_sentence(stored, turns, STANDING_RULE_COVERAGE) == theirs
+    assert in_their_words(theirs, turns, STANDING_RULE_COVERAGE) is True
+
+
+@pytest.mark.parametrize("stored, turns", [
+    (F418, [F418_SAID]),                                                              # Auto's words
+    ("We don't post on Tuesdays.", ["We post on Tuesdays."]),                         # a no added
+    (f"{RULE} Noted.", [SAID]),                                                       # a word they never said
+    ("Post on Tuesdays 🚫", ["Post on Tuesdays."]),                                    # what cannot be weighed
+    ("We post on Tuesdays.", ["Do we post on Tuesdays?"]),                            # a question is no rule
+    ("Send it. " + "word " * 81, ["Send it. " + "word " * 81]),                      # past the cap
+    (RULE, []),
+    ("", [SAID]),
+])
+def test_their_sentence_is_none_when_no_sentence_of_theirs_holds_it(stored, turns):
+    from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
+    from modules.tools.discovery.rule_wording import their_sentence
+
+    assert their_sentence(stored, turns, STANDING_RULE_COVERAGE) is None
+
+
+@pytest.fixture
+def turns_read(monkeypatch):
+    """The owner's messages, as owner_says gives them, and how often a store read them."""
+    import modules.tools.discovery.said_instructions as said
+
+    messages: list = []
+    reads: list = []
+
+    def _turns(db, workspace_id, params):
+        reads.append(params.get("content"))
+        return list(messages)
+
+    monkeypatch.setattr(said, "chat_owner_turns", _turns)
+    return NS(messages=messages, reads=reads)
+
+
+def test_a_store_their_lead_in_left_out_names_their_sentence_and_that_one_is_the_rule(qdrant, turns_read):
+    from modules.tools.discovery.memory_write import NOT_THE_OWNERS_RULE
+
+    turns_read.messages.append(N17_162)
+    first = _store(N17_162_STORED)
+    assert first["standing_rule"] is False and first["rule_note"] == NOT_THE_OWNERS_RULE
+    assert first["store_as"] == N17_162 and _block() == ""
+    assert "do not delete the old rules" in NOT_THE_OWNERS_RULE
+    again = _store(first["store_as"])
+    assert again["standing_rule"] is True and "store_as" not in again
+    assert f"- {N17_162}" in _block()
+    assert turns_read.reads == [N17_162_STORED, N17_162]                     # once per store
+
+
+def test_no_store_as_for_what_auto_composed_or_for_no_person(qdrant, turns_read):
+    turns_read.messages.append(F418_SAID)
+    composed = _store(F418)
+    assert composed["standing_rule"] is False and composed["rule_note"] and "store_as" not in composed
+    assert "store_as" not in _store(N17_162_STORED, by=None)                # nobody's write reads no chat
+    assert turns_read.reads == [F418]
+
+
+def test_the_owners_messages_are_read_once_and_the_four_argument_call_still_reads_them(qdrant, turns_read):
+    from modules.tools.discovery.memory_write import memory_metadata
+
+    turns_read.messages.append(SAID)
+    assert _store(RULE)["standing_rule"] is True and turns_read.reads == [RULE]
+    metadata = memory_metadata(MagicMock(), str(WS), {"content": RULE}, f"user:{OWNER}")
+    assert metadata["stated_by"] == "owner" and turns_read.reads == [RULE, RULE]
+    given = memory_metadata(MagicMock(), str(WS), {"content": RULE}, f"user:{OWNER}", said=[])
+    assert "stated_by" not in given and turns_read.reads == [RULE, RULE]      # given: never read again
 
 
 def test_a_no_said_either_way_is_the_same_no():

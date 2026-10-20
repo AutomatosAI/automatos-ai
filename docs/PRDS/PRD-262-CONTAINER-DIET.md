@@ -96,10 +96,12 @@ Gerard decided on 20 Oct (US-004) that the budgets stay `warn` and the scan poli
 - **§9-Q12: public files that database rows may name** (`public/images`, `favicon_io`, `modal-fix.js`). Needs a production database check first.
 - **Trade-off rows not taken:** #6 (a custom ffmpeg), #10, #15 (English-only ICU), #23 (no OCR), #26, #32, #39, #41, #42 and #46.
 
-**Small gaps, any time:**
-- **§8 code-only update bar for the frontend (≤ 8 MB) is not wired.** `.github/image-budgets.json`'s `updates` block has only `api.code-only`, so `image_report.py budget` passes the frontend unchecked. Add a `frontend.code-only` entry.
-- **agent-opt-worker is about 11 MB over its 150 MB budget** since #1242 (litellm 1.91.5 needs openai 2.x). Raise the budget with that reason, or trim.
-- **Tight margins:** worker 418 MB against 420 (before #1220) and media-render 1,296 MB against 1,300. Any growth in either needs a cut first.
+**Budget notes for W10's US-062, final budgets.** These are not open issues. The budgets and the scan are warn-only (US-004, Gerard, 20 Oct), and the numbers will move as the platform grows. US-062 resets them once, after WebSummit:
+- **The frontend's code-only update bar (≤ 8 MB) isn't wired.** `.github/image-budgets.json`'s `updates` block has only `api.code-only`.
+- **agent-opt-worker is about 11 MB over its 150 MB budget** since #1242 (litellm 1.91.5 needs openai 2.x).
+- **Margins:**
+  - media-render: 1,296 MB against its 1,300 MB on-disk bar;
+  - worker: 418 MB compressed (amd64) against 420 before #1220. With #1220 it's 909 MB installed (arm64), down from 1,073.
 
 **Fixes in the next fix wave (owned outside this PRD):**
 - **P256-FIX-WRK-1:** on Linux, the uid-1000 worker can't write a deliverables folder that another uid owns. smoke-images' core-stack step is red until this lands. Branch `fix/prd-262-worker-deliverables-owner` has a fix, plus the security review's three acceptance criteria (no gid 0; never adopt an id `getent` knows; one `stat`).
@@ -110,7 +112,10 @@ Both land with #1220's `setpriv` as one change to `services/workspace-worker/ent
 **Watch:**
 - **Dependabot's media-render pip job can't resolve `kokoro-onnx==0.6.1`.** It lists only 0.1.x, so its Python is probably older than the package's `Requires-Python`.
 - **The local backend restarted once during night 18 on 0fc14dae9.** SQLAlchemy's QueuePool (10 + 20) was exhausted, then the process shut down. It isn't linked to W4's boot changes yet; it was reported to TESTER on 20 Oct.
-- **`POST /api/missions/upload` answers 500 when no embedding provider is set** and leaves a failed row behind. This is Gerard's product call.
+- **`POST /api/missions/upload` answers 500 when no embedding provider is set**, and leaves a failed row behind.
+  - It's only seen in CI's fresh-install smoke. The local stack has a key from the operator workspace key store, so it's unaffected.
+  - The SaaS has no OpenRouter key by choice while testing runs locally, so it would happen there too. That's expected while the SaaS is parked.
+  - Gerard decides after WebSummit whether a mission upload should store the file without retrieval, refuse up front, or clean up on failure (`/api/documents/upload` already answers 200 with the processing error).
 
 ## 1. Introduction
 

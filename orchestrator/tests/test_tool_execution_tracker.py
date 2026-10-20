@@ -5,6 +5,8 @@ tool_execution_tracker.py, the one ToolLoopExecutor uses since PRD-142 W3-S4). T
 that stayed in consumers/chatbot/service.py, which they used to extract, ran nowhere and
 was deleted with it.
 """
+import pytest
+
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 
 
@@ -148,3 +150,54 @@ def test_mixed_dispatcher_and_direct_counted_separately():
 
     assert tracker.tool_counts.get("platform_list_agents") == 1
     assert tracker.tool_counts.get("platform_execute:platform_list_agents") == 1
+
+
+# ── P256-FIX-N17-4 (night 17, F447): a read runs again after a write that went through ──
+
+BROWSE = {"action": "platform_browse_memories", "params": {}}
+DELETE = {"action": "platform_delete_memory", "params": {"memory_id": "m-1"}}
+WAITS = {"success": False, "requires_confirmation": True, "grant_id": 42, "message": "Card raised."}
+
+
+def _ran(tracker, tool_name, args, result):
+    tracker.record_execution(tool_name, args)
+    tracker.record_outcome(tool_name, args, result)
+
+
+def test_a_browse_after_a_delete_that_went_through_runs_again():
+    tracker = ToolExecutionTracker()
+    _ran(tracker, "platform_execute", BROWSE, {"success": True, "memories": []})
+    assert tracker.should_skip_execution("platform_execute", BROWSE)[0] is True
+    _ran(tracker, "platform_execute", DELETE, {"success": True})
+
+    assert tracker.should_skip_execution("platform_execute", BROWSE)[0] is False
+    assert tracker.should_skip_execution("platform_execute", DELETE)[0] is True     # the write still ran once
+    assert tracker.ran_as[("platform_execute", tracker._hash_args(DELETE))] == "platform_delete_memory"
+
+
+def test_a_direct_read_is_cleared_by_a_write_too():
+    tracker = ToolExecutionTracker()
+    listing = {"status": "review"}
+    _ran(tracker, "platform_list_tasks", listing, {"success": True, "tasks": []})
+    _ran(tracker, "platform_execute", DELETE, {"success": True})
+    assert tracker.should_skip_execution("platform_list_tasks", listing)[0] is False
+
+
+@pytest.mark.parametrize("result", [{"success": False, "error": "Memory not found"}, WAITS])
+def test_a_write_that_failed_or_waits_for_the_owner_leaves_the_read_skipped(result):
+    tracker = ToolExecutionTracker()
+    _ran(tracker, "platform_execute", BROWSE, {"success": True, "memories": []})
+    _ran(tracker, "platform_execute", DELETE, result)
+    assert tracker.should_skip_execution("platform_execute", BROWSE)[0] is True
+
+
+def test_a_read_after_a_read_and_a_search_after_a_write_are_still_skipped():
+    tracker = ToolExecutionTracker()
+    search = {"query": "posting rules"}
+    _ran(tracker, "search_knowledge", search, {"success": True, "results": []})
+    _ran(tracker, "platform_execute", BROWSE, {"success": True, "memories": []})
+    _ran(tracker, "platform_list_tasks", {"status": "review"}, {"success": True, "tasks": []})
+    assert tracker.should_skip_execution("platform_execute", BROWSE)[0] is True      # a read changes nothing
+    _ran(tracker, "platform_execute", DELETE, {"success": True})
+    skip, reason = tracker.should_skip_execution("search_knowledge", search)
+    assert skip is True and "same search already ran" in reason                     # F085-A / F120 dedupe stands

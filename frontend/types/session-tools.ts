@@ -8,7 +8,7 @@
  */
 
 /** The group ids the backend accepts; any other id is refused with a 422. */
-export type SessionToolGroupId = 'data' | 'graph' | 'documents' | 'playbooks' | 'missions' | 'reports'
+export type SessionToolGroupId = 'data' | 'graph' | 'documents' | 'playbooks' | 'missions' | 'reports' | 'socials'
 
 /** One group the owner can turn on for this agent's sessions. */
 export interface SessionToolGroup {

@@ -24,7 +24,7 @@ export const ENTRY_TYPES: ReadonlyArray<EntryDef> = [
   {
     id: 'mission',
     label: 'Mission',
-    desc: 'Big, complex work. 6–9 agents, field memory, parallel reasoning.',
+    desc: 'Big, complex work. A team of agents, field memory, parallel reasoning.',
     when: 'When the goal needs more than one head.',
     Icon: Orbit,
     tone: 'mission',

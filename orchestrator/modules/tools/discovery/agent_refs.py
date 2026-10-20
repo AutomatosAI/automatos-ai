@@ -19,6 +19,9 @@ import functools
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from modules.tools.discovery.cannot_call_warning import CANNOT_CALL_KEYS
+from modules.tools.execution.owner_reasons import Refusal, agents_share_a_name
+
 Handler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 AGENT_ID, AGENT_NAME = "agent_id", "agent_name"
@@ -107,8 +110,9 @@ def resolve_active_agent(db: Any, workspace_id: Any, ref: Any) -> Tuple[Optional
     matches = active_named(db, workspace_id, said)
     if len(matches) == 1:
         return matches[0], None
-    if matches:
-        return None, CLASH.format(said=said.strip(), candidates=candidates(matches))
+    if matches:   # P256-FIX-N17-10 (F449): the owner is told the clash, never the call's agent_id
+        return None, Refusal(CLASH.format(said=said.strip(), candidates=candidates(matches)),
+                             agents_share_a_name(len(matches), said))
     return None, None
 
 
@@ -167,7 +171,8 @@ def takes_the_agent_id(name_key: str) -> Callable[[Handler], Handler]:
 def gives_the_card_on_update(update: Handler) -> Handler:
     """Wrap platform_update_task: an agent_id or agent_name gives the card to that agent the
     way platform_assign_task does (an answered card runs again, F309), then any other edit
-    runs. A refused assignment edits nothing."""
+    runs. A refused assignment edits nothing. A card the same call sends back is only given
+    (P256-FIX-N17-2, ``_the_give``), so the send-back carries the owner's note."""
     @functools.wraps(update)
     async def wrapped(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         given = {key: value for key, value in (params or {}).items() if key not in (AGENT_ID, AGENT_NAME)}
@@ -175,14 +180,31 @@ def gives_the_card_on_update(update: Handler) -> Handler:
                  if (params or {}).get(key) not in (None, "")}
         if not agent:
             return await update(db, workspace_id, given)
-        from modules.tools.discovery.handlers_board_task_assign import assign_board_task
-
+        give = _the_give(db, workspace_id, given)
         private = {key: value for key, value in given.items() if key.startswith("_")}
-        assigned = await assign_board_task(db, workspace_id, {**private, "task_id": given.get("task_id"), **agent})
+        assigned = await give(db, workspace_id, {**private, "task_id": given.get("task_id"), **agent})
         if assigned.get("success") is not True or not _edits(given):
             return assigned
         return _both(assigned, await update(db, workspace_id, given))
     return wrapped
+
+
+def _the_give(db: Any, workspace_id: Any, edit: Dict[str, Any]) -> Handler:
+    """How the card is given. Night 17 (F444): {agent, status: 'assigned', note} on an answered
+    card ran it again for the new agent (``an_answered_card_runs_again``), so the move found
+    it already Assigned, never reached the board's Reject, and the owner's note never reached
+    the redo. When the edit sends the card back (``send_back_checks.board_sends_back``), the
+    plain assignment only sets its agent, and the Reject sends it back with the note."""
+    from modules.tools.discovery.send_back_checks import board_sends_back
+    from modules.tools.discovery.send_backs import EDIT_ACTION
+
+    if board_sends_back(db, workspace_id, EDIT_ACTION, edit):
+        from modules.tools.discovery.handlers_board_tasks import assign_board_task as only_given
+
+        return only_given
+    from modules.tools.discovery.handlers_board_task_assign import assign_board_task
+
+    return assign_board_task
 
 
 def _edits(params: Dict[str, Any]) -> bool:
@@ -191,9 +213,11 @@ def _edits(params: Dict[str, Any]) -> bool:
 
 
 def _both(assigned: Dict[str, Any], edited: Dict[str, Any]) -> Dict[str, Any]:
-    """One answer for a card given to an agent and then edited."""
+    """One answer for a card given to an agent and then edited, with what the agent's
+    sessions cannot call (F430, ``cannot_call_warning``)."""
     agent = assigned.get("assigned_agent")
-    out = {"status": assigned.get("status"), **edited, "assigned_agent": agent}
+    warned = {key: assigned[key] for key in CANNOT_CALL_KEYS if key in assigned}
+    out = {"status": assigned.get("status"), **edited, "assigned_agent": agent, **warned}
     if edited.get("success") is True:
         return out
     return {**out, "partial": True, "error": GIVEN_BEFORE_REFUSED.format(error=edited.get("error"), agent=agent)}

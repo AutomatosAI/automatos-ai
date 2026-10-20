@@ -27,6 +27,8 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from modules.tools.execution.owner_reasons import OWNER_REASON, SENT_WRONG
+
 logger = logging.getLogger(__name__)
 
 PLATFORM_DISPATCHER = "platform_execute"
@@ -143,7 +145,7 @@ def decodes_nested_params(execute: Callable[..., Awaitable[Dict[str, Any]]]) -> 
         elif tool_name == COMPOSIO_DISPATCHER and isinstance(parameters, dict):
             refused = _composio_refusal(parameters)
             if refused:
-                return {"success": False, "error": refused, "tool": tool_name}
+                return {"success": False, "error": refused, "tool": tool_name, OWNER_REASON: SENT_WRONG}  # F449
         return await execute(self, *as_the_schema_reads(tool_name, decoded), *args, **kwargs)
     return wrapped
 

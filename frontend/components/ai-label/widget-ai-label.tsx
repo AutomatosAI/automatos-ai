@@ -48,6 +48,7 @@ function WidgetAiLabelNote({ onHiddenChange }: { readonly onHiddenChange: (hidde
 export function WidgetAiLabelFrame({ children }: { readonly children: ReactNode }) {
   const hidden = useAiLabelPaused(WIDGET_AI_LABEL)
   const setHidden = useAiLabelStore((state) => state.setHidden)
+  const releaseLabel = useAiLabelStore((state) => state.releaseLabel)
   const [checked, setChecked] = useState(false)
   const report = useCallback(
     (labelHidden: boolean) => {
@@ -57,7 +58,7 @@ export function WidgetAiLabelFrame({ children }: { readonly children: ReactNode 
     [setHidden],
   )
   // A panel that closes takes its pause with it; the next one checks its own label.
-  useEffect(() => () => setHidden(WIDGET_AI_LABEL, false), [setHidden])
+  useEffect(() => () => releaseLabel(WIDGET_AI_LABEL), [releaseLabel])
   return (
     <div className={FRAME_CLASS}>
       <WidgetAiLabelNote onHiddenChange={report} />

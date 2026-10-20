@@ -18,8 +18,9 @@ with plain string args (the post and its workspace), never a closure: the
   fire racing a person's publish now, publishes once; then the US-301 publisher
   runs. A job registered late fires at once (``misfire_grace_time=None``) and decides.
 * **A missed slot.** Fired more than ``SOCIALS_MISFIRE_GRACE_SECONDS`` after its slot
-  (the backend was down), with Socials off for the workspace, or with an approval
-  that no longer matches, the post goes to ``missed`` and the workspace is told
+  (the backend was down), with Socials off for the workspace, with an approval that no
+  longer matches, or with a video whose AI-generated label disagrees with the post's
+  (PRD-264 EUAI-08a), the post goes to ``missed`` and the workspace is told
   (``social_post_missed``). Stale content is never posted silently. A missed post can
   be rescheduled or published now while its approval still matches.
 * **A lost publish.** The same pass ends a post still publishing well past a run's
@@ -41,7 +42,7 @@ from sqlalchemy import update
 from config import config
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
-from modules.socials import notify, plan_late, publish_lifecycle, publisher, service
+from modules.socials import ai_media, notify, plan_late, publish_lifecycle, publisher, service
 from modules.socials.publish_records import PublishJob, end_lost
 from modules.socials.publishing import run_publish
 from modules.socials.settings import socials_off_reason
@@ -60,6 +61,8 @@ MISSED_OFF = "Socials was off for this workspace at its slot ({why}): nothing wa
 # Past a run's own limit, before a publishing post counts as lost: its end is written.
 LOST_MARGIN_SECONDS = 300
 MISSED_STALE = "Its approval no longer matched its content at its slot ({why}): nothing was published."
+# PRD-264 EUAI-08a: the video shows the AI-generated label other than the post sets it (ai_media.label_mismatch).
+MISSED_UNLABELLED = "Nothing was published at its slot. {why}"
 # PRD-251B (B11, US-B105): a planned slot that passed with the post still unapproved.
 PLANNED_PASS_STATUSES = (service.DRAFT, service.NEEDS_APPROVAL, service.CHANGES_REQUESTED)
 MISSED_UNAPPROVED = (
@@ -277,6 +280,9 @@ def _claim(db: Any, post: SocialPost, now: datetime) -> Tuple[Optional[PublishJo
     reason = _missed_reason(db, post, slot, now)
     if reason is None and not publish_lifecycle.approval_matches(post):
         reason = MISSED_STALE.format(why="the content changed after it was approved")
+    unlabelled = ai_media.label_mismatch(post) if reason is None else None
+    if unlabelled is not None:
+        reason = MISSED_UNLABELLED.format(why=unlabelled)
     if reason is not None:
         return None, _miss(db, post, reason)
     try:

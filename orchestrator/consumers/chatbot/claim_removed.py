@@ -27,6 +27,11 @@ N15-CI:
   Done), is replaced by that write's account ("#0422 was moved to Done."). A claim about anything else
   (a letter over an unrelated card made) still takes the line. A reply that was nothing but such claims says so
   (``Removed.denies_done``): Auto's turn answers with the account of its calls (F264-b).
+
+P256-FIX-N17-5 (F446, nights 16–17): a turn that only read is answered only for Auto's own reports (a
+third-person "It has been unassigned." says what the read found); a refused write is settled by a later done or
+waiting one (``receipts.refused_writes_left``); the line keeps a bullet's marker and colon label and is never glued
+to the text before it.
 """
 from __future__ import annotations
 
@@ -38,7 +43,7 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE_SAID
 from consumers.chatbot.claims_backed import FAMILIES, SAYS_DONE, SENTENCES, not_said, own_lines, without_marks
-from consumers.chatbot.receipts import DONE, REFUSED, WRITE, receipt, tried, unbacked_sentences
+from consumers.chatbot.receipts import DONE, READ, WRITE, receipt, refused_writes_left, tried, unbacked_sentences
 from core.llm.screen_watch import corrected
 from modules.tools.execution.card_raised import act_of, has_a_card, the_ask
 from modules.tools.execution.turn_account import auto_speaks
@@ -56,6 +61,10 @@ _CARD_KEYS = ("task_id", "task_number", "number")      # a write's params that n
 _NUMBER = re.compile(r"(?<![\w.#])#?(\d{1,7}(?:\.\d+)?)(?!\w)")
 _LEADING_SPACE = re.compile(r"^\s*")
 _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
+# P256-FIX-N17-5: a taken-out sentence's list marker and its bold label, when that ends in a colon ("**X:**", "**X**:").
+_LABEL = r"\*\*[^*\n]+?(?::\*\*|\*\*:)"
+_KEPT_IN_FRONT = re.compile(rf"^(\s*)([-•+*]\s+)?({_LABEL}\s*)?")
+_ONLY_FRONT = re.compile(rf"\s*(?:[-•+*]\s*)?(?:{_LABEL})?\s*")
 
 
 @dataclass(frozen=True)
@@ -85,14 +94,10 @@ def _asks(outcomes: Iterable[Outcome]) -> List[str]:
 
 
 def _refused(outcomes: Iterable[Outcome]) -> List[str]:
-    """The turn's refused writes that no later call of the same action made good, each once."""
+    """The turn's refused writes that no later call of the same action made good or raised a card for
+    (``receipts.refused_writes_left``, P256-FIX-N17-5), each once."""
     writes = [r for r in (receipt(*outcome) for outcome in outcomes) if r["kind"] == WRITE]
-    done = {r["action"] for r in writes if r["status"] == DONE}
-    refused: Dict[str, Dict[str, Any]] = {}
-    for r in writes:
-        if r["status"] == REFUSED and r["action"] not in done:
-            refused.setdefault(r["action"], r)
-    return list(dict.fromkeys(TRIED.format(what=tried(r)) for r in refused.values()))
+    return list(dict.fromkeys(TRIED.format(what=tried(r)) for r in refused_writes_left(writes)))
 
 
 def not_done_in_place(verbs: Iterable[str], outcomes: List[Outcome]) -> str:
@@ -112,6 +117,29 @@ def _instead_of(said: str, put: Dict[str, str], line: str, placed: bool) -> Tupl
     return ("" if placed else line), True
 
 
+def _in_its_place(sentence: str, instead: str, before: str) -> str:
+    """What stands where ``sentence`` was taken out (``before``: the line's text kept ahead of it): its list
+    marker when it opens the line and a bold label that ends in a colon ("- **#1751 (Tidewater):** "), never a
+    bold span without one; then ``instead`` after the sentence's own leading space, or one space when the
+    text before ends in none (P256-FIX-N17-5, F446: "it.Just to be clear", a bullet's label lost)."""
+    front = _KEPT_IN_FRONT.match(sentence)
+    marker = "" if before.strip() else front.group(2) or ""
+    label = front.group(3) or "" if instead or not before.strip() else ""     # mid-line, nothing in its place: it goes
+    if marker or label:
+        kept = f"{front.group(1)}{marker}{label}"
+        return f"{kept}{'' if kept[-1].isspace() or not instead else ' '}{instead}"
+    if not instead:
+        return ""
+    space = front.group(1) or (" " if before and not before[-1].isspace() else "")
+    return f"{space}{instead}"
+
+
+def _left_open(sentence: str) -> str:
+    """The marks a taken-out sentence opened and did not close ("**I've sent it." before "** Here's…")."""
+    opening = _OPENING_MARKS.match(sentence)
+    return opening.group(1) if opening and not sentence.rstrip().endswith(opening.group(1)) else ""
+
+
 def _line_without(text: str, put: Dict[str, str], line: str, placed: bool) -> Tuple[str, bool, bool]:
     """``text`` (one line) with its sentences in ``put`` taken out, each with what ``put`` says goes in
     its place; whether a sentence was taken out, and whether the line is said by now. What only
@@ -124,9 +152,8 @@ def _line_without(text: str, put: Dict[str, str], line: str, placed: bool) -> Tu
         said = without_marks(sentence).strip()
         if said in put:
             instead, placed = _instead_of(said, put, line, placed)
-            kept.append(f"{_LEADING_SPACE.match(sentence).group(0)}{instead}" if instead else "")
-            opening = _OPENING_MARKS.match(sentence)
-            removed, marks = True, opening.group(1) if opening else ""
+            kept.append(_in_its_place(sentence, instead, "".join(kept)))
+            removed, marks = True, _left_open(sentence)
             continue
         if marks and sentence.startswith(marks):    # the marks that closed the sentence taken out ("**")
             sentence = sentence[len(marks):]
@@ -154,7 +181,7 @@ def _replaced(answer: str, put: Dict[str, str], line: str, tidy: bool = False) -
             continue
         cut, removed, placed = _line_without(text, put, line, placed)
         cut = _tidied(text, cut) if removed and tidy else cut
-        if not (removed and not cut.strip()):
+        if not (removed and _ONLY_FRONT.fullmatch(cut)):      # N17-5: nor one left with only its marker or label
             kept.append(cut)
     if not placed and _LINE in put.values():
         kept.extend(["", line])
@@ -236,18 +263,33 @@ def _dropped(answer: str, found: List[Tuple[str, str]], outcomes: List[Outcome])
     return dict.fromkeys((*claimed, *_going_on(answer, claimed, voiced)), "")
 
 
+def _only_read(ran: List[Outcome], read_ahead: bool) -> bool:
+    """Whether the turn wrote nothing (no write receipt: done, refused or waiting) and read something (a
+    done read, or its reads before the loop, ``read_ahead``)."""
+    receipts = [receipt(*outcome) for outcome in ran]
+    if any(r["kind"] == WRITE for r in receipts):
+        return False
+    return read_ahead or any(r["kind"] == READ and r["status"] == DONE for r in receipts)
+
+
 def without_unbacked_claims(answer: str, outcomes: Iterable[Outcome],
-                            promises: Optional[bool] = True) -> Optional[Removed]:
+                            promises: Optional[bool] = True, read_ahead: bool = False) -> Optional[Removed]:
     """The reply with the sentences that make an unbacked claim taken out, or None when every claim
     is backed (``promises``: whose voice the reply is, as ``receipts.unbacked_claim`` reads it). In
     Auto's voice, the not-done line takes the first one's place, or the account of a write the claim
     said wrong takes its; in an agent's, nothing does (``Removed.taken_out`` tells the owner), unless
-    nothing of its text is left, when the line is the whole answer."""
+    nothing of its text is left, when the line is the whole answer.
+    P256-FIX-N17-5 (F446): in Auto's voice, a turn that only read (``_only_read``; ``read_ahead``: it read
+    before the loop) is answered only when one of its claims is Auto's own report ("I've sent it", "Done.",
+    "Email sent."): a third-person one ("It has been unassigned.") says what the read found. When one is,
+    every unbacked claim goes as before. A turn that read nothing keeps the full check."""
     ran = list(outcomes)
     found = unbacked_sentences(answer, ran, promises)
     if not found:
         return None
     own = auto_speaks(promises)
+    if own and _only_read(ran, read_ahead) and not unbacked_sentences(answer, ran, promises, own_only=True):
+        return None
     put = _own_instead(found, ran) if own else _dropped(answer, found, ran)
     line = not_done_in_place([verb for verb, sentence in found if not own or put[sentence.strip()] == _LINE], ran)
     only = not _replaced(answer, dict.fromkeys(put, ""), line).strip()

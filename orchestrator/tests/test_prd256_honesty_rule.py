@@ -315,8 +315,9 @@ def test_the_in_loop_check_reads_the_receipts_rule():
 
     source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
     assert "return in_place(self, current)" in source
-    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
-        claims_in_place.in_place)                                                                   # RVW-7
+    in_place = inspect.getsource(claims_in_place.in_place)        # RVW-7; N17-5: whether the turn read before it
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises," in in_place
+    assert 'read_ahead=getattr(loop, "read_ahead", False))' in in_place
     assert "claimed_action_not_done" not in source and "claimed_action_nudge" not in source
 
 

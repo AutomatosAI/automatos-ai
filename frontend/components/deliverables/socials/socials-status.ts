@@ -40,6 +40,8 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   // F378: another take by Auto (the one before it kept), and that earlier take restored.
   retake: 'Auto made another take',
   retake_undone: 'Earlier take restored',
+  // PRD-264 EUAI-08a: a person switched the post's AI-generated label on or off (the comment says which).
+  ai_label: 'AI-generated label changed',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {

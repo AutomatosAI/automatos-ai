@@ -83,7 +83,9 @@ def test_the_inventory_names_only_what_the_widget_key_may_read(db):
             "## Documents in this workspace\n"
             "This workspace holds 2 of the owner's documents (franchise-a-rota.pdf, price-list.pdf). For a question "
             "about the business, a document, or how the product works, search them with search_knowledge first "
-            "and name the file you used.")
+            "and name the file you used. Never tell the owner a document does not give something until "
+            "search_knowledge, in the thing's own words, finds nothing either; platform_search_documents calls "
+            "do not count.")
     with _widget("data:query", team="Franchise-A"):
         assert documents_summary(db, ws) == (
             "## Documents and data in this workspace\n"
