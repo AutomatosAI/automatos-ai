@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { LookNotice, LOOKS_NOT_KEPT, storedNotice } from '@/components/looks/look-notice'
 import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
-import { LookScopeContext } from '@/components/looks/look-scope'
+import { LookScopeContext } from '@/components/theme-host/look-scope'
 import { LOOK_SEND_DELAY_MS } from '@/lib/theme-host/builtin/play-look-store'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { apiClient } from '@/lib/api-client'

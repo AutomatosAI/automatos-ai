@@ -120,7 +120,7 @@ the move lands.
 | `@/hooks/use-idle-timeout` | hooks/use-auto-mascot.ts | copied into Play | — | A pure timer the mascot driver uses; it moves with it. |
 | `@/lib/look-kit/*` | `lib/looks` (`engine.ts` binds Play's catalogue, prefix and look spec; the pure helpers directly), `components/looks` through `lib/looks/engine` after A-13a | copied into Play | — | The look runtime is core-owned in Phase A and the kit vendors it by version (PA-9); the active look and saving are `looks.useLook` and `looks.saveLook`. |
 | `@/lib/theme-host/builtin/*` | `lib/looks` after A-09b | host-only | — | Builtin Play's registration files (PA-7: `play-look-keys.ts`, `play-boot.ts` and the rest); deleted at A-19. |
-| `@/components/theme-host/*` | Play's frame and cards after A-12c, A-13c | host-only | — | The host's own components (slots, the protected-surface guard, the look runtime); a theme gets the cards through `cards.*`. |
+| `@/components/theme-host/*` | Play's frame and cards after A-12c, A-13c; hooks/use-celebrate-new.ts (`look-scope`, a W-A5 seam item) | host-only | — | The host's own components (slots, the protected-surface guard, the look runtime); a theme gets the cards through `cards.*`. The look scope (whose seen Deliverables record the shelf keeps) has no SDK name yet: a seam-review item. |
 | `@/lib/api-client` | Play's tests today; `lib/looks/store.ts` if A-09b reads the server directly | host-only | — | A theme never holds the backend client (PRD §4.3 item 7); every call it needs is an SDK hook (looks: `looks.listLooks`, `looks.saveLook`, A-13c). |
 
 ## 3. The data hooks the Q3 pages read (§0)

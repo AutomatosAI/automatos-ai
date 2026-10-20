@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { useLookScope } from '@/components/looks/look-scope'
+import { useLookScope } from '@/components/theme-host/look-scope'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'

@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Deliverable } from '@automatos/theme-sdk'
 
-import { useLookScope } from '../components/looks/look-scope'
+// PRD-261 W-A5 seam item: the scope is the host's (it fills it), and the SDK has no name for it yet
+// (context.useWorkspace carries no user). lib/__tests__/prd261-port-deliverables.test.ts allows
+// exactly this import in exactly this file, and fails when the allowance outlives the import.
+import { useLookScope } from '@/components/theme-host/look-scope'
+
 import { freshDeliverables, markSeen, readSeen, type SeenRecord, writeSeen } from '../lib/play/seen'
 
 /** The record as last read or written, and the scope it belongs to. */

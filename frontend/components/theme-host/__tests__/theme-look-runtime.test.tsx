@@ -21,7 +21,7 @@ vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' }, isLoading: false, error: null, refreshWorkspace: async () => undefined }),
 }))
 
-import { useLookScope } from '@/components/looks/look-scope'
+import { useLookScope } from '@/components/theme-host/look-scope'
 import { declaresLooks, ThemeLookRuntime } from '@/components/theme-host/theme-look-runtime'
 import { ThemeProvider } from '@/components/theme-provider'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'

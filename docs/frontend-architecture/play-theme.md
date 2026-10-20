@@ -558,7 +558,7 @@ frontend/
 │   ├── looks/style/page.tsx       # PlayOnlyRoute → the style sheet
 │   └── not-found.tsx              # server component, Next's 404 title; ThemeSlot slot="notFound@1" picks the page
 ├── components/
-│   ├── looks/                     # looks-screen and its parts, usePlayLook (the SDK's looks), look-scope; style/ (the runtime, PlayOnlyRoute and both lazy slots are host code in lib/theme-host/builtin since A-14d)
+│   ├── looks/                     # looks-screen and its parts, usePlayLook (the SDK's looks); style/ (the runtime, PlayOnlyRoute and both lazy slots are host code in lib/theme-host/builtin since A-14d; the look scope's context is the host's, components/theme-host/look-scope.ts)
 │   ├── mascot/                    # AutoMascot and its CSS module
 │   ├── play/
 │   │   ├── shell/                 # PlayFrame (its slot is lib/theme-host/builtin/play-frame-lazy.tsx), PlaySidebar, play-nav, ConnectionPill, PageColumns
