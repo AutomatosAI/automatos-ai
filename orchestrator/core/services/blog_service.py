@@ -22,7 +22,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from core.models.core import BlogPost
-from core.services.blog_review import REVIEW_CLEARED, edits_change_the_post
+from core.services.blog_review import REVIEW_CLEARED, content_sha256, edits_change_the_post
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -260,15 +260,19 @@ class BlogService:
     # ------------------------------------------------------------------
     # Editorial review (PRD-264 EUAI-08b)
     # ------------------------------------------------------------------
-    def mark_reviewed(self, post_id: UUID, reviewer: str) -> BlogPost | None:
+    async def mark_reviewed(self, post_id: UUID, reviewer: str) -> BlogPost | None:
         """Record that ``reviewer`` reviewed this workspace's post and took editorial responsibility.
 
-        The post then reads ``ai_generated: false`` until an edit changes it. Another
-        workspace's post is not found (``get_post`` is workspace-scoped): ``None``.
+        Records who, when, and the SHA-256 of the post's text as it is now: the post
+        reads ``ai_generated: false`` only while its text still hashes to that value
+        (an agent can rewrite the workspace file without ``update_post``), and until
+        an edit clears the review. Another workspace's post is not found (``get_post``
+        is workspace-scoped): ``None``.
         """
         post = self.get_post(post_id)
         if not post:
             return None
+        post.reviewed_content_sha256 = content_sha256(await self.get_content(post))
         post.reviewed_by_user_id = reviewer
         post.reviewed_at = datetime.now(timezone.utc)
         self.db.commit()

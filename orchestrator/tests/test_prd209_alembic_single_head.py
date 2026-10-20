@@ -110,7 +110,8 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto auto_haiku_default_20261019
 # — the provenance record (content_provenance) the public detection route reads.
 # 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto prd264_content_provenance
-# — blog_posts.reviewed_by_user_id and reviewed_at, the person who took editorial responsibility.
+# — blog_posts.reviewed_by_user_id, reviewed_at and reviewed_content_sha256: who took editorial
+# responsibility, when, and for which text.
 EXPECTED_HEAD = "prd264_blog_review"
 
 
