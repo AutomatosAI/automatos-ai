@@ -29,7 +29,7 @@ Curation is v1 (Gerard tunes content later). The picks are defensible and cited:
     shopify-extension-dev     Shopify Extension Builder
 
 PRD-251 US-120 adds **Socials** (``core/seeds/seed_socials_package.py``): its two
-agents and four Playbooks are seeded there, at every boot, and its members are
+agents and five Playbooks are seeded there, at every boot, and its members are
 built from that roster the same way.
 """
 from __future__ import annotations
