@@ -5,7 +5,8 @@
  *
  * PRD-261 W-A6b (gap G2): an installed theme's boot names its own look keys (a '/' in the theme
  * id), which pass the gate, so the script paints the stored look; a 'from-look' installed boot
- * starts on the tone cookie, as builtin Play's does.
+ * with looks and a tone rule starts on the generic look runtime's tone cookie (A-19d2:
+ * `automatos-theme-tone`), as builtin Play's starts on its own.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -24,6 +25,7 @@ import { BUILTIN_PLAY_BOOT } from '@/lib/theme-host/builtin/play-boot'
 import { BUILTIN_PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { bootLookStorage, installedLookKeys } from '@/lib/theme-host/builtin/play-look-storage'
 import { HTML_CLASS_PATTERN } from '@/lib/theme-host/constants'
+import { THEME_TONE_COOKIE } from '@/lib/theme-host/looks/tone-cookie'
 import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
 import { STUDIO_HTML_CLASS, parseUiStyle, type UiStyle } from '@/lib/ui-style'
 
@@ -224,20 +226,32 @@ describe("PRD-261 W-A6b (gap G2) — an installed theme's stored look and tone b
 
   const resolve = (cookies: Record<string, string>, boot: ThemeBoot) => createThemeBootResolver(cookieReader(cookies), async () => boot)(INSTALL_STYLE)
 
-  it("starts a 'from-look' installed boot that names its look keys on the tone cookie, strictly", async () => {
-    // Play's package: the theme the look runtime runs under, which keeps the tone cookie.
-    const fromLook = installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY })
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, fromLook)).tone).toEqual({ policy: 'from-look', value: 'light' })
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'bogus' }, fromLook)).tone.value).toBeNull()
-    expect((await resolve({}, fromLook)).tone.value).toBeNull()
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY, lookStorage: null }))).tone.value).toBeNull()
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, installedBoot())).tone).toEqual({ policy: 'user', value: null })
+  /** A 'from-look' installed boot the generic look runtime runs: a tone rule on its tint, and one preset. */
+  function lookingBoot(fields: Partial<ThemeBoot> = {}): ThemeBoot {
+    const base = installedBoot()
+    const prepaint = base.prepaint === null ? null : { ...base.prepaint, tone: { knob: 'tint', values: { warm: 'light' as const, cold: 'dark' as const } } }
+    const preset = { schema: GUARD.schema, interface: GUARD.iface, id: 'warm', name: 'Warm', sub: 'The default', tint: 'warm' }
+    return installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY, prepaint, looks: { defaultLook: preset.id, presets: [preset] }, ...fields })
+  }
+
+  it("starts a 'from-look' installed boot with looks and a tone rule on the generic runtime's tone cookie, strictly (A-19d2)", async () => {
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'light' }, lookingBoot())).tone).toEqual({ policy: 'from-look', value: 'light' })
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'bogus' }, lookingBoot())).tone.value).toBeNull()
+    expect((await resolve({}, lookingBoot())).tone.value).toBeNull()
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'light' }, lookingBoot({ lookStorage: null }))).tone.value).toBeNull()
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'light' }, installedBoot())).tone).toEqual({ policy: 'user', value: null })
   })
 
-  it("leaves a 'from-look' installed boot whose class isn't Play's, or that carries no entry, off the tone cookie", async () => {
+  it("never reads builtin Play's own tone cookie for an installed theme, Play's package included", async () => {
+    expect((await resolve({ [PLAY_TONE_COOKIE]: 'light' }, lookingBoot())).tone).toEqual(FROM_LOOK)
+  })
+
+  it("starts any installed theme with looks on it, whatever its class; none without an entry, a tone rule or looks", async () => {
     const acme = { ...HELLO_PACKAGE_ENTRY, tone: 'from-look' as const }
     expect(acme.htmlClass).not.toBe(BUILTIN_PLAY_HTML_CLASS)
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'dark' }, installedBoot({ tone: FROM_LOOK, entry: acme }))).tone).toEqual(FROM_LOOK)
-    expect((await resolve({ [PLAY_TONE_COOKIE]: 'dark' }, installedBoot({ tone: FROM_LOOK, entry: null }))).tone).toEqual(FROM_LOOK)
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, lookingBoot({ entry: acme }))).tone).toEqual({ policy: 'from-look', value: 'dark' })
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, lookingBoot({ entry: null }))).tone).toEqual(FROM_LOOK)
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, installedBoot({ tone: FROM_LOOK, entry: PLAY_PACKAGE_ENTRY }))).tone).toEqual(FROM_LOOK)
+    expect((await resolve({ [THEME_TONE_COOKIE]: 'dark' }, lookingBoot({ looks: null }))).tone).toEqual(FROM_LOOK)
   })
 })

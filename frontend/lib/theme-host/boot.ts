@@ -13,16 +13,18 @@
  * Every style gets correct first-paint classes: Classic none, Studio `studio`, a builtin theme
  * its base's class and its own, and an installed theme (`theme:install:<uuid>`) its base's —
  * Studio, DEFAULT_THEME_BASE — until A-08c's resolver returns its own boot. An installed theme's
- * boot names its own look keys and guard (W-A6b, gap G2), and its tone comes from the tone cookie
- * as builtin Play's does.
+ * boot names its own look keys and guard (W-A6b, gap G2); when its look sets the tone, its tone
+ * comes from the generic look runtime's tone cookie (A-19d2: `automatos-theme-tone`), as builtin
+ * Play's comes from its own.
  */
-import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { STYLE_HTML_CLASS_NAMES, styleHtmlClasses } from '@/lib/ui-style'
 
 import { parseThemeTone, sanitizeThemeBoot } from './boot-sanitize'
 import type { BuiltinThemeBootData, CookieReader, ThemeBoot, ThemeBootResolver, ThemeTone } from './boot-types'
 import { BUILTIN_PLAY_BOOT } from './builtin/play-boot'
-import { BUILTIN_PLAY_REF, runsPlayLooks } from './builtin/play-entry'
+import { BUILTIN_PLAY_REF } from './builtin/play-entry'
+import { themeLookRulesOf } from './looks/spec'
+import { THEME_TONE_COOKIE } from './looks/tone-cookie'
 import { findThemeEntry, isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeTonePolicy, UiStyle } from './registry-types'
 
@@ -98,29 +100,34 @@ export function builtinThemeBoot(style: UiStyle, readCookie: CookieReader): Them
 const LOG_PREFIX = '[theme-boot]'
 
 /**
- * The cookie the host's look runtime keeps the look's tone in (play-tone-cookie.ts), for whichever
- * theme it runs: builtin Play (BUILTIN_PLAY_BOOT.toneCookie) or an installed theme.
+ * Whether the generic look runtime (lib/theme-host/looks/provider.tsx) keeps this installed boot's
+ * look tone in THEME_TONE_COOKIE: a running theme (its entry) whose look sets the tone, whose boot
+ * names where its look is kept, has looks to run (its table, guard and presets) and a tone rule in
+ * its table. Exactly then the runtime writes the cookie; any other theme would start on another
+ * theme's last tone and keep it, since nothing would hand it a tone after hydration.
  */
-const LOOK_TONE_COOKIE = PLAY_TONE_COOKIE
+function keepsLookTone(boot: ThemeBoot): boolean {
+  if (boot.tone.policy !== 'from-look' || boot.lookStorage === null || boot.entry === null) return false
+  return boot.prepaint?.tone !== undefined && themeLookRulesOf(boot) !== null
+}
 
 /**
- * PRD-261 W-A6b (gap G2): an installed theme whose look sets the tone and whose boot names where
- * its look is kept starts on the tone its look last wrote to the tone cookie, as builtin Play's
- * boot does, so the first paint is already that tone. The cookie is read per request, after the
- * backend's boot (which the boot cache may hold) is answered. Only a theme the look runtime runs
- * under (runsPlayLooks: Play's class) keeps that cookie; any other would start on Play's last tone
- * and drop it after hydration, so its tone stays the user's.
+ * PRD-261 W-A6b (gap G2), A-19d2: an installed theme whose look sets the tone starts on the tone
+ * its look last wrote to the generic look runtime's tone cookie, so the first paint is already that
+ * tone. The cookie is read per request, after the backend's boot (which the boot cache may hold) is
+ * answered, and strictly: anything but 'light' or 'dark' is no tone. Builtin Play's own cookie is
+ * never read for an installed theme, Play's package included.
  */
 function withLookTone(boot: ThemeBoot, readCookie: CookieReader): ThemeBoot {
-  if (boot.tone.policy !== 'from-look' || boot.lookStorage === null || !runsPlayLooks(boot.entry)) return boot
-  return { ...boot, tone: { policy: boot.tone.policy, value: parseThemeTone(readCookie(LOOK_TONE_COOKIE)) } }
+  if (!keepsLookTone(boot)) return boot
+  return { ...boot, tone: { policy: boot.tone.policy, value: parseThemeTone(readCookie(THEME_TONE_COOKIE)) } }
 }
 
 /**
  * The resolver the root layout calls. `installed` (A-08c) answers for `theme:install:*`; its
  * boot passes the same gate, and when it fails the page gets the base boot (Studio's classes)
- * and the client host takes over. A 'from-look' installed boot takes its tone from the tone
- * cookie (withLookTone).
+ * and the client host takes over. A 'from-look' installed boot with looks and a tone rule takes
+ * its tone from the generic look runtime's tone cookie (withLookTone).
  */
 export function createThemeBootResolver(readCookie: CookieReader, installed?: ThemeBootResolver): ThemeBootResolver {
   return async (style) => {
