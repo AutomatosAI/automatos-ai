@@ -254,7 +254,8 @@ jobs:
     if: ${{ !cancelled() }}
     # Pinned, not -latest: the browsers' system packages are installed for this image.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # PRD-261 A-17b: 60, up from 45, for the Play parity specs (twice each, one test at a time).
+    timeout-minutes: 60
 
     # Job level, not step level: docker-compose.yml interpolates its `:?` variables
     # on every subcommand (up, logs and down alike). Throwaway values for an
@@ -383,14 +384,16 @@ jobs:
       # Its specs store the member's theme choice on the lane's one backend, which every other
       # spec's tab reads, so they never run beside them. Their own output folders keep the run
       # above's report and traces. They run when the specs above failed too.
-      - name: Run the installed Play package specs
+      # PRD-261 A-17b: the Play parity specs (@parity, specs/play-parity/) run here too: each runs
+      # under builtin Play and under the installed package, and stores the choice the same way.
+      - name: Run the installed Play package and Play parity specs
         if: ${{ !cancelled() && steps.specs.outcome != 'skipped' }}
         working-directory: e2e/browser
         env:
           E2E_APP_URL: http://localhost:3000
           E2E_KIT_PACKAGE: ${{ runner.temp }}/kit-package/${{ env.PLAY_PACKAGE }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-package
-        run: npx playwright test --grep "@package" --project=chromium --project=webkit --workers=1 --output=test-results-package
+        run: npx playwright test --grep "@package|@parity" --project=chromium --project=webkit --workers=1 --output=test-results-package
 
       # The theme-host record (React version, import-map integrity support), pass or fail.
       - name: Summarise the theme-host record

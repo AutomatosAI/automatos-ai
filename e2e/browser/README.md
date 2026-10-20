@@ -19,7 +19,7 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
    `node .next/standalone/server.js` on `http://localhost:3000`, the backend's CORS default.
 3. Installs this package (`npm ci`), the browsers (`npx playwright install --with-deps`),
    type-checks the specs (`npx tsc`) and runs them.
-4. Runs the `@package` specs in a step of their own (below), after the others.
+4. Runs the `@package` and `@parity` specs in a step of their own (below), after the others.
 5. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
    frontend server logs as `browser-e2e-report` (kept 7 days).
 
@@ -42,6 +42,30 @@ which every other spec's tab reads, so they run in their own step, one test at a
 
 To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the Play
 change it carries (the mirror rule, `docs/frontend-architecture/play-theme.md`).
+
+## Play parity (PRD-261 A-17b)
+
+`specs/play-parity/*.spec.ts` hold builtin Play and the installed package to the same assertions.
+Each spec writes its tests once inside `describeParity` (`support/play-parity.ts`), which runs them
+under each Play: builtin Play (the server choice `builtin:play`, then the style cookie
+`theme:builtin:play`) and the kit's package (uploaded, opted in to and chosen through
+`support/kit-package.ts`). They cover Auto's 12 states on the style sheet (each still and clip
+served from that Play's own files), approvals in the chat (a tool card and a Mission card, approve,
+deny and reject), P260-FX-19 (Make it yours readable on Paper, in forced colours and with a long
+name), P260-FX-22 (focus after Try again, the asleep screen, This look's toolbar and Switch to
+Play), P260-FX-30 (Stop keeps the reply) and Play below 1024 px (the core chrome in the look's
+colours, the look's tone forced, a stored look painted from the first frame). Play's chat runs on
+recorded turns (`fixtures/play-parity/chat-turns.json`, through `support/chat-stream.ts`); no model
+is called.
+
+They store the member's choice and builtin Play's looks on the lane's one backend, so they carry
+`@parity` and run in the `@package` step, one test at a time. Each test starts and ends on Studio,
+with no install of Play's package and no looks kept for Play on the server.
+
+Where core treats an installed theme differently, so the package cannot pass what builtin Play
+passes, the test keeps its assertions and is `test.fixme` for the package only, naming the gap
+(`GAP_*` in `support/play-parity.ts`). The gaps, and the checks no browser lane can make, are in
+`parity-checklist.md`, the manual pass (Q22).
 
 The package pins `@playwright/test`, `typescript`, `@types/node`, `@types/react` and
 `@types/react-dom` exactly and commits its own `package-lock.json` (every package from
@@ -85,6 +109,8 @@ Every test carries one tag through the `tag` option, for example
   the theme when the page inside its frame fails, and stays off where it should.
 - `@package` — Play installed from the Design Kit's package (above). Selected only by the
   workflow's own step for it, never by the main run's `--grep`.
+- `@parity` — the Play parity specs (above), run under builtin Play and the installed package.
+  Selected by the same step as `@package`.
 - `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.
   The only tag Firefox runs (the `firefox` project has `grep: /@record/`).
   `scripts/summarise-records.mjs` turns the folder into the job summary's table; the folder is
