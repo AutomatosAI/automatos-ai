@@ -21,9 +21,10 @@ workspace's Auto as target, or an apply kind with no prior value or a proposed v
 its params builder refuses) is dropped, and its reason is kept on the run's row
 (``harness_runs.prescriptions``). Nothing is queued with a placeholder.
 
-Two detectors run today: ``heartbeat_tune`` (US-050) and ``reconnect_app`` (DIAGNOSE's
-tool issues, US-019). A rollback is raised by the post-change check (US-056), and a
-tool removal waits for its dependency gate (US-057), so PRESCRIBE detects neither.
+Three detectors run today: ``heartbeat_tune`` (US-050), ``reconnect_app`` (DIAGNOSE's
+tool issues, US-019) and ``rollback``, whose suggestions the post-change check
+(services.harness_post_change, US-056) puts in DIAGNOSE's result. A tool removal waits
+for its dependency gate (US-057), so PRESCRIBE does not detect one.
 
 No write, no platform action, no model call: the prior-value readers only read.
 """
@@ -73,6 +74,8 @@ APP_KEY = "app_name"
 ASSIGNED_KEY = "assigned"
 ROLLBACK_OF_KEY = "kind"
 ROLLBACK_VALUE_KEY = "value"
+# The rx id of the change a rollback undoes (US-056): its ledger row moves to rolled_back.
+ROLLBACK_RX_KEY = "rx_id"
 
 TARGET_AGENT = "agent"
 # A dropped suggestion's entry on the run's row carries its reason under this key.
@@ -253,6 +256,13 @@ def detect_reconnects(evidence: Evidence) -> Tuple[Proposal, ...]:
     )
 
 
+def detect_rollbacks(evidence: Evidence) -> Tuple[Proposal, ...]:
+    """The rollbacks the post-change check suggests this run (US-056), from DIAGNOSE's result."""
+    from services.harness_post_change import rollbacks_of
+
+    return rollbacks_of(evidence.diagnosis)
+
+
 # ------------------------------------------------------------------ params and rollback builders
 
 
@@ -374,7 +384,7 @@ KINDS: Dict[str, ChangeKind] = {kind.name: kind for kind in (
                rollback_builder=assign_params),
     # A rollback runs the undo call of the kind it reverses, so its actions are theirs. It
     # restores the agent as it was; its card names the metric that fell (US-056).
-    ChangeKind(ROLLBACK, no_detector, risk=1, inner_actions=(CONFIGURE_HEARTBEAT, ASSIGN_TOOL),
+    ChangeKind(ROLLBACK, detect_rollbacks, risk=1, inner_actions=(CONFIGURE_HEARTBEAT, ASSIGN_TOOL),
                params_builder=rollback_params, predicted_metric=TASK_SUCCESS,
                guard_metrics=GUARD_METRICS, prior_value_reader=read_rolled_back,
                rollback_builder=never_rolled_back),
@@ -480,6 +490,7 @@ __all__ = [
     "Prescribed",
     "Proposal",
     "REPORT_KINDS",
+    "detect_rollbacks",
     "doubled_interval",
     "drop_reason",
     "prescribe",

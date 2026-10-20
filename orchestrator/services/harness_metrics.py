@@ -40,6 +40,9 @@ agent-week-run, agent-week-app-class) and its own trap filters, and a fixed set
 keeps each filter readable and separately tested. The count never depends on the
 roster size (no per-agent loop hits the database).
 
+The post-change check (PRD-263 US-056) reads the same counts between any two
+moments (:func:`span_window`), for a change's frozen reference.
+
 Read only: no write, no platform action, no model call.
 """
 
@@ -51,7 +54,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from operator import itemgetter
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 from uuid import UUID
@@ -69,6 +72,7 @@ logger = logging.getLogger(__name__)
 REF_WEEKS = 4
 # How the heartbeat service reads an agent's interval when its configuration has none.
 DEFAULT_HEARTBEAT_INTERVAL_MINUTES = 60
+DAYS_PER_WEEK = 7
 
 # One agent-week row. DIAGNOSE reads rows only through these names (US-014, US-015).
 AGENT_ROW_FIELDS: Tuple[str, ...] = (
@@ -310,7 +314,6 @@ _TOOLS_SQL = text("""
     GROUP BY 1, 2, 3, 4, 5, 6
 """)
 
-
 @dataclass(frozen=True)
 class Window:
     """The judged ISO week and the reference weeks before it, as naive-UTC bounds."""
@@ -362,6 +365,26 @@ def build_window(cur_week: str, ref_weeks: int = REF_WEEKS) -> Window:
         start=datetime.combine(oldest, datetime.min.time()),
         end=datetime.combine(monday + timedelta(weeks=1), datetime.min.time()),
     )
+
+
+def _naive_utc(moment: datetime) -> datetime:
+    """A moment as the naive UTC the statements compare (a naive one is taken as UTC)."""
+    return moment.astimezone(timezone.utc).replace(tzinfo=None) if moment.tzinfo else moment
+
+
+def span_window(start: datetime, end: datetime) -> Window:
+    """A window read between exactly ``start`` and ``end``, whatever the weekday: every ISO
+    week the span touches gets its row, each counting only the part of it inside the span.
+    The post-change check reads a change's frozen reference this way (PRD-263 US-056).
+    ValueError when ``end`` is not after ``start``."""
+    start, end = _naive_utc(start), _naive_utc(end)
+    if end <= start:
+        raise ValueError(f"a span must end after it starts, got {start} to {end}")
+    first, last = start.date(), (end - timedelta(microseconds=1)).date()
+    monday = first - timedelta(days=first.weekday())
+    weeks = tuple(iso_week_label(monday + timedelta(weeks=i))
+                  for i in range((last - monday).days // DAYS_PER_WEEK + 1))
+    return Window(cur_week=weeks[-1], ref_weeks=weeks[:-1], start=start, end=end)
 
 
 def _week_of(week_start: Any) -> str:
@@ -549,16 +572,11 @@ def _agent_rows(roster: List[Dict[str, Any]], window: Window,
     return tuple(rows)
 
 
-def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
-              *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
-    """Read one workspace's raw per-agent counts for ``cur_week`` and the weeks before it.
-
-    The synchronous core (tests call it on a real session); async callers use
-    :func:`read`. Every statement is bound to ``workspace_id``. A database error is
-    logged and raised, never turned into zeros.
-    """
+def read_window(db: Session, workspace_id: Union[UUID, str], window: Window) -> HarnessMetrics:
+    """Read one workspace's raw per-agent counts for every week of ``window``. Every
+    statement is bound to ``workspace_id``. A database error is logged and raised, never
+    turned into zeros."""
     workspace = str(UUID(str(workspace_id)))
-    window = build_window(cur_week, ref_weeks)
     try:
         roster = _roster(db, workspace)
         if not roster:
@@ -574,6 +592,16 @@ def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
     logger.info("[HARNESS] metrics read: workspace %s, week %s, %d agents x %d weeks, %d tool rows",
                 workspace, window.cur_week, len(roster), len(window.weeks), len(tools))
     return HarnessMetrics(workspace_id=workspace, window=window, agent_rows=rows, tool_rows=tools)
+
+
+def read_sync(db: Session, workspace_id: Union[UUID, str], cur_week: str,
+              *, ref_weeks: int = REF_WEEKS) -> HarnessMetrics:
+    """COLLECT's read: one workspace's raw per-agent counts for ``cur_week`` and the
+    ``ref_weeks`` weeks before it.
+
+    The synchronous core (tests call it on a real session); async callers use :func:`read`.
+    """
+    return read_window(db, workspace_id, build_window(cur_week, ref_weeks))
 
 
 async def read(db: Session, workspace_id: Union[UUID, str], cur_week: str,
@@ -597,4 +625,6 @@ __all__ = [
     "iso_week_label",
     "read",
     "read_sync",
+    "read_window",
+    "span_window",
 ]

@@ -204,8 +204,10 @@ async def _apply_as_auto(
     db: Session, workspace_id: UUID, row: "HarnessTaskLedger", current: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Run the change kind's inner action as the workspace's Auto, resolved here and
-    never from the caller's ``_agent_id``, and record ``applied`` or ``failed``."""
-    from services import harness_changes, harness_grants
+    never from the caller's ``_agent_id``, and record ``applied`` or ``failed``. An applied
+    change keeps its frozen reference for the post-change check (PRD-263 US-056); an applied
+    rollback moves the change it undoes to ``rolled_back``."""
+    from services import harness_changes, harness_grants, harness_post_change
 
     auto = harness_grants.resolve_auto_agent(db, workspace_id)
     if auto is None:
@@ -217,11 +219,15 @@ async def _apply_as_auto(
     result = await _run_inner(db, workspace_id, call, auto["id"])
     if result.get("success") is not True:
         return _failed(db, row, str(result.get("error") or harness_grants.NO_OUTCOME)[:ERROR_CHARS])
-    if not harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING,
-                               applied_at=datetime.now(timezone.utc), value_at_apply=current):
+    applied_at = datetime.now(timezone.utc)
+    ref_start, ref_end = harness_post_change.frozen_reference(applied_at)
+    if not harness_grants.move(db, row, LEDGER_APPLIED, from_state=LEDGER_APPLYING, applied_at=applied_at,
+                               value_at_apply=current, frozen_ref_start=ref_start, frozen_ref_end=ref_end):
         logger.error("[HARNESS] Change %s in %s ran, but ledger row %s was no longer applying",
                      row.rx_id, workspace_id, row.id)
         return {"success": False, "error": APPLY_UNRECORDED}
+    if row.kind == harness_changes.ROLLBACK:
+        harness_post_change.close_rolled_back(db, row)
     return {
         "success": True,
         "rx_id": row.rx_id,
