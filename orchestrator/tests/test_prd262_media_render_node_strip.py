@@ -4,8 +4,10 @@ The node-stripped stage strips the official image's binary (about 20 MB of .symt
 .strtab and .debug sections; .dynsym stays, so native addons still resolve Node-API).
 Its text is the worker's, byte for byte: the same RUN on the same base makes the
 same layer, and the runtime copies the binary as the first layer on the shared
-python:3.12-slim base, so a host with both images keeps one node binary
-(scripts/ci/image_layer_digest.py compares the two). The in-image suite proves the
+python:3.12-slim base, so a host with both images keeps one node binary. CI builds
+the two images in different workflows, so this suite proves the shared text; the
+digests were compared on a local build of both (scripts/ci/image_layer_digest.py
+MEDIA WORKER --same /, 20 Oct 2026). The in-image suite proves the
 binary is stripped and sharp's addon loads (services/media-render/tests/test_image_node.py).
 
 Pure file reads: no Docker, no network.
