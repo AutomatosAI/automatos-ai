@@ -61,23 +61,41 @@ const PACKAGE_ID = '44444444-4444-4444-8444-444444444444'
 // api/marketplace_themes_submit.py SUBMIT_REFUSED: the headline of a package-check refusal.
 const SUBMIT_REFUSED = "This theme can't be submitted."
 
-const SCAN_REPORT = {
-  schema: 'automatos-theme-scan/v1',
-  verdict: 'review_required',
-  checks: {
-    sizes: { status: 'pass', packageBytes: 20480, codeBytes: 10240, entryBytes: 2048 },
-    cssScope: { status: 'pass', path: 'dist/theme.css' },
-    automated: { status: 'not_run', reason: 'LLM stage did not run' },
-  },
+// sdk_uses.py UNKNOWN_NAMES and review_stage.py STALE_CLONES, as the server words them.
+const UNKNOWN_NAMES = "The theme imports names this host's SDK doesn't export, so its code can't load: useSecret."
+const STALE_CLONES =
+  '1 cloned page(s) copied a core file this host has changed since, so the clone may miss fixes and features the core page has now.'
+const USES_PASS = { level: 'pass', status: 'checked', problems: [], unknownNames: [], usedAreas: ['chat'], wideImport: false }
+const USES_ERROR = { ...USES_PASS, level: 'error', problems: [UNKNOWN_NAMES], unknownNames: ['useSecret'] }
+
+/**
+ * review_stage.member_view of a run_review_stage report (schema v2): the reader checks keep
+ * scan.py's `status` beside their `level`, `uses` says only `checked`, `clonedFrom` has no
+ * status, and the LLM check and the level counts stay with the reviewer.
+ */
+function memberReport(verdict: string, uses: Record<string, unknown>) {
+  return {
+    schema: 'automatos-theme-scan/v2',
+    stage: 'C-02a',
+    verdict,
+    checks: {
+      sizes: { status: 'pass', level: 'pass', packageBytes: 20480, codeBytes: 10240, entryBytes: 2048 },
+      cssScope: { status: 'pass', level: 'pass', path: 'dist/theme.css' },
+      looks: { status: 'pass', level: 'pass', presets: ['default'] },
+      contrast: { status: 'not_run', level: 'not_measured', reason: 'Not measured: no colour pairs.', presets: [] },
+      uses,
+      clonedFrom: { level: 'warning', clones: ['/chat'], stale: ['/chat'], reason: STALE_CLONES },
+    },
+  }
 }
 
 function submission(overrides: { scanVerdict?: string | null; duplicate?: boolean } = {}) {
+  const scanVerdict = overrides.scanVerdict === undefined ? 'review_required' : overrides.scanVerdict
   return {
     package: {
       id: PACKAGE_ID, themeId: 'acme/hello', version: '1.0.0', name: 'Hello theme', digest: 'b'.repeat(64),
-      ownerType: 'marketplace', status: 'pending', reviewed: false,
-      scanVerdict: overrides.scanVerdict === undefined ? 'review_required' : overrides.scanVerdict,
-      scanReport: SCAN_REPORT,
+      ownerType: 'marketplace', status: 'pending', reviewed: false, scanVerdict,
+      scanReport: memberReport(scanVerdict ?? 'not_run', scanVerdict === 'blocked' ? USES_ERROR : USES_PASS),
     },
     duplicate: overrides.duplicate ?? false,
   }
@@ -137,7 +155,14 @@ describe('Publish theme form', () => {
     expect(within(result).getByText('Hello theme')).toBeInTheDocument()
     expect(within(result).getByText(PENDING_REVIEW)).toBeInTheDocument()
     expect(within(result).getByText(/Verdict:/).textContent).toContain(SUBMISSION_VERDICTS.review_required)
-    expect(within(result).getByTestId('theme-scan-report')).toBeInTheDocument()
+    // The v2 report is read by its levels: the stale clone is a Warning with its reason, never "unknown".
+    const clone = within(result).getByTestId('theme-check-clonedFrom')
+    expect(within(clone).getByText('Warning')).toHaveAttribute('data-level', 'warning')
+    expect(within(clone).getByText(STALE_CLONES)).toBeInTheDocument()
+    expect(within(within(result).getByTestId('theme-check-uses')).getByText('Pass')).toBeInTheDocument()
+    expect(within(within(result).getByTestId('theme-check-contrast')).getByText('Not measured')).toBeInTheDocument()
+    expect(within(result).queryByText('unknown')).not.toBeInTheDocument()
+    expect(within(result).queryByText('checked')).not.toBeInTheDocument()
     expect(within(result).queryByTestId('publish-blocked')).not.toBeInTheDocument()
     expect(within(result).queryByText(new RegExp(DUPLICATE_NOTE))).not.toBeInTheDocument()
   })
@@ -151,6 +176,11 @@ describe('Publish theme form', () => {
     const result = await screen.findByTestId('publish-result')
     expect(within(result).getByText(new RegExp(DUPLICATE_NOTE))).toBeInTheDocument()
     expect(within(result).getByTestId('publish-blocked')).toHaveTextContent(BLOCKED_NOTE)
+    // Which check blocked it, and why: the `uses` error with the server's problem sentence.
+    const uses = within(result).getByTestId('theme-check-uses')
+    expect(within(uses).getByText('Error')).toHaveAttribute('data-level', 'error')
+    expect(within(uses).getByText(UNKNOWN_NAMES)).toBeInTheDocument()
+    expect(within(result).getByText(/Verdict:/).textContent).toContain(SUBMISSION_VERDICTS.blocked)
   })
 
   it('lists every package-check error of a 400 under its part of the package, with path and code', async () => {

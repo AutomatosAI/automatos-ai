@@ -3,6 +3,9 @@
  * level (Error, Warning, Pass, Not measured), the server's reason and what it found. The LLM check
  * that did not read all of the code says "LLM stage did not run" (`review_stage.py`), never Pass.
  *
+ * Also the author's view of a Marketplace submission (C-01b's Publish theme result): the same v2
+ * report through `review_stage.member_view`, which leaves the LLM check out.
+ *
  * Everything here is server data shown as text (React escapes it); a finding's evidence is code
  * from the submitted package and is shown in a <code> element, never run or linked.
  */
@@ -89,14 +92,21 @@ function CheckRow({ check }: { check: ReportCheck }) {
   )
 }
 
-export function ScanChecks({ report, verdict }: { report: unknown; verdict: string | null }) {
+interface ScanChecksProps {
+  readonly report: unknown
+  readonly verdict: string | null
+  /** The verdict's words; the Publish theme result (C-01b) passes the author's. */
+  readonly verdictLabels?: Readonly<Record<string, string>>
+}
+
+export function ScanChecks({ report, verdict, verdictLabels = VERDICT_LABELS }: ScanChecksProps) {
   const checks = reportChecksOf(report)
   return (
     <section aria-label="Scan report" className="space-y-2" data-testid="theme-review-scan">
       <p className="text-sm font-medium text-foreground">
         Scan report
         <span className="ml-2 text-xs font-normal text-muted-foreground" data-testid="theme-review-verdict">
-          Verdict: {labelOf(VERDICT_LABELS, verdict)}
+          Verdict: {labelOf(verdictLabels, verdict)}
         </span>
       </p>
       {checks.length === 0 ? (

@@ -4,11 +4,15 @@
  * The answer of `POST /api/marketplace/themes/submit` (`submission_item`): the package, stored
  * `pending` and not reviewed, with the automated stage's verdict and its plain checks
  * (`review_stage.member_view`; the LLM check's findings stay with the reviewer). Nothing is listed
- * yet: a person reviews every version (C-03a, D3), and a `blocked` verdict can't be approved. The
- * checks are shown by A-07d's scan report, reused, with the submission's verdict words.
+ * yet: a person reviews every version (C-03a, D3), and a `blocked` verdict can't be approved.
+ *
+ * The report is schema `automatos-theme-scan/v2`: each check's result is its `level` (the `uses`
+ * check's `status` is only `checked`, `clonedFrom` has none) and what it found is in `problems`
+ * and `reason`. So the checks are shown by C-03b's v2 reader (`ScanChecks`), reused with the
+ * submission's verdict words, not by A-07d's v1 private-upload `ScanReport`.
  */
 import { Badge } from '@/components/ui/badge'
-import { ScanReport } from '@/components/settings/themes/scan-report'
+import { ScanChecks } from '@/components/admin/themes/scan-checks'
 import type { ThemeSubmission } from '@/lib/api-client'
 
 export const PENDING_REVIEW = 'Pending review'
@@ -26,14 +30,7 @@ export const SUBMISSION_VERDICTS: Readonly<Record<string, string>> = {
 }
 
 const VERDICT_BLOCKED = 'blocked'
-const VERDICT_NOT_RUN = 'not_run'
 const STATUS_PENDING = 'pending'
-
-/** The verdict in words; an unknown verdict as the server wrote it. */
-export function submissionVerdictLabel(verdict: string | null): string {
-  const key = verdict ?? VERDICT_NOT_RUN
-  return SUBMISSION_VERDICTS[key] ?? key
-}
 
 export function PublishResult({ submission }: { submission: ThemeSubmission }) {
   const pkg = submission.package
@@ -54,7 +51,7 @@ export function PublishResult({ submission }: { submission: ThemeSubmission }) {
           {BLOCKED_NOTE}
         </p>
       )}
-      <ScanReport report={pkg.scanReport} verdict={submissionVerdictLabel(pkg.scanVerdict)} />
+      <ScanChecks report={pkg.scanReport} verdict={pkg.scanVerdict} verdictLabels={SUBMISSION_VERDICTS} />
     </div>
   )
 }
