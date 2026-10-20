@@ -92,6 +92,7 @@ export function reportOf(overrides: Partial<ThemeReviewReport> = {}): ThemeRevie
     history: [{ event: 'submitted', from: null, to: 'pending', by: 7, reason: null, at: '2026-10-19T10:00:00+00:00' }],
     signatureRequest: null,
     signatureVerified: false,
+    keyId: null,
     ...overrides,
   }
 }

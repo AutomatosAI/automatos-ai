@@ -1031,8 +1031,27 @@ export interface ThemeLooks {
 }
 
 // ===== PRD-261 W-C2: the answers of api/marketplace_themes*.py and api/admin_themes.py (plan §2.2) =====
-/** services/themes/listings.py _publisher: the id's publisher; `official` for a reserved one. */
+/**
+ * services/themes/listings.py _publisher: the id's publisher. `official` only for a reserved publisher
+ * whose shown version carries a signature an active Automatos key verifies (QB-21, C-05b); a reserved
+ * name alone is never Official.
+ */
 export interface ThemeListingPublisher { name: string; official: boolean }
+
+/**
+ * signature_verify.py Verdict states: `verified` (an active Automatos signing key verifies it),
+ * `invalid` (no active key does: no key at all, or only a retired or revoked one; or the version's
+ * files don't add up to its digest; on a listing, also when the keys file did not load) and
+ * `unsigned` (no signature stored).
+ */
+export type ThemeSignatureState = 'verified' | 'invalid' | 'unsigned'
+
+/** signature_verify.py Verdict.view: a version's signature check, as the listings carry it (C-05b). */
+export interface ThemeSignatureVerdict {
+  state: ThemeSignatureState
+  /** The active key that verified it; for `invalid`, the retired or revoked key that does, else null; null when unsigned. */
+  keyId: string | null
+}
 
 /** listings.py installed_state: this workspace's active install of the listed theme. */
 export interface ThemeListingInstall {
@@ -1048,6 +1067,8 @@ export interface ThemeListing {
   /** The theme id with its `/` written as `.` (`automatos/play` is `automatos.play`). */
   listingId: string; themeId: string; name: string | null; description: string | null
   publisher: ThemeListingPublisher; version: string; packageId: string
+  /** The shown version's signature check (listings.py listing_summary). */
+  signature: ThemeSignatureVerdict
   /** This host can run the version shown (the newest compatible one, else the newest). */
   compatible: boolean
   uses: string[]; pricing: string; cover: string | null
@@ -1060,7 +1081,10 @@ export interface ThemePresetPreviews { id: string; default: boolean; previews: {
 /** listings.py _version_entry: one approved version in the detail's versions map. */
 export interface ThemeListingVersion {
   packageId: string; engines: Record<string, string> | null; compatible: boolean
-  revoked: ThemeRevocationState | null; createdAt: string | null
+  revoked: ThemeRevocationState | null
+  /** This version's signature check. */
+  signature: ThemeSignatureVerdict
+  createdAt: string | null
 }
 
 /** GET /api/marketplace/themes/{listingId} (listings.py listing_detail). */
@@ -1133,8 +1157,10 @@ export interface ThemeReviewReport extends ThemeReviewPackage {
   manifest: Record<string, unknown> | null; scanReport: Record<string, unknown> | null
   reportNote: ThemeReportNote | null; approval: ThemeApprovalState
   history: ThemeReviewEvent[]; signatureRequest: ThemeSignatureRequest | null
-  /** Always false until C-05 verifies signatures. */
+  /** An active Automatos signing key verifies the stored signature (signature_verify.package_verdict, C-05b). */
   signatureVerified: boolean
+  /** The key that check names: the active one that verifies, or a retired or revoked one that does; else null. */
+  keyId: string | null
 }
 
 /** POST …/report-note: the version with the note just stored. */
@@ -1151,9 +1177,18 @@ export interface ThemeRejectionResult extends ThemeReviewPackage { reason: strin
 /** POST …/deactivate: the version taken down; its digest has a `disable` revocation. */
 export interface ThemeDeactivationResult extends ThemeReviewPackage { reason: string; revocation: 'disable' }
 
-/** POST …/signature (signing.py store_signature): stored, not verified (C-05). */
+/**
+ * POST …/signature (signing.py store_signature): stored only once an active Automatos signing key
+ * verifies it (C-05b); a signature no active key verifies is a 400 and nothing is stored.
+ */
 export interface ThemeSignatureResult extends ThemeReviewPackage {
-  signature: { requestId: string; signature: string; algorithm: string; verified: boolean }
+  signature: {
+    requestId: string; signature: string; algorithm: string
+    /** Always true in a stored answer (the 400 above otherwise). */
+    verified: boolean
+    /** The active key that verified it, as the `signed` review event names it. */
+    keyId: string
+  }
 }
 
 /** A theme id as path segments: `acme/hello` stays two segments, each one encoded. */
