@@ -13,8 +13,10 @@ installed, so a 200 is an unauthenticated one. Pins (plan §2.2.7, §2.6 C-05g):
 * ``Cache-Control: public, max-age=300``, a weak ETag that ignores ``generatedAt``, ``If-None-Match`` → 304;
 * ``revokedKeys`` are the keys file's revoked keys; a keys file that doesn't load is a 503;
 * ``parse_feed`` round-trips ``build_feed`` and refuses the whole feed for a wrong schema, oversize,
-  more than 10,000 rows, a bad digest, id or range, a reason over 2000 characters; an unknown level
-  parses as ``disable``.
+  more than 10,000 rows, a bad digest, id or range, a reason that isn't one line of plain text (over
+  2000 characters, empty, a line break, a bidi override or another control character); an unknown
+  level parses as ``disable``; a hosted reason with line breaks or a bidi override goes out on one
+  line, so its row stays in the feed.
 """
 from __future__ import annotations
 
@@ -221,6 +223,20 @@ def test_revoked_keys_come_from_the_keys_file(api, monkeypatch, tmp_path):
     assert broken.json()["detail"] == feed_api.FEED_DOWN
 
 
+def test_a_hosted_reason_goes_out_on_one_line_and_its_row_stays_in_the_feed(api):
+    # review.deactivate stores a reason with its line breaks; the parser refuses one with them.
+    package = _package(api.db)
+    row = _revoke(api.db, digest=package.digest, reason="Reported twice:\n  sends chat off-site\u202e\r\nfixed in 1.1")
+    blank = _revoke(api.db, digest=_package(api.db, theme_id="acme/other").digest, reason="\u202e\u202c")
+    wire = {item["id"]: item["reason"] for item in api.client.get(FEED).json()["revocations"]}
+    assert wire == {
+        str(row.id): "Reported twice: sends chat off-site fixed in 1.1",
+        str(blank.id): revocation_feed.FEED_REASON_FALLBACK,
+    }
+    parsed = {str(item.id): item.reason for item in parse_feed(feed_bytes(build_feed(api.db))).revocations}
+    assert parsed == wire
+
+
 def test_an_unreadable_hosted_range_goes_out_for_every_version_and_a_long_reason_is_cut(api):
     _package(api.db)
     row = _revoke(api.db, theme_id="acme/ink", version_range="~1.0", reason="r" * 2500)
@@ -279,6 +295,11 @@ BAD_ROWS = {
     "reason over 2000": {"reason": "x" * 2001},
     "reason not text": {"reason": None},
     "reason with NUL": {"reason": "bad\x00"},
+    "reason empty": {"reason": ""},
+    "reason of spaces": {"reason": "   "},
+    "reason with a line break": {"reason": "two\nlines"},
+    "reason with a bidi override": {"reason": "safe \u202e txt.exe"},
+    "reason with a bell": {"reason": "ring\x07"},
     "id not a uuid": {"id": "not-a-uuid"},
     "id in capitals": {"id": UPPER_UUID},
     "no id": {"id": DROP},
