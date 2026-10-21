@@ -913,7 +913,17 @@ async def verify_training_example(
     db: Session = Depends(get_db)
 ):
     """Mark an example as verified (Golden SQL)."""
+    from core.models.database_knowledge import NL2SQLTrainingExample
     from modules.nl2sql.training.example_store import SQLExampleStore
+
+    example = db.query(NL2SQLTrainingExample).filter(
+        NL2SQLTrainingExample.id == example_id,
+        NL2SQLTrainingExample.workspace_id == ctx.workspace_id,
+        NL2SQLTrainingExample.database_source_id == source_id
+    ).first()
+
+    if not example:
+        raise HTTPException(status_code=404, detail="Training example not found")
 
     store = SQLExampleStore(db_session=db)
     await store.mark_verified(example_id, str(ctx.workspace_id))
@@ -929,7 +939,17 @@ async def delete_training_example(
     db: Session = Depends(get_db)
 ):
     """Delete a training example."""
+    from core.models.database_knowledge import NL2SQLTrainingExample
     from modules.nl2sql.training.example_store import SQLExampleStore
+
+    example = db.query(NL2SQLTrainingExample).filter(
+        NL2SQLTrainingExample.id == example_id,
+        NL2SQLTrainingExample.workspace_id == ctx.workspace_id,
+        NL2SQLTrainingExample.database_source_id == source_id
+    ).first()
+
+    if not example:
+        raise HTTPException(status_code=404, detail="Training example not found")
 
     store = SQLExampleStore(db_session=db)
     await store.delete_example(example_id, str(ctx.workspace_id))
