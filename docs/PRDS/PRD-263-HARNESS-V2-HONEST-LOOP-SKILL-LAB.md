@@ -81,7 +81,8 @@ P1: PR-1A (US-008), PR-1B (US-009–US-012), PR-1C (US-013), PR-1D (US-014a, US-
 Gerard: "why would we hard code caps and decide for everyone?" Every probe run, calibration, iteration-0 probe and Lab launch requires a spend limit the operator supplies at launch (`--max-spend`, no default) and the operator's cost factor (`--cost-factor`, no default; metered spend = booked spend × that factor). It refuses to start without either, and stops before metered spend would pass the limit. The OpenRouter balance floor and the Max allowance threshold follow the same rule: operator-supplied, no default, refuse when unset. Cost figures in this PRD are planning estimates only (§13). The org loop makes no model call of its own. This decision takes the design's open question 8; the design's proposed $55, $66 and $120 caps are dropped. *(US-033, US-038, US-041, US-044, US-045, US-069, US-073, US-074, US-078, US-078a, US-081)*
 
 **D5. The eval rule (known as "D7") is amended, scoped to this PRD: a named build session may edit `replay.py` and `phase.sh`, and the Lab Gerard launches may run `replay.py`. Improver sessions never read the eval folder.**
-Gerard has not answered this one. The default is applied and the decision stays open. Every story that depends on it is tagged **Needs D7** and is held until US-028 merges. P1, P3, `harvest.py`, the night preflight (US-041) and the production skill signal do not depend on it.
+Gerard has not answered this one. The default is applied and the decision stays open. Every story that depends on it is tagged **Needs D7** and is held until US-028 merges.
+**Taken, 20 Oct 2026:** US-028 merged as written (#1204), so the default and its extension both stand. Gerard named the build session "HARNESS" for LOCAL-2 to LOCAL-5 (it edits, and runs fixture mode only; Gerard launches every pass that spends). P1, P3, `harvest.py`, the night preflight (US-041) and the production skill signal do not depend on it.
 As worded, the default covers `replay.py` and `phase.sh` edits and the Lab running `replay.py`. The other eval-folder steps are a proposed extension in US-028: edits to `compare-arms.py`, `rescore.py` and `arm-report.py`; creating `make_split.py` and `split.json`; the build session running the tooling in fixture mode; the Lab running `phase.sh --reset-only`, `compare-arms.py --gate` and `arm-report.py` and reading `split.json`, aggregate run outputs and (for its gold scan) the row file; set v2 authoring; and the rescore and calibration runs. Until Gerard accepts that extension, each of those steps is his operator step. *(US-028 and every Needs D7 story; §11-Q1)*
 
 **D6. The Skill Lab is an operator tool over the global skill for now. Whether it later becomes a per-workspace product feature (each owner improves their own Auto on their own budget and limits) is open, and is revisited after WebSummit.** *(US-073–US-083; §11-Q2)*
@@ -195,7 +196,7 @@ Each P1 and P3 PR is one story group, aimed at AGENTS.md's ~400 changed lines ex
   | Q25 non-Haiku check | US-079 | default |
   | Q27 US-020 | US-020 | default: keep |
   | Q28 legacy mode values | US-016 | default: read-time mapping |
-  | Q29 unpriced usage | US-035 | default: refuse until priced |
+  | Q29 unpriced usage | US-035 | answered 20 Oct: (c), embeddings allowed and reported |
   | Q30 blocked evidence card | US-053, US-054 | default: reconcile to failed |
   | Q31 US-062 timing | US-062, US-073 | default: PR-3I merges early in P3; P5 waits for PR-3I only |
 
@@ -611,6 +612,7 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 **Acceptance criteria:**
 - [ ] Recorded from the code at `697ca7d6e` (a build session re-verifies by grep and records any drift): `main.py:483` starts the unified scheduler if any of `HEARTBEAT_ENABLED`, `RECIPE_SCHEDULER_ENABLED` or `COORDINATOR_ENABLED` is true. Inside it run TaskReconciler stall retries (`:506-513`, no flag), the watch ticker (`WATCHER_ENABLED`, `:517-523`, `config.py:777`), memory consolidation, decay and promotion (`MEMORY_JOBS_ENABLED`, `:528`), field-memory promotion (`FIELD_PROMOTION_ENABLED`, `:539`), the nightly EdgeBuilder (`:547-550`, regardless of flag), the Composio sync, agent-scheduled tasks (`:566`, no flag), the mission coordinator (`:588`) and HARNESS (`:597`). The quiet stack is `HEARTBEAT_ENABLED=false`, `RECIPE_SCHEDULER_ENABLED=false` and `COORDINATOR_ENABLED=false` together; then `main.py:483` skips the whole scheduler.
 - [ ] Recorded: `COMPLEXITY_CACHE_TTL_HOURS=0` does NOT bypass the AutoBrain complexity cache. The store maps 0 to 24 h (`consumers/chatbot/auto.py:1405`), the lookup has no TTL check (`:1366-1370`), and keys are `complexity:{workspace_id}:{sha256(msg)[:16]}` (`:1410-1412`), which `phase.sh` never clears, so identical eval prompts reuse pass 1's verdict in every later pass and arm.
+- [x] Re-verified by grep on main at `630fc1c85` (20 Oct 2026, build session HARNESS). The finding holds; only the lines drifted. The scheduler gate is now `main.py:398`. The nightly EdgeBuilder still starts whatever its flag says (`:462`), and HARNESS starts at `:514`. In `consumers/chatbot/auto.py` the store still maps 0 to 24 h (`:1405`), the lookup has no TTL check (`:1356`), and the key is built at `:1412`.
 - [ ] Default fix, local and no PR: every `phase.sh --reset-only` deletes the Redis keys matching `complexity:<c1 workspace id>:*` and prints the count (US-038). Code option, only if Gerard picks it (§11-Q22): `_cache_lookup` and `_cache_store` skip the cache when the setting is 0, with `test_prd263_local_quiet_mode.py`.
 - [ ] US-044 and US-074 check on the running containers that the three switches are all false and that the boot log shows no scheduler start lines.
 
@@ -736,7 +738,13 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 **Acceptance criteria:**
 - [ ] Every run directory since 9 Oct that holds `rows.jsonl` (11 at 18 Oct) is rescored; directories without `rows.jsonl` (3 aborted runs on 9 Oct) are listed as not rescorable. A local table lists run, date, old pass count, new pass count, `claim_backed` delta, ungraded count and whether the run saved receipts.
 - [ ] Only aggregate counts are copied into this PRD (§10); no row contents.
-- [ ] No model calls are made ($0).
+- [x] No model calls are made ($0).
+- [x] **Rescored 20 Oct 2026 (build session HARNESS).**
+  - 11 runs were rescored. The 3 aborted runs of 9 Oct are not rescorable.
+  - 0 rows are ungraded.
+  - c1's `llm_usage` row count was 237,436 before and after, so the rescore cost $0.
+  - Passed rows per run, old → new: 40→50, 37→43, 44→46, 50→50, 48→47, 51→48, 52→50, 61→61, 60→59, 59→58 and 60→60.
+  - `claim_backed` changes, run by run: +3, −1, 0, −1, −3, −6, −3, 0, −1, 0, +1.
 
 **LOCAL-6: preflight and night signal** (US-041, US-042; no D7)
 
@@ -775,7 +783,12 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 - [ ] Rows from F385–F449 (nights 12–17), plus F382–F383 (night 11) if they carry a customer ask, are authored by Gerard or by a row-author session separate from improver sessions (§11-Q4: about 30 rows). Code-scanning and infrastructure findings (for example F384) are excluded. Each row passes the row-validity check (US-034).
 - [ ] `split.json` groups by `f_id` and stratifies by category at about 60/40. A fixed list of held-out-only categories, recorded in `make_split.py` (local), is never placed in train. Held-out has at least 35 rows. The seed and mapping stay local, and the split sha goes into the fingerprint.
 - [ ] The rotation rule (held-out retires into train after 5 gate decisions and is replaced by rows chosen by the local split tooling) is recorded with the split tooling.
-- [ ] Nothing from auto-eval is committed to automatos-ai or automatos-skills (`git status` of both).
+- [x] Nothing from auto-eval is committed to automatos-ai or automatos-skills (`git status` of both).
+- [x] **Done 20 Oct 2026.**
+  - The build session HARNESS wrote 32 rows, at Gerard's direction, from the findings F383–F449. It left out infrastructure, CodeQL, pricing and agent-run-only findings, and any ask that would delete real c1 data.
+  - Every row passes the row-validity check against the live action registry.
+  - Two existing rows, F351-a and F351-b, lost a forbidden pattern that named a removed action; nothing else in them changed.
+  - `split.json` is sealed: 97 rows, 51 train and 46 held-out. It is grouped by finding, and held-out-only categories are never in train. The seed stays local.
 
 #### US-044: Calibration: six passes on one pinned build (Gerard's run)
 **Description:** As Gerard, I want reset passes on one pinned build, with and without the complexity-key flush, so I have the per-row flake table, the noise floor, the ATOM share, the late-write margin and the real cost factor before any gate is trusted.
@@ -1537,7 +1550,7 @@ Taken on 18 Oct: D1–D4 answer the design's open questions 6 (auto-apply delete
 26. **PRD-212's HARNESS stories (new).** PRD-212 (draft, 24 Jul) plans a HARNESS rebuild in S1–S3: baselines to the DB, a GEPA/DSPy proposer, an honest tile. *Recommendation: mark PRD-212 S1–S3 superseded by PRD-263 (`harness_runs`, statistics instead of an LLM proposer, the honest tile); its notifications and observability stories are unaffected.*
 27. **US-020's pagination (new).** It paginates the `/approve` lookup that PR-3A deletes a week or so later; US-016 already deleted the card-to-Done reader. *Recommendation: keep it (about 20 lines); it covers any workspace where the legacy flag is on until P3. If PR-3A were ever to merge before PR-1F, US-020 has nothing left to paginate and is recorded as not built.*
 28. **Legacy mode values (US-001, US-016; new).** Stored `full_auto`/`manual` and `enabled: false`/`disabled: true` are mapped at read time in one function (`harness_mode.py`), which is a compatibility branch AGENTS.md:44 discourages. Alternatively, convert stored values once under the US-001 issue (an existing-data change: a script or migration over `workspaces.settings`), then drop the mapping. Separately, `manual` (all changes need approval) maps to `report_only`, not `propose`. *Recommendation: the read-time mapping for beta, recorded on US-001; `manual` → `report_only`, because `propose` is an opt-in under the new meaning.*
-29. **Unpriced usage rows (US-035; new).** Embedding rows are booked at $0 when no price is known (`core/llm/usage_tracker.py:344-347`; the 15 Oct measurement found embeddings at $0), so the refuse-on-unpriced rule stops every paid pass until they are priced. (a) Add the embedding model's price where `resolve_price` reads prices (a small automatos-ai PR that also corrects booked night figures); (b) the operator passes `--price <model>=<usd per 1M tokens>` at launch, no default; (c) exempt embeddings and report their tokens only (the spend stop then undercounts). *Recommendation: (a), with (b) as the bridge until it merges.*
+29. **Unpriced usage rows (US-035; new).** Embedding rows are booked at $0 when no price is known (`core/llm/usage_tracker.py:344-347`; the 15 Oct measurement found embeddings at $0), so the refuse-on-unpriced rule stops every paid pass until they are priced. (a) Add the embedding model's price where `resolve_price` reads prices (a small automatos-ai PR that also corrects booked night figures); (b) the operator passes `--price <model>=<usd per 1M tokens>` at launch, no default; (c) exempt embeddings and report their tokens only (the spend stop then undercounts). *Recommendation: (a), with (b) as the bridge until it merges.* **Answered, Gerard, 20 Oct 2026: (c).** Unpriced embedding rows are allowed and reported (each pass's meter counts their calls and tokens); every other unpriced usage still refuses.
 30. **Evidence card dragged to Blocked (US-053, US-054; new).** The approval API re-queues a Blocked board task linked to a grant instead of running the call (`api/approval_grants.py:625-660`, `:735-748`). (a) Accept it: the card goes to `assigned` with no agent, so nothing dispatches it; nothing changes; the ledger ends `failed` with the reason; the next tick raises a fresh card if the evidence still holds. (b) A maintainer issue to make `_resume_tool_call` skip the re-queue for `platform_harness_apply` (a guardrail edit). *Recommendation: (a).*
 31. **US-062's PR and the P5 start (US-062, US-073; new).** Under D3, US-062 is its own PR, PR-3I, which depends on no other PRD-263 PR. P5 is planned from 31 Oct, and US-073 requires US-062 merged before any Lab spend. When should PR-3I merge? *Recommendation: early in P3, ahead of the `harness_service.py` chain, so P5 waits only for PR-3I and can start on 31 Oct; if PR-3I slips past 31 Oct, P5 starts later and has fewer days before the 6 Nov freeze (§13).*
 

@@ -12,6 +12,10 @@
  * PRD-261 A-19c: the prepaint section carries the tone rule's cases, and the ones with `messages`
  * pin the exact sentences, which the server gives too; the tone rule's names and the boot's
  * preset caps equal contract.py's.
+ *
+ * PRD-261 M-01 (host 1.1.0): the manifests section carries theme.json's mobile block, and the
+ * block's lists (the token list, the font roles, the mascot modes, the contrast pairs and their AA
+ * minimums, the lowest host) equal contract.py's MOBILE_* names.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -24,6 +28,10 @@ import {
 } from '../css-value'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
 import {
+  MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES, MOBILE_MIN_HOST,
+  MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES,
+} from '../mobile-manifest'
+import {
   HOST_OWNED_ROUTES, HTML_CLASS_OWNERS, KNOWN_SLOTS, MANIFEST_ERROR_CODES, PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS,
   RESERVED_HTML_CLASSES, THEME_BASES, THEME_HOST_VERSION, THEME_TONES, validateManifest,
 } from '../package-manifest'
@@ -35,6 +43,8 @@ const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
 // PB-3: the host and SDK version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
 const CONTRACT_VERSION = '1.1.0'
+// PB-32: the mobile block joined host 1.1.0, so a theme with one admits no older host (a later bump keeps this).
+const MOBILE_BLOCK_HOST = '1.1.0'
 
 interface CorpusCase {
   readonly name: string
@@ -247,6 +257,25 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESETS_MAX'))).toBe(BOOT_PRESETS_MAX)
     expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESET_MAX_BYTES'))).toBe(BOOT_PRESET_MAX_BYTES)
     expect([BOOT_PRESETS_MAX, BOOT_PRESET_MAX_BYTES]).toEqual([12, 4096])
+  })
+
+  it('has the same mobile block lists, AA minimums and lowest host (M-01, plan §2.2.11)', () => {
+    expect(strings('MOBILE_TOKEN_NAMES')).toEqual([...MOBILE_TOKEN_NAMES])
+    expect(strings('MOBILE_REQUIRED_TOKENS')).toEqual([...MOBILE_REQUIRED_TOKENS])
+    expect(strings('MOBILE_FONT_ROLES')).toEqual([...MOBILE_FONT_ROLES])
+    expect(strings('MOBILE_MASCOT_MODES')).toEqual([...MOBILE_MASCOT_MODES])
+    expect(strings('MOBILE_CONTRAST_PAIRS')).toEqual(MOBILE_CONTRAST_PAIRS.flat())
+    expect(Number(pythonValue(PYTHON.contract, 'MOBILE_AA_TEXT'))).toBe(MOBILE_AA_TEXT)
+    expect(Number(pythonValue(PYTHON.contract, 'MOBILE_AA_UI'))).toBe(MOBILE_AA_UI)
+    expect([MOBILE_AA_TEXT, MOBILE_AA_UI]).toEqual([4.5, 3])
+    expect(strings('MOBILE_MIN_HOST')).toEqual([MOBILE_MIN_HOST])
+    expect(MOBILE_MIN_HOST).toBe(MOBILE_BLOCK_HOST)
+  })
+
+  it('runs a mobile case of every verdict the block has (M-01)', () => {
+    const mobileCases = CORPUS.manifests.cases.filter((testCase) => testCase.name.startsWith('mobile'))
+    const codes = new Set(mobileCases.map((testCase) => testCase.code))
+    expect(codes).toEqual(new Set([null, 'BAD_MOBILE', 'UNKNOWN_FIELD']))
   })
 
   it('knows the same error codes as each Python validator', () => {

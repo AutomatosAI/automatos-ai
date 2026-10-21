@@ -75,7 +75,7 @@ If you're not sure where to start, just ask: "What can I do here?" or "Help me s
 MANAGER_DOCTRINE_BLOCK = """\
 **How I Manage — The Manager's Doctrine:**
 1. **Awareness.** I know the floor before acting — I ground answers in platform_board_summary, platform_list_missions, and platform_list_agents, not guesses.
-2. **Three lanes, chosen deliberately.** DELEGATE (a specialist answers here), ASSIGN (a named agent works off-thread on the board, supervised), or MISSION (a multi-agent project) — I say which lane and why in one line.
+2. **Three lanes, chosen deliberately.** RESPOND (I answer here myself), ASSIGN (a named agent works off-thread on the board, supervised), or MISSION (a multi-agent project) — I say which lane and why in one line.
 3. **Delegate, don't implement.** I own decomposition, dispatch, sign-off, and QA — not the grunt work my agents exist for.
 4. **Reuse before creating.** I check the roster and honour named routing first; I create an agent only when nothing fits, and say I checked. One capable owner beats a duplicate.
 5. **Dispatch as a contract.** Every handoff states OBJECTIVE, OUTPUT, TOOLS, and BOUNDARIES — referencing artifacts, not pasting them.
@@ -84,8 +84,16 @@ MANAGER_DOCTRINE_BLOCK = """\
 8. **Recurring work becomes a Playbook.** When an ask repeats, I propose a Playbook and a schedule.
 9. **Narrate.** Every assignment, escalation, and sign-off gets a one-line explanation. Visibility is the product."""
 
+# PRD-263 US-066: point 2 named a DELEGATE lane (a specialist answers the chat) until
+# 20 Oct 2026, after PRD-256 had removed that lane from the router (consumers/chatbot/
+# auto.py: respond, assign, mission). The block as it shipped is kept, so a row still
+# holding it is a shipped default the backfill lifts (_PERSONA_BACKFILL_LIFTS below).
+_RESPOND_LANE = "RESPOND (I answer here myself)"
+_PREVIOUS_DELEGATE_LANE = "DELEGATE (a specialist answers here)"
+_PREVIOUS_MANAGER_DOCTRINE_BLOCK = MANAGER_DOCTRINE_BLOCK.replace(_RESPOND_LANE, _PREVIOUS_DELEGATE_LANE)
 
-def compose_persona_with_doctrine(base_voice: str) -> str:
+
+def compose_persona_with_doctrine(base_voice: str, doctrine: str = MANAGER_DOCTRINE_BLOCK) -> str:
     """Compose a base personality voice with the always-on Manager's Doctrine.
 
     PRD-226 (P226-RVW-4): the SINGLE builder that attaches the doctrine to a base
@@ -96,9 +104,10 @@ def compose_persona_with_doctrine(base_voice: str) -> str:
     ``_KNOWN_SEED_PERSONA_HASHES`` — closing the collision where the doctrine-free
     'friendly' preset was byte-identical to ``_ALEMBIC_BACKFILL_PERSONA`` and so
     flip-flopped OUT of the persona on every settings save, then back in on the
-    next deploy's backfill.
+    next deploy's backfill. ``doctrine`` is the current block; only the backfill
+    passes the previous one, to recognise a row that still holds it.
     """
-    return f"{base_voice.strip()}\n\n{MANAGER_DOCTRINE_BLOCK}"
+    return f"{base_voice.strip()}\n\n{doctrine}"
 
 
 def _default_persona() -> str:
@@ -219,7 +228,6 @@ _PREVIOUS_FRIENDLY_FALLBACK = _FRIENDLY_FALLBACK.replace(_ACTION_LINE, _PREVIOUS
 _PERSONA_BACKFILL_LIFTS: dict[str, tuple[str, str]] = {
     _persona_hash(_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
     _persona_hash(_PREVIOUS_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
-    _persona_hash(compose_persona_with_doctrine(_PREVIOUS_FRIENDLY_FALLBACK)): (_default_persona(), "friendly"),
     _persona_hash(_ALEMBIC_BACKFILL_PERSONA): (_default_persona(), "friendly"),
     _CTO_SOUL_APR2026_SNAPSHOT_HASH: (_default_persona(), "friendly"),
     _persona_hash(_PERSONALITY_BASE_VOICES["professional"]): (
@@ -230,10 +238,23 @@ _PERSONA_BACKFILL_LIFTS: dict[str, tuple[str, str]] = {
         compose_persona_with_doctrine(_PERSONALITY_BASE_VOICES["technical"]),
         "technical",
     ),
+    # PRD-263 US-066: every shipped text that carries the previous (DELEGATE) block — the
+    # seeded default, its pre-F381 form, and each Settings preset — lifts to the same voice
+    # with the current block. The pre-F381 doctrine-carrying key moved here from above: a
+    # row holds it with the block it was written with, never the current one.
+    _persona_hash(compose_persona_with_doctrine(_FRIENDLY_FALLBACK, _PREVIOUS_MANAGER_DOCTRINE_BLOCK)): (
+        _default_persona(), "friendly"),
+    _persona_hash(compose_persona_with_doctrine(_PREVIOUS_FRIENDLY_FALLBACK, _PREVIOUS_MANAGER_DOCTRINE_BLOCK)): (
+        _default_persona(), "friendly"),
+    **{
+        _persona_hash(compose_persona_with_doctrine(voice, _PREVIOUS_MANAGER_DOCTRINE_BLOCK)): (
+            compose_persona_with_doctrine(voice), mode)
+        for mode, voice in _PERSONALITY_BASE_VOICES.items()
+    },
 }
 
-# The doctrine-FREE shipped defaults the backfill may replace — exactly the key
-# set of the lift table. Kept as a public name for callers/tests that assert
+# The shipped defaults the backfill may replace (doctrine-free, or carrying a
+# previous doctrine block) — exactly the key set of the lift table. Kept as a public name for callers/tests that assert
 # replace-set membership (a row on one of these is a shipped default, not a
 # customization).
 _KNOWN_SEED_PERSONA_HASHES = frozenset(_PERSONA_BACKFILL_LIFTS)

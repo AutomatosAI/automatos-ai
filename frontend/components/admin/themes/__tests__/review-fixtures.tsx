@@ -11,6 +11,9 @@ import type { ThemePendingVersion, ThemeReviewReport, ThemeSignatureRequest } fr
 export const PACKAGE_ID = '44444444-4444-4444-8444-444444444444'
 export const REQUEST_ID = '55555555-5555-4555-8555-555555555555'
 export const DIGEST = 'b'.repeat(64)
+/** signature_verify.py key_id_of: `ed25519:` and 16 hex. An active key, and a retired one. */
+export const KEY_ID = 'ed25519:0123456789abcdef'
+export const RETIRED_KEY_ID = 'ed25519:fedcba9876543210'
 
 // review_stage.py run_review_stage: schema v2, one check per level, and the LLM stage that had no key.
 export const SCAN_REPORT_V2 = {
@@ -92,6 +95,7 @@ export function reportOf(overrides: Partial<ThemeReviewReport> = {}): ThemeRevie
     history: [{ event: 'submitted', from: null, to: 'pending', by: 7, reason: null, at: '2026-10-19T10:00:00+00:00' }],
     signatureRequest: null,
     signatureVerified: false,
+    keyId: null,
     ...overrides,
   }
 }

@@ -49,8 +49,18 @@ function sizesDetail(check: Record<string, unknown>): string | null {
   return parts.length ? parts.map(([name, size]) => `${name} ${size}`).join(' · ') : null
 }
 
+/**
+ * services/themes/mobile_contrast.py SUBJECT_DEFAULTS: under `fromLooks` the contrast check measures the
+ * prepaint table's defaults first (id `boot/prepaint.json#defaults`); they are no preset, so not listed.
+ */
+const DEFAULTS_KIND = 'defaults'
+
+function isTableDefaults(preset: unknown): boolean {
+  return isRecord(preset) && preset.kind === DEFAULTS_KIND
+}
+
 function presetsDetail(check: Record<string, unknown>): string | null {
-  const presets = Array.isArray(check.presets) ? check.presets : []
+  const presets = Array.isArray(check.presets) ? check.presets.filter((preset) => !isTableDefaults(preset)) : []
   const names = presets.map((preset) => (isRecord(preset) ? preset.id : preset)).filter((id) => typeof id === 'string')
   return names.length ? `Presets: ${names.join(', ')}` : null
 }

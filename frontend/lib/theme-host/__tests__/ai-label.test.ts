@@ -7,6 +7,9 @@
  * through the lazy slot builtin Play registers for /chat, lib/theme-host/builtin/play-slots.tsx),
  * and with an installed fixture theme that registers /chat through the theme host (ThemeSlot draws
  * its page, the host's chat screen inside the theme's own markup and stylesheet, in MainLayout).
+ * PRD-261 A-19e1: and under the neutral fixture theme of A-19b (fixture-theme-entry.ts) as the active
+ * installed theme, its /chat page a theme's own composer inside the SDK's cards.AiLabelFence: the case
+ * that stays when builtin Play's two leave core (W-A8).
  * The label renders once, after ThemeSlot, outside the theme's page, with role="note" and the
  * same words. Then hostile fixture themes set `display:none`,
  * `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label (and a fade
@@ -68,15 +71,21 @@ import { AI_LABEL_PAUSED_TEXT, aiLabelText } from '@/lib/ai-label/copy'
 import { useAiLabelStore, usePublishAnsweringAgent } from '@/lib/ai-label/store'
 import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
 import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { AiLabelFence as ThemeAiLabelFence } from '@/lib/theme-sdk/host-cards/ai-label-fence'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
-type Page = 'default' | 'play' | 'theme'
+import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from './fixture-theme-entry'
 
-const PAGES: readonly Page[] = ['default', 'play', 'theme']
+type Page = 'default' | 'play' | 'theme' | 'fixture'
+
+const PAGES: readonly Page[] = ['default', 'play', 'theme', 'fixture']
 const AUTO_LABEL = 'Auto is an AI'
 const THEME_CLASS = 'hello-chat'
 const HOSTILE_CLASS = 'hostile-theme'
 const CARD_BUTTON = 'Approve & run'
+/** The fixture theme's own composer: its box and its Send. */
+const FIXTURE_COMPOSER = 'Message the fixture theme'
+const FIXTURE_SEND = 'Send to the fixture theme'
 /** Where a label-sized box sits in jsdom's 1024 x 768 window when no style moves or sizes it. */
 const LABEL_BOX = { left: 880, top: 740, width: 110, height: 20 }
 const LABEL = `[${AI_LABEL_ATTR}]`
@@ -125,6 +134,15 @@ function themeChat(): ReactElement {
   return h('div', { 'data-testid': 'theme-page', 'data-theme-page': '' }, h('header', null, 'Hello theme'), playChat())
 }
 
+/**
+ * The A-19b fixture theme's /chat page as an installed theme draws it with the SDK alone: its own
+ * markup, a reply's card, and its own composer inside cards.AiLabelFence.
+ */
+function fixtureChat(): ReactElement {
+  const composer = h('form', null, h('textarea', { 'aria-label': FIXTURE_COMPOSER }), h('button', { type: 'submit' }, FIXTURE_SEND))
+  return h('div', { 'data-testid': FIXTURE_THEME_TEST_IDS.chat }, h('header', null, 'Fixture theme'), card(), h(ThemeAiLabelFence, null, composer))
+}
+
 function FixtureFrame({ children }: { readonly children?: ReactNode }): ReactElement {
   return h('div', { 'data-testid': 'theme-frame' }, children)
 }
@@ -140,16 +158,30 @@ const FIXTURE_THEME_HOST: ThemeHostContextValue = {
   reportRenderFailure: () => undefined,
 }
 
+/** The active theme's entry under each page: builtin Play's, the A-19b fixture theme's, or none. */
+const ENTRY_OF: Readonly<Record<Page, ThemeEntry | null>> = { default: null, play: BUILTIN_PLAY_ENTRY, theme: null, fixture: FIXTURE_THEME_ENTRY }
+/** The element each page's chat is drawn in. */
+const PAGE_ROOT: Readonly<Record<Page, string>> = { default: 'core-chat', play: 'play-chat', theme: 'theme-page', fixture: FIXTURE_THEME_TEST_IDS.chat }
+
+/** The theme host's value for a page an installed theme draws; null for the default chat and builtin Play. */
+function hostOf(page: Page): ThemeHostContextValue | null {
+  if (page === 'theme') return FIXTURE_THEME_HOST
+  if (page === 'fixture') return fixtureThemeHost('active', { pages: new Map<string, unknown>([[CHAT_HREF, fixtureChat]]) })
+  return null
+}
+
 function renderChat(page: Page) {
-  state.entry = page === 'play' ? BUILTIN_PLAY_ENTRY : null
+  state.entry = ENTRY_OF[page]
   state.layout = page === 'default' ? 'fallback' : 'theme'
   state.slot = page === 'play' ? playChat : null
   const chat = h(ChatLayout, null, h('div', { 'data-testid': 'core-chat' }, card(), defaultChat()))
-  return render(page === 'theme' ? h(ThemeHostContext.Provider, { value: FIXTURE_THEME_HOST }, chat) : chat)
+  const host = hostOf(page)
+  return render(host ? h(ThemeHostContext.Provider, { value: host }, chat) : chat)
 }
 
 function inputOf(page: Page): HTMLElement {
-  return page === 'default' ? screen.getByRole('textbox') : screen.getByRole('textbox', { name: PLAY_PLACEHOLDER })
+  if (page === 'default') return screen.getByRole('textbox')
+  return screen.getByRole('textbox', { name: page === 'fixture' ? FIXTURE_COMPOSER : PLAY_PLACEHOLDER })
 }
 
 function cardButton(): HTMLElement {
@@ -190,7 +222,7 @@ describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
     expect(note).toHaveTextContent(AUTO_LABEL)
     expect(theLabel()).toBe(note)
     // after ThemeSlot, outside the page and the theme's markup: no page or theme draws it
-    const pageRoot = screen.getByTestId(page === 'default' ? 'core-chat' : page === 'play' ? 'play-chat' : 'theme-page')
+    const pageRoot = screen.getByTestId(PAGE_ROOT[page])
     expect(pageRoot.contains(note)).toBe(false)
     expect(note.closest(`[${AI_LABEL_FENCE_ATTR}]`)).toBeNull()
     if (page !== 'default') expect(screen.queryByTestId('core-chat')).toBeNull()
@@ -231,6 +263,17 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     await waitFor(() => expect(inputOf(page)).toBeDisabled())
     expect(screen.getByRole('alert', { hidden: true })).toHaveTextContent(AI_LABEL_PAUSED_TEXT)
     // a reply's card is not the composer: it stays clickable (a protected surface)
+    expect(cardButton()).toBeEnabled()
+  })
+
+  it("on the fixture theme's /chat the SDK's fence holds the theme's whole composer, its own Send too, and only that", async () => {
+    document.documentElement.classList.add(HOSTILE_CLASS)
+    addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { display: none; }`)
+    renderChat('fixture')
+    await waitFor(() => expect(inputOf('fixture')).toBeDisabled())
+    expect(screen.getByRole('button', { name: FIXTURE_SEND, hidden: true })).toBeDisabled()
+    expect(inputOf('fixture').closest(`[${AI_LABEL_FENCE_ATTR}]`)).not.toBeNull()
+    expect(screen.getByTestId(FIXTURE_THEME_TEST_IDS.chat).contains(theLabel())).toBe(false)
     expect(cardButton()).toBeEnabled()
   })
 

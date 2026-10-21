@@ -106,15 +106,20 @@ def _skill_doctrine_section() -> str:
 def test_substantive_doctrine_consistent_across_auto_facing_homes():
     """AC3: ask-length, lane names, and awareness tools must read consistently
     across the skill's §17 and MANAGER_DOCTRINE_BLOCK — not just the nine
-    titles. A silent drift in either Auto-facing home fails CI."""
+    titles. A silent drift in either Auto-facing home fails CI.
+
+    PRD-263 US-066: the lanes are the router's (consumers/chatbot/auto.py: respond,
+    assign, mission). PRD-256 removed DELEGATE (a specialist answering the chat), so
+    RESPOND replaces it in both homes and DELEGATE must not come back."""
     section = _skill_doctrine_section()
     block = seed_mod.MANAGER_DOCTRINE_BLOCK
     for home_name, home in (("skill §17", section), ("doctrine block", block)):
         # point 7 ask-length ceiling — the value that drifted ("short" vs "≤ ~700")
         assert "700" in home, f"{home_name} lost the ~700-char ask ceiling (point 7)"
         # point 2 — the three lanes, named
-        for lane in ("DELEGATE", "ASSIGN", "MISSION"):
+        for lane in ("RESPOND", "ASSIGN", "MISSION"):
             assert lane in home, f"{home_name} missing lane {lane!r} (point 2)"
+        assert "DELEGATE" not in home, f"{home_name} still names the removed DELEGATE lane (point 2)"
         # point 1 — the awareness tool names
         for tool in (
             "platform_board_summary",
