@@ -19,11 +19,11 @@ if str(_ORCH) not in sys.path:
 
 from consumers.chatbot.turn_errors import (  # noqa: E402
     CODE_ACTIVATION_FAILED,
+    CODE_CREDITS_EXHAUSTED,
     CODE_MODEL_UNAVAILABLE,
     CODE_NO_API_KEY,
     CODE_RATE_LIMITED,
     CODE_RUNTIME_MISMATCH,
-    CODE_TRIAL_EXHAUSTED,
     CODE_TURN_FAILED,
     describe_turn_error,
 )
@@ -34,8 +34,13 @@ from core.llm.clients.openai_compatible_client import (  # noqa: E402
 )
 
 
-class TrialExhaustedError(Exception):
-    """Stands in for the PRD-230 typed error: matched by name."""
+class _CreditsExhaustedStandIn(Exception):
+    """Stands in for services.credits.routing.CreditsExhaustedError: matched by
+    its ``error_code`` attribute (services.credits.routing.is_credit_stop),
+    never by class name — PRD-265 replaced the old by-name TrialExhaustedError
+    duck type with this typed-attribute match."""
+
+    error_code = "credits_exhausted"
 
 
 def test_model_unavailable_is_recognised_from_the_providers_wording():
@@ -65,9 +70,13 @@ def test_describe_maps_each_failure_to_a_sentence_and_a_code():
         assert err.message.startswith("Researcher"), err
 
 
-def test_trial_exhausted_keeps_the_literal_code_the_client_matches():
-    err = describe_turn_error(TrialExhaustedError("trial_exhausted: the trial is spent"))
-    assert err.code == CODE_TRIAL_EXHAUSTED and "trial_exhausted" in err.message
+def test_credits_exhausted_keeps_the_literal_code_the_client_matches():
+    err = describe_turn_error(_CreditsExhaustedStandIn(
+        "Your credits are used up, so work on Automatos's AI keys is paused."
+    ))
+    # is_credit_stop already produced the person's sentence — describe_turn_error
+    # passes it through verbatim, under the stable code the client renders on.
+    assert err.code == CODE_CREDITS_EXHAUSTED and "credits are used up" in err.message
 
 
 def test_runtime_mismatch_by_error_code_attribute():

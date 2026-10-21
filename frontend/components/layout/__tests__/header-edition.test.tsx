@@ -7,6 +7,9 @@
  * user, so ProfileMenu rendered a sign-in affordance on every local page. Both
  * headers (classic + studio) now mount ProfileMenu only in `saas`; the rest of the
  * utilities cluster (help, theme, notifications) is edition-neutral and stays.
+ *
+ * PRD-265 US-008: both headers carry the credit balance in `saas` only (the local
+ * edition is never metered). The chip itself is stubbed here; its own test covers it.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
@@ -27,6 +30,9 @@ vi.mock('@/components/notifications/notification-bell', () => ({
 }))
 vi.mock('@/components/ui/theme-toggle', () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
+}))
+vi.mock('@/components/billing/credit-balance-pill', () => ({
+  CreditBalancePill: () => <div data-testid="credit-balance-pill" />,
 }))
 
 afterEach(() => {
@@ -54,15 +60,17 @@ describe('Header (classic) — account slot per edition', () => {
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('notification-bell')).toBeInTheDocument()
     expect(screen.getByLabelText('Help & documentation')).toBeInTheDocument()
+    expect(screen.queryByTestId('credit-balance-pill')).toBeNull()
   })
 
-  it('saas: ProfileMenu mounts exactly as today', async () => {
+  it('saas: ProfileMenu mounts exactly as today, beside the credit balance', async () => {
     const { Header } = await load('saas')
     render(<Header onMenuClick={() => {}} />)
 
     expect(screen.getByTestId('profile-menu')).toBeInTheDocument()
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('notification-bell')).toBeInTheDocument()
+    expect(screen.getByTestId('credit-balance-pill')).toBeInTheDocument()
   })
 })
 
@@ -75,11 +83,13 @@ describe('StudioHeader — account slot per edition', () => {
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('notification-bell')).toBeInTheDocument()
     expect(screen.getByLabelText('Open search (⌘K)')).toBeInTheDocument()
+    expect(screen.queryByTestId('credit-balance-pill')).toBeNull()
   })
 
-  it('saas: ProfileMenu mounts exactly as today', async () => {
+  it('saas: ProfileMenu mounts exactly as today, beside the credit balance', async () => {
     const { StudioHeader } = await load('saas')
     render(<StudioHeader />)
     expect(screen.getByTestId('profile-menu')).toBeInTheDocument()
+    expect(screen.getByTestId('credit-balance-pill')).toBeInTheDocument()
   })
 })

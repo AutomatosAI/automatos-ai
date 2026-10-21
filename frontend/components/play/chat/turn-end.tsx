@@ -19,11 +19,12 @@ import styles from './turn.module.css'
  * snag box for a turn that failed before Auto's reply began (useChat drops the
  * empty reply when the request itself fails, so there is no reply to hold it),
  * and the Mission Auto suggests once his answer is complete. PlayTrialBanner
- * is the core's TrialExhaustedBanner above the message box, on chat.tsx's two
- * triggers: the workspace's trial snapshot, or the typed trial_exhausted code
- * the last send returned. All of it on the SDK (PRD-261 A-14a): the view
- * model's status, suggestion and spent trial, cards.TrialExhaustedBanner and
- * context.useTrial.
+ * is the core's TrialExhaustedBanner (the paused-credits banner, PRD-265) above
+ * the message box, on two triggers: the workspace's credits say work on
+ * Automatos's keys is paused (useTrial's `exhausted`), or the last send was
+ * refused with the typed credits_exhausted code. All of it on the SDK (PRD-261
+ * A-14a): the view model's status, suggestion and trialExhausted,
+ * cards.TrialExhaustedBanner and context.useTrial.
  */
 
 /** The name of what follows the conversation. */

@@ -49,10 +49,12 @@ function MemberRoleCell({ member, onRoleChange }: MemberRoleCellProps) {
                     onChange={(e) => onRoleChange(member.id, e.target.value)}
                     className={`appearance-none pl-3 pr-8 py-1.5 text-xs font-semibold rounded-full border bg-transparent focus:outline-none focus:ring-1 focus:ring-offset-0 cursor-pointer ${getRoleBadgeColor(member.role)}`}
                 >
-                    <option value="owner" className="bg-[#1a1a1a] text-purple-400">Owner</option>
-                    <option value="admin" className="bg-[#1a1a1a] text-warning">Admin</option>
-                    <option value="editor" className="bg-[#1a1a1a] text-blue-400">Editor</option>
-                    <option value="viewer" className="bg-[#1a1a1a] text-green-400">Viewer</option>
+                    {/* The popup is painted by the OS, so the options read the theme's
+                        popover surface; the pill above still carries the role colour. */}
+                    <option value="owner" className="bg-popover text-popover-foreground">Owner</option>
+                    <option value="admin" className="bg-popover text-popover-foreground">Admin</option>
+                    <option value="editor" className="bg-popover text-popover-foreground">Editor</option>
+                    <option value="viewer" className="bg-popover text-popover-foreground">Viewer</option>
                 </select>
                 {/* Tiny custom arrow since we removed appearance */}
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-current opacity-50">

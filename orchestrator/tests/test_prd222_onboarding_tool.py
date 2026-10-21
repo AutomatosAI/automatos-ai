@@ -92,7 +92,7 @@ def test_handler_advances_and_returns_snapshot():
     ws = _FakeWorkspace({"stage": "not_started", "stages": {}, "segment": {}})
     res = _run(update_onboarding(_db_returning(ws), uuid4(), {"advance_to": "questions"}))
     assert res["success"] is True
-    assert res["data"] == {"stage": "questions", "trial": None}
+    assert res["data"] == {"stage": "questions"}  # PRD-265: the trial is credits, not in the snapshot
     assert ws.onboarding["stage"] == "questions"
 
 

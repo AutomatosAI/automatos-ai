@@ -46,7 +46,7 @@ import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { useChatApprovalsStore } from '@/lib/chat-controller/approvals'
 import { useChatController } from '@/lib/chat-controller/controller'
 import type { ChatConversationView, ChatTurnEvent } from '@/lib/chat-controller/view-model'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { CREDITS_EXHAUSTED_CODE as TRIAL_EXHAUSTED_CODE } from '@/lib/credits'
 
 import { chatEndpoint, dataLine, endStream, posts, stream, tick, turns, wire, wordsLine } from './support/chat-wire'
 
@@ -249,7 +249,7 @@ describe('Try again after a failed turn', () => {
     expect(posts[1].message?.parts?.[0]?.text).toBe(ASK)
   })
 
-  it('a reply the trial blocks mid-stream carries its failure and says trial_exhausted', async () => {
+  it('a reply the trial blocks mid-stream carries its failure and says credits_exhausted', async () => {
     const hook = renderController()
     await ask(hook, ASK)
     await stream(`e:${JSON.stringify({ message: 'Trial used up.', code: TRIAL_EXHAUSTED_CODE })}`)

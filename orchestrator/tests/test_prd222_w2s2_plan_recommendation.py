@@ -47,12 +47,15 @@ def _db_returning(workspace):
 @pytest.mark.parametrize(
     "segment,team_size,expected",
     [
-        ({"business": "solo barber shop", "comfort": "brand new"}, None, "basic"),
-        ({}, None, "basic"),
-        ({"comfort": "very technical"}, None, "pro"),
+        # PRD-265: Own keys and Pro are the same service — only a technical/
+        # own-keys signal routes to basic; a brand-new solo op with no such
+        # signal (or no signal at all) is Pro, where the AI credits are included.
+        ({"business": "solo barber shop", "comfort": "brand new"}, None, "pro"),
+        ({}, None, "pro"),
+        ({"comfort": "very technical"}, None, "basic"),
         ({"goal": "automate our data pipeline with sql"}, None, "pro"),
         # team_size lives in the STORED segment (arg=None) — the REAL path the
-        # display + funnel use. Without the number these two are 'basic' (the text
+        # display + funnel use. Without the number these two are 'pro' (the text
         # alone matches no signal), so they prove the stored-size branch fires.
         ({"business": "small marketing team", "team_size": 3}, None, "pro"),
         ({"business": "a creative agency with several teams"}, None, "business"),
@@ -67,14 +70,15 @@ def test_recommend_plan_rules(segment, team_size, expected):
 
 def test_recommend_plan_reads_team_size_from_stored_segment():
     # The real product path: team_size is a stored segment field, not a separate
-    # injected arg. size>=6 → business, size>=2 → pro, solo → basic.
+    # injected arg. size>=6 → business; no technical/own-keys signal → pro
+    # (PRD-265: basic is reserved for an explicit own-keys signal, not solo-ness).
     assert pt.recommend_plan({"business": "a consultancy", "team_size": 8})[0] == "business"
     assert pt.recommend_plan({"business": "a small shop", "team_size": 3})[0] == "pro"
-    assert pt.recommend_plan({"business": "just me", "team_size": 1})[0] == "basic"
+    assert pt.recommend_plan({"business": "just me", "team_size": 1})[0] == "pro"
     # An explicit arg still overrides the stored field (direct/unit use).
     assert pt.recommend_plan({"team_size": 1}, 8)[0] == "business"
-    # A non-int stray value degrades safely to the text signals (here: solo).
-    assert pt.recommend_plan({"business": "solo", "team_size": "lots"})[0] == "basic"
+    # A non-int stray value degrades safely to the text signals (here: none → pro).
+    assert pt.recommend_plan({"business": "solo", "team_size": "lots"})[0] == "pro"
 
 
 def test_recommend_plan_only_returns_assignable_tiers():
@@ -85,18 +89,19 @@ def test_recommend_plan_only_returns_assignable_tiers():
 
 def test_proposal_copy_has_pricing_and_enterprise_soon():
     copy = pt.plan_proposal_copy({"business": "solo shop", "comfort": "brand new"})
-    assert "Basic $19/mo" in copy and "Pro $49/mo" in copy and "Business $99/mo" in copy
-    assert "early access" in copy.lower()
+    assert "Own keys $9/mo" in copy and "Pro $29/mo" in copy and "Business $99/mo (by invite)" in copy
+    assert "beta pricing" in copy.lower()  # PRD-265: no "early access" copy any more
     assert "enterprise is coming soon" in copy.lower()
-    # Tells Auto to set the accepted plan via the tool (basic recommended here).
+    # Tells Auto to set the accepted plan via the tool. No technical/own-keys
+    # signal in a brand-new solo shop, so Pro is recommended (PRD-265).
     assert "platform_update_onboarding" in copy
-    assert 'plan: "basic"' in copy
+    assert 'plan: "pro"' in copy
 
 
 def test_section_proposal_injects_recommendation():
     sec = OnboardingSection()
     copy = sec._plan_recommendation({"segment": {"business": "solo barber", "comfort": "brand new"}})
-    assert "Basic" in copy and "$19" in copy
+    assert "Pro" in copy and "$29" in copy
 
 
 def test_section_proposal_reads_stored_team_size():
@@ -129,21 +134,30 @@ def test_record_plan_event_rejects_unknown_event():
 # --------------------------------------------------------------------------- #
 
 
-def test_handler_accepts_plan_writes_limits_and_funnel():
+def test_handler_records_plan_choice_without_assigning_it():
+    # PRD-265 US-006: a plan is a CHOICE, never an assignment. update_onboarding
+    # is wrapped by plan_is_chosen_never_assigned — a lone 'plan' param never
+    # reaches the stage-machine writer; it is validated, stamped as the
+    # plan_accepted funnel event via record_plan_choice, and answered with how
+    # the owner buys it. The workspace's plan and plan_limits are UNCHANGED.
     ws = _FakeWorkspace(plan="basic", plan_limits={"max_documents": 100})
     res = _run(update_onboarding(_db_returning(ws), uuid4(), {"plan": "pro"}))
     assert res["success"] is True
-    assert ws.plan == "pro"
-    # US-023 helper wrote the tier limits (seat key = max_members) and preserved
-    # the unmanaged key.
-    assert ws.plan_limits["max_members"] == 5
-    assert ws.plan_limits["max_agents"] == 20
-    assert ws.plan_limits["max_documents"] == 100
+    assert ws.plan == "basic"
+    assert ws.plan_limits == {"max_documents": 100}
     # plan_accepted funnel event stamped.
     assert ws.onboarding["funnel"]["plan_accepted"]["plan"] == "pro"
+    # The how-to-buy block: beta (BILLING_OPEN False by default) → no charge yet.
+    assert res["plan"]["plan"] == "pro"
+    assert set(res["plan"]) == {"plan", "name", "buy", "message"}
+    assert res["plan"]["buy"] is None
+    assert "beta" in res["plan"]["message"].lower()
 
 
 def test_handler_rejects_enterprise_with_honest_copy():
+    # record_plan_choice's own refusal (services.plan_tiers.is_assignable) runs
+    # before the workspace is even queried — unchanged under PRD-265, since a
+    # plan was never written at this seam in the first place.
     ws = _FakeWorkspace(plan="basic")
     res = _run(update_onboarding(_db_returning(ws), uuid4(), {"plan": "enterprise"}))
     assert res["success"] is False
@@ -207,7 +221,9 @@ def _raise(*_a, **_k):
 
 
 def test_accept_path_commits_exactly_once():
-    # plan + plan_limits + plan_accepted are ONE transaction, not two commits.
+    # PRD-265: a lone plan choice never writes plan/plan_limits any more — it
+    # commits once, via record_plan_choice's own record_plan_event call
+    # (default commit=True). There is nothing left to combine it with.
     ws = _FakeWorkspace(plan="basic", plan_limits={"max_documents": 100})
     db = _db_returning(ws)
     res = _run(update_onboarding(db, uuid4(), {"plan": "pro"}))
@@ -216,18 +232,21 @@ def test_accept_path_commits_exactly_once():
 
 
 def test_accept_funnel_failure_commits_nothing_and_reports_failure(monkeypatch):
-    # A funnel-write failure must NOT leave a durable plan change reported as a
-    # failure: the single commit never runs and the tx is rolled back, so no
-    # partial write reaches the DB while success is False (FR-4).
-    import modules.tools.discovery.handlers_onboarding as h
+    # PRD-265: a chosen plan is only RECORDED (plan_accepted), never assigned. A
+    # failure writing that record is a clean tool error, not a crash: nothing is
+    # committed, the transaction is rolled back, and the plan is untouched (FR-4).
+    # record_plan_choice imports record_plan_event from services.onboarding_state
+    # on every call, so that is where the failure is injected.
+    import services.onboarding_state as onboarding_state_mod
 
-    monkeypatch.setattr(h, "record_plan_event", _raise)
+    monkeypatch.setattr(onboarding_state_mod, "record_plan_event", _raise)
     ws = _FakeWorkspace(plan="basic", plan_limits={"max_documents": 100})
     db = _db_returning(ws)
     res = _run(update_onboarding(db, uuid4(), {"plan": "pro"}))
     assert res["success"] is False
     assert db.commit.call_count == 0  # nothing committed — no partial write
     assert db.rollback.call_count == 1
+    assert ws.plan == "basic"
 
 
 def test_proposal_advance_commits_exactly_once():
@@ -258,8 +277,10 @@ def test_proposal_funnel_failure_leaves_stage_uncommitted(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# @integration — real transaction: a funnel failure rolls back the plan write so
-# workspace.plan is UNCHANGED in the DB (the literal RVW-2 AC). Skips w/o Postgres.
+# @integration — real transaction. PRD-265: the stage/segment path's plan+
+# funnel atomicity (RVW-2) is unaffected (above); the lone-plan path writes no
+# plan at all any more, so the real row is unchanged by construction, not by a
+# rollback. Skips w/o Postgres.
 # --------------------------------------------------------------------------- #
 
 
@@ -281,10 +302,13 @@ def engine():
 
 @pytest.mark.integration
 def test_accept_funnel_failure_does_not_change_plan_real_db(engine, new_session, monkeypatch):
+    """PRD-265: the plan choice (record_plan_choice) never writes workspace.plan;
+    a failure recording it reports {"success": False} and the real row is
+    unchanged (FR-4)."""
     from sqlalchemy import text
 
     from core.models.workspaces import Workspace
-    import modules.tools.discovery.handlers_onboarding as h
+    import services.onboarding_state as onboarding_state_mod
 
     s = new_session()
     wid = str(uuid4())
@@ -295,13 +319,12 @@ def test_accept_funnel_failure_does_not_change_plan_real_db(engine, new_session,
         )
         s.commit()
 
-        # Inject a failure on the funnel write that follows assign_plan's flush.
-        monkeypatch.setattr(h, "record_plan_event", _raise)
+        # record_plan_choice imports record_plan_event fresh from
+        # services.onboarding_state on every call — patch it there.
+        monkeypatch.setattr(onboarding_state_mod, "record_plan_event", _raise)
         res = _run(update_onboarding(s, wid, {"plan": "pro"}))
         assert res["success"] is False
 
-        # The flushed-but-uncommitted plan write was rolled back — the row is
-        # still 'basic' (no partial durable write; FR-4).
         row = s.execute(
             text("SELECT plan FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": wid}
         ).fetchone()

@@ -66,7 +66,6 @@ const ALLOWLIST: Record<string, string> = {
   'components/chatbot/sheet-artifact.tsx dark:text-gray-100': SHEET_ARTIFACT_RATCHET,
   'components/chatbot/sheet-artifact.tsx dark:divide-gray-800/70': SHEET_ARTIFACT_RATCHET,
   'components/chatbot/message.tsx dark:text-gray-200': MESSAGE_RATCHET,
-  'components/onboarding/power-up-card.tsx dark:text-amber-500': POWER_UP_CARD_RATCHET,
   'components/onboarding/power-up-card.tsx dark:text-emerald-400': POWER_UP_CARD_RATCHET,
 }
 

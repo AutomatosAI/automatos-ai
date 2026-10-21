@@ -2410,9 +2410,12 @@ class StreamingChatService:
         Every LLM call of the turn — the agent's, the complexity assessor's, a
         memory distil's — is booked to the ``chat`` lane and to this
         conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
+        The turn is one ask (PRD-265): its calls are metered at their real cost,
+        and it stops if they reach the workspace's credit balance.
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
         from core.security.surface import WIDGET, turn_surface
+        from services.credits.asks import ask_scope
 
         # F351 (night 10b): a document conversation keeps its document tools on a follow-up —
         # the full path (never the dispatcher-only ATOM lane) and the template actions ranked in.
@@ -2423,6 +2426,7 @@ class StreamingChatService:
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
         # is off for it) leaves every action listing of the turn, the ATOM enum too.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
+                ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
                 self._hidden_action_scope(agent_id):

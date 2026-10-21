@@ -126,7 +126,7 @@ def test_a_failed_preview_says_why_and_the_post_is_untouched(previews):
 def test_past_the_quota_a_preview_is_refused_before_media_render(previews, monkeypatch):
     post = _renderable(previews)
     calls = _real_renderer_check(monkeypatch)
-    previews.session.add(_usage_row(WS, 600))  # Basic: 10 minutes, all used
+    previews.session.add(_usage_row(WS, 3600))  # Own keys: 60 minutes, all used
     previews.session.commit()
     resp = _preview(previews, post["id"])
     assert resp.status_code == 429

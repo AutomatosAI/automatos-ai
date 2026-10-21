@@ -12,7 +12,7 @@ import { LIVE_KEY } from '@/lib/chat/receipts'
 import { NO_REPLY, type ReplyProgress } from '@/lib/mascot/events'
 import { memoryStorage } from '@/lib/looks/__tests__/helpers'
 import { receipt } from '@/lib/mascot/__tests__/helpers'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { CREDITS_EXHAUSTED_CODE } from '@/lib/credits'
 
 /** A short nap for the tests. */
 const NAP_MS = 1000
@@ -81,7 +81,7 @@ describe('useAutoMascot: the chat', () => {
 
     const blocked = mount({ status: 'idle' })
     blocked.rerender({ status: 'streaming' })
-    blocked.rerender({ status: 'idle', errorCode: TRIAL_EXHAUSTED_CODE })
+    blocked.rerender({ status: 'idle', errorCode: CREDITS_EXHAUSTED_CODE })
     expect(blocked.result.current.mascot).toBe('oops')
   })
 

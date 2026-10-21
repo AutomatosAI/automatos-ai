@@ -7,6 +7,7 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index, text
+from sqlalchemy import event
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -191,6 +192,13 @@ class LLMUsage(Base):
     # and would otherwise name nothing). Readers prefer the live agents.name.
     agent_name = Column(String(255), nullable=True)
     execution_id = Column(String(255))
+    # PRD-265: the ask (one user turn, or one run of scheduled work) this call was
+    # part of — ``execution_id`` can span many asks (chat:<conversation>) — and
+    # whether the call is billable: ``customer`` (customer work, waiting for the
+    # meter), ``charged`` (metered), ``overhead`` (absorbed, decision D-3). NULL
+    # on calls that are not a model call someone asked for (retrieval, media).
+    ask_id = Column(String(64), nullable=True)
+    charge_class = Column(String(16), nullable=True)
     request_type = Column(String(50))  # chat, agent, recipe, routing, embedding
 
     # Token usage. ``input_tokens`` is the FULL prompt (fresh + cached + written)
@@ -218,8 +226,31 @@ class LLMUsage(Base):
     # dispatch check (migration llm_usage_execution_index builds it CONCURRENTLY).
     __table_args__ = (
         Index("idx_llm_usage_workspace_execution", "workspace_id", "execution_id"),
+        # PRD-265 (migration prd265_credit_ledger builds both CONCURRENTLY, partial):
+        # an ask's calls, and the calls waiting for the meter (a metered call leaves it).
+        Index("ix_llm_usage_ask_id", "ask_id", postgresql_where=text("ask_id IS NOT NULL")),
+        Index("ix_llm_usage_to_meter", "id", postgresql_where=text("charge_class = 'customer'")),
         {"extend_existing": True},
     )
+
+
+@event.listens_for(LLMUsage, "before_insert")
+def _stamp_the_ask(_mapper, _connection, row: LLMUsage) -> None:
+    """PRD-265: a usage row carries the ask and the charge class in scope when it
+    is written (``LLMManager`` names the class of each model call it records).
+
+    Every writer goes through ``UsageTracker`` (calls, embeddings, reranks, media);
+    stamping here keeps them all in step without threading the fields through each.
+    The best-effort writer threads run in a copy of the caller's context
+    (``core.best_effort._submit``), so the caller's scope is the one read.
+    """
+    from core.llm.usage_context import current_usage_scope
+
+    scope = current_usage_scope()
+    if row.ask_id is None:
+        row.ask_id = scope.get("ask_id")
+    if row.charge_class is None:
+        row.charge_class = scope.get("charge_class")
 
 # Database Models
 class Team(Base):
