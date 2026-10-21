@@ -189,8 +189,8 @@ class ActivityService:
         """Return hero-card stats for the Activity Command Centre.
 
         Returns working_now, channels_live, completed_today, needs_attention.
-        ``may_answer``: the viewer is a workspace admin, so questions and
-        approval grants are theirs to answer (PRD-252 R5).
+        ``may_answer``: the viewer is an owner, admin or editor, so questions and
+        approval grants are theirs to answer (PRD-252 R5, PRD-266 D16).
         """
         since = self._period_start(period)
 

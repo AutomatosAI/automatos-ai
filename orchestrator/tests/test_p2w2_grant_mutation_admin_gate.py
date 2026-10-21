@@ -6,9 +6,11 @@ agent's destructive action by POSTing grant/deny/revoke. And nothing told a
 human that a grant was pending — a blocked board task waited silently.
 
 Pinned here:
-- every approval-grant endpoint (list + the three mutations) carries the
-  canonical ``require_workspace_admin`` dependency (PRD-185 S12) — plain
-  members 403, workspace owner/admin and the super-admin pass;
+- every approval-grant endpoint carries its gate: revoke the canonical
+  ``require_workspace_admin`` dependency (PRD-185 S12) — plain members 403,
+  workspace owner/admin and the super-admin pass; list, grant, deny and answer
+  ``require_workspace_answerer`` since PRD-266 D16 (an editor answers too; the
+  role tests are in tests/test_prd266_editors_answer.py);
 - creating a fresh pending grant dispatches exactly one ``approval_pending``
   notification (grant id / subject / risk in the payload), the reuse branch
   does not re-spam, and denial semantics are untouched;
@@ -42,7 +44,7 @@ import tests.conftest as _conftest  # noqa: E402
 _conftest._restore_real_app_modules()
 
 from api import approval_grants as grants_api  # noqa: E402
-from core.auth.workspace_admin import require_workspace_admin  # noqa: E402
+from core.auth.workspace_admin import require_workspace_admin, require_workspace_answerer  # noqa: E402
 from services import board_approval  # noqa: E402
 
 
@@ -55,7 +57,8 @@ def _ctx(*, system_role="user", role="user", clerk_user_id=None, workspace_id=No
 
 
 # ---------------------------------------------------------------------------
-# The gate is wired: every approval-grant route depends on require_workspace_admin
+# The gate is wired: revoke depends on require_workspace_admin; list, grant, deny
+# and answer on require_workspace_answerer (PRD-266 D16), never on both
 # ---------------------------------------------------------------------------
 
 def _dependant_calls(dependant) -> set:
@@ -65,23 +68,26 @@ def _dependant_calls(dependant) -> set:
     return calls
 
 
-def test_every_grant_route_carries_workspace_admin_gate():
+def test_every_grant_route_carries_its_gate():
     expected = {
-        ("/api/v1/approval-grants", "GET"),
-        ("/api/v1/approval-grants/{grant_id}/grant", "POST"),
-        ("/api/v1/approval-grants/{grant_id}/deny", "POST"),
-        ("/api/v1/approval-grants/{grant_id}/revoke", "POST"),
+        ("/api/v1/approval-grants", "GET"): require_workspace_answerer,
+        ("/api/v1/approval-grants/{grant_id}/grant", "POST"): require_workspace_answerer,
+        ("/api/v1/approval-grants/{grant_id}/deny", "POST"): require_workspace_answerer,
+        ("/api/v1/approval-grants/{grant_id}/answer", "POST"): require_workspace_answerer,
+        ("/api/v1/approval-grants/{grant_id}/revoke", "POST"): require_workspace_admin,
     }
+    gates = {require_workspace_admin, require_workspace_answerer}
     seen = set()
     for route in grants_api.router.routes:
         for method in route.methods or ():
             key = (route.path, method)
             if key in expected:
-                assert require_workspace_admin in _dependant_calls(route.dependant), (
-                    f"{method} {route.path} is not gated by require_workspace_admin"
+                carried = _dependant_calls(route.dependant) & gates
+                assert carried == {expected[key]}, (
+                    f"{method} {route.path} is gated by {carried}, not {expected[key].__name__} alone"
                 )
                 seen.add(key)
-    assert seen == expected, f"missing routes: {expected - seen}"
+    assert seen == set(expected), f"missing routes: {set(expected) - seen}"
 
 
 def test_plain_member_403s_and_workspace_admin_passes():

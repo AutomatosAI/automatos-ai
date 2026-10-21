@@ -9,7 +9,7 @@ bypass), and every resolver on the way has to know ``device``:
 * ``POST /api/chat`` (``require_workspace_permission("agents:execute")``): the turn is the
   person's, in the bound workspace; only the reply stream is patched;
 * ``GET /api/v1/tasks`` (``require_task_context``): the board is the bound workspace's;
-* ``POST /api/v1/approval-grants/{id}/answer`` (``require_workspace_admin``): the question is
+* ``POST /api/v1/approval-grants/{id}/answer`` (``require_workspace_answerer``): the question is
   answered (the resume and the chat confirmation are patched; the answer's write is real);
 * ``GET /api/themes/files/{digest}/{path}`` (``services/themes/membership.py``): an opted-in
   private theme of the bound workspace loads; the same person's theme in another workspace

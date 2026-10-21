@@ -10,7 +10,9 @@ route (POST/PUT/PATCH/DELETE) must be classified **exactly one** way:
     families by S3–S6);
 (b) super-admin-locked router-wide (the PRD-143 obs tier — classified, never
     relaxed);
-(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed);
+(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed), or
+    ``require_workspace_answerer``-gated (PRD-266 D16: the approval-grant verbs an
+    owner, admin or editor may take; revoke stays workspace-admin);
 (d) own non-hybrid auth (widget plane key auth, HMAC/secret webhooks, the
     Shopify machine lane) — enumerated explicitly, and structurally proven to
     NOT ride the shared hybrid dependency;
@@ -349,6 +351,8 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
             buckets.append("su-locked")
         if rec["wsadmin"]:
             buckets.append("workspace-admin")
+        if rec["wsanswer"]:
+            buckets.append("workspace-answerer")
         if key in OWN_AUTH_ROUTES:
             buckets.append("own-auth")
         if key in PUBLIC_BY_DESIGN:
