@@ -281,7 +281,13 @@ The `CliHost` model stores `capabilities` (e.g., available CLIs, models) and `st
 
 `MODERATION_WEBHOOK_URL` is a credential: set it on the hosted API service only, never in a committed file, and never log it. Leave it unset on self-hosted installs: nothing leaves the install. Each new report (never a duplicate) is posted after the response through the generic webhook driver (`channels/drivers/webhook.py`) as JSON `{text, message, ai_generated: true}`. The `text` holds the report id, the workspace id, the target type and id, the reason, an excerpt of the reported content (at most 200 characters) and the reporter's note (at most 200 characters). It never holds the reporter's name, email or id, or the workspace's name. The excerpt and the note are user and AI content: each is sent on one line with `&`, `<` and `>` as entities (so Slack cannot read a mention or a link in them), and the receiving inbox must still treat them as untrusted. Which inbox receives it and who answers is PRD-266 open question 2.
 
-**Sources:** [orchestrator/config.py]() (`MODERATION_WEBHOOK_URL`), [orchestrator/services/content_reports/moderation.py]()
+| Variable | Service | Purpose | Default |
+| :--- | :--- | :--- | :--- |
+| `ANDROID_APP_SHA256_CERT_FINGERPRINTS` | Frontend (`frontend`, server side) | The SHA-256 fingerprints of the certificate that signs the Automatos Go Android app (`com.automatos.app`), which `/.well-known/assetlinks.json` lists so Android opens `/go/*`, Command Center and chat links in the app. Comma-separated; each must be 32 upper-case hex pairs joined by colons (`AA:BB:…`), and any other value is dropped. Read at request time: no rebuild is needed. | (none: `assetlinks.json` is `[]`, an empty statement list) |
+
+`ANDROID_APP_SHA256_CERT_FINGERPRINTS` holds public values, not a secret: the same fingerprints are in every `assetlinks.json` an Android app's site serves. Which certificate (the EAS Android signing credentials) is a PRD-266 open question; until it is set, Android opens these links in the browser. The iOS file, `/.well-known/apple-app-site-association`, needs no setting: its app id (`KGVA9933BG.com.automatos.app`) and paths are constants in `frontend/lib/universal-links.ts`. Both files are public in the saas middleware (exact paths) and are served in both editions; a self-hosted web address is not one of the app's associated domains, so there they are inert.
+
+**Sources:** [orchestrator/config.py]() (`MODERATION_WEBHOOK_URL`), [orchestrator/services/content_reports/moderation.py](), [frontend/lib/universal-links.ts]() and [frontend/app/.well-known/assetlinks.json/route.ts]() (`ANDROID_APP_SHA256_CERT_FINGERPRINTS`)
 
 ---
 

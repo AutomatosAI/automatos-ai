@@ -25,6 +25,11 @@ const isPublicRoute = createRouteMatcher([
   // /verify-email or /verification public.
   "/verify",
   "/verify/(.*)",
+  // PRD-266 US-018c: the app-association files iOS and Android fetch signed out (Automatos Go's
+  // universal links). Exact paths, never /.well-known/(.*). The matcher below already skips
+  // assetlinks.json (it has an extension), but the extensionless AASA reaches auth.protect().
+  "/.well-known/apple-app-site-association",
+  "/.well-known/assetlinks.json",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {
