@@ -45,7 +45,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from config import config
-from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
+from core.models.themes import THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signature_verify, signing
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
 from services.themes.listing_updates import offer_listed_update, withdraw_offers
@@ -325,18 +325,24 @@ def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) 
 
 
 def _has_live_disable(db: Session, digest: str) -> bool:
+    """A live ``local`` disable of ``digest`` stands already. A pulled (``feed``) one doesn't count:
+    the feed may lift it, and the deactivation would go with it. The row is locked: a lift of it
+    in flight finishes first and this then finds it lifted, or waits and then refuses (409)."""
     row = (
         db.query(ThemeRevocation.id)
         .filter(ThemeRevocation.digest == digest, ThemeRevocation.level == REVOKE_DISABLE,
-                ThemeRevocation.lifted_at.is_(None))
+                ThemeRevocation.lifted_at.is_(None), ThemeRevocation.origin == THEME_REVOCATION_ORIGIN_LOCAL)
+        .with_for_update()
         .first()
     )
     return row is not None
 
 
 def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest and
-    withdraw the update offers its approval made (``withdraw_offers``)."""
+    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest (unless
+    a live ``local`` one stands) and withdraw the update offers its approval made (``withdraw_offers``).
+    ``revocation_admin.lift_revocation`` refuses to lift the last live ``local`` disable of a
+    deactivated version, so the deactivation can't be undone by lifting a revocation."""
     package = queued_package(db, package_id, lock=True)
     if package.status != STATUS_APPROVED:
         raise ThemeReviewError(CONFLICT, NOT_APPROVED)

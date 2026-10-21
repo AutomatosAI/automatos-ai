@@ -22,7 +22,10 @@ answer 404). This module is the admin's hand on that table:
   repeat: the admin's own row stands after the feed lifts its row;
 * **lift** sets ``lifted_at`` on a ``local`` row, once (lifting a lifted row answers it as it
   is). A ``feed`` row is the hosted list's to lift: here it is a 409, and the local pull lifts
-  it when the feed says ``liftedAt``.
+  it when the feed says ``liftedAt``. The last live ``local`` disable covering a deactivated
+  Marketplace version (``review.deactivate``) is a 409 too, whatever it was written for: a
+  deactivation is not undone by lifting a revocation. Those versions are locked first, so two
+  lifts of a version's last two disables can't both pass.
 
 Nothing is deleted: the hosted feed reports a lifted row for ``THEME_REVOCATIONS_LIFTED_DAYS``.
 Synchronous; nothing here commits: the router does, once. A create that loses the race to an
@@ -35,13 +38,16 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models.themes import THEME_REVOCATION_LEVELS, THEME_REVOCATION_ORIGIN_LOCAL, ThemeRevocation
-from services.themes.choices import BAD_REQUEST, CONFLICT, NOT_FOUND, ThemeInstallError
+from core.models.themes import THEME_REVOCATION_LEVELS, THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeRevocation
+from services.themes.choices import BAD_REQUEST, CONFLICT, MARKETPLACE_OWNER, NOT_FOUND, ThemeInstallError
 from services.themes.contract import plain_text_problem
-from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, SHA256_PATTERN
+from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, SHA256_PATTERN, satisfies_range
+from services.themes.review import STATUS_DEACTIVATED
+from services.themes.revocations import REVOKE_DISABLE
 
 REASON_MAX = 2000
 REASON_FIELD = "reason"
@@ -59,6 +65,10 @@ REVOCATION_NOT_FOUND = "That revocation doesn't exist."
 FEED_ROW = (
     "This revocation came from the Automatos revocation feed, so it can't be lifted here. "
     "It lifts when the feed lifts it."
+)
+HOLDS_DEACTIVATION = (
+    "This is the last revocation keeping {theme_id} {version}, a deactivated Marketplace version, "
+    "disabled, so it can't be lifted. A deactivation isn't undone by lifting a revocation."
 )
 
 
@@ -177,9 +187,59 @@ def create_revocation(
     return row, True
 
 
+def _covers(row: ThemeRevocation, package: ThemePackage) -> bool:
+    """True when ``row`` covers ``package`` as ``revocations.py`` reads a row: by its digest, or by its
+    theme id with no range, a range this code can't read (every version) or one the version is in."""
+    if row.digest is not None:
+        return row.digest == package.digest
+    if row.theme_id != package.theme_id:
+        return False
+    version_range = row.version_range
+    if version_range is None or RANGE_PATTERN.fullmatch(version_range) is None:
+        return True
+    return satisfies_range(version_range, package.version)
+
+
+def _other_live_local_disable(db: Session, package: ThemePackage, row: ThemeRevocation) -> bool:
+    """True when a live ``local`` disable besides ``row`` covers ``package``."""
+    others = (
+        db.query(ThemeRevocation)
+        .filter(
+            ThemeRevocation.id != row.id,
+            ThemeRevocation.lifted_at.is_(None),
+            ThemeRevocation.origin == THEME_REVOCATION_ORIGIN_LOCAL,
+            ThemeRevocation.level == REVOKE_DISABLE,
+            or_(ThemeRevocation.digest == package.digest, ThemeRevocation.theme_id == package.theme_id),
+        )
+        .all()
+    )
+    return any(_covers(other, package) for other in others)
+
+
+def _held_deactivation(db: Session, row: ThemeRevocation) -> Optional[ThemePackage]:
+    """A deactivated Marketplace version that no live ``local`` disable but ``row`` covers, or None.
+    The deactivated versions ``row`` names are locked, so a concurrent lift of their other disable
+    waits for this one and then sees it."""
+    if row.level != REVOKE_DISABLE:
+        return None
+    named = ThemePackage.digest == row.digest if row.digest is not None else ThemePackage.theme_id == row.theme_id
+    deactivated = (
+        db.query(ThemePackage)
+        .filter(ThemePackage.owner_type == MARKETPLACE_OWNER, ThemePackage.status == STATUS_DEACTIVATED, named)
+        .order_by(ThemePackage.id)
+        .with_for_update()
+        .all()
+    )
+    for package in deactivated:
+        if _covers(row, package) and not _other_live_local_disable(db, package, row):
+            return package
+    return None
+
+
 def lift_revocation(db: Session, revocation_id: UUID) -> Tuple[ThemeRevocation, bool]:
     """Set ``lifted_at`` on a ``local`` row: ``(row, True)``; an already lifted one answers
-    ``(row, False)`` unchanged. A missing row is a 404; a ``feed`` row a 409, unchanged."""
+    ``(row, False)`` unchanged. A missing row is a 404; a ``feed`` row a 409, unchanged; so is the
+    last live ``local`` disable of a deactivated Marketplace version (:func:`_held_deactivation`)."""
     row = db.query(ThemeRevocation).filter(ThemeRevocation.id == revocation_id).with_for_update().first()
     if row is None:
         raise RevocationAdminError(NOT_FOUND, REVOCATION_NOT_FOUND)
@@ -187,6 +247,9 @@ def lift_revocation(db: Session, revocation_id: UUID) -> Tuple[ThemeRevocation, 
         raise RevocationAdminError(CONFLICT, FEED_ROW)
     if row.lifted_at is not None:
         return row, False
+    held = _held_deactivation(db, row)
+    if held is not None:
+        raise RevocationAdminError(CONFLICT, HOLDS_DEACTIVATION.format(theme_id=held.theme_id, version=held.version))
     row.lifted_at = _now()
     db.flush()
     return row, True

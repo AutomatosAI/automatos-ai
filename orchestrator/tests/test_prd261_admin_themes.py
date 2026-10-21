@@ -18,7 +18,8 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
   file that does not load reads ``invalid`` in the report (200) and the paste is a 503 with its
   plain message, nothing stored;
 * the reviewer's isolated-job note is stored and gates approval on the hosted edition;
-* reject needs a reason; deactivate writes a ``disable`` revocation of the digest;
+* reject needs a reason; deactivate writes a ``disable`` revocation of the digest, unless a live
+  ``local`` one stands (a pulled ``feed`` one doesn't: the feed may lift it);
 * every route refuses a non-admin, and a workspace's private upload is 404 here;
 * report-note, approve, deactivate and signature need a fresh step-up after the admin check
   (a non-admin gets the plain 403, never a reverification prompt); a ``pass`` note must carry
@@ -340,6 +341,24 @@ def test_deactivate_writes_a_disable_revocation(api):
     assert (revocation.level, revocation.created_by) == ("disable", ADMIN_PK)
     assert revocations.is_disabled(api.db, package)
     assert len(_events(api.db, package, "deactivated")) == 1
+
+
+def test_a_pulled_disable_does_not_stand_in_for_the_deactivations_own(api):
+    package = _package(api.db, status="approved")
+    api.db.add(ThemeRevocation(digest=package.digest, level="disable", reason="pulled", origin="feed"))
+    api.db.commit()
+    resp = api.client.post(f"{BASE}/{package.id}/deactivate", json={"reason": "reported: exfiltrates chat"})
+    assert resp.status_code == 200, resp.text
+    rows = api.db.query(ThemeRevocation).filter(ThemeRevocation.digest == package.digest).all()
+    assert sorted((row.origin, row.level, row.reason) for row in rows) == [
+        ("feed", "disable", "pulled"), ("local", "disable", "reported: exfiltrates chat"),
+    ]
+    # A live local disable does stand in: the next deactivation of that digest writes none.
+    again = _package(api.db, status="approved", theme_id="acme/ink-copy", digest="ef" * 32)
+    api.db.add(ThemeRevocation(digest=again.digest, level="disable", reason="written here"))
+    api.db.commit()
+    assert api.client.post(f"{BASE}/{again.id}/deactivate", json={"reason": "same files"}).status_code == 200
+    assert api.db.query(ThemeRevocation).filter(ThemeRevocation.digest == again.digest).count() == 1
 
 
 # --- signature ---------------------------------------------------------------------------
