@@ -74,7 +74,8 @@ LISTING = "/api/marketplace/themes/{listing_id}"
 C1_ROUTES = {
     ("POST", "/api/marketplace/themes/submit"),
     ("GET", "/api/marketplace/themes"), ("GET", LISTING), ("POST", LISTING + "/install"),
-    ("GET", "/api/admin/themes/pending"), ("GET", ADMIN + "/report"), ("POST", ADMIN + "/report-note"),
+    ("GET", "/api/admin/themes/pending"), ("GET", ADMIN + "/report"), ("GET", ADMIN + "/review-package"),
+    ("POST", ADMIN + "/report-note"),
     ("POST", ADMIN + "/approve"), ("POST", ADMIN + "/reject"), ("POST", ADMIN + "/deactivate"),
     ("POST", ADMIN + "/signature"),
 }
@@ -231,8 +232,9 @@ SAMPLES = {
     "POST /api/marketplace/themes/{listing_id}/install": "/api/marketplace/themes/acme.ink/install",
     "GET /api/admin/themes/pending": "/api/admin/themes/pending",
 }
-for tail in ("report", "report-note", "approve", "reject", "deactivate", "signature"):
-    method = "GET" if tail == "report" else "POST"
+READS = ("report", "review-package")  # the admin GETs; the other tails are POSTs
+for tail in READS + ("report-note", "approve", "reject", "deactivate", "signature"):
+    method = "GET" if tail in READS else "POST"
     SAMPLES[method + " /api/admin/themes/{package_id}/" + tail] = (
         "/api/admin/themes/00000000-0000-4000-8000-000000000000/" + tail)
 

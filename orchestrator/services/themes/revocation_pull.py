@@ -17,7 +17,8 @@ Automatos revokes falls back to its base here on the next load.
   new, its target, level and reason refreshed when it is already a feed row. It is lifted only by
   an explicit ``liftedAt`` and never un-lifted; a row absent from the feed stays as it is (never
   deleted); a row with ``origin`` 'local' is never written, even under a feed id. ``revokedKeys``
-  replaces ``theme_revocation_sync.revoked_key_ids``, which C-05c's signature check reads.
+  replaces ``theme_revocation_sync.revoked_key_ids``, which C-05c's signature check reads through
+  the one validated reader, ``revocation_sync_state.revoked_key_ids`` (as the sync status does).
 * **Fail closed.** Any failure (a refused URL, unreachable, a timeout, a status other than 200, a
   3xx, an encoded or oversize body, not JSON, a refused feed, a database error) rolls back every
   row change and records ``last_attempt_at`` and ``last_error`` (a plain sentence);
@@ -62,6 +63,7 @@ from services.themes.revocation_feed import (
     iso_time,
     parse_feed,
 )
+from services.themes.revocation_sync_state import revoked_key_ids
 
 logger = logging.getLogger(__name__)
 
@@ -294,9 +296,11 @@ def pull_feed(db: Session, client_factory: Optional[ClientFactory] = None) -> Pu
 
 
 def stored_revoked_keys(db: Session) -> List[str]:
-    """The revoked key ids the last successful pull stored (empty before one)."""
-    row = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
-    return [] if row is None else list(row.revoked_key_ids or [])
+    """The revoked key ids the last successful pull stored, sorted (empty before one, and in SaaS).
+
+    Read by ``revocation_sync_state.revoked_key_ids``, the one reader: only key ids count.
+    """
+    return sorted(revoked_key_ids(db))
 
 
 def is_stale(last_success_at: Optional[datetime], now: datetime) -> bool:

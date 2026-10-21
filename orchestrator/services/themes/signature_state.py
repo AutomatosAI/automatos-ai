@@ -20,7 +20,8 @@ A stored signature **fails** when:
 * the key that verifies it is in ``theme_revocation_sync.revoked_key_ids``: the keys the hosted
   revocation feed lists as revoked (``revokedKeys``), as the local edition's pull stores them
   (C-05h). That row is the local edition's own (the pull never runs in SaaS, where the revoked
-  keys are the keys file's), so only the local edition reads it.
+  keys are the keys file's), so only the local edition reads it, through the one validated
+  reader, ``revocation_sync_state.revoked_key_ids`` (re-exported here for this module's callers).
 
 Not a failure: no signature (an unsigned package reads nothing here and is untouched); a
 ``retired`` key's signature (still that key's, so the version keeps running; it is no longer
@@ -43,9 +44,9 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Hashable, NamedTuple, Optional, Sequence, Tuple
 
-from config import config
-from core.models.themes import THEME_REVOCATION_SYNC_ROW_ID, ThemePackage, ThemeRevocationSync
+from core.models.themes import ThemePackage
 from services.themes import signature_verify
+from services.themes.revocation_sync_state import revoked_key_ids
 
 logger = logging.getLogger(__name__)
 
@@ -99,26 +100,6 @@ _answers = _AnswerCache(SIGNATURE_CACHE_SIZE)
 def clear_cache() -> None:
     """Forget every cached answer (tests; a process restart does the same)."""
     _answers.clear()
-
-
-def revoked_key_ids(db: Any) -> FrozenSet[str]:
-    """The key ids the hosted feed lists as revoked, as the local edition's pull stored them; none in SaaS.
-
-    A stored value that isn't a list of key ids is logged; its string entries still count.
-    """
-    if not config.IS_LOCAL_EDITION:
-        return frozenset()
-    row = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
-    stored = None if row is None else row.revoked_key_ids
-    if stored is None:
-        return frozenset()
-    if not isinstance(stored, list):
-        logger.error("theme_revocation_sync.revoked_key_ids is not a list (%s): no key reads as revoked by the feed",
-                     type(stored).__name__)
-        return frozenset()
-    if any(not isinstance(key_id, str) for key_id in stored):
-        logger.error("theme_revocation_sync.revoked_key_ids holds entries that aren't key ids: only its key ids count")
-    return frozenset(key_id for key_id in stored if isinstance(key_id, str))
 
 
 def _keys_bytes() -> Optional[bytes]:

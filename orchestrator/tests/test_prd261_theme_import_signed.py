@@ -11,6 +11,9 @@ the RFC's published seeds, held in memory, make the signatures. Pins (plan §2.6
   unknown key, another key named, a malformed envelope are 400 ``SIGNATURE_BAD``; over 4 KB is 413;
   a keys file that does not load is 503; each stores no row and puts no file;
 * a non-admin may upload ``automatos/...`` with a verified envelope (201); without one the 403 stands;
+* in the local edition a key the hosted feed revoked (``theme_revocation_sync.revoked_key_ids``) is
+  400 ``SIGNATURE_BAD`` (``INACTIVE_KEY``) and reads ``invalid`` in the view and the installed list;
+  the hosted edition never reads that row;
 * QB-24's answer is one named constant; without the part the upload is what it was; the import
   route's body limit leaves room for the envelope.
 """
@@ -46,8 +49,8 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from config import config  # noqa: E402
 from core.models.themes import (  # noqa: E402
-    ThemeChoice, ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync,
-    ThemeWorkspaceSettings,
+    THEME_REVOCATION_SYNC_ROW_ID, ThemeChoice, ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation,
+    ThemeRevocationSync, ThemeWorkspaceSettings,
 )
 from services.themes import records, signed_upload, storage  # noqa: E402
 from services.themes import signature_verify as sv  # noqa: E402
@@ -162,6 +165,16 @@ def _installed(client):
     return {row["version"]: row for row in client.get(INSTALLED).json()["installs"]}
 
 
+def _feed_revokes(env, *key_ids):
+    """The single sync row as the local pull leaves it, with ``key_ids`` revoked by the hosted feed."""
+    session = env.sessions()
+    try:
+        session.merge(ThemeRevocationSync(id=THEME_REVOCATION_SYNC_ROW_ID, revoked_key_ids=list(key_ids)))
+        session.commit()
+    finally:
+        session.close()
+
+
 # --- a verified envelope --------------------------------------------------------------------
 
 
@@ -223,6 +236,33 @@ def test_a_signature_by_an_inactive_key_is_400_bad(env, status):
     response = _upload_signed(_client(env, _local_ctx(uuid4())), data, _envelope(data))
     _refused(response, 400, signed_upload.SIGNATURE_BAD, signed_upload.INACTIVE_KEY)
     _nothing_stored(env)
+
+
+def test_a_signature_by_a_key_the_hosted_feed_revoked_is_400_inactive_in_the_local_edition(env):
+    _feed_revokes(env, SIGNER["keyId"])
+    data = _hello()
+    response = _upload_signed(_client(env, _local_ctx(uuid4())), data, _envelope(data))
+    _refused(response, 400, signed_upload.SIGNATURE_BAD, signed_upload.INACTIVE_KEY)
+    _nothing_stored(env)
+
+
+def test_the_hosted_edition_never_reads_the_local_feed_row(env, monkeypatch):
+    _feed_revokes(env, SIGNER["keyId"])  # the local edition's own row: SaaS publishes the feed, never pulls it
+    workspace = uuid4()
+    _members(env, workspace, 1)
+    data = _hello()
+    response = _upload_signed(_saas(env, monkeypatch, workspace), data, _envelope(data))
+    assert response.status_code == 201, response.text
+    (row,) = _rows(env, ThemePackage)
+    assert row.signature == _envelope(data)["signature"]
+
+
+def test_the_installed_list_reads_a_key_the_hosted_feed_revoked_since_as_invalid(env):
+    data = _hello()
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload_signed(client, data, _envelope(data)).status_code == 201
+    _feed_revokes(env, SIGNER["keyId"])
+    assert _installed(client)["1.0.0"]["signature"] == {"state": "invalid", "keyId": SIGNER["keyId"]}
 
 
 def test_a_signature_no_key_in_the_file_verifies_is_400_bad(env):
@@ -352,12 +392,32 @@ def _stored(data, signature):
                         file_manifest=checked.file_manifest, signature=signature)
 
 
+def _view(env, package):
+    """``signature_view`` over a session of its own (it reads the keys the hosted feed revoked)."""
+    session = env.sessions()
+    try:
+        return signed_upload.signature_view(session, package)
+    finally:
+        session.close()
+
+
 def test_the_view_reads_a_retired_key_as_invalid_and_a_broken_keys_file_fails_closed(env):
     data = _hello()
     package = _stored(data, _envelope(data)["signature"])
-    assert signed_upload.signature_view(package) == {"state": "verified", "keyId": SIGNER["keyId"]}
+    assert _view(env, package) == {"state": "verified", "keyId": SIGNER["keyId"]}
     env.keys(_key_entry(SIGNER, status="retired"))
-    assert signed_upload.signature_view(package) == {"state": "invalid", "keyId": SIGNER["keyId"]}
+    assert _view(env, package) == {"state": "invalid", "keyId": SIGNER["keyId"]}
     env.keys(text="{schema")
-    assert signed_upload.signature_view(package) == {"state": "invalid", "keyId": None}
-    assert signed_upload.signature_view(_stored(data, None)) == {"state": "unsigned", "keyId": None}
+    assert _view(env, package) == {"state": "invalid", "keyId": None}
+    assert _view(env, _stored(data, None)) == {"state": "unsigned", "keyId": None}
+
+
+def test_the_view_reads_a_key_the_hosted_feed_revoked_as_invalid_in_the_local_edition_only(env, monkeypatch):
+    data = _hello()
+    package = _stored(data, _envelope(data)["signature"])
+    _feed_revokes(env, OTHER["keyId"])
+    assert _view(env, package) == {"state": "verified", "keyId": SIGNER["keyId"]}
+    _feed_revokes(env, SIGNER["keyId"])
+    assert _view(env, package) == {"state": "invalid", "keyId": SIGNER["keyId"]}
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")  # the row is the local edition's own
+    assert _view(env, package) == {"state": "verified", "keyId": SIGNER["keyId"]}

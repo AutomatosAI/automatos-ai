@@ -1,5 +1,5 @@
 {
-  "route_count": 945,
+  "route_count": 946,
   "routes": [
     {
       "method": "GET",
@@ -160,6 +160,10 @@
     {
       "method": "POST",
       "path": "/api/admin/themes/{package_id}/report-note"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/{package_id}/review-package"
     },
     {
       "method": "POST",

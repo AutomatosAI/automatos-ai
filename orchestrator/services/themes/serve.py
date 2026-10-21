@@ -15,11 +15,14 @@ with that digest:
   (``theme_opt_ins``, Q6).
 
 Two workspaces may hold the same digest, so the row is chosen by the digest and the caller's
-authorisation, never as "the one row with that digest". A live ``disable`` revocation
-(``revocations.py``) then serves nothing. ``theme.json`` is one of the hashed files, so every
-row with a digest has the same theme id and version, and a revocation (by digest, or by theme id
-and version range) covers all of them or none: the first authorised row's answer is final, and
-the same bytes are never served through a sibling row once revoked.
+authorisation, never as "the one row with that digest". A row a live ``disable`` covers
+(``revocations.is_disabled``) serves nothing, and the next authorised row is tried: the approved
+listing first, then the caller's installed rows. ``theme.json`` is one of the hashed files, so
+every row with a digest has the same theme id and version, and a stored revocation (by digest, or
+by theme id and version range) covers all of them or none: revoked bytes are never served through
+a sibling row. A signature disable (C-05c) is one row's own (its stored signature doesn't check
+out), so a Marketplace listing whose signature fails still leaves a workspace's own copy of the
+same bytes serving to its members (private code, so after their opt-in).
 
 Every file read is checked against the row's ``file_manifest``: the path must be listed, its
 stored bytes must hash to the listed sha256 (a mismatch is logged as tampering and serves
@@ -208,15 +211,21 @@ def _installed_rows(db: Any, membership: Membership, digest: str) -> List[Tuple[
 
 
 def authorised_package(db: Any, membership: Membership, digest: str) -> Optional[ThemePackage]:
-    """The package row the caller may load files of by ``digest``, or None (the route's 404)."""
+    """The package row the caller may load files of by ``digest``, or None (the route's 404).
+
+    The approved listing unless a ``disable`` covers it, else the first of the caller's installed
+    rows that may run and no ``disable`` covers (module docstring: a stored revocation covers
+    every row of the digest; a signature disable only its own row).
+    """
     if DIGEST_PATTERN.fullmatch(digest or "") is None:
         return None
     listing = _approved_listing(db, digest)
-    if listing is not None:
-        return None if is_disabled(db, listing) else listing
+    if listing is not None and not is_disabled(db, listing):
+        return listing
     for package, install in _installed_rows(db, membership, digest):
-        if belongs_to_install(install, package) and may_run(db, membership, install, package):
-            return None if is_disabled(db, package) else package
+        runs = belongs_to_install(install, package) and may_run(db, membership, install, package)
+        if runs and not is_disabled(db, package):
+            return package
     return None
 
 
