@@ -238,11 +238,19 @@ def build_feed(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
     moment = as_utc(now or datetime.now(timezone.utc)).replace(microsecond=0)
     listed = _listed(db)
     rows = [wire for wire in (_feed_row(row, listed) for row in _candidates(db, moment)) if wire is not None]
-    if len(rows) > FEED_MAX_ROWS:
-        logger.error("The revocation feed has %d rows, more than the %d a local edition reads",
-                     len(rows), FEED_MAX_ROWS)
     return {"schema": FEED_SCHEMA, "generatedAt": moment.isoformat(), "revocations": rows,
             "revokedKeys": revoked_key_ids()}
+
+
+def unreadable_size(feed: Mapping[str, Any], body: bytes) -> Optional[str]:
+    """Why every local edition's ``parse_feed`` would refuse this built feed for its size, or None:
+    ``body`` (``feed_bytes(feed)``) over ``THEME_REVOCATIONS_FEED_MAX_KB``, or over ``FEED_MAX_ROWS`` rows."""
+    limit = feed_max_bytes()
+    if len(body) > limit:
+        return TOO_LARGE.format(kb=limit // BYTES_PER_KB)
+    if len(feed["revocations"]) > FEED_MAX_ROWS:
+        return TOO_MANY
+    return None
 
 
 def feed_bytes(feed: Mapping[str, Any]) -> bytes:
@@ -382,5 +390,5 @@ __all__ = [
     "DEFAULT_FEED_MAX_KB", "DEFAULT_LIFTED_DAYS", "FEED_MAX_KB_SETTING", "FEED_MAX_ROWS", "FEED_REASON_MAX",
     "FEED_SCHEMA", "LIFTED_DAYS_SETTING", "Feed", "FeedError", "FeedRevocation", "as_utc", "build_feed",
     "etag_matches", "feed_bytes", "feed_etag", "feed_max_bytes", "iso_time", "lifted_days", "parse_feed",
-    "revoked_key_ids",
+    "revoked_key_ids", "unreadable_size",
 ]
