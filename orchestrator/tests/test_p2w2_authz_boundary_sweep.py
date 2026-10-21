@@ -10,7 +10,9 @@ route (POST/PUT/PATCH/DELETE) must be classified **exactly one** way:
     families by S3–S6);
 (b) super-admin-locked router-wide (the PRD-143 obs tier — classified, never
     relaxed);
-(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed);
+(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed), or
+    ``require_workspace_answerer``-gated (PRD-266 D16: the approval-grant verbs an
+    owner, admin or editor may take; revoke stays workspace-admin);
 (d) own non-hybrid auth (widget plane key auth, HMAC/secret webhooks, the
     Shopify machine lane) — enumerated explicitly, and structurally proven to
     NOT ride the shared hybrid dependency;
@@ -64,6 +66,11 @@ PUBLIC_BY_DESIGN = {
     # Verifies the Clerk JWT directly; the invitee may not be a member of any
     # workspace yet (api/team.py public_router, dossier §B).
     ("POST", "/api/team/accept-invitation"),
+    # PRD-266 §4.3 (AGENTS.md exception 1, approved 20 Oct 2026, #1253): a phone has no
+    # account yet, so the one-time code a workspace admin minted is its only credential.
+    # 404 unless AUTH_EDITION=local and LOCAL_REMOTE_ACCESS=paired; rate-limited per IP
+    # before the code is read (api/mobile_devices.py).
+    ("POST", "/api/v1/mobile/pair"),
 }
 
 # (d) Own non-hybrid auth. Structurally enforced below: none of these may
@@ -200,6 +207,19 @@ OWN_GATE_IN_HANDLER = {
     # armed creds, workspace toggle, cap, and a strict signed-in-user resolve
     # (403 "Live voice requires a signed-in user"); not a shared dependency.
     ("POST", "/api/voice/web-call"),
+    # PRD-266 §4.3 (api/mobile_devices.py): a device belongs to a PERSON, so no workspace
+    # permission or admin dependency fits. Each handler gates through ``_caller(db, ctx…)``
+    # (404 without a workspace, 403 when no person stands behind the caller), and
+    # services.mobile.devices confines the write to that person's devices in the caller's
+    # workspace: any other device, another workspace's included, is 404.
+    # register: device token or Clerk lane only (REGISTRAR_AUTH_TYPES, else 403); its own row.
+    ("POST", "/api/v1/mobile/devices"),
+    # update: the device's person only (devices._owned).
+    ("PATCH", "/api/v1/mobile/devices/{device_id}"),
+    # revoke: the device's person, or a workspace owner/admin (may_see_own_workspace_health).
+    ("DELETE", "/api/v1/mobile/devices/{device_id}"),
+    # rotate: the device lane on its own device, presenting its current token (else 404/409).
+    ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
 }
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
@@ -351,6 +371,8 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
             buckets.append("su-locked")
         if rec["wsadmin"]:
             buckets.append("workspace-admin")
+        if rec["wsanswer"]:
+            buckets.append("workspace-answerer")
         if key in OWN_AUTH_ROUTES:
             buckets.append("own-auth")
         if key in PUBLIC_BY_DESIGN:

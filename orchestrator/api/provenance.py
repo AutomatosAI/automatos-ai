@@ -26,7 +26,6 @@ sends along is ignored.
 """
 from __future__ import annotations
 
-import ipaddress
 import logging
 from typing import Any, Dict
 
@@ -38,15 +37,13 @@ from api.credentials import get_client_ip
 from api.widgets.rate_limit import RateLimitStore
 from config import config
 from core.database.database import get_db
+from core.security.ip_bucket import UNPARSABLE_BUCKET_SUFFIX, ip_rate_bucket
 from services.content_provenance import is_sha256_hex, provenance_answer
 
 PROVENANCE_ROUTE_PREFIX = "/api/public/provenance"
 PROVENANCE_WINDOW_SECONDS = 60
 RATE_BUCKET_PREFIX = "provenance:ip"
-# One IPv6 subscriber is usually handed a whole /64, so per-address buckets would let
-# them rotate addresses inside it; the bucket is the /64 instead.
-IPV6_BUCKET_PREFIX_LENGTH = 64
-UNPARSABLE_IP_BUCKET = f"{RATE_BUCKET_PREFIX}:unparsable"
+UNPARSABLE_IP_BUCKET = f"{RATE_BUCKET_PREFIX}:{UNPARSABLE_BUCKET_SUFFIX}"
 BAD_HASH_DETAIL = "Send the file's SHA-256 as 64 lower-case hex characters."
 RATE_LIMITED_DETAIL = "Too many checks from this address. Try again in a minute."
 LOOKUP_FAILED_DETAIL = "The check is unavailable right now. Try again in a minute."
@@ -71,19 +68,10 @@ def rate_bucket_for(request: Request) -> str:
     the first hop is the connecting address; on Railway this is unverified until a
     probe is run (docs/compliance/DETECTION.md, an owner decision). It is parsed as an
     IP so the Redis key and the fail-open log line only ever hold an address: anything else shares
-    ``UNPARSABLE_IP_BUCKET``. An IPv4-mapped IPv6 address counts as its IPv4 address.
+    ``UNPARSABLE_IP_BUCKET``. An IPv4-mapped IPv6 address counts as its IPv4 address. The rule
+    is ``core.security.ip_bucket``'s, shared with POST /api/v1/mobile/pair (PRD-266 K13).
     """
-    try:
-        address = ipaddress.ip_address(get_client_ip(request))
-    except ValueError:
-        return UNPARSABLE_IP_BUCKET
-    mapped = getattr(address, "ipv4_mapped", None)
-    if mapped is not None:
-        address = mapped
-    if address.version == 6:
-        network = ipaddress.IPv6Network((int(address), IPV6_BUCKET_PREFIX_LENGTH), strict=False)
-        return f"{RATE_BUCKET_PREFIX}:{network}"
-    return f"{RATE_BUCKET_PREFIX}:{address}"
+    return ip_rate_bucket(get_client_ip(request), RATE_BUCKET_PREFIX)
 
 
 def limit_checks_per_ip(request: Request) -> None:

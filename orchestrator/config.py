@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # Default tenant UUID for single-tenant deployments
 DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
+# The hosted product's API host: PUBLIC_API_HOST's default. A local install still on it
+# has not named its own host, so it never advertises this one (PRD-266 K15).
+HOSTED_PUBLIC_API_HOST = "api.automatos.app"
+
+# An unset publish address is this machine only, as compose's own default (PRD-266 §4.3).
+DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -2092,9 +2099,29 @@ class Config:
     # injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_API_HOST overrides it (the local
     # tunnel's domain, set in the compose override). No trailing slash.
     PUBLIC_API_HOST: str = (
-        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
-        or "api.automatos.app"
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", HOSTED_PUBLIC_API_HOST))
+        or HOSTED_PUBLIC_API_HOST
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-266 Automatos Go: pairing a phone (or a browser) with a local install
+    # =============================================================================
+    # LOCAL_REMOTE_ACCESS (local edition, §4.3): 'off' (the default) keeps the install on this
+    # machine; 'paired' opens POST /api/v1/mobile/pair and closes the anonymous lane; 'open'
+    # keeps it on a published install, warned at every boot. Boot refuses an unknown value and
+    # 'off' with a publish address beyond loopback (services/mobile/remote_access.py).
+    LOCAL_REMOTE_ACCESS: str = (os.getenv("LOCAL_REMOTE_ACCESS", "off") or "off").strip().lower()
+    # The addresses compose publishes the API and the web app on (docker-compose.yml passes
+    # both in), so the API knows whether it is reachable beyond this machine.
+    API_PUBLISH_ADDRESS: str = (os.getenv("API_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    WEB_PUBLISH_ADDRESS: str = (os.getenv("WEB_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    # A paired device is asked to rotate its token this many days after it was issued
+    # (``rotate_after`` in the pairing answer), at least one.
+    MOBILE_TOKEN_ROTATE_DAYS: int = max(1, int(os.getenv("MOBILE_TOKEN_ROTATE_DAYS", "30")))
+    # After a rotation the previous token keeps working this long (§4.2: ten minutes).
+    MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
+        0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
+    )
 
     # =============================================================================
     # PRD-251 Socials
@@ -2370,6 +2397,8 @@ class Config:
         - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
           workspace the auto-authenticated local session resolves to (W6 seeds it).
           It requires NO Clerk env.
+        - PRD-266 §4.3: a ``local`` install published beyond loopback needs
+          ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
@@ -2407,6 +2436,13 @@ class Config:
                     "local workspace the auto-authenticated local session resolves "
                     "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
                 )
+
+        # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
+        from services.mobile import remote_access
+        remote_access.enforce_boot_decision(self.AUTH_EDITION, self.LOCAL_REMOTE_ACCESS, {
+            "API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS,
+            "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS,
+        })
 
     def validate(self) -> bool:
         """

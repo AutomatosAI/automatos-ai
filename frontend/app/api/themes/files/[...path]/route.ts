@@ -8,8 +8,10 @@
  * the import map's integrity pins. So this handler is the one place their session is turned into
  * a backend call: in SaaS it reads the Clerk session (the middleware lets this path through to
  * here, `isPublicRoute`, so that signed out is a 401 from this handler and not Clerk's 404) and
- * sends its token as `Bearer`; in the local edition it sends none and the backend serves the
- * local operator. It is a same-origin file proxy, not the backend client, so it fetches directly.
+ * sends its token as `Bearer`; in the local edition it sends the paired browser's device token
+ * from its SameSite=Strict cookie when there is one (PRD-266 K8, lib/device-token.ts: a browser on
+ * an install in LOCAL_REMOTE_ACCESS=paired mode), and none otherwise, so the backend serves the
+ * local operator as before. It is a same-origin file proxy, not the backend client, so it fetches directly.
  *
  * Only a package digest and plain file-name segments reach the backend (F179, as
  * app/api/generated-images/[id]/route.ts does). `Range` and `If-None-Match` go forward, so a
@@ -20,6 +22,7 @@
 import { auth } from '@clerk/nextjs/server'
 
 import { isSaaS } from '@/lib/auth-edition'
+import { deviceAuthorizationFromCookies } from '@/lib/device-token'
 import { THEME_DIGEST_PATTERN, THEME_FILES_PATH } from '@/lib/theme-host/constants'
 
 export const dynamic = 'force-dynamic'
@@ -75,9 +78,9 @@ function backendFilePath(segments: readonly string[] | undefined): string | null
   return `${THEME_FILES_PATH}${digest}/${file.join('/')}`
 }
 
-/** SaaS: the Clerk session's token, or not ok when signed out. Local: no token at all. */
-async function backendCredential(): Promise<Credential> {
-  if (!isSaaS) return { ok: true, authorization: null }
+/** SaaS: the Clerk session's token, or not ok when signed out. Local: the device cookie's token, or none. */
+async function backendCredential(request: Request): Promise<Credential> {
+  if (!isSaaS) return { ok: true, authorization: deviceAuthorizationFromCookies(request.headers.get('cookie')) }
   try {
     const session = await auth()
     if (!session.userId) return { ok: false }
@@ -136,7 +139,7 @@ export async function GET(request: Request, { params }: RouteContext): Promise<R
   }
   const filePath = backendFilePath((await params).path)
   if (filePath === null) return refusal(404, REFUSAL_TEXT[404])
-  const credential = await backendCredential()
+  const credential = await backendCredential(request)
   if (!credential.ok) return refusal(401, REFUSAL_TEXT[401])
   try {
     const backend = await fetch(`${BACKEND_URL}${filePath}`, {

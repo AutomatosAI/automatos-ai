@@ -16,6 +16,8 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from core.auth.principal import claimed_user_pk
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,10 @@ def resolve_caller_int_id(db: Session, ctx: Any) -> Optional[int]:
     Deliberately not ``api.chat.get_user_id`` — that helper falls back to a
     default user for principal-less paths, and a fallback principal must
     never mint a call attributed to somebody. No user → no mint.
+
+    The local operator and a paired device (PRD-266) carry their PK on ``raw_claims``;
+    it is read by ``core.auth.principal.resolve_user_pk``'s own claim rule
+    (``claimed_user_pk``), so the anonymous local operator mints as itself (403 before).
     """
     user = getattr(ctx, "user", None)
     if user is None:
@@ -32,6 +38,9 @@ def resolve_caller_int_id(db: Session, ctx: Any) -> Optional[int]:
     uid = getattr(user, "id", None)
     if isinstance(uid, int):
         return uid
+    claimed = claimed_user_pk(ctx)
+    if claimed is not None:
+        return claimed
     clerk_uid = getattr(user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
     if not clerk_uid:
         return None

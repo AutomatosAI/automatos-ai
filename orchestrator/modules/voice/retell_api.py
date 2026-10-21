@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from types import MappingProxyType
+from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import quote
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+# PRD-266 (lead, 21 Oct): the mint stays on /v2. A call minted through /v3 sends no
+# transcript or talking events, which the phone's Auto Live needs.
 RETELL_CREATE_WEB_CALL_URL = "https://api.retellai.com/v2/create-web-call"
 # PRD-258 US-002: read one call back (its ``latency`` block) when the
 # ``call_analyzed`` webhook arrives without one.
@@ -110,10 +113,49 @@ class RetellApiError(Exception):
     """Retell refused or failed the call-creation request."""
 
 
+# PRD-266 D32: the fields a native client joins a call with, each with the type Retell
+# documents. They pass through the mint only when Retell returns them: v3's connection
+# details carry transport, ice_servers and expires_at; the v2 call object carries none.
+RETELL_TRANSPORT_FIELD_TYPES: Mapping[str, type] = MappingProxyType({
+    "transport": str,
+    "url": str,
+    "ice_servers": list,
+    "expires_at": int,
+})
+
+
 @dataclass(frozen=True)
 class RetellWebCall:
+    """A minted web call: its id, its ~30s access token and, when Retell returned them,
+    its transport fields (nothing else of Retell's response is kept)."""
+
     call_id: str
     access_token: str
+    transport: Optional[str] = None
+    url: Optional[str] = None
+    ice_servers: Optional[List[Dict[str, Any]]] = None
+    expires_at: Optional[int] = None
+
+    def transport_fields(self) -> Dict[str, Any]:
+        """The transport fields Retell returned, by name; an absent one is left out."""
+        values = {name: getattr(self, name) for name in RETELL_TRANSPORT_FIELD_TYPES}
+        return {name: value for name, value in values.items() if value is not None}
+
+
+def _transport_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Retell's transport fields from a create-web-call body, each present and of its
+    documented type. One of another type is dropped and logged by name and type, never
+    by value (ICE servers carry TURN credentials)."""
+    fields: Dict[str, Any] = {}
+    for name, kind in RETELL_TRANSPORT_FIELD_TYPES.items():
+        value = data.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, kind):
+            logger.warning("voice_live_retell_field_dropped field=%s type=%s", name, type(value).__name__)
+            continue
+        fields[name] = list(value) if isinstance(value, list) else value
+    return fields
 
 
 def build_web_call_payload(
@@ -233,7 +275,8 @@ async def update_agent(api_key: str, agent_id: str, settings: Dict[str, Any]) ->
 
 
 async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCall:
-    """POST create-web-call; returns the short-lived token + call id.
+    """POST create-web-call; returns the short-lived token + call id, and Retell's
+    transport fields when it sent them (PRD-266 D32).
 
     Raises ``RetellApiError`` with an operator-honest (never key-leaking)
     message on any refusal — the mint route turns that into a 502.
@@ -261,7 +304,7 @@ async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCal
     access_token = data.get("access_token")
     if not call_id or not access_token:
         raise RetellApiError("Retell response missing call_id/access_token")
-    return RetellWebCall(call_id=str(call_id), access_token=str(access_token))
+    return RetellWebCall(call_id=str(call_id), access_token=str(access_token), **_transport_fields(data))
 
 
 async def get_call(api_key: str, call_id: str) -> Dict[str, Any]:

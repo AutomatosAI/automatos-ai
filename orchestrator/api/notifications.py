@@ -35,8 +35,10 @@ from core.auth.hybrid import (
     DEFAULT_NOTIFICATION_PREFERENCES,
     get_request_context_hybrid,
 )
+# PRD-266: the request's integer users.id comes from the ONE resolver (a paired
+# device resolves too); bound to the old name so the call sites are untouched.
+from core.auth.principal import resolve_user_pk as _resolve_user_id
 from core.database.database import get_db
-from core.models.core import User as UserModel
 from core.services.notification_dispatcher import VALID_EVENT_TYPES
 
 logger = logging.getLogger(__name__)
@@ -99,31 +101,6 @@ class ReadAllResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _resolve_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
-    """
-    Resolve the current request's integer ``users.id`` (or ``None`` when the
-    caller cannot be mapped to a DB user — e.g. API key auth).
-
-    Matches first by ``clerk_user_id`` then by ``email``; mirrors the pattern
-    used in ``api/workflow_recipes.py``.
-    """
-    if not ctx.user or not ctx.user.id:
-        return None
-
-    user = (
-        db.query(UserModel)
-        .filter(UserModel.clerk_user_id == ctx.user.id)
-        .first()
-    )
-    if not user and ctx.user.email:
-        user = (
-            db.query(UserModel)
-            .filter(UserModel.email == ctx.user.email)
-            .first()
-        )
-    return user.id if user else None
 
 
 def _row_to_model(row: Any) -> NotificationRow:

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.workspace_admin import may_see_own_workspace_health
+from core.auth.workspace_admin import may_answer_workspace_questions
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from pydantic import BaseModel
@@ -317,7 +317,7 @@ def get_activity_stats(
     """
     try:
         svc = ActivityService(db, ctx.workspace_id)
-        return svc.get_stats(period=period, may_answer=may_see_own_workspace_health(db, ctx))
+        return svc.get_stats(period=period, may_answer=may_answer_workspace_questions(db, ctx))
     except Exception as e:
         logger.error("Activity stats error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch activity stats") from e
@@ -334,13 +334,13 @@ def get_needs_you(
     """PRD-252 R5: the one Needs-you number and the rows behind it.
 
     The Board tab badge, ATTENTION and Auto's pill show ``total``; the Needs
-    you widget lists ``rows``. Questions and approval grants count only for a
-    workspace admin, who alone can answer them. A failure is a 503 with a
+    you widget lists ``rows``. Questions and approval grants count only for an
+    owner, admin or editor, who can answer them (PRD-266 D16). A failure is a 503 with a
     message, never "nothing needs you" (F207). It has no period (F246): what
     waits for the owner waits until it is dealt with.
     """
     try:
-        return needs_you(db, ctx.workspace_id, may_answer=may_see_own_workspace_health(db, ctx))
+        return needs_you(db, ctx.workspace_id, may_answer=may_answer_workspace_questions(db, ctx))
     except Exception as e:
         logger.exception("Needs-you read failed for workspace %s", ctx.workspace_id)
         raise HTTPException(status_code=503, detail=NEEDS_YOU_NOT_LOADED) from e

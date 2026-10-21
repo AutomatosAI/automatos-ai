@@ -247,11 +247,28 @@ def assign_plan(
 # --------------------------------------------------------------------------- #
 
 
+def _tier_or_entry(plan: Optional[str], tiers: Optional[dict] = None) -> dict:
+    """The tier config for ``plan``; an unknown or empty plan is the entry tier (``basic``)."""
+    resolved = _tiers(tiers)
+    return resolved.get(plan) or resolved.get("basic") or {}
+
+
 def enabled_families(plan: str, tiers: Optional[dict] = None) -> dict:
     """The capability families enabled for ``plan`` (unknown plan ⇒ entry tier)."""
-    resolved = _tiers(tiers)
-    tier = resolved.get(plan) or resolved.get("basic") or {}
-    return dict(tier.get("families") or {})
+    return dict(_tier_or_entry(plan, tiers).get("families") or {})
+
+
+def family_enabled(plan: Optional[str], family: str, tiers: Optional[dict] = None) -> bool:
+    """Whether a workspace on ``plan`` has capability ``family``, by :func:`exposure_for_plan`'s
+    rules: a KNOWN tier that declares no ``families`` policy (``enterprise`` today) is
+    unrestricted, as the nav and tool layers treat it (RVW-5); an unknown or empty plan is the
+    entry tier; a declaring tier has only the families it sets true. PRD-266 D34 gates the
+    voice mint on ``voice``.
+    """
+    families = _tier_or_entry(plan, tiers).get("families")
+    if not isinstance(families, dict):
+        return True
+    return bool(families.get(family))
 
 
 def _nav_exposure(families: dict, declares_families: bool = True) -> dict:

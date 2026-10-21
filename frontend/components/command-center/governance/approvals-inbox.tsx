@@ -5,8 +5,9 @@
  *
  * The front door for durable approval grants: pending grants first (subject,
  * tool, risk tier, Art.14 oversight rationale, estimated cost, requested/expires),
- * decided grants below with a status filter. Grant / Deny / Revoke call the
- * ws-admin-gated API (PRD-196 S2) and optimistically refresh on decision.
+ * decided grants below with a status filter. Grant / Deny call the API gated to
+ * owners, admins and editors (PRD-266 D16; a viewer's 403 says so plainly),
+ * Revoke the ws-admin-gated one (PRD-196 S2); each refreshes on decision.
  *
  * Reuses the approval cards' oversight presentation (OversightNote: the tier
  * label + the Art.14 note) rather than forking a rival card.
@@ -32,11 +33,13 @@ import {
 } from '@/hooks/use-missions-api'
 import type { ApprovalGrant } from '@/lib/api-client'
 import { ownerLine } from '@/lib/grant-owner'
+import { grantsLoadErrorLine } from '@/lib/grant-refusal'
 import { executedOutcomeLine, executedResultOf, refusedClickLine } from '@/lib/grant-outcome'
 import type { MissionResponse } from '@/types/missions'
 
 const PENDING = 'pending'
 const DECIDED_STATUSES = ['granted', 'denied', 'revoked', 'expired'] as const
+const LOAD_ERROR = 'Could not load approvals.'
 
 function whenLabel(iso: string | null): string {
   if (!iso) return '—'
@@ -280,7 +283,7 @@ function MissionApprovalCard({ mission }: { mission: MissionResponse }) {
 }
 
 export function ApprovalsInbox() {
-  const { data, isLoading, isError } = useApprovalGrants()
+  const { data, isLoading, isError, error } = useApprovalGrants()
   // PRD-200 S3: parked missions are the second pending source (client-composed
   // from the existing state-filtered list — Q4, no new route). A missions-query
   // failure must not blank the grants inbox, so it defaults to empty rather than
@@ -307,7 +310,7 @@ export function ApprovalsInbox() {
     return <p className="text-sm text-muted-foreground p-3">Loading approvals…</p>
   }
   if (isError) {
-    return <p className="text-sm text-muted-foreground p-3">Could not load approvals. You may not be a workspace admin.</p>
+    return <p className="text-sm text-muted-foreground p-3">{grantsLoadErrorLine(error, LOAD_ERROR)}</p>
   }
 
   return (

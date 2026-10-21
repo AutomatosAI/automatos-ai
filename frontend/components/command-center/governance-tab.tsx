@@ -4,8 +4,10 @@
  * GovernanceTab — PRD-196 (P2-15). The single Command Centre pillar for
  * governance: Approvals · Audit · Policy · Compliance.
  *
- * The whole tab is workspace-admin-only (every endpoint it calls is gated by
- * the canonical `require_workspace_admin`, PRD-185 S12 / PRD-196 S2). This is
+ * The tab is workspace-admin-only (its endpoints are gated by the canonical
+ * `require_workspace_admin`, PRD-185 S12 / PRD-196 S2) but Approvals, whose
+ * list, grant and deny answer editors too (`require_workspace_answerer`,
+ * PRD-266 D16; revoke stays admin-only). This is
  * the human surface for the durable-grant machinery, the audit log, the policy
  * posture/budget, and GDPR self-service that were previously API-only.
  *

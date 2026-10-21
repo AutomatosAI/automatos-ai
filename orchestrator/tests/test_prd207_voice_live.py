@@ -1211,10 +1211,9 @@ def _first_socket_of_call(monkeypatch) -> None:
 def _ws_db(minted: bool):
     from contextlib import contextmanager
 
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = (
-        (1,) if minted else None
-    )
+    db = MagicMock()  # a live call (PRD-266 US-008b): it opens (.first()) and every turn speaks (.scalar())
+    db.query.return_value.filter.return_value.first.return_value = ("minted",) if minted else None
+    db.query.return_value.filter.return_value.scalar.return_value = "started"
 
     @contextmanager
     def fake_session():
@@ -1268,7 +1267,7 @@ def test_ws_superseded_call_closes_without_speaking(monkeypatch):
     db = MagicMock()
     # open-time minted check (.first()) passes; the per-turn status check
     # (.scalar()) reports this call was superseded by a newer mint.
-    db.query.return_value.filter.return_value.first.return_value = (1,)
+    db.query.return_value.filter.return_value.first.return_value = ("minted",)
     db.query.return_value.filter.return_value.scalar.return_value = "superseded"
 
     @contextmanager

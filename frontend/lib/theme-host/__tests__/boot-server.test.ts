@@ -154,6 +154,17 @@ describe('PRD-261 A-08c — the installed theme boot, fetched on the server', ()
     expect(logged).not.toHaveBeenCalled()
   })
 
+  it("PRD-266 K8: a paired install's 401 device_pairing_required paints the base boot, nothing logged or kept", async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const cache: InstalledBootDeps['cache'] = new Map()
+    const refusal = () => json({ detail: { code: 'device_pairing_required', message: 'Pair this browser.' } }, 401)
+    const local = { caller: async () => caller('local-operator', null), cache }
+    const installed = createInstalledBootResolver(deps(answering(refusal), local))
+    expect(await createThemeBootResolver(NO_COOKIES, installed)(INSTALL_STYLE)).toEqual(baseThemeBoot(INSTALL_STYLE))
+    expect(cache.size).toBe(0)
+    expect(logged).not.toHaveBeenCalled()
+  })
+
   it('asks nothing when signed out or when the session has no token', async () => {
     const fetchBoot = answering(() => json(runningBoot()))
     expect(await createInstalledBootResolver(deps(fetchBoot, { caller: async () => null }))(INSTALL_STYLE)).toEqual(

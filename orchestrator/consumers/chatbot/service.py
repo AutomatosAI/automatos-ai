@@ -22,7 +22,7 @@ from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, or_
 
 # Converged tool-loop spine — chat + agent share this (PRD-142 W3-S4 / G6)
 from modules.tools.execution.tool_loop import (
@@ -45,6 +45,7 @@ from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8
 from consumers.chatbot.atom_prompt import (
     atom_memory_block, atom_system_prompt, resolve_atom_attachments, todays_line_off_loop,
 )
+from consumers.chatbot.chat_history import history_page  # PRD-266 US-007b: the paged chat list
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
@@ -310,22 +311,16 @@ class ChatService:
         self,
         user_id: int,
         limit: int = 20,
-        starting_after: Optional[datetime] = None,
+        starting_after: Optional[str] = None,
         workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user within a workspace.
+        """Get chat history for a user within a workspace (``consumers.chatbot.chat_history``).
 
-        Ordered by most recent activity (``updated_at`` — bumped on every
-        ``save_message``), not creation time, so a thread that just received a
-        message surfaces first (PRD-220 S2). ``starting_after`` pages on the
-        same key.
+        Ordered by most recent activity (PRD-220 S2). ``starting_after`` is a chat id
+        (PRD-266 US-007b): the chats after it in that order; ``ChatCursorNotFound``
+        when it is not this user's chat in this workspace.
         """
-        query = self.db.query(Chat).filter(Chat.user_id == user_id)
-        if workspace_id is not None:
-            query = query.filter(Chat.workspace_id == workspace_id)
-        if starting_after:
-            query = query.filter(Chat.updated_at < starting_after)
-        return query.order_by(desc(Chat.updated_at)).limit(limit).all()
+        return history_page(self.db, user_id, limit, starting_after, workspace_id)
 
     def update_chat_title(self, chat_id: str, title: str) -> bool:
         """Update chat title, handling unique constraint violations."""

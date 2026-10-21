@@ -248,6 +248,75 @@ Tokens per session are recorded on the ticket and in Analytics as
 figure to invent. The full reference is the
 [self-hosting guide](docs/getting-started/self-hosting.md#session-mode--your-own-claude-code-sessions-managed-prd-234).
 
+## Reach your install from your phone (optional)
+
+Automatos Go, the phone app, and browsers on other machines can use a local
+install once it has an https address and every device proves who it is. With
+`LOCAL_REMOTE_ACCESS=paired` a request with no credential is refused
+(`401 device_pairing_required`), from the browser on this machine too: each phone
+and each browser pairs once, with a one-time code. Turn that on before the
+install is reachable, then put TLS in front.
+
+1. **Turn on paired mode and give the stack its public addresses**: two https
+   addresses, one for the web app and one for the API (below, Caddy's
+   `studio.example.com` and `api.example.com`). In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://api.example.com
+   NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+   ```
+   and in `envs/api.local` (`.env` reaches only the variables compose names; this
+   file reaches every backend setting):
+   ```bash
+   PUBLIC_API_HOST=api.example.com
+   FRONTEND_URL=https://studio.example.com
+   CORS_ALLOW_ORIGINS=https://studio.example.com,http://localhost:3000
+   ```
+   A phone is handed the API as `https://<PUBLIC_API_HOST>`. When the proxy will
+   run on another machine, also publish the API and the web app, and only those:
+   `API_PUBLISH_ADDRESS=0.0.0.0` and `WEB_PUBLISH_ADDRESS=0.0.0.0` in `.env`.
+   Leave `BIND_ADDRESS` unset, so Postgres, Redis, MinIO and the other datastores
+   stay on `127.0.0.1`. Then `make up`: it builds the web app here, because its
+   API address changed.
+2. **Put TLS in front:**
+   - **Caddy** on this machine, with both DNS names pointing at it (it fetches
+     the certificates itself):
+     ```
+     studio.example.com {
+         reverse_proxy 127.0.0.1:3000
+     }
+     api.example.com {
+         reverse_proxy 127.0.0.1:8000
+     }
+     ```
+   - **Tailscale**, for devices on your tailnet only: `tailscale serve --bg 3000`
+     serves the web app at `https://<machine>.<tailnet>.ts.net`, and
+     `tailscale serve --bg --https=8443 8000` the API on port 8443. In step 1
+     the web address is then `https://<machine>.<tailnet>.ts.net` and
+     `PUBLIC_API_HOST` is `<machine>.<tailnet>.ts.net:8443`.
+
+   A proxy on this machine reaches the ports on `127.0.0.1`, so nothing more is
+   published.
+3. **Mint the first code on the server** and type it into *Pair this browser*,
+   which every unpaired browser now shows in place of the app:
+   ```bash
+   docker compose exec backend python -m scripts.mint_pairing_code
+   ```
+   It prints the code (it works once, for ten minutes) and its pairing link.
+4. **Pair phones from Studio.** **Settings → Phones & devices → Get a pairing
+   code** shows a code, its ten-minute countdown and the pairing link; enter the
+   code in Automatos Go. Another browser opens the web address and enters a code
+   minted there. The same page lists every paired device, with Revoke.
+
+**An install that already set `BIND_ADDRESS=0.0.0.0`** publishes the API and the
+web app beyond this machine, so while `LOCAL_REMOTE_ACCESS` is unset (`off`) the
+backend refuses to start, and `docker compose logs backend` says why and names the
+fix: `LOCAL_REMOTE_ACCESS=paired` (above); `LOCAL_REMOTE_ACCESS=open`, which keeps
+the old behaviour (whoever reaches the install is its operator) and logs a warning
+at every boot; or removing `BIND_ADDRESS`, which keeps the install on this machine.
+A tunnel or proxy on this machine is invisible to that check, so behind one run
+`paired`. Details: [self-hosting guide → Network exposure](docs/getting-started/self-hosting.md#network-exposure-bind_address).
+
 ## What does *not* work out of the box
 
 - **AI features need a model key** (above) — without one, agents and chat have

@@ -49,6 +49,10 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # #848: guessing a pairing code (8 characters, 10 minutes) once session mode is reachable
     # beyond loopback, e.g. through a cluster's ingress. One bucket for the instance.
     "cli_host_pair":   config.rate_limit_for("cli_host_pair", 10, 600),     # 10 pairing attempts per 10 minutes
+    # PRD-266 K13: the public POST /api/v1/mobile/pair, one bucket per client IP (an IPv6 /64),
+    # counted off the event loop by api/mobile_devices.py through RateLimitStore (the provenance
+    # pattern). Per IP only: an instance-wide bucket would let one caller block pairing for everyone.
+    "mobile_pair_ip":  config.rate_limit_for("mobile_pair_ip", 10, 600),    # 10 pairing attempts per IP per 10 minutes
 }
 
 

@@ -834,7 +834,7 @@ async def backfill_params(
     Admin-only endpoint. Accepts API key auth without requiring workspace context
     (parameter backfill is a global operation, not workspace-scoped).
     """
-    from core.auth.hybrid import _get_api_key
+    from core.auth.bearer_registry import api_key as _get_api_key
     provided_key = _get_api_key(request)
     expected = config.ORCHESTRATOR_API_KEY
     if not provided_key or not expected or not hmac.compare_digest(provided_key, expected):

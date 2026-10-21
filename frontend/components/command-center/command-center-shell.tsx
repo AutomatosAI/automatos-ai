@@ -67,7 +67,8 @@ const TABS: { key: TabKey; label: string }[] = [
   // cascade behind it. The badge is a live count of open questions.
   { key: 'questions', label: 'Questions' },
   // PRD-196 (P2-15): the governance pillar (Approvals · Audit · Policy ·
-  // Compliance), ws-admin-only. The human surface for the policy plane.
+  // Compliance), ws-admin-only but Approvals, which editors answer too
+  // (PRD-266 D16). The human surface for the policy plane.
   { key: 'governance', label: 'Governance' },
 ]
 

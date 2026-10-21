@@ -4,9 +4,10 @@
  * The single front door for the durable approval grants that gate board tasks,
  * playbook runs, and (future) scheduled/webhook agents — AND, since PRD-225, the
  * question-kind asks. Reads `GET /api/v1/approval-grants?status=&kind=` and
- * drives the grant / deny / revoke / answer verbs — all ws-admin gated by
- * PRD-196 S2. A decision invalidates the list so the surface refreshes
- * optimistically.
+ * drives the grant / deny / revoke / answer verbs. The list and grant / deny /
+ * answer answer owners, admins and editors (PRD-266 D16), revoke only admins
+ * (PRD-196 S2); a refused call is a 403 the surfaces read (lib/grant-refusal.ts).
+ * A decision invalidates the list so the surface refreshes optimistically.
  *
  * PRD-225 consolidation (house rule: no duplicate hooks): the former
  * `use-approval-grants-api.ts` (a second useGrantApproval/useDenyApproval pair)
