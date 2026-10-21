@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
+from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from core.auth.hybrid import get_request_context_hybrid
@@ -430,31 +431,22 @@ async def stream_chat(
 @router.get("/history")
 def get_chat_history(
     limit: int = 20,
+    starting_after: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get chat history for the current user within their workspace"""
+    """Get chat history for the current user within their workspace.
+
+    ``starting_after`` (PRD-266 US-007b): a chat id; the page after it, 404 when not the caller's."""
     chat_service = ChatService(db)
     user_id = get_user_id(db, ctx)
-
-    chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
+    try:
+        chats = chat_service.get_chat_history(
+            user_id=user_id, limit=limit, starting_after=starting_after, workspace_id=ctx.workspace_id)
+    except ChatCursorNotFound:
+        raise HTTPException(status_code=404, detail="Chat not found") from None
     previews = _last_message_previews(db, [str(chat.id) for chat in chats])
-
-    return [
-        {
-            "id": str(chat.id),
-            "userId": chat.user_id,
-            "title": chat.title,
-            "createdAt": utc_iso(chat.created_at),
-            "updatedAt": utc_iso(chat.updated_at),
-            "visibility": chat.visibility,
-            "lastContext": chat.last_context,
-            "lastMessagePreview": previews.get(str(chat.id)),
-            # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
-            "kind": chat.kind,
-        }
-        for chat in chats
-    ]
+    return [history_row(chat, previews.get(str(chat.id))) for chat in chats]
 
 
 # ---------------------------------------------------------------------------
