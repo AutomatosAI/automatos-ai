@@ -5,7 +5,7 @@ PRD-21: API endpoints for database knowledge source management
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, status
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -36,6 +36,8 @@ from core.auth.dependencies import RequestContext
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
+
+TRAINING_EXAMPLE_NOT_FOUND_DETAIL = "Training example not found"
 
 # Initialize services
 db_service = None
@@ -885,7 +887,10 @@ async def update_training_example(
     ).first()
 
     if not example:
-        raise HTTPException(status_code=404, detail="Training example not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=TRAINING_EXAMPLE_NOT_FOUND_DETAIL,
+        )
 
     if "question" in body:
         example.question = body["question"]
@@ -923,7 +928,10 @@ async def verify_training_example(
     ).first()
 
     if not example:
-        raise HTTPException(status_code=404, detail="Training example not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=TRAINING_EXAMPLE_NOT_FOUND_DETAIL,
+        )
 
     store = SQLExampleStore(db_session=db)
     await store.mark_verified(example_id, str(ctx.workspace_id))
@@ -949,7 +957,10 @@ async def delete_training_example(
     ).first()
 
     if not example:
-        raise HTTPException(status_code=404, detail="Training example not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=TRAINING_EXAMPLE_NOT_FOUND_DETAIL,
+        )
 
     store = SQLExampleStore(db_session=db)
     await store.delete_example(example_id, str(ctx.workspace_id))
