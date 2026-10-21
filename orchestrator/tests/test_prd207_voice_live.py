@@ -1211,12 +1211,8 @@ def _first_socket_of_call(monkeypatch) -> None:
 def _ws_db(minted: bool):
     from contextlib import contextmanager
 
-    db = MagicMock()
-    # A minted call is live (PRD-266 US-008b): its status opens the socket
-    # (.first()) and lets every turn speak (the per-turn .scalar() re-read).
-    db.query.return_value.filter.return_value.first.return_value = (
-        ("minted",) if minted else None
-    )
+    db = MagicMock()  # a live call (PRD-266 US-008b): it opens (.first()) and every turn speaks (.scalar())
+    db.query.return_value.filter.return_value.first.return_value = ("minted",) if minted else None
     db.query.return_value.filter.return_value.scalar.return_value = "started"
 
     @contextmanager
