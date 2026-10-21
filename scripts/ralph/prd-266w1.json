@@ -331,6 +331,24 @@
       "priority": 16,
       "passes": false,
       "notes": "Seams (measured 20 Oct on b5628af98 (origin/main 630fc1c85 + the PRD commit); line numbers drift: RE-VERIFY every anchor by grep): api/voice_retell.py:611 retell_llm_websocket (20 code lines; :641-648 the superseded → 4409 branch), :586 _call_status; modules/voice/live_socket.py:60 CALL_STATUS_SUPERSEDED, :224-229 the per-turn superseded check; modules/voice/call_events.py:130 _apply_ended (status 'ended' if started else 'failed'), :149 apply_call_event. A foreground code review is required before the commit (an unauthenticated socket's credential)."
+    },
+    {
+      "id": "W1-DRIFT-1",
+      "prdStory": "PRD-261 PA-18 guardrail",
+      "priority": 17,
+      "passes": false,
+      "title": "services/themes/data/core-pages.json regenerated for this wave's frontend page changes (the PRD-261 core-pages drift guard)",
+      "description": "W1 edits core frontend pages (pair-browser gate, Phones & devices, api-client); PRD-261's drift guard fails CI unless core-pages.json is regenerated (W3 hit it on 21 Oct).",
+      "acceptanceCriteria": [
+        "From the worktree root, run the guard's own generator with a bare python3 (nothing installed): `python3 orchestrator/tests/test_prd261_core_pages_drift.py --write`; commit the regenerated orchestrator/services/themes/data/core-pages.json (signed, ' [skip ci]')",
+        "git diff of core-pages.json changes ONLY the hashes of PAGE_SOURCES files this wave edited (list them in the commit body); if an unrelated page's hash changes, stop and say so (it means the base moved)",
+        "orchestrator/tests/test_prd261_core_pages_drift.py itself is NOT edited (PLAY's guardrail)",
+        "Run it AFTER every other story in this wave is DONE, so the hashes match the final frontend; if a later fix story edits a core page again, re-run it"
+      ],
+      "files": [
+        "orchestrator/services/themes/data/core-pages.json"
+      ],
+      "notes": "Lead, 21 Oct. Found when PRD-266 W3's review fix edited the Command Center schedule widget and CI's shard 3 failed test_core_pages_json_matches_the_checkout and test_the_reader_returns_the_committed_hashes."
     }
   ]
 }
