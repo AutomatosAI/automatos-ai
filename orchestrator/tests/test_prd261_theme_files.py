@@ -19,6 +19,9 @@ Pinned (plan §2.6 A-08a):
 * tampered stored bytes → 404 and a logged error; ``Service-Worker: script`` → 403;
 * the integrity value is the base64 form of the stored hex; a ``disable`` revocation → 404 and
   the base boot; the local edition's operator counts as owner of every workspace;
+* W-C3 seam fix A: a disabled row gives way to the caller's next authorised row of the digest, so a
+  listing whose signature fails (C-05c, its own row) leaves a workspace's own copy of the same
+  bytes serving, while a stored ``disable`` of the digest still covers every row;
 * PRD-261 W-A6b (gap G1): the boot of a theme that runs carries its registry entry from
   ``theme.json`` (``entry``); the base boot's is null.
 * PRD-261 W-A6b (gap G2): the boot of a theme that runs names where its stored look is
@@ -63,8 +66,10 @@ from config import config  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.themes import ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation  # noqa: E402
-from services.themes import serve  # noqa: E402
+from core.models.themes import (  # noqa: E402
+    ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync,
+)
+from services.themes import serve, signature_state, signature_verify  # noqa: E402
 from services.themes.package import read_theme_package  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
@@ -82,7 +87,11 @@ RAW_TABLES = (
     "CREATE TABLE workspaces (id VARCHAR PRIMARY KEY, owner_id INTEGER, paused_at TIMESTAMP, deleted_at TIMESTAMP)",
     "CREATE TABLE workspace_members (workspace_id VARCHAR, user_id INTEGER, role VARCHAR, is_active BOOLEAN)",
 )
-THEME_TABLES = [model.__table__ for model in (ThemePackage, ThemeInstallation, ThemeOptIn, ThemeRevocation)]
+THEME_TABLES = [model.__table__ for model in (
+    ThemePackage, ThemeInstallation, ThemeOptIn, ThemeRevocation, ThemeRevocationSync,
+)]
+NO_ONES_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")  # 64 bytes no key signed
+LONG_AGO = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module")
@@ -435,6 +444,44 @@ def test_a_disable_revocation_is_404_and_the_base_boot_and_a_warn_still_serves(w
     world.db.commit()
     assert _file(world, _person("alice")).status_code == 404
     assert _boot(world, _person("alice"), install.id).json()["addClasses"] == ["studio"]
+
+
+@pytest.fixture
+def no_signing_keys(monkeypatch, tmp_path):
+    """A keys file holding no key, so every stored signature fails on load (C-05c)."""
+    keys = tmp_path / "signing-keys.json"
+    keys.write_text(json.dumps({"schema": 1, "keys": []}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", keys)
+    signature_state.clear_cache()
+    yield
+    signature_state.clear_cache()
+
+
+def _listing_whose_signature_fails(world) -> ThemePackage:
+    listing = _row(world, "marketplace", status="approved", reviewed=True)
+    listing.signature = NO_ONES_SIGNATURE
+    world.db.commit()
+    return listing
+
+
+def test_a_listing_whose_signature_fails_leaves_a_workspaces_own_copy_serving(world, no_signing_keys):
+    _listing_whose_signature_fails(world)
+    assert _file(world, _person("bob")).status_code == 404  # the listing itself serves nobody
+    _private(world, TEAM)  # Alice's team holds its own private copy of the same bytes; she opted in
+    assert _file(world, _person("alice")).status_code == 200
+    assert _file(world, _person("bob")).status_code == 404
+    world.db.add(ThemeRevocation(digest=world.package.digest, level="disable", reason="bad bytes"))
+    world.db.commit()
+    assert _file(world, _person("alice")).status_code == 404  # a stored disable covers every row of the digest
+
+
+def test_a_disabled_installed_row_gives_way_to_the_callers_next_installed_copy(world, no_signing_keys):
+    listing = _listing_whose_signature_fails(world)
+    first = _install(world, HOME, listing)  # Alice's own workspace runs the listing, installed first
+    first.installed_at = LONG_AGO
+    world.db.commit()
+    _private(world, TEAM)  # and her team runs its own copy of the same bytes
+    assert _file(world, _person("alice")).status_code == 200
 
 
 def test_an_approved_listing_serves_anyone_signed_in_and_a_pending_one_only_nobody(world):
