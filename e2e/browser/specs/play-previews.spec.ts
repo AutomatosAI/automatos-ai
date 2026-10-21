@@ -22,8 +22,8 @@ import { watchPage } from '../support/watch'
 // and belongs to its preset by the listing's longest-match rule (listings.py _owner_preset).
 //
 // Deterministic: reduced motion (Auto is his still, never a clip frame), his still loaded and him at
-// rest (the first open's hello is over), the fonts loaded, the look's variables on <html>, animations
-// off and two shots in a row equal. The conversations list and the shelf answer with none, so only
+// rest (the first open's hello is over and the message box Play focuses is left), the fonts loaded,
+// the look's variables on <html>, animations off and two shots in a row equal. The conversations list and the shelf answer with none, so only
 // the lane's own member and workspace show.
 //
 // Chromium only. The specs store the member's choice and Play's looks on the lane's one backend, so
@@ -89,6 +89,8 @@ const SAVE_TIMEOUT_MS = 20_000
 // The empty chat (the kit's chat/first-open.tsx) and Auto at rest (lib/mascot/media.ts CAPTIONS.idle).
 const HERO = 'Say hello'
 const AT_REST = 'Ready when you are'
+/** Auto while the message box has focus (lib/mascot/media.ts CAPTIONS.listening; reducer.ts input-focus). */
+const LISTENING = 'Listening'
 // The shelf (the kit's deliverables/play-shelf.tsx, shelf-body.tsx and lib/play/shelf.ts emptyMessage).
 const SHELF_TITLE = 'Your shelf'
 const EMPTY_SHELF = 'Nothing on your shelf yet. Ask Auto for a report or a document and it lands here.'
@@ -242,11 +244,21 @@ async function looksChosen(page: Page, look: BootLook): Promise<void> {
   await expect(lookCard(page, look)).toHaveAttribute(PRESSED_ATTR, 'true')
 }
 
-/** The empty chat with Auto big and at rest: the first open's hello one-shot has ended. */
+/**
+ * The empty chat with Auto big and at rest. Play focuses an empty chat's message box (the kit's
+ * chat/play-chat-view.tsx autoFocus) and Auto listens while it has focus (reducer.ts input-focus,
+ * queued behind the first open's hello; only input-blur ends it), so once hello has ended he shows
+ * listening. The box is then left, as a member who clicks away leaves it, and Auto rests.
+ */
 async function chatAtRest(page: Page): Promise<void> {
-  await expect(messageBox(page)).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+  const box = messageBox(page)
+  await expect(box).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+  await expect(box, "Play focuses the empty chat's message box").toBeFocused()
   const hero = page.getByRole('region', { name: HERO, exact: true })
-  await expect(hero.getByRole('img', { name: AT_REST, exact: true })).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+  const listening = hero.getByRole('img', { name: LISTENING, exact: true })
+  await expect(listening, 'hello is over and Auto listens to the focused box').toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+  await box.blur()
+  await expect(hero.getByRole('img', { name: AT_REST, exact: true }), 'the box left, Auto rests').toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
 async function emptyShelf(page: Page): Promise<void> {
