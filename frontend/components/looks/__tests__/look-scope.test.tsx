@@ -9,7 +9,10 @@
  * to the first account once and is never deleted.
  * A workspace that failed to load (the backend asleep when the page opened)
  * is asked for again once the backend answers GET /health, and until the
- * looks are read Play still paints the pre-paint script's look.
+ * looks are read Play still paints the pre-paint script's look. PRD-261 A-19d2
+ * (PB-8a): the host asks (ThemeLookRuntime's one useHostWorkspaceRetry call,
+ * for a builtin theme with looks too), no longer AccountLookScope, so the
+ * providers here mount the host's retry beside it.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -43,6 +46,7 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 
 import { AccountLookScope } from '@/components/theme-host/account-look-scope'
+import { useHostWorkspaceRetry } from '@/components/theme-host/use-workspace-retry'
 import { LookProvider, useLook } from '@/lib/theme-host/builtin/play-look-provider'
 import { LOOKS_HEADING, LooksScreen } from '@/components/looks/looks-screen'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
@@ -118,11 +122,18 @@ function Shelf({ items }: { readonly items: readonly Deliverable[] }) {
   return <p>Celebrating: {latest?.id ?? 'nothing'}</p>
 }
 
+/** The host's one workspace retry, as ThemeLookRuntime calls it under a builtin theme with looks (PB-8a). */
+function HostWorkspaceRetry() {
+  useHostWorkspaceRetry(true)
+  return null
+}
+
 /** The providers as components/providers.tsx nests them: the account's scope above the LookProvider. */
 function Providers({ style = BUILTIN_PLAY_STYLE, children }: { readonly style?: UiStyle; readonly children: ReactNode }) {
   return (
     <UiStyleProvider initialStyle={style}>
       <QueryClientProvider client={queryClient}>
+        <HostWorkspaceRetry />
         <AccountLookScope>
           <LookProvider>{children}</LookProvider>
         </AccountLookScope>
