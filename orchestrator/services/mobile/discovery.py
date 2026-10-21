@@ -46,8 +46,10 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 PUSH_EXPO_ENABLED = False
 
 # Capability name -> (method, path) of the live route that implements it. Only what this build
-# implements: US-007a adds spoken_mode, US-008a voice_live.
-CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({})
+# implements (US-008a adds voice_live). spoken_mode: ``spokenMode`` on the chat request (US-007a).
+CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "spoken_mode": ("POST", "/api/chat"),
+})
 
 
 class DiscoveryUnavailable(RuntimeError):
