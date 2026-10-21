@@ -26,7 +26,6 @@ import contextlib
 import json
 import logging
 import threading
-import uuid
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket
@@ -38,10 +37,9 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from modules.policy import ai_disclosure
-from modules.voice import arming, call_events, live_settings, live_socket, retell_api, turn_timing, voice_meter
+from modules.voice import arming, call_events, live_settings, live_socket, mint, retell_api, turn_timing, voice_meter
 from modules.voice.caller import named_call_agent
-# mint_web_call keeps its call site: it is over the 50-line shape limit, so a
-# touched line inside it fails CI's changed-lines gate (PRD-258 US-001, D6).
+# The mint resolves its caller through this module's name, so a patch here holds.
 from modules.voice.caller import resolve_caller_int_id as _resolve_caller_int_id
 from modules.voice.providers.retell import (
     RetellLLMRequest,
@@ -64,7 +62,32 @@ class MintWebCallRequest(BaseModel):
     agent_id: Optional[int] = Field(default=None, description="Explicitly selected agent")
 
 
-@router.post("/api/voice/web-call")
+def _mint_ports() -> mint.MintPorts:
+    """What a mint borrows from the route, late-bound through this module's names (the
+    ``_socket_ports`` pattern), so a test's patch on ``api.voice_retell`` still holds."""
+    return mint.MintPorts(
+        voice_live_enabled=lambda: live_settings.voice_live_enabled(),
+        retell_credentials=lambda: live_settings.retell_credentials(),
+        workspace_voice_live=lambda settings: live_settings.parse_workspace_voice_live(settings),
+        monthly_meter=lambda db, workspace_id: voice_meter.monthly_meter(db, workspace_id),
+        cap_allows_mint=lambda reading, cap: voice_meter.cap_allows_mint(reading, cap),
+        create_web_call=lambda api_key, payload: retell_api.create_web_call(api_key, payload),
+    )
+
+
+def _require_voice_live_plan(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> None:
+    """PRD-266 D34: on SaaS the mint needs a plan with the voice family; 403
+    ``voice_live_plan_required`` otherwise. The local edition is unrestricted."""
+    try:
+        mint.require_voice_live_plan(db, ctx.workspace_id)
+    except mint.MintRefused as refused:
+        raise HTTPException(status_code=refused.status_code, detail=refused.detail) from refused
+
+
+@router.post("/api/voice/web-call", dependencies=[Depends(_require_voice_live_plan)])
 async def mint_web_call(
     body: MintWebCallRequest = Body(default=MintWebCallRequest()),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -72,188 +95,37 @@ async def mint_web_call(
 ) -> dict:
     """Mint a Retell web-call session for the authenticated caller (S1).
 
-    Gates, in order, all fail-closed with honest reasons (§7.5-3):
-    platform ``voice.live_enabled`` settings toggle → Retell credentials →
-    workspace toggle → cap formula. The ``voice_calls`` row is BORN here
-    (status ``minted``) so the webhook's trust boundary has something to
-    validate against before any event arrives. The Retell key never reaches
-    the browser — only the ~30s-lived ``access_token`` does.
+    Gates, in order, all fail-closed with honest reasons (§7.5-3): on SaaS the
+    plan (``_require_voice_live_plan``, D34) → platform ``voice.live_enabled``
+    settings toggle → Retell credentials → a strictly resolved caller →
+    workspace toggle → cap formula. The steps are ``modules/voice/mint.py``'s,
+    fed this module's names through ``_mint_ports``. The ``voice_calls`` row is
+    BORN here (status ``minted``) so the webhook's trust boundary has something
+    to validate against before any event arrives. The Retell key never reaches
+    the browser — only the ~30s-lived ``access_token`` does, with Retell's
+    transport fields when it returned them (D32).
     """
-    from core.models.core import Chat
-    from core.models.voice_calls import VoiceCall
-    from core.models.workspaces import Workspace
-
-    # Gate 1 — the platform master switch (a Settings toggle, never an env var).
-    if not live_settings.voice_live_enabled():
-        logger.info("voice_live_mint_denied reason=platform_disabled workspace=%s", ctx.workspace_id)
-        raise HTTPException(status_code=503, detail="Auto Live is switched off platform-wide")
-
-    # Gate 2 — armed: all three Retell credentials present in system settings.
-    creds = live_settings.retell_credentials()
-    if not creds.armed:
-        logger.warning("voice_live_mint_denied reason=not_armed workspace=%s", ctx.workspace_id)
-        raise HTTPException(
-            status_code=503,
-            detail="Auto Live is not armed — Retell credentials are missing in Settings",
-        )
-
-    # The caller must strictly resolve to a real user (no fallback principals).
-    user_int_id = _resolve_caller_int_id(db, ctx)
-    if user_int_id is None:
-        logger.info("voice_live_mint_denied reason=no_user workspace=%s", ctx.workspace_id)
-        raise HTTPException(status_code=403, detail="Live voice requires a signed-in user")
-
-    # Gate 3 — the workspace's own toggle.
-    workspace = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    ws_voice = live_settings.parse_workspace_voice_live(workspace.settings)
-    if not ws_voice.enabled:
-        logger.info("voice_live_mint_denied reason=workspace_disabled workspace=%s", ctx.workspace_id)
-        raise HTTPException(
-            status_code=403, detail="Auto Live is not enabled for this workspace"
-        )
-
-    # Gate 4 — the cap formula (ended + active×reserve ≥ cap refuses).
-    reading = voice_meter.monthly_meter(db, ctx.workspace_id)
-    allowed, reason = voice_meter.cap_allows_mint(reading, ws_voice.monthly_cap_minutes)
-    if not allowed:
-        logger.warning(
-            "voice_live_cap_exceeded workspace=%s %s", ctx.workspace_id, reason
-        )
-        raise HTTPException(status_code=429, detail=reason)
-
-    # Bind-target validation at mint: the chat must be the caller's own thread
-    # in THIS workspace — refuse honestly rather than mint a lie the webhook
-    # would then reject (§7.5-1/2). No chat on screen yet? CREATE the thread
-    # here and hand its id back — voice and text are the SAME conversation,
-    # visible while you speak, typeable when you hang up (Gerard's first-call
-    # feedback: the transcript must never land in an invisible side thread).
-    bound_chat_id: Optional[str] = None
-    if body.chat_id:
-        try:
-            chat_uuid = uuid.UUID(str(body.chat_id))
-        except ValueError:
-            raise HTTPException(status_code=400, detail="chat_id is not a valid chat")
-        chat = (
-            db.query(Chat)
-            .filter(Chat.id == chat_uuid, Chat.workspace_id == ctx.workspace_id)
-            .first()
-        )
-        if chat is None:
-            raise HTTPException(status_code=400, detail="chat_id is not a chat in this workspace")
-        if int(chat.user_id) != int(user_int_id):
-            raise HTTPException(status_code=403, detail="You can only bind a live call to your own chat")
-        bound_chat_id = str(chat_uuid)
-    else:
-        # Welcome-screen mint (no thread on screen): CONTINUE the caller's one
-        # voice conversation — reuse their existing voice thread if it exists,
-        # else create it. Without the find, every welcome-screen call spun up a
-        # brand-new "Voice call —" thread, fragmenting the conversation (#585 —
-        # the ONE-voice-thread contract; unique_user_title made a fixed title
-        # 500 on the second call, so the thread is timestamped and found by
-        # prefix rather than by a colliding constant title).
-        from modules.voice.call_binding import create_voice_chat
-
-        existing = (
-            db.query(Chat)
-            .filter(
-                Chat.user_id == int(user_int_id),
-                Chat.workspace_id == ctx.workspace_id,
-                Chat.title.like("Voice call%"),
-            )
-            .order_by(Chat.created_at.desc())
-            .first()
-        )
-        if existing is not None:
-            bound_chat_id = str(existing.id)
-        else:
-            chat = create_voice_chat(
-                db, user_id=int(user_int_id), workspace_id=ctx.workspace_id
-            )
-            bound_chat_id = str(chat.id)
-
-    dynamic_vars = {
-        "workspace_id": str(ctx.workspace_id),
-        "user_id": user_int_id,
-        "chat_id": bound_chat_id,
-        "agent_id": body.agent_id,
-    }
-    payload = retell_api.build_web_call_payload(
-        agent_id=creds.agent_id,
-        dynamic_variables=dynamic_vars,
-        voice_id=ws_voice.retell_voice_id,
-        max_call_minutes=int(config.VOICE_LIVE_MAX_CALL_MINUTES),
-    )
-
-    logger.info(
-        "voice_live_mint_requested workspace=%s user=%s chat=%s",
-        ctx.workspace_id, user_int_id, bound_chat_id,
-    )
+    ports = _mint_ports()
     try:
-        web_call = await retell_api.create_web_call(creds.api_key, payload)
-    except retell_api.RetellApiError as exc:
-        logger.error("voice_live_mint_denied reason=vendor_error workspace=%s err=%s", ctx.workspace_id, exc)
-        raise HTTPException(status_code=502, detail=f"Could not start the call: {exc}")
-
-    # ONE LIVE CALL PER USER. A client that mints again (device switch, a
-    # re-press, a re-render, two LiveVoiceMode instances during a view
-    # transition) would otherwise leave several web calls connected to the
-    # SAME mic, each streaming Auto's reply — the caller hears Auto talking
-    # over herself ("five people at once"). Supersede the caller's prior
-    # active calls here; their sockets close on their next turn (below) so no
-    # superseded call ever speaks again. Best-effort, same transaction.
-    superseded = (
-        db.query(VoiceCall)
-        .filter(
-            VoiceCall.user_id == user_int_id,
-            VoiceCall.status.in_(("minted", "started")),
-        )
-        .update(
-            {
-                VoiceCall.status: "superseded",
-                VoiceCall.disconnect_reason: "superseded_by_newer_call",
-            },
-            synchronize_session=False,
-        )
-    )
-    if superseded:
-        logger.info(
-            "voice_live_superseded_prior count=%s user=%s (new call=%s)",
-            superseded, user_int_id, web_call.call_id,
-        )
-
-    # The row is BORN at mint — the webhook validates against it (S2/S3).
-    # PRD-143 discipline: su derives from Clerk-claims system_role ONLY —
-    # captured HERE (the one place the session exists) for the webhook.
-    caller_is_su = (
-        getattr(getattr(ctx, "user", None), "system_role", "user") == "super_admin"
-    )
-    db.add(
-        VoiceCall(
-            call_id=web_call.call_id,
-            provider="retell",
+        creds = mint.armed_credentials(ports, ctx.workspace_id)
+        # The caller must strictly resolve to a real user (no fallback principals).
+        user_int_id = _resolve_caller_int_id(db, ctx)
+        if user_int_id is None:
+            logger.info("voice_live_mint_denied reason=no_user workspace=%s", ctx.workspace_id)
+            raise HTTPException(status_code=403, detail="Live voice requires a signed-in user")
+        ws_voice = mint.workspace_voice_within_cap(db, ports, ctx.workspace_id)
+        target = mint.MintTarget(
             workspace_id=ctx.workspace_id,
             user_id=user_int_id,
-            chat_id=bound_chat_id,
-            status="minted",
-            is_super_admin=caller_is_su,
+            chat_id=mint.bind_chat(db, ctx.workspace_id, user_int_id, body.chat_id),
+            agent_id=body.agent_id,
         )
-    )
-    db.commit()
-
-    logger.info(
-        "voice_live_minted call=%s workspace=%s user=%s chat=%s",
-        web_call.call_id, ctx.workspace_id, user_int_id, bound_chat_id,
-    )
+        web_call = await mint.create_call(ports, creds, ws_voice, target)
+    except mint.MintRefused as refused:
+        raise HTTPException(status_code=refused.status_code, detail=refused.detail) from refused
+    mint.record_minted_call(db, web_call, target, is_super_admin=mint.caller_is_super_admin(ctx))
     # The token dies in ~30s unused — the client connects immediately.
-    # chat_id lets the screen point at the call's thread: one conversation,
-    # spoken and typed.
-    return {
-        "call_id": web_call.call_id,
-        "access_token": web_call.access_token,
-        "chat_id": bound_chat_id,
-    }
+    return mint.mint_response(web_call, target.chat_id)
 
 
 # ---------------------------------------------------------------------------

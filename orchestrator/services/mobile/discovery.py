@@ -46,9 +46,11 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 PUSH_EXPO_ENABLED = False
 
 # Capability name -> (method, path) of the live route that implements it. Only what this build
-# implements (US-008a adds voice_live). spoken_mode: ``spokenMode`` on the chat request (US-007a).
+# implements. spoken_mode: ``spokenMode`` on the chat request (US-007a). voice_live: the Auto
+# Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34).
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "spoken_mode": ("POST", "/api/chat"),
+    "voice_live": ("POST", "/api/voice/web-call"),
 })
 
 

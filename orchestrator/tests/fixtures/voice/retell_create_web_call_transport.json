@@ -1,0 +1,17 @@
+{
+  "access_token": "tok_v3fx",
+  "call_id": "call_v3fx",
+  "expires_at": 1792540830000,
+  "ice_servers": [
+    {
+      "urls": ["stun:stun.example.com:3478"]
+    },
+    {
+      "credential": "fakecred",
+      "urls": ["turn:turn.example.com:3478?transport=udp"],
+      "username": "fakeuser"
+    }
+  ],
+  "transport": "gateway",
+  "url": "wss://gateway.example.com/rtc"
+}
