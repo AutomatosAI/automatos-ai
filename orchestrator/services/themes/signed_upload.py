@@ -15,7 +15,13 @@ from the file.
 
 ``signature_view`` is the ``{state, keyId}`` the installed list shows for a stored version.
 
-Synchronous and side-effect free; the keys file is read on each check (``signature_verify``).
+In the local edition a key the hosted feed revoked (``revokedKeys``, as the pull stored them:
+``revocation_sync_state.revoked_key_ids``) counts as revoked here too, as it does on load
+(``signature_state``): an upload it verifies is refused with ``INACTIVE_KEY``, and the view reads
+a stored signature it made as ``invalid`` with its key id.
+
+Synchronous and side-effect free (it reads the database, never writes it); the keys file is read
+on each check (``signature_verify``).
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from services.themes import signature_verify
 from services.themes.contract import KB, ThemeError, parse_json, theme_error
 from services.themes.manifest import ID_PATTERN, VERSION_PATTERN
 from services.themes.package import ThemePackage as CheckedThemePackage
+from services.themes.revocation_sync_state import revoked_key_ids
 
 logger = logging.getLogger(__name__)
 
@@ -146,19 +153,27 @@ def _refusal_for(verdict: signature_verify.Verdict) -> str:
     return INACTIVE_KEY if verdict.key_id is not None else NOT_VERIFIED
 
 
+def _feed_checked(db: Any, verdict: signature_verify.Verdict) -> signature_verify.Verdict:
+    """``verdict``, or ``invalid`` with its key id when the key that verified is one the hosted feed revoked."""
+    if verdict.verified and verdict.key_id in revoked_key_ids(db):
+        return signature_verify.Verdict(signature_verify.STATE_INVALID, verdict.key_id)
+    return verdict
+
+
 def check_upload_signature(
-    checked: CheckedThemePackage, data: bytes, keys: Optional[Sequence[signature_verify.SigningKey]] = None,
+    db: Any, checked: CheckedThemePackage, data: bytes, keys: Optional[Sequence[signature_verify.SigningKey]] = None,
 ) -> VerifiedSignature:
     """The envelope ``data`` checked against the read upload ``checked``; refuses with ``SignatureRefused``.
 
     ``keys`` defaults to the keys file; a keys file that does not load raises
-    ``signature_verify.SigningKeysError`` (the route's 503).
+    ``signature_verify.SigningKeysError`` (the route's 503). ``db`` gives the keys the hosted feed
+    revoked (local edition): a signature one of them made is ``INACTIVE_KEY``.
     """
     envelope = parse_envelope(data)
     _check_names_upload(envelope, checked)
     manifest = checked.manifest
     payload = signature_verify.payload_for(manifest["id"], manifest["version"], _file_hashes(checked))
-    verdict = signature_verify.verify(payload, envelope["signature"], keys)
+    verdict = _feed_checked(db, signature_verify.verify(payload, envelope["signature"], keys))
     if not verdict.verified:
         raise _bad(_refusal_for(verdict))
     if verdict.key_id != envelope["keyId"]:
@@ -166,16 +181,18 @@ def check_upload_signature(
     return VerifiedSignature(signature=envelope["signature"], key_id=verdict.key_id)
 
 
-def signature_view(package: ThemePackage) -> Dict[str, Optional[str]]:
+def signature_view(db: Any, package: ThemePackage) -> Dict[str, Optional[str]]:
     """``{state, keyId}`` of a stored version's signature, as the installed list shows it.
 
     A keys file that does not load fails closed: ``invalid``, never ``verified`` (as the listings do).
+    A key the hosted feed revoked (local edition) reads ``invalid`` with its key id.
     """
     try:
-        return signature_verify.package_verdict(package).view()
+        verdict = signature_verify.package_verdict(package)
     except signature_verify.SigningKeysError as bad:
         logger.error("theme signing keys did not load; package %s reads as invalid: %s", package.id, bad)
         return signature_verify.Verdict(signature_verify.STATE_INVALID).view()
+    return _feed_checked(db, verdict).view()
 
 
 __all__ = [

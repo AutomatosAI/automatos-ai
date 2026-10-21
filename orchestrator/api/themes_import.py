@@ -8,8 +8,9 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
    htmlClass, sizes, CSS scope, looks): 413 over the package cap, 400 with the codes;
 3. an optional ``signature`` part (C-05d, a detached ``.sig.json``, ``services/themes/signed_upload.py``)
    is checked against the upload's own files before anything is stored: 413 over
-   ``ENVELOPE_MAX_BYTES``, 400 ``SIGNATURE_BAD``/``SIGNATURE_MISMATCH``, 503 when the keys file
-   doesn't load; a verified one is stored on the package row. Without the part nothing changes;
+   ``ENVELOPE_MAX_BYTES``, 400 ``SIGNATURE_BAD``/``SIGNATURE_MISMATCH`` (``SIGNATURE_BAD`` too for a
+   key the hosted feed revoked, in the local edition), 503 when the keys file doesn't load; a
+   verified one is stored on the package row. Without the part nothing changes;
 4. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin`` or a verified
    signature, else 403;
 5. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
@@ -103,13 +104,15 @@ def _read_upload(file: UploadFile) -> Tuple[CheckedThemePackage, int]:
         raise HTTPException(status_code=status, detail={"message": IMPORT_REFUSED, "errors": exc.errors}) from exc
 
 
-def _read_signature(part: Optional[UploadFile], checked: CheckedThemePackage) -> Optional[VerifiedSignature]:
+def _read_signature(
+    db: Session, part: Optional[UploadFile], checked: CheckedThemePackage,
+) -> Optional[VerifiedSignature]:
     """The upload's verified signature (C-05d), or None without the part; 413/400/503 otherwise."""
     if part is None:
         return None
     data = part.file.read(ENVELOPE_MAX_BYTES + 1)
     try:
-        verified = check_upload_signature(checked, data)
+        verified = check_upload_signature(db, checked, data)
     except SignatureRefused as exc:
         logger.info("[Themes] Upload signature refused (%d): %s", exc.status_code, exc.error["code"])
         raise HTTPException(status_code=exc.status_code, detail={"message": IMPORT_REFUSED, "errors": [exc.error]}) from exc
@@ -289,7 +292,7 @@ def import_theme(
     """Upload a .autotheme (and, optionally, its .sig.json) into this workspace only; returns the
     package, its scan and the install."""
     checked, package_bytes = _read_upload(file)
-    verified = _read_signature(signature, checked)
+    verified = _read_signature(db, signature, checked)
     refusal = reserved_publisher_refusal(checked.manifest["id"], ctx.user, signed=verified is not None)
     if refusal is not None:
         raise _refuse(403, refusal)

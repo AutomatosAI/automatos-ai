@@ -86,7 +86,7 @@ def install_row(db: Session, workspace_id: UUID, user_pk: Optional[int], install
         "optIn": opt_in_state(db, workspace_id, user_pk, package),
         "revoked": revocation_body(revocation_of(db, package)),
         "needsUpdate": needs_update(manifest),
-        "signature": signature_view(package),
+        "signature": signature_view(db, package),
     }
 
 
