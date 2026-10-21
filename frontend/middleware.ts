@@ -30,6 +30,9 @@ const isPublicRoute = createRouteMatcher([
   // assetlinks.json (it has an extension), but the extensionless AASA reaches auth.protect().
   "/.well-known/apple-app-site-association",
   "/.well-known/assetlinks.json",
+  // PRD-266 US-018d: where a pairing QR opens in a phone's browser. It calls nothing and never pairs.
+  // The exact path, like /verify: /go, /go/pairing and /gopher stay protected.
+  "/go/pair",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {
