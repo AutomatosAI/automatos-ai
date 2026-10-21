@@ -86,13 +86,13 @@ def seed_new_workspace(db, ws_id: UUID, uid: int) -> None:
     except Exception:
         logger.exception("Base-model seed failed for workspace %s — non-fatal", ws_id)
 
-    # 6) PRD-222 US-004 (W1·S9): grant the one-time $5 onboarding trial credit so
-    # the value moment lands before the BYOK ask. One per Clerk user; paused by
-    # the global daily cap or the TRIAL_ENABLED kill switch (all config-driven).
-    # Non-fatal — a workspace must provision even if the grant hiccups.
+    # 6) PRD-265 US-005 (PRD-222 W1·S9 before it): grant the one-time trial
+    # credits so the value moment lands before the BYOK ask. Once per person;
+    # paused by the global daily cap or the TRIAL_ENABLED kill switch (all
+    # config-driven). Non-fatal — a workspace must provision even if the grant hiccups.
     try:
-        from services.trial_ledger import grant_trial_at_provisioning
-        if grant_trial_at_provisioning(db, ws_id, owner_id=uid) is not None:
+        from services.credits.trial import grant_trial
+        if grant_trial(db, ws_id, owner_id=uid) is not None:
             db.commit()
     except Exception:
         logger.exception("Trial grant failed for workspace %s — non-fatal", ws_id)

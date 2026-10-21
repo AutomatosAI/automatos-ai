@@ -15,12 +15,15 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.llm.credit import is_out_of_credit
+from services.credits.routing import CREDITS_EXHAUSTED_CODE, is_credit_stop
 
 CODE_RATE_LIMITED = "rate_limited"
 CODE_MODEL_UNAVAILABLE = "model_unavailable"
 CODE_NO_API_KEY = "no_api_key"
 CODE_RUNTIME_MISMATCH = "runtime_mismatch"
-CODE_TRIAL_EXHAUSTED = "trial_exhausted"
+# PRD-265: platform-funded work paused for want of credits (services.credits.routing).
+# The client renders the paused banner on it.
+CODE_CREDITS_EXHAUSTED = CREDITS_EXHAUSTED_CODE
 CODE_ACTIVATION_FAILED = "activation_failed"
 CODE_PROVIDER_FAILED = "provider_failed"
 CODE_TURN_FAILED = "turn_failed"
@@ -102,9 +105,9 @@ def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None)
     text = str(exc) or name
     who = _who(agent_name)
 
-    if name == "TrialExhaustedError":
-        # PRD-222 US-014: the client matches the typed code inside the text.
-        return TurnError(CODE_TRIAL_EXHAUSTED, text)
+    if is_credit_stop(exc):
+        # The message is already the person's sentence (services.credits.routing).
+        return TurnError(exc.error_code, text)
     if name == "ProviderRateLimitError":
         return TurnError(CODE_RATE_LIMITED, f"{who} is rate-limited right now. {_short(text)}")
     if name == "ProviderModelUnavailableError":

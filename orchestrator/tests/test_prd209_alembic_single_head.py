@@ -121,10 +121,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
 # prd264_blog_review — a new table only, the audit record of the one-time relink
 # of returning users to production IDs.
-# 2026-10-20 (PRD-266 US-002): prd266_mobile_devices chains onto
-# clerk_user_relinks_20261019 — a new table only (mobile_devices: the phones and
-# paired browsers of Automatos Go).
-EXPECTED_HEAD = "prd266_mobile_devices"
+# 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto clerk_user_relinks_20261019
+# — credit_ledger + credit_balances (new tables), llm_usage.ask_id (a nullable column and a
+# concurrent partial index), and the dollar trials converted into credit grants.
+EXPECTED_HEAD = "prd265_credit_ledger"
 
 
 def _literal(node: ast.AST):

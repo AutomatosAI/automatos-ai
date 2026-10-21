@@ -21,7 +21,7 @@ import {
   type ReplyProgress,
 } from '@/lib/mascot/events'
 import type { MascotEvent } from '@/lib/mascot/types'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { CREDITS_EXHAUSTED_CODE } from '@/lib/credits'
 import type { Receipt } from '@/types'
 
 import { receipt, replay, sequence } from './helpers'
@@ -142,18 +142,18 @@ describe('mascotEventsFromStatus', () => {
 
   it('fails the turn on error, and on a blocked turn whose error landed with the end of the stream', () => {
     expect(mascotEventsFromStatus('streaming', 'error', null)).toEqual([{ type: 'error', message: FAILED_TURN, code: null }])
-    expect(mascotEventsFromStatus('idle', 'error', TRIAL_EXHAUSTED_CODE))
-      .toEqual([{ type: 'error', message: FAILED_TURN, code: TRIAL_EXHAUSTED_CODE }])
-    expect(mascotEventsFromStatus('streaming', 'idle', TRIAL_EXHAUSTED_CODE))
-      .toEqual([{ type: 'error', message: BLOCKED_TURN, code: TRIAL_EXHAUSTED_CODE }])
+    expect(mascotEventsFromStatus('idle', 'error', CREDITS_EXHAUSTED_CODE))
+      .toEqual([{ type: 'error', message: FAILED_TURN, code: CREDITS_EXHAUSTED_CODE }])
+    expect(mascotEventsFromStatus('streaming', 'idle', CREDITS_EXHAUSTED_CODE))
+      .toEqual([{ type: 'error', message: BLOCKED_TURN, code: CREDITS_EXHAUSTED_CODE }])
   })
 
   it('makes nothing when the status is unchanged or the error is already told', () => {
     for (const status of ['idle', 'streaming', 'error'] as const) {
-      expect(mascotEventsFromStatus(status, status, TRIAL_EXHAUSTED_CODE)).toEqual([])
+      expect(mascotEventsFromStatus(status, status, CREDITS_EXHAUSTED_CODE)).toEqual([])
     }
     expect(mascotEventsFromStatus('error', 'idle', null)).toEqual([])
-    expect(mascotEventsFromStatus('error', 'idle', TRIAL_EXHAUSTED_CODE)).toEqual([])
+    expect(mascotEventsFromStatus('error', 'idle', CREDITS_EXHAUSTED_CODE)).toEqual([])
   })
 })
 
@@ -191,7 +191,7 @@ describe("whole turns from the core chat's parts", () => {
   })
 
   it('a blocked turn ends on oops even when the stream ended in the same render', () => {
-    expect(replay(fromStatuses(['streaming', 'idle'], TRIAL_EXHAUSTED_CODE)).mascot).toBe('oops')
+    expect(replay(fromStatuses(['streaming', 'idle'], CREDITS_EXHAUSTED_CODE)).mascot).toBe('oops')
   })
 
   it('reading memories, then a workflow running', () => {

@@ -227,6 +227,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
 
   // PRD-261 A-13c moved the mount: components/providers.tsx mounts ThemeLookRuntime with the same tone
   // setter, and ThemeLookRuntime mounts this provider (at every width), switched on while the theme declares looks.
+  // A-19d2: only a builtin theme's (an installed theme with looks runs on lib/theme-host/looks, inside it).
   // These two pin the same wiring through both files; theme-look-runtime.test.tsx renders it.
   it('is wired the same way in components/providers.tsx, through the host look runtime', () => {
     const src = readFileSync(PROVIDERS, 'utf8')
@@ -235,7 +236,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     expect(src).toContain('forcedTheme={playTone}')
     expect(src).toContain('<ThemeLookRuntime onToneChange={setPlayTone}>')
     expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
-    expect(runtime).toContain('<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>')
+    expect(runtime).toContain('<LookProvider onToneChange={builtin ? onToneChange : undefined} enabled={builtin} keepFirstPaint={keepFirstPaint}>')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {
@@ -252,7 +253,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     ])
     inOrder(readFileSync(LOOK_RUNTIME, 'utf8'), [
       '<AccountLookScope enabled={mounted}>',
-      '<LookProvider onToneChange={onToneChange} enabled={mounted} keepFirstPaint={keepFirstPaint}>',
+      '<LookProvider onToneChange={builtin ? onToneChange : undefined} enabled={builtin} keepFirstPaint={keepFirstPaint}>',
       '</LookProvider>',
       '</AccountLookScope>',
     ])

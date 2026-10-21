@@ -301,8 +301,6 @@ class PlaybookSchedulerService:
         """Execute a cron-triggered playbook. Same pattern as webhook handler."""
         from core.database.database import SessionLocal
         from core.models import WorkflowTemplate as WorkflowPlaybook
-        from core.models.core import RecipeExecution
-        from uuid import uuid4
 
         db = SessionLocal()
         try:
@@ -323,96 +321,20 @@ class PlaybookSchedulerService:
                 logger.warning("[PlaybookScheduler] Playbook %d has no steps, skipping", playbook_id)
                 return
 
-            # PRD-222 US-005 — no background burn: a trial workspace gets no
-            # scheduled playbook execution until converted. Visible skip.
-            try:
-                from core.models.workspaces import Workspace
-                from services.trial_ledger import is_trial_active_workspace
-                # PRD-234 S3: the local edition has no platform-paid trial credit to
-                # protect (operator keys / the user's own Claude subscription) — the
-                # onboarding trial record must not switch scheduled work off there.
-                from config import config as _config
-                _local_edition = getattr(_config, "AUTH_EDITION", "saas") == "local"
-
-                _ws = db.query(Workspace).get(playbook.workspace_id)
-                if not _local_edition and is_trial_active_workspace(_ws):
-                    logger.warning(
-                        "[PlaybookScheduler] Skipping playbook %d — trial workspace %s "
-                        "(no background burn until converted)",
-                        playbook_id, playbook.workspace_id,
-                    )
-                    return
-            except Exception as _e:
-                logger.debug("[PlaybookScheduler] trial-skip check failed for playbook %d: %s", playbook_id, _e)
-
-            # PRD-185 S4: repeated-failure circuit breaker. A cron playbook that
-            # fails on every run re-fires forever (the 2026-06 daily 402 spam).
-            # Once the last N terminal runs are all failures, stop re-firing until
-            # a human intervenes; a manual run that succeeds breaks the streak and
-            # auto-resets. Checked BEFORE creating an execution row so an open
-            # breaker adds no history noise and stays stably open.
-            from services.playbook_breaker import breaker_is_open
-            if breaker_is_open(db, playbook.id):
-                from config import config as _cfg
-                logger.warning(
-                    "[PlaybookScheduler] Circuit breaker OPEN for playbook %d (%s) — "
-                    "last %d runs all failed; skipping cron re-fire until a manual run succeeds",
-                    playbook.id, playbook.name, _cfg.PLAYBOOK_BREAKER_THRESHOLD,
-                )
-                # PRD-204 S4: the bench used to be a log line only. Notify
-                # the workspace once per breaker-open period (in-memory
-                # latch -- see __init__; cleared below when the breaker
-                # closes).
-                if playbook.id not in self._benched_notified:
-                    self._benched_notified.add(playbook.id)
-                    await self._notify_playbook_benched(
-                        db, playbook, _cfg.PLAYBOOK_BREAKER_THRESHOLD
-                    )
+            if self._skipped_without_credits(db, playbook) or await self._breaker_benches(db, playbook):
                 return
 
-            # Breaker closed -- clear the bench latch so the NEXT open period
-            # notifies again.
-            self._benched_notified.discard(playbook.id)
-
-            execution_id = f"cron-{uuid4().hex[:12]}"
-            execution = RecipeExecution(
-                execution_id=execution_id,
-                recipe_id=playbook.id,
-                workspace_id=playbook.workspace_id,
-                status="pending",
-                input_data={},
-                triggered_by="cron_scheduler",
-                execution_metadata={
-                    "execution_type": "cron_scheduler",
-                    "total_steps": len(playbook.steps),
-                    "cron_expression": sc.get("cron_expression"),
-                },
-            )
-            db.add(execution)
-            db.commit()
-
-            # Concurrency guard — skip this tick if workspace is at capacity
-            from services.concurrency_guard import check_concurrency
-            concurrency = await check_concurrency(UUID(str(playbook.workspace_id)), db)
-            if not concurrency.allowed:
-                logger.warning(
-                    "[PlaybookScheduler] Concurrency limit reached for workspace %s, "
-                    "skipping playbook %d this tick: %s",
-                    workspace_id, playbook_id, concurrency.reason,
-                )
-                # Roll back the pending execution record — cron will retry next tick
-                db.delete(execution)
-                db.commit()
-                await self._notify_schedule_skipped(
-                    db, playbook, f"the workspace was at its run limit ({concurrency.reason})")
+            execution = self._record_cron_execution(db, playbook, sc)
+            if await self._concurrency_skips(db, playbook, execution, workspace_id):
                 return
 
-            logger.info("[PlaybookScheduler] Firing playbook %d (%s), execution=%s", playbook.id, playbook.name, execution_id)
+            logger.info("[PlaybookScheduler] Firing playbook %d (%s), execution=%s",
+                        playbook.id, playbook.name, execution.execution_id)
 
             # PRD-142 W3-S12: cron-fired playbooks launch via the engine seam.
             from services.playbook_engine import get_playbook_engine
             get_playbook_engine().launch(
-                recipe_execution_id=execution_id,
+                recipe_execution_id=execution.execution_id,
                 recipe_id=playbook.id,
                 workspace_id=UUID(str(playbook.workspace_id)),
                 input_data={},
@@ -421,6 +343,101 @@ class PlaybookSchedulerService:
             logger.error("[PlaybookScheduler] Failed to fire playbook %d: %s", playbook_id, e, exc_info=True)
         finally:
             db.close()
+
+    @staticmethod
+    def _skipped_without_credits(db, playbook) -> bool:
+        """No background burn (PRD-222 FR-17, on credits since PRD-265 US-004): a
+        scheduled run starts only when something other than the trial can pay for
+        it (``services.credits.routing.background_allowed`` — the local edition
+        always can). Visible skip; a failed check fires the run, and the call-time
+        credit gate still stops any platform call it makes."""
+        try:
+            from services.credits.routing import background_allowed
+
+            if not background_allowed(db, playbook.workspace_id):
+                logger.warning(
+                    "[PlaybookScheduler] Skipping playbook %d — workspace %s has nothing but the "
+                    "trial to pay for background work",
+                    playbook.id, playbook.workspace_id,
+                )
+                return True
+        except Exception:  # noqa: BLE001 — a failed check fires the run; the call-time gate still holds
+            logger.warning("[PlaybookScheduler] credit check failed for playbook %d", playbook.id, exc_info=True)
+        return False
+
+    async def _breaker_benches(self, db, playbook) -> bool:
+        """PRD-185 S4: repeated-failure circuit breaker. A cron playbook that
+        fails on every run re-fires forever (the 2026-06 daily 402 spam).
+        Once the last N terminal runs are all failures, stop re-firing until
+        a human intervenes; a manual run that succeeds breaks the streak and
+        auto-resets. Checked BEFORE creating an execution row so an open
+        breaker adds no history noise and stays stably open."""
+        from services.playbook_breaker import breaker_is_open
+        if breaker_is_open(db, playbook.id):
+            from config import config as _cfg
+            logger.warning(
+                "[PlaybookScheduler] Circuit breaker OPEN for playbook %d (%s) — "
+                "last %d runs all failed; skipping cron re-fire until a manual run succeeds",
+                playbook.id, playbook.name, _cfg.PLAYBOOK_BREAKER_THRESHOLD,
+            )
+            # PRD-204 S4: the bench used to be a log line only. Notify
+            # the workspace once per breaker-open period (in-memory
+            # latch -- see __init__; cleared below when the breaker
+            # closes).
+            if playbook.id not in self._benched_notified:
+                self._benched_notified.add(playbook.id)
+                await self._notify_playbook_benched(
+                    db, playbook, _cfg.PLAYBOOK_BREAKER_THRESHOLD
+                )
+            return True
+
+        # Breaker closed -- clear the bench latch so the NEXT open period
+        # notifies again.
+        self._benched_notified.discard(playbook.id)
+        return False
+
+    @staticmethod
+    def _record_cron_execution(db, playbook, sc: dict):
+        """The pending run row for this cron fire (its id marks it a scheduler run)."""
+        from core.models.core import RecipeExecution
+        from services.playbook_usage import CRON_RUN_PREFIX
+        from uuid import uuid4
+
+        execution_id = f"{CRON_RUN_PREFIX}{uuid4().hex[:12]}"
+        execution = RecipeExecution(
+            execution_id=execution_id,
+            recipe_id=playbook.id,
+            workspace_id=playbook.workspace_id,
+            status="pending",
+            input_data={},
+            triggered_by="cron_scheduler",
+            execution_metadata={
+                "execution_type": "cron_scheduler",
+                "total_steps": len(playbook.steps),
+                "cron_expression": sc.get("cron_expression"),
+            },
+        )
+        db.add(execution)
+        db.commit()
+        return execution
+
+    async def _concurrency_skips(self, db, playbook, execution, workspace_id: str) -> bool:
+        """Concurrency guard — skip this tick if workspace is at capacity."""
+        from services.concurrency_guard import check_concurrency
+        concurrency = await check_concurrency(UUID(str(playbook.workspace_id)), db)
+        if concurrency.allowed:
+            return False
+        logger.warning(
+            "[PlaybookScheduler] Concurrency limit reached for workspace %s, "
+            "skipping playbook %d this tick: %s",
+            workspace_id, playbook.id, concurrency.reason,
+        )
+        # Roll back the pending execution record — cron will retry next tick
+        db.delete(execution)
+        db.commit()
+        await self._notify_schedule_skipped(
+            db, playbook, f"the workspace was at its run limit ({concurrency.reason})")
+        return True
 
     # ------------------------------------------------------------------
     # PRD-204 S4: benched notification

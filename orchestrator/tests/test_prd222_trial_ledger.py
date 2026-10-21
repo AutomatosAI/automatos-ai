@@ -1,74 +1,32 @@
-"""PRD-222 W1·S9 (US-004) — trial config + grant at provisioning.
+"""PRD-222 W1·S9 (US-004) — trial config + the pure grant decision.
 
-Pure tests: no Postgres. The grant decision is a pure function; the DB-touching
-helpers run against a fake session that returns canned rows and records the
-``UPDATE``. Real-Postgres coverage of the provisioning path is CI's job (the
-``hybrid.py`` seam is exercised by the auth integration suite on push).
+PRD-265 W1 replaced the $5 trial ledger (``services.trial_ledger``, a JSONB
+blob on the workspace plus a ``system_settings`` daily-spend counter) with the
+credit ledger's one-time trial grant (``services.credits.trial``, backed by
+``credit_ledger`` / ``credit_balances``). The grant decision stays a pure
+function here, as it always was; everything that needs the ledger's SQL (the
+daily spend read, the one-per-person check, ``grant_trial`` end to end) needs
+real Postgres now and moved to ``test_prd265_credit_ledger_realdb.py`` —
+removed from this file, not duplicated.
 """
 from __future__ import annotations
 
-import json
 import os
-from datetime import date
 from pathlib import Path
 
-import pytest
-
 from config import config
-from services.trial_ledger import (
-    TRIAL_ACTIVE,
-    daily_spend_key,
+from services.credits.trial import (
+    ALREADY_HELD,
+    DAILY_CAP_REACHED,
+    DISABLED,
+    GRANTED,
     decide_trial_grant,
-    get_daily_trial_spend,
-    grant_trial_at_provisioning,
-    user_has_held_trial,
 )
 
 
 # --------------------------------------------------------------------------- #
-# Fakes
-# --------------------------------------------------------------------------- #
-
-
-class _FakeResult:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _FakeDB:
-    """Session stand-in: dispatches SELECTs by target table, records UPDATEs."""
-
-    def __init__(self, *, has_trial=False, daily_spend_raw=None):
-        self._has_trial = has_trial
-        self._daily_spend_raw = daily_spend_raw
-        self.updates = []  # (sql, params) for every UPDATE
-        self.selects = []  # (kind, params)
-        self.commits = 0
-
-    def execute(self, clause, params=None):
-        upper = str(clause).strip().upper()
-        if upper.startswith("SELECT") and "SYSTEM_SETTINGS" in upper:
-            self.selects.append(("daily", params))
-            row = (self._daily_spend_raw,) if self._daily_spend_raw is not None else None
-            return _FakeResult(row)
-        if upper.startswith("SELECT") and "WORKSPACES" in upper:
-            self.selects.append(("has_trial", params))
-            return _FakeResult((1,) if self._has_trial else None)
-        if upper.startswith("UPDATE") and "WORKSPACES" in upper:
-            self.updates.append((str(clause), params))
-            return _FakeResult(None)
-        return _FakeResult(None)
-
-    def commit(self):
-        self.commits += 1
-
-
-# --------------------------------------------------------------------------- #
-# AC1 — config keys read via config.py with the stated defaults; no os.getenv
-# in the new service file.
+# Config keys read via config.py with the stated defaults; no os.getenv in
+# the service file.
 # --------------------------------------------------------------------------- #
 
 
@@ -76,162 +34,52 @@ def test_trial_config_defaults():
     # Guard each assertion on its env being unset so a CI override never fails it.
     if not os.getenv("TRIAL_ENABLED"):
         assert config.TRIAL_ENABLED is True
-    if not os.getenv("TRIAL_CREDIT_USD"):
-        assert config.TRIAL_CREDIT_USD == 5.00
-    if not os.getenv("TRIAL_GLOBAL_DAILY_USD"):
-        assert config.TRIAL_GLOBAL_DAILY_USD == 25.00
-    # All four are the right types.
+    if not os.getenv("TRIAL_CREDITS"):
+        assert config.TRIAL_CREDITS == 500
+    if not os.getenv("TRIAL_GLOBAL_DAILY_CREDITS"):
+        assert config.TRIAL_GLOBAL_DAILY_CREDITS == 2500
+    # All three are the right types — credits are integers now, never a float USD amount.
     assert isinstance(config.TRIAL_ENABLED, bool)
-    assert isinstance(config.TRIAL_CREDIT_USD, float)
-    assert isinstance(config.TRIAL_GLOBAL_DAILY_USD, float)
+    assert isinstance(config.TRIAL_CREDITS, int)
+    assert isinstance(config.TRIAL_GLOBAL_DAILY_CREDITS, int)
 
 
-
-def test_trial_ledger_uses_no_os_getenv():
+def test_credits_trial_uses_no_os_getenv():
     # No os.getenv outside config.py — the service reads config.TRIAL_* only.
-    src = (Path(__file__).resolve().parents[1] / "services" / "trial_ledger.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "services" / "credits" / "trial.py").read_text()
     assert "os.getenv" not in src
     assert "import os" not in src
 
 
 # --------------------------------------------------------------------------- #
-# Daily counter — read side (US-005 writes it).
-# --------------------------------------------------------------------------- #
-
-
-def test_daily_spend_key_format():
-    assert daily_spend_key(date(2026, 7, 31)) == "trial_spend_2026-07-31"
-
-
-def test_get_daily_trial_spend_reads_value():
-    assert get_daily_trial_spend(_FakeDB(daily_spend_raw="2.50")) == 2.5
-
-
-def test_get_daily_trial_spend_unset_is_zero():
-    assert get_daily_trial_spend(_FakeDB()) == 0.0
-
-
-def test_get_daily_trial_spend_unparseable_is_zero():
-    assert get_daily_trial_spend(_FakeDB(daily_spend_raw="garbage")) == 0.0
-
-
-# --------------------------------------------------------------------------- #
-# Pure grant decision — every branch.
+# Pure grant decision — every branch (decide_trial_grant returns the reason
+# string directly now, not a (trial_dict, reason) tuple — there is no USD
+# trial dict to build; the ledger writes the credits on GRANTED).
 # --------------------------------------------------------------------------- #
 
 
 def test_decide_grant_happy():
-    trial, reason = decide_trial_grant(
-        enabled=True, already_held=False, daily_spend=0.0, daily_cap=25.0, credit_usd=5.0
-    )
-    assert reason == "granted"
-    assert trial == {"granted_usd": 5.0, "spent_usd": 0, "state": TRIAL_ACTIVE}
+    assert decide_trial_grant(enabled=True, already_held=False, spent_today=0, daily_cap=2500) == GRANTED
 
 
 def test_decide_grant_disabled():
-    trial, reason = decide_trial_grant(
-        enabled=False, already_held=False, daily_spend=0.0, daily_cap=25.0, credit_usd=5.0
-    )
-    assert trial is None and reason == "disabled"
+    assert decide_trial_grant(enabled=False, already_held=False, spent_today=0, daily_cap=2500) == DISABLED
 
 
 def test_decide_grant_already_held():
-    trial, reason = decide_trial_grant(
-        enabled=True, already_held=True, daily_spend=0.0, daily_cap=25.0, credit_usd=5.0
-    )
-    assert trial is None and reason == "already_held"
+    assert decide_trial_grant(enabled=True, already_held=True, spent_today=0, daily_cap=2500) == ALREADY_HELD
 
 
 def test_decide_grant_daily_cap_reached_at_boundary():
     # >= cap pauses (boundary inclusive).
-    trial, reason = decide_trial_grant(
-        enabled=True, already_held=False, daily_spend=25.0, daily_cap=25.0, credit_usd=5.0
-    )
-    assert trial is None and reason == "daily_cap_reached"
+    assert decide_trial_grant(enabled=True, already_held=False, spent_today=2500, daily_cap=2500) == DAILY_CAP_REACHED
 
 
-def test_decide_grant_rounds_credit():
-    trial, _ = decide_trial_grant(
-        enabled=True, already_held=False, daily_spend=0.0, daily_cap=25.0, credit_usd=5.005
-    )
-    assert trial["granted_usd"] == 5.0
+def test_decide_grant_already_held_wins_over_daily_cap():
+    # Order of checks (services.credits.trial.decide_trial_grant): a person who
+    # already holds their trial is never re-paused by today's platform-wide spend.
+    assert decide_trial_grant(enabled=True, already_held=True, spent_today=99999, daily_cap=2500) == ALREADY_HELD
 
 
-# --------------------------------------------------------------------------- #
-# One-per-user check.
-# --------------------------------------------------------------------------- #
-
-
-def test_user_has_held_trial_true():
-    assert user_has_held_trial(_FakeDB(has_trial=True), 42) is True
-
-
-def test_user_has_held_trial_false():
-    assert user_has_held_trial(_FakeDB(has_trial=False), 42) is False
-
-
-def test_user_has_held_trial_none_db_or_owner():
-    assert user_has_held_trial(None, 42) is False
-    assert user_has_held_trial(_FakeDB(has_trial=True), None) is False
-
-
-# --------------------------------------------------------------------------- #
-# grant_trial_at_provisioning — end to end against the fake session.
-# --------------------------------------------------------------------------- #
-
-
-def test_grant_writes_trial_for_fresh_user():
-    db = _FakeDB(has_trial=False, daily_spend_raw="0")
-    trial = grant_trial_at_provisioning(db, "ws-1", owner_id=7)
-    assert trial == {"granted_usd": 5.0, "spent_usd": 0, "state": TRIAL_ACTIVE}
-    assert len(db.updates) == 1
-    # The UPDATE writes the exact trial JSON to the trial key.
-    _sql, params = db.updates[0]
-    assert json.loads(params["trial"]) == trial
-    assert params["ws_id"] == "ws-1"
-
-
-def test_grant_skipped_when_user_already_held_trial():
-    db = _FakeDB(has_trial=True)
-    assert grant_trial_at_provisioning(db, "ws-2", owner_id=7) is None
-    assert db.updates == []  # nothing written for a second workspace
-
-
-def test_grant_skipped_when_kill_switch_off(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_ENABLED", False)
-    db = _FakeDB(has_trial=False, daily_spend_raw="0")
-    assert grant_trial_at_provisioning(db, "ws-3", owner_id=8) is None
-    assert db.updates == []
-
-
-def test_grant_paused_when_daily_cap_reached(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_GLOBAL_DAILY_USD", 25.0)
-    db = _FakeDB(has_trial=False, daily_spend_raw="25.00")
-    assert grant_trial_at_provisioning(db, "ws-4", owner_id=9) is None
-    assert db.updates == []  # grant PAUSED — nothing written
-
-
-def test_grant_uses_configured_credit_amount(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_CREDIT_USD", 3.0)
-    db = _FakeDB(has_trial=False, daily_spend_raw="0")
-    trial = grant_trial_at_provisioning(db, "ws-5", owner_id=10)
-    assert trial["granted_usd"] == 3.0
-
-
-# --------------------------------------------------------------------------- #
-# The granted trial round-trips through US-002's public snapshot.
-# --------------------------------------------------------------------------- #
-
-
-def test_granted_trial_surfaces_through_public_snapshot():
-    from services.onboarding_state import public_snapshot
-
-    trial, _ = decide_trial_grant(
-        enabled=True, already_held=False, daily_spend=0.0, daily_cap=25.0, credit_usd=5.0
-    )
-
-    class _WS:
-        onboarding = {"stage": "not_started", "trial": trial}
-
-    snap = public_snapshot(_WS())
-    assert snap["trial"] == {"granted_usd": 5.0, "spent_usd": 0, "state": TRIAL_ACTIVE}
+def test_decide_grant_under_cap_is_granted():
+    assert decide_trial_grant(enabled=True, already_held=False, spent_today=2499, daily_cap=2500) == GRANTED

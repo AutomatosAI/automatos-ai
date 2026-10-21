@@ -33,7 +33,6 @@ import { useNeedsYou } from '@/hooks/use-needs-you'
 import { useWatches } from '@/hooks/use-watches-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
 
-import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 
 import { StatsStrip } from './stats-strip'
@@ -187,9 +186,6 @@ export function CommandCenterShell() {
         </div>
         <div className="cc-actions">
           <PeriodSelect value={period} onChange={setPeriod} />
-          {/* PRD-222 US-014: trial balance, honest on the Command Center too —
-              same snapshot the chat pill reads; self-hides once converted. */}
-          <TrialBalancePill />
           <button
             type="button"
             className="cc-btn"

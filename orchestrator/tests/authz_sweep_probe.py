@@ -11,7 +11,8 @@ served route+method with the authorization facts the sweep asserts on:
 - ``wsanswer`` — ``require_workspace_answerer`` present (PRD-266 D16: owner, admin or editor)
 - ``perm``     — the ``require_workspace_permission`` marker string, if gated
 - ``admin_in_handler`` — the endpoint body asserts the shared admin check
-  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)``)
+  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)`` /
+  ``_require_platform_admin(ctx)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
   auth-type gate (credentials resolve, the voice mint, the mobile device routes)
 
@@ -92,6 +93,9 @@ def main() -> None:
                         or "_require_workspace_admin(ctx)" in src
                         # PRD-207 voice/arm: platform-admin gate in the handler.
                         or "_is_platform_admin(ctx)" in src
+                        # PRD-265 US-007: api/admin_credits.py's platform-admin
+                        # gate in the handler body (caller_is_admin, 403).
+                        or "_require_platform_admin(ctx)" in src
                     ),
                     "own_gate_in_handler": (
                         "Admin access required to resolve credentials" in src

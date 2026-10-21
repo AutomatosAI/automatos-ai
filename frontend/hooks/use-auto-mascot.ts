@@ -29,7 +29,7 @@ export type BackendStatus = 'up' | 'down'
 export interface AutoMascotOptions {
   /** useChat's status: into streaming starts a turn, back to idle finishes it, into error fails it. */
   readonly status?: ChatStatus
-  /** useChat's errorCode: set when the last turn was blocked ('trial_exhausted'). */
+  /** useChat's errorCode: set when the last turn was blocked ('credits_exhausted'). */
   readonly errorCode?: string | null
   /**
    * The newest reply: its reasoning thinks, its words starting end thinking, a

@@ -189,6 +189,13 @@ ADMIN_GATED_IN_HANDLER = {
     ("POST", "/api/admin/themes/{package_id}/reject"),
     ("POST", "/api/admin/themes/{package_id}/report-note"),
     ("POST", "/api/admin/themes/{package_id}/signature"),
+    # PRD-265 US-007: grant/take-back a workspace's credits
+    # (api/admin_credits.py adjust_workspace_credits) — platform-admin gate in
+    # the handler body (`_require_platform_admin(ctx)` -> `caller_is_admin`,
+    # 403), not a shared dependency. Also GET /api/v1/billing/summary|ledger
+    # (api/billing.py) carry the credit read surface — both are GET-only, so
+    # the mutating-routes sweep below does not classify them.
+    ("POST", "/api/admin/workspaces/{workspace_id}/credits"),
 }
 
 # (g) Own explicit in-handler gate.

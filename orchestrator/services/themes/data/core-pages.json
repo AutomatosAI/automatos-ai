@@ -12,7 +12,7 @@
     "app/playbooks/page.tsx": "6bd7522e1268fd3cec737df995e1ea8e82debca5d6ed1221e2de653981697b27",
     "components/agents/studio/agent-management-studio.tsx": "4bbcef4e09158bc526623c85574771867895efa3007b55cd537b98379be3427b",
     "components/chatbot/studio-chat-shell.tsx": "eb0aa1b42b3c6971037935b10b7a0e74e257758f7ed3c7a1ba728a0a4887b492",
-    "components/command-center/command-center-shell.tsx": "137661817fb38d19850435434e86b1e5aaca379b1d6d692d670190548d00da40",
+    "components/command-center/command-center-shell.tsx": "6d5cf76c4f6246fc6158a1505b3bc2589eef35474a0e50e730e4f4335077ac53",
     "components/deliverables/studio/deliverables-studio.tsx": "2e01340bc230e3563970e429d470608a181c11d93c488fbc796e769c5c8b5e87",
     "components/documents/document-management.tsx": "d4588f5172ea070ebeaa1b012236fd45d0263638e7694b4c1c3e319ce11e7d38",
     "components/playbooks/PlaybooksPanel.tsx": "f3486c7ab9d5abc6fa66eb5a7d40be9b27ff60b71bcaff7697f411608b9cf2b6"

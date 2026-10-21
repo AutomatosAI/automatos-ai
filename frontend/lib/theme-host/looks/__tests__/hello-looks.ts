@@ -4,14 +4,20 @@
  * theme (A-19c: three presets, a ground and an accent knob, a glow), passed through the browser's own
  * gate (boot-sanitize.ts) as the root layout does. Also a Storage kept in memory and one that is
  * blocked, so no test shares jsdom's localStorage.
+ *
+ * A-19d2: the whole boot of that theme as the root layout writes it into the page (helloThemeBoot:
+ * its entry, look keys, guard, table and presets), and the page's JSON element itself (putPageBoot),
+ * which the generic look runtime reads after mount.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
 
-import { sanitizeBootLooks, sanitizeLookGuard, sanitizePrepaint } from '@/lib/theme-host/boot-sanitize'
-import type { ThemeLookStorage } from '@/lib/theme-host/boot-types'
+import { THEME_BOOT_ELEMENT_ID, type ThemeBoot } from '@/lib/theme-host/boot'
+import { sanitizeBootLooks, sanitizeLookGuard, sanitizePrepaint, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
+import type { InstalledThemeEntryData, ThemeLookStorage } from '@/lib/theme-host/boot-types'
 import { themeLookRulesOf, type ThemeLook, type ThemeLookBoot, type ThemeLookRules } from '@/lib/theme-host/looks/spec'
-import { lookTheme, type LookTheme } from '@/lib/theme-host/looks/storage'
+import { bootLookStorage, lookTheme, type LookTheme } from '@/lib/theme-host/looks/storage'
+import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
 
 const HELLO_BOOT_PATH = path.resolve(__dirname, '../../../../..', 'e2e/browser/fixtures/hello-a09b/boot.json')
 
@@ -60,6 +66,45 @@ export const INK = preset('ink')
 /** A valid saved look of the user's own. */
 export function myLook(fields: Readonly<Record<string, string | number>> = {}): ThemeLook {
   return { ...PAPER, id: 'my-look-1', name: 'My look 1', sub: 'Saved just now', ground: 'dusk', accent: 'green', glow: 18, ...fields } as ThemeLook
+}
+
+/** hello-a09b's entry as the boot route answers it (serve.py theme_entry): looks, and a tone its look sets. */
+export const HELLO_ENTRY: InstalledThemeEntryData = {
+  themeId: HELLO_THEME_ID,
+  name: 'Hello looks',
+  base: 'studio',
+  htmlClass: 'hello-a09b',
+  minWidth: 0,
+  tone: 'from-look',
+  reviewed: false,
+  ownsPages: [],
+  routes: [],
+  nav: [],
+  slots: ['frame@1', 'lookEditor@1', 'styleSheet@1'],
+}
+
+/** hello-a09b's whole boot as the root layout writes it into the page, through the browser's gate. */
+export function helloThemeBoot(fields: Partial<ThemeBoot> = {}): ThemeBoot {
+  return sanitizeThemeBoot({
+    addClasses: ['studio', HELLO_ENTRY.htmlClass],
+    removeClasses: [],
+    tone: { policy: 'from-look', value: null },
+    ...helloBoot(),
+    lookStorage: bootLookStorage(HELLO.keys),
+    integrity: null,
+    entry: HELLO_ENTRY,
+    ...fields,
+  })
+}
+
+/** Puts `boot` into the page as the root layout's JSON element; the returned function takes it out. */
+export function putPageBoot(boot: unknown): () => void {
+  const element = document.createElement('script')
+  element.type = 'application/json'
+  element.id = THEME_BOOT_ELEMENT_ID
+  element.textContent = scriptSafeJson(boot)
+  document.head.appendChild(element)
+  return () => element.remove()
 }
 
 /** The keys the backend's boot names for an installed theme (orchestrator serve.py look_storage). */

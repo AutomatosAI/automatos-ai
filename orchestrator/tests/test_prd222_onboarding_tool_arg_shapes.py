@@ -153,10 +153,12 @@ def test_handler_is_silent_when_the_shape_is_already_right(caplog):
 
 
 def test_handler_plan_case_is_forgiven():
+    # PRD-265 US-006: the plan is recorded as the person's choice, never assigned.
     ws = _FakeWorkspace("proposal")
     res = _run(update_onboarding(_db_returning(ws), ws.id, {"plan": " Basic "}))
     assert res["success"] is True
-    assert ws.plan == "basic"
+    assert res["plan"]["plan"] == "basic"
+    assert ws.onboarding["funnel"]["plan_accepted"]["plan"] == "basic"
 
 
 def test_handler_enterprise_copy_is_only_for_enterprise():

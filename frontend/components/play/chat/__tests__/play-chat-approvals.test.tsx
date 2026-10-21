@@ -55,6 +55,11 @@ vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
+// PRD-265: the credits the paused banner and the SDK's useTrial read: none here (play-chat-turn.test.tsx covers them).
+vi.mock('@/hooks/use-billing-summary', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-billing-summary')>()),
+  useBillingSummary: () => ({ data: undefined }),
+}))
 vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state, caption, detail }: { state: string; caption?: string; detail?: string }) => (
     <div data-testid="auto" data-state={state}>

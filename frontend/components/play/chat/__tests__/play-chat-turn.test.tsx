@@ -3,8 +3,8 @@
  * lines from the reply's ToolCall entries, the receipts in receiptLine's words,
  * the Deliverable card, the snag box with Try again (the hook's reload()), a
  * failed turn the server saved and a reply posted in the background, as the
- * stored rows bring them (P260-FX-09), the core's TrialExhaustedBanner for a
- * spent trial, the core's MissionSuggestionCard for a mission-suggestion part,
+ * stored rows bring them (P260-FX-09), the core's TrialExhaustedBanner for
+ * used-up credits (PRD-265), the core's MissionSuggestionCard for a mission-suggestion part,
  * and the core's WithdrawOfferCard and TaskCard a reply carries (P260-FX-29;
  * Withdraw is mocked at the core's useDenyApproval, as the core's own test
  * does). The chat hook
@@ -64,10 +64,16 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
     </div>
   ),
 }))
-// The core banner's own dependencies: no workspace snapshot, and its power-up card as a stand-in.
+// The core banner's own dependencies: no workspace snapshot, the billing summary (PRD-265: the
+// banner and the SDK's useTrial read it; no QueryClient here), and its power-up card as a stand-in.
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: null }),
   useWorkspaceOptional: () => null,
+}))
+const billing = vi.hoisted(() => ({ data: undefined as unknown }))
+vi.mock('@/hooks/use-billing-summary', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-billing-summary')>()),
+  useBillingSummary: () => billing,
 }))
 vi.mock('@/components/onboarding/power-up-card', () => ({ PowerUpCard: () => <div data-testid="power-up-card" /> }))
 vi.mock('@/hooks/use-missions-api', () => ({
@@ -128,7 +134,7 @@ import { PlayChat } from '@/components/play/chat/play-chat'
 import { PAGE_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { NO_ACTIONS, NOTHING_ON_THE_BOARD, receiptLine } from '@/lib/chat/receipts'
 import { HELLO_KEY } from '@/lib/mascot/session'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { CREDITS_EXHAUSTED_CODE } from '@/lib/credits'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useMissionStore } from '@/stores/mission-store'
 
@@ -196,6 +202,7 @@ afterEach(() => {
   useAiLabelStore.setState({ hiddenLabels: [], shownLabels: [] })
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', errorCode: null, messages: null })
+  billing.data = undefined
 })
 
 describe('tool lines', () => {
@@ -417,20 +424,36 @@ describe('a reply posted in the background (M29)', () => {
   })
 })
 
-describe('a spent trial', () => {
-  it("trial_exhausted renders the core's TrialExhaustedBanner, not a snag", async () => {
+describe('used-up credits (PRD-265)', () => {
+  it("credits_exhausted renders the core's TrialExhaustedBanner, not a snag", async () => {
     chat.status = 'error'
-    chat.errorCode = TRIAL_EXHAUSTED_CODE
+    chat.errorCode = CREDITS_EXHAUSTED_CODE
     await renderChat([QUESTION])
-    expect(screen.getByTestId('trial-exhausted-banner')).toHaveTextContent('Your trial credit is used up')
+    expect(screen.getByTestId('trial-exhausted-banner')).toHaveTextContent('Your credits are used up')
     expect(screen.queryByRole('region', { name: SNAG_TITLE })).toBeNull()
   })
 
-  it('a reply blocked mid-stream by the trial shows the banner instead of its snag box', async () => {
-    chat.errorCode = TRIAL_EXHAUSTED_CODE
-    await renderChat([QUESTION, autoMessage('m2', '', { error: { message: 'Trial used up.', code: TRIAL_EXHAUSTED_CODE } })])
+  it('a reply refused mid-stream for credits shows the banner instead of its snag box', async () => {
+    chat.errorCode = CREDITS_EXHAUSTED_CODE
+    await renderChat([QUESTION, autoMessage('m2', '', { error: { message: 'Credits used up.', code: CREDITS_EXHAUSTED_CODE } })])
     expect(screen.getByTestId('trial-exhausted-banner')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: SNAG_TITLE })).toBeNull()
+  })
+
+  it('a paused balance shows the banner before anything is sent; on own keys it does not', async () => {
+    const paused = {
+      plan: 'basic', plan_name: 'Own keys', price_usd: 9, price_label: 'beta', billing_open: false, status: 'paused',
+      renewal_date: null, balance: { trial: 0, monthly: 0, topup: 0, spendable: 0 }, trial_credits: 500,
+      platform_ai: false, metered: true, paused: true, low: false, own_keys: false,
+    }
+    billing.data = paused
+    const view = await renderChat([QUESTION])
+    expect(screen.getByTestId('trial-exhausted-banner')).toHaveTextContent('On the Own keys plan the AI runs on your own keys')
+    view.unmount()
+
+    billing.data = { ...paused, own_keys: true }
+    await renderChat([QUESTION])
+    expect(screen.queryByTestId('trial-exhausted-banner')).toBeNull()
   })
 })
 

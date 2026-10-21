@@ -98,6 +98,11 @@ vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => null,
 }))
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
+// PRD-265: the credits the paused banner and the SDK's useTrial read: none here (play-chat-turn.test.tsx covers them).
+vi.mock('@/hooks/use-billing-summary', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-billing-summary')>()),
+  useBillingSummary: () => ({ data: undefined }),
+}))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => null }))
 
 // The core's fallback chrome, its parts left out (their own tests cover them).

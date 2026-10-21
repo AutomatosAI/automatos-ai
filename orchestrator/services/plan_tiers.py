@@ -24,8 +24,12 @@ so unmanaged keys survive, under the keys the LIVE consumers already read:
 
 ``mission_concurrency`` / ``watcher_limit`` / ``marketplace_depth`` are stored too
 (the tier's declared limits) but have no enforcement consumer yet — this wave adds
-NO quota hardening. No billing anywhere: ``display_price_usd`` is a label only
-(PRD §12 Q5). ``enterprise`` is coming-soon and is rejected by :func:`assign_plan`.
+NO quota hardening. ``enterprise`` is coming-soon and is rejected by :func:`assign_plan`.
+
+PRD-265 (billing): ``display_price_usd`` is still a display field. The commerce
+facts a tier carries — ``platform_ai``, ``monthly_credits``, ``self_serve`` and
+``metered`` — are read through the helpers below by the credit gate
+(``services/credits``) and by Auto's plan proposal, which never assigns a paid plan.
 
   * ``render_minutes_month`` — PRD-251 S1.1c: the monthly media render quota,
     hosting, not a capability gate (``0`` or no key = no quota). It is written
@@ -67,6 +71,77 @@ def assignable_tiers(tiers: Optional[dict] = None) -> dict:
     """The subset of tiers a workspace can be assigned to (excludes enterprise)."""
     resolved = _tiers(tiers)
     return {name: t for name, t in resolved.items() if is_assignable(name, resolved)}
+
+
+# The DB key of the entry tier (Own keys): ``workspaces.plan`` defaults to it.
+ENTRY_PLAN = "basic"
+# Beside every plan price until paid plans open (facts sheet §4: beta pricing).
+BETA_PRICE_LABEL = "beta"
+# The in-app page where an owner buys a plan (the Billing tab, PRD-265 US-011).
+BILLING_SETTINGS_PATH = "/settings?tab=billing"
+
+
+def _tier_or_entry(plan: Optional[str], tiers: Optional[dict] = None) -> dict:
+    resolved = _tiers(tiers)
+    return resolved.get(plan or "") or resolved.get(ENTRY_PLAN) or {}
+
+
+def tier_key(raw: Any, tiers: Optional[dict] = None) -> Optional[str]:
+    """The tier key a plan name means — its key or its display name, any case
+    ("Own keys" → ``basic``); an unknown name comes back lower-cased as given."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    wanted = raw.strip().lower()
+    for key, tier in _tiers(tiers).items():
+        if wanted in (key, str((tier or {}).get("display_name") or "").lower()):
+            return key
+    return wanted
+
+
+def price_label() -> Optional[str]:
+    """The label beside every plan price: ``"beta"`` until paid plans open
+    (``config.BILLING_OPEN``, PRD-265 US-001), then none."""
+    from config import config
+
+    return None if config.BILLING_OPEN else BETA_PRICE_LABEL
+
+
+def platform_ai_allowed(plan: Optional[str], tiers: Optional[dict] = None) -> bool:
+    """Whether the plan's own credits (monthly, top-up) may pay for calls on the
+    platform's AI keys. Own keys (and an unknown plan, which resolves to it) may
+    not: its calls run on the customer's keys only (PRD-265 FR-3)."""
+    return bool(_tier_or_entry(plan, tiers).get("platform_ai"))
+
+
+def is_metered(plan: Optional[str], tiers: Optional[dict] = None) -> bool:
+    """False only for a tier on an explicit platform allowance (enterprise): its
+    platform calls are recorded but never gated by credits."""
+    return _tier_or_entry(plan, tiers).get("metered", True) is not False
+
+
+def unmetered_plans(tiers: Optional[dict] = None) -> list:
+    """The plans on an explicit platform allowance (never gated by credits)."""
+    resolved = _tiers(tiers)
+    return [name for name in resolved if not is_metered(name, resolved)]
+
+
+def monthly_credits(plan: Optional[str], tiers: Optional[dict] = None) -> int:
+    """Credits one paid period of ``plan`` grants (0 for Own keys)."""
+    return int(_tier_or_entry(plan, tiers).get("monthly_credits") or 0)
+
+
+def is_self_serve(plan: str, tiers: Optional[dict] = None) -> bool:
+    """True for a plan the owner buys through checkout; Business is by invite."""
+    tier = _tiers(tiers).get(plan)
+    return is_assignable(plan, tiers) and bool(tier.get("self_serve"))
+
+
+def purchase_path(plan: str, tiers: Optional[dict] = None) -> Optional[str]:
+    """Where the owner buys ``plan`` in the app (the Billing tab, plan preselected),
+    or None for a plan that isn't sold self-serve."""
+    if not is_self_serve(plan, tiers):
+        return None
+    return f"{BILLING_SETTINGS_PATH}&plan={plan}"
 
 
 def plan_limits_for_tier(
@@ -234,11 +309,12 @@ def exposure_for_plan(plan: str, tiers: Optional[dict] = None) -> dict:
     tier = _tier_or_entry(plan, tiers)
     families = dict(tier.get("families") or {})
     declares_families = isinstance(tier.get("families"), dict)
+    price = tier.get("display_price_usd")
     return {
         "plan": plan,
         "display_name": tier.get("display_name"),
-        "display_price_usd": tier.get("display_price_usd"),
-        "price_label": tier.get("price_label"),
+        "display_price_usd": price,
+        "price_label": price_label() if price is not None else None,
         "families": families,
         "marketplace_depth": tier.get("marketplace_depth", 1),
         "nav": _nav_exposure(families, declares_families=declares_families),
@@ -374,9 +450,12 @@ _BUSINESS_SIGNALS = (
     "agency", "multiple teams", "several teams", "multiple pods", "departments",
     "organisation", "organization", "franchise", "enterprise",
 )
-_PRO_SIGNALS = (
-    "developer", "engineering", "software", "code", "analytics", "dashboard",
-    "sql", "data team", "automation",
+# PRD-265: Own keys and Pro are the same service; only who pays for the AI
+# differs. Someone technical can bring their own keys; everyone else is better
+# served by Pro, where the credits are included.
+_OWN_KEYS_SIGNALS = (
+    "technical", "developer", "engineering", "software", "code", "api key",
+    "own keys", "openrouter", "anthropic", "openai",
 )
 
 
@@ -384,9 +463,10 @@ def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict
     """Recommend an assignable tier from the stored segment + expressed team size.
 
     Simple, explainable rules (NO pricing math): an org-scale operation (≥6 seats
-    or multi-team language) → business; a small team, technical comfort, or
-    code/data needs → pro; a solo operator → basic. Returns ``(plan, reason)``
-    where reason is a short plain-language phrase for the proposal copy.
+    or multi-team language) → business; someone technical, who can bring their
+    own AI keys → basic (Own keys); everyone else → pro, where AI credits are
+    included. Returns ``(plan, reason)`` where reason is a short plain-language
+    phrase for the proposal copy.
 
     ``team_size`` is read from the STORED segment (``segment['team_size']``, the
     key Auto captures through the tool) when not passed explicitly — so the two
@@ -401,32 +481,35 @@ def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict
 
     if (size is not None and size >= 6) or any(s in text for s in _BUSINESS_SIGNALS):
         return "business", "you're running multiple teams or pods"
-    if (size is not None and size >= 2) or "technical" in text or any(s in text for s in _PRO_SIGNALS):
-        return "pro", "you've got a small team or code/data needs"
-    return "basic", "you're a solo operator getting started"
+    if any(s in text for s in _OWN_KEYS_SIGNALS):
+        return ENTRY_PLAN, "they can run it on their own AI keys"
+    return "pro", "AI credits are included, no keys needed"
+
+
+def _price_phrase(name: str, tier: dict) -> str:
+    """``"Pro $29/mo"`` — and ``"by invite"`` for a plan not sold self-serve."""
+    phrase = f"{tier.get('display_name') or name.title()} ${tier.get('display_price_usd')}/mo"
+    return phrase if tier.get("self_serve") else f"{phrase} (by invite)"
 
 
 def plan_proposal_copy(segment: Optional[dict], team_size=None, tiers: Optional[dict] = None) -> str:
     """The plan-recommendation line injected into the proposal stage guidance.
 
-    Names the recommended tier with its DISPLAY price + early-access label, lists
-    every assignable tier's price, states Enterprise is coming soon, and tells
-    Auto to set the accepted plan via ``platform_update_onboarding`` (only
-    assignable tiers). Display strings come from PLAN_TIERS — no charge is ever
-    computed (Q5).
+    Names the recommended tier with its DISPLAY price, lists every assignable
+    tier's price, states Enterprise is coming soon, and tells Auto to RECORD the
+    choice via ``platform_update_onboarding`` — Auto never puts a workspace on a
+    paid plan (PRD-265 US-006); the tool answers with where the owner buys it.
+    While billing is closed the copy carries the facts sheet's beta terms.
     """
     resolved = _tiers(tiers)
     plan, reason = recommend_plan(segment, team_size, resolved)
     tier = resolved.get(plan) or {}
     name = tier.get("display_name") or plan.title()
-    price = tier.get("display_price_usd")
-    options = " · ".join(
-        f"{t.get('display_name') or p.title()} ${t.get('display_price_usd')}/mo"
-        for p, t in assignable_tiers(resolved).items()
-    )
+    options = " · ".join(_price_phrase(p, t) for p, t in assignable_tiers(resolved).items())
+    beta = " Beta pricing: nothing is charged yet." if price_label() else ""
+    # Kept short: this line rides the proposal stage's prompt, capped at 800 tokens.
     return (
-        f"Recommend the **{name} plan — ${price}/mo** (early-access pricing) because {reason}. "
-        f"Show the options — {options} (all early access) — and note Enterprise is coming soon. "
-        f"On an explicit yes, set it with `platform_update_onboarding` (plan: \"{plan}\"); "
-        f"only basic/pro/business are assignable."
+        f"Recommend the **{name} plan — ${tier.get('display_price_usd')}/mo** because {reason}. "
+        f"Options: {options}; Enterprise is coming soon.{beta} On a yes, record it via "
+        f"`platform_update_onboarding` (plan: \"{plan}\"); never assign a plan yourself."
     )
