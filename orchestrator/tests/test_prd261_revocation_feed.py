@@ -15,10 +15,9 @@ installed, so a 200 is an unauthenticated one. Pins (plan §2.2.7, §2.6 C-05g):
 * a built feed a local edition would refuse for its size (over ``THEME_REVOCATIONS_FEED_MAX_KB``, or
   over ``FEED_MAX_ROWS`` rows) is a 503 with a plain message and an error log, never a 200 or a 304;
 * ``parse_feed`` round-trips ``build_feed`` and refuses the whole feed for a wrong schema, oversize,
-  more than 10,000 rows, a bad digest, id or range, a reason that isn't one line of plain text (over
-  2000 characters, empty, a line break, a bidi override or another control character); an unknown
-  level parses as ``disable``; a hosted reason with line breaks or a bidi override goes out on one
-  line, so its row stays in the feed.
+  more than 10,000 rows, a bad digest, id or range, a reason that isn't one line of plain text of
+  1..2000 characters (a line break, a bidi override); an unknown level parses as ``disable``; a hosted
+  reason goes out on one line, so its row stays in the feed.
 """
 from __future__ import annotations
 
@@ -227,8 +226,7 @@ def test_revoked_keys_come_from_the_keys_file(api, monkeypatch, tmp_path):
 
 
 def test_a_hosted_reason_goes_out_on_one_line_and_its_row_stays_in_the_feed(api):
-    # review.deactivate stores a reason with its line breaks; the parser refuses one with them.
-    package = _package(api.db)
+    package = _package(api.db)  # review.deactivate keeps a reason's line breaks; parse_feed refuses them
     row = _revoke(api.db, digest=package.digest, reason="Reported twice:\n  sends chat off-site\u202e\r\nfixed in 1.1")
     blank = _revoke(api.db, digest=_package(api.db, theme_id="acme/other").digest, reason="\u202e\u202c")
     wire = {item["id"]: item["reason"] for item in api.client.get(FEED).json()["revocations"]}
@@ -246,23 +244,15 @@ def test_a_feed_too_large_for_a_local_edition_is_503_and_logged(api, monkeypatch
     monkeypatch.setattr(config, revocation_feed.FEED_MAX_KB_SETTING, 1, raising=False)
     with caplog.at_level(logging.ERROR, logger=feed_api.logger.name):
         refused = api.client.get(FEED)
-        unconfirmed = api.client.get(FEED, headers={"If-None-Match": etag})
-    for resp in (refused, unconfirmed):
+        unconfirmed = api.client.get(FEED, headers={"If-None-Match": etag})  # never a 304 either
+        monkeypatch.setattr(config, revocation_feed.FEED_MAX_KB_SETTING, 2, raising=False)
+        assert api.client.get(FEED).status_code == 200
+        monkeypatch.setattr(revocation_feed, "FEED_MAX_ROWS", 0)  # more rows than a local edition reads
+        too_many = api.client.get(FEED)
+    for resp in (refused, unconfirmed, too_many):
         assert (resp.status_code, resp.json()) == (503, {"detail": feed_api.FEED_TOO_LARGE})
     logged = [r.getMessage() for r in caplog.records if r.name == feed_api.logger.name and r.levelno == logging.ERROR]
-    assert len(logged) == 2 and all("not served" in message for message in logged)
-    monkeypatch.setattr(config, revocation_feed.FEED_MAX_KB_SETTING, 2, raising=False)
-    assert api.client.get(FEED).status_code == 200
-
-
-def test_a_feed_with_more_rows_than_a_local_edition_reads_is_503(api, monkeypatch):
-    digest = _package(api.db).digest
-    _revoke(api.db, digest=digest)
-    _revoke(api.db, digest=digest, level="warn")
-    assert api.client.get(FEED).status_code == 200
-    monkeypatch.setattr(revocation_feed, "FEED_MAX_ROWS", 1)
-    resp = api.client.get(FEED)
-    assert (resp.status_code, resp.json()) == (503, {"detail": feed_api.FEED_TOO_LARGE})
+    assert len(logged) == 3 and all("not served" in message for message in logged)
 
 
 def test_an_unreadable_hosted_range_goes_out_for_every_version_and_a_long_reason_is_cut(api):
