@@ -36,6 +36,7 @@ import sqlalchemy as sa  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
+import core.models  # noqa: E402,F401  (every model mapped, as the app maps them)
 from config import config  # noqa: E402
 from core.models.themes import THEME_REVOCATION_SYNC_ROW_ID, ThemeRevocationSync  # noqa: E402
 from services.themes import revocation_pull, revocation_sync_state, signature_state  # noqa: E402
