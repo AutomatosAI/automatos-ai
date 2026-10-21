@@ -35,6 +35,9 @@ export const ROUTINE_MAX_DUR_MIN = 45
 export const RECURRING_DUR_MIN = 20
 export const SINGLE_DUR_MIN = 15
 export const OVERDUE_TONE = 'hsl(45 80% 55%)'
+/** A paused scheduled task (PRD-266 D27): a grey border and a dimmed box, beside the word 'Paused'. */
+export const PAUSED_TONE = 'hsl(var(--muted-foreground))'
+export const PAUSED_OPACITY = 0.6
 
 
 export interface DayCell {
