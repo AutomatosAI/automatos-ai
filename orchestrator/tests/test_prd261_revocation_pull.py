@@ -8,10 +8,13 @@ only by ``liftedAt``, absent rows kept, local rows never written; every failure 
 JSON, schema, a bad row, oversize, 3xx, encoded, database) changes no row and records
 ``last_attempt_at``/``last_error``; no ``Authorization``, ``Cookie`` or ``X-Workspace-ID`` sent;
 ``http://`` only to loopback; ``revokedKeys`` stored; status (stale after 7 days) and Check now
-admin-only, 404 hosted, 409 without a URL; a pulled disable makes the local ``active`` the base.
+admin-only, 404 hosted, 409 without a URL; a pulled disable makes the local ``active`` the base, and
+so does a pulled ``revokedKeys`` naming the key that signed the chosen version (C-05c reads it
+through ``revocation_sync_state``), until the feed stops naming it.
 """
 from __future__ import annotations
 
+import base64
 import gzip
 import inspect
 import json
@@ -24,6 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -56,8 +60,10 @@ from core.models.themes import (  # noqa: E402
     ThemeChoice, ThemeInstallation, ThemeLook, ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
-from services.themes import revocation_feed, revocation_pull  # noqa: E402
+from services.themes import revocation_feed, revocation_pull, signature_state, signature_verify, signing  # noqa: E402
+from services.themes.digest import package_digest  # noqa: E402
 from services.themes.revocation_feed import as_utc  # noqa: E402
+from services.themes.signature_state import SIGNATURE_DISABLE_REASON  # noqa: E402
 
 WS = uuid.uuid4()
 OPERATOR_PK = 1
@@ -72,6 +78,10 @@ DROP = object()  # a field the wire helpers leave out
 COLUMNS = ("digest", "theme_id", "version_range", "level", "reason", "created_by", "created_at", "lifted_at", "origin")
 TABLES = [m.__table__ for m in (ThemePackage, ThemeInstallation, ThemeChoice, ThemeLook, ThemeOptIn,
                                 ThemeWorkspaceSettings, ThemeRevocation, ThemeRevocationSync)]
+VECTOR = json.loads((_ORCH / "tests" / "fixtures" / "themes" / "signing-vector.json").read_text(encoding="utf-8"))
+SIGNER = VECTOR["ed25519"]["cases"][0]  # an RFC 8032 case: its published seed signs here
+INK_FILES = {"dist/entry.js": {"type": "text/javascript", "size": 1, "sha256": "ab" * 32},
+             "dist/theme.css": {"type": "text/css", "size": 1, "sha256": "cd" * 32}}
 
 
 def _operator():
@@ -392,3 +402,40 @@ def test_a_pulled_disable_makes_the_local_active_answer_the_base(api):
     body = api.client.get("/api/themes/active").json()
     assert (body["choice"], body["theme"]) == ("classic", None)
     assert body["revoked"] == {"installId": str(install.id), "level": "disable", "reason": "Automatos revoked it"}
+
+
+def _signed_ink_chosen(api, monkeypatch, tmp_path):
+    """acme/ink 1.0.0 signed by ``SIGNER`` (active in the keys file), installed in WS and chosen."""
+    keys = [{"keyId": SIGNER["keyId"], "spki": SIGNER["spki"], "status": "active", "added": "2026-10-21"}]
+    keys_file = tmp_path / "signing-keys.json"
+    keys_file.write_text(json.dumps({"schema": 1, "keys": keys}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", keys_file)
+    signature_state.clear_cache()
+    manifest = {"id": "acme/ink", "name": "Ink", "version": "1.0.0", "base": "classic", "htmlClass": "ink"}
+    package = ThemePackage(id=uuid.uuid4(), theme_id="acme/ink", version="1.0.0", owner_type="workspace",
+                           workspace_id=WS, manifest=manifest, file_manifest=INK_FILES,
+                           digest=package_digest({path: row["sha256"] for path, row in INK_FILES.items()}),
+                           storage_prefix="themes/acme/ink/1.0.0/")
+    seed = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(SIGNER["seed"]))
+    signed = seed.sign(signature_verify.canonical_bytes(signing.signing_payload(package)))
+    package.signature = base64.b64encode(signed).decode("ascii")
+    install = ThemeInstallation(workspace_id=WS, theme_id="acme/ink", package_id=package.id)
+    api.db.add_all([package, install])
+    api.db.commit()
+    assert api.client.put("/api/themes/choice", json={"choice": str(install.id)}).status_code == 200
+    return install
+
+
+def test_a_pulled_revoked_key_disables_the_version_it_signed_in_the_local_edition(api, monkeypatch, tmp_path):
+    install = _signed_ink_chosen(api, monkeypatch, tmp_path)
+    assert api.client.get("/api/themes/active").json()["theme"]["installId"] == str(install.id)  # it verifies
+    api.answer = _answer(_feed([], keys=[SIGNER["keyId"]]))
+    assert _pull(api).status_code == 200
+    body = api.client.get("/api/themes/active").json()
+    assert (body["choice"], body["theme"]) == ("classic", None)
+    assert body["revoked"] == {"installId": str(install.id), "level": "disable", "reason": SIGNATURE_DISABLE_REASON}
+    api.answer = _answer(_feed([], keys=[]))  # the feed no longer names the key: the version runs again
+    assert _pull(api).status_code == 200
+    assert api.client.get("/api/themes/active").json()["theme"]["installId"] == str(install.id)
+    assert api.db.query(ThemeRevocation).count() == 0  # the disable was never stored
+    signature_state.clear_cache()
