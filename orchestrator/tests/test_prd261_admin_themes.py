@@ -516,7 +516,7 @@ EXPECTED_ROUTES = {
     ("GET", f"{BASE}/pending"), ("GET", f"{BASE}/{{package_id}}/report"),
     ("POST", f"{BASE}/{{package_id}}/report-note"), ("POST", f"{BASE}/{{package_id}}/approve"),
     ("POST", f"{BASE}/{{package_id}}/reject"), ("POST", f"{BASE}/{{package_id}}/deactivate"),
-    ("POST", f"{BASE}/{{package_id}}/signature"),
+    ("POST", f"{BASE}/{{package_id}}/signature"), ("GET", f"{BASE}/{{package_id}}/review-package"),
 }
 
 
