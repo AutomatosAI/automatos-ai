@@ -45,6 +45,7 @@ import { ActivityTab } from './activity-tab'
 import { WatchlistTab } from './watchlist-tab'
 import { GovernanceTab } from './governance-tab'
 import { QuestionsTab } from './questions-tab'
+import { isPausedItem } from './calendar-actions'
 
 type TabKey =
   | 'summary'
@@ -128,7 +129,8 @@ export function CommandCenterShell() {
       // PRD-252 R5: the one Needs-you number sits on Board; it counted every open ticket.
       summary: 0,
       board: needsYou?.total ?? 0,
-      calendar: schedule?.scheduled?.length ?? 0,
+      // PRD-266 D27: a paused task stays in the feed, but only work that will run counts.
+      calendar: schedule?.scheduled?.filter((item) => !isPausedItem(item)).length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
       watchlist: watchlist?.total ?? 0,
       // PRD-225: the count of open questions — the wave's most user-visible

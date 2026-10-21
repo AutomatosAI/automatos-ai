@@ -20,6 +20,7 @@ const ACTION_PREFIXES = [
   { value: 'approval_grant:', label: 'Approvals' },
   { value: 'governance:', label: 'Governance config' },
   { value: 'audit:', label: 'Retention' },
+  { value: 'content_reported', label: 'Content reports' },
 ]
 
 const ACTOR_TYPES = [

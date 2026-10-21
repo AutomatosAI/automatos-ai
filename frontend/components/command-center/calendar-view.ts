@@ -6,6 +6,7 @@
 import { useMemo } from 'react'
 
 import type { ScheduleItem } from '@/hooks/use-activity-api'
+import { isPausedItem } from './calendar-actions'
 import type { ScheduleItemType } from './calendar-kinds'
 import {
   BAND_MAX_INTERVAL_MIN,
@@ -61,11 +62,12 @@ export function shiftedAnchor(anchor: Date, mode: ViewMode, direction: -1 | 0 | 
 }
 
 /** Ported from the deleted classic ActivityCalendar (PRD-162 S4): the soonest
- *  upcoming items. A deadline overdue by more than a week drops out. */
+ *  upcoming items. A deadline overdue by more than a week drops out, and a paused
+ *  task never runs next (PRD-266 D27: it stays on the grid, greyed). */
 function nextUpOf(items: ScheduleItem[]): ScheduleItem[] {
   const floor = Date.now() - NEXTUP_OVERDUE_MAX_MS
   return [...items]
-    .filter((i) => i.next_run_at && new Date(i.next_run_at).getTime() >= floor)
+    .filter((i) => !isPausedItem(i) && i.next_run_at && new Date(i.next_run_at).getTime() >= floor)
     .sort((a, b) => new Date(a.next_run_at as string).getTime() - new Date(b.next_run_at as string).getTime())
     .slice(0, 6)
 }

@@ -10,12 +10,11 @@
  */
 import { Fragment, type ReactNode } from 'react'
 
-import { buildEventActions, type EventActionDeps } from './calendar-actions'
+import { buildEventActions, isPausedItem, type EventActionDeps } from './calendar-actions'
 import { EventMenu } from './calendar-event-menu'
-import { kindTone } from './calendar-kinds'
-import { OVERDUE_TONE, timeLabel, type CalEvent, type DayCell } from './calendar-model'
+import { PAUSED_OPACITY, timeLabel, type CalEvent, type DayCell } from './calendar-model'
 import type { SocialReschedule } from './calendar-social-reschedule'
-import { DueTag } from './calendar-week-grid'
+import { DueTag, PausedTag, eventAccent } from './calendar-week-grid'
 
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
 const CHIPS_PER_DAY = 3
@@ -32,6 +31,9 @@ interface MonthCellProps {
 
 function MonthChip({ evt, past, actionDeps, social }: { evt: CalEvent; past: boolean; actionDeps: EventActionDeps; social?: SocialReschedule }) {
   const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
+  const paused = isPausedItem(evt.item)
+  // A past day's chip fades; a paused one (PRD-266 D27) is at most its own dimness.
+  const opacity = Math.min(past && !evt.due ? 0.5 : 1, paused ? PAUSED_OPACITY : 1)
   return (
     <EventMenu actions={buildEventActions(evt.item, actionDeps)}>
       <button
@@ -39,10 +41,12 @@ function MonthChip({ evt, past, actionDeps, social }: { evt: CalEvent; past: boo
         {...social?.dragProps(evt.item)}
         className="cc-cal-month-evt"
         data-kind={evt.item.type}
-        style={{ borderLeftColor: overdue ? OVERDUE_TONE : kindTone(evt.item.type), opacity: past && !evt.due ? 0.5 : 1 }}
+        data-paused={paused || undefined}
+        style={{ borderLeftColor: eventAccent(evt, overdue), opacity }}
         title={evt.name}
       >
         <span className="t">{timeLabel(evt)}</span> {evt.due && <DueTag overdue={overdue} />}{' '}
+        {paused && <PausedTag />}
         <span className="n2">{evt.name}</span>
       </button>
     </EventMenu>

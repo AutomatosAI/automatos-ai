@@ -13,7 +13,7 @@
 import { Fragment, type CSSProperties, type ReactNode } from 'react'
 
 import { toneFor } from './agent-tones'
-import { buildEventActions, type EventActionDeps } from './calendar-actions'
+import { buildEventActions, isPausedItem, type EventActionDeps } from './calendar-actions'
 import { EventMenu } from './calendar-event-menu'
 import { KIND_META, collapseCrowded, kindTone, layoutLanes } from './calendar-kinds'
 import {
@@ -22,6 +22,8 @@ import {
   MAX_LANES,
   MIN_EVENT_PX,
   OVERDUE_TONE,
+  PAUSED_OPACITY,
+  PAUSED_TONE,
   START_HR,
   eventSpan,
   hhmm,
@@ -52,6 +54,31 @@ export function DueTag({ overdue }: { overdue: boolean }) {
   )
 }
 
+/** PRD-266 D27: a paused scheduled task says so in words beside its name, never by colour alone. */
+export function PausedTag() {
+  return (
+    <span
+      className="paused"
+      style={{
+        marginRight: 6,
+        padding: '0 4px',
+        borderRadius: 3,
+        fontWeight: 600,
+        background: 'hsl(var(--muted))',
+        color: PAUSED_TONE,
+      }}
+    >
+      Paused
+    </span>
+  )
+}
+
+/** An event's left border: grey when paused, amber when overdue, else its kind's colour. */
+export function eventAccent(evt: CalEvent, overdue: boolean): string {
+  if (isPausedItem(evt.item)) return PAUSED_TONE
+  return overdue ? OVERDUE_TONE : kindTone(evt.item.type)
+}
+
 /** A slot with more overlapping events than the column has lanes for: one
  *  card, the members' agent dots, and a submenu per member. */
 function GroupCard({ members, start, end, actionDeps }: { members: CalEvent[]; start: number; end: number; actionDeps: EventActionDeps }) {
@@ -62,7 +89,10 @@ function GroupCard({ members, start, end, actionDeps }: { members: CalEvent[]; s
   const names = members.map((m) => (m.item.type === 'routine' && m.agent ? m.agent : m.name))
   const top = (first.hour - START_HR) * HOUR_PX + (first.min / 60) * HOUR_PX
   const height = Math.max(((end - start) / 3_600_000) * HOUR_PX, MIN_EVENT_PX)
-  const groups = members.map((m) => ({ label: `${hhmm(m)} ${m.name}`, actions: buildEventActions(m.item, actionDeps) }))
+  const groups = members.map((m) => ({
+    label: `${hhmm(m)} ${m.name}${isPausedItem(m.item) ? ' · Paused' : ''}`,
+    actions: buildEventActions(m.item, actionDeps),
+  }))
   return (
     <EventMenu groups={groups}>
       <button
@@ -118,6 +148,7 @@ export function eventBox(evt: CalEvent, lane: number, lanes: number): CSSPropert
 function GridEvent({ evt, lane, lanes, actionDeps, social }: GridEventProps) {
   const tone = toneFor(evt.agent)
   const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
+  const paused = isPausedItem(evt.item)
   const kind = KIND_META[evt.item.type]?.label ?? evt.item.type
   return (
     <EventMenu actions={buildEventActions(evt.item, actionDeps)}>
@@ -126,12 +157,14 @@ function GridEvent({ evt, lane, lanes, actionDeps, social }: GridEventProps) {
         {...social?.dragProps(evt.item)}
         className="cc-cal-event"
         data-kind={evt.item.type}
+        data-paused={paused || undefined}
         data-lane={lane}
         data-lanes={lanes}
         style={{
           ...eventBox(evt, lane, lanes),
-          borderLeftColor: overdue ? OVERDUE_TONE : kindTone(evt.item.type),
+          borderLeftColor: eventAccent(evt, overdue),
           background: 'hsl(var(--secondary))',
+          opacity: paused ? PAUSED_OPACITY : undefined,
         }}
         title={`${kind}: ${evt.name} — click for actions`}
       >
@@ -145,7 +178,10 @@ function GridEvent({ evt, lane, lanes, actionDeps, social }: GridEventProps) {
           )}
           {evt.due && <DueTag overdue={overdue} />}
         </div>
-        <div className="ttl">{evt.name}</div>
+        <div className="ttl">
+          {paused && <PausedTag />}
+          {evt.name}
+        </div>
       </button>
     </EventMenu>
   )

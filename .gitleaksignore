@@ -51,3 +51,10 @@ e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_
 # its entropy. The test uses a short fake key now. Flagged by a local range scan of
 # feat/prd-262-api before its PR.
 49448b51881b9e64414848f39b5b6e49bded2510:orchestrator/tests/test_prd262_pandas_leaves.py:generic-api-key:213
+
+# PRD-266 W3 (US-017c): the ai_providers route test's token-masking cases used a made-up
+# 16-character chat-bot token value, fake by construction; generic-api-key matched its
+# entropy. The test uses a 9-character fake now. Flagged by the #1263 history scan.
+0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:289
+0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:309
+0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:315
