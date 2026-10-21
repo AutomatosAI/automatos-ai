@@ -646,6 +646,10 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-266 US-016b: the Automatos moderation inbox for content reports. SaaS only
+    # (a local install posts nothing even when it is set); an https URL; a credential,
+    # never logged. PRD-266 open question 2 names the destination.
+    MODERATION_WEBHOOK_URL: str = os.getenv("MODERATION_WEBHOOK_URL", "")
     # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
     # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
     # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no

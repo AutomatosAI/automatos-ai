@@ -27,6 +27,7 @@ from core.models.core import (
     RecipeExecution,
     WorkflowTemplate,
 )
+from services.activity_scheduled_task_items import scheduled_task_items
 from services.activity_social_items import social_post_items
 from services.needs_you import needs_you_counts
 from services.ticket_numbers import ticket_label, ticket_numbers
@@ -1064,52 +1065,9 @@ class ActivityService:
             })
         return items
 
-    def _scheduled_task_items(
-        self, now: datetime, horizon: datetime
-    ) -> List[Dict[str, Any]]:
-        """Agent-scheduled tasks (one-shot + recurring) — ONE query, status=active."""
-        rows = self.db.execute(
-            text(
-                """
-                SELECT t.id, t.task_type, t.description, t.schedule, t.next_run_at,
-                       t.deliver_as, t.payload->>'title' AS payload_title,
-                       ta.name AS target_name
-                FROM agent_scheduled_tasks t
-                LEFT JOIN agents ta ON ta.id = t.target_agent_id
-                WHERE t.workspace_id = :ws AND t.status = 'active'
-                """
-            ),
-            {"ws": self._ws_str},
-        ).fetchall()
-        items: List[Dict[str, Any]] = []
-        for row in rows:
-            cron = row.schedule if is_valid_cron(row.schedule) else None
-            nxt = next_run(cron, now=now) if cron else _as_utc(row.next_run_at)
-            if nxt is None or nxt > horizon:
-                continue
-            # A board-delivery row is the ticket it will file: name it by the title.
-            label = (
-                getattr(row, "payload_title", None) or row.description or row.task_type or "Scheduled task"
-            ).strip()
-            items.append({
-                "id": f"task-{row.id}",
-                "scheduled_task_id": row.id,
-                "task_type": row.task_type,
-                "deliver_as": getattr(row, "deliver_as", None) or "chat",
-                "name": label[:80],
-                "type": "task",
-                "next_run_at": nxt.isoformat(),
-                "frequency": cron or "One-off",
-                "agent_name": row.target_name,
-                "agent_id": None,
-                "recurrence": {
-                    "cron_expression": cron,
-                    "interval_minutes": None,
-                    "timezone": "UTC",
-                    "active_hours": None,
-                },
-            })
-        return items
+    def _scheduled_task_items(self, now: datetime, horizon: datetime) -> List[Dict[str, Any]]:
+        """PRD-266 D27 (US-018a): active and paused scheduled tasks (services/activity_scheduled_task_items.py)."""
+        return scheduled_task_items(self.db, self.workspace_id, now, horizon)
 
     def _social_post_items(self, now: datetime, horizon: datetime) -> List[Dict[str, Any]]:
         """PRD-251 D10 (US-307): scheduled social posts (services/activity_social_items.py)."""

@@ -85,6 +85,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "watch_escalation",
         "trigger_fired",
         "report_submitted",
+        # PRD-266 US-016a: a member reported an Auto message or a Deliverable; the
+        # owner's notice opens Command Center -> Governance (link_type content_report).
+        "content_reported",
         "agent_error",
     }
 )

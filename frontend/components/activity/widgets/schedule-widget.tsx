@@ -6,6 +6,7 @@ import { useActivitySchedule } from '@/hooks/use-activity-api'
 import type { ScheduleItem } from '@/hooks/use-activity-api'
 import { format, startOfWeek, addDays, isToday, isSameDay, parseISO } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { isPausedItem } from '@/components/command-center/calendar-actions'
 
 interface ScheduleWidgetProps {
   className?: string
@@ -108,6 +109,9 @@ function UpcomingList({ items }: { items: ScheduleItem[] }) {
 export function ScheduleWidget({ className, onViewAll }: ScheduleWidgetProps) {
   const { data, isLoading, isError } = useActivitySchedule('7d')
   const items = data?.scheduled ?? []
+  // PRD-266 D27: a paused task stays in the feed, but it will not run, so it is
+  // neither upcoming nor a dot on its day (the calendar's Next up skips it too).
+  const upcoming = items.filter((item) => !isPausedItem(item))
   const schedulerActive = data?.scheduler_active ?? false
 
   return (
@@ -142,7 +146,7 @@ export function ScheduleWidget({ className, onViewAll }: ScheduleWidgetProps) {
           </p>
         ) : (
           <>
-            <WeekCalendar items={items} />
+            <WeekCalendar items={upcoming} />
             <div>
               <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 Upcoming
@@ -152,7 +156,7 @@ export function ScheduleWidget({ className, onViewAll }: ScheduleWidgetProps) {
                   Scheduler starting up...
                 </p>
               ) : (
-                <UpcomingList items={items} />
+                <UpcomingList items={upcoming} />
               )}
             </div>
           </>

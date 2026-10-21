@@ -100,12 +100,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-264 EUAI-10 (D16) -- the public detection route: a SHA-256 in, yes or no out,
     # rate-limited per IP. The one unauthenticated route of PRD-264.
     RouterSpec("api.provenance"),
-    # PRD-266 W1 -- Automatos Go's device routes (/api/v1/mobile). POST /pair is public
-    # (AGENTS.md exception 1), rate-limited per IP and code-gated; 404 outside local paired mode.
-    RouterSpec("api.mobile_devices"),
-    # PRD-266 US-001 -- the discovery document (GET /.well-known/automatos.json), public
-    # (AGENTS.md exception 1): names and capabilities only, never a secret.
-    RouterSpec("api.well_known"),
+    # PRD-266 US-016a -- content reports (POST /api/v1/reports): any member reports an
+    # Auto message or a Deliverable. Authenticated; not PRD-76's api.reports.
+    RouterSpec("api.content_reports"),
 )
 
 
