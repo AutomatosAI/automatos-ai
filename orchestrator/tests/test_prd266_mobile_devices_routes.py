@@ -48,7 +48,8 @@ def _bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _register_body(install_id: str, **overrides) -> dict:
+def _register_body(install_id: str, /, **overrides) -> dict:
+    # ``install_id`` is positional-only, so an override may replace it (``install_id="short"``).
     return {"install_id": install_id, "platform": "ios", "app_version": "1.0.0", "locale": "en-IE",
             "timezone": "Europe/Dublin", "expo_push_token": f"ExponentPushToken[{install_id}]",
             "digest_time": "07:30", **overrides}

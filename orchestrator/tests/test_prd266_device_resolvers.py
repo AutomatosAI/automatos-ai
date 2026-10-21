@@ -347,6 +347,28 @@ def test_notifications_resolve_a_device_to_its_person(ws, db_session):
     assert notifications._resolve_user_id(_NoQueries(), _device_ctx(ws, person)) == person[0]
 
 
+# The table as alembic/versions/prd128_notifications.py makes it: a test DB built from the
+# models (scripts/init_test_db.py) has none. Postgres DDL is transactional, so db_session's
+# rollback drops it again; on a migrated DB, IF NOT EXISTS leaves the real one alone.
+PRD128_NOTIFICATIONS = """
+    CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        event_type VARCHAR(50) NOT NULL, title VARCHAR(255) NOT NULL,
+        message TEXT, link_type VARCHAR(30), link_id TEXT, agent_id INTEGER, agent_name VARCHAR(100),
+        status VARCHAR(20) NOT NULL DEFAULT 'ok', read_at TIMESTAMPTZ, dismissed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+
+
+@pytest.fixture
+def notifications_table(db_session) -> None:
+    db_session.execute(text(PRD128_NOTIFICATIONS))
+    db_session.flush()
+
+
 def _notify(db, workspace_id, user_pk, title) -> None:
     db.execute(
         text("INSERT INTO notifications (workspace_id, user_id, event_type, title) "
@@ -356,7 +378,8 @@ def _notify(db, workspace_id, user_pk, title) -> None:
     db.flush()
 
 
-def test_a_devices_unread_count_is_its_persons_in_its_workspace(ws, db_session, seed_workspace):
+def test_a_devices_unread_count_is_its_persons_in_its_workspace(ws, db_session, seed_workspace,
+                                                                notifications_table):
     from api import notifications
 
     person, someone_else = _person(db_session), _person(db_session)

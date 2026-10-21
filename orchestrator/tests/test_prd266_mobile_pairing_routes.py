@@ -36,7 +36,8 @@ WRONG_CODE = "ABCD-EFGH"
 PERSON_IP = "198.51.100.7"
 
 
-def _body(code: str, **overrides) -> dict:
+def _body(code: str, /, **overrides) -> dict:
+    # ``code`` is positional-only, so an override may replace it (``_body(c, code="")``).
     return {"code": code, "name": "Studio test phone", "platform": "ios", "app_version": "1.0.0",
             "install_id": "prd266-route-install-01", **overrides}
 

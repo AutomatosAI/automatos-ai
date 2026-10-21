@@ -220,7 +220,7 @@ def test_a_loopback_install_boots_as_today(boot):
 def test_saas_boot_never_reads_the_mode(boot, monkeypatch):
     monkeypatch.setattr(boot, "AUTH_EDITION", "saas")
     monkeypatch.setattr(boot, "CLERK_JWKS_URL", "https://clerk.prd266.test/.well-known/jwks.json")
-    monkeypatch.setattr(boot, "CLERK_SECRET_KEY", "prd266-clerk-placeholder")
+    monkeypatch.setattr(boot, "CLERK_SECRET_KEY", "not-a-key")
     monkeypatch.setattr(boot, "LOCAL_REMOTE_ACCESS", "banana")
     monkeypatch.setattr(boot, "API_PUBLISH_ADDRESS", EVERYWHERE)
 

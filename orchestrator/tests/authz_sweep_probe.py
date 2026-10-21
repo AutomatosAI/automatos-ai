@@ -13,7 +13,7 @@ served route+method with the authorization facts the sweep asserts on:
 - ``admin_in_handler`` — the endpoint body asserts the shared admin check
   (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
-  auth-type gate (today: credentials resolve)
+  auth-type gate (credentials resolve, the voice mint, the mobile device routes)
 
 Usage (from ``orchestrator/``)::
 
@@ -97,6 +97,8 @@ def main() -> None:
                         "Admin access required to resolve credentials" in src
                         # PRD-207 voice/web-call: the mint's own signed-in-user gate.
                         or "Live voice requires a signed-in user" in src
+                        # PRD-266 api/mobile_devices.py: the device routes' person gate.
+                        or "caller = _caller(db, ctx" in src
                     ),
                 }
             )

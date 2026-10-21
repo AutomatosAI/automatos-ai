@@ -51,3 +51,8 @@ e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_
 # its entropy. The test uses a short fake key now. Flagged by a local range scan of
 # feat/prd-262-api before its PR.
 49448b51881b9e64414848f39b5b6e49bded2510:orchestrator/tests/test_prd262_pandas_leaves.py:generic-api-key:213
+
+# PRD-266 W1 (US-005a): test_saas_boot_never_reads_the_mode set the Clerk secret setting
+# to a made-up placeholder string so a saas boot counts as configured; generic-api-key
+# matched its entropy. The test uses a short fake key now. Flagged by the #1264 history scan.
+75e2cb495497e73c430bc49f4f55f80a6b8530b7:orchestrator/tests/test_prd266_remote_access.py:generic-api-key:223

@@ -200,6 +200,19 @@ OWN_GATE_IN_HANDLER = {
     # armed creds, workspace toggle, cap, and a strict signed-in-user resolve
     # (403 "Live voice requires a signed-in user"); not a shared dependency.
     ("POST", "/api/voice/web-call"),
+    # PRD-266 §4.3 (api/mobile_devices.py): a device belongs to a PERSON, so no workspace
+    # permission or admin dependency fits. Each handler gates through ``_caller(db, ctx…)``
+    # (404 without a workspace, 403 when no person stands behind the caller), and
+    # services.mobile.devices confines the write to that person's devices in the caller's
+    # workspace: any other device, another workspace's included, is 404.
+    # register: device token or Clerk lane only (REGISTRAR_AUTH_TYPES, else 403); its own row.
+    ("POST", "/api/v1/mobile/devices"),
+    # update: the device's person only (devices._owned).
+    ("PATCH", "/api/v1/mobile/devices/{device_id}"),
+    # revoke: the device's person, or a workspace owner/admin (may_see_own_workspace_health).
+    ("DELETE", "/api/v1/mobile/devices/{device_id}"),
+    # rotate: the device lane on its own device, presenting its current token (else 404/409).
+    ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
 }
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
