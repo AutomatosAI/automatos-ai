@@ -281,12 +281,17 @@ def _inline_masking(workspace_settings):
     return settings
 
 
+# A made-up bot token of 9 characters: one over the 8 that are shown as they are,
+# and too short for a secret scanner to read as a credential (its rule needs 10).
+FAKE_BOT_TOKEN = "tg-fake-9"
+FAKE_BOT_TOKEN_SHOWN = "tg-f...ke-9"
+
 MASKING_CASES = [
     None,
     {},
     {"theme": "dark"},
     {"integrations": {}},
-    {"integrations": {"telegram_bot_token": "1234567890abcdef"}},
+    {"integrations": {"telegram_bot_token": FAKE_BOT_TOKEN}},
     {"integrations": {"slack_bot_token": "12345678"}},  # exactly 8: shown as it is
     {"integrations": {"slack_bot_token": "123456789"}},  # 9: masked
     {"integrations": {"whatsapp_access_token": "whatsapp-access-value-xyz",
@@ -306,15 +311,15 @@ def test_masked_settings_answers_exactly_what_the_inline_code_did(workspace_sett
 
 
 def test_a_token_over_8_characters_shows_its_first_4_and_last_4_around_dots():
-    shown = masked_settings({"integrations": {"telegram_bot_token": "1234567890abcdef", "slack_bot_token": "short"}})
+    shown = masked_settings({"integrations": {"telegram_bot_token": FAKE_BOT_TOKEN, "slack_bot_token": "short"}})
 
-    assert shown["integrations"] == {"telegram_bot_token": "1234...cdef", "slack_bot_token": "short"}
+    assert shown["integrations"] == {"telegram_bot_token": FAKE_BOT_TOKEN_SHOWN, "slack_bot_token": "short"}
 
 
 def test_masked_settings_answers_a_new_dict_not_the_stored_one():
-    stored = {"integrations": {"telegram_bot_token": "1234567890abcdef"}, "theme": "dark"}
+    stored = {"integrations": {"telegram_bot_token": FAKE_BOT_TOKEN}, "theme": "dark"}
 
     shown = masked_settings(stored)
 
     assert shown is not stored and shown["integrations"] is not stored["integrations"]
-    assert stored["integrations"]["telegram_bot_token"] == "1234567890abcdef"
+    assert stored["integrations"]["telegram_bot_token"] == FAKE_BOT_TOKEN

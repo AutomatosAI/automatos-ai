@@ -42,6 +42,40 @@ def _payload(text: str, ai_disclosure: Optional[str]) -> dict[str, Any]:
     return body
 
 
+async def post_webhook(url: str, payload: dict[str, Any]) -> SendResult:
+    """POST ``payload`` as JSON to ``url``: the driver's HTTP call, timeout and failure mapping.
+
+    A network failure answers ``ok=False``, retryable, with an ``error`` that quotes
+    the exception (whose text can quote the URL); HTTP 400 and above answers
+    ``ok=False`` with ``webhook returned HTTP <status>``, retryable from 500.
+    ``WebhookDriver.send`` posts through it; so does the moderation post
+    (``services/content_reports/moderation.py``), which is not a channel message
+    and so never goes through ``channels.sender.send_to_channel`` (PRD-264 EUAI-03).
+    """
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+    except Exception as exc:  # noqa: BLE001
+        return SendResult(
+            ok=False, latency_ms=int((time.monotonic() - started) * 1000),
+            error=f"network error: {exc}", retryable=True,
+        )
+
+    latency_ms = int((time.monotonic() - started) * 1000)
+    if resp.status_code < 400:
+        return SendResult(ok=True, latency_ms=latency_ms)
+    return SendResult(
+        ok=False, latency_ms=latency_ms,
+        error=f"webhook returned HTTP {resp.status_code}",
+        retryable=resp.status_code >= 500,
+    )
+
+
 class WebhookDriver(ChannelDriver):
     display_name = "Webhook URL"
     # PRD-264 EUAI-03: the receiver is a system, so the AI notice travels as
@@ -77,29 +111,7 @@ class WebhookDriver(ChannelDriver):
         url = str(target or config.get("webhook_url") or "").strip()
         if not url:
             raise DriverNotConfigured("Webhook driver requires webhook_url in config or target")
-
-        started = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-                resp = await client.post(
-                    url,
-                    json=_payload(text, ai_disclosure),
-                    headers={"Content-Type": "application/json"},
-                )
-        except Exception as exc:  # noqa: BLE001
-            return SendResult(
-                ok=False, latency_ms=int((time.monotonic() - started) * 1000),
-                error=f"network error: {exc}", retryable=True,
-            )
-
-        latency_ms = int((time.monotonic() - started) * 1000)
-        if resp.status_code < 400:
-            return SendResult(ok=True, latency_ms=latency_ms)
-        return SendResult(
-            ok=False, latency_ms=latency_ms,
-            error=f"webhook returned HTTP {resp.status_code}",
-            retryable=resp.status_code >= 500,
-        )
+        return await post_webhook(url, _payload(text, ai_disclosure))
 
     async def install_webhook(
         self,

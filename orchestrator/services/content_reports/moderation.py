@@ -1,19 +1,23 @@
 """The moderation post: a new content report's summary to the Automatos inbox (PRD-266 US-016b).
 
 On SaaS, each NEW report (never a duplicate, never one that failed) is posted, after
-the response, to ``MODERATION_WEBHOOK_URL`` through the existing generic webhook
-driver (``channels/drivers/webhook.py``: httpx, a 15 s timeout, the body
-``{text, message, ai_generated}``). A local install posts nothing, even when the
-setting is set: its reports stay with its operator (D15).
+the response, to ``MODERATION_WEBHOOK_URL`` through the generic webhook driver's HTTP
+helper (``post_webhook`` in ``channels/drivers/webhook.py``: httpx, a 15 s timeout)
+with the driver's body ``{text, message, ai_generated}`` and no AI notice. It never
+calls a driver's ``send``: the post goes to Automatos's own inbox, not to a channel,
+and PRD-264 EUAI-03 keeps a driver's ``send`` for ``channels.sender.send_to_channel``.
+A local install posts nothing, even when the setting is set: its reports stay with
+its operator (D15).
 
 The summary carries the report id, the workspace id, the target type and id, the
 reason, an excerpt of the reported content and the reporter's note, each cut to
 ``EXCERPT_MAX_CHARS``. It never carries the reporter's name, email or id, or the
 workspace's name: ``FiledReport`` holds none of them.
 
-The URL is a credential: it is never logged, and neither is the driver's error
+The URL is a credential: it is never logged, and neither is the helper's error
 text (an httpx exception can quote the URL). A failed post is logged with the
-report id, the HTTP status when there is one and whether it is retryable.
+report id, the workspace id, the HTTP status when there is one and whether it is
+retryable.
 """
 
 from __future__ import annotations
@@ -21,11 +25,12 @@ from __future__ import annotations
 import functools
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from channels.drivers import get_driver
+from channels.drivers.webhook import post_webhook
 from config import config
+from modules.policy.ai_disclosure import mark_ai_generated
 from services.content_reports import EXCERPT_MAX_CHARS
 from services.content_reports.service import FiledReport
 from services.content_reports.targets import clip_excerpt
@@ -40,8 +45,8 @@ NO_NOTE = "(none)"
 # note or an excerpt cannot ping a channel or carry a disguised link.
 _CONTROL_ENTITIES: dict[str, str] = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
 
-# The driver's own failure text for an HTTP error; only the status is read from it.
-_DRIVER_HTTP_ERROR = re.compile(r"webhook returned HTTP (\d{3})")
+# The helper's own failure text for an HTTP error; only the status is read from it.
+_WEBHOOK_HTTP_ERROR = re.compile(r"webhook returned HTTP (\d{3})")
 
 
 def _plain(text: Optional[str]) -> str:
@@ -109,9 +114,14 @@ def moderation_url() -> Optional[str]:
     return value
 
 
+def _webhook_body(summary: str) -> dict[str, Any]:
+    """The webhook driver's JSON body for ``summary`` (``{text, message, ai_generated}``), no AI notice."""
+    return mark_ai_generated({"text": summary, "message": summary})
+
+
 def _http_status(error: Optional[str]) -> Optional[str]:
-    """The HTTP status in the driver's failure text, or ``None`` (a network error has none)."""
-    match = _DRIVER_HTTP_ERROR.fullmatch(error or "")
+    """The HTTP status in the helper's failure text, or ``None`` (a network error has none)."""
+    match = _WEBHOOK_HTTP_ERROR.fullmatch(error or "")
     return match.group(1) if match else None
 
 
@@ -119,28 +129,28 @@ async def post_to_moderation(summary: str, *, report_id: int, workspace_id: str)
     """Post ``summary`` to the moderation inbox; ``True`` when the inbox took it.
 
     ``False``, with no network call, unless this install posts reports
-    (``moderation_url``). A failure is logged at ERROR without the URL and
-    without the driver's error text, and is never raised: the report stands.
+    (``moderation_url``). A failure is logged at ERROR with the report and the
+    workspace ids, without the URL and without the helper's error text, and is
+    never raised: the report stands.
     """
     url = moderation_url()
     if url is None:
         return False
     try:
-        # The existing generic outbound driver (channels/drivers/webhook.py); no client of our own.
-        result = await get_driver("webhook")().send(
-            workspace_id=workspace_id, config={"webhook_url": url}, target=None, text=summary,
-        )
+        # The generic webhook driver's HTTP helper; no client of our own, and no driver send.
+        result = await post_webhook(url, _webhook_body(summary))
     except Exception as exc:  # noqa: BLE001 — its text can quote the URL: logged by class only, returns False
         logger.error(
-            "[content_reports] report %s: the moderation post raised %s (not retried)",
-            report_id, type(exc).__name__,
+            "[content_reports] report %s (workspace %s): the moderation post raised %s (not retried)",
+            report_id, workspace_id, type(exc).__name__,
         )
         return False
     if result.ok:
         return True
     logger.error(
-        "[content_reports] report %s: the moderation post failed (HTTP status %s, retryable %s)",
-        report_id, _http_status(result.error) or "none", result.retryable,
+        "[content_reports] report %s (workspace %s): the moderation post failed "
+        "(HTTP status %s, retryable %s)",
+        report_id, workspace_id, _http_status(result.error) or "none", result.retryable,
     )
     return False
 
