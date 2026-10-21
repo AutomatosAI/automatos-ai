@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -15,6 +15,7 @@ import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { SessionModeTab } from './SessionModeTab'
 import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
 import { AppearanceTab } from './themes/appearance-tab'
+import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -36,6 +37,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  *
  * Appearance (PRD-261 A-07d) holds Themes, in both editions: installing a private theme is
  * on by default in the local edition (THEMES_PRIVATE_UPLOAD=auto).
+ *
+ * Phones & devices (PRD-266 US-005c) is in both editions: the device list everywhere, pairing
+ * only on a local install in paired mode.
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -48,6 +52,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'socials',  // PRD-251B US-B106 — the workspace's own Socials switch
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
   'appearance',  // PRD-261 A-07d — Themes: install, opt in, choose
+  'phones-devices',  // PRD-266 US-005c — the device list; pairing in paired mode
 ])
 
 export function SettingsPanel() {
@@ -64,6 +69,7 @@ export function SettingsPanel() {
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
+    { value: 'phones-devices', label: 'Phones & devices', icon: Smartphone },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
@@ -151,6 +157,11 @@ export function SettingsPanel() {
         {/* PRD-128: Notification Preferences */}
         <TabsContent value="notifications">
           <NotificationsSettingsTab />
+        </TabsContent>
+
+        {/* PRD-266 US-005c: Phones & devices — the device list, Revoke, and pairing in paired mode */}
+        <TabsContent value="phones-devices">
+          <PhonesDevicesTab />
         </TabsContent>
 
         {/* PRD-251B US-B106: the workspace's own Socials switch (the master is under System Settings) */}

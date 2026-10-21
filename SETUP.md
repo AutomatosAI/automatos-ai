@@ -275,6 +275,90 @@ Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting
 
 ---
 
+## Reach your install from your phone (optional)
+
+For Automatos Go on a phone, or a browser on another machine. Do this only when the
+person asks for it: it puts the install on a network. With `LOCAL_REMOTE_ACCESS=paired`
+a request with no credential is refused (`401 device_pairing_required`), from the
+browser on this machine too, so each phone and each browser pairs once with a
+one-time code. Turn that on before the install is reachable (step 1), then put TLS in
+front (step 2).
+
+1. **Turn on paired mode and give the stack its public addresses.** Agree two https
+   addresses with the person, one for the web app and one for the API (below, Caddy's
+   `studio.example.com` and `api.example.com`; Tailscale's are in step 2). Add to `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://api.example.com
+   NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+   ```
+   and to `envs/api.local`, creating it if it is missing (`.env` reaches only the
+   variables compose names; this file reaches every backend setting):
+   ```bash
+   PUBLIC_API_HOST=api.example.com
+   FRONTEND_URL=https://studio.example.com
+   CORS_ALLOW_ORIGINS=https://studio.example.com,http://localhost:3000
+   ```
+   A phone is handed the API as `https://<PUBLIC_API_HOST>`. When the proxy will run
+   on another machine, also publish the API and the web app, and only those:
+   `API_PUBLISH_ADDRESS=0.0.0.0` and `WEB_PUBLISH_ADDRESS=0.0.0.0` in `.env`. Leave
+   `BIND_ADDRESS` unset, so Postgres, Redis, MinIO and the other datastores stay on
+   `127.0.0.1`. Then run `make up`: it builds the web app here, because its API
+   address changed.
+
+   *Check:* `curl -s http://localhost:8000/.well-known/automatos.json` (or your
+   `API_PORT`) shows `"pairing":{"enabled":true}` and the API's https address as
+   `api_url`.
+2. **Put TLS in front** (ask before installing Caddy or Tailscale, rule 1):
+   - **Caddy** on this machine, with both DNS names pointing at it (it fetches the
+     certificates itself):
+     ```
+     studio.example.com {
+         reverse_proxy 127.0.0.1:3000
+     }
+     api.example.com {
+         reverse_proxy 127.0.0.1:8000
+     }
+     ```
+   - **Tailscale**, for devices on the person's tailnet only: `tailscale serve --bg 3000`
+     serves the web app at `https://<machine>.<tailnet>.ts.net`, and
+     `tailscale serve --bg --https=8443 8000` the API on port 8443. In step 1 the web
+     address is then `https://<machine>.<tailnet>.ts.net` and `PUBLIC_API_HOST` is
+     `<machine>.<tailnet>.ts.net:8443`.
+
+   A proxy on this machine reaches the ports on `127.0.0.1`: publish nothing more.
+
+   *Check:* the web app's https address opens it, and `https://<api address>/health`
+   returns JSON.
+3. **Pair the first browser.** Every unpaired browser now shows *Pair this browser* in
+   place of the app. Mint its code on the server:
+   ```bash
+   docker compose exec backend python -m scripts.mint_pairing_code
+   ```
+   It prints a code (it works once, for ten minutes) and its pairing link. The person
+   types the code into *Pair this browser*, with a name for that browser.
+
+   *Check:* the app shows after the code.
+4. **Pair phones from Studio.** In the paired browser: **Settings → Phones & devices →
+   Get a pairing code** shows a code, its ten-minute countdown and the pairing link;
+   the person enters the code in Automatos Go. Another browser opens the web address
+   and enters a code minted there.
+
+   *Check:* the phone is listed under **Settings → Phones & devices**, where Revoke
+   cuts it off.
+
+**An install that already set `BIND_ADDRESS=0.0.0.0`** publishes the API and the web
+app beyond this machine, so while `LOCAL_REMOTE_ACCESS` is unset (`off`) the backend
+refuses to start, and `docker compose logs backend` says why and names the fix. Show
+the person the message and let them choose: `LOCAL_REMOTE_ACCESS=paired` (above);
+`LOCAL_REMOTE_ACCESS=open`, which keeps the old behaviour (whoever reaches the install
+is its operator) and logs a warning at every boot; or removing `BIND_ADDRESS`, which
+keeps the install on this machine. A tunnel or proxy on this machine is invisible to
+that check, so behind one run `paired`. Details:
+[self-hosting guide → Network exposure](docs/getting-started/self-hosting.md#network-exposure-bind_address).
+
+---
+
 ## Done — the checklist
 
 - [ ] `docker compose ps`: all services running or healthy
@@ -282,6 +366,7 @@ Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting
 - [ ] `.env` has real secrets (no `CHANGE_ME`) and an absolute `AUTOMATOS_WORKSPACE_DIR`
 - [ ] A model key is added in Settings → API Keys (by the person)
 - [ ] Optional: session mode paired, and `make cli-host-status` shows running
+- [ ] Optional: reached from a phone; discovery shows `"pairing":{"enabled":true}` and the phone is listed under Settings → Phones & devices
 
 Day to day: `make up` starts it, `make down` stops it (your data is kept), and
 `make status` shows what's running. To update: `git pull && make up`, which also

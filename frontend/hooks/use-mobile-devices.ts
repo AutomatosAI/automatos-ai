@@ -14,8 +14,15 @@
  * earlier paired run is cleared, so every request is the same as before pairing existed. A
  * discovery read that fails shows the app: the server stays the authority, and its first
  * `device_pairing_required` brings the screen.
+ *
+ * US-005c, Settings → Phones & devices (§4.3 "Web"), below React Query's provider: the device
+ * list (GET /api/v1/mobile/devices: the caller's own, and the workspace's for an owner or admin),
+ * Revoke (DELETE /devices/{id}), a one-time code for a phone or another browser (POST
+ * /pairing-codes, local edition only) and whether this install is in paired mode, from the same
+ * discovery document.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiClient, type ApiHttpError } from '@/lib/api-client'
 import { onUnauthorized } from '@/lib/api-unauthorized'
@@ -34,6 +41,10 @@ import {
 export const DISCOVERY_PATH = '/.well-known/automatos.json'
 export const PAIR_PATH = '/api/v1/mobile/pair'
 export const WEB_PLATFORM = 'web'
+export const DEVICES_PATH = '/api/v1/mobile/devices'
+export const PAIRING_CODES_PATH = '/api/v1/mobile/pairing-codes'
+export const MOBILE_DEVICES_QUERY_KEY = ['mobile-devices'] as const
+const DISCOVERY_QUERY_KEY = ['mobile-discovery'] as const
 const LOCAL_EDITION = 'local'
 const INVALID_PAIRING_CODE = 'invalid_pairing_code'
 const NOT_FOUND = 404
@@ -48,7 +59,33 @@ export const PAIRING_MESSAGES = {
 /** The parts of the §4.1 discovery document the web app reads. */
 export interface DiscoveryDocument {
   readonly edition: string
+  readonly web_url?: string
   readonly pairing?: { readonly enabled?: boolean }
+}
+
+/** A device as GET /devices lists it (MobileDevice.to_dict: the fields Settings shows). */
+export interface MobileDevice {
+  readonly id: string
+  /** paired (a device token) or clerk (a signed-in phone). */
+  readonly kind: string
+  readonly name: string | null
+  readonly platform: string | null
+  readonly status: string
+  readonly push_enabled: boolean
+  readonly last_seen_at: string | null
+}
+
+/** POST /pairing-codes's answer: the code, shown once; when it stops working; its universal link. */
+export interface PairingCode {
+  readonly code: string
+  readonly expires_at: string
+  readonly qr_payload: string
+}
+
+/** What Settings reads from discovery: paired mode, and the web address another browser opens. */
+export interface PairingMode {
+  readonly paired: boolean
+  readonly webUrl: string | null
 }
 
 /** POST /pair's answer: the device token is in it exactly once. */
@@ -68,6 +105,11 @@ export interface BrowserPairing {
 
 export function readDiscovery(): Promise<DiscoveryDocument> {
   return apiClient.get<DiscoveryDocument>(DISCOVERY_PATH)
+}
+
+/** Does the discovery document say this is a local install that takes paired devices? */
+export function takesPairedDevices(discovery: DiscoveryDocument | null | undefined): boolean {
+  return discovery?.edition === LOCAL_EDITION && discovery.pairing?.enabled === true
 }
 
 /** Exchange a one-time code for this browser's device token; the server canonicalises the typed code. */
@@ -98,7 +140,7 @@ function followDiscovery(setToken: Setter<string | null>, setPairingOn: Setter<b
   readDiscovery()
     .then((discovery) => {
       if (!live) return
-      const on = discovery?.edition === LOCAL_EDITION && discovery.pairing?.enabled === true
+      const on = takesPairedDevices(discovery)
       if (on) restoreDeviceCookie()
       else clearDeviceToken()
       setToken(readDeviceToken())
@@ -138,4 +180,34 @@ export function useBrowserPairing(): BrowserPairing {
     setToken(answer.token)
   }, [])
   return { needsPairing: isLocal && pairingOn === true && token === null, keepPairing }
+}
+
+/** Settings: is this install in paired mode? SaaS never reads discovery and is never paired. */
+export function usePairingMode(): PairingMode {
+  const { data } = useQuery({ queryKey: DISCOVERY_QUERY_KEY, queryFn: readDiscovery, enabled: isLocal })
+  const paired = isLocal && takesPairedDevices(data)
+  return { paired, webUrl: paired ? data?.web_url ?? null : null }
+}
+
+/** The devices the caller may see, read again every `refreshMs` when given (a live pairing code). */
+export function useMobileDevices(refreshMs?: number) {
+  return useQuery({
+    queryKey: MOBILE_DEVICES_QUERY_KEY,
+    queryFn: async () => (await apiClient.get<{ devices: MobileDevice[] }>(DEVICES_PATH)).devices,
+    refetchInterval: refreshMs ?? false,
+  })
+}
+
+/** Revoke a device (a paired one's next call is refused: device_revoked), then read the list again. */
+export function useRevokeDevice() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (deviceId: string) => apiClient.delete<MobileDevice>(`${DEVICES_PATH}/${encodeURIComponent(deviceId)}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MOBILE_DEVICES_QUERY_KEY }),
+  })
+}
+
+/** Mint a one-time code that pairs a phone or a browser to the caller: ten minutes, once. */
+export function useMintPairingCode() {
+  return useMutation({ mutationFn: () => apiClient.post<PairingCode>(PAIRING_CODES_PATH) })
 }
