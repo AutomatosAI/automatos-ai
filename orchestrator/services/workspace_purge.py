@@ -448,6 +448,12 @@ _CREDENTIAL_TABLES: frozenset[str] = frozenset({"user_api_keys", "credentials"})
 # GDPR ``erase_workspace``) deletes them.
 _RESET_RECORD_SURVIVOR_TABLES: frozenset[str] = frozenset({"content_provenance"})
 
+# The credit ledger and its balances (PRD-265): billing history, and the record that
+# keeps the trial once per person. A reset tops the trial back up through the ledger
+# (``services.credits.trial.reset_trial``); it never erases what was charged. Only full
+# erasure deletes them.
+_RESET_BILLING_SURVIVOR_TABLES: frozenset[str] = frozenset({"credit_ledger", "credit_balances"})
+
 # Row-level survivor filter for the ``agents`` table: onboarding builds the
 # workspace's ordinary agents, but the platform's system agents and the hidden
 # onboarding-role agents (VOYAGER/BLUEPRINT/SCRIBE/FORGE) are seeded, not built —
@@ -486,8 +492,8 @@ def purge_built_artifacts(db: Session, workspace_id: UUID, *, wipe_s3: bool = Tr
     """Delete what onboarding BUILT in one workspace, sparing survivors.
 
     Reuses :func:`_delete_rows` (dynamic discovery + FK-safe multi-pass) with:
-      * the identity/access, credential and provenance-record tables excluded
-        (survivors), and
+      * the identity/access, credential, provenance-record and credit-ledger
+        tables excluded (survivors), and
       * the ``agents`` table filtered to non-system, non-onboarding rows.
     Then wipes the workspace's S3 document prefix via :func:`_purge_s3_prefix`.
     Never touches the workspace row, users, membership, or Clerk. Does NOT commit
@@ -496,7 +502,8 @@ def purge_built_artifacts(db: Session, workspace_id: UUID, *, wipe_s3: bool = Tr
     rows = _delete_rows(
         db,
         workspace_id,
-        skip_tables=_RESET_ACCESS_SURVIVOR_TABLES | _CREDENTIAL_TABLES | _RESET_RECORD_SURVIVOR_TABLES,
+        skip_tables=(_RESET_ACCESS_SURVIVOR_TABLES | _CREDENTIAL_TABLES | _RESET_RECORD_SURVIVOR_TABLES
+                     | _RESET_BILLING_SURVIVOR_TABLES),
         row_predicates={"agents": _AGENT_SURVIVOR_SQL},
         ref_predicates={"agents": _AGENT_SURVIVOR_SQL},
     )

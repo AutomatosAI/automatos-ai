@@ -30,15 +30,21 @@ from services import plan_tiers as pt
 
 
 # --------------------------------------------------------------------------- #
-# The regression that started it: basic hides Team, and the tiers that show it
+# The regression that started it (basic hid Team) and the current nav shape.
+# PRD-265 US-001 repriced basic to carry exactly Pro's families, so this no
+# longer reproduces on current defaults — pinned here so a future re-gating
+# of basic is a deliberate choice, not a silent regression.
 # --------------------------------------------------------------------------- #
 
 
-def test_basic_hides_team_and_analytics_nav():
-    """The exact reason a tenant loses Team Management from the rail."""
+def test_basic_shows_team_and_analytics_nav():
+    """PRD-265 US-001: basic (Own keys) now carries EXACTLY Pro's families, so
+    the historic InBuildUK defect this module documents (basic hid Team
+    Management from the rail) no longer reproduces on current defaults —
+    basic shows the same nav as every other paid tier."""
     nav = pt.exposure_for_plan("basic")["nav"]
-    assert nav["team"] is False
-    assert nav["analytics"] is False
+    assert nav["team"] is True
+    assert nav["analytics"] is True
 
 
 @pytest.mark.parametrize("plan", ["pro", "business"])
@@ -101,9 +107,10 @@ def test_console_assignment_clears_a_stale_tier_ceiling():
     pt.assign_plan(None, ws, "pro")  # normal path writes the $100 tier ceiling
     assert ws.plan_limits["budget"]["max_cost_usd"] == 100.0
 
-    # basic carries its OWN $25 ceiling on the normal path, so this proves the
-    # switch both withholds the new ceiling and clears the stale one — a tier
-    # with budget_usd=0 (business) would have cleared it either way.
+    # basic carries the SAME $100 ceiling as pro on the normal path (PRD-265:
+    # basic = Pro's limits), so this proves the switch both withholds the new
+    # ceiling and clears the stale one — a tier with budget_usd=0 (business)
+    # would have cleared it either way.
     pt.assign_plan(None, ws, "basic", with_budget=False)
     assert ws.plan == "basic"
     assert "budget" not in ws.plan_limits
@@ -132,10 +139,14 @@ def test_console_assignment_still_rejects_a_non_assignable_tier():
 def test_downgrade_seats_below_current_members_is_allowed_not_blocked():
     """The console warns; it does not refuse. The cap binds the NEXT invite
     (core/workspaces/invitations.py), never the members already in place."""
-    ws = SimpleNamespace(plan="pro", plan_limits={"max_members": 5})
-    pt.assign_plan(None, ws, "basic", with_budget=False)
-    assert ws.plan == "basic"
-    assert ws.plan_limits["max_members"] == 1  # the cap the console warns about
+    # PRD-265: basic and pro now share the same 5-seat cap, so the squeeze
+    # this test pins moves to the one downgrade that still produces it —
+    # business (25 seats) → pro (5 seats) — with more members already in
+    # place than the new cap allows.
+    ws = SimpleNamespace(plan="business", plan_limits={"max_members": 10})
+    pt.assign_plan(None, ws, "pro", with_budget=False)
+    assert ws.plan == "pro"
+    assert ws.plan_limits["max_members"] == 5  # the cap the console warns about
 
 
 # --------------------------------------------------------------------------- #
@@ -331,8 +342,9 @@ def test_plans_catalogue_lists_every_tier_and_marks_assignability():
     # enterprise is coming-soon: visible (a workspace sits on it) but not selectable.
     assert tiers["enterprise"]["assignable"] is False
     assert tiers["enterprise"]["coming_soon"] is True
-    # The nav the dropdown explains its choice with.
-    assert tiers["basic"]["nav"]["team"] is False
+    # The nav the dropdown explains its choice with. PRD-265: basic now
+    # matches pro's nav exactly (it carries the same families).
+    assert tiers["basic"]["nav"]["team"] is True
     assert tiers["pro"]["nav"]["team"] is True
 
 
@@ -360,17 +372,19 @@ def test_plan_change_moves_the_tier_and_writes_no_budget():
 
 
 def test_plan_change_warns_when_seats_fall_below_current_members():
-    ws = _workspace(plan="pro", limits={"max_members": 5})
-    client = _client(ws, members_count=5)
+    # PRD-265: basic and pro now share the same 5-seat cap, so the downgrade
+    # that still produces a squeeze is business (25 seats) → pro (5 seats).
+    ws = _workspace(plan="business", limits={"max_members": 25})
+    client = _client(ws, members_count=10)
 
-    res = client.patch(f"/api/admin/workspaces/{ws.id}/plan", json={"plan": "basic"})
+    res = client.patch(f"/api/admin/workspaces/{ws.id}/plan", json={"plan": "pro"})
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["plan"] == "basic"
+    assert body["plan"] == "pro"
     assert len(body["warnings"]) == 1
-    assert "5 active members" in body["warnings"][0]
+    assert "10 active members" in body["warnings"][0]
     # Warned, not refused — the cap binds the next invitation, not the members.
-    assert body["plan_limits"]["max_members"] == 1
+    assert body["plan_limits"]["max_members"] == 5
 
 
 @pytest.mark.parametrize("plan", ["enterprise", "nope", "starter"])

@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
+import { useBillingSummary } from '@/hooks/use-billing-summary'
 
 /**
  * PRD-222 US-016 (W1·S10 / D9) — DEV/OPS reset console. UNLINKED from all nav:
@@ -46,7 +47,7 @@ function clearLegacyOnboardingStorage(userId: string) {
   }
   remove.forEach((k) => localStorage.removeItem(k))
 }
-/** Wiping credentials without a trial reset leaves a converted workspace keyless. */
+/** Wiping credentials without a trial reset can leave a workspace with no key and no credits. */
 function CredentialsWarning() {
   return (
     <div
@@ -55,10 +56,28 @@ function CredentialsWarning() {
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
       <span>
-        Wiping credentials without resetting the trial leaves a converted
-        workspace with no key — requests fall through to unmetered platform
-        resolution. Turn on “Reset trial” too, or leave credentials in place.
+        Wiping credentials without resetting the trial can leave the workspace
+        with no key and no trial credits — work on Automatos&apos;s AI keys is
+        then paused. Turn on “Reset trial” too, or leave credentials in place.
       </span>
+    </div>
+  )
+}
+
+/** PRD-265: the trial is credits in the ledger, read off the billing summary. */
+function TrialCreditsReadout() {
+  const { data: summary } = useBillingSummary()
+  return (
+    <div className="mt-1" data-testid="reset-trial">
+      Trial:{' '}
+      {summary?.metered ? (
+        <span className="font-mono">
+          {summary.balance.trial} of {summary.trial_credits} credits
+          {summary.paused ? ' · paused' : ''}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">none</span>
+      )}
     </div>
   )
 }
@@ -76,9 +95,8 @@ function ResetOnboardingConsole() {
   const [error, setError] = useState<string | null>(null)
 
   const stage = workspace?.onboarding?.stage ?? 'unknown'
-  const trial = workspace?.onboarding?.trial ?? null
-  // A converted workspace with its key wiped falls through to unmetered platform
-  // resolution — surface that trap before the operator pulls the trigger.
+  // A workspace with its key wiped and its trial spent is paused (PRD-265) —
+  // surface that trap before the operator pulls the trigger.
   const credentialsWarning = wipeCredentials && !resetTrial
 
   async function handleReset() {
@@ -157,22 +175,12 @@ function ResetOnboardingConsole() {
             {stage}
           </span>
         </div>
-        <div className="mt-1" data-testid="reset-trial">
-          Trial:{' '}
-          {trial ? (
-            <span className="font-mono">
-              {trial.state} · ${Number(trial.spent_usd ?? 0).toFixed(2)} of $
-              {Number(trial.granted_usd ?? 0).toFixed(2)}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">none</span>
-          )}
-        </div>
+        <TrialCreditsReadout />
       </div>
 
       <div className="mt-6 space-y-4">
         <div className="flex items-center justify-between">
-          <Label htmlFor="reset-trial-toggle">Reset trial (re-grant a fresh $0 trial)</Label>
+          <Label htmlFor="reset-trial-toggle">Reset trial (back to the full trial credits)</Label>
           <Switch
             id="reset-trial-toggle"
             data-testid="toggle-reset-trial"

@@ -8,6 +8,7 @@ Supports per-service configuration via system settings.
 
 import re
 import time
+import asyncio
 import logging
 from typing import Tuple, Dict, Any, List, Optional
 from functools import lru_cache
@@ -401,7 +402,6 @@ class LLMManager:
         execution_id: Optional[str] = None,
         request_type: Optional[str] = None,
         is_byok: bool = False,
-        trial: bool = False,
     ):
         """
         Initialize LLM Manager.
@@ -415,9 +415,7 @@ class LLMManager:
             agent_id: Agent ID for usage tracking
             execution_id: Execution ID for usage tracking
             request_type: Request type label (chat, recipe, orchestrator, etc.)
-            is_byok: Whether this uses a BYOK key
-            trial: PRD-222 US-005 — this request is routed on the platform key
-                under a workspace trial; its cost accrues to the trial ledger.
+            is_byok: Whether this uses a BYOK key (never gated or charged credits)
         """
         self.service_name = service_name
         self._tracking_ctx: Dict[str, Any] = {
@@ -426,7 +424,6 @@ class LLMManager:
             "execution_id": execution_id,
             "request_type": request_type or service_name,
             "is_byok": is_byok,
-            "trial": trial,
         }
         
         built_from_settings = config is None
@@ -666,6 +663,9 @@ class LLMManager:
         PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning deltas live when the
         provider can stream (F264: in Auto's words); providers without ``stream_response`` answer whole.
         """
+        # PRD-265: the credit gate may read the database (an ask's first call), so it
+        # runs off the event loop (F105); to_thread carries the ask's context with it.
+        await asyncio.to_thread(self._credit_gate)
         self._ensure_provider_initialized()
         start = time.monotonic()
         budget = self._call_budget()
@@ -701,6 +701,7 @@ class LLMManager:
     @traced_llm_call  # PRD-256 O3: the same span as the async path
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
         """Generate response using the configured provider (synchronous), with usage tracking."""
+        self._credit_gate()
         self._ensure_provider_initialized()
         start = time.monotonic()
         budget = self._call_budget()
@@ -735,6 +736,36 @@ class LLMManager:
 
         ctx = getattr(self, "_tracking_ctx", None) or {}
         return ctx.get("workspace_id") or current_usage_scope().get("workspace_id")
+
+    def _credit_purpose(self) -> Optional[str]:
+        return getattr(self, "_own_purpose", None) or getattr(self, "service_name", None)
+
+    def _credit_gate(self) -> None:
+        """PRD-265 US-004: platform-funded customer work needs credits — the one
+        gate every construction site passes (services.credits.gate). Raises
+        ``CreditsExhaustedError`` BEFORE any provider call (no credits, or the ask's
+        running cost has reached the workspace's balance)."""
+        from services.credits.gate import before_platform_call
+
+        ctx = getattr(self, "_tracking_ctx", None) or {}
+        before_platform_call(
+            workspace_id=self._credit_workspace(), is_byok=bool(ctx.get("is_byok")),
+            purpose=self._credit_purpose(),
+        )
+
+    def _note_ask_cost(self, counts: UsageCounts) -> None:
+        """PRD-265: the call's cost counts against its ask's budget (the balance
+        read at the ask's first call)."""
+        try:
+            from services.credits.gate import after_platform_call
+
+            cost, _source = self.call_cost(counts.input_tokens, counts.output_tokens, counts.reported_cost)
+            after_platform_call(
+                workspace_id=self._credit_workspace(), is_byok=bool(self._tracking_ctx.get("is_byok")),
+                purpose=self._credit_purpose(), cost_usd=cost,
+            )
+        except Exception:  # noqa: BLE001 — the call already happened; the settle job has its row
+            logger.warning("[credits] ask cost not noted", exc_info=True)
 
     def _reserved(self, budget: Optional[int]) -> Optional[int]:
         return budget or getattr(getattr(self, "config", None), "max_tokens", None)
@@ -811,57 +842,45 @@ class LLMManager:
             reported_cost=counts.reported_cost,
         )
         self._record_usage(counts, latency_ms, status)
-        self._accrue_trial_spend(counts)
+        self._note_ask_cost(counts)
 
     def _record_usage(self, counts: UsageCounts, latency_ms: int, status: str) -> None:
-        """Usage tracking — the scope's lane/execution over the constructor's."""
+        """Usage tracking — the scope's lane/execution over the constructor's.
+        PRD-265: the row is written under its charge class (customer work or
+        absorbed overhead, ``services.credits.classification``) for the meter."""
         try:
-            from .usage_context import current_usage_scope
+            from services.credits.classification import call_class
+
+            from .usage_context import current_usage_scope, usage_scope
             from .usage_tracker import UsageTracker, resolve_workspace_id
 
             scope = current_usage_scope()
             ws = resolve_workspace_id(self._tracking_ctx.get("workspace_id") or scope.get("workspace_id"))
             if not ws:
                 return
-            UsageTracker.track(
-                workspace_id=ws,
-                model_id=self.config.model or "unknown",
-                provider=self.config.provider.value if self.config.provider else "unknown",
-                input_tokens=counts.input_tokens,
-                output_tokens=counts.output_tokens,
-                agent_id=self._tracking_ctx.get("agent_id") or scope.get("agent_id"),
-                execution_id=scope.get("execution_id") or self._tracking_ctx.get("execution_id"),
-                request_type=(
-                    scope.get("request_type")
-                    or self._tracking_ctx.get("request_type")
-                    or self.service_name
-                ),
-                latency_ms=latency_ms,
-                status=status,
-                is_byok=self._tracking_ctx.get("is_byok", False),
-                cache_read_tokens=counts.cache_read_tokens,
-                cache_write_tokens=counts.cache_write_tokens,
-                reported_cost=counts.reported_cost,
-            )
-        except Exception as e:
-            logger.debug(f"Usage tracking failed: {e}")
-
-    def _accrue_trial_spend(self, counts: UsageCounts) -> None:
-        """PRD-222 US-005: accrue trial spend on the workspace trial + the daily
-        counter — only for platform-trial requests (the flag is False on every
-        BYOK / non-trial / system call, so this is a no-op for them)."""
-        if self._tracking_ctx.get("trial") and self._tracking_ctx.get("workspace_id"):
-            try:
-                from services.trial_ledger import record_trial_spend
-
-                record_trial_spend(
-                    self._tracking_ctx["workspace_id"],
+            with usage_scope(charge_class=call_class(self._credit_purpose())):
+                UsageTracker.track(
+                    workspace_id=ws,
                     model_id=self.config.model or "unknown",
+                    provider=self.config.provider.value if self.config.provider else "unknown",
                     input_tokens=counts.input_tokens,
                     output_tokens=counts.output_tokens,
+                    agent_id=self._tracking_ctx.get("agent_id") or scope.get("agent_id"),
+                    execution_id=scope.get("execution_id") or self._tracking_ctx.get("execution_id"),
+                    request_type=(
+                        scope.get("request_type")
+                        or self._tracking_ctx.get("request_type")
+                        or self.service_name
+                    ),
+                    latency_ms=latency_ms,
+                    status=status,
+                    is_byok=self._tracking_ctx.get("is_byok", False),
+                    cache_read_tokens=counts.cache_read_tokens,
+                    cache_write_tokens=counts.cache_write_tokens,
+                    reported_cost=counts.reported_cost,
                 )
-            except Exception as e:
-                logger.debug(f"Trial spend accrual failed: {e}")
+        except Exception as e:  # noqa: BLE001 — usage tracking never breaks the call it records
+            logger.debug(f"Usage tracking failed: {e}")
 
     # ------------------------------------------------------------------
     # Cost Audit Logger

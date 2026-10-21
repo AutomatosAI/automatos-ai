@@ -1,7 +1,8 @@
 /**
  * PRD-222 W1S2/US-002 — the current-workspace onboarding snapshot reaches the
- * WorkspaceProvider. The backend now returns `onboarding: {stage, trial}` on
- * GET /api/workspaces/current; this asserts the provider maps it onto
+ * WorkspaceProvider. The backend returns `onboarding: {stage}` on
+ * GET /api/workspaces/current (PRD-265: the trial is credits in the ledger now,
+ * served by GET /api/v1/billing/summary); this asserts the provider maps it onto
  * `workspace.onboarding` and stays null-safe when the field is absent.
  * Pure/mocked — Clerk auth, navigation, and fetch are stubbed; no server.
  */
@@ -33,15 +34,6 @@ function Probe() {
   return (
     <div>
       <span data-testid="stage">{workspace?.onboarding?.stage ?? 'NONE'}</span>
-      <span data-testid="granted">
-        {workspace?.onboarding?.trial?.granted_usd ?? 'NONE'}
-      </span>
-      <span data-testid="spent">
-        {workspace?.onboarding?.trial?.spent_usd ?? 'NONE'}
-      </span>
-      <span data-testid="state">
-        {workspace?.onboarding?.trial?.state ?? 'NONE'}
-      </span>
     </div>
   )
 }
@@ -75,13 +67,10 @@ describe('WorkspaceProvider — onboarding snapshot (US-002)', () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://api.test'
   })
 
-  it('exposes workspace.onboarding.stage and trial from the API', async () => {
+  it('exposes workspace.onboarding.stage from the API', async () => {
     mockFetch({
       ...BASE_RESPONSE,
-      onboarding: {
-        stage: 'powerup',
-        trial: { granted_usd: 5, spent_usd: 1.6, state: 'active' },
-      },
+      onboarding: { stage: 'powerup' },
     })
 
     render(
@@ -95,9 +84,6 @@ describe('WorkspaceProvider — onboarding snapshot (US-002)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('stage')).toHaveTextContent('powerup'),
     )
-    expect(screen.getByTestId('granted')).toHaveTextContent('5')
-    expect(screen.getByTestId('spent')).toHaveTextContent('1.6')
-    expect(screen.getByTestId('state')).toHaveTextContent('active')
   })
 
   it('is null-safe when the response omits onboarding', async () => {
@@ -114,7 +100,5 @@ describe('WorkspaceProvider — onboarding snapshot (US-002)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('stage')).toHaveTextContent('NONE'),
     )
-    expect(screen.getByTestId('granted')).toHaveTextContent('NONE')
-    expect(screen.getByTestId('state')).toHaveTextContent('NONE')
   })
 })

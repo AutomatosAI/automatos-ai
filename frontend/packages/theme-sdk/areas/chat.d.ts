@@ -212,7 +212,10 @@ export interface HostChatController {
   readonly status: HostChatStatus
   readonly streaming: boolean
   readonly errorCode: string | null
-  /** The workspace's trial is spent: the send was refused (cards.TrialExhaustedBanner). */
+  /**
+   * The workspace's credits are used up: the send was refused with `credits_exhausted`
+   * (cards.TrialExhaustedBanner). The name predates billing in credits, when the trial was the only credit.
+   */
   readonly trialExhausted: boolean
   readonly suggestion: HostMissionSuggestion | null
   /** The Mission the chat is planning, once one is (cards.MissionCreatedCard). */

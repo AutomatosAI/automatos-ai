@@ -42,7 +42,6 @@ interface KeySaveResponse {
 
 export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
   const { workspace, refreshWorkspace } = useWorkspace()
-  const trial = workspace?.onboarding?.trial ?? null
 
   const [dismissed, setDismissed] = useState(false)
   const [provider, setProvider] = useState<Provider>('openrouter')
@@ -104,8 +103,6 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const remaining = trial ? Math.max(0, trial.granted_usd - trial.spent_usd) : null
-
   return (
     <div
       data-testid="power-up-card"
@@ -134,19 +131,6 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
         Connect your AI key (2 min) and Auto keeps working for you — no
         interruption.
       </p>
-
-      {trial && trial.state !== 'converted' && (
-        <p
-          data-testid="power-up-trial"
-          className={
-            trial.state === 'warned' || trial.state === 'exhausted'
-              ? 'text-xs font-medium text-amber-600 dark:text-amber-500'
-              : 'text-xs text-muted-foreground'
-          }
-        >
-          ${remaining?.toFixed(2)} of ${trial.granted_usd.toFixed(2)} trial credit left
-        </p>
-      )}
 
       {/* Recommendation on top — OpenRouter is the only top-level pick */}
       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">

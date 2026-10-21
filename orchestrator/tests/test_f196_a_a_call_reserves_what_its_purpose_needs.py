@@ -129,7 +129,9 @@ def test_an_agent_that_sets_nothing_reserves_an_agent_runs_budget(factory):
     assert factory._output_budget(None, GEMINI_FLASH_CEILING) == 8000
     assert factory._output_budget(4000, GEMINI_FLASH_CEILING) == 4000     # its own setting wins
     assert factory._output_budget(100000, GEMINI_FLASH_CEILING) == GEMINI_FLASH_CEILING
-    activate = inspect.getsource(agent_factory.AgentFactory.activate_agent)
+    # PRD-265 split activate_agent; the agent's own model config is resolved in
+    # _tier_llm_config, which activate_agent calls through _activation_llm_config.
+    activate = inspect.getsource(agent_factory.AgentFactory._tier_llm_config)
     assert '"max_tokens": self._output_budget(agent_model_config.get("max_tokens"), ceiling)' in activate
 
 

@@ -6,6 +6,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { ProfileMenu } from '@/components/auth/profile-menu';
 import { UserProfileButton } from '@/components/auth/user-profile-button';
+import { CreditBalancePill } from '@/components/billing/credit-balance-pill';
 import { isSaaS } from '@/lib/auth-edition';
 import { openGlobalSearch } from '@/lib/global-search-event';
 import {
@@ -48,12 +49,16 @@ export function StudioHeader() {
 }
 
 /**
- * The header's utilities cluster — Help, notifications, the theme menu and the
- * profile control by edition. Play's frame (PRD-260 T-004) keeps the same one.
+ * The header's utilities cluster — the credit balance (hosted edition), Help,
+ * notifications, the theme menu and the profile control by edition. Play's frame
+ * (PRD-260 T-004) keeps the same one.
  */
 export function StudioHeaderUtilities() {
   return (
     <div className="sh-utils">
+      {/* Credit balance — hosted edition only (PRD-265 US-008); nothing is metered locally. */}
+      {isSaaS && <CreditBalancePill className="mr-2" />}
+
       {/* Docs + Help dropdown */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

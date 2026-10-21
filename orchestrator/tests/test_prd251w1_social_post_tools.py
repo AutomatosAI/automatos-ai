@@ -799,16 +799,16 @@ def test_a_draft_renders_by_default_through_media_render_and_waits_for_approval(
 
 def test_past_the_render_quota_the_draft_is_saved_and_the_render_refused_before_media_render(env):
     template_id = _template(env)
-    env.session.add(_usage_row(WS, 600))  # Basic: 10 minutes, all used
+    env.session.add(_usage_row(WS, 3600))  # Own keys: 60 minutes, all used
     env.session.commit()
 
     result = _tool(env, "platform_create_social_post", **_draft_fields(), template=str(template_id), render=True)
 
     assert result["success"] is False and result["render"]["started"] is False, result  # F379: a failed call
-    assert "used 10.0 of its 10 render minutes this month on the Basic plan" in result["render"]["error"]
+    assert "used 60.0 of its 60 render minutes this month on the Own keys plan" in result["render"]["error"]
     assert result["error"].startswith(f"Saved post {result['post']['id']} (\"Web Summit countdown\") as a draft, "
                                       "but it did NOT render: ")
-    assert "used 10.0 of its 10 render minutes" in result["error"] and result["saved_as_draft"] is True
+    assert "used 60.0 of its 60 render minutes" in result["error"] and result["saved_as_draft"] is True
     assert env.health == [] and env.launched == []
     row = _row(env, result["post"]["id"])
     assert row.status == "draft" and [e["action"] for e in row.review_log] == ["draft"]
