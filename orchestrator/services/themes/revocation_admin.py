@@ -21,11 +21,14 @@ answer 404). This module is the admin's hand on that table:
   transaction is rolled back and it answers the row that won. A live ``feed`` row is not a
   repeat: the admin's own row stands after the feed lifts its row;
 * **lift** sets ``lifted_at`` on a ``local`` row, once (lifting a lifted row answers it as it
-  is). A ``feed`` row is the hosted list's to lift: here it is a 409, and the local pull lifts
-  it when the feed says ``liftedAt``. The last live ``local`` disable covering a deactivated
-  Marketplace version (``review.deactivate``) is a 409 too, whatever it was written for: a
-  deactivation is not undone by lifting a revocation. Those versions are locked first, so two
-  lifts of a version's last two disables can't both pass.
+  is). A ``feed`` row is the hosted list's to lift while revocation sync works: then it is a
+  409, and the local pull lifts it when the feed says ``liftedAt``. While sync is off
+  (``revocation_pull.pull_enabled`` is false: the hosted edition, or no feed URL) or stale (no
+  successful pull for ``revocation_pull.STALE_AFTER``), the admin may lift it here, and the
+  router logs who did; a later pull never un-lifts it. The last live ``local`` disable covering
+  a deactivated Marketplace version (``review.deactivate``) is a 409 too, whatever it was written
+  for: a deactivation is not undone by lifting a revocation. Those versions are locked first, so
+  two lifts of a version's last two disables can't both pass.
 
 Nothing is deleted: the hosted feed reports a lifted row for ``THEME_REVOCATIONS_LIFTED_DAYS``.
 Synchronous; nothing here commits: the router does, once. A create that loses the race to an
@@ -42,7 +45,14 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models.themes import THEME_REVOCATION_LEVELS, THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeRevocation
+from core.models.themes import (
+    THEME_REVOCATION_LEVELS,
+    THEME_REVOCATION_ORIGIN_LOCAL,
+    THEME_REVOCATION_SYNC_ROW_ID,
+    ThemePackage,
+    ThemeRevocation,
+    ThemeRevocationSync,
+)
 from services.themes.choices import BAD_REQUEST, CONFLICT, MARKETPLACE_OWNER, NOT_FOUND, ThemeInstallError
 from services.themes.contract import plain_text_problem
 from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, SHA256_PATTERN, satisfies_range
@@ -63,8 +73,8 @@ BAD_RANGE = "A version range is an exact version such as 1.2.0, or a caret range
 BAD_LEVEL = "The level is 'warn' (the theme still runs, with a notice) or 'disable' (members see the base)."
 REVOCATION_NOT_FOUND = "That revocation doesn't exist."
 FEED_ROW = (
-    "This revocation came from the Automatos revocation feed, so it can't be lifted here. "
-    "It lifts when the feed lifts it."
+    "This revocation came from the Automatos revocation feed, and revocation sync is working, so it "
+    "lifts when the feed lifts it. It can be lifted here only while sync is off or stale."
 )
 HOLDS_DEACTIVATION = (
     "This is the last revocation keeping {theme_id} {version}, a deactivated Marketplace version, "
@@ -236,18 +246,34 @@ def _held_deactivation(db: Session, row: ThemeRevocation) -> Optional[ThemePacka
     return None
 
 
+def _feed_rows_liftable_here(db: Session) -> bool:
+    """True while this install doesn't keep its ``feed`` rows in step with the hosted list: its pull
+    is off (``revocation_pull.pull_enabled``) or stale (``revocation_pull.is_stale``, the sync panel's
+    rule: no successful pull for ``STALE_AFTER``, or none yet)."""
+    # Imported here, not at the top: revocation_pull sits in the revocations / signature_state /
+    # revocation_feed import chain (a cycle there was W-C3 hand-off item 8); this module stays out of it.
+    from services.themes import revocation_pull
+
+    if not revocation_pull.pull_enabled():
+        return True
+    sync = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
+    return revocation_pull.is_stale(None if sync is None else sync.last_success_at, _now())
+
+
 def lift_revocation(db: Session, revocation_id: UUID) -> Tuple[ThemeRevocation, bool]:
-    """Set ``lifted_at`` on a ``local`` row: ``(row, True)``; an already lifted one answers
-    ``(row, False)`` unchanged. A missing row is a 404; a ``feed`` row a 409, unchanged; so is the
+    """Set ``lifted_at`` on a ``local`` row, or on a ``feed`` row while sync is off or stale
+    (:func:`_feed_rows_liftable_here`): ``(row, True)``; an already lifted one answers ``(row, False)``
+    unchanged. A missing row is a 404; a ``feed`` row while sync works a 409, unchanged; so is the
     last live ``local`` disable of a deactivated Marketplace version (:func:`_held_deactivation`)."""
     row = db.query(ThemeRevocation).filter(ThemeRevocation.id == revocation_id).with_for_update().first()
     if row is None:
         raise RevocationAdminError(NOT_FOUND, REVOCATION_NOT_FOUND)
-    if row.origin != THEME_REVOCATION_ORIGIN_LOCAL:
+    local = row.origin == THEME_REVOCATION_ORIGIN_LOCAL
+    if not local and not _feed_rows_liftable_here(db):
         raise RevocationAdminError(CONFLICT, FEED_ROW)
     if row.lifted_at is not None:
         return row, False
-    held = _held_deactivation(db, row)
+    held = _held_deactivation(db, row) if local else None
     if held is not None:
         raise RevocationAdminError(CONFLICT, HOLDS_DEACTIVATION.format(theme_id=held.theme_id, version=held.version))
     row.lifted_at = _now()

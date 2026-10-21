@@ -7,7 +7,8 @@ adds the two mutating ones to the authZ sweep's ``ADMIN_GATED_IN_HANDLER`` bucke
 ``GET  /api/admin/themes/revocations``                         every row, live first, then the newest
 ``POST /api/admin/themes/revocations``                         ``{digest | themeId [+ versionRange],
                                                                level, reason}``; 201, or 200 for a repeat
-``POST /api/admin/themes/revocations/{revocationId}/lift``     sets ``liftedAt`` on a ``local`` row
+``POST /api/admin/themes/revocations/{revocationId}/lift``     sets ``liftedAt`` on a ``local`` row (a
+                                                               ``feed`` one while sync is off or stale)
 ============================================================  ==========================================
 
 Every handler checks ``caller_is_admin`` (``core/auth/roles.py``) first, through
@@ -17,7 +18,9 @@ the admin check (A-07c, ``STEP_UP_MAX_AGE_MINUTES``; the ``admin_themes.py`` ``A
 pattern): ``require_revocation_admin`` runs first as a dependency, so a non-admin gets the plain
 403 and is never asked to reverify. The local edition has no step-up (``core/auth/step_up.py``).
 Every check and refusal is ``services/themes/revocation_admin.py``'s; a create writes only an
-``origin='local'`` row (the body has no ``origin``: an unknown field is a 422).
+``origin='local'`` row (the body has no ``origin``: an unknown field is a 422). A lift of a ``feed``
+row (only while revocation sync is off or stale) is logged at warning level with who lifted it:
+this install then no longer follows the hosted list for that row.
 
 The paths sit beside the review queue (``admin_themes.py``), whose ``/{package_id}/<action>``
 routes have two segments and fixed tails, so neither router shadows the other. Plain ``def``
@@ -42,6 +45,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.database.database import get_db
+from core.models.themes import THEME_REVOCATION_ORIGIN_FEED
 from services.themes import revocation_admin
 from services.themes.choices import CONFLICT, ThemeInstallError
 
@@ -135,10 +139,14 @@ def create_theme_revocation(
 def lift_theme_revocation(
     revocation_id: UUID, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Lift a revocation written here; a row the hosted feed sent is the feed's to lift (409)."""
+    """Lift a revocation written here; a row the hosted feed sent is the feed's to lift (409) while
+    revocation sync works."""
     _require_admin(ctx)
     actor = resolve_user_pk(db, ctx)
     row, lifted = _run(db, lambda: revocation_admin.lift_revocation(db, revocation_id))
-    if lifted:
+    if lifted and row.origin == THEME_REVOCATION_ORIGIN_FEED:
+        logger.warning("theme revocation %s from the feed lifted here by user %s (revocation sync off or stale)",
+                       revocation_id, actor)
+    elif lifted:
         logger.info("theme revocation %s lifted by user %s", revocation_id, actor)
     return {"revocation": revocation_admin.revocation_view(row)}

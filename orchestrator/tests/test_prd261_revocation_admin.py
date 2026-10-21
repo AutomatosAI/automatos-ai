@@ -19,7 +19,10 @@ stubbed for the install router's gate. C3-wire registers the router in ``main.py
   whether ``review.deactivate`` wrote it or the admin wrote it earlier for another reason (the
   deactivation then wrote none); with another live ``local`` disable covering the version it can,
   and that one is then the last; a pulled row or a warn doesn't count, nor a range that misses it;
-* lifting an ``origin='feed'`` row is 409 and changes nothing; a duplicate live revocation
+* lifting an ``origin='feed'`` row is 409 and changes nothing while revocation sync works (the
+  local edition, a feed URL, a successful pull within ``revocation_pull.STALE_AFTER``); while sync
+  is off (the hosted edition, or no feed URL) or stale (no success in that window, or none yet)
+  the admin lifts it here, and the router logs who did at warning level; a duplicate live revocation
   answers the existing row with 200, and so does a create that loses the race to an identical
   one (``uq_theme_revocations_live_local`` refuses its write); a create writes only
   ``origin='local'``.
@@ -27,6 +30,7 @@ stubbed for the install router's gate. C3-wire registers the router in ``main.py
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import sys
 import time
@@ -68,7 +72,7 @@ from core.models.themes import (  # noqa: E402
     THEME_REVOCATION_ORIGIN_FEED, THEME_REVOCATION_ORIGIN_LOCAL, ThemeChoice, ThemeInstallation, ThemeLook,
     ThemeOptIn, ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeRevocationSync, ThemeWorkspaceSettings,
 )
-from services.themes import review, revocation_admin  # noqa: E402
+from services.themes import review, revocation_admin, revocation_pull  # noqa: E402
 
 WS = uuid.uuid4()
 ADMIN_PK, OPERATOR_PK = 7, 1
@@ -381,12 +385,54 @@ def test_a_disable_of_a_version_that_is_not_deactivated_lifts(api):
 # --- lift and list --------------------------------------------------------------------------
 
 
-def test_lifting_a_feed_row_is_409_and_changes_nothing(api):
+FEED_URL = "https://feed.example.test/api/themes/revocations"
+STALE_AFTER = revocation_pull.STALE_AFTER
+HOUR = timedelta(hours=1)
+
+
+def _local_sync(api, monkeypatch, url=FEED_URL, last_success_ago=None):
+    """The local edition's operator, its feed URL, and its sync row's last success (None: no row)."""
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(config, revocation_pull.URL_SETTING, url, raising=False)
+    api.ctx = _operator()
+    if last_success_ago is not None:
+        api.db.add(ThemeRevocationSync(last_success_at=datetime.now(timezone.utc) - last_success_ago))
+        api.db.commit()
+
+
+def test_lifting_a_feed_row_is_409_and_changes_nothing_while_sync_works(api, monkeypatch):
+    _local_sync(api, monkeypatch, last_success_ago=STALE_AFTER - HOUR)
     feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED)
     resp = _lift(api, feed.id)
     assert resp.status_code == 409 and resp.json()["detail"] == revocation_admin.FEED_ROW
     api.db.refresh(feed)
     assert (feed.origin, feed.lifted_at) == ("feed", None)
+
+
+SYNC_OFF_OR_STALE = {
+    "the hosted edition (no pull)": None,
+    "no feed URL": {"url": "", "last_success_ago": HOUR},
+    "stale": {"last_success_ago": STALE_AFTER + HOUR},
+    "never pulled": {},
+}
+
+
+@pytest.mark.parametrize("sync", list(SYNC_OFF_OR_STALE.values()), ids=list(SYNC_OFF_OR_STALE))
+def test_a_feed_row_lifts_here_while_sync_is_off_or_stale_and_who_lifted_it_is_logged(
+    api, monkeypatch, caplog, sync,
+):
+    if sync is not None:
+        _local_sync(api, monkeypatch, **sync)
+    actor = ADMIN_PK if sync is None else OPERATOR_PK
+    feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED, level="disable", digest=DIGEST)
+    with caplog.at_level(logging.WARNING, logger=revocations_api.logger.name):
+        resp = _lift(api, feed.id)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["revocation"]["liftedAt"] and resp.json()["revocation"]["origin"] == "feed"
+    api.db.refresh(feed)
+    assert feed.lifted_at is not None
+    [record] = [r for r in caplog.records if r.name == revocations_api.logger.name and r.levelno == logging.WARNING]
+    assert str(feed.id) in record.getMessage() and f"user {actor}" in record.getMessage()
 
 
 def test_lift_sets_lifted_at_once_and_an_unknown_id_is_404(api):
