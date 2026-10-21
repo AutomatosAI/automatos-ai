@@ -340,10 +340,10 @@
       "title": "services/themes/data/core-pages.json regenerated for this wave's frontend page changes (the PRD-261 core-pages drift guard)",
       "description": "W1 edits core frontend pages (pair-browser gate, Phones & devices, api-client); PRD-261's drift guard fails CI unless core-pages.json is regenerated (W3 hit it on 21 Oct).",
       "acceptanceCriteria": [
-        "From the worktree root, run the guard's own generator with a bare python3 (nothing installed): `python3 orchestrator/tests/test_prd261_core_pages_drift.py --write`; commit the regenerated orchestrator/services/themes/data/core-pages.json (signed, ' [skip ci]')",
-        "git diff of core-pages.json changes ONLY the hashes of PAGE_SOURCES files this wave edited (list them in the commit body); if an unrelated page's hash changes, stop and say so (it means the base moved)",
-        "orchestrator/tests/test_prd261_core_pages_drift.py itself is NOT edited (PLAY's guardrail)",
-        "Run it AFTER every other story in this wave is DONE, so the hashes match the final frontend; if a later fix story edits a core page again, re-run it"
+        "From the worktree root, run the guard's own generator with a bare python3 (nothing installed): `python3 orchestrator/tests/test_prd261_core_pages_drift.py --write`; commit the regenerated orchestrator/services/themes/data/core-pages.json (signed, ' [skip ci]') → DONE — python3 3.14 (bare) ran the generator on the post-merge base 7ae677b52; regenerated orchestrator/services/themes/data/core-pages.json committed signed in 3a57a3e0c [skip ci]",
+        "git diff of core-pages.json changes ONLY the hashes of PAGE_SOURCES files this wave edited (list them in the commit body); if an unrelated page's hash changes, stop and say so (it means the base moved) → DONE — the diff changes one hash, components/command-center/command-center-shell.tsx, the one PAGE_SOURCES file this wave edited (US-006b, fc6aacf7a), listed in 3a57a3e0c's body; no unrelated page moved",
+        "orchestrator/tests/test_prd261_core_pages_drift.py itself is NOT edited (PLAY's guardrail) → DONE — git diff 7ae677b52..HEAD -- orchestrator/tests/test_prd261_core_pages_drift.py is empty",
+        "Run it AFTER every other story in this wave is DONE, so the hashes match the final frontend; if a later fix story edits a core page again, re-run it → DONE — run after US-003a … US-008b were all DONE (last story commit ef298f7f8) and after the owner's origin/main merge 824a1bcda; no fix story has edited a core page since"
       ],
       "files": [
         "orchestrator/services/themes/data/core-pages.json"
