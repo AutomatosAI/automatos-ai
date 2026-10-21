@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from modules.voice import retell_api
+from modules.voice.live_socket import CALL_STATUS_SUPERSEDED, LIVE_CALL_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,6 @@ VENDOR_REFUSED_PREFIX = "Could not start the call: "
 # The caller's one voice thread is found by its title's prefix (#585: the title is
 # timestamped, so a fixed title cannot collide on the second call).
 VOICE_THREAD_TITLE_LIKE = "Voice call%"
-ACTIVE_CALL_STATUSES = ("minted", "started")
-SUPERSEDED_STATUS = "superseded"
 SUPERSEDED_REASON = "superseded_by_newer_call"
 MINTED_STATUS = "minted"
 RETELL_PROVIDER = "retell"
@@ -227,7 +226,7 @@ def caller_is_super_admin(ctx: Any) -> bool:
 
 
 def _supersede_prior_calls(db: Session, user_id: int, new_call_id: str) -> None:
-    """ONE LIVE CALL PER USER: mark the caller's active calls superseded, in the mint's
+    """ONE LIVE CALL PER USER: mark the caller's live calls superseded, in the mint's
     transaction. A client that mints again (device switch, a re-press, two LiveVoiceMode
     instances) would otherwise leave several calls on the same mic, each streaming Auto
     over herself; a superseded call's socket closes on its next turn."""
@@ -235,9 +234,9 @@ def _supersede_prior_calls(db: Session, user_id: int, new_call_id: str) -> None:
 
     superseded = (
         db.query(VoiceCall)
-        .filter(VoiceCall.user_id == user_id, VoiceCall.status.in_(ACTIVE_CALL_STATUSES))
+        .filter(VoiceCall.user_id == user_id, VoiceCall.status.in_(LIVE_CALL_STATUSES))
         .update(
-            {VoiceCall.status: SUPERSEDED_STATUS, VoiceCall.disconnect_reason: SUPERSEDED_REASON},
+            {VoiceCall.status: CALL_STATUS_SUPERSEDED, VoiceCall.disconnect_reason: SUPERSEDED_REASON},
             synchronize_session=False,
         )
     )

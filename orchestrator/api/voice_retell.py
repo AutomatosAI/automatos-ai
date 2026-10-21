@@ -490,7 +490,9 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
 
     Auth: a WS handshake carries no HMAC — the MINTED ``call_id`` is the
     credential (born server-side at ``/api/voice/web-call``, unguessable,
-    dead in ~30s unused). No mint row → close 4401 before accept. The
+    dead in ~30s unused). No mint row → close 4401 before accept; a call
+    that is not live (``live_socket.LIVE_CALL_STATUSES``: ended, failed,
+    superseded, anything unknown) → close 4409 before accept. The
     steward/orphan fallback lane stays exclusive to the HMAC-verified events
     webhook; an unauthenticated socket can never conjure attribution.
 
@@ -511,12 +513,13 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
         logger.warning("voice_live_ws_rejected reason=unminted_call call=%s", call_id)
         await websocket.close(code=4401)
         return
-    if minted[0] == live_socket.CALL_STATUS_SUPERSEDED:
-        # A newer call already owns this user's conversation — refuse before
-        # accept so an auto_reconnect of a superseded call can't loop back in
-        # and start a second voice.
-        logger.info("voice_live_ws_rejected reason=superseded call=%s", call_id)
-        await websocket.close(code=4409)
+    if not live_socket.is_live(minted[0]):
+        # Only a live call opens the socket (PRD-266 US-008b): an ended or failed
+        # call's leaked call_id cannot drive Auto's tools after the call, and an
+        # auto_reconnect of a superseded call can't loop back in and start a
+        # second voice. Refused before accept.
+        logger.info("voice_live_ws_rejected reason=not_live status=%s call=%s", minted[0], call_id)
+        await websocket.close(code=live_socket.WS_CLOSE_NOT_LIVE)
         return
 
     await websocket.accept()
