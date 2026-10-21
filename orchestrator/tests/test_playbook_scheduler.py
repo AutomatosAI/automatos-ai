@@ -83,7 +83,8 @@ import services.playbook_scheduler as sched_mod
 # shared run: the breaker read as closed and the real engine launched).
 import services.playbook_breaker  # noqa: E402,F401
 import services.playbook_engine  # noqa: E402,F401
-import services.trial_ledger  # noqa: E402,F401
+import services.playbook_usage  # noqa: E402,F401
+import services.credits.routing  # noqa: E402,F401
 
 _restore_apscheduler_stubs()
 

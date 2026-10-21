@@ -53,6 +53,11 @@ class UnifiedScheduler:
         self._scheduler.start()
         logger.info("[Scheduler] Unified scheduler started")
 
+        # PRD-265: the credit meter and the nightly overhead record.
+        from services.credits.jobs import register_credit_jobs
+
+        register_credit_jobs(self._scheduler)
+
     def stop(self):
         """Shut down the shared scheduler (stops all registered jobs)."""
         if self._scheduler:

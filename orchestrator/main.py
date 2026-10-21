@@ -76,6 +76,8 @@ from api.team import router as team_router, public_router as team_public_router 
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
+from api.admin_credits import router as admin_credits_router  # PRD-265 US-007: admin credit grants
+from api.billing import router as billing_router  # PRD-265 US-008: balance, status, ledger
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
@@ -1266,6 +1268,8 @@ app.include_router(team_public_router)  # Accept-invitation public endpoints
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
+app.include_router(admin_credits_router)  # PRD-265 US-007: admin credit grants
+app.include_router(billing_router)  # PRD-265 US-008: balance, status, ledger
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)

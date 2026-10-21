@@ -273,17 +273,22 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
     expect(result.current).toMatchObject({ status: 'streaming', streaming: true })
   })
 
-  it("carries the turn's suggestion, the Mission being planned, the title and a spent trial", () => {
+  it("carries the turn's suggestion, the Mission being planned, the title and used-up credits", () => {
     host.planning = 'm-1'
-    const { result } = openChat(coreView({ errorCode: 'trial_exhausted', status: 'error' }))
+    const { result } = openChat(coreView({ errorCode: 'credits_exhausted', status: 'error' }))
     expect(result.current).toMatchObject({
       conversation: { key: 'c1', chatId: 'c1', title: null },
       title: 'Find me a laptop',
       suggestion: { goal: 'Compare laptops weekly', complexity: 'low' },
       planningMissionId: 'm-1',
-      errorCode: 'trial_exhausted',
+      errorCode: 'credits_exhausted',
       trialExhausted: true,
     })
+  })
+
+  it('another turn error is not used-up credits', () => {
+    const { result } = openChat(coreView({ errorCode: 'rate_limited', status: 'error' }))
+    expect(result.current).toMatchObject({ errorCode: 'rate_limited', trialExhausted: false })
   })
 
   it("sends, tries again and stops through the controller's own actions", () => {

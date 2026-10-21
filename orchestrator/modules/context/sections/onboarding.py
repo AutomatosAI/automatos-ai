@@ -206,15 +206,18 @@ _RETRIGGER_NOTE = (
 )
 
 
-def _trial_line(onboarding: dict[str, Any]) -> str:
-    """A concrete trial-balance sentence for the power-up copy, when known."""
-    trial = onboarding.get("trial") or {}
-    granted = trial.get("granted_usd")
-    if granted is None:
-        return "Mention their remaining trial credit."
-    spent = trial.get("spent_usd") or 0
-    remaining = max(0.0, float(granted) - float(spent))
-    return f"They have ${remaining:.2f} of ${float(granted):.2f} trial credit left."
+def _trial_line(ctx: SectionContext) -> str:
+    """A concrete trial-balance sentence for the power-up copy, when known
+    (PRD-265: the trial is credits in the ledger; 1 credit = 1 US cent)."""
+    try:
+        from config import config
+        from services.credits.ledger import read_balance
+
+        left = max(0, read_balance(ctx.db_session, ctx.workspace_id).trial)
+    except Exception:  # noqa: BLE001 — copy must never blank on a balance read
+        logger.warning("OnboardingSection: trial balance unreadable", exc_info=True)
+        return "Mention their remaining trial credits."
+    return f"They have {left} of {config.TRIAL_CREDITS} trial credits left."
 
 
 class OnboardingSection(BaseSection):
@@ -312,7 +315,7 @@ class OnboardingSection(BaseSection):
         if stage == "boom":
             return _STAGE_BOOM
         if stage == "powerup":
-            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding), an_app=self._next_app(ctx))
+            return _STAGE_POWERUP.format(trial_line=_trial_line(ctx), an_app=self._next_app(ctx))
         return ""  # defensive — terminal stages never reach here
 
     @staticmethod
@@ -345,9 +348,9 @@ class OnboardingSection(BaseSection):
         except Exception:  # noqa: BLE001 — guidance must never blank on a helper error
             logger.warning("OnboardingSection._plan_recommendation failed", exc_info=True)
             return (
-                "Recommend a plan (Basic $19 · Pro $49 · Business $99/mo, early access; "
-                "Enterprise coming soon) and set the accepted tier via "
-                "`platform_update_onboarding` (plan)."
+                "Recommend a plan (Own keys $9 · Pro $29 · Business $99/mo by invite; "
+                "Enterprise coming soon) and record the choice via "
+                "`platform_update_onboarding` (plan) — never put a workspace on a paid plan yourself."
             )
 
     def _firecrawl_note(self, ctx: SectionContext) -> str:

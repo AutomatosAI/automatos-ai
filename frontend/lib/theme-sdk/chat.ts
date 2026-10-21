@@ -45,7 +45,7 @@ import {
   receiptLine as coreReceiptLine,
   safeLink,
 } from '@/lib/chat/receipts'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { CREDITS_EXHAUSTED_CODE } from '@/lib/credits'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useMissionStore } from '@/stores/mission-store'
 import { useFreshDraftStore } from '@/stores/fresh-draft-store'
@@ -258,7 +258,10 @@ export interface HostChatController {
   readonly status: HostChatStatus
   readonly streaming: boolean
   readonly errorCode: string | null
-  /** The workspace's trial is spent: the send was refused (cards.TrialExhaustedBanner). */
+  /**
+   * The workspace's credits are used up: the send was refused with `credits_exhausted`
+   * (cards.TrialExhaustedBanner). The name predates PRD-265, when the trial was the only credit.
+   */
   readonly trialExhausted: boolean
   readonly suggestion: HostMissionSuggestion | null
   /** The Mission the chat is planning, once one is (cards.MissionCreatedCard). */
@@ -359,7 +362,7 @@ function useOpenConversation(
         status,
         streaming,
         errorCode,
-        trialExhausted: errorCode === TRIAL_EXHAUSTED_CODE,
+        trialExhausted: errorCode === CREDITS_EXHAUSTED_CODE,
         suggestion,
         planningMissionId,
         looseApprovals,
