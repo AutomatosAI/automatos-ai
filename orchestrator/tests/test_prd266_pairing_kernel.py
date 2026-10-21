@@ -1,7 +1,9 @@
 """PRD-266 US-003a — the one pairing kernel (``core/auth/pairing.py``).
 
 * the code alphabet has no look-alikes (0/O/1/I); a code is 8 of its
-  characters shown as ``XXXX-XXXX``; normalising upper-cases and drops spaces;
+  characters shown as ``XXXX-XXXX``; normalising gives the canonical (issued)
+  form, so a code typed in lower case, with spaces or without its hyphen pairs a
+  CLI host, a phone and a browser alike (US-005b, lead 20 Oct);
 * ``hash_secret`` is the SHA-256 hex CLI hosts have always stored;
 * ``mint_token`` keeps its prefix and returns ``hash_secret`` of the token;
 * ``secrets_match`` compares through ``hmac.compare_digest`` and refuses an
@@ -64,12 +66,29 @@ def test_a_code_is_eight_alphabet_characters_shown_as_two_groups():
 
 
 def test_normalize_upper_cases_and_strips_spaces():
-    assert pairing.normalize_pairing_code("  abcd efgh ") == "ABCDEFGH"
+    assert pairing.normalize_pairing_code("  abcd efgh ") == "ABCD-EFGH"
     assert pairing.normalize_pairing_code("abcd-efgh") == "ABCD-EFGH"
     assert pairing.normalize_pairing_code(None) == ""
     assert pairing.normalize_pairing_code("   ") == ""
     code = pairing.new_pairing_code()
     assert pairing.normalize_pairing_code(code.lower()) == code, "a code typed in lower case is the same code"
+
+
+@pytest.mark.parametrize("typed", ["abcdefgh", "ABCD EFGH", "abcd-efgh", "  AbCd-EfGh ", "ab cd-ef gh", "ABCD--EFGH"])
+def test_a_typed_code_is_canonicalised_to_its_issued_form(typed):
+    assert pairing.normalize_pairing_code(typed) == "ABCD-EFGH"
+    assert pairing.hash_secret(pairing.normalize_pairing_code(typed)) == pairing.hash_secret("ABCD-EFGH")
+
+
+def test_an_issued_code_is_its_own_canonical_form_so_stored_hashes_keep_matching():
+    for code in {pairing.new_pairing_code() for _ in range(SAMPLES)}:
+        assert pairing.normalize_pairing_code(code) == code
+        assert pairing.hash_secret(pairing.normalize_pairing_code(code)) == pairing.hash_secret(code)
+
+
+@pytest.mark.parametrize("typed, canonical", [("abc", "ABC"), ("abcd-efg", "ABCDEFG"), ("abcd-efghj", "ABCDEFGHJ"), ("-", "")])
+def test_a_code_of_any_other_length_stays_ungrouped(typed, canonical):
+    assert pairing.normalize_pairing_code(typed) == canonical
 
 
 # ── hashing and minting ─────────────────────────────────────────────────────
@@ -232,3 +251,66 @@ def test_the_session_token_scan_still_matches_by_the_kernel():
     assert svc._scan_for_session_token(_FakeQuery([live]), token + "x") is None
     lapsed = SimpleNamespace(runtime_ref=ref, lease_until=datetime.now(timezone.utc) - timedelta(seconds=1))
     assert svc._scan_for_session_token(_FakeQuery([lapsed]), token) is None, "the live-lease rule still holds"
+
+
+# ── the canonical form on every path that pairs (Postgres, CI) ─────────────
+
+TYPED_FORMS = (str.lower, lambda code: code.replace("-", ""), lambda code: code.replace("-", " ").lower())
+WEB_URL = "https://studio.prd266-kernel.test"
+REQUEST_BASE = "http://192.0.2.20:8000/"
+
+
+def _typed_variants(code: str):
+    return [form(code) for form in TYPED_FORMS]
+
+
+@pytest.fixture
+def local_install(monkeypatch):
+    """A local install that takes paired devices, its web app at ``WEB_URL``."""
+    from config import HOSTED_PUBLIC_API_HOST, config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(config, "LOCAL_REMOTE_ACCESS", "paired")
+    monkeypatch.setattr(config, "FRONTEND_URL", WEB_URL)
+    monkeypatch.setattr(config, "PUBLIC_API_HOST", HOSTED_PUBLIC_API_HOST)
+    return config
+
+
+def _seed_person(db) -> int:
+    import uuid
+
+    from sqlalchemy import text
+
+    tag = uuid.uuid4().hex[:12]
+    return db.execute(
+        text("INSERT INTO users (username, email, is_active) VALUES (:u, :e, true) RETURNING id"),
+        {"u": f"prd266-kernel-{tag}", "e": f"prd266-kernel-{tag}@t.test"},
+    ).scalar()
+
+
+@pytest.mark.parametrize("variant", range(len(TYPED_FORMS)))
+def test_a_cli_host_pairs_with_the_code_typed_without_its_hyphen(db_session, seed_workspace, variant):
+    import uuid
+
+    from services import cli_host_service as svc
+
+    host, code, _expires = svc.create_pairing_code(db_session, uuid.UUID(seed_workspace()), "laptop")
+    paired = svc.pair_host(db_session, _typed_variants(code)[variant], "laptop", {})
+    assert paired is not None and paired[0].id == host.id
+
+
+@pytest.mark.parametrize("platform", ["ios", "web"])
+@pytest.mark.parametrize("variant", range(len(TYPED_FORMS)))
+def test_a_phone_and_a_browser_pair_with_the_code_typed_without_its_hyphen(
+    db_session, seed_workspace, local_install, platform, variant,
+):
+    """The phone's code field and the web 'Pair this browser' field send what was typed."""
+    import uuid
+
+    from services.mobile.pairing import create_pairing_code, pair_device
+
+    issued = create_pairing_code(
+        db_session, uuid.UUID(seed_workspace()), _seed_person(db_session), request_base_url=REQUEST_BASE)
+    typed = _typed_variants(issued.code)[variant]
+    paired = pair_device(db_session, typed, f"{platform} test", platform, "1.0.0", f"prd266-kernel-{platform}-{variant}")
+    assert paired is not None and paired.token.startswith("amd_")

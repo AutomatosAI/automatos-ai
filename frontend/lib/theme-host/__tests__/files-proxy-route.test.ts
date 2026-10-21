@@ -17,6 +17,8 @@ const DIGEST = 'a'.repeat(64)
 const CLIP = ['assets', 'mascot', 'idle.mp4']
 const ENTRY = ['dist', 'entry.js']
 const CSP = "default-src 'none'; sandbox"
+/** A paired browser's device token (PRD-266: `amd_` then token_urlsafe(32)). */
+const DEVICE_TOKEN = `amd_${'d'.repeat(43)}`
 
 type BackendCall = (url: string, init?: RequestInit) => Promise<Response>
 type BackendFetch = Mock<BackendCall>
@@ -104,6 +106,28 @@ describe('PRD-261 A-08b — local edition', () => {
     expect(response.status).toBe(200)
     expect(clerk.auth).not.toHaveBeenCalled()
     expect(sentHeaders(backend).get('authorization')).toBeNull()
+  })
+
+  it("PRD-266 K8: sends a paired browser's device cookie as Bearer, and nothing for any other cookie", async () => {
+    const get = await routeGet(false)
+    const paired = stubBackend(backendAnswer(200, { 'Content-Type': 'text/javascript' }, 'export default {}'))
+    await call(get, [DIGEST, ...ENTRY], { cookie: `theme=x; automatos_device_token=${DEVICE_TOKEN}; other=1` })
+    expect(sentHeaders(paired).get('authorization')).toBe(`Bearer ${DEVICE_TOKEN}`)
+    expect(clerk.auth).not.toHaveBeenCalled()
+    for (const cookie of ['automatos_device_token=not-a-device-token', 'automatos_device_token=', `session=${DEVICE_TOKEN}`]) {
+      const backend = stubBackend(backendAnswer(200, { 'Content-Type': 'text/javascript' }, 'export default {}'))
+      await call(get, [DIGEST, ...ENTRY], { cookie })
+      expect(sentHeaders(backend).get('authorization')).toBeNull()
+    }
+  })
+})
+
+describe('PRD-266 K8 — SaaS never reads the device cookie', () => {
+  it("sends the Clerk session's token, whatever device cookie the request carries", async () => {
+    signedIn('session-token')
+    const backend = stubBackend(backendAnswer(200, { 'Content-Type': 'text/javascript' }, 'export default {}'))
+    await call(await routeGet(true), [DIGEST, ...ENTRY], { cookie: `automatos_device_token=${DEVICE_TOKEN}` })
+    expect(sentHeaders(backend).get('authorization')).toBe('Bearer session-token')
   })
 })
 

@@ -9,7 +9,10 @@
  * session and its workspace from the page). The boot route is not workspace-scoped (it resolves
  * the workspace from the install, §2.2), so no X-Workspace-ID is needed. In SaaS the Clerk
  * session's token goes as Bearer and a signed-out request asks nothing; in the local edition no
- * token is sent and the backend serves the local operator, as the files proxy does (A-08b).
+ * token is sent and the backend serves the local operator. On a local install in
+ * LOCAL_REMOTE_ACCESS=paired mode that lane is closed: the boot route answers 401
+ * (device_pairing_required), which paints the base boot quietly, and the client host then loads
+ * the theme with the browser's own device token (PRD-266 K8: the layout reads no device cookie).
  *
  * The fetch has 300 ms (INSTALLED_BOOT_TIMEOUT_MS). When it fails, times out or answers
  * anything but a boot, the resolver throws and createThemeBootResolver (boot.ts) paints the base

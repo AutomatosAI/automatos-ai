@@ -26,11 +26,13 @@ import {
     useClerk as clerkUseClerk,
 } from '@clerk/nextjs'
 import { isSaaS } from '@/lib/auth-edition'
+import { readDeviceToken } from '@/lib/device-token'
 
 // The local session: signed-in-shaped (the backend treats the anonymous local
-// session as workspace owner — PRD-195 auth-lane contract), token-less (the
-// api-client's token getter is already a null no-op via LocalAuthProvider),
-// org-less and user-less (the SaaS personal-account shape).
+// session as workspace owner — PRD-195 auth-lane contract), org-less and
+// user-less (the SaaS personal-account shape). Its token is the paired browser's
+// device token, as LocalAuthProvider's api-client getter returns it, or null when
+// the browser holds none (PRD-266 US-005b).
 const LOCAL_AUTH = {
     isLoaded: true,
     isSignedIn: true,
@@ -39,7 +41,7 @@ const LOCAL_AUTH = {
     orgId: null,
     orgRole: null,
     orgSlug: null,
-    getToken: async () => null,
+    getToken: async () => readDeviceToken(),
     signOut: async () => {},
 } as unknown as ReturnType<typeof clerkUseAuth>
 

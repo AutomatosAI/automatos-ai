@@ -40,8 +40,20 @@ def hash_secret(value: Optional[str]) -> str:
 
 
 def normalize_pairing_code(code: Optional[str]) -> str:
-    """A typed code as it is hashed: trimmed, upper-cased, inner spaces removed."""
-    return (code or "").strip().upper().replace(" ", "")
+    """A typed code in its canonical form, the form it was issued and hashed in.
+
+    Trimmed, upper-cased, spaces and hyphens removed; a result of exactly
+    ``PAIRING_CODE_LENGTH`` characters gets the group separator back after the
+    first half. So ``abcdefgh``, ``ABCD EFGH`` and ``abcd-efgh`` all match a code
+    issued as ``ABCD-EFGH``, and an issued code is its own canonical form: the
+    hashes already stored keep matching. Any other length stays ungrouped and
+    matches nothing.
+    """
+    bare = (code or "").strip().upper().replace(" ", "").replace(_CODE_GROUP_SEPARATOR, "")
+    if len(bare) != PAIRING_CODE_LENGTH:
+        return bare
+    half = PAIRING_CODE_LENGTH // 2
+    return f"{bare[:half]}{_CODE_GROUP_SEPARATOR}{bare[half:]}"
 
 
 def new_pairing_code() -> str:
