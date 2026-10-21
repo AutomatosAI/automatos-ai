@@ -4,6 +4,14 @@
   revocation, a review deactivation) or ``'feed'`` (pulled from the hosted revocation
   feed, keyed by the hosted row's id). ``NOT NULL DEFAULT 'local'``, so every existing
   row reads ``'local'``; a CHECK keeps it to those two values.
+* ``uq_theme_revocations_live_local``: at most one live (``lifted_at IS NULL``) ``'local'``
+  row per target and level, so two identical creates in the same instant can't both write
+  (``revocation_admin.create_revocation`` answers the row that won). The target columns are
+  read through ``COALESCE(<column>, '')``: a unique index counts NULLs as distinct, so on the bare
+  columns a digest row (theme id and range NULL) would never collide. A ``'feed'`` row and a
+  lifted row are outside it. Built after ``origin``, which its predicate names; a database
+  that already holds two such twins (create and deactivate check for one before writing, so
+  only a lost race leaves them) refuses it, and the upgrade stops there.
 * ``theme_revocation_sync``: one row (``CHECK (id = 1)``) the local edition's pull
   writes: when it last tried, when it last succeeded, the feed's ``generatedAt``, the
   last error, the feed's ``revokedKeys`` and when the row last changed.
@@ -14,10 +22,11 @@
 Create_all-first safe: the column and the CHECK are added only when the table lacks
 them (a DO block that asks ``pg_attribute`` and ``pg_constraint`` for the table the
 unqualified name resolves to, so a database ``create_all`` built is not even locked),
-the table is ``CREATE TABLE IF NOT EXISTS``, and running it twice changes nothing.
+the table is ``CREATE TABLE IF NOT EXISTS``, the index ``CREATE UNIQUE INDEX IF NOT
+EXISTS``, and running it twice changes nothing.
 Adding a column with a constant default rewrites no row on Postgres 11+.
 
-The downgrade drops the sync table, then the CHECK and the column; it deletes no
+The downgrade drops the index and the sync table, then the CHECK and the column; it deletes no
 revocation row (a pulled row stays, as a row of this install).
 
 Revision ID: prd261_revocation_feed
@@ -68,8 +77,16 @@ CREATE TABLE IF NOT EXISTS theme_revocation_sync (
 """),
 )
 
+# After _ADD_ORIGIN (the predicate names origin), as core/models/themes.py declares it.
+_INDEXES = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_revocations_live_local ON theme_revocations "
+    "(COALESCE(digest, ''), COALESCE(theme_id, ''), COALESCE(version_range, ''), level) "
+    "WHERE lifted_at IS NULL AND origin = 'local';",
+)
+
 # The upgrade's steps undone, in reverse order.
 _DOWNGRADE = (
+    "DROP INDEX IF EXISTS uq_theme_revocations_live_local;",
     "DROP TABLE IF EXISTS theme_revocation_sync;",
     "ALTER TABLE theme_revocations DROP CONSTRAINT IF EXISTS ck_theme_revocations_origin;",
     "ALTER TABLE theme_revocations DROP COLUMN IF EXISTS origin;",
@@ -79,6 +96,8 @@ _DOWNGRADE = (
 def upgrade() -> None:
     op.execute(_ADD_ORIGIN)
     for _table, statement in _TABLES:
+        op.execute(statement)
+    for statement in _INDEXES:
         op.execute(statement)
 
 

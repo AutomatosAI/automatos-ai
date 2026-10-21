@@ -16,15 +16,17 @@ answer 404). This module is the admin's hand on that table:
   is 1 to ``REASON_MAX`` characters of one line of plain text (``contract.plain_text_problem``:
   every member reads it in the host's notice). A request that repeats a live ``local`` row (the
   same target and level) answers that row instead of writing a second one, so a retry or a
-  double click writes once. No index backs that check (as with ``review.deactivate``): two
-  creates in the same instant can both write, and each then needs its own lift. A live ``feed``
-  row is not a repeat: the admin's own row stands after the feed lifts its row;
+  double click writes once. The partial unique index ``uq_theme_revocations_live_local`` backs
+  that check: of two creates in the same instant one writes, the other's flush is refused, its
+  transaction is rolled back and it answers the row that won. A live ``feed`` row is not a
+  repeat: the admin's own row stands after the feed lifts its row;
 * **lift** sets ``lifted_at`` on a ``local`` row, once (lifting a lifted row answers it as it
   is). A ``feed`` row is the hosted list's to lift: here it is a 409, and the local pull lifts
   it when the feed says ``liftedAt``.
 
 Nothing is deleted: the hosted feed reports a lifted row for ``THEME_REVOCATIONS_LIFTED_DAYS``.
-Synchronous; nothing here commits: the router does, once.
+Synchronous; nothing here commits: the router does, once. A create that loses the race to an
+identical one rolls its transaction back (it had written nothing else).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.models.themes import THEME_REVOCATION_LEVELS, THEME_REVOCATION_ORIGIN_LOCAL, ThemeRevocation
@@ -127,7 +130,9 @@ def _same(column: Any, value: Optional[str]) -> Any:
 
 
 def _live_local_repeat(db: Session, target: Target, level: str) -> Optional[ThemeRevocation]:
-    """The oldest live ``local`` row with this target and level, or None."""
+    """The live ``local`` row with this target and level, or None. The partial unique index
+    ``uq_theme_revocations_live_local`` holds at most one such row, so the order only makes the
+    answer certain; a create that races this check loses at its flush (:func:`create_revocation`)."""
     return (
         db.query(ThemeRevocation)
         .filter(
@@ -147,7 +152,8 @@ def create_revocation(
     db: Session, new: NewRevocation, actor_pk: Optional[int],
 ) -> Tuple[ThemeRevocation, bool]:
     """Write a ``local`` revocation once every field checks out: ``(row, True)``. A live ``local``
-    row with the same target and level answers instead: ``(that row, False)``, nothing written."""
+    row with the same target and level answers instead: ``(that row, False)``, nothing written; so
+    does one an identical create wrote in the same instant (the transaction is rolled back)."""
     target = checked_target(new)
     level = checked_level(new.level)
     reason = checked_reason(new.reason)
@@ -159,7 +165,15 @@ def create_revocation(
         reason=reason, created_by=actor_pk, created_at=_now(), origin=THEME_REVOCATION_ORIGIN_LOCAL,
     )
     db.add(row)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # An identical create committed between the check and this write: the index refused this one.
+        db.rollback()
+        winner = _live_local_repeat(db, target, level)
+        if winner is None:
+            raise
+        return winner, False
     return row, True
 
 

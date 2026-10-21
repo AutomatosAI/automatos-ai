@@ -16,7 +16,9 @@ stubbed for the install router's gate. C3-wire registers the router in ``main.py
 * a digest disable makes ``active`` answer the base; a warn by ``^1.0.0`` keeps the theme with
   the notice; lift restores it;
 * lifting an ``origin='feed'`` row is 409 and changes nothing; a duplicate live revocation
-  answers the existing row with 200; a create writes only ``origin='local'``.
+  answers the existing row with 200, and so does a create that loses the race to an identical
+  one (``uq_theme_revocations_live_local`` refuses its write); a create writes only
+  ``origin='local'``.
 """
 from __future__ import annotations
 
@@ -284,6 +286,23 @@ def test_a_duplicate_live_revocation_answers_the_existing_row_with_200(api):
     assert renewed.status_code == 201 and renewed.json()["revocation"]["id"] != first.json()["revocation"]["id"]
 
 
+def test_a_create_that_loses_the_race_answers_the_row_that_won_with_200(api, monkeypatch):
+    # The other request's row lands after this one checked for a repeat and before it writes.
+    won = _row(api, level="disable", digest=DIGEST)
+    checks = []
+    real_check = revocation_admin._live_local_repeat
+
+    def raced(db, target, level):
+        checks.append(target)
+        return None if len(checks) == 1 else real_check(db, target, level)
+
+    monkeypatch.setattr(revocation_admin, "_live_local_repeat", raced)
+    resp = _create(api, digest=DIGEST)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] is False and resp.json()["revocation"]["id"] == str(won.id)
+    assert [row.id for row in _rows(api)] == [won.id] and len(checks) == 2
+
+
 def test_a_live_feed_row_is_no_duplicate_and_stays_as_it_was(api):
     feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED, level="disable", digest=DIGEST)
     resp = _create(api, digest=DIGEST)
@@ -319,7 +338,7 @@ def test_lift_sets_lifted_at_once_and_an_unknown_id_is_404(api):
 def test_the_list_shows_live_rows_first_then_the_newest_with_their_origin(api):
     _row(api, minutes_ago=30)
     _row(api, minutes_ago=1, lifted=True)
-    _row(api, minutes_ago=5)
+    _row(api, minutes_ago=5, level="disable")  # one live local row per target and level
     _row(api, minutes_ago=10, origin=THEME_REVOCATION_ORIGIN_FEED)
     listed = api.client.get(BASE).json()["revocations"]
     expected = [("r5", "local"), ("r10", "feed"), ("r30", "local"), ("r1", "local")]  # live first, then newest
