@@ -249,6 +249,24 @@
       "priority": 12,
       "passes": false,
       "notes": "Found by the W3 adversarial review (21 Oct) with grep -rn 'useActivitySchedule' frontend: three readers (calendar-tab.tsx, command-center-shell.tsx:104/131, activity/widgets/schedule-widget.tsx:109), and US-018b changed only the first. Auto's platform_get_schedule tool sees paused: true by K13's choice: no change there. The mobile app's reading of paused is W2's. The commit ends ' [skip ci]' unless the lead makes it the wave's next CI commit."
+    },
+    {
+      "id": "W3-CI-2",
+      "prdStory": "PRD-261 PA-18 guardrail",
+      "priority": 13,
+      "passes": false,
+      "title": "services/themes/data/core-pages.json regenerated for this wave's frontend page changes (the PRD-261 core-pages drift guard)",
+      "description": "CI run 39526923540 (shard 3) failed the PRD-261 core-pages drift guard after the review fix P266W3-RVW-1 edited a core frontend page.",
+      "acceptanceCriteria": [
+        "From the worktree root, run the guard's own generator with a bare python3 (nothing installed): `python3 orchestrator/tests/test_prd261_core_pages_drift.py --write`; commit the regenerated orchestrator/services/themes/data/core-pages.json (signed, ' [skip ci]')",
+        "git diff of core-pages.json changes ONLY the hashes of PAGE_SOURCES files this wave edited (list them in the commit body); if an unrelated page's hash changes, stop and say so (it means the base moved)",
+        "orchestrator/tests/test_prd261_core_pages_drift.py itself is NOT edited (PLAY's guardrail)",
+        "Run it AFTER every other story in this wave is DONE, so the hashes match the final frontend; if a later fix story edits a core page again, re-run it"
+      ],
+      "files": [
+        "orchestrator/services/themes/data/core-pages.json"
+      ],
+      "notes": "Lead, 21 Oct. Found when PRD-266 W3's review fix edited the Command Center schedule widget and CI's shard 3 failed test_core_pages_json_matches_the_checkout and test_the_reader_returns_the_committed_hashes."
     }
   ]
 }
