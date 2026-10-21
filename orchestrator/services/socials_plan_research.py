@@ -125,15 +125,19 @@ def launch(db: Any, plan: SocialCampaign, *, triggered_by: str, now: datetime) -
 
 
 def background_allowed(workspace: Optional[Workspace]) -> bool:
-    """Socials on, and no trial workspace's background burn on the hosted edition (PRD-222):
-    the weekly research run, and the results' reads (PRD-251C US-C402)."""
+    """Socials on, and no background burn on the trial alone on the hosted edition
+    (PRD-222 FR-17, on credits since PRD-265): the weekly research run, and the
+    results' reads (PRD-251C US-C402)."""
     if workspace is None or socials_off_reason(workspace) is not None:
         return False
     if (config.AUTH_EDITION or "").strip().lower() == "local":
         return True
-    from services.trial_ledger import is_trial_active_workspace
+    from sqlalchemy.orm import object_session
 
-    return not is_trial_active_workspace(workspace)
+    from services.credits.routing import background_allowed as credits_allow_background
+
+    db = object_session(workspace)
+    return db is not None and credits_allow_background(db, workspace.id)
 
 
 def _tell_unavailable(db: Any, plan: SocialCampaign, now: datetime) -> None:

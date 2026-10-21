@@ -11,8 +11,8 @@ import {
 /**
  * PRD-222 US-020 (W2·S4) — the post-setup "run & learn" checklist card.
  *
- * Rendered on chat AND the Command Center (the trial-balance-pill dual-surface
- * pattern): one server read-model, two mounts. Shows the outcome-framed next
+ * Rendered on chat AND the Command Center (a dual-surface pattern): one server
+ * read-model, two mounts. Shows the outcome-framed next
  * steps whose completion is DERIVED server-side from real counts (connect a
  * second app · run your first mission · invite a teammate on multi-seat plans ·
  * take the matched Academy course). Dismissible; the dismissal is persisted in

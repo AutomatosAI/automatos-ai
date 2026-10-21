@@ -75,6 +75,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "playbook_schedule_skipped",
         # F197: the AI provider's account has credit again (the bell said it ran out).
         "credit_restored",
+        # PRD-265: the workspace's Automatos credits are running low / have run out.
+        "credits_low",
+        "credits_exhausted",
         # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
         # actions S7/S8, escalations).
         "watch_verdict",

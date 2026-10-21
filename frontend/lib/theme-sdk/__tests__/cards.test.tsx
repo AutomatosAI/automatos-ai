@@ -253,8 +253,8 @@ describe('PRD-261 A-12a — the chrome cards', () => {
   })
 
   it("TrialExhaustedBanner and FirstRunNudge draw the host's own", () => {
-    render(<TrialExhaustedBanner errorCode="trial_exhausted" />)
-    expect(given('TrialExhaustedBanner')).toEqual({ errorCode: 'trial_exhausted' })
+    render(<TrialExhaustedBanner errorCode="credits_exhausted" />)
+    expect(given('TrialExhaustedBanner')).toEqual({ errorCode: 'credits_exhausted' })
     render(<FirstRunNudge />)
     expect(screen.getByTestId('FirstRunNudge')).toBeInTheDocument()
   })

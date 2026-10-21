@@ -54,6 +54,11 @@ export interface HostRole {
   readonly canEdit: boolean
 }
 
+/**
+ * The workspace's trial. The trial is credits (1 credit = 1 US cent), so the dollars are its credits / 100.
+ * `state`: `converted` once the workspace runs on AI keys of its own, `exhausted` while work on Automatos's
+ * keys is paused, `warned` while the balance runs low, else `active`.
+ */
 export interface HostTrial {
   readonly state: 'active' | 'warned' | 'exhausted' | 'converted'
   readonly grantedUsd: number
@@ -74,7 +79,11 @@ export declare function useRole(): HostRole
 /** The edition; fixed for the life of the build. */
 export declare function useEdition(): HostEdition
 
-/** The workspace's trial ledger; null when it has none or has not loaded. */
+/**
+ * The workspace's trial, read off its credits; null in the local edition, while it loads, or on a plan billed
+ * outside credits. It reads the host's query cache, so it needs the host's QueryClientProvider, which every page
+ * and theme the host draws has.
+ */
 export declare function useTrial(): HostTrial | null
 
 /** Whether the backend answers. */

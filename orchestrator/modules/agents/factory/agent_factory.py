@@ -445,41 +445,40 @@ class AgentFactory:
 
         return provider_str, model_id
 
-    async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
+    async def _resolve_api_key(
+        self, provider_name: str, agent_name: str = "", workspace_id=None, own_keys_only: bool = False,
+    ) -> Optional[ResolvedKey]:
         """The key that pays for ``provider_name``'s calls: BYOK, the operator workspace's,
         the credential store's, the env's (``core.llm.key_resolver``, which the
-        Analytics credit card reads too, F244)."""
-        return resolve_provider_key(self.db_session, provider_name, workspace_id=workspace_id, agent_name=agent_name)
-
-    def _resolve_trial_decision(self, workspace_id, model_id: str, is_byok: bool) -> bool:
-        """PRD-222 US-005 / PRD-230 US-001 — the trial routing decision at the
-        LLM key-resolution choke point, shared by BOTH the mission factory path
-        (``_create_llm_manager``) and the chat path (``activate_agent``). One gate,
-        no drift.
-
-        Returns ``trial_routed`` — tag the LLMManager so spend accrues to the
-        trial ledger (``manager.py`` gates ``record_trial_spend`` on this flag).
-
-        2026-08-29 (Gerard): model pinning DELETED — the trial is a spend cap,
-        not a model gate. Raises ``TrialExhaustedError`` when the trial is
-        spent. No-op (``False``) for BYOK, non-trial, and system calls.
-        """
-        if not workspace_id or is_byok:
-            return False
-        from services.trial_ledger import (
-            resolve_trial_routing, TrialExhaustedError,
-            ACTION_BLOCKED, ACTION_PLATFORM_TRIAL,
+        Analytics credit card reads too, F244). ``own_keys_only`` (PRD-265): the
+        workspace's own key, or None."""
+        return resolve_provider_key(
+            self.db_session, provider_name, workspace_id=workspace_id,
+            agent_name=agent_name, own_keys_only=own_keys_only,
         )
-        from core.models.workspaces import Workspace
 
-        _ws = self.db_session.query(Workspace).get(workspace_id)
-        routing = resolve_trial_routing(_ws, model_id, is_byok=False)
-        if routing.action == ACTION_BLOCKED:
-            self.logger.info(f"[Trial] Blocking exhausted trial workspace {workspace_id}")
-            raise TrialExhaustedError()
-        if routing.action == ACTION_PLATFORM_TRIAL:
-            return True
-        return False
+    def _platform_unfunded(self, workspace_id) -> Optional[Any]:
+        """PRD-265 US-004 — the key-resolution half of the credit gate, shared by
+        the agent-creation path (``_create_llm_manager``) and the chat path
+        (``activate_agent``). One check, no drift.
+
+        Returns the workspace's ``Funding`` when its credits can't pay for a
+        platform-key call right now, so only the workspace's own keys may run the
+        agent (direct, then via its own OpenRouter key); None when the platform's
+        keys may (local edition, an allowance plan, or credits left). The
+        call-time gate (``services.credits.gate``) is the backstop for every other
+        call site, and stops an ask once its cost reaches the balance.
+        """
+        if not workspace_id:
+            return None
+        from services.credits import asks
+        from services.credits.routing import FUNDED_BY_CREDITS, can_pay, workspace_funding
+
+        state = asks.current_ask()
+        funding = workspace_funding(self.db_session, workspace_id, background=bool(state and state.background))
+        if funding.funded_by != FUNDED_BY_CREDITS or can_pay(funding, 1):
+            return None
+        return funding
 
     async def _create_llm_manager(
         self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None, agent_id: Optional[int] = None,
@@ -489,50 +488,11 @@ class AgentFactory:
         ``agent_id`` rides into usage tracking — without it every call booked
         through this path had a NULL agent and the agent's counters never moved.
         """
-        from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
+        from core.llm import LLMConfig
 
-        from core.llm.providers import enum_for
-
-        effective_provider, effective_model_id = self._resolve_provider_for_model(
-            model_config.provider, model_config.model_id
+        provider, effective_provider, effective_model_id, resolved = await self._creation_key(
+            model_config, agent_name, workspace_id,
         )
-        provider = enum_for(effective_provider)
-        if provider is None:
-            raise ValueError(f"Unsupported provider: {effective_provider}")
-        resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
-        if not resolved and effective_provider != "openrouter":
-            # 2026-08-29 (Gerard, the Harbourline failure): provider resolution is
-            # KEY-AVAILABILITY-DRIVEN. A vendor model with no direct vendor key
-            # must route via OpenRouter when that key exists — never error while
-            # a capable key sits in the chain. Direct vendor keys, when a user
-            # adds them, still win (this branch only runs when they are absent).
-            or_resolved = await self._resolve_api_key("openrouter", agent_name, workspace_id=workspace_id)
-            if or_resolved:
-                effective_model_id = self._openrouter_model_id(effective_provider, effective_model_id)
-                self.logger.info(
-                    f"[KeyRouting] no {effective_provider} key — routing {effective_model_id} "
-                    f"via OpenRouter (source={or_resolved.source})"
-                )
-                effective_provider = "openrouter"
-                provider = LLMProviderEnum.OPENROUTER
-                resolved = or_resolved
-        if not resolved:
-            raise ValueError(
-                f"No API key available for {effective_provider}. "
-                f"Add one in Settings → API Keys, or set platform fallback "
-                f"({effective_provider.upper()}_API_KEY env var on the API service)."
-            )
-
-        # PRD-222 US-005 — trial routing gate at the LLM key-resolution choke point.
-        # BYOK provably bypasses it (resolved.is_byok short-circuits). For a non-BYOK
-        # call on a trial workspace: block an exhausted trial with the typed error,
-        # else route on the platform key and PIN the model to the trial allowlist.
-        # No-op for non-trial workspaces and system calls (workspace_id None).
-        # Shared with the chat path (activate_agent) via _resolve_trial_decision.
-        trial_routed = self._resolve_trial_decision(
-            workspace_id, effective_model_id, resolved.is_byok
-        )
-
         llm_config = LLMConfig(
             provider=provider,
             model=effective_model_id,
@@ -561,9 +521,61 @@ class AgentFactory:
             workspace_id=workspace_id,
             agent_id=agent_id,
             is_byok=resolved.is_byok,
-            trial=trial_routed,
         )
         return manager, resolved
+
+    async def _creation_key(
+        self, model_config: ModelConfiguration, agent_name: str, workspace_id,
+    ) -> Tuple[Any, str, str, ResolvedKey]:
+        """The provider enum, provider, model and key a created agent runs on.
+
+        PRD-265 US-004: without credits for the platform's keys, only the
+        workspace's own keys are tried (``_platform_unfunded``, the same check as
+        ``activate_agent``); finding none stops with ``CreditsExhaustedError``.
+        """
+        from core.llm import LLMProvider as LLMProviderEnum
+        from core.llm.providers import enum_for
+
+        effective_provider, effective_model_id = self._resolve_provider_for_model(
+            model_config.provider, model_config.model_id
+        )
+        provider = enum_for(effective_provider)
+        if provider is None:
+            raise ValueError(f"Unsupported provider: {effective_provider}")
+        unfunded = self._platform_unfunded(workspace_id)
+        own_only = unfunded is not None
+        resolved = await self._resolve_api_key(
+            effective_provider, agent_name, workspace_id=workspace_id, own_keys_only=own_only,
+        )
+        if not resolved and effective_provider != "openrouter":
+            # 2026-08-29 (Gerard, the Harbourline failure): provider resolution is
+            # KEY-AVAILABILITY-DRIVEN. A vendor model with no direct vendor key
+            # must route via OpenRouter when that key exists — never error while
+            # a capable key sits in the chain. Direct vendor keys, when a user
+            # adds them, still win (this branch only runs when they are absent).
+            or_resolved = await self._resolve_api_key(
+                "openrouter", agent_name, workspace_id=workspace_id, own_keys_only=own_only,
+            )
+            if or_resolved:
+                effective_model_id = self._openrouter_model_id(effective_provider, effective_model_id)
+                self.logger.info(
+                    f"[KeyRouting] no {effective_provider} key — routing {effective_model_id} "
+                    f"via OpenRouter (source={or_resolved.source})"
+                )
+                effective_provider = "openrouter"
+                provider = LLMProviderEnum.OPENROUTER
+                resolved = or_resolved
+        if not resolved and own_only:
+            from services.credits.routing import paused_error
+
+            raise paused_error(unfunded)  # no credits, and no key of its own
+        if not resolved:
+            raise ValueError(
+                f"No API key available for {effective_provider}. "
+                f"Add one in Settings → API Keys, or set platform fallback "
+                f"({effective_provider.upper()}_API_KEY env var on the API service)."
+            )
+        return provider, effective_provider, effective_model_id, resolved
 
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
         """Verify LLM connection with minimal test."""
@@ -713,23 +725,13 @@ class AgentFactory:
 
         ``workspace_id`` (PRD-230 US-001): the CONVERSATION's workspace, threaded
         from the chatbot. Auto the system agent carries no ``workspace_id`` of its
-        own, so without this the trial gate and BYOK lookup no-op on chat — the
+        own, so without this the credit gate and BYOK lookup no-op on chat — the
         primary surface ran unmetered/unpinned. Falls back to the agent's own
         workspace for mission and other callers (unchanged behavior there).
         """
-        from services.trial_ledger import TrialExhaustedError
+        from services.credits.routing import CreditsExhaustedError
 
-        # F149 (log-only until the logs show no caller hits it): an agent run
-        # for a workspace is that workspace's own or a platform system agent.
-        if workspace_id is not None:
-            from core.security.workspace_scope import agent_in_workspace
-
-            if not agent_in_workspace(self.db_session, agent_id, workspace_id):
-                self.logger.warning(
-                    "[F149] agent %s activated for workspace %s it does not belong to",
-                    agent_id, workspace_id, stack_info=True,
-                )
-
+        self._warn_foreign_workspace(agent_id, workspace_id)
         try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
@@ -741,209 +743,21 @@ class AgentFactory:
             if not db_agent:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
-
-            # PRD-234 S1a: a ``runtime: cli`` agent (session mode) is never
-            # activated into the LLM runtime — its tickets are claimed by the
-            # paired CLI host. Loud, and before any key resolution happens.
-            from core.cli_runtime import is_cli_agent
-            if is_cli_agent(getattr(db_agent, "configuration", None)):
-                self.logger.warning(
-                    "Agent %s runs as a cli session (session mode) — not activated "
-                    "in the LLM runtime; file a board ticket for it", agent_id,
-                )
+            if self._runs_as_cli_session(db_agent, agent_id):
                 return None
 
-            # PRD-230 US-001 — the effective workspace for key resolution, the trial
-            # gate, and usage tracking. The chat path passes the conversation's
-            # workspace (Auto carries none of its own); every other caller falls back
-            # to the agent's workspace, so their behavior is unchanged.
-            effective_ws_id = workspace_id or getattr(db_agent, "workspace_id", None)
-            if isinstance(effective_ws_id, str):
-                try:
-                    effective_ws_id = uuid.UUID(effective_ws_id)
-                except (ValueError, AttributeError):
-                    effective_ws_id = getattr(db_agent, "workspace_id", None)
-
-            # Resolve LLM config: agent's own model_config → orchestrator-tier defaults
-            agent_model_config = db_agent.model_config or {}
-            agent_config = db_agent.configuration or {}
-            agent_llm_config = agent_config.get("llm_config") or {}
-
-            agent_has_model = agent_model_config.get("model_id") and agent_model_config.get("provider")
-
-            if force_llm_tier == "system_llm":
-                tier_config = self._get_system_llm_config_from_settings()
-                llm_config_dict = {
-                    "provider": tier_config.get("provider"),
-                    "model": tier_config.get("model"),
-                    "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
-                    "max_tokens": tier_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
-                    "output_ceiling": tier_config.get("output_ceiling"),
-                }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (force_llm_tier=system_llm)")
-            elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
-                reason = f"force_llm_tier={force_llm_tier}" if force_llm_tier else "use_orchestrator_llm=True"
-                orchestrator_llm_config = self._get_default_llm_config_from_settings()
-                llm_config_dict = {
-                    "provider": orchestrator_llm_config.get("provider"),
-                    "model": orchestrator_llm_config.get("model"),
-                    "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": self._output_budget(
-                        agent_llm_config.get("max_tokens") or orchestrator_llm_config.get("max_tokens"),
-                        orchestrator_llm_config.get("output_ceiling"),
-                    ),
-                    "output_ceiling": orchestrator_llm_config.get("output_ceiling"),
-                }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
-            elif agent_has_model:
-                ceiling = self._model_ceiling(agent_model_config.get("model_id"))
-                llm_config_dict = {
-                    "provider": agent_model_config["provider"],
-                    "model": agent_model_config["model_id"],
-                    "temperature": agent_model_config.get("temperature", 0.7),
-                    "max_tokens": self._output_budget(agent_model_config.get("max_tokens"), ceiling),
-                    "output_ceiling": ceiling,
-                }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
-            else:
-                orchestrator_llm_config = self._get_default_llm_config_from_settings()
-                llm_config_dict = {
-                    "provider": orchestrator_llm_config.get("provider"),
-                    "model": orchestrator_llm_config.get("model"),
-                    "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": self._output_budget(
-                        agent_llm_config.get("max_tokens") or orchestrator_llm_config.get("max_tokens"),
-                        orchestrator_llm_config.get("output_ceiling"),
-                    ),
-                    "output_ceiling": orchestrator_llm_config.get("output_ceiling"),
-                }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
-
-            # PRD-223 W0: the orchestrator seat is policy-gated. This is the
-            # last-mile check — every writer path (settings route, per-agent
-            # route, chat tool, seeds) converges here, so a quarantined model
-            # cannot reach Auto's chair no matter how it was written. On a
-            # block, degrade to a trusted brain (orchestrator default, then
-            # platform default) — never a dead chat.
-            is_orchestrator_seat = (
-                use_orchestrator_llm
-                or force_llm_tier == "orchestrator_llm"
-                or (
-                    getattr(db_agent, "name", "") == "Auto"
-                    and bool(getattr(db_agent, "is_system_agent", False))
-                )
+            effective_ws_id = self._effective_workspace(workspace_id, db_agent)
+            llm_config_dict = self._activation_llm_config(db_agent, agent_id, use_orchestrator_llm, force_llm_tier)
+            llm_manager, resolved, provider_str = await self._activation_llm_manager(
+                llm_config_dict, db_agent, agent_id, effective_ws_id,
             )
-            if is_orchestrator_seat:
-                from core.llm.model_policy import check_model_for_agent, check_orchestrator_model
-
-                allowed, reason = check_model_for_agent(
-                    self.db_session,
-                    getattr(db_agent, "workspace_id", None),
-                    llm_config_dict.get("model"),
-                    orchestrator_seat=True,
-                    provider=llm_config_dict.get("provider"),
-                )
-                if not allowed:
-                    blocked_model = llm_config_dict.get("model")
-                    fallback = self._get_default_llm_config_from_settings()
-                    fb_ok, _ = check_orchestrator_model(fallback.get("model"))
-                    if not fb_ok:
-                        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
-                        fallback = {"provider": DEFAULT_LLM_PROVIDER, "model": DEFAULT_LLM_MODEL}
-                    llm_config_dict["provider"] = fallback.get("provider")
-                    llm_config_dict["model"] = fallback.get("model")
-                    self.logger.critical(
-                        f"[model-policy] Agent {agent_id} orchestrator-seat model "
-                        f"'{blocked_model}' BLOCKED ({reason}) — substituting "
-                        f"'{llm_config_dict['provider']}/{llm_config_dict['model']}' (PRD-223)"
-                    )
-
-            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
-            provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
-            model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
-            provider_str, model_id_str = self._resolve_provider_for_model(provider_str, model_id_str)
-
-            try:
-                provider = LLMProvider(provider_str)
-            except ValueError:
-                # Safety net: any provider that survived the resolver without being
-                # normalised (e.g. stale enum value) is forced through OpenRouter.
-                self.logger.warning(
-                    f"Provider '{provider_str}' is not a valid LLMProvider enum; forcing OpenRouter"
-                )
-                provider_str = "openrouter"
-                if "/" not in model_id_str:
-                    original = (llm_config_dict.get("provider") or "").lower()
-                    if original and original != provider_str:
-                        model_id_str = f"{original}/{model_id_str}"
-                provider = LLMProvider(provider_str)
-            resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=effective_ws_id)
-
-            # Fallback: if direct provider has no credential, try OpenRouter
-            if (not resolved or not resolved.api_key) and provider_str != "openrouter":
-                self.logger.warning(
-                    f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
-                )
-                original_provider = (llm_config_dict.get("provider") or "").lower()
-                model_id_str = self._openrouter_model_id(original_provider, model_id_str)
-                provider_str = "openrouter"
-                provider = LLMProvider(provider_str)
-                resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=effective_ws_id)
-
-            # PRD-230 US-001 — the SAME trial gate the mission factory uses, on
-            # the chat path (without it Auto ran unmetered). 2026-08-29: model
-            # pinning DELETED (Gerard — the trial is a spend cap, not a model
-            # gate). BYOK bypasses; exhausted trials raise the typed error;
-            # active trials tag the manager so spend accrues.
-            trial_routed = self._resolve_trial_decision(
-                effective_ws_id, model_id_str, resolved.is_byok if resolved else False
-            )
-
-            llm_config = LLMConfig(
-                provider=provider,
-                model=model_id_str,
-                temperature=llm_config_dict.get("temperature", 0.7),
-                max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
-                output_ceiling=llm_config_dict.get("output_ceiling"),
-                api_key=resolved.api_key if resolved else None,
-                top_p=llm_config_dict.get("top_p"),
-                frequency_penalty=llm_config_dict.get("frequency_penalty"),
-                presence_penalty=llm_config_dict.get("presence_penalty"),
-                stop=llm_config_dict.get("stop"),
-                timeout=llm_config_dict.get("timeout"),
-            )
-            llm_manager = LLMManager(
-                config=llm_config,
-                workspace_id=effective_ws_id,
-                agent_id=agent_id,
-                is_byok=resolved.is_byok if resolved else False,
-                trial=trial_routed,
-            )
-
-            persona_text = ""
-            if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
-                persona_text = db_agent.custom_persona_prompt
-            elif getattr(db_agent, "persona", None) and getattr(db_agent.persona, "system_prompt", None):
-                persona_text = db_agent.persona.system_prompt
-
-            metadata = AgentMetadata(
-                name=db_agent.name,
-                agent_type=db_agent.agent_type,
-                description=db_agent.description,
-                persona=persona_text or None,
-                skills=agent_config.get("skills", []),
-                custom_metadata=agent_config.get("custom_metadata", {}),
-            )
-
-            agent_tools = await self._load_agent_tools(agent_id)
-
             agent_runtime = AgentRuntime(
                 agent_id=agent_id,
-                metadata=metadata,
+                metadata=self._activation_metadata(db_agent),
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
-                tools=agent_tools,
+                tools=await self._load_agent_tools(agent_id),
                 tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace"),
                 is_byok=resolved.is_byok if resolved else False,
                 resolved_provider=resolved.provider if resolved else provider_str,
@@ -957,14 +771,262 @@ class AgentFactory:
             self.logger.info(f"Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
             return agent_runtime
 
-        except TrialExhaustedError:
-            # PRD-230 US-001 — the typed trial-exhausted error must reach the
-            # caller so the chat/mission surface renders the stable error_code.
-            # Never swallow it into a generic "failed to activate" None.
+        except CreditsExhaustedError:
+            # PRD-265 US-004 — the typed paused error must reach the caller so the
+            # chat/mission surface renders the stable error_code. Never swallow it
+            # into a generic "failed to activate" None.
             raise
         except Exception as e:
             self.logger.error(f"Failed to activate agent {agent_id}: {e}")
             return None
+
+    def _warn_foreign_workspace(self, agent_id: int, workspace_id: Optional[Any]) -> None:
+        """F149 (log-only until the logs show no caller hits it): an agent run
+        for a workspace is that workspace's own or a platform system agent."""
+        if workspace_id is None:
+            return
+        from core.security.workspace_scope import agent_in_workspace
+
+        if not agent_in_workspace(self.db_session, agent_id, workspace_id):
+            self.logger.warning(
+                "[F149] agent %s activated for workspace %s it does not belong to",
+                agent_id, workspace_id, stack_info=True,
+            )
+
+    def _runs_as_cli_session(self, db_agent: Any, agent_id: int) -> bool:
+        """PRD-234 S1a: a ``runtime: cli`` agent (session mode) is never
+        activated into the LLM runtime — its tickets are claimed by the
+        paired CLI host. Loud, and before any key resolution happens."""
+        from core.cli_runtime import is_cli_agent
+
+        if not is_cli_agent(getattr(db_agent, "configuration", None)):
+            return False
+        self.logger.warning(
+            "Agent %s runs as a cli session (session mode) — not activated "
+            "in the LLM runtime; file a board ticket for it", agent_id,
+        )
+        return True
+
+    @staticmethod
+    def _effective_workspace(workspace_id: Optional[Any], db_agent: Any) -> Any:
+        """PRD-230 US-001 — the effective workspace for key resolution, the credit
+        gate, and usage tracking. The chat path passes the conversation's
+        workspace (Auto carries none of its own); every other caller falls back
+        to the agent's workspace, so their behavior is unchanged."""
+        effective_ws_id = workspace_id or getattr(db_agent, "workspace_id", None)
+        if isinstance(effective_ws_id, str):
+            try:
+                effective_ws_id = uuid.UUID(effective_ws_id)
+            except (ValueError, AttributeError):
+                effective_ws_id = getattr(db_agent, "workspace_id", None)
+        return effective_ws_id
+
+    def _activation_llm_config(
+        self, db_agent: Any, agent_id: int, use_orchestrator_llm: bool, force_llm_tier: Optional[str],
+    ) -> Dict[str, Any]:
+        """The agent's LLM config: its own model_config → the forced or
+        orchestrator tier from settings, then the orchestrator-seat policy."""
+        llm_config_dict = self._tier_llm_config(db_agent, agent_id, use_orchestrator_llm, force_llm_tier)
+        is_orchestrator_seat = (
+            use_orchestrator_llm
+            or force_llm_tier == "orchestrator_llm"
+            or (
+                getattr(db_agent, "name", "") == "Auto"
+                and bool(getattr(db_agent, "is_system_agent", False))
+            )
+        )
+        if is_orchestrator_seat:
+            llm_config_dict = self._seat_policy_config(db_agent, agent_id, llm_config_dict)
+        return llm_config_dict
+
+    def _settings_tier_config(self, tier_config: Dict[str, Any], agent_llm_config: Dict[str, Any]) -> Dict[str, Any]:
+        """An agent on the orchestrator tier from settings (its own temperature wins)."""
+        return {
+            "provider": tier_config.get("provider"),
+            "model": tier_config.get("model"),
+            "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
+            "max_tokens": self._output_budget(
+                agent_llm_config.get("max_tokens") or tier_config.get("max_tokens"),
+                tier_config.get("output_ceiling"),
+            ),
+            "output_ceiling": tier_config.get("output_ceiling"),
+        }
+
+    def _tier_llm_config(
+        self, db_agent: Any, agent_id: int, use_orchestrator_llm: bool, force_llm_tier: Optional[str],
+    ) -> Dict[str, Any]:
+        """Resolve LLM config: agent's own model_config → orchestrator-tier defaults."""
+        agent_model_config = db_agent.model_config or {}
+        agent_config = db_agent.configuration or {}
+        agent_llm_config = agent_config.get("llm_config") or {}
+
+        agent_has_model = agent_model_config.get("model_id") and agent_model_config.get("provider")
+
+        if force_llm_tier == "system_llm":
+            tier_config = self._get_system_llm_config_from_settings()
+            llm_config_dict = {
+                "provider": tier_config.get("provider"),
+                "model": tier_config.get("model"),
+                "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
+                "max_tokens": tier_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
+                "output_ceiling": tier_config.get("output_ceiling"),
+            }
+            reason = "force_llm_tier=system_llm"
+        elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
+            reason = f"force_llm_tier={force_llm_tier}" if force_llm_tier else "use_orchestrator_llm=True"
+            llm_config_dict = self._settings_tier_config(self._get_default_llm_config_from_settings(), agent_llm_config)
+        elif agent_has_model:
+            ceiling = self._model_ceiling(agent_model_config.get("model_id"))
+            llm_config_dict = {
+                "provider": agent_model_config["provider"],
+                "model": agent_model_config["model_id"],
+                "temperature": agent_model_config.get("temperature", 0.7),
+                "max_tokens": self._output_budget(agent_model_config.get("max_tokens"), ceiling),
+                "output_ceiling": ceiling,
+            }
+            reason = "agent model_config"
+        else:
+            llm_config_dict = self._settings_tier_config(self._get_default_llm_config_from_settings(), agent_llm_config)
+            reason = "no agent model_config"
+        self.logger.info(
+            f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})"
+        )
+        return llm_config_dict
+
+    def _seat_policy_config(self, db_agent: Any, agent_id: int, llm_config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """PRD-223 W0: the orchestrator seat is policy-gated. This is the
+        last-mile check — every writer path (settings route, per-agent
+        route, chat tool, seeds) converges here, so a quarantined model
+        cannot reach Auto's chair no matter how it was written. On a
+        block, degrade to a trusted brain (orchestrator default, then
+        platform default) — never a dead chat."""
+        from core.llm.model_policy import check_model_for_agent, check_orchestrator_model
+
+        allowed, reason = check_model_for_agent(
+            self.db_session,
+            getattr(db_agent, "workspace_id", None),
+            llm_config_dict.get("model"),
+            orchestrator_seat=True,
+            provider=llm_config_dict.get("provider"),
+        )
+        if allowed:
+            return llm_config_dict
+        blocked_model = llm_config_dict.get("model")
+        fallback = self._get_default_llm_config_from_settings()
+        fb_ok, _ = check_orchestrator_model(fallback.get("model"))
+        if not fb_ok:
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+            fallback = {"provider": DEFAULT_LLM_PROVIDER, "model": DEFAULT_LLM_MODEL}
+        substituted = {**llm_config_dict, "provider": fallback.get("provider"), "model": fallback.get("model")}
+        self.logger.critical(
+            f"[model-policy] Agent {agent_id} orchestrator-seat model "
+            f"'{blocked_model}' BLOCKED ({reason}) — substituting "
+            f"'{substituted['provider']}/{substituted['model']}' (PRD-223)"
+        )
+        return substituted
+
+    def _activation_provider(self, llm_config_dict: Dict[str, Any]) -> Tuple[str, str]:
+        """The provider and model the agent runs as, normalised by the resolver."""
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+
+        provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
+        model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
+        provider_str, model_id_str = self._resolve_provider_for_model(provider_str, model_id_str)
+        try:
+            LLMProvider(provider_str)
+        except ValueError:
+            # Safety net: any provider that survived the resolver without being
+            # normalised (e.g. stale enum value) is forced through OpenRouter.
+            self.logger.warning(
+                f"Provider '{provider_str}' is not a valid LLMProvider enum; forcing OpenRouter"
+            )
+            provider_str = "openrouter"
+            if "/" not in model_id_str:
+                original = (llm_config_dict.get("provider") or "").lower()
+                if original and original != provider_str:
+                    model_id_str = f"{original}/{model_id_str}"
+        return provider_str, model_id_str
+
+    async def _activation_key(
+        self, llm_config_dict: Dict[str, Any], agent_name: str, effective_ws_id: Any,
+    ) -> Tuple[str, str, Optional[ResolvedKey]]:
+        """The key that pays for the agent's calls, and the provider/model it runs as.
+
+        PRD-265 US-004: without credits for the platform's keys, only the
+        workspace's own keys may run the agent (``_platform_unfunded``, the same
+        check as ``_create_llm_manager``); finding none of them stops the run with
+        ``CreditsExhaustedError``.
+        """
+        provider_str, model_id_str = self._activation_provider(llm_config_dict)
+        unfunded = self._platform_unfunded(effective_ws_id)
+        own_only = unfunded is not None
+        resolved = await self._resolve_api_key(
+            provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
+        )
+
+        # Fallback: if direct provider has no credential, try OpenRouter
+        if (not resolved or not resolved.api_key) and provider_str != "openrouter":
+            self.logger.warning(
+                f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
+            )
+            original_provider = (llm_config_dict.get("provider") or "").lower()
+            model_id_str = self._openrouter_model_id(original_provider, model_id_str)
+            provider_str = "openrouter"
+            resolved = await self._resolve_api_key(
+                provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
+            )
+        if own_only and (not resolved or not resolved.api_key):
+            from services.credits.routing import paused_error
+
+            raise paused_error(unfunded)
+        return provider_str, model_id_str, resolved
+
+    async def _activation_llm_manager(
+        self, llm_config_dict: Dict[str, Any], db_agent: Any, agent_id: int, effective_ws_id: Any,
+    ) -> Tuple[LLMManager, Optional[ResolvedKey], str]:
+        """The agent's LLM manager on the key that pays for its calls."""
+        provider_str, model_id_str, resolved = await self._activation_key(
+            llm_config_dict, db_agent.name, effective_ws_id,
+        )
+        llm_config = LLMConfig(
+            provider=LLMProvider(provider_str),
+            model=model_id_str,
+            temperature=llm_config_dict.get("temperature", 0.7),
+            max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
+            output_ceiling=llm_config_dict.get("output_ceiling"),
+            api_key=resolved.api_key if resolved else None,
+            top_p=llm_config_dict.get("top_p"),
+            frequency_penalty=llm_config_dict.get("frequency_penalty"),
+            presence_penalty=llm_config_dict.get("presence_penalty"),
+            stop=llm_config_dict.get("stop"),
+            timeout=llm_config_dict.get("timeout"),
+        )
+        llm_manager = LLMManager(
+            config=llm_config,
+            workspace_id=effective_ws_id,
+            agent_id=agent_id,
+            is_byok=resolved.is_byok if resolved else False,
+        )
+        return llm_manager, resolved, provider_str
+
+    @staticmethod
+    def _activation_metadata(db_agent: Any) -> AgentMetadata:
+        """The runtime's metadata: name, type, persona, skills."""
+        agent_config = db_agent.configuration or {}
+        persona_text = ""
+        if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
+            persona_text = db_agent.custom_persona_prompt
+        elif getattr(db_agent, "persona", None) and getattr(db_agent.persona, "system_prompt", None):
+            persona_text = db_agent.persona.system_prompt
+
+        return AgentMetadata(
+            name=db_agent.name,
+            agent_type=db_agent.agent_type,
+            description=db_agent.description,
+            persona=persona_text or None,
+            skills=agent_config.get("skills", []),
+            custom_metadata=agent_config.get("custom_metadata", {}),
+        )
 
     # ==================================================================
     # execute_with_prompt — CLEAN REWRITE
@@ -1105,22 +1167,55 @@ class AgentFactory:
 
         agent_runtime.lifecycle_state = AgentLifecycle.BUSY
 
-        # Every LLM call of this run — the agent's own manager and any helper —
-        # is booked to the lane that asked (board_task / mission / heartbeat…)
-        # and to the thing it ran for, task-locally (2026-09-09 analytics).
-        from core.llm.usage_context import execution_ref_for_context, lane_for_context, usage_scope
-
-        with usage_scope(
-            request_type=lane_for_context(context),
-            execution_id=execution_ref_for_context(context),
-            agent_id=agent_id,
-            workspace_id=agent_runtime.workspace_id,
-        ):
+        async def run(runtime: AgentRuntime) -> Dict[str, Any]:
             return await self._execute_with_prompt_scoped(
-                agent_runtime, agent_id, agent_name, prompt, system_prompt, context, use_memory,
+                runtime, runtime.agent_id, runtime.metadata.name, prompt, system_prompt, context, use_memory,
                 max_retries, max_tool_iterations, composio_action_names, context_mode,
                 attachment_ids, start_time, conversation,
             )
+
+        return await self._run_as_ask(agent, agent_runtime, workspace_dir, context, run)
+
+    async def _run_as_ask(self, agent, agent_runtime: AgentRuntime, workspace_dir, context, run) -> Dict[str, Any]:
+        """Run ``execute_with_prompt``'s work in its usage scope and as one ask.
+
+        Every LLM call of this run — the agent's own manager and any helper — is
+        booked to the lane that asked (board_task / mission / heartbeat…) and to
+        the thing it ran for, task-locally (2026-09-09 analytics). PRD-265 US-003:
+        the run is one ask unless it runs inside one already (a sub-agent of a
+        chat turn); its calls are metered at their real cost.
+        """
+        from core.llm.usage_context import execution_ref_for_context, lane_for_context, usage_scope
+        from services.credits.asks import LANE_AGENT_RUN, ask_scope, is_background_lane
+        from services.credits.routing import is_credit_stop
+
+        lane = lane_for_context(context)
+        with usage_scope(
+            request_type=lane,
+            execution_id=execution_ref_for_context(context),
+            agent_id=agent_runtime.agent_id,
+            workspace_id=agent_runtime.workspace_id,
+        ), ask_scope(lane or LANE_AGENT_RUN, workspace_id=agent_runtime.workspace_id,
+                     background=is_background_lane(lane)):
+            try:
+                agent_runtime = await self._runtime_for_funding(agent, agent_runtime, workspace_dir)
+            except Exception as exc:
+                if not is_credit_stop(exc):
+                    raise
+                return {"status": "error", "error": str(exc), "error_code": exc.error_code}
+            return await run(agent_runtime)
+
+    async def _runtime_for_funding(self, agent, agent_runtime: AgentRuntime, workspace_dir) -> AgentRuntime:
+        """PRD-265: a cached runtime keeps the key it was activated with. When that
+        is the platform's key and the workspace can no longer pay for it, activate
+        the agent again, so the run resolves the workspace's own key — or stops
+        with ``CreditsExhaustedError`` when it has none."""
+        if not isinstance(agent, int) or agent_runtime.is_byok:
+            return agent_runtime
+        if self._platform_unfunded(agent_runtime.workspace_id) is None:
+            return agent_runtime
+        fresh = await self.activate_agent(agent, workspace_dir=workspace_dir or "/tmp/automatos_workspace")
+        return fresh or agent_runtime
 
     @reports_the_claims_it_took_out  # N15-CI: an agent's text carries no not-done line; its result says it
     @said_plainly  # F297: a run's raw tool output is never its answer

@@ -85,8 +85,9 @@ def test_no_setting_has_been_deleted():
         # Named explicitly because their loss is silent at import and fatal at
         # runtime — the route/handler reads the attribute directly.
         "ONBOARDING_RESET_ENABLED",
-        "TRIAL_CREDIT_USD",
-        "TRIAL_GLOBAL_DAILY_USD",
+        "TRIAL_CREDITS",
+        "TRIAL_GLOBAL_DAILY_CREDITS",
+        "BILLING_OPEN",
         "SEMANTIC_TOOL_ROUTING",
         "TOOL_ROUTING_ENUM_CAP",
     ],

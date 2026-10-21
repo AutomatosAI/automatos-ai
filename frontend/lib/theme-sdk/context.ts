@@ -9,16 +9,18 @@
  * without changing the SDK. Outside a provider each hook answers "unknown" (null, or the same
  * fail-open default the host's own chrome uses), never throws. useThemeLayout is the host's own
  * width source for the active theme (hooks/use-studio-theme.ts), added by W-A5's seam owner for a
- * theme route that must leave a phone to the host's page. The one exception is useHealth: it
- * reads react-query, so it needs the host's QueryClientProvider (components/providers.tsx) above it, as
- * every page and theme the host draws has; in an isolated mount without one, react-query throws.
+ * theme route that must leave a phone to the host's page. The exceptions are useHealth and
+ * useTrial: they read react-query, so they need the host's QueryClientProvider
+ * (components/providers.tsx) above them, as every page and theme the host draws has; in an
+ * isolated mount without one, react-query throws.
  */
 import { useMemo } from 'react'
 import { useTheme } from 'next-themes'
 
-import { useWorkspaceOptional, type TrialState, type Workspace } from '@/components/workspace-provider'
+import { useWorkspaceOptional, type Workspace } from '@/components/workspace-provider'
 import { useSystemRoleOptional } from '@/contexts/role-context'
 import { useBackendHealth, type BackendHealth, type BackendHealthOptions } from '@/hooks/use-backend-health'
+import { useBillingSummary, type BillingSummary } from '@/hooks/use-billing-summary'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { useThemeLayout as useHostThemeLayout } from '@/hooks/use-studio-theme'
 import { authEdition, type AuthEdition } from '@/lib/auth-edition'
@@ -64,11 +66,20 @@ export interface HostRole {
   readonly canEdit: boolean
 }
 
+/**
+ * The workspace's trial. Since PRD-265 the trial is credits in the credit ledger (1 credit = 1 US
+ * cent), so the dollars are the trial's credits / 100. `state`: `converted` once the workspace
+ * runs on AI keys of its own, `exhausted` while work on Automatos's keys is paused, `warned`
+ * while the balance runs low, else `active`.
+ */
 export interface HostTrial {
-  readonly state: TrialState
+  readonly state: 'active' | 'warned' | 'exhausted' | 'converted'
   readonly grantedUsd: number
   readonly spentUsd: number
 }
+
+/** 1 credit = 1 US cent of AI usage at Automatos prices (PRD-265). */
+const CREDITS_PER_USD = 100
 
 export interface HostMediaPreferences {
   /** The user asks for reduced motion (and always on the server, so a first paint never animates). */
@@ -114,17 +125,30 @@ export function useEdition(): HostEdition {
   return authEdition
 }
 
-/** The workspace's trial ledger; null when it has none or has not loaded. */
+function trialStateOf(summary: BillingSummary): HostTrial['state'] {
+  if (summary.own_keys) return 'converted'
+  if (summary.paused) return 'exhausted'
+  return summary.low ? 'warned' : 'active'
+}
+
+/**
+ * The workspace's trial, read off its credits (GET /api/v1/billing/summary, the host's
+ * useBillingSummary); null in the local edition, while it loads, or on a plan billed outside credits.
+ */
 export function useTrial(): HostTrial | null {
-  const trial = useWorkspaceOptional()?.workspace?.onboarding?.trial ?? null
-  const state = trial?.state
-  const grantedUsd = trial?.granted_usd
-  const spentUsd = trial?.spent_usd
+  const summary = useBillingSummary().data
+  const state = summary?.metered ? trialStateOf(summary) : null
+  const grantedCredits = summary?.trial_credits ?? 0
+  const leftCredits = Math.max(0, summary?.balance.trial ?? 0)
   return useMemo(
-    () => (state !== undefined && grantedUsd !== undefined && spentUsd !== undefined
-      ? Object.freeze({ state, grantedUsd, spentUsd })
-      : null),
-    [state, grantedUsd, spentUsd],
+    () => (state === null
+      ? null
+      : Object.freeze({
+        state,
+        grantedUsd: grantedCredits / CREDITS_PER_USD,
+        spentUsd: Math.max(0, grantedCredits - leftCredits) / CREDITS_PER_USD,
+      })),
+    [state, grantedCredits, leftCredits],
   )
 }
 

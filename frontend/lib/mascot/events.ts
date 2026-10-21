@@ -9,7 +9,7 @@ export { NO_REPLY, type ChatStatus, type ReplyProgress } from '../chat/chat-stat
  *
  * `useChat` (lib/chat/hooks.ts, under useChatWithReceipts) has a status of
  * 'idle' | 'streaming' | 'error' (an awaited detached reply reads as
- * 'streaming'), and its errorCode names a blocked turn ('trial_exhausted'). The
+ * 'streaming'), and its errorCode names a blocked turn ('credits_exhausted'). The
  * words, the model's reasoning and a cap that ended the turn never reach its
  * data callback: useChat writes them onto the newest reply, so they are read
  * from it (mascotEventsFromReply). The data callback's parts are Auto's events

@@ -12,6 +12,8 @@ The agent factory and the card now both use this resolver, in the calls' own ord
 4. the config's env key.
 
 A provider that is BYO-key only in this edition never resolves from 2-4 (PRD-236).
+``own_keys_only`` (PRD-265) stops at 1: a workspace whose credits can't pay for the
+platform's keys runs on its own keys or not at all.
 """
 from __future__ import annotations
 
@@ -34,12 +36,14 @@ class ResolvedKey:
 
 
 def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = None,
-                         agent_name: str = "") -> Optional[ResolvedKey]:
+                         agent_name: str = "", own_keys_only: bool = False) -> Optional[ResolvedKey]:
     """The key that pays for ``provider_name``'s calls in ``workspace_id``, or None."""
     if workspace_id:
         byok = _byok_key(db, provider_name, workspace_id)
         if byok is not None:
             return byok
+    if own_keys_only:
+        return None
     from core.llm.providers import platform_key_allowed
 
     if not platform_key_allowed(provider_name):

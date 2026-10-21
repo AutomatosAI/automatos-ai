@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * PRD-261 A-19d1 — the generic look runtime (lib/theme-host/looks) names no theme: its runtime files
+ * PRD-261 A-19d1, A-19d2 — the generic look runtime (lib/theme-host/looks) names no theme: its runtime files
  * (not their tests) pass the look runtime's THEME_MARKERS, the markers lib/look-kit/__tests__/
  * theme-neutral.test.ts holds lib/look-kit to (no theme's variable prefix, interface name, storage
  * keys or look format, no import of a theme's folders or of components). The markers are read from
@@ -17,8 +17,11 @@ const RUNTIME_DIR = path.join(FRONTEND, 'lib', 'theme-host', 'looks')
 const MARKER_SOURCE = path.join(FRONTEND, 'lib', 'look-kit', '__tests__', 'theme-neutral.test.ts')
 const TEST_DIR = '__tests__'
 const SOURCE_FILE = /\.(ts|tsx)$/
-/** The runtime's files A-19d1 made: the scan must see each one. */
-const MUST_SCAN: readonly string[] = ['spec', 'storage', 'state', 'store', 'server', 'transfer']
+/** The runtime's files A-19d1 and A-19d2 made: the scan must see each one. */
+const MUST_SCAN: readonly string[] = [
+  'spec', 'storage', 'state', 'store', 'server', 'transfer',
+  'paint', 'tone-cookie', 'motion', 'page-boot', 'provider', 'bridge',
+]
 /** The marker list's opening line in the look-kit scan, and one marker per line after it until `]`. */
 const MARKERS_START = 'const THEME_MARKERS: readonly RegExp[] = ['
 const MARKERS_END = ']'
