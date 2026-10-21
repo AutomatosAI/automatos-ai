@@ -20,19 +20,23 @@
   ``private_uploads`` NULL means the edition default.
 * ``theme_revocations``: a digest, or a theme id with an optional version range,
   marked ``warn`` or ``disable``. ``origin`` is ``local`` (written here) or ``feed``
-  (pulled from the hosted revocation feed under the hosted row's id).
+  (pulled from the hosted revocation feed under the hosted row's id). At most one live
+  ``local`` row per target and level: a partial unique index over the target with each
+  NULL read as '' (a unique index counts NULLs as distinct, so the bare columns would
+  never collide). A ``feed`` row, or a lifted one, may repeat a live ``local`` row.
 * ``theme_revocation_sync``: the one row (``id`` 1) the local edition's feed pull writes.
 * ``theme_review_events``: the review history of one package.
 
 JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns the
 portable ``Uuid``, so the tables also build under SQLite in the unit tests. The
 ``prd261_themes`` migration creates the first nine, ``prd261_revocation_feed`` adds
-``theme_revocations.origin`` and ``theme_revocation_sync``, and
+``theme_revocations.origin``, its live-local unique index and ``theme_revocation_sync``, and
 ``tests/test_prd261_theme_models.py`` holds the migrations and the models together.
 """
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -115,6 +119,9 @@ WORKSPACE_OWNED = "owner_type = 'workspace'"
 MARKETPLACE_OWNED = "owner_type = 'marketplace'"
 ACTIVE_INSTALLATION = "uninstalled_at IS NULL"
 ACTIVE_DEFAULT = "is_default AND uninstalled_at IS NULL"
+LIVE_LOCAL_REVOCATION = f"lifted_at IS NULL AND origin = '{THEME_REVOCATION_ORIGIN_LOCAL}'"
+# A revocation's target with each NULL read as '': NULLs are distinct in a unique index.
+REVOCATION_TARGET_TERMS = ("COALESCE(digest, '')", "COALESCE(theme_id, '')", "COALESCE(version_range, '')")
 
 OWNER_MATCHES_WORKSPACE = (
     "(owner_type = 'workspace' AND workspace_id IS NOT NULL) "
@@ -137,7 +144,8 @@ def _json_type():
     return JSON().with_variant(JSONB(), "postgresql")
 
 
-def _partial_unique(name: str, predicate: str, *columns: str) -> Index:
+def _partial_unique(name: str, predicate: str, *columns: Any) -> Index:
+    """A unique index over ``columns`` (column names, or ``text()`` expressions) where ``predicate`` holds."""
     where = text(predicate)
     return Index(name, *columns, unique=True, postgresql_where=where, sqlite_where=where)
 
@@ -361,6 +369,10 @@ class ThemeRevocation(Base):
         Index("ix_theme_revocations_digest", "digest"),
         Index("ix_theme_revocations_theme_id", "theme_id"),
         Index("ix_theme_revocations_created_by", "created_by"),
+        _partial_unique(
+            "uq_theme_revocations_live_local", LIVE_LOCAL_REVOCATION,
+            *(text(term) for term in REVOCATION_TARGET_TERMS), "level",
+        ),
         {"extend_existing": True},
     )
 

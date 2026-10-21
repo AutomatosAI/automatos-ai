@@ -15,12 +15,22 @@ stubbed for the install router's gate. C3-wire registers the router in ``main.py
   never stored); the level is warn or disable; the reason 1..2000 characters of plain text;
 * a digest disable makes ``active`` answer the base; a warn by ``^1.0.0`` keeps the theme with
   the notice; lift restores it;
-* lifting an ``origin='feed'`` row is 409 and changes nothing; a duplicate live revocation
-  answers the existing row with 200; a create writes only ``origin='local'``.
+* the last live ``local`` disable covering a deactivated Marketplace version can't be lifted (409),
+  whether ``review.deactivate`` wrote it or the admin wrote it earlier for another reason (the
+  deactivation then wrote none); with another live ``local`` disable covering the version it can,
+  and that one is then the last; a pulled row or a warn doesn't count, nor a range that misses it;
+* lifting an ``origin='feed'`` row is 409 and changes nothing while revocation sync works (the
+  local edition, a feed URL, a successful pull within ``revocation_pull.STALE_AFTER``); while sync
+  is off (the hosted edition, or no feed URL) or stale (no success in that window, or none yet)
+  the admin lifts it here, and the router logs who did at warning level; a duplicate live revocation
+  answers the existing row with 200, and so does a create that loses the race to an identical
+  one (``uq_theme_revocations_live_local`` refuses its write); a create writes only
+  ``origin='local'``.
 """
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import sys
 import time
@@ -60,9 +70,9 @@ from core.auth.principal import LOCAL_OPERATOR_CLAIM_SOURCE  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.themes import (  # noqa: E402
     THEME_REVOCATION_ORIGIN_FEED, THEME_REVOCATION_ORIGIN_LOCAL, ThemeChoice, ThemeInstallation, ThemeLook,
-    ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync, ThemeWorkspaceSettings,
+    ThemeOptIn, ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeRevocationSync, ThemeWorkspaceSettings,
 )
-from services.themes import revocation_admin  # noqa: E402
+from services.themes import review, revocation_admin, revocation_pull  # noqa: E402
 
 WS = uuid.uuid4()
 ADMIN_PK, OPERATOR_PK = 7, 1
@@ -73,7 +83,7 @@ BASE = "/api/admin/themes/revocations"
 LIFT = f"{BASE}/{{revocation_id}}/lift"
 TABLES = [m.__table__ for m in (
     ThemePackage, ThemeInstallation, ThemeChoice, ThemeLook, ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation,
-    ThemeRevocationSync,
+    ThemeRevocationSync, ThemeReviewEvent,
 )]
 
 
@@ -284,6 +294,23 @@ def test_a_duplicate_live_revocation_answers_the_existing_row_with_200(api):
     assert renewed.status_code == 201 and renewed.json()["revocation"]["id"] != first.json()["revocation"]["id"]
 
 
+def test_a_create_that_loses_the_race_answers_the_row_that_won_with_200(api, monkeypatch):
+    # The other request's row lands after this one checked for a repeat and before it writes.
+    won = _row(api, level="disable", digest=DIGEST)
+    checks = []
+    real_check = revocation_admin._live_local_repeat
+
+    def raced(db, target, level):
+        checks.append(target)
+        return None if len(checks) == 1 else real_check(db, target, level)
+
+    monkeypatch.setattr(revocation_admin, "_live_local_repeat", raced)
+    resp = _create(api, digest=DIGEST)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] is False and resp.json()["revocation"]["id"] == str(won.id)
+    assert [row.id for row in _rows(api)] == [won.id] and len(checks) == 2
+
+
 def test_a_live_feed_row_is_no_duplicate_and_stays_as_it_was(api):
     feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED, level="disable", digest=DIGEST)
     resp = _create(api, digest=DIGEST)
@@ -293,15 +320,119 @@ def test_a_live_feed_row_is_no_duplicate_and_stays_as_it_was(api):
     assert (feed.origin, feed.lifted_at, feed.reason) == ("feed", None, "r0")
 
 
+# --- lift and a deactivated Marketplace version ---------------------------------------------
+
+
+def _deactivated(api, package, reason="reported: exfiltrates chat"):
+    """``package`` taken off the Marketplace by the review queue's deactivate (C-03a)."""
+    review.deactivate(api.db, package.id, reason, ADMIN_PK)
+    api.db.commit()
+
+
+def _live(api, revocation_id):
+    api.db.expire_all()
+    return api.db.get(ThemeRevocation, revocation_id).lifted_at is None
+
+
+def _holds(package):
+    return revocation_admin.HOLDS_DEACTIVATION.format(theme_id=package.theme_id, version=package.version)
+
+
+def test_the_deactivations_own_disable_cannot_be_lifted(api):
+    package = _package(api.db)
+    _deactivated(api, package)
+    [row] = _rows(api)
+    assert (row.digest, row.level, row.origin) == (package.digest, "disable", "local")
+    resp = _lift(api, row.id)
+    assert resp.status_code == 409 and resp.json()["detail"] == _holds(package)
+    assert _live(api, row.id)
+    # A pulled disable or a local warn of the same digest keeps nothing off: it's still the last.
+    _row(api, origin=THEME_REVOCATION_ORIGIN_FEED, level="disable", digest=package.digest)
+    _row(api, level="warn", digest=package.digest)
+    assert _lift(api, row.id).status_code == 409 and _live(api, row.id)
+
+
+def test_a_disable_written_for_another_reason_cannot_undo_a_deactivation(api):
+    package = _package(api.db)
+    earlier = _create(api, digest=package.digest, reason="a report is being checked").json()["revocation"]
+    _deactivated(api, package)
+    assert len(_rows(api)) == 1  # the earlier local disable stood in for the deactivation's own
+    resp = _lift(api, earlier["id"])
+    assert resp.status_code == 409 and resp.json()["detail"] == _holds(package)
+    assert _live(api, uuid.UUID(earlier["id"]))
+
+
+def test_with_another_local_disable_covering_it_one_lifts_and_the_other_is_then_the_last(api):
+    package = _package(api.db, version="1.2.0")
+    _deactivated(api, package)
+    [own] = _rows(api)
+    missing = _create(api, themeId=THEME, versionRange="^2.0.0").json()["revocation"]  # misses 1.2.0
+    assert _lift(api, own.id).status_code == 409
+    by_theme = _create(api, themeId=THEME, versionRange="^1.0.0").json()["revocation"]
+    assert _lift(api, own.id).status_code == 200 and not _live(api, own.id)
+    assert _lift(api, missing["id"]).status_code == 200  # never covered the deactivated version
+    resp = _lift(api, by_theme["id"])
+    assert resp.status_code == 409 and resp.json()["detail"] == _holds(package)
+    assert _live(api, uuid.UUID(by_theme["id"]))
+
+
+def test_a_disable_of_a_version_that_is_not_deactivated_lifts(api):
+    package = _package(api.db)
+    created = _create(api, digest=package.digest).json()["revocation"]
+    assert _lift(api, created["id"]).status_code == 200  # approved, not deactivated
+
+
 # --- lift and list --------------------------------------------------------------------------
 
 
-def test_lifting_a_feed_row_is_409_and_changes_nothing(api):
+FEED_URL = "https://feed.example.test/api/themes/revocations"
+STALE_AFTER = revocation_pull.STALE_AFTER
+HOUR = timedelta(hours=1)
+
+
+def _local_sync(api, monkeypatch, url=FEED_URL, last_success_ago=None):
+    """The local edition's operator, its feed URL, and its sync row's last success (None: no row)."""
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(config, revocation_pull.URL_SETTING, url, raising=False)
+    api.ctx = _operator()
+    if last_success_ago is not None:
+        api.db.add(ThemeRevocationSync(last_success_at=datetime.now(timezone.utc) - last_success_ago))
+        api.db.commit()
+
+
+def test_lifting_a_feed_row_is_409_and_changes_nothing_while_sync_works(api, monkeypatch):
+    _local_sync(api, monkeypatch, last_success_ago=STALE_AFTER - HOUR)
     feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED)
     resp = _lift(api, feed.id)
     assert resp.status_code == 409 and resp.json()["detail"] == revocation_admin.FEED_ROW
     api.db.refresh(feed)
     assert (feed.origin, feed.lifted_at) == ("feed", None)
+
+
+SYNC_OFF_OR_STALE = {
+    "the hosted edition (no pull)": None,
+    "no feed URL": {"url": "", "last_success_ago": HOUR},
+    "stale": {"last_success_ago": STALE_AFTER + HOUR},
+    "never pulled": {},
+}
+
+
+@pytest.mark.parametrize("sync", list(SYNC_OFF_OR_STALE.values()), ids=list(SYNC_OFF_OR_STALE))
+def test_a_feed_row_lifts_here_while_sync_is_off_or_stale_and_who_lifted_it_is_logged(
+    api, monkeypatch, caplog, sync,
+):
+    if sync is not None:
+        _local_sync(api, monkeypatch, **sync)
+    actor = ADMIN_PK if sync is None else OPERATOR_PK
+    feed = _row(api, origin=THEME_REVOCATION_ORIGIN_FEED, level="disable", digest=DIGEST)
+    with caplog.at_level(logging.WARNING, logger=revocations_api.logger.name):
+        resp = _lift(api, feed.id)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["revocation"]["liftedAt"] and resp.json()["revocation"]["origin"] == "feed"
+    api.db.refresh(feed)
+    assert feed.lifted_at is not None
+    [record] = [r for r in caplog.records if r.name == revocations_api.logger.name and r.levelno == logging.WARNING]
+    assert str(feed.id) in record.getMessage() and f"user {actor}" in record.getMessage()
 
 
 def test_lift_sets_lifted_at_once_and_an_unknown_id_is_404(api):
@@ -319,7 +450,7 @@ def test_lift_sets_lifted_at_once_and_an_unknown_id_is_404(api):
 def test_the_list_shows_live_rows_first_then_the_newest_with_their_origin(api):
     _row(api, minutes_ago=30)
     _row(api, minutes_ago=1, lifted=True)
-    _row(api, minutes_ago=5)
+    _row(api, minutes_ago=5, level="disable")  # one live local row per target and level
     _row(api, minutes_ago=10, origin=THEME_REVOCATION_ORIGIN_FEED)
     listed = api.client.get(BASE).json()["revocations"]
     expected = [("r5", "local"), ("r10", "feed"), ("r30", "local"), ("r1", "local")]  # live first, then newest

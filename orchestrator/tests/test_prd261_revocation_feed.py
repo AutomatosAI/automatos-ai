@@ -12,14 +12,18 @@ installed, so a 200 is an unauthenticated one. Pins (plan §2.2.7, §2.6 C-05g):
 * a row lifted within ``THEME_REVOCATIONS_LIFTED_DAYS`` appears with ``liftedAt``, an older one doesn't;
 * ``Cache-Control: public, max-age=300``, a weak ETag that ignores ``generatedAt``, ``If-None-Match`` → 304;
 * ``revokedKeys`` are the keys file's revoked keys; a keys file that doesn't load is a 503;
+* a built feed a local edition would refuse for its size (over ``THEME_REVOCATIONS_FEED_MAX_KB``, or
+  over ``FEED_MAX_ROWS`` rows) is a 503 with a plain message and an error log, never a 200 or a 304;
 * ``parse_feed`` round-trips ``build_feed`` and refuses the whole feed for a wrong schema, oversize,
-  more than 10,000 rows, a bad digest, id or range, a reason over 2000 characters; an unknown level
-  parses as ``disable``.
+  more than 10,000 rows, a bad digest, id or range, a reason that isn't one line of plain text of
+  1..2000 characters (a line break, a bidi override); an unknown level parses as ``disable``; a hosted
+  reason goes out on one line, so its row stays in the feed.
 """
 from __future__ import annotations
 
 import inspect
 import json
+import logging
 import os
 import sys
 import uuid
@@ -221,6 +225,36 @@ def test_revoked_keys_come_from_the_keys_file(api, monkeypatch, tmp_path):
     assert broken.json()["detail"] == feed_api.FEED_DOWN
 
 
+def test_a_hosted_reason_goes_out_on_one_line_and_its_row_stays_in_the_feed(api):
+    package = _package(api.db)  # review.deactivate keeps a reason's line breaks; parse_feed refuses them
+    row = _revoke(api.db, digest=package.digest, reason="Reported twice:\n  sends chat off-site\u202e\r\nfixed in 1.1")
+    blank = _revoke(api.db, digest=_package(api.db, theme_id="acme/other").digest, reason="\u202e\u202c")
+    wire = {item["id"]: item["reason"] for item in api.client.get(FEED).json()["revocations"]}
+    assert wire == {
+        str(row.id): "Reported twice: sends chat off-site fixed in 1.1",
+        str(blank.id): revocation_feed.FEED_REASON_FALLBACK,
+    }
+    parsed = {str(item.id): item.reason for item in parse_feed(feed_bytes(build_feed(api.db))).revocations}
+    assert parsed == wire
+
+
+def test_a_feed_too_large_for_a_local_edition_is_503_and_logged(api, monkeypatch, caplog):
+    _revoke(api.db, digest=_package(api.db).digest, reason="r" * 1500)  # one row, about 1.8 KB of feed
+    etag = feed_etag(build_feed(api.db))
+    monkeypatch.setattr(config, revocation_feed.FEED_MAX_KB_SETTING, 1, raising=False)
+    with caplog.at_level(logging.ERROR, logger=feed_api.logger.name):
+        refused = api.client.get(FEED)
+        unconfirmed = api.client.get(FEED, headers={"If-None-Match": etag})  # never a 304 either
+        monkeypatch.setattr(config, revocation_feed.FEED_MAX_KB_SETTING, 2, raising=False)
+        assert api.client.get(FEED).status_code == 200
+        monkeypatch.setattr(revocation_feed, "FEED_MAX_ROWS", 0)  # more rows than a local edition reads
+        too_many = api.client.get(FEED)
+    for resp in (refused, unconfirmed, too_many):
+        assert (resp.status_code, resp.json()) == (503, {"detail": feed_api.FEED_TOO_LARGE})
+    logged = [r.getMessage() for r in caplog.records if r.name == feed_api.logger.name and r.levelno == logging.ERROR]
+    assert len(logged) == 3 and all("not served" in message for message in logged)
+
+
 def test_an_unreadable_hosted_range_goes_out_for_every_version_and_a_long_reason_is_cut(api):
     _package(api.db)
     row = _revoke(api.db, theme_id="acme/ink", version_range="~1.0", reason="r" * 2500)
@@ -279,6 +313,11 @@ BAD_ROWS = {
     "reason over 2000": {"reason": "x" * 2001},
     "reason not text": {"reason": None},
     "reason with NUL": {"reason": "bad\x00"},
+    "reason empty": {"reason": ""},
+    "reason of spaces": {"reason": "   "},
+    "reason with a line break": {"reason": "two\nlines"},
+    "reason with a bidi override": {"reason": "safe \u202e txt.exe"},
+    "reason with a bell": {"reason": "ring\x07"},
     "id not a uuid": {"id": "not-a-uuid"},
     "id in capitals": {"id": UPPER_UUID},
     "no id": {"id": DROP},

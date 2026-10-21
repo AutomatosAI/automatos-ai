@@ -23,11 +23,16 @@
 message that echoes nothing from it, for: more than ``THEME_REVOCATIONS_FEED_MAX_KB``; not UTF-8
 JSON; a schema other than 1; more than ``FEED_MAX_ROWS`` rows; a row whose target is not exactly a
 64-hex digest, or a theme id (``manifest.ID_PATTERN``) with an optional range
-(``manifest.RANGE_PATTERN``); a reason over ``FEED_REASON_MAX`` characters; an id that is not a
-UUID; a time without an offset; an id twice; a key id that is not ``ed25519:`` and 16 hex. A level
-it doesn't know parses as ``disable`` (fail closed, as ``revocations.effective_level`` reads one).
-Every row ``build_feed`` writes passes the same row check (one that fails it is left out and
-logged), so ``parse_feed(feed_bytes(build_feed(db)))`` round-trips.
+(``manifest.RANGE_PATTERN``); a reason that isn't one line of plain text of 1 to
+``FEED_REASON_MAX`` characters (``contract.plain_text_problem``, the rule an admin's reason meets in
+``revocation_admin.checked_reason``: every member reads it in the host's notice, so a bidi override
+or a control character refuses the feed); an id that is not a UUID; a time without an offset; an
+id twice; a key id that is not ``ed25519:`` and 16 hex. A level it doesn't know parses as
+``disable`` (fail closed, as ``revocations.effective_level`` reads one). Every row ``build_feed``
+writes passes the same row check (one that fails it is left out and logged), so
+``parse_feed(feed_bytes(build_feed(db)))`` round-trips. A hosted reason goes out on one line
+(``_one_line``): a deactivation's reason may hold line breaks (``review.plain_text``), and the row
+must not be left out for them.
 
 The feed is unsigned (QB-26, still open: this is the plan's default): HTTPS and this strict check
 protect it, so an emergency revocation waits for no signer. Synchronous; nothing here writes.
@@ -50,6 +55,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.models.themes import THEME_REVOCATION_LEVELS, THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeRevocation
 from services.themes import signature_verify
+from services.themes.contract import is_unsafe_char, plain_text_problem
 from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, satisfies_range
 from services.themes.revocations import REVOKE_DISABLE, effective_level
 from services.themes.serve import DIGEST_PATTERN, INSTALLED_MARKETPLACE_STATUSES, MARKETPLACE
@@ -60,6 +66,10 @@ FEED_SCHEMA = 1
 FEED_MAX_ROWS = 10_000
 FEED_MAX_KEYS = 1_000
 FEED_REASON_MAX = 2000
+REASON_FIELD = "reason"
+# The reason a row goes out with when none of its own is left on one line (a stored reason of
+# nothing but control or bidi characters).
+FEED_REASON_FALLBACK = "Revoked by Automatos."
 LIFTED_DAYS_SETTING = "THEME_REVOCATIONS_LIFTED_DAYS"
 DEFAULT_LIFTED_DAYS = 365
 FEED_MAX_KB_SETTING = "THEME_REVOCATIONS_FEED_MAX_KB"
@@ -70,7 +80,6 @@ KEY_ID_PATTERN = re.compile(
 )
 WEAK_ETAG_PREFIX = "W/"
 ANY_ETAG = "*"
-NUL = "\x00"
 
 FEED_WHERE = "The revocation feed"
 ROW_WHERE = "Revocation {number} in the feed"
@@ -86,7 +95,7 @@ ROW_DIGEST = ROW_WHERE + " has a digest that isn't 64 lowercase hex."
 ROW_THEME_ID = ROW_WHERE + " has a theme id that isn't publisher/slug."
 ROW_RANGE = ROW_WHERE + " has a version range that isn't X.Y.Z or ^X.Y.Z."
 ROW_ID = ROW_WHERE + " has an id that isn't a UUID."
-ROW_REASON = ROW_WHERE + f" has a reason that isn't text of at most {FEED_REASON_MAX} characters."
+ROW_REASON = ROW_WHERE + f" has a reason that isn't one line of plain text of 1 to {FEED_REASON_MAX} characters."
 BAD_TIME = "{where} has a {field} that isn't a time with an offset."
 
 
@@ -186,12 +195,20 @@ def _covers_listed(row: ThemeRevocation, version_range: Optional[str], listed: _
     return any(version_range is None or satisfies_range(version_range, version) for version in versions)
 
 
+def _one_line(reason: Optional[str]) -> str:
+    """``reason`` as the feed sends it: each run of unsafe characters (``contract.is_unsafe_char``: a
+    line break, a bidi override) and spaces one space, cut to ``FEED_REASON_MAX`` characters."""
+    spaced = "".join(" " if is_unsafe_char(char) else char for char in reason or "")
+    line = " ".join(spaced.split())[:FEED_REASON_MAX].rstrip()
+    return line or FEED_REASON_FALLBACK
+
+
 def _wire_row(row: ThemeRevocation, version_range: Optional[str]) -> Dict[str, Any]:
     target = {"digest": row.digest} if row.digest is not None else {
         "themeId": row.theme_id, "versionRange": version_range,
     }
     return {
-        "id": str(row.id), **target, "level": effective_level(row), "reason": (row.reason or "")[:FEED_REASON_MAX],
+        "id": str(row.id), **target, "level": effective_level(row), "reason": _one_line(row.reason),
         "createdAt": iso_time(row.created_at), "liftedAt": iso_time(row.lifted_at),
     }
 
@@ -221,11 +238,19 @@ def build_feed(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
     moment = as_utc(now or datetime.now(timezone.utc)).replace(microsecond=0)
     listed = _listed(db)
     rows = [wire for wire in (_feed_row(row, listed) for row in _candidates(db, moment)) if wire is not None]
-    if len(rows) > FEED_MAX_ROWS:
-        logger.error("The revocation feed has %d rows, more than the %d a local edition reads",
-                     len(rows), FEED_MAX_ROWS)
     return {"schema": FEED_SCHEMA, "generatedAt": moment.isoformat(), "revocations": rows,
             "revokedKeys": revoked_key_ids()}
+
+
+def unreadable_size(feed: Mapping[str, Any], body: bytes) -> Optional[str]:
+    """Why every local edition's ``parse_feed`` would refuse this built feed for its size, or None:
+    ``body`` (``feed_bytes(feed)``) over ``THEME_REVOCATIONS_FEED_MAX_KB``, or over ``FEED_MAX_ROWS`` rows."""
+    limit = feed_max_bytes()
+    if len(body) > limit:
+        return TOO_LARGE.format(kb=limit // BYTES_PER_KB)
+    if len(feed["revocations"]) > FEED_MAX_ROWS:
+        return TOO_MANY
+    return None
 
 
 def feed_bytes(feed: Mapping[str, Any]) -> bytes:
@@ -336,7 +361,8 @@ def _level(value: Any, number: int) -> str:
 
 
 def _reason(value: Any, number: int) -> str:
-    if not isinstance(value, str) or len(value) > FEED_REASON_MAX or NUL in value:
+    """The row's reason, as sent: one line of plain text of 1 to ``FEED_REASON_MAX`` characters."""
+    if plain_text_problem(value, REASON_FIELD, FEED_REASON_MAX) is not None:
         raise FeedError(ROW_REASON.format(number=number))
     return value
 
@@ -364,5 +390,5 @@ __all__ = [
     "DEFAULT_FEED_MAX_KB", "DEFAULT_LIFTED_DAYS", "FEED_MAX_KB_SETTING", "FEED_MAX_ROWS", "FEED_REASON_MAX",
     "FEED_SCHEMA", "LIFTED_DAYS_SETTING", "Feed", "FeedError", "FeedRevocation", "as_utc", "build_feed",
     "etag_matches", "feed_bytes", "feed_etag", "feed_max_bytes", "iso_time", "lifted_days", "parse_feed",
-    "revoked_key_ids",
+    "revoked_key_ids", "unreadable_size",
 ]

@@ -14,18 +14,23 @@ missing on one path, so this file pins:
 * the plan's shape (§2.6 A-05): ``digest`` has a plain index, never a global unique;
   the four partial uniques; ``previous_package_id``, ``pending_package_id`` and
   ``pinned_version`` on the installation; and (§2.6 C-05f) ``origin VARCHAR(16) NOT
-  NULL DEFAULT 'local'`` with its CHECK, and the single-row ``theme_revocation_sync``;
+  NULL DEFAULT 'local'`` with its CHECK, the single-row ``theme_revocation_sync``, and
+  the live-local unique (one live ``local`` revocation per target and level, each NULL
+  target column read as '', so a digest row's NULL theme id doesn't make it distinct);
 * under SQLite (``create_all``): the partial uniques refuse duplicates, two workspaces
   may hold the same digest, and a workspace row and a Marketplace row may too; a
-  revocation reads ``local`` unless the feed wrote it, and the sync table holds one row;
+  revocation reads ``local`` unless the feed wrote it, the sync table holds one row, and
+  a second live ``local`` row with a live row's target and level is refused (a ``feed``
+  twin, a lifted twin and another level are not);
 * on real Postgres (``@integration``, inside a rolled-back transaction; skipped when no
   Postgres is reachable, run by test.yml): on a ``create_all`` database the migrations
   change nothing; in an empty schema they build exactly the model's schema (columns,
   defaults, constraints, index definitions) and a second run changes nothing; a row
   from before C-05f reads ``local`` and the feed's downgrade restores the schema before
-  it; and the partial uniques hold there. ``prd261_themes``' downgrade is pinned by
-  reading it, not run, so the test never takes an exclusive lock on ``workspaces`` or
-  ``users``; the feed's downgrade runs in the empty schema and locks only its tables.
+  it; and the partial uniques (the live-local one included) hold there. ``prd261_themes``'
+  downgrade is pinned by reading it, not run, so the test never takes an exclusive lock on
+  ``workspaces`` or ``users``; the feed's downgrade runs in the empty schema and locks only
+  its tables.
 """
 from __future__ import annotations
 
@@ -109,15 +114,24 @@ KEY_ID = "ed25519:0123456789abcdef"
 # The feed migration's guarded ALTERs (inside its DO block).
 ADDED_COLUMN = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (.+);")
 ADDED_CHECK = re.compile(r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+) CHECK \((.+)\);")
+CREATED_INDEX = re.compile(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+) ON (\w+) ")
+LIVE_LOCAL_UNIQUE = "uq_theme_revocations_live_local"
+LIVE_LOCAL_TERMS = ("COALESCE(digest, '')", "COALESCE(theme_id, '')", "COALESCE(version_range, '')", "level")
+LIVE_LOCAL_PREDICATE = "lifted_at IS NULL AND origin = 'local'"
 
 
 def _pg_type(column: sa.Column) -> str:
     return column.type.compile(dialect=postgresql.dialect())
 
 
-def _where(index: sa.Index):
-    where = index.dialect_options["postgresql"]["where"]
+def _where(index: sa.Index, dialect: str = "postgresql"):
+    where = index.dialect_options[dialect]["where"]
     return None if where is None else str(where)
+
+
+def _terms(index: sa.Index) -> tuple:
+    """What an index is over, as DDL names it: a column's name, or an expression's SQL text."""
+    return tuple(term.name if isinstance(term, sa.Column) else str(term) for term in index.expressions)
 
 
 def _migration_constants(path: Path = MIGRATION) -> dict:
@@ -283,7 +297,7 @@ def test_model_indexes_equal_ddl_indexes():
     for table_name, table in TABLES.items():
         for index in table.indexes:
             kind = "UNIQUE INDEX" if index.unique else "INDEX"
-            columns = ", ".join(c.name for c in index.columns)
+            columns = ", ".join(_terms(index))
             where = _where(index)
             tail = f" WHERE {where};" if where else ";"
             expected.append(f"CREATE {kind} IF NOT EXISTS {index.name} ON {table_name} ({columns}){tail}")
@@ -345,13 +359,32 @@ def test_the_feed_migration_adds_only_what_the_table_lacks():
     assert "conrelid = 'theme_revocations'::regclass AND conname = 'ck_theme_revocations_origin'" in alters
     assert re.search(r"\bDROP\b", alters, re.I) is None
     assert "op.create_table" not in FEED_MIGRATION.read_text(encoding="utf-8")
+    indexes = constants["_INDEXES"]
+    assert [CREATED_INDEX.match(sql).groups() for sql in indexes] == [(LIVE_LOCAL_UNIQUE, "theme_revocations")]
+    for sql in indexes:
+        assert sql.startswith("CREATE UNIQUE INDEX IF NOT EXISTS ") and re.search(r"\b(ALTER|DROP)\b", sql) is None
     upgrade = _function_source("upgrade", FEED_MIGRATION)
     assert "op.execute(_ADD_ORIGIN)" in upgrade and "_TABLES" in upgrade
+    # The index's predicate names origin, so it is built after the column is added.
+    assert upgrade.index("_ADD_ORIGIN") < upgrade.index("_INDEXES")
+
+
+def test_the_c05f_shape_one_live_local_revocation_per_target_and_level():
+    indexes = {index.name: index for index in ThemeRevocation.__table__.indexes}
+    index = indexes[LIVE_LOCAL_UNIQUE]
+    assert index.unique and _terms(index) == LIVE_LOCAL_TERMS
+    # The same predicate on both dialects: the unit tests' SQLite enforces what Postgres does.
+    assert _where(index) == _where(index, "sqlite") == LIVE_LOCAL_PREDICATE
+    # The only unique on the table: a target may repeat across origins and lifts.
+    assert [name for name, other in indexes.items() if other.unique] == [LIVE_LOCAL_UNIQUE]
 
 
 def test_the_feed_downgrade_undoes_the_upgrade_in_reverse_order():
     constants = _migration_constants(FEED_MIGRATION)
     alters = constants["_ADD_ORIGIN"]
+    indexes = [
+        f"DROP INDEX IF EXISTS {CREATED_INDEX.match(sql).group(1)};" for sql in reversed(constants["_INDEXES"])
+    ]
     tables = [f"DROP TABLE IF EXISTS {name};" for name, _sql in reversed(constants["_TABLES"])]
     checks = [
         f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name};"
@@ -361,7 +394,7 @@ def test_the_feed_downgrade_undoes_the_upgrade_in_reverse_order():
         f"ALTER TABLE {table} DROP COLUMN IF EXISTS {line.split(' ', 1)[0]};"
         for table, line in reversed(ADDED_COLUMN.findall(alters))
     ]
-    assert list(constants["_DOWNGRADE"]) == tables + checks + columns
+    assert list(constants["_DOWNGRADE"]) == indexes + tables + checks + columns
     assert "_DOWNGRADE" in _function_source("downgrade", FEED_MIGRATION)
 
 
@@ -501,6 +534,43 @@ def test_a_revocation_reads_local_unless_the_feed_wrote_it(session):
     session.commit()
     _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="unknown origin", origin="hosted"))
     _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="no origin", origin=None))
+
+
+def _live_local_twins(**target):
+    """Two live ``local`` rows that name the same target at the same level (only their reasons differ)."""
+    return [ThemeRevocation(level="disable", reason=reason, **target) for reason in ("first", "second")]
+
+
+@pytest.mark.parametrize("target", [
+    {"digest": DIGEST}, {"theme_id": "acme/ink"}, {"theme_id": "acme/ink", "version_range": "^1.0.0"},
+], ids=["digest", "theme id", "theme id and range"])
+def test_one_live_local_revocation_per_target_and_level(session, target):
+    first, twin = _live_local_twins(**target)
+    session.add(first)
+    session.commit()
+    _refused(session, twin)  # NULL theme id or range included: read as '', so the twin collides
+    session.add_all([
+        ThemeRevocation(id=uuid.uuid4(), level="disable", reason="pulled", origin="feed", **target),
+        ThemeRevocation(level="disable", reason="lifted", lifted_at=datetime.now(timezone.utc), **target),
+        ThemeRevocation(level="warn", reason="another level", **target),
+    ])
+    session.commit()
+    first.lifted_at = datetime.now(timezone.utc)
+    session.commit()
+    session.add(ThemeRevocation(level="disable", reason="renewed", **target))  # the live one was lifted
+    session.commit()
+    assert session.query(ThemeRevocation).count() == 5
+
+
+def test_another_range_or_no_range_is_another_target(session):
+    session.add_all([
+        ThemeRevocation(theme_id="acme/ink", level="disable", reason="every version"),
+        ThemeRevocation(theme_id="acme/ink", version_range="^1.0.0", level="disable", reason="1.x"),
+        ThemeRevocation(theme_id="acme/ink", version_range="1.0.0", level="disable", reason="1.0.0"),
+        ThemeRevocation(theme_id="acme/ok", level="disable", reason="another theme"),
+    ])
+    session.commit()
+    assert session.query(ThemeRevocation).count() == 4
 
 
 def test_the_sync_table_holds_one_row(session):
@@ -675,6 +745,30 @@ def test_the_feed_migration_reads_old_rows_local_and_its_downgrade_restores_the_
     assert pg_conn.execute(sa.text("SELECT count(*) FROM theme_revocations")).scalar() == 1  # no row deleted
     _run_migration(pg_conn, "upgrade", FEED_MIGRATION)
     assert _pg_schema(pg_conn) == model_schema
+
+
+_INSERT_TARGETED = sa.text(
+    "INSERT INTO theme_revocations (id, digest, theme_id, version_range, level, reason, origin, lifted_at) "
+    "VALUES (CAST(:id AS uuid), :digest, :theme_id, :version_range, 'disable', :reason, :origin, :lifted_at)"
+)
+
+
+def _targeted(target: dict, reason: str, origin: str = "local", lifted_at=None) -> dict:
+    values = {"digest": None, "theme_id": None, "version_range": None, **target}
+    return {**values, "id": str(uuid.uuid4()), "reason": reason, "origin": origin, "lifted_at": lifted_at}
+
+
+@pytest.mark.integration
+def test_the_live_local_unique_holds_on_postgres(pg_conn):
+    _enter_empty_schema(pg_conn)  # the migrations' own index, not create_all's
+    _upgrade_chain(pg_conn)
+    now = datetime.now(timezone.utc)
+    for target in ({"digest": DIGEST}, {"theme_id": "acme/ink"}, {"theme_id": "acme/ink", "version_range": "^1.0.0"}):
+        pg_conn.execute(_INSERT_TARGETED, _targeted(target, "first"))
+        _pg_refused(pg_conn, _INSERT_TARGETED, _targeted(target, "second"))
+        pg_conn.execute(_INSERT_TARGETED, _targeted(target, "pulled", origin="feed"))
+        pg_conn.execute(_INSERT_TARGETED, _targeted(target, "lifted", lifted_at=now))
+    assert pg_conn.execute(sa.text("SELECT count(*) FROM theme_revocations")).scalar() == 9
 
 
 @pytest.mark.integration
