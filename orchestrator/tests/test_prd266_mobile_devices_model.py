@@ -31,7 +31,7 @@ from sqlalchemy import text
 
 ORCH = Path(__file__).resolve().parents[1]
 MIGRATION = ORCH / "alembic" / "versions" / "prd266_mobile_devices.py"
-OLD_HEAD = "clerk_user_relinks_20261019"
+OLD_HEAD = "prd265_credit_ledger"
 
 COLUMNS = (
     "id", "workspace_id", "user_id", "kind", "install_id", "name", "platform", "app_version",

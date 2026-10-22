@@ -132,6 +132,24 @@ def _bound_person(db: Session, user_pk: int) -> Optional[Tuple[int, str]]:
     return (int(row[0]), row[1]) if row is not None and row[1] else None
 
 
+def _assert_still_a_member(
+    db: Session, device: MobileDevice, person: Tuple[int, str], hybrid: ModuleType
+) -> None:
+    """401 a paired device whose person was removed from the device's workspace.
+
+    ``_bound_person`` only checks the ``users`` row is still active — a user
+    removed from THIS workspace, but still active elsewhere, would otherwise
+    keep the device's old access forever. The local operator has no
+    ``workspace_members`` row at all (bound by email, not membership) and is
+    exempt, same as every other lane that binds them.
+    """
+    user_pk, email = person
+    if email == config.LOCAL_OPERATOR_EMAIL:
+        return
+    if not hybrid._user_pk_is_workspace_member(db, device.workspace_id, user_pk):
+        raise _unauthorized(f"device {device.id}'s person is no longer a member of its workspace")
+
+
 def _user_context(device: MobileDevice, person: Tuple[int, str]) -> UserContext:
     """The device's person, bound as the local-operator lane binds the operator."""
     user_pk, email = person
@@ -181,6 +199,7 @@ def _resolve_in_own_session(request: Request, token: str) -> RequestContext:
         person = _bound_person(db, device.user_id)
         if person is None:
             raise _unauthorized(f"device {device.id} has no person")
+        _assert_still_a_member(db, device, person, hybrid)
         context = RequestContext(
             workspace_id=device.workspace_id,
             user=_user_context(device, person),
