@@ -9,7 +9,8 @@ so a registered bearer is resolved BEFORE the Clerk lane. Proven here, against P
   ``raw_claims {source: "mobile_device", device_id, user_id}``;
 * saas: 401, nothing looked up, and Clerk's ``verify_token`` is never called;
 * an unknown token is 401; a revoked row is ``401 {"code": "device_revoked"}``; a
-  deactivated person is 401;
+  deactivated person is 401; a person dropped from the device's workspace (still active
+  elsewhere) is 401 too — the local operator is exempt, having no membership row at all;
 * after a rotation the previous token works strictly before ``prev_token_valid_until`` and
   is 401 from then on (a frozen clock);
 * a request naming another workspace (either header or the query: every input hybrid
@@ -139,11 +140,22 @@ def _seed_user(db) -> tuple:
     return user_pk, email
 
 
+def _member(db, workspace_id, user_pk, *, active=True) -> None:
+    db.execute(
+        text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
+             "VALUES (CAST(:ws AS uuid), :uid, 'member', :active)"),
+        {"ws": str(workspace_id), "uid": user_pk, "active": active},
+    )
+    db.flush()
+
+
 @pytest.fixture
 def person(db_session, seed_workspace):
-    """A workspace and its person: ``(workspace_id, user_pk, email)``."""
+    """A workspace and its person, an active member of it: ``(workspace_id, user_pk, email)``."""
     user_pk, email = _seed_user(db_session)
-    return uuid.UUID(seed_workspace()), user_pk, email
+    workspace_id = uuid.UUID(seed_workspace())
+    _member(db_session, workspace_id, user_pk)
+    return workspace_id, user_pk, email
 
 
 def _paired(db, person, *, status="active", last_seen_at=None):
@@ -257,6 +269,35 @@ async def test_a_deactivated_person_is_401(db_session, person, local):
     refused = await _refused(token)
 
     assert refused.status_code == 401 and refused.detail != {"code": "device_revoked"}
+
+
+@pytest.mark.asyncio
+async def test_a_person_dropped_from_the_workspace_is_401(db_session, person, local):
+    """A device paired while its person was a member keeps no access once they're removed."""
+    _, token = _paired(db_session, person)
+    db_session.execute(
+        text("UPDATE workspace_members SET is_active = false WHERE workspace_id = CAST(:ws AS uuid) AND user_id = :uid"),
+        {"ws": str(person[0]), "uid": person[1]},
+    )
+
+    refused = await _refused(token)
+
+    assert refused.status_code == 401 and refused.detail != {"code": "device_revoked"}
+
+
+@pytest.mark.asyncio
+async def test_the_local_operator_needs_no_membership_row(db_session, person, local, monkeypatch):
+    """The operator binds by email (hybrid's local lane), never by workspace_members."""
+    monkeypatch.setattr(config, "LOCAL_OPERATOR_EMAIL", person[2])
+    db_session.execute(
+        text("DELETE FROM workspace_members WHERE workspace_id = CAST(:ws AS uuid) AND user_id = :uid"),
+        {"ws": str(person[0]), "uid": person[1]},
+    )
+    _, token = _paired(db_session, person)
+
+    ctx = await _resolve(token)
+
+    assert ctx.user.system_role == "super_admin"
 
 
 @pytest.mark.asyncio

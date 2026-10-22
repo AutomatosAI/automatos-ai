@@ -201,11 +201,18 @@ def _operator(db, workspace_id):
 
 
 def _paired(db, workspace_id, user_pk, *, install_id=None):
-    """An active paired row and its token: ``(row, token)``."""
+    """An active paired row and its token: ``(row, token)``.
+
+    Real pairing only ever binds a device to a member of its workspace (the bearer
+    lane re-checks this on every call), so a membership row comes with it.
+    """
     from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
     from core.auth.pairing import mint_token
     from core.models.mobile_devices import MobileDevice
 
+    db.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
+                    "VALUES (CAST(:ws AS uuid), :user, 'member', TRUE) ON CONFLICT DO NOTHING"),
+               {"ws": str(workspace_id), "user": user_pk})
     token, digest = mint_token(DEVICE_TOKEN_PREFIX, TOKEN_BYTES)
     row = MobileDevice(workspace_id=workspace_id, user_id=user_pk, kind="paired", status="active",
                        install_id=install_id or _install(), platform="ios", token_hash=digest,
@@ -303,6 +310,13 @@ def test_a_phone_paired_again_gets_a_new_push_key_on_its_next_registration(db_se
     monkeypatch.setattr(config, "FRONTEND_URL", "https://studio.prd266.test")
     monkeypatch.setattr(config, "PUBLIC_API_HOST", HOSTED_PUBLIC_API_HOST)
     pk, install_id = _person(db_session)[0], _install()
+    # The real POST /pairing-codes route only ever mints a code for its own (already a
+    # member) caller — calling the service layer directly here skips that, so it's given
+    # explicitly, same as every other real pairing would already have it.
+    db_session.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
+                            "VALUES (CAST(:ws AS uuid), :user, 'member', TRUE)"),
+                       {"ws": str(ws), "user": pk})
+    _settle(db_session)
 
     def _pair_and_register() -> str:
         code = pairing.create_pairing_code(db_session, ws, pk, request_base_url="http://testserver").code
