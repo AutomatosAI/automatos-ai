@@ -307,12 +307,23 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # balances (new tables), llm_usage.ask_id, and trials as credit grants; the guard follows it.
     credit_ledger = (versions / "prd265_credit_ledger.py").read_text()
     assert 'down_revision = "clerk_user_relinks_20261019"' in credit_ledger
-    # 2026-10-21 (PRD-266 W1 Connect): prd266_mobile_devices chains onto prd265_credit_ledger
-    # (rebased from a stray second head off clerk_user_relinks_20261019) — the Automatos Go
-    # backend's device-pairing tables, a new table only; the guard follows it.
+    # 2026-10-21 (PRD-266 W1 Connect): prd266_mobile_devices chains onto
+    # clerk_user_relinks_20261019 too — the Automatos Go backend's device-pairing
+    # tables, a new table only. A second, independent head alongside
+    # prd265_credit_ledger (both PRs branched the same parent without a merge
+    # revision); the guard follows it.
     mobile_devices = (versions / "prd266_mobile_devices.py").read_text()
-    assert 'down_revision = "prd265_credit_ledger"' in mobile_devices
-    assert 'EXPECTED_HEAD = "prd266_mobile_devices"' in guard
+    assert 'down_revision = "clerk_user_relinks_20261019"' in mobile_devices
+    # 2026-10-22: prd266_merge_heads joins the two — a production database already
+    # had both independently stamped (alembic upgrade heads, plural, before this
+    # merge revision existed); rewriting prd266_mobile_devices' down_revision to
+    # chain onto prd265_credit_ledger directly crashed that database ("Requested
+    # revision ... overlaps with other requested revisions ..."). Pure merge, no
+    # schema operations (mirrors prd203_merge_heads); the guard follows it.
+    merged = (versions / "prd266_merge_heads.py").read_text()
+    assert 'down_revision = (' in merged
+    assert '"prd265_credit_ledger"' in merged and '"prd266_mobile_devices"' in merged
+    assert 'EXPECTED_HEAD = "prd266_merge_heads"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
