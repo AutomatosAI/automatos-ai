@@ -22,8 +22,10 @@ WORKDIR /app
 COPY requirements.lock .
 # eMudhra/emSign CA compromise (Oct 2026): pip < 26.2.2 keeps trusting the
 # broken intermediate CAs via its own vendored certifi regardless of what
-# the lock resolves to — must upgrade pip itself first.
-RUN pip install --no-cache-dir --upgrade pip \
+# the lock resolves to — must upgrade pip itself first. Hash-pinned so the
+# upgrade download itself isn't trusting the very CA chain it's fixing.
+RUN printf 'pip==26.2.2 --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70\n' > /tmp/pip-boot.txt \
+    && pip install --no-cache-dir --require-hashes -r /tmp/pip-boot.txt \
     && pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
 
 COPY --chown=1000:1000 . .
