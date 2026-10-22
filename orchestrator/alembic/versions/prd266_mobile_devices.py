@@ -27,7 +27,7 @@ Create Date: 2026-10-20
 from alembic import op
 
 revision = "prd266_mobile_devices"
-down_revision = "clerk_user_relinks_20261019"
+down_revision = "prd265_credit_ledger"
 branch_labels = None
 depends_on = None
 

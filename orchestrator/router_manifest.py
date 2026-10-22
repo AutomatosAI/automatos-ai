@@ -103,6 +103,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-266 US-016a -- content reports (POST /api/v1/reports): any member reports an
     # Auto message or a Deliverable. Authenticated; not PRD-76's api.reports.
     RouterSpec("api.content_reports"),
+    # PRD-266 W1 Connect -- the Automatos Go backend: device discovery, pairing,
+    # remote access (/api/v1/mobile/*).
+    RouterSpec("api.mobile_devices"),
 )
 
 
