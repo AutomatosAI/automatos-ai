@@ -58,7 +58,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # uv from its own image, in a named stage for the same reason (as the worker's, US-044).
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
 
 # The media assets, fetched, at the paths the media assets image carries them
 # (scripts/ci/media_assets.py): /kokoro/<release>/<file> and /music/<id>.<ext>.

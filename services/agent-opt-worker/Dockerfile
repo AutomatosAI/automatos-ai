@@ -20,7 +20,11 @@ WORKDIR /app
 # exactly it: --require-hashes, and --no-deps so nothing outside the lock is
 # fetched (overrides.txt keeps the PyPI package `fi` out; requirements.in).
 COPY requirements.lock .
-RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
+# eMudhra/emSign CA compromise (Oct 2026): pip < 26.2.2 keeps trusting the
+# broken intermediate CAs via its own vendored certifi regardless of what
+# the lock resolves to — must upgrade pip itself first.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
 
 COPY --chown=1000:1000 . .
 USER worker

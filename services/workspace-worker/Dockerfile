@@ -26,7 +26,7 @@ FROM node AS npm
 RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
 
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
 
 # PRD-262 US-044: requirements.lock in three parts: claude-agent-sdk alone, psycopg2
 # alone (the psycopg2 stage below builds it from source, PRD-262 row 27) and everything

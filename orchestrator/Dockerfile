@@ -17,7 +17,7 @@
 # tag@digest pin sits on a FROM line, where Dependabot reads it (FR-9). Only the
 # binary is copied, into pybuild, which never ships.
 # -----------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
 
 # -----------------------------------------------------------------------------
 # Wheel-build stage — compilers live HERE and never reach the runtime image
