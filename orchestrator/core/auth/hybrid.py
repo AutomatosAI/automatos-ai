@@ -149,6 +149,25 @@ def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[st
     return bool(row)
 
 
+def _user_pk_is_workspace_member(db, workspace_id: UUID, user_pk: int) -> bool:
+    """Return True if the user (by internal PK, not clerk_user_id) is an active member.
+
+    For lanes bound to a local ``users.id`` rather than a Clerk identity — the device
+    lane (PRD-266 §4.3) being the first — where there is no clerk_user_id to key off.
+    """
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_members wm "
+            "WHERE wm.workspace_id = :workspace_id "
+            "AND wm.user_id = :user_pk "
+            "AND wm.is_active = true "
+            "LIMIT 1"
+        ),
+        {"workspace_id": str(workspace_id), "user_pk": user_pk},
+    ).fetchone()
+    return bool(row)
+
+
 def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: UUID) -> bool:
     """
     Verify that a Clerk user actually has access to the requested workspace.
