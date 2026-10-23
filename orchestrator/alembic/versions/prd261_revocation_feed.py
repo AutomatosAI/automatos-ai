@@ -30,7 +30,7 @@ The downgrade drops the index and the sync table, then the CHECK and the column;
 revocation row (a pulled row stays, as a row of this install).
 
 Revision ID: prd261_revocation_feed
-Revises: prd265_billing
+Revises: prd265_billing_in_studio
 Create Date: 2026-10-21
 """
 
@@ -38,7 +38,7 @@ from alembic import op
 
 
 revision = "prd261_revocation_feed"
-down_revision = "prd265_billing"
+down_revision = "prd265_billing_in_studio"
 branch_labels = None
 depends_on = None
 
