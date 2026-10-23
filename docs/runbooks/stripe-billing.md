@@ -37,9 +37,9 @@ Stripe's Dashboard moves its menus around. If a setting isn't where this page sa
    python -m scripts.stripe_setup --webhook-url https://<API public host>/api/v1/billing/webhooks/stripe --dry-run
    ```
    It lists what it would create and writes nothing. `<API public host>` is the API service's public domain (Railway → the service → Settings → Networking).
-7. **Real run.** Run the same command without `--dry-run`. It ends with a block of `NAME=value` lines. The first run also prints `STRIPE_WEBHOOK_SECRET`. That is the only time the script can show it, so copy it straight into Railway.
+7. **Real run.** Run the same command without `--dry-run`. It ends with a block of `NAME=value` lines. The script never prints the webhook signing secret. Get it in Stripe under Developers → Webhooks → the new endpoint → Signing secret → Reveal, and set it as `STRIPE_WEBHOOK_SECRET`.
 8. **Values on Railway.**
-   - Put every printed line on the API service's Variables: `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS`, `STRIPE_PRICE_TOPUP`, `STRIPE_PORTAL_CONFIGURATION_ID`, `STRIPE_ACCOUNT_ID` and `STRIPE_WEBHOOK_SECRET`.
+   - Put every printed line on the API service's Variables: `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS`, `STRIPE_PRICE_TOPUP`, `STRIPE_PORTAL_CONFIGURATION_ID` and `STRIPE_ACCOUNT_ID`. Add `STRIPE_WEBHOOK_SECRET` from the Dashboard.
    - **Leave `BILLING_OPEN=false`.** Until it is true (9 Nov), only platform admins can check out.
    - Railway redeploys.
 9. **Webhook check.** In Stripe, go to Developers → Webhooks and open the endpoint. It lists 11 events. After the tests below, every delivery should show `200`.
@@ -99,7 +99,7 @@ If `…0341` is used straight in Checkout, the first payment fails on the Checko
    ```
    python -m scripts.stripe_setup --live --webhook-url https://<API public host>/api/v1/billing/webhooks/stripe --dry-run
    ```
-6. **Live values.** Replace every Stripe value on Railway with the printed live ones: the Price IDs, the portal ID, the account ID and the **new** webhook secret. Test-mode IDs don't work with a live key.
+6. **Live values.** Replace every Stripe value on Railway with the printed live ones: the Price IDs, the portal ID and the account ID. Also set the live endpoint's **new** webhook signing secret, revealed in the Dashboard. Test-mode IDs don't work with a live key.
 7. **Live card tests (US-012).** Run them as a platform admin, with `BILLING_OPEN` still `false`.
 8. **Open (US-013).** On 9 Nov, set `BILLING_OPEN=true`.
 

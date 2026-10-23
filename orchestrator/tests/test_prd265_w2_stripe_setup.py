@@ -3,10 +3,11 @@
 No network. An ``httpx.MockTransport`` plays Stripe's prices, portal
 configurations, webhook endpoints and account: it records every request and answers
 the way Stripe does (list pages, create payloads, a lookup key moved only with
-``transfer_lookup_key``, the webhook signing secret only on create). The tests pin
-what the script sends (the form fields of every create), that a second run creates
+``transfer_lookup_key``, the webhook signing secret on create). The tests pin what
+the script sends (the form fields of every create), that a second run creates
 nothing, the live/test key guard, ``--dry-run``, the stop on a Price that doesn't
-match config, and that neither the secret key nor a known webhook secret is printed.
+match config, and that neither the secret key nor the webhook signing secret is ever
+printed (the Dashboard reveals it).
 """
 from __future__ import annotations
 
@@ -294,7 +295,7 @@ def test_empty_account_gets_the_webhook_at_the_pinned_version_with_every_event()
     assert call.idempotency_key and call.idempotency_key.startswith(f"automatos-stripe-setup-{RUN_ID}-")
 
 
-def test_empty_account_prints_every_env_line_and_the_webhook_secret_once():
+def test_empty_account_prints_every_env_line_and_where_to_reveal_the_signing_secret():
     fake = FakeStripe()
     code, output = _run(fake)
     assert code == stripe_setup.EXIT_OK, output
@@ -304,9 +305,10 @@ def test_empty_account_prints_every_env_line_and_the_webhook_secret_once():
         assert f"{env_name}={fake.price(lookup_key)['id']}" in lines
     assert f"STRIPE_PORTAL_CONFIGURATION_ID={fake.portals[0]['id']}" in lines
     assert f"STRIPE_ACCOUNT_ID={ACCOUNT_ID}" in lines
-    assert f"STRIPE_WEBHOOK_SECRET={WEBHOOK_SECRET}" in lines
-    assert output.count(WEBHOOK_SECRET) == 1
-    assert "set STRIPE_WEBHOOK_SECRET now" in output
+    # Stripe returned the signing secret, but it never reaches the output.
+    assert WEBHOOK_SECRET not in output and "STRIPE_WEBHOOK_SECRET=" not in output
+    assert f"# STRIPE_WEBHOOK_SECRET: {stripe_setup.SIGNING_SECRET_WHERE}" in lines
+    assert "set STRIPE_WEBHOOK_SECRET too" in output
 
 
 # ---------------------------------------------------------------------------

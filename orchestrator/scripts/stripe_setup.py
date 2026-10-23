@@ -24,8 +24,9 @@ It finds each object below and creates it only when it is missing:
 
 Then it prints the ``NAME=value`` lines to set on the Railway API service. A live
 key needs ``--live`` and ``--live`` needs a live key. ``--dry-run`` only reads.
-The secret key is never printed. The webhook signing secret is printed once, when
-the endpoint is created: Stripe's API never returns it again.
+Neither the secret key nor the webhook signing secret is ever printed: the
+signing secret is revealed in the Stripe Dashboard (Developers → Webhooks → the
+endpoint → Signing secret), so it never lands in a terminal's scrollback or a log.
 """
 from __future__ import annotations
 
@@ -85,6 +86,8 @@ TOPUP_ENV_NAME = "STRIPE_PRICE_TOPUP"
 PORTAL_ENV_NAME = "STRIPE_PORTAL_CONFIGURATION_ID"
 ACCOUNT_ENV_NAME = "STRIPE_ACCOUNT_ID"
 WEBHOOK_SIGNING_ENV_NAME = "STRIPE_WEBHOOK_SECRET"
+SIGNING_SECRET_WHERE = ("reveal it in the Stripe Dashboard: Developers → Webhooks → this endpoint → "
+                        "Signing secret → Reveal (it is never printed here).")
 
 
 class SetupError(Exception):
@@ -141,11 +144,11 @@ class PriceSpec:
 
 @dataclass(frozen=True)
 class WebhookResult:
-    """The endpoint's id (None on a dry run that would create it), and its signing
-    secret, which Stripe returns only when the endpoint is created."""
+    """The endpoint's id (None on a dry run that would create it), and whether this
+    run created it (its signing secret then has to be set on Railway)."""
 
     endpoint_id: Optional[str]
-    secret: Optional[str]
+    created: bool = False
 
 
 @dataclass(frozen=True)
@@ -421,21 +424,17 @@ def find_webhook(api: StripeApi, url: str) -> Optional[dict]:
 
 
 def create_webhook(run: SetupRun, url: str, api_version: str, events: Sequence[str]) -> WebhookResult:
-    """A new endpoint at our pinned API version. Its signing secret comes back
-    only in this answer."""
+    """A new endpoint at our pinned API version. Its signing secret is left in
+    Stripe: the Dashboard reveals it, this script never reads or prints it."""
     if run.dry_run:
         run.say(f"Webhook endpoint: missing, would create at {url} ({len(events)} events, API {api_version})")
-        return WebhookResult(endpoint_id=None, secret=None)
+        return WebhookResult(endpoint_id=None)
     params = {"url": url, "api_version": api_version, "enabled_events": list(events),
               "description": WEBHOOK_DESCRIPTION, "metadata": {METADATA_KEY: WEBHOOK_METADATA_VALUE}}
     created = run.api.post(WEBHOOKS_PATH, params, idempotency_key=run.idempotency_key("webhook"))
     endpoint_id = _id_of(created, "the new webhook endpoint")
-    secret = created.get("secret")
-    if not isinstance(secret, str) or not secret:
-        raise SetupError(f"Stripe created webhook endpoint {endpoint_id} but returned no signing secret. "
-                         "Reveal it in the Dashboard (Developers → Webhooks → the endpoint).")
     run.say(f"Webhook endpoint: created ({endpoint_id}), {len(events)} events, API {api_version}")
-    return WebhookResult(endpoint_id=endpoint_id, secret=secret)
+    return WebhookResult(endpoint_id=endpoint_id, created=True)
 
 
 def warn_on_api_version(run: SetupRun, endpoint: dict, api_version: str) -> None:
@@ -470,14 +469,14 @@ def update_webhook(run: SetupRun, endpoint: dict, events: Sequence[str]) -> None
 
 
 def ensure_webhook(run: SetupRun, url: str, api_version: str, events: Sequence[str]) -> WebhookResult:
-    """The webhook endpoint at ``url`` with our events: created when missing (the
-    only time its secret is known), else updated in place."""
+    """The webhook endpoint at ``url`` with our events: created when missing, else
+    updated in place."""
     existing = find_webhook(run.api, url)
     if existing is None:
         return create_webhook(run, url, api_version, events)
     warn_on_api_version(run, existing, api_version)
     update_webhook(run, existing, events)
-    return WebhookResult(endpoint_id=_id_of(existing, "the webhook endpoint"), secret=None)
+    return WebhookResult(endpoint_id=_id_of(existing, "the webhook endpoint"))
 
 
 # ---------------------------------------------------------------------------
@@ -485,22 +484,23 @@ def ensure_webhook(run: SetupRun, url: str, api_version: str, events: Sequence[s
 # ---------------------------------------------------------------------------
 def env_lines(specs: Sequence[PriceSpec], prices: dict[str, Optional[dict]], portal_id: Optional[str],
               account_id: str, webhook: WebhookResult) -> list[str]:
-    """The ``NAME=value`` lines for Railway. The webhook secret is there only when
-    the endpoint was just created; a value a dry run couldn't know is a comment."""
+    """The ``NAME=value`` lines for Railway; a value a dry run couldn't know is a
+    comment. When the webhook endpoint was just created, a comment says where its
+    signing secret is revealed (the script never prints it)."""
     values = [(spec.env_name, (prices.get(spec.lookup_key) or {}).get("id")) for spec in specs]
     values = values + [(PORTAL_ENV_NAME, portal_id), (ACCOUNT_ENV_NAME, account_id)]
-    if webhook.secret:
-        values = values + [(WEBHOOK_SIGNING_ENV_NAME, webhook.secret)]
-    return [f"{name}={value}" if value else f"# {name}: known after a real run (this was a dry run)"
-            for name, value in values]
+    lines = [f"{name}={value}" if value else f"# {name}: known after a real run (this was a dry run)"
+             for name, value in values]
+    if webhook.created:
+        lines.append(f"# {WEBHOOK_SIGNING_ENV_NAME}: {SIGNING_SECRET_WHERE}")
+    return lines
 
 
 def print_env_block(run: SetupRun, lines: Sequence[str], webhook: WebhookResult, live: bool) -> None:
     """The closing block: the lines to set on the Railway API service."""
     run.say()
-    if webhook.secret:
-        run.say(f"IMPORTANT: set {WEBHOOK_SIGNING_ENV_NAME} now. Stripe's API returns the signing secret "
-                "only when the endpoint is created, so this script can't show it again.")
+    if webhook.created:
+        run.say(f"IMPORTANT: set {WEBHOOK_SIGNING_ENV_NAME} too. {SIGNING_SECRET_WHERE}")
     mode = "LIVE" if live else "test"
     run.say(f"Set these on the Railway API service ({mode} mode), next to STRIPE_SECRET_KEY (not printed):")
     for line in lines:
@@ -519,8 +519,7 @@ def say_header(run: SetupRun, options: Options, settings: Settings) -> None:
 
 
 def _setup(run: SetupRun, options: Options, settings: Settings) -> int:
-    """The steps, in order: account, Prices, portal, webhook, then the report. The
-    webhook comes last, so nothing can fail between its secret and the report."""
+    """The steps, in order: account, Prices, portal, webhook, then the report."""
     say_header(run, options, settings)
     specs = price_specs(settings, options.tax_behavior)
     account_id = _id_of(run.api.get(ACCOUNT_PATH), "the account")
