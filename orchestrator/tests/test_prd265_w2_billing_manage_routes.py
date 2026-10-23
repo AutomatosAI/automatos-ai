@@ -6,7 +6,6 @@ The router is imported inside each test so one failure doesn't block the rest.
 """
 from __future__ import annotations
 
-import importlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -83,6 +82,17 @@ def _workspace():
     return SimpleNamespace(id=uuid4(), name="Barber & Co", plan="pro")
 
 
+def _subscribed(monkeypatch):
+    """The workspace's billing account: a live Pro subscription (every lookup of the fake
+    session would otherwise answer the workspace itself)."""
+    account = SimpleNamespace(
+        workspace_id="ws-1", customer_id="cus_1", subscription_id="sub_1", subscription_status="active",
+        plan="pro", current_period_end=None, credited_period_end=None, cancel_at_period_end=False,
+        schedule_id=None, scheduled_plan=None, scheduled_at=None, business_offer_until=None)
+    monkeypatch.setattr("services.billing.manage.account_for_workspace", lambda db, ws: account)
+    return account
+
+
 def _ctx(system_role="user"):
     return RequestContext(workspace_id=uuid4(), user=UserContext(id="u-1", email="owner@example.com",
                                                                  system_role=system_role), auth_type="clerk")
@@ -156,6 +166,7 @@ def test_every_route_is_404_in_the_local_edition(monkeypatch, method, path, body
 
 
 def test_get_payment_method_happy_path(hosted, monkeypatch):
+    _subscribed(monkeypatch)
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()
@@ -165,6 +176,7 @@ def test_get_payment_method_happy_path(hosted, monkeypatch):
 
 
 def test_cancel_subscription_happy_path(hosted, monkeypatch):
+    _subscribed(monkeypatch)
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()
@@ -179,6 +191,7 @@ def test_cancel_subscription_happy_path(hosted, monkeypatch):
 
 
 def test_download_invoice_answers_a_pdf_with_a_quoted_filename(hosted, monkeypatch):
+    _subscribed(monkeypatch)
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()

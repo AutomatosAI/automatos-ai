@@ -13,7 +13,7 @@ from urllib.parse import parse_qsl
 import httpx
 import pytest
 
-from services.billing.provider import CardOnFile, InvoiceLine, PlanChangePreview, PlanChangeResult
+from services.billing.provider import CardOnFile, InvoiceLine, PlanChangeResult
 from services.billing.stripe_api import StripeApi
 from services.billing.stripe_manage import checked
 from services.billing.stripe_provider import StripeProvider

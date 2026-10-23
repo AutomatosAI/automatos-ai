@@ -88,7 +88,8 @@ def test_a_plan_checkout_returns_the_client_secret_and_the_publishable_key(monke
     assert request.return_url == "https://app.automatos.ai/settings?tab=billing&checkout=return"
 
 
-def test_business_is_refused_without_an_offer(db, provider):
+def test_business_is_refused_without_an_offer(monkeypatch, db, provider):
+    monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
     with pytest.raises(BillingRefused) as exc_info:
         start_plan_checkout(db, provider, _workspace(), plan="business", email=None)
     assert exc_info.value.status == 400

@@ -127,6 +127,8 @@ def test_checkout_200_returns_the_client_secret_and_publishable_key(hosted, monk
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: provider)
     monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
     monkeypatch.setattr("services.billing.checkout.price_for_plan", lambda plan: "price_basic")
+    monkeypatch.setattr("services.billing.checkout.link_account",
+                        lambda db, ws, customer_id, provider: SimpleNamespace(customer_id=customer_id))
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()
     res = _checkout(app, {"kind": "plan", "plan": "basic"})

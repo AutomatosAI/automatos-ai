@@ -35,7 +35,9 @@ def _db():
 def _account(**overrides):
     base = dict(workspace_id="ws-1", customer_id="cus_1", subscription_id="sub_1",
                subscription_status="active", plan="pro", current_period_end=None,
-               credited_period_end=None, cancel_at_period_end=False, period_credits=0)
+               credited_period_start=None, credited_period_end=None, cancel_at_period_end=False,
+               period_credits=0, schedule_id=None, scheduled_plan=None, scheduled_at=None,
+               business_offer_until=None)
     base.update(overrides)
     return SimpleNamespace(**base)
 

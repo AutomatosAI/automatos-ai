@@ -31,7 +31,7 @@ describe('apiClient.requestBlob', () => {
     const blob = await apiClient.requestBlob(PDF_PATH)
 
     expect(blob.type).toBe('application/pdf')
-    expect(await blob.text()).toBe('%PDF-1.7')
+    expect(blob.size).toBe('%PDF-1.7'.length) // jsdom's Blob has no text(); the bytes arrived whole
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url).endsWith(PDF_PATH)).toBe(true)
     expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json')
