@@ -62,7 +62,9 @@ from services.page_context import (
     page_actions_from_context as _page_actions_from_context,
 )
 
-from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.empty_completion import NOTHING_SAID, is_empty_completion, with_fallback_content
+from consumers.chatbot.failed_loop import a_failed_loop_fails_the_turn  # a later round's failure fails the turn
+from consumers.chatbot.turn_notes import save_turn_note  # PRD-239 S4: a failed turn's note
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
@@ -236,11 +238,6 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     if row is not None and is_cli_agent(row[0]):
         return RuntimeMismatchError(agent_id, RUNTIME_CLI, lane="chat")
     return None
-
-
-# F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
-# a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it.
-NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
 
 
 def _update_runtime_metrics(agent_runtime: Any, response: Any) -> None:
@@ -1481,6 +1478,7 @@ class StreamingChatService:
 
     @the_loop_writes_receipts  # PRD-256 US-001: the loop's receipts, from its tracker, before the answer
     @settles_held_retractions  # FX-017: a retraction held after a blank retry goes out only if replaced
+    @a_failed_loop_fails_the_turn  # a later round's failure is the turn's: error frame and note, never a reply
     async def _stream_tool_loop(
         self,
         response,
@@ -3007,17 +3005,8 @@ class StreamingChatService:
 
     def _persist_turn_error(self, chat_id: str, err: Any) -> None:
         """PRD-239 S4: keep the failure in the conversation (an assistant note with
-        provenance) so it survives a reload and the detached-turn path. Fail-soft."""
-        from consumers.chatbot.turn_errors import TURN_ERROR_ORIGIN  # the model's history reads it back
-
-        try:
-            self.chat_service.save_message(
-                chat_id=chat_id, role="assistant", parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
-                workspace_id=self.workspace_id,
-                source={"origin": TURN_ERROR_ORIGIN, "label": "Error", "code": err.code},
-            )
-        except Exception:  # noqa: BLE001
-            logger.debug("[Chat] could not persist the turn error note", exc_info=True)
+        provenance) so it survives a reload and the detached-turn path (turn_notes)."""
+        save_turn_note(self.chat_service, chat_id, self.workspace_id, err)
 
     async def _execute_pretriggered_tools(
         self,

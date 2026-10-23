@@ -111,7 +111,7 @@ def route(monkeypatch):
     monkeypatch.setattr(chat, "get_session_queue", lambda: _Queue())
     monkeypatch.setattr(chat, "get_user_id", lambda db, ctx=None: USER_PK)
     monkeypatch.setattr(chat, "_open_chat", lambda *args, **kwargs: CHAT_ID)
-    monkeypatch.setattr(chat, "_turn_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(chat, "turn_history", lambda *args, **kwargs: [])
     monkeypatch.setattr(chat, "_turn_lane", _auto_answers)
     monkeypatch.setattr(chat, "run_detached_turn", _inline)
     return asked

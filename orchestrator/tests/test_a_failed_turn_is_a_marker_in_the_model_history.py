@@ -8,7 +8,7 @@ assistant note, "⚠️ <sentence>" with source origin ``turn_error``
 note to the model as Auto's own reply.
 
 The notes here are saved by the real ``_persist_turn_error``, and the history is built by
-the real entry points: the chat route (``api.chat._turn_history``, then
+the real entry points: the chat route (``api.chat.turn_history``, then
 ``PromptAnalyzer.convert_to_llm_messages``), the public widget and the voice call. No
 database, network or model.
 """
@@ -75,7 +75,7 @@ def _the_23_oct_chat() -> _SavedChat:
 def _chat_turn_history(chat: _SavedChat):
     """The history the chat route hands the turn (the detached turn reads the same)."""
     newest = ChatMessageRequest(parts=[MessagePart(type="text", text=NEWEST)])
-    return chat_route._turn_history(chat, CHAT_ID, newest, {})
+    return chat_route.turn_history(chat, CHAT_ID, newest, {})
 
 
 def _model_reads(history):

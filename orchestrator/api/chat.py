@@ -18,10 +18,13 @@ from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
-from consumers.chatbot import ChatService, StreamingChatService, history_for_model
+from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
+from consumers.chatbot.turn_errors import CODE_SESSION_AGENT_TERMINAL, TurnError
+from consumers.chatbot.turn_notes import note_an_unanswered_turn, save_turn_note
 from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
+from api.chat_turn_history import turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
@@ -32,7 +35,7 @@ from core.utils.timestamps import utc_iso
 from services.board_events import notify_chat_event
 from services.chat_agent_switch import record_agent_switch
 from services.chat_turns import get_turn_registry, run_detached_turn
-from services.page_context import inject_page_preamble, sanitize_page_context
+from services.page_context import sanitize_page_context
 from modules.voice.spoken_stream import spoken_text_frames
 
 logger = logging.getLogger(__name__)
@@ -245,41 +248,6 @@ def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx
     return str(chat.id)
 
 
-def _with_attachments(history: List[Dict[str, Any]], current_msg: ChatMessageRequest) -> List[Dict[str, Any]]:
-    """PRD-127: the request's ephemeral attachment ids ride on the latest user message.
-    Attachments are request-scoped (7-day S3 TTL) and never persisted in chat history;
-    AttachmentResolver resolves them inline. The frontend sends ids both at the top
-    level and inside file parts."""
-    ids = list(current_msg.attachment_ids or [])
-    for part in current_msg.parts or []:
-        if part.attachment_id and part.attachment_id not in ids:
-            ids.append(part.attachment_id)
-    logger.info(
-        "[PRD-127] chat request attachments: top_level_ids=%s parts=%s collected=%s",
-        current_msg.attachment_ids, [p.dict(exclude_none=True) for p in current_msg.parts or []], ids,
-    )
-    if not ids:
-        return history
-    for index in range(len(history) - 1, -1, -1):
-        if history[index].get("role") == "user":
-            logger.info("[PRD-127] injected %d attachment_ids into message_history[%d]", len(ids), index)
-            return history[:index] + [{**history[index], "attachment_ids": ids}] + history[index + 1:]
-    return history
-
-
-def _turn_history(chat_service: ChatService, chat_id: str, current_msg: ChatMessageRequest,
-                  page_ctx: Any) -> List[Dict[str, Any]]:
-    """The conversation the turn reads: the chat's messages (history_for_model), the attachments, the page.
-
-    PRD-221 S2 (extends PRD-220): the page context is the structured reference set
-    {page, route, tab, selected, filters, visible_ids}, or the legacy {"page": <label>};
-    one renderer serves both. It is sanitized against the allow-list (authz-looking
-    fields never survive) and injected prompt-side only: the user message is already
-    saved clean, so chat titles and reloaded history never show the hint."""
-    history = history_for_model(chat_service.get_messages_by_chat_id(chat_id))
-    return inject_page_preamble(_with_attachments(history, current_msg), page_ctx)
-
-
 def _is_super_admin(ctx: RequestContext) -> bool:
     """PRD-143: the su surface is derived from system_role ONLY, never from workspace
     role, is_admin or autonomy level (fail-closed boundary)."""
@@ -304,12 +272,14 @@ async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, mes
 
 @dataclass(frozen=True)
 class _Turn:
-    """What the detached turn needs: plain values, never the request's DB session."""
+    """What the detached turn needs: plain values, never the request's DB session. The
+    turn reads its conversation once it runs, newest at the person's ``message_id``."""
 
     workspace_id: Any
     chat_id: str
     user_id: int
-    messages: List[Dict[str, Any]]
+    message: ChatMessageRequest
+    message_id: Any
     lane: TurnLane
     message_text: str
     mission_mode: bool
@@ -319,17 +289,18 @@ class _Turn:
     spoken_mode: bool
 
 
-async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn):
-    """The turn's frames, from the agent its lane names."""
+async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn, messages: List[Dict[str, Any]]):
+    """The turn's frames, from the agent its lane names, over the conversation ``messages``."""
     lane = turn.lane
     if lane.session_agent:
         # PRD-239 S7 v2: a session agent lives in the Runtime Canvas; the operator talks
-        # to it in the terminal, never through this lane. Say so (S4 renders `e:` frames).
+        # to it in the terminal, never through this lane. Say so (S4 renders `e:` frames),
+        # and keep it as the turn's note: the next turn reads the message as unanswered.
         from services.cli_ticket_lane import session_agent_terminal_message
 
-        yield service.streaming_handler.format_aisdk_error(
-            session_agent_terminal_message(task_db, lane.agent_id), code="session_agent_terminal",
-        )
+        said = TurnError(CODE_SESSION_AGENT_TERMINAL, session_agent_terminal_message(task_db, lane.agent_id))
+        yield service.streaming_handler.format_aisdk_error(said.message, code=said.code)
+        save_turn_note(ChatService(task_db), turn.chat_id, turn.workspace_id, said)
         return
     if lane.suggest_mission:
         # PRD-125: the mission suggestion card (the frontend renders it); Auto still answers.
@@ -337,7 +308,7 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
             "goal": turn.message_text, "complexity": lane.assessment.complexity.value, "agent_id": lane.agent_id,
         })
     reply = service.stream_response_with_agent(
-        chat_id=turn.chat_id, messages=turn.messages, agent_id=lane.agent_id, user_id=turn.user_id,
+        chat_id=turn.chat_id, messages=messages, agent_id=lane.agent_id, user_id=turn.user_id,
         skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
         is_super_admin=turn.is_super_admin,
@@ -358,22 +329,29 @@ async def _produce_turn(turn: _Turn):
     """PRD-237 S7: the turn is a producer task with its own DB session; the HTTP response
     only consumes it (services.chat_turns). A reload or navigation that drops the
     connection no longer kills the reply; Stop is explicit via POST /{chat_id}/cancel.
-    Concurrent requests for the same chat are serialized by the session queue."""
+    Concurrent requests for the same chat are serialized by the session queue, and the
+    turn reads its conversation once it holds it: the turns before it have ended, so their
+    replies and failure notes are in it."""
     task_db = SessionLocal()
     try:
         service = StreamingChatService(task_db, workspace_id=turn.workspace_id)
         async with get_session_queue().acquire(f"{turn.workspace_id}:{turn.chat_id}"):
-            async for chunk in _turn_chunks(service, task_db, turn):
+            messages = turn_history(ChatService(task_db), turn.chat_id, turn.message, turn.page_context,
+                                    turn.message_id)
+            async for chunk in _turn_chunks(service, task_db, turn, messages):
                 yield chunk
     finally:
         task_db.close()
 
 
-def _notify_a_missed_reply(workspace_id: Any, chat_id: str, user_id: int):
-    """The turn's ``on_complete``: a client that missed the end of the turn (reload,
-    navigation) is told the reply landed, and the PRD-205 S7 lane merges it live. A
-    connected client already has the reply; notifying it would duplicate."""
+def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: Any):
+    """The turn's ``on_complete``: a turn that did not complete (Stop, a failure outside the
+    streaming service) leaves its note (consumers.chatbot.turn_notes). A client that missed
+    the end of the turn (reload, navigation) is told the reply landed, and the PRD-205 S7
+    lane merges it live. A connected client already has the reply; notifying it would duplicate."""
     async def _on_complete(*, completed: bool, cancelled: bool, client_gone: bool) -> None:
+        if not completed:
+            await note_an_unanswered_turn(workspace_id, chat_id, message_id, cancelled=cancelled)
         if not (completed and client_gone):
             return
         notify_db = SessionLocal()
@@ -402,18 +380,19 @@ async def stream_chat(
     current_msg = _current_message(request)
     parts = _message_parts(current_msg)
     chat_id = _open_chat(db, chat_service, request, ctx, user_id, parts)
-    chat_service.save_message(
+    saved = chat_service.save_message(
         chat_id=chat_id, role="user", parts=[part.dict() for part in parts], workspace_id=ctx.workspace_id,
     )
     page_ctx = sanitize_page_context(request.context)
-    history = _turn_history(chat_service, chat_id, current_msg, page_ctx)
+    history = turn_history(chat_service, chat_id, current_msg, page_ctx)  # the lane's read; the turn reads again
     message_text = _message_text(parts)
     lane = await _turn_lane(db, ctx, request, message_text, len(history), said_before(history))
     logger.info("[chat] agent_id=%s answers the turn", lane.agent_id)
     # The request-scoped ``db`` is never handed to the turn: FastAPI closes it when the
     # response ends, which may be before the turn does.
     turn = _Turn(
-        workspace_id=ctx.workspace_id, chat_id=chat_id, user_id=user_id, messages=history, lane=lane,
+        workspace_id=ctx.workspace_id, chat_id=chat_id, user_id=user_id, message=current_msg,
+        message_id=getattr(saved, "id", None), lane=lane,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
     )
@@ -421,7 +400,7 @@ async def stream_chat(
         run_detached_turn(
             chat_id=chat_id,
             produce=lambda: _produce_turn(turn),
-            on_complete=_notify_a_missed_reply(ctx.workspace_id, chat_id, user_id),
+            on_complete=_after_the_turn(ctx.workspace_id, chat_id, user_id, turn.message_id),
         ),
         media_type="text/plain; charset=utf-8",
         headers=response_headers(lane.assessment),
