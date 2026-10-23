@@ -8,7 +8,10 @@
  * mark (`[data-theme-heading]`) with tabIndex -1, the page's one focus anchor whichever shows. An
  * installed theme with the slot (the fixture theme, PRD-261 A-19b) renders its screen instead, full
  * bleed inside MainLayout; below the theme's width the page says it opens on a wider screen; while
- * the host still loads the theme, neither shows.
+ * the host still loads the theme, neither shows. The width is the theme's minWidth from its registry
+ * entry, or the installed frame's width for a theme the registry has no entry for (A-02c): one pixel
+ * under it is the note, and widening the window to it brings the screen (builtin Play's style-screen
+ * and phone-layout tests held the /looks and /looks/style cases until it left core, W-A8).
  *
  * W-A8: in a workspace, the note reads the workspace's installs. When none can be chosen (none
  * installed, or only a withdrawn one: the Appearance menu lists Classic and Studio alone), it says
@@ -44,6 +47,7 @@ import LookStylePage from '@/app/looks/style/page'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
 import { PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
+import { INSTALLED_FRAME_MIN_WIDTH_PX } from '@/lib/theme-host/installed-entry'
 import {
   FIXTURE_THEME_ENTRY,
   FIXTURE_THEME_STYLE,
@@ -92,7 +96,7 @@ const PAGES: ReadonlyArray<readonly [string, PageCase]> = [
 
 const CORE_STYLES: readonly UiStyle[] = ['classic', 'studio']
 
-/** A phone-wide window, while a test sets one. */
+/** A narrow window (a phone's, or one just under the theme's width), while a test sets one. */
 let phone: WindowWidth | null = null
 
 /**
@@ -173,6 +177,31 @@ describe.each(PAGES)('%s', (_path, page) => {
     renderPage(page, FIXTURE_THEME_STYLE, fixtureThemeHost())
     expectNote(page, WIDER_SCREEN_NOTE)
     expect(screen.queryByText(page.note)).toBeNull()
+  })
+
+  it("one pixel under the theme's minWidth says it opens on a wider screen; widened to it, the theme's screen", async () => {
+    phone = stubWindowWidth(FIXTURE_THEME_ENTRY.minWidth - 1)
+    renderPage(page, FIXTURE_THEME_STYLE, fixtureThemeHost())
+    expectNote(page, WIDER_SCREEN_NOTE)
+    act(() => phone?.resize(FIXTURE_THEME_ENTRY.minWidth))
+    expect(await screen.findByTestId(page.screenTestId)).toBeInTheDocument()
+    expect(screen.queryByText(WIDER_SCREEN_NOTE)).toBeNull()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'true')
+  })
+
+  it("under an installed theme the registry has no entry for, below the frame's width says so too (A-02c)", async () => {
+    phone = stubWindowWidth(INSTALLED_FRAME_MIN_WIDTH_PX - 1)
+    render(
+      <ThemeHostContext.Provider value={fixtureThemeHost()}>
+        <UiStyleProvider initialStyle={FIXTURE_THEME_STYLE} installedTheme={null}>
+          <page.Page />
+        </UiStyleProvider>
+      </ThemeHostContext.Provider>,
+    )
+    expectNote(page, WIDER_SCREEN_NOTE)
+    act(() => phone?.resize(INSTALLED_FRAME_MIN_WIDTH_PX))
+    expect(await screen.findByTestId(page.screenTestId)).toBeInTheDocument()
+    expect(screen.queryByText(WIDER_SCREEN_NOTE)).toBeNull()
   })
 
   it('while the host still loads the installed theme, shows neither the note nor a screen', () => {

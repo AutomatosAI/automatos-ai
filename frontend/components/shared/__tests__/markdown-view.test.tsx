@@ -3,6 +3,11 @@
  * The app has no @tailwindcss/typography, so `prose` classes were inert and
  * preflight had flattened documents; these assert the structure the `.md-view`
  * CSS then styles, and that fenced code still gets the copy-button card.
+ *
+ * PRD-261 W-A8: `skipHtml` (which the SDK's cards.MarkdownView hands through for model output) drops
+ * raw HTML in the text; without it, as on the core's own surfaces, react-markdown prints the tags
+ * as literal text. Neither ever renders them as elements. Builtin Play's markdown test held the
+ * dropping until it left core; only this renderer can prove it.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
@@ -89,5 +94,28 @@ describe('MarkdownView', () => {
     expect(boxes).toHaveLength(2)
     expect(boxes[0]).toBeChecked()
     expect(boxes[0]).toBeDisabled()
+  })
+})
+
+/** Model output with raw HTML in it: a script, a bold run, an image with a handler. */
+const WITH_HTML = 'Aim for <script>alert(1)</script> **16 GB** <img src=x onerror=alert(1)>'
+const RAW_TAG = /<\/?(?:script|img)\b/i
+
+describe('MarkdownView and raw HTML in the text', () => {
+  it('with skipHtml drops it: no script or img element, no literal tag, the words and the bold kept', () => {
+    const { container } = render(<MarkdownView skipHtml>{WITH_HTML}</MarkdownView>)
+    expect(container.querySelector('script, img')).toBeNull()
+    expect(container.textContent).not.toMatch(RAW_TAG)
+    expect(container.textContent).not.toContain('onerror')
+    expect(container.querySelector('strong')).toHaveTextContent('16 GB')
+    expect(container).toHaveTextContent('Aim for alert(1) 16 GB')
+  })
+
+  it('without it (the default) prints the tags as literal text, never as elements', () => {
+    const { container } = render(<MarkdownView>{WITH_HTML}</MarkdownView>)
+    expect(container.querySelector('script, img')).toBeNull()
+    expect(container.textContent).toMatch(RAW_TAG)
+    expect(container).toHaveTextContent('Aim for <script>alert(1)</script> 16 GB <img src=x onerror=alert(1)>')
+    expect(container.querySelector('strong')).toHaveTextContent('16 GB')
   })
 })

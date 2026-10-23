@@ -6,6 +6,10 @@
  * 'dashboard'. The real AutoWidget renders here; its data sources are stubbed.
  * The pages are drawn under a theme at a laptop's width, in its frame: the fixture theme
  * (PRD-261 A-19b), whose frame the theme host hands MainLayout with the widget.
+ *
+ * PRD-261 W-A8: MainLayout draws no widget on /chat and the pages under it, where the chat page is
+ * Auto already, and draws it everywhere else (builtin Play's phone-layout test held this until it
+ * left core; only core's MainLayout decides it).
  */
 import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -66,7 +70,11 @@ import { MainLayout } from '@/components/layout/main-layout'
 import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
 import { fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 
-async function openWidgetOn(pathname: string) {
+/** The widget's floating button, by its title. */
+const WIDGET_BUTTON = 'Ask Auto'
+
+/** MainLayout on `pathname`, around a page, in the fixture theme's frame. */
+function renderLayoutOn(pathname: string) {
   state.pathname = pathname
   render(
     <ThemeHostContext.Provider value={fixtureThemeHost()}>
@@ -75,7 +83,11 @@ async function openWidgetOn(pathname: string) {
       </MainLayout>
     </ThemeHostContext.Provider>,
   )
-  fireEvent.click(await screen.findByTitle('Ask Auto'))
+}
+
+async function openWidgetOn(pathname: string) {
+  renderLayoutOn(pathname)
+  fireEvent.click(await screen.findByTitle(WIDGET_BUTTON))
   return screen.findByText(/^Ask me anything about/)
 }
 
@@ -101,5 +113,21 @@ describe("the floating Auto widget on a theme's pages (PRD-260 M70)", () => {
   it("still says 'Dashboard' on a page with no name of its own (the queries above can see it)", async () => {
     const greeting = await openWidgetOn('/docs')
     expect(greeting).toHaveTextContent('Ask me anything about Dashboard, or tell me what you need help with.')
+  })
+})
+
+describe('the floating Auto widget is hidden on /chat (PRD-261 W-A8)', () => {
+  // The frame draws the page and the widget together, so once the page is there a widget would be too.
+  it.each(['/chat', '/chat/c-42'])('draws no widget on %s, the page still drawn', async (pathname) => {
+    renderLayoutOn(pathname)
+    expect(await screen.findByTestId('page')).toBeInTheDocument()
+    expect(screen.queryByTitle(WIDGET_BUTTON)).toBeNull()
+    expect(screen.queryByText(/^Ask me anything about/)).toBeNull()
+  })
+
+  it.each(['/', '/docs', '/command-center', '/x/conversations'])('draws the widget on %s', async (pathname) => {
+    renderLayoutOn(pathname)
+    expect(await screen.findByTitle(WIDGET_BUTTON)).toBeInTheDocument()
+    expect(screen.getByTestId('page')).toBeInTheDocument()
   })
 })
