@@ -4,8 +4,9 @@ The rules (PRD-265 §3–§4, FR-1–FR-3):
 
 - **Own key** — a call on the workspace's own key is never debited.
 - **Local edition** — never metered: the keys are the operator's own.
-- **Allowance** — a plan with ``metered: False`` (enterprise, contract-billed) runs
-  on the platform's keys without a credit check; its calls are still recorded.
+- **Allowance** — a plan with ``metered: False`` (enterprise, contract-billed), or a
+  workspace a free owner owns (``BILLING_FREE_OWNER_EMAILS``: the founder never pays),
+  runs on the platform's keys without a credit check; its calls are still recorded.
 - **Credits** — everything else on the platform's keys needs credits. Trial
   credits pay on any plan. Monthly and top-up credits pay only on a plan whose
   ``platform_ai`` is on: Own keys (the entry plan) has no platform lane once its
@@ -23,7 +24,9 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
+
+from sqlalchemy import text
 
 from services.credits.ledger import BUCKET_TRIAL, SPEND_ORDER, Balance, read_balance
 
@@ -103,12 +106,33 @@ def spend_buckets_for(plan: Optional[str], *, background: bool = False) -> tuple
     return buckets
 
 
-def funding_for(plan: Optional[str], balance: Balance, *, edition: str, background: bool = False) -> Funding:
-    """Pure: how platform-key calls for a workspace on ``plan`` are paid for."""
+def free_workspace_ids(db: Any, workspace_ids: Iterable[Any]) -> set:
+    """The workspaces among ``workspace_ids`` (as strings) that a free owner owns
+    (``BILLING_FREE_OWNER_EMAILS``). No query at all when nobody is free."""
+    from config import config
+
+    emails, ids = sorted(config.BILLING_FREE_OWNER_EMAILS), sorted({str(w) for w in workspace_ids if w})
+    if not emails or not ids:
+        return set()
+    rows = db.execute(text(
+        "SELECT w.id::text FROM workspaces w JOIN users u ON u.id = w.owner_id "
+        "WHERE w.id::text = ANY(:ids) AND lower(u.email) = ANY(:emails)"
+    ), {"ids": ids, "emails": emails}).fetchall()
+    return {row[0] for row in rows}
+
+
+def is_free_workspace(db: Any, workspace_id: Any) -> bool:
+    return str(workspace_id) in free_workspace_ids(db, [workspace_id])
+
+
+def funding_for(plan: Optional[str], balance: Balance, *, edition: str, background: bool = False,
+                free: bool = False) -> Funding:
+    """Pure: how platform-key calls for a workspace on ``plan`` are paid for.
+    ``free`` — a free owner's workspace — is an allowance whatever the plan."""
     if edition == "local":
         return Funding(FUNDED_BY_LOCAL)
     metered, platform_ai = _plan_facts(plan)
-    if not metered:
+    if free or not metered:
         return Funding(FUNDED_BY_ALLOWANCE)
     buckets = spend_buckets_for(plan, background=background)
     return Funding(FUNDED_BY_CREDITS, buckets, balance.spendable(buckets), own_keys_plan=not platform_ai)
@@ -123,7 +147,8 @@ def workspace_funding(db: Any, workspace_id: Any, *, background: bool = False) -
         return Funding(FUNDED_BY_LOCAL)
     workspace = db.query(Workspace).get(workspace_id)
     plan = getattr(workspace, "plan", None)
-    return funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION, background=background)
+    return funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION, background=background,
+                       free=is_free_workspace(db, workspace_id))
 
 
 def can_pay(funding: Funding, credits: int) -> bool:
