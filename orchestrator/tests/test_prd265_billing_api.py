@@ -151,7 +151,7 @@ def test_an_admin_grants_credits_with_a_reason(hosted, monkeypatch):
     db.commit.assert_called()
 
 
-def test_a_retried_request_with_its_id_changes_nothing_the_second_time(monkeypatch):
+def test_a_retried_request_with_its_id_changes_nothing_the_second_time(hosted, monkeypatch):
     ws = _workspace()
     client, written, _ = _admin(monkeypatch, ws, "super_admin")
     seen = set()
@@ -183,7 +183,7 @@ def test_a_non_admin_gets_403_and_nothing_is_written(hosted, monkeypatch):
     {"credits": 10, "reason": "ok", "bucket": "overhead"},
     {"credits": 10, "reason": "ok", "request_id": "bad id with spaces"},
 ])
-def test_a_zero_reasonless_or_odd_adjustment_is_refused(monkeypatch, body):
+def test_a_zero_reasonless_or_odd_adjustment_is_refused(hosted, monkeypatch, body):
     ws = _workspace()
     client, written, _ = _admin(monkeypatch, ws, "super_admin")
     assert client.post(f"/api/admin/workspaces/{ws.id}/credits", json=body).status_code == 422

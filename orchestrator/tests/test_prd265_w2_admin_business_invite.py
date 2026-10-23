@@ -42,7 +42,9 @@ def hosted(monkeypatch):
 def test_the_local_edition_has_no_business_offer(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     workspace = _workspace()
-    assert _post(_app(system_role="super_admin", workspace=workspace), workspace.id).status_code == 404
+    app, db = _app(system_role="super_admin", workspace=workspace)
+    assert _post(app, workspace.id).status_code == 404
+    db.commit.assert_not_called()
 
 
 def _workspace():
