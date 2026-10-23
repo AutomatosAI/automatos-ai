@@ -110,6 +110,8 @@ VERDICT_WORDS = {
     hv.Verdict.WATCH: "Watching",
     hv.Verdict.REGRESSION: "Regression",
 }
+NEEDS_ATTENTION_HEADING = "## Needs attention"
+OTHER_AGENTS_HEADING = "## Other agents"
 
 # ISO week -> agent id -> metric -> that metric's stored entry (its verdict and figures).
 History = Mapping[str, Mapping[str, Mapping[str, Mapping[str, Any]]]]
@@ -579,24 +581,42 @@ def _coverage_line(diagnosis: Mapping[str, Any]) -> str:
             f"agents ({coverage:.0%}).")
 
 
+def _by_severity(diagnosis: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """Every agent entry, the worst verdict first (REGRESSION, WATCH, steady, not enough data), then by name."""
+    return sorted(diagnosis[AGENTS_KEY].values(),
+                  key=lambda entry: (-_VERDICT_RANK[hv.Verdict(entry[VERDICT_KEY])], str(entry["agent_name"]).lower()))
+
+
 def report_lines(diagnosis: Mapping[str, Any]) -> List[str]:
-    """The audit report's verdict section: coverage first, then every agent with its n.
-    It never calls an agent it did not judge stable, and never says converged."""
+    """The audit report's head: the week, coverage, convergence and the counts, then every agent in WATCH or
+    REGRESSION with its n. Auto reads the report through the chat, which keeps only the first 2,000 tokens of a
+    tool's answer (consumers/chatbot/tool_cut.py), and its weekly review names the agent behind each WATCH and
+    REGRESSION, so they come first; report_tail_lines lists the rest. It never calls an agent it did not judge
+    stable, and never says converged."""
     counts = diagnosis["counts"]
     refs = diagnosis["ref_weeks"]
     reference = f"{refs[0]} to {refs[-1]}" if refs else "none"
-    agents = sorted(diagnosis[AGENTS_KEY].values(), key=lambda entry: str(entry["agent_name"]).lower())
-    return [
+    flagged = [entry for entry in _by_severity(diagnosis) if entry[VERDICT_KEY] in _FLAGGED_VALUES]
+    head = [
         f"**Week judged:** {diagnosis['window']} (reference weeks {reference}, less flagged and "
         "post-change weeks)",
         _coverage_line(diagnosis),
         f"**Convergence:** {diagnosis[CONVERGENCE_KEY]}",
         f"**Verdicts:** {counts['insufficient_data']} not enough data, {counts['watch']} watching, "
         f"{counts['regression']} regression, {counts['stable']} steady",
-        "",
-        "## Agents",
-        *[_agent_line(entry, diagnosis["min_samples"]) for entry in agents],
     ]
+    if not flagged:
+        return head
+    return [*head, "", NEEDS_ATTENTION_HEADING, *[_agent_line(entry, diagnosis["min_samples"]) for entry in flagged]]
+
+
+def report_tail_lines(diagnosis: Mapping[str, Any]) -> List[str]:
+    """The agents not in WATCH or REGRESSION, steady first and then not enough data, each with its n: the
+    audit report's last section, after everything that asks for action."""
+    rest = [entry for entry in _by_severity(diagnosis) if entry[VERDICT_KEY] not in _FLAGGED_VALUES]
+    if not rest:
+        return []
+    return [OTHER_AGENTS_HEADING, *[_agent_line(entry, diagnosis["min_samples"]) for entry in rest]]
 
 
 __all__ = [
@@ -610,7 +630,10 @@ __all__ = [
     "diagnose",
     "needs_attention",
     "reference_weeks",
+    "NEEDS_ATTENTION_HEADING",
+    "OTHER_AGENTS_HEADING",
     "report_lines",
+    "report_tail_lines",
     "settings_from_config",
     "status_fields",
     "stored_verdicts",

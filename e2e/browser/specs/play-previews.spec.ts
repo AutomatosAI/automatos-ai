@@ -16,15 +16,19 @@ import { watchPage } from '../support/watch'
 // e2e/browser/previews/. The workflow uploads that folder as `play-previews`; the owner picks from it
 // and the kit commits the picks (C-06q2). Nothing here is committed or changes Play's bytes.
 //
-// Each shot is 1280x800 at device scale 1, one image pixel per CSS pixel (scale: 'css'), and is held
+// Each shot is 1440x900 at device scale 1, one image pixel per CSS pixel (scale: 'css'), and is held
 // to what core's package reader and listing take: a PNG of at most 512 KB (package.py
 // IMAGE_MAX_BYTES), a name that fits the manifest's previews pattern (manifest.py PREVIEW_PATTERN)
 // and belongs to its preset by the listing's longest-match rule (listings.py _owner_preset).
 //
 // Deterministic: reduced motion (Auto is his still, never a clip frame), his still loaded and him at
 // rest (the first open's hello is over and the message box Play focuses is left), the fonts loaded,
-// the look's variables on <html>, animations off and two shots in a row equal. The conversations list and the shelf answer with none, so only
-// the lane's own member and workspace show.
+// the look's variables on <html>, animations off and two shots in a row equal. The conversations list answers with none, so only
+// the lane's own member and workspace show; the shelf answers with one page of made-up Deliverables
+// (SHELF_ITEMS), so its shot shows cards. The lane has no LLM key, so the host's local-edition key
+// nudge is dismissed before the first load, as a member dismisses it, and every chat shot is held to
+// showing none. Play's empty chat scrolls on a short window (the kit's chat/composer.module.css,
+// P260-FX-14), so every chat shot is also held to showing the whole message box.
 //
 // Chromium only. The specs store the member's choice and Play's looks on the lane's one backend, so
 // they run in the @package step, one test at a time; each starts and ends on Studio, with no install
@@ -33,7 +37,8 @@ import { watchPage } from '../support/watch'
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const ONLY_BROWSER = 'chromium'
 const PREVIEW_DIR = path.resolve(__dirname, '..', 'previews')
-const VIEWPORT = { width: 1280, height: 800 }
+/** 16:10, tall enough that every preset's empty chat fits with its message box (800 px high cut it off under three). */
+const VIEWPORT = { width: 1440, height: 900 }
 const DEVICE_SCALE = 1
 /** Play 1.1.0's presets (the kit's themes/play/src/lib/looks/presets.ts); the boot must carry exactly these. */
 const PRESET_IDS = ['ember', 'obsidian', 'aurora', 'workshop', 'daylight'] as const
@@ -91,15 +96,29 @@ const HERO = 'Say hello'
 const AT_REST = 'Ready when you are'
 /** Auto while the message box has focus (lib/mascot/media.ts CAPTIONS.listening; reducer.ts input-focus). */
 const LISTENING = 'Listening'
-// The shelf (the kit's deliverables/play-shelf.tsx, shelf-body.tsx and lib/play/shelf.ts emptyMessage).
+/** The message box's form (the kit's chat/message-box.tsx): its field and Send, the box a member sees. */
+const COMPOSER_FORM = 'form'
+// The shelf (the kit's deliverables/play-shelf.tsx, shelf-body.tsx and shelf-card.tsx).
 const SHELF_TITLE = 'Your shelf'
-const EMPTY_SHELF = 'Nothing on your shelf yet. Ask Auto for a report or a document and it lands here.'
-const START_A_CHAT = 'Start a chat'
-/** GET /api/deliverables (hooks/use-deliverables-api.ts fetchListPage), answered with an empty page of PAGE_SIZE. */
+/** shelf-body.tsx DELIVERABLES_LIST_LABEL: the card grid's name. */
+const SHELF_LIST = 'Deliverables'
+/** GET /api/deliverables (hooks/use-deliverables-api.ts fetchListPage), answered with one page of PAGE_SIZE. */
 const DELIVERABLES_LIST_PATH = '/api/deliverables'
 const SHELF_PAGE_SIZE = 24
-const EMPTY_SHELF_PAGE = { success: true, deliverables: [], total: 0, limit: SHELF_PAGE_SIZE, offset: 0 }
 const OK = 200
+const DAY_MS = 24 * 60 * 60 * 1000
+/** The made-up Deliverables are dated back from the run, so the cards read Today, Yesterday and weekdays. */
+const SHELF_NOW = Date.now()
+/** Their ids (the core's Deliverable id pattern) are this and a two-digit number; their workspace is a made-up one. */
+const FAKE_ID_PREFIX = '00000000-0000-4000-8000-0000000c06'
+const FAKE_WORKSPACE_ID = '00000000-0000-4000-8000-0000000c0600'
+const FAKE_FILE_DIR = 'outputs/'
+// The host's local-edition key nudge over the chat (core's components/local/first-run-nudge.tsx): it
+// stays hidden once dismissed, which it remembers in localStorage under FIRST_RUN_NUDGE_STORAGE_KEY
+// as '1' and reads after mount. The e2e package does not import the frontend, so the key is copied.
+const NUDGE_DISMISSED = { key: 'automatos:local-first-run-nudge:dismissed', value: '1' }
+/** first-run-nudge.tsx FIRST_RUN_NUDGE_MESSAGE: the nudge's words, never in a chat shot. */
+const NUDGE_MESSAGE = 'Add an LLM key to bring Auto to life'
 
 type Vars = Readonly<Record<string, string>>
 type VarTable = Readonly<Record<string, Readonly<Record<string, Vars>>>>
@@ -135,11 +154,63 @@ interface Screen {
   readonly path: string
   /** Waits until the screen shows what its shot is of, under `look`. */
   ready(page: Page, look: BootLook): Promise<void>
+  /** Holds the settled frame to what a listing may show, right before it is shot. */
+  framed?(page: Page): Promise<void>
 }
 
+/** A made-up Deliverable for the shelf's shot: friendly and generic, after the chat's example chips. */
+interface ShelfItem {
+  readonly title: string
+  /** Its artifact_type, one the shelf's chips filter on (the kit's lib/play/shelf.ts CHIP_TYPES). */
+  readonly kind: string
+  readonly file: string
+  readonly daysAgo: number
+}
+
+/** Newest first, as the list answers. None has a picture URL, so no card fetches a file (shelf-card.tsx pictureUrl). */
+const SHELF_ITEMS: readonly ShelfItem[] = [
+  { title: 'Revision week plan', kind: 'report', file: 'revision-week-plan.md', daysAgo: 0 },
+  { title: 'Bake sale captions', kind: 'document', file: 'bake-sale-captions.docx', daysAgo: 1 },
+  { title: 'Lisbon weekend budget', kind: 'spreadsheet', file: 'lisbon-weekend-budget.xlsx', daysAgo: 2 },
+  { title: 'Laptop shortlist', kind: 'slide', file: 'laptop-shortlist.pptx', daysAgo: 4 },
+  { title: 'Bake sale poster', kind: 'image', file: 'bake-sale-poster.png', daysAgo: 6 },
+]
+
+/** One list row as the shelf reads it (hooks/use-deliverables-api.ts Deliverable; deliverable_service.py _row_to_dict). */
+function fakeDeliverable(item: ShelfItem, index: number): Readonly<Record<string, unknown>> {
+  const made = new Date(SHELF_NOW - item.daysAgo * DAY_MS).toISOString()
+  return {
+    id: `${FAKE_ID_PREFIX}${String(index + 1).padStart(2, '0')}`,
+    workspace_id: FAKE_WORKSPACE_ID,
+    source_type: 'chat',
+    source_id: null,
+    agent_id: null,
+    agent_name: null,
+    artifact_type: item.kind,
+    title: item.title,
+    summary: null,
+    storage_type: 'workspace',
+    file_path: `${FAKE_FILE_DIR}${item.file}`,
+    file_name: item.file,
+    file_type: path.extname(item.file).slice(1),
+    file_size_bytes: null,
+    preview_url: null,
+    preview_type: null,
+    thumbnail_url: null,
+    extra: {},
+    tags: [],
+    status: 'ready',
+    created_at: made,
+    updated_at: made,
+  }
+}
+
+/** The list's one page (hooks/use-deliverables-api.ts DeliverableListResponse): every item, so no Load more. */
+const SHELF_PAGE = { success: true, deliverables: SHELF_ITEMS.map(fakeDeliverable), total: SHELF_ITEMS.length, limit: SHELF_PAGE_SIZE, offset: 0 }
+
 const SCREENS: Readonly<Record<ScreenId, Screen>> = {
-  chat: { path: '/chat', ready: chatAtRest },
-  deliverables: { path: '/deliverables', ready: emptyShelf },
+  chat: { path: '/chat', ready: chatAtRest, framed: chatFramed },
+  deliverables: { path: '/deliverables', ready: shelfOfCards },
   looks: { path: '/looks', ready: looksChosen },
 }
 
@@ -261,10 +332,28 @@ async function chatAtRest(page: Page): Promise<void> {
   await expect(hero.getByRole('img', { name: AT_REST, exact: true }), 'the box left, Auto rests').toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
-async function emptyShelf(page: Page): Promise<void> {
+/** The whole message box is inside the viewport: a preset whose empty chat runs past the fold fails here. */
+async function expectComposerInView(page: Page): Promise<void> {
+  const found = await page.locator(COMPOSER_FORM).filter({ has: messageBox(page) }).boundingBox()
+  expect(found, 'the message box is laid out').not.toBeNull()
+  const box = found as NonNullable<typeof found>
+  expect(box.y, 'the message box starts inside the viewport').toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height, `the message box ends inside the ${VIEWPORT.height} px viewport`).toBeLessThanOrEqual(VIEWPORT.height)
+}
+
+/** The chat as a listing shows it: Play alone, with no host nudge over it (openMakeItYours dismissed it), and the whole message box. */
+async function chatFramed(page: Page): Promise<void> {
+  await expect(page.getByText(NUDGE_MESSAGE), "the host's key nudge stays dismissed").toHaveCount(0)
+  await expectComposerInView(page)
+}
+
+/** The shelf with a card for each made-up Deliverable, none reaching for a picture, and Auto in its header. */
+async function shelfOfCards(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: SHELF_TITLE, level: 1, exact: true })).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
-  await expect(page.getByText(EMPTY_SHELF, { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: START_A_CHAT, exact: true })).toBeEnabled()
+  const cards = page.getByRole('list', { name: SHELF_LIST, exact: true }).getByRole('listitem')
+  await expect(cards, 'every Deliverable the list answers is a card').toHaveCount(SHELF_ITEMS.length, { timeout: THEME_LOAD_TIMEOUT_MS })
+  for (const item of SHELF_ITEMS) await expect(cards.getByRole('heading', { name: item.title, level: 2, exact: true })).toBeVisible()
+  await expect(cards.locator('img'), 'no card shows a picture the stub does not serve').toHaveCount(0)
   await expect(page.locator(AUTO_STAGE).first()).toBeVisible()
 }
 
@@ -314,16 +403,21 @@ async function shoot(page: Page, boot: PageBoot, look: BootLook, shot: Shot): Pr
   await screen.ready(page, look)
   await expectPainted(page, boot, look)
   await expectSettled(page)
+  await screen.framed?.(page)
   fs.writeFileSync(file, await stableShot(page))
   checkPreview(shot, boot.looks.presets.map((preset) => preset.id))
 }
 
-/** Installs and chooses Play's package and opens Make it yours; the conversations and the shelf answer with none. */
+/**
+ * Installs and chooses Play's package and opens Make it yours; the conversations answer with none and
+ * the shelf with SHELF_PAGE, and the host's key nudge is dismissed before the first load.
+ */
 async function openMakeItYours(page: Page, request: APIRequestContext): Promise<PageBoot> {
   const install = await installKitPackage(request)
   await chooseKitPackage(page, install, APP_URL)
+  await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), NUDGE_DISMISSED)
   await noStoredConversations(page)
-  await page.route((url) => url.pathname === DELIVERABLES_LIST_PATH, (route) => fulfillBackendJson(route, OK, EMPTY_SHELF_PAGE))
+  await page.route((url) => url.pathname === DELIVERABLES_LIST_PATH, (route) => fulfillBackendJson(route, OK, SHELF_PAGE))
   await page.goto(SCREENS.looks.path)
   await expectInstalledPlay(page)
   const boot = await readBoot(page)

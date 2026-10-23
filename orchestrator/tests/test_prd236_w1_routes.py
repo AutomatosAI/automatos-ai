@@ -323,7 +323,15 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     merged = (versions / "prd266_merge_heads.py").read_text()
     assert 'down_revision = (' in merged
     assert '"prd265_credit_ledger"' in merged and '"prd266_mobile_devices"' in merged
-    assert 'EXPECTED_HEAD = "prd266_merge_heads"' in guard
+    # 2026-10-23 (PRD-265 W2): prd265_billing chains onto the merge — billing_accounts and
+    # billing_events (new tables only); the guard follows it.
+    billing = (versions / "prd265_billing.py").read_text()
+    assert 'down_revision = "prd266_merge_heads"' in billing
+    # 2026-10-23 (PRD-265 W2, payments in Studio): prd265_billing_in_studio chains onto it —
+    # four nullable billing_accounts columns, added by ALTER (prd265_billing had already run).
+    in_studio = (versions / "prd265_billing_in_studio.py").read_text()
+    assert 'down_revision = "prd265_billing"' in in_studio
+    assert 'EXPECTED_HEAD = "prd265_billing_in_studio"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

@@ -30,10 +30,10 @@ import { apiClient } from '@/lib/api-client'
 import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
 import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 import { formatAbsoluteDate as formatDate, formatRelative } from '@/lib/format-relative'
-import {
-  WorkspacePlanSelect,
-  type PlanTier,
-} from '@/components/admin/workspace-plan-select'
+import { type PlanTier } from '@/components/admin/workspace-plan-select'
+// PRD-265 US-007: the plan column is the plan dropdown plus the "Business checkout link"
+// action. It keeps the dropdown's name here, so the console body below is unchanged.
+import { WorkspacePlanCell as WorkspacePlanSelect } from '@/components/admin/workspace-plan-cell'
 
 // ===================================================================
 // Types

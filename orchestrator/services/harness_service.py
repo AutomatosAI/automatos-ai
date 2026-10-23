@@ -579,10 +579,12 @@ class HarnessService:
         diagnosis: Dict[str, Any],
         prescriptions: List[Dict[str, Any]],
     ) -> str:
-        """Build the human-readable audit report: coverage and every agent's verdict
-        with its n first (services.harness_diagnose.report_lines), how each applied change
-        is doing (US-056), then the issues and the changes HARNESS suggests, each a report
-        line and nothing more (PRD-263 US-016). It never calls an unjudged agent stable (FR-7)."""
+        """Build the human-readable audit report, what asks for action first: coverage, the
+        counts and every agent in WATCH or REGRESSION (services.harness_diagnose.report_lines),
+        how each applied change is doing (US-056), the issues and the changes HARNESS suggests,
+        each a report line and nothing more (PRD-263 US-016), and last the other agents
+        (report_tail_lines). Auto reads it through the chat's 2,000-token cut of a tool's answer.
+        It never calls an unjudged agent stable (FR-7)."""
         from services import harness_diagnose, harness_post_change
 
         lines = [
@@ -611,6 +613,7 @@ class HarnessService:
                 )
             lines.append("")
 
+        lines.extend(harness_diagnose.report_tail_lines(diagnosis))
         return "\n".join(lines)
 
 

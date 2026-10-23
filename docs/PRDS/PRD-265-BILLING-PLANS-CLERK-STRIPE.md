@@ -3,10 +3,30 @@
 **Status:** Draft for Gerard, 20 Oct 2026. · **Owner:** Gerard · **Written:** 20 Oct 2026, grounded on `origin/main` that day.
 
 **Decisions taken (Gerard, 20 Oct 2026):**
-- **P1, stack:** Clerk for sign-in and entitlements, Stripe for billing. Stripe runs the subscriptions, credit top-ups, Checkout (3-D Secure), the customer portal and Stripe Tax for VAT. **Clerk Billing is not used:** it has no 3-D Secure, no VAT and no one-off purchases.
+- **P1, stack:** Clerk for sign-in and entitlements, Stripe for billing. Stripe runs the subscriptions, credit top-ups, payments (3-D Secure) and Stripe Tax for VAT; since P5 (23 Oct) every payment surface is inside Studio, with no hosted Checkout or portal. **Clerk Billing is not used:** it has no 3-D Secure, no VAT and no one-off purchases.
 - **P2, pricing unit — REVISED 20 Oct 2026 (Gerard): metered, like OpenRouter.** Every platform-funded model call costs its real cost in cents × one markup (`CREDITS_MARKUP`, default 1.2×). The earlier fixed credits per *ask* by band (Rikki's proposal) is dropped: a fixed charge could not price a $0.50 report and a $10 app build alike.
 - **P3, timing:** the beta opens Tue 3 Nov on the trial plus customers' own keys, with nothing charged. **Paid plans open Mon 9 Nov 2026**, before Web Summit (10–12 Nov).
 - **P4, legal entity:** left open. It gates the Stripe account and the VAT registrations (§9).
+- **P5, payments inside Studio (Gerard, 23 Oct 2026):** "If I ever see a site … that has to go off to Stripe to collect a payment and back again I am running a mile." No hosted Checkout page, no Customer Portal, no emailed Stripe link. The card form is part of Settings → Billing, in our theme: Stripe's secure card fields sit inside our form. Card change, invoices (PDFs served by us), cancel/resume and plan changes are in the same tab. A bank's 3-D Secure check may appear over the page.
+- **P1 re-confirmed 23 Oct 2026 (Gerard):** "we go it alone with Stripe." Clerk's billing docs, re-read that day, still say no 3-D Secure ("payments that require a 3DS challenge will fail"), no tax or VAT, USD only, no refunds.
+
+**W2 build choices (23 Oct 2026):**
+- **Stripe client:** a thin client on `httpx`, which is already a dependency (`services/billing/stripe_api.py`). No new Python package, so the hash-locked `requirements.lock` is unchanged.
+- **API version `2026-09-30.endive`**, on the same release train as the frontend's `@stripe/stripe-js@10` / `@stripe/react-stripe-js@7`: Stripe keys each Stripe.js major to one train.
+  - Checked against Stripe's changelog on 23 Oct: no change between basil and endive touches a field or event our webhook readers use, and they also accept the older shapes.
+  - Subscriptions use the classic billing mode, so prorations read as before.
+- **In-page checkout:** a Checkout Session with `ui_mode=elements`; its client secret mounts the card form in our tab, which confirms with `redirect: 'if_required'`.
+  - VAT numbers go through `updateTaxIdInfo` from our own field.
+  - The consent box is ours too, and the acceptance time is stamped on the session (`metadata.terms_accepted_at`).
+- **New frontend dependency:** Stripe.js (the two packages above). PCI rules require it for card fields on our own page.
+- **CSP:** adds Stripe's documented sources: `js.stripe.com` (scripts and frames), `hooks.stripe.com` (3-D Secure), `api.stripe.com` (connect), and Link.
+- **Before `BILLING_OPEN`:** only platform admins can check out, so test mode and the live card tests (US-012) run before 9 Nov while customers still see the beta block.
+- **Top-ups** are sold only on a live Pro or Business subscription. On Own keys, top-up credits can't pay for platform AI.
+- **Plan changes** for an existing subscriber happen in our tab.
+  - The prorated price is shown first. An upgrade moves at once (`pending_if_incomplete`), and if the bank wants 3-D Secure, the tab finishes it with the payment's client secret.
+  - A downgrade waits for the period end through a subscription schedule, and "Keep my plan" undoes it. An upgrade grants the difference in monthly credits, prorated by the share of the period left, just as Stripe prorates the price, so an upgrade on the last day can't buy a whole month of credits for a day's difference.
+- **A subscription that ends** (cancelled, or unpaid after Stripe's retries) puts the workspace back on `basic` (Own keys) and expires the month, so platform AI pauses.
+- **Business by invite** is an in-app offer. A platform admin offers it to one workspace for `BUSINESS_OFFER_DAYS` (14). Its owner gets a notification and buys it on their own Billing tab. No link leaves Studio.
 
 **Source:**
 - `<workspace>/reports/Automatos billing options.md`: billing research of 19 Oct, with vendor and code claims re-verified.
@@ -19,7 +39,7 @@
 - plan tiers in code;
 - a credit ledger and the gate in front of the platform's AI keys;
 - the leak fixes that must land before any money is taken;
-- Stripe checkout, webhooks, portal and tax;
+- Stripe checkout (in-page), in-app subscription management, webhooks and tax;
 - the in-app billing surfaces;
 - the Clerk production cutover as a dependency;
 - go-live tests.
@@ -200,19 +220,21 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 
 ### W2: Stripe
 
+Built 23 Oct 2026 on `feat/prd-265-w2`. Code: `services/billing/` (provider interface, the Stripe adapter, the event translator, grants, checkout), `api/billing.py`, `api/billing_webhooks.py`, `services/credits/expiry.py` (an hourly sweep), and migration `prd265_billing`. The Billing tab is under `frontend/components/settings/billing/`. Setup: `scripts/stripe_setup.py` and the runbook `docs/runbooks/stripe-billing.md`.
+
 #### US-009: Stripe adapter and Checkout
 **Description:** As a workspace owner, I can buy a plan or a top-up with a card that needs 3-D Secure.
 
 **Acceptance Criteria:**
-- [ ] `services/billing/` defines a provider interface (`create_checkout`, `portal_link`, `parse_webhook`), with a Stripe implementation. A merchant of record can be added later without touching the ledger.
+- [ ] `services/billing/` defines a provider interface (`create_checkout`, `parse_webhook`, and the in-app management calls that replaced `portal_link` under P5), with a Stripe implementation. A merchant of record can be added later without touching the ledger.
 - [ ] Checkout Sessions:
   - `mode=subscription` for Own keys and Pro; Business only through the admin link.
   - `mode=payment` for top-ups.
   - `automatic_tax` on, `tax_id_collection` on, `client_reference_id = workspace_id`.
   - The EU withdrawal-consent text for consumers buying credits (wording from counsel, D-4).
 - [ ] Stripe keys, Price IDs and the webhook secret come from the environment only; none in code.
-- [ ] `POST /api/v1/billing/checkout` (owner/admin) and `POST /api/v1/billing/portal` (owner/admin).
-- [ ] The CSP adds `js.stripe.com`, `checkout.stripe.com` and `billing.stripe.com` where needed.
+- [ ] `POST /api/v1/billing/checkout` (owner/admin) returns an in-page session; P5 replaced the portal with in-app routes for the card, invoices, cancel/resume and plan change.
+- [ ] The CSP adds Stripe.js's documented sources (`js.stripe.com`, `hooks.stripe.com`, `api.stripe.com`, Link). There are no `checkout.stripe.com` or `billing.stripe.com` pages, because nothing redirects.
 
 #### US-010: Webhooks keep plan and credits in step
 **Description:** As Automatos, I need Stripe events to change plans and credits exactly once.
@@ -230,7 +252,7 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 **Description:** As an owner, I can see my plan, invoices and balance and manage payment.
 
 **Acceptance Criteria:**
-- [ ] A Settings → Billing tab shows the plan, renewal date, balance, a ledger, "Change plan", "Top up" and "Manage payment" (portal).
+- [ ] A Settings → Billing tab shows the plan, renewal date, balance, a ledger, "Change plan", "Top up" and, in place of the portal, the card on file, invoices and cancel/resume (P5).
 - [ ] The in-app upgrade page uses the facts sheet §4 block.
 - [ ] The Studio site pricing section switches to the paid block on the opening deploy (G6).
 - [ ] Verify in the browser on staging.

@@ -124,7 +124,11 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto clerk_user_relinks_20261019
 # — credit_ledger + credit_balances (new tables), llm_usage.ask_id (a nullable column and a
 # concurrent partial index), and the dollar trials converted into credit grants.
-EXPECTED_HEAD = "prd266_merge_heads"
+# 2026-10-23 (PRD-265 W2): prd265_billing chains onto prd266_merge_heads — billing_accounts
+# and billing_events (new tables only).
+# 2026-10-23 (PRD-265 W2, payments in Studio): prd265_billing_in_studio chains onto it —
+# four nullable billing_accounts columns (a scheduled downgrade, a Business offer).
+EXPECTED_HEAD = "prd265_billing_in_studio"
 
 
 def _literal(node: ast.AST):
