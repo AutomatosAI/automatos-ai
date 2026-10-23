@@ -12,7 +12,6 @@ import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
-import { ThemeSlotScope } from '@/components/theme-host/theme-slot-registrations'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
 
@@ -246,11 +245,11 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   )
 
   // PRD-260 D7, PRD-261 A-04b: under a theme, from its entry's minWidth up, the theme's frame
-  // (frame@1) draws through ThemeFrameSlot, a builtin theme's handed to it by ThemeSlotScope and an
-  // installed theme's by the theme host; below it, the fallback chrome as for Studio. Under a theme
-  // while the width isn't known (the server, hydration), nothing: a page mounted in one chrome and
-  // again in the other runs its effects twice (P260-FX-25, M69). ThemeFrameSlot draws nothing
-  // while the host loads an installed theme, for the same reason.
+  // (frame@1) draws through ThemeFrameSlot, handed to it by the theme host; below it, the fallback
+  // chrome as for Studio. Under a theme while the width isn't known (the server, hydration),
+  // nothing: a page mounted in one chrome and again in the other runs its effects twice
+  // (P260-FX-25, M69). ThemeFrameSlot draws nothing while the host loads an installed theme, for
+  // the same reason.
   if (themeLayout === 'pending') return null
 
   const studioDesktop = isStudio && !isMobileLayout
@@ -264,10 +263,8 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   if (themeLayout !== 'theme' && !studioDesktop) return chrome
 
   return (
-    <ThemeSlotScope>
-      <ThemeFrameSlot fallback={chrome} fullBleed={fullBleed} autoWidget={autoWidget}>
-        {children}
-      </ThemeFrameSlot>
-    </ThemeSlotScope>
+    <ThemeFrameSlot fallback={chrome} fullBleed={fullBleed} autoWidget={autoWidget}>
+      {children}
+    </ThemeFrameSlot>
   )
 }

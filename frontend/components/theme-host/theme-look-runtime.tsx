@@ -14,34 +14,28 @@
  * Classic, Studio and a theme without looks get no look runtime: no scope, no storage read, no look
  * on <html>, nothing for the SDK. The runtime's components stay mounted either way and are only
  * switched off (`enabled`), so the tree above the page has one shape: a style switched in place
- * (Studio and builtin Play, or the server's stored choice) never remounts the page below (M69).
- * Leaving a theme with looks switches it off: the look comes off <html>, and the host gives the tone
- * back to the user and deletes the forced tone's cookie.
+ * (Classic and Studio, or the server's stored choice) never remounts the page below (M69).
+ * Leaving a theme with looks switches it off: the look comes off <html>, the runtime deletes its
+ * tone cookie, and the host gives the tone back to the user.
  *
- * PRD-261 A-19d2 — two runtimes, file-disjoint, until W-A8 deletes builtin Play:
- * - builtin Play keeps its own (lib/theme-host/builtin/play-look-{provider,store,bridge}, Play's
- *   look engine and its `data-pl-motion` and `automatos-play-tone` marks), unchanged;
- * - an installed theme with looks runs on the generic one (lib/theme-host/looks/provider.tsx): its
- *   looks come from its own boot data (the prepaint table, the guard and the presets), it paints
- *   `data-theme-motion` and `--theme-motion`, and its look's tone follows the table's tone rule into
- *   `automatos-theme-tone` and forcedTheme. Play's package is such a theme: it no longer gets the
- *   builtin runtime because its <html> class is Play's.
+ * PRD-261 A-19d2, A-19f1 — one runtime, the generic one (lib/theme-host/looks/provider.tsx), for
+ * every installed theme with looks: its looks come from its own boot data (the prepaint table, the
+ * guard and the presets), it paints `data-theme-motion` and `--theme-motion`, and its look's tone
+ * follows the table's tone rule into `automatos-theme-tone` and forcedTheme. Play's package is such
+ * a theme; builtin Play and its own runtime left core (A-19f1).
  * While the host loads or runs an installed theme, a runtime that paints no look leaves <html> as the
  * root layout's boot painted it (W-A6: the theme's prepaint table), so the theme keeps its first
  * paint after hydration. A failed load, safe mode and every other style clear as before: the runtime
  * stops for an installed theme the moment the host stops running it, without waiting for the host to
- * release its entry. The SDK's `looks` area reads whichever runtime runs (the generic bridge hands on
- * builtin Play's while it is off).
+ * release its entry. The SDK's `looks` area reads the runtime while it runs.
  *
  * PB-8a (the W-E3 seam review): the host's one workspace retry (./use-workspace-retry.ts) is called
- * here, whenever the host runs an installed theme or a builtin theme with looks is the style.
+ * here, whenever the host runs an installed theme.
  */
 import { useEffect, type ReactNode } from 'react'
 
 import { useActiveTheme } from '@/hooks/use-studio-theme'
 import type { ThemeTone } from '@/lib/theme-host/boot'
-import { LookProvider } from '@/lib/theme-host/builtin/play-look-provider'
-import { clearPlayToneCookie } from '@/lib/theme-host/builtin/play-tone-cookie'
 import { ThemeLookProvider } from '@/lib/theme-host/looks/provider'
 import type { SlotId, ThemeEntry, ThemeTonePolicy } from '@/lib/theme-host/registry-types'
 import { THEME_HOST_RUNNING_STATUSES } from '@/lib/theme-host/types'
@@ -55,7 +49,7 @@ import { useHostWorkspaceRetry } from './use-workspace-retry'
 /** The slot a theme with looks fills (PA-14: every installable theme ships one). */
 const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
 
-/** No installed theme with looks is the style: the user sets the tone. */
+/** No theme with looks is the style: the user sets the tone. */
 const USER_TONE: ThemeTonePolicy = 'user'
 
 export interface ThemeLookRuntimeProps {
@@ -69,18 +63,19 @@ export function declaresLooks(theme: ThemeEntry | null): boolean {
   return theme !== null && theme.slots.includes(LOOK_EDITOR_SLOT)
 }
 
-/** With no look runtime mounted, nothing forces the tone: the user's own returns, and the cookie goes. */
+/**
+ * With no look runtime mounted, nothing forces the tone: the user's own returns. The runtime,
+ * switched off, deletes its own tone cookie (lib/theme-host/looks/provider.tsx).
+ */
 function useToneReleased(mounted: boolean, onToneChange: (tone: ThemeTone | undefined) => void): void {
   useEffect(() => {
-    if (mounted) return
-    clearPlayToneCookie()
-    onToneChange(undefined)
+    if (!mounted) onToneChange(undefined)
   }, [mounted, onToneChange])
 }
 
 /**
  * Whether the host loads or runs an installed theme. A look runtime that paints no look then leaves
- * <html> as the root layout's first paint (it is off under Classic, Studio and builtin Play).
+ * <html> as the root layout's first paint (it is off under Classic and Studio).
  */
 function useHostRunsTheme(): boolean {
   const status = useThemeHost()?.status ?? null
@@ -88,25 +83,12 @@ function useHostRunsTheme(): boolean {
 }
 
 /**
- * Whether the active theme gets a look runtime: it declares looks and, for an installed one, the
- * host still loads or runs it. The host's release reaches the style context one commit after it
- * enters safe mode or fails, and the runtime must not repaint the look the host just took off.
+ * Whether the active theme gets a look runtime: it declares looks and the host still loads or runs
+ * it. The host's release reaches the style context one commit after it enters safe mode or fails,
+ * and the runtime must not repaint the look the host just took off.
  */
 function runsLooks(theme: ThemeEntry | null, hostRunsTheme: boolean): boolean {
-  return declaresLooks(theme) && (theme?.kind !== 'installed' || hostRunsTheme)
-}
-
-/** Which runtime a theme with looks gets: builtin Play's own until W-A8, or the generic one for an installed theme. */
-interface LookRuntimes {
-  /** A builtin theme with looks is the style: builtin Play's runtime runs. */
-  readonly builtin: boolean
-  /** The installed theme with looks that is the style, whose looks the generic runtime runs; null otherwise. */
-  readonly installed: ThemeEntry | null
-}
-
-function lookRuntimesOf(theme: ThemeEntry | null): LookRuntimes {
-  if (theme === null || !declaresLooks(theme)) return { builtin: false, installed: null }
-  return theme.kind === 'installed' ? { builtin: false, installed: theme } : { builtin: true, installed: null }
+  return declaresLooks(theme) && hostRunsTheme
 }
 
 interface InstalledLooksProps {
@@ -140,17 +122,14 @@ export function ThemeLookRuntime({ children, onToneChange }: ThemeLookRuntimePro
   const keepFirstPaint = useHostRunsTheme()
   const theme = useActiveTheme()
   const mounted = runsLooks(theme, keepFirstPaint)
-  const { builtin, installed } = lookRuntimesOf(theme)
   useToneReleased(mounted, onToneChange)
-  useHostWorkspaceRetry(keepFirstPaint || builtin)
+  useHostWorkspaceRetry(keepFirstPaint)
   // One shape for every style: a different tree here would remount every page (M69).
   return (
     <AccountLookScope enabled={mounted}>
-      <LookProvider onToneChange={builtin ? onToneChange : undefined} enabled={builtin} keepFirstPaint={keepFirstPaint}>
-        <InstalledLooks theme={installed} enabled={mounted} keepFirstPaint={keepFirstPaint} onToneChange={onToneChange}>
-          <ThemeStateScope>{children}</ThemeStateScope>
-        </InstalledLooks>
-      </LookProvider>
+      <InstalledLooks theme={declaresLooks(theme) ? theme : null} enabled={mounted} keepFirstPaint={keepFirstPaint} onToneChange={onToneChange}>
+        <ThemeStateScope>{children}</ThemeStateScope>
+      </InstalledLooks>
     </AccountLookScope>
   )
 }
