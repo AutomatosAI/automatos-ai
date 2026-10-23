@@ -1096,7 +1096,7 @@ export interface ThemeListingInstall {
 
 /** One card of the Themes tab: GET /api/marketplace/themes (listings.py listing_summary). */
 export interface ThemeListing {
-  /** The theme id with its `/` written as `.` (`automatos/play` is `automatos.play`). */
+  /** The theme id with its `/` written as `.` (`acme/ink` is `acme.ink`). */
   listingId: string; themeId: string; name: string | null; description: string | null
   publisher: ThemeListingPublisher; version: string; packageId: string
   /** The shown version's signature check (listings.py listing_summary). */

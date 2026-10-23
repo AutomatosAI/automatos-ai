@@ -247,7 +247,7 @@ def test_a_member_whose_install_is_in_the_non_default_workspace_gets_files_and_b
     assert boot.status_code == 200
     body = boot.json()
     assert body["addClasses"] == ["studio", "hello"]
-    assert body["removeClasses"] == ["play"]
+    assert body["removeClasses"] == []  # A-20: no theme's class is the host's to take off
     assert body["tone"] == {"policy": "user", "value": None}
     assert body["prepaint"] == PREPAINT
     assert boot.headers["cache-control"] == "private, no-store"
@@ -279,7 +279,7 @@ def test_a_member_who_has_not_opted_in_gets_404_for_files_and_the_base_boot(worl
     boot = _boot(world, _person("alice"), install.id)
     assert boot.status_code == 200
     assert boot.json() == {
-        "addClasses": ["studio"], "removeClasses": ["hello", "play"], "tone": {"policy": "user", "value": None},
+        "addClasses": ["studio"], "removeClasses": ["hello"], "tone": {"policy": "user", "value": None},
         "prepaint": None, "lookStorage": None, "lookGuard": None, "looks": None, "integrity": None, "entry": None,
     }
 
@@ -334,6 +334,17 @@ def test_a_schema_with_an_interface_guards_the_stored_look_by_its_header():
     assert looks["lookStorage"] == serve.look_storage("automatos/play")
     boot = serve.theme_boot(ThemePackage(manifest={"id": "automatos/play", "htmlClass": "play"}, file_manifest={}), None, looks)
     assert (boot["lookStorage"], boot["lookGuard"]) == (looks["lookStorage"], looks["lookGuard"])
+
+
+@pytest.mark.parametrize("theme_id", ["automatos/play", "acme/ink"])
+def test_htmlclass_play_is_any_themes_own_class_in_its_boot(theme_id):
+    # A-20 (QB-11): the boot holds 'play' like any theme's class, for any id, and the host keeps only Studio's.
+    manifest = {"id": theme_id, "htmlClass": "play"}
+    assert serve.STYLE_HTML_CLASSES == ("studio",)
+    running = serve.theme_boot(ThemePackage(manifest=manifest, file_manifest={}), None)
+    base = serve.base_boot(manifest)
+    assert (running["addClasses"], running["removeClasses"]) == (["studio", "play"], [])
+    assert (base["addClasses"], base["removeClasses"]) == (["studio"], ["play"])
 
 
 def test_a_look_schema_that_cant_be_read_or_fails_its_check_gives_no_look_keys(caplog):

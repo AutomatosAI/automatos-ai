@@ -16,6 +16,9 @@
  * PRD-261 M-01 (host 1.1.0): the manifests section carries theme.json's mobile block, and the
  * block's lists (the token list, the font roles, the mascot modes, the contrast pairs and their AA
  * minimums, the lowest host) equal contract.py's MOBILE_* names.
+ *
+ * PRD-261 A-20 (QB-11): htmlClass 'play' is no longer reserved. The corpus gives it to any theme id
+ * and still refuses every class the host keeps, and neither contract gives a class to an id.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -32,7 +35,7 @@ import {
   MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES,
 } from '../mobile-manifest'
 import {
-  HOST_OWNED_ROUTES, HTML_CLASS_OWNERS, KNOWN_SLOTS, MANIFEST_ERROR_CODES, PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS,
+  HOST_OWNED_ROUTES, KNOWN_SLOTS, MANIFEST_ERROR_CODES, PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS,
   RESERVED_HTML_CLASSES, THEME_BASES, THEME_HOST_VERSION, THEME_TONES, validateManifest,
 } from '../package-manifest'
 import { SDK_VERSION } from '../sdk'
@@ -45,6 +48,11 @@ const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cas
 const CONTRACT_VERSION = '1.1.0'
 // PB-32: the mobile block joined host 1.1.0, so a theme with one admits no older host (a later bump keeps this).
 const MOBILE_BLOCK_HOST = '1.1.0'
+// A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
+const HOST_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'dark', 'light', 'system']
+const FREED_HTML_CLASS = 'play'
+const RESERVED_CODE = 'RESERVED_HTML_CLASS'
+const FREED_CLASS_IDS_MIN = 3
 
 interface CorpusCase {
   readonly name: string
@@ -136,6 +144,11 @@ function expectVerdict(errors: readonly ThemeError[], code: string | null, known
   }
 }
 
+/** The manifest cases that set `htmlClass` to `htmlClass` (A-20's reserved-class cases). */
+function htmlClassCases(htmlClass: string): CorpusCase[] {
+  return CORPUS.manifests.cases.filter((testCase) => testCase.set?.htmlClass === htmlClass)
+}
+
 function isToneCase(document: unknown): boolean {
   return typeof document === 'object' && document !== null && !Array.isArray(document) && TONE_RULE_KEY in document
 }
@@ -208,6 +221,18 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
     expect(validateManifest(inherited).errors.map((error) => error.code)).toEqual(['MISSING_FIELD'])
   })
 
+  it("gives htmlClass 'play' to any theme id and refuses each class the host keeps (A-20)", () => {
+    const freed = htmlClassCases(FREED_HTML_CLASS)
+    const ids = new Set(freed.map((testCase) => testCase.set?.id ?? CORPUS.manifests.base?.id))
+    expect(ids.size).toBeGreaterThanOrEqual(FREED_CLASS_IDS_MIN)
+    expect(freed.map((testCase) => testCase.code)).toEqual(freed.map(() => null))
+    HOST_HTML_CLASSES.forEach((htmlClass) => {
+      const codes = htmlClassCases(htmlClass).map((testCase) => testCase.code)
+      expect(codes.length, htmlClass).toBeGreaterThan(0)
+      expect(Array.from(new Set(codes)), htmlClass).toEqual([RESERVED_CODE])
+    })
+  })
+
   it('runs every section the browser shares with the server', () => {
     const sections = [CORPUS.manifests, CORPUS.lookSchemas, CORPUS.looks, CORPUS.prepaint]
     sections.forEach((section) => expect(section.cases.length).toBeGreaterThan(0))
@@ -231,9 +256,11 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(SDK_VERSION).toBe(CONTRACT_VERSION)
   })
 
-  it("reserves the same <html> classes, with Play's package keeping its own class (PA-8)", () => {
+  it('reserves the same <html> classes, and neither side gives one to a theme id (A-20)', () => {
     expect(strings('RESERVED_HTML_CLASSES')).toEqual([...RESERVED_HTML_CLASSES])
-    expect(strings('HTML_CLASS_OWNERS')).toEqual(Array.from(HTML_CLASS_OWNERS).flat())
+    expect(RESERVED_HTML_CLASSES).toEqual(HOST_HTML_CLASSES)
+    expect(PYTHON.contract).not.toMatch(/\bHTML_CLASS_OWNERS\b/)
+    expect(PYTHON.manifest).not.toMatch(/\bHTML_CLASS_OWNERS\b/)
     expect(strings('HTML_CLASS_PATTERN')).toEqual([HTML_CLASS_PATTERN.source.replace(/^\^|\$$/g, '')])
   })
 

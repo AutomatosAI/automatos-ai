@@ -19,7 +19,7 @@ import { chooseStyle } from './hello-theme'
 const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://localhost:8000'
 /** The downloaded .autotheme; empty when the lane did not name one. */
 export const KIT_PACKAGE_FILE = process.env.E2E_KIT_PACKAGE ?? ''
-/** Play's theme id in the package's theme.json (PA-8: the only id that may use htmlClass `play`). */
+/** Play's theme id in the package's theme.json (A-20: its htmlClass `play` is any theme's, kept for no id). */
 export const PLAY_THEME_ID = 'automatos/play'
 const PACKAGE_TYPE = 'application/zip'
 const INSTALLED_STYLE_PREFIX = 'theme:install:'

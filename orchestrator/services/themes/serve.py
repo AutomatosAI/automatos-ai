@@ -67,7 +67,7 @@ from config import config
 from core.models.themes import ThemeInstallation, ThemePackage
 from core.storage import get_s3_client
 from services.themes.choices import is_private
-from services.themes.contract import BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, HTML_CLASS_OWNERS, parse_json
+from services.themes.contract import BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import sha256_hex
 from services.themes.look_schema import (
@@ -98,9 +98,9 @@ MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 STUDIO_BASE = "studio"
 STUDIO_HTML_CLASS = "studio"
 # Every class a boot takes off <html> unless its style carries it: the Style axis's (frontend
-# lib/ui-style.ts STYLE_HTML_CLASS_NAMES, Studio's) and each class PA-8 keeps for one theme's
-# package (contract.py HTML_CLASS_OWNERS, Play's until A-20).
-STYLE_HTML_CLASSES: Tuple[str, ...] = (STUDIO_HTML_CLASS, *sorted(HTML_CLASS_OWNERS))
+# lib/ui-style.ts STYLE_HTML_CLASS_NAMES, Studio's). No theme's class is on the list (A-20): a
+# theme's own class leaves with the base boot of that theme (base_boot).
+STYLE_HTML_CLASSES: Tuple[str, ...] = (STUDIO_HTML_CLASS,)
 USER_TONE = "user"
 # theme.json requires minWidth; a manifest stored before it was required draws at every width.
 DEFAULT_MIN_WIDTH = 0

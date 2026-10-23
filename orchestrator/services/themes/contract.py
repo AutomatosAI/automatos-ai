@@ -66,10 +66,9 @@ MANIFEST_PATH = "theme.json"
 # PRD §4.2: a theme's own class on <html>.
 HTML_CLASS_PATTERN = re.compile(r"[a-z][a-z0-9-]{2,31}")
 # Classes the core owns on <html>: the Style axis, Classic, and next-themes' tones (and its
-# "system" name, which it never puts on <html> but a theme must not take either).
-RESERVED_HTML_CLASSES: Tuple[str, ...] = ("studio", "classic", "play", "dark", "light", "system")
-# PA-8: Play's package keeps html.play until A-20; no other id may take it.
-HTML_CLASS_OWNERS: Dict[str, str] = {"play": "automatos/play"}
+# "system" name, which it never puts on <html> but a theme must not take either). No theme's id
+# keeps one (A-20, QB-11): any other class that fits the pattern is any theme's.
+RESERVED_HTML_CLASSES: Tuple[str, ...] = ("studio", "classic", "dark", "light", "system")
 # C-01a: only an admin may submit under these publishers. Private uploads are not checked here.
 RESERVED_PUBLISHERS: Tuple[str, ...] = ("automatos",)
 

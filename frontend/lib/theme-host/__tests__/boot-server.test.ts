@@ -57,7 +57,7 @@ function moduleUrl(digest: string, file = 'dist/entry.js'): string {
 function runningBoot(digest = DIGEST, htmlClass = 'hello'): Record<string, unknown> {
   return {
     addClasses: ['studio', htmlClass],
-    removeClasses: ['play'],
+    removeClasses: [],
     tone: { policy: 'user', value: null },
     prepaint: null,
     lookStorage: null,
@@ -68,7 +68,7 @@ function runningBoot(digest = DIGEST, htmlClass = 'hello'): Record<string, unkno
 
 /** The base boot the route answers when the caller may not run the theme (no opt-in, revoked). */
 function baseAnswer(): Record<string, unknown> {
-  return { ...runningBoot(), addClasses: ['studio'], removeClasses: ['hello', 'play'], integrity: null }
+  return { ...runningBoot(), addClasses: ['studio'], removeClasses: ['hello'], integrity: null }
 }
 
 function json(body: unknown, status = 200): Response {
