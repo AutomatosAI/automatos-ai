@@ -1,0 +1,422 @@
+[
+  {
+    "corePath": "frontend/app/conversations/__tests__/page.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "e2e/browser/specs/first-paint.spec.ts"
+  },
+  {
+    "corePath": "frontend/components/__tests__/prd260-theme-menu.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "frontend/components/__tests__/theme-menu-look-tone.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/copied-helpers.test.tsx",
+    "kitPath": "themes/play/test/looks/copied-helpers.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/look-manage.test.tsx",
+    "kitPath": "themes/play/test/looks/look-manage.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/look-preview.test.tsx",
+    "kitPath": "themes/play/test/looks/look-preview.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/look-provider-server.test.tsx",
+    "kitPath": "themes/play/test/looks/looks-screen.test.tsx",
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/store-api.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/look-provider.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/provider.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/look-scope.test.tsx",
+    "kitPath": "themes/play/test/lib/seen.test.ts",
+    "coreReplacement": "frontend/components/theme-host/__tests__/account-look-scope.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/looks-harness.tsx",
+    "kitPath": "themes/play/test/looks/looks-harness.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/looks-screen.test.tsx",
+    "kitPath": "themes/play/test/looks/looks-screen.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/play-only-route.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "frontend/components/theme-host/__tests__/no-look-editor-note.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/style-screen.test.tsx",
+    "kitPath": "themes/play/test/looks/style-screen.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/looks/__tests__/use-look-store-server.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/store-server.test.tsx"
+  },
+  {
+    "corePath": "frontend/components/mascot/__tests__/auto-mascot-pause.test.tsx",
+    "kitPath": "themes/play/test/mascot/auto-mascot-pause.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/mascot/__tests__/auto-mascot.test.tsx",
+    "kitPath": "themes/play/test/mascot/auto-mascot.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/__tests__/play-layout-phone.test.tsx",
+    "kitPath": "themes/play/test/shell/play-layout-phone.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/auto-reply-ai-generated.test.tsx",
+    "kitPath": "themes/play/test/chat/auto-reply-ai-generated.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/caption.test.ts",
+    "kitPath": "themes/play/test/chat/caption.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/deliverables.test.ts",
+    "kitPath": "themes/play/test/chat/deliverables.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/first-open-layout.test.ts",
+    "kitPath": "themes/play/test/chat/first-open-layout.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/play-chat-approvals-stream.test.tsx",
+    "kitPath": "themes/play/test/chat/play-chat-approvals-stream.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/play-chat-approvals.test.tsx",
+    "kitPath": "themes/play/test/chat/play-chat-approvals.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/play-chat-turn.test.tsx",
+    "kitPath": "themes/play/test/chat/play-chat-turn.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/play-chat.test.tsx",
+    "kitPath": "themes/play/test/chat/play-chat.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/chat/__tests__/play-markdown.test.tsx",
+    "kitPath": "themes/play/test/chat/play-markdown.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/conversations/__tests__/play-conversations.test.tsx",
+    "kitPath": "themes/play/test/conversations/play-conversations.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/deliverables/__tests__/play-deliverable.test.tsx",
+    "kitPath": "themes/play/test/deliverables/play-deliverable.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/deliverables/__tests__/play-shelf.test.tsx",
+    "kitPath": "themes/play/test/deliverables/play-shelf.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/edges/__tests__/edges.test.tsx",
+    "kitPath": "themes/play/test/edges/edges.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/shell/__tests__/play-frame.test.tsx",
+    "kitPath": "themes/play/test/shell/play-frame.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/components/play/shell/__tests__/play-sidebar.test.tsx",
+    "kitPath": "themes/play/test/shell/play-sidebar.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/hooks/__tests__/use-auto-mascot.test.tsx",
+    "kitPath": "themes/play/test/mascot/use-auto-mascot.test.tsx",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/hooks/__tests__/use-idle-timeout.test.ts",
+    "kitPath": "themes/play/test/mascot/use-idle-timeout.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/hooks/__tests__/use-play-turn.test.ts",
+    "kitPath": "themes/play/test/hooks/use-play-turn.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/css-colours.ts",
+    "kitPath": "themes/play/test/support/css-colours.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/mascot-cache-headers.test.ts",
+    "kitPath": null,
+    "coreReplacement": "orchestrator/tests/test_prd261_theme_files.py"
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd260-play-guards.test.ts",
+    "kitPath": "themes/play/test/css-guards.test.ts",
+    "coreReplacement": "frontend/lib/__tests__/prd261-no-theme-in-core.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-a19-seams.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/__tests__/prd261-no-theme-in-core.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-chat.test.ts",
+    "kitPath": "themes/play/test/copied-from-core.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-conversations.test.ts",
+    "kitPath": "themes/play/test/copied-from-core.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-deliverables.test.ts",
+    "kitPath": "themes/play/test/copied-from-core.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-frame.test.ts",
+    "kitPath": "themes/play/test/imports.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-look-editor.test.ts",
+    "kitPath": "themes/play/test/imports.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-mascot.test.ts",
+    "kitPath": "themes/play/test/imports.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/prd261-port-play-folders.test.ts",
+    "kitPath": "themes/play/test/imports.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/__tests__/ui-style-play.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/__tests__/ui-style.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/look-kit/__tests__/fixtures/play-presets-pre-move.json",
+    "kitPath": "themes/play/test/lib/looks/fixtures/play-presets-pre-move.json",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/look-kit/__tests__/play-presets-parity.test.ts",
+    "kitPath": "themes/play/test/lib/looks/play-presets-parity.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/catalogue.test.ts",
+    "kitPath": "themes/play/test/lib/looks/catalogue.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/contrast.test.ts",
+    "kitPath": "themes/play/test/lib/looks/contrast.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/css.test.ts",
+    "kitPath": "themes/play/test/lib/looks/css.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/document.test.ts",
+    "kitPath": "themes/play/test/lib/looks/document.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/editor.test.ts",
+    "kitPath": "themes/play/test/lib/looks/editor.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/helpers.ts",
+    "kitPath": "themes/play/test/lib/looks/helpers.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/prepaint.test.ts",
+    "kitPath": "tests/compile-looks.test.ts",
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/paint.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/storage.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/storage.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/store-served.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/state-served.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/store.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/state.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/studio-tokens.test.ts",
+    "kitPath": "themes/play/test/lib/looks/studio-tokens.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/style.test.ts",
+    "kitPath": "themes/play/test/lib/looks/style.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/theme-keys.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/theme-keys.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/tone.test.ts",
+    "kitPath": "tests/compile-looks.test.ts",
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/tone-cookie.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/transfer.test.ts",
+    "kitPath": "themes/play/test/lib/looks/transfer.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/looks/__tests__/validate.test.ts",
+    "kitPath": "themes/play/test/lib/looks/validate.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/events.test.ts",
+    "kitPath": "themes/play/test/mascot/events.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/helpers.ts",
+    "kitPath": "themes/play/test/mascot/helpers.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/media.test.ts",
+    "kitPath": "themes/play/test/mascot/media.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/pause.test.ts",
+    "kitPath": "themes/play/test/mascot/pause.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/player.test.ts",
+    "kitPath": "themes/play/test/mascot/player.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/reducer.test.ts",
+    "kitPath": "themes/play/test/mascot/reducer.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/ring.test.ts",
+    "kitPath": "themes/play/test/mascot/ring.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/session.test.ts",
+    "kitPath": "themes/play/test/mascot/session.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/mascot/__tests__/tools.test.ts",
+    "kitPath": "themes/play/test/mascot/tools.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/conversations.test.ts",
+    "kitPath": "themes/play/test/lib/conversations.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/detail.test.ts",
+    "kitPath": "themes/play/test/lib/detail.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/draft.test.ts",
+    "kitPath": "themes/play/test/lib/draft.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/focus.test.ts",
+    "kitPath": "themes/play/test/lib/focus.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/seen.test.ts",
+    "kitPath": "themes/play/test/lib/seen.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/play/__tests__/shelf.test.ts",
+    "kitPath": "themes/play/test/lib/shelf.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "frontend/lib/theme-host/__tests__/builtin-slots.test.tsx",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/__tests__/loader.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/theme-host/looks/__tests__/keys-parity.test.ts",
+    "kitPath": null,
+    "coreReplacement": "frontend/lib/theme-host/looks/__tests__/theme-keys.test.ts"
+  },
+  {
+    "corePath": "frontend/lib/theme-host/looks/__tests__/paint-play-parity.test.ts",
+    "kitPath": "tests/compile-looks.test.ts",
+    "coreReplacement": "e2e/browser/specs/play-parity/fx19-looks-readable.spec.ts"
+  },
+  {
+    "corePath": "orchestrator/tests/test_prd261_play_schema_parity.py",
+    "kitPath": "tests/compile-looks.test.ts",
+    "coreReplacement": null
+  },
+  {
+    "corePath": "orchestrator/tests/test_prd262_frontend_posters.py",
+    "kitPath": "themes/play/test/assets.test.ts",
+    "coreReplacement": null
+  }
+]
