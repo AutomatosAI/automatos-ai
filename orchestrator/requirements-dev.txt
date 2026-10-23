@@ -11,7 +11,7 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast
 pytest-cov==4.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (compatible with pytest 7.4.x)
-black==23.11.0
+black==26.10.1
 isort==5.12.0
 # PRD-211: in-repo topology discipline. `import-linter` (pulls grimp, pure
 # Python) runs the feature-module `independence` contract in orchestrator/
