@@ -25,6 +25,7 @@ from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
 from core.llm.providers import describe_usage_provider
+from api.llm_marketplace import route_capabilities
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -679,7 +680,7 @@ async def get_model_comparison(
             input_cost_per_1k=registry.input_cost_per_1k_tokens if registry else None,
             output_cost_per_1k=registry.output_cost_per_1k_tokens if registry else None,
             context_window=registry.context_window if registry else None,
-            capabilities=registry.capabilities or {} if registry else {},
+            capabilities=route_capabilities(registry) if registry else {},
             total_requests=total_requests,
             total_tokens=int(usage.total_tokens or 0) if usage else 0,
             total_cost=float(usage.total_cost or 0) if usage else 0.0,
