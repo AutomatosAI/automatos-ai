@@ -1,8 +1,10 @@
 """PRD-261 A-07b — a member's theme choice, and the lookups every install route shares.
 
 PA-12: the server is the one source of truth for the choice. ``theme_choices`` holds one
-row per member per workspace; the value is one of ``'classic'``, ``'studio'``, a builtin
-theme (``'builtin:play'``) or the lowercase uuid of an active install in that workspace.
+row per member per workspace; the value is one of ``'classic'``, ``'studio'`` or the
+lowercase uuid of an active install in that workspace. A row written before PRD-261 A-19,
+when Play was compiled into the app, may still name it; it reads as no choice
+(``defaults._pick``), and a new save of that value is refused like any other.
 
 Tenancy (the W-B2 review carry): ``theme_installations.package_id`` and
 ``theme_opt_ins.package_id`` have no database constraint against another workspace's
@@ -28,8 +30,6 @@ from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, The
 logger = logging.getLogger(__name__)
 
 PLAIN_CHOICES = ("classic", "studio")
-# The themes compiled into the app (lib/theme-host/builtin/play-entry.ts) until A-19.
-BUILTIN_CHOICES = ("builtin:play",)
 FALLBACK_CHOICE = "studio"
 MARKETPLACE_OWNER = "marketplace"
 WORKSPACE_OWNER = "workspace"
@@ -44,7 +44,7 @@ PACKAGE_NOT_FOUND = "That theme version doesn't exist in this workspace."
 CHOICE_LOCKED = "This workspace's admins choose its theme; the workspace default applies."
 NEEDS_MEMBER = "Choosing a theme needs a signed-in member of this workspace."
 CHOICE_RACED = "Your theme choice changed in another tab at the same moment. Try again."
-BAD_CHOICE = "A theme choice is 'classic', 'studio', 'builtin:play' or an installed theme's id."
+BAD_CHOICE = "A theme choice is 'classic', 'studio' or an installed theme's id."
 
 
 class ThemeInstallError(Exception):
@@ -134,7 +134,7 @@ def stored_choice(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> Op
 
 
 def _checked_choice(db: Session, workspace_id: UUID, choice: str) -> str:
-    if choice in PLAIN_CHOICES or choice in BUILTIN_CHOICES:
+    if choice in PLAIN_CHOICES:
         return choice
     install_id = install_id_of(choice)
     if install_id is None:

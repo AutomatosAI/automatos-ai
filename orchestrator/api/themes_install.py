@@ -69,7 +69,7 @@ T = TypeVar("T")
 
 
 class ChoiceBody(BaseModel):
-    """``PUT /api/themes/choice``: 'classic' | 'studio' | 'builtin:play' | an install id."""
+    """``PUT /api/themes/choice``: 'classic' | 'studio' | an install id (else 400)."""
 
     model_config = ConfigDict(extra="forbid")
     choice: str = Field(min_length=1, max_length=THEME_CHOICE_LENGTH)

@@ -3,9 +3,10 @@
 next/font/google downloads each family's CSS and font files from Google while `next build`
 runs, and a change on Google's side has failed builds that changed no font (7 Oct 2026). The
 core fonts are vendored under frontend/app/fonts/core and loaded with next/font/local
-(app/core-fonts.ts), as Play's are (app/play-fonts.ts), so `docker build` needs no Google
-fetch. This pins that no shipped frontend source imports next/font/google, and that every
-file a next/font/local call names is committed.
+(app/core-fonts.ts), so `docker build` needs no Google fetch. This pins that no shipped
+frontend source imports next/font/google, and that every file a next/font/local call names is
+committed. Play's display faces left core with builtin Play (PRD-261 A-19); its package holds
+them, checked by the kit's themes/play/test/assets.test.ts.
 
 Pure file reads: no Node, no network.
 """
@@ -24,7 +25,7 @@ GOOGLE_FONT_IMPORT = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](?:@next/font|next/font)/google['"]"""
 )
 LOCAL_FONT_PATH = re.compile(r"""\bpath:\s*['"](\./fonts/[^'"]+\.woff2)['"]""")
-FONT_MODULES = ("app/core-fonts.ts", "app/play-fonts.ts")
+FONT_MODULES = ("app/core-fonts.ts",)
 
 
 def _shipped_sources() -> list[Path]:
