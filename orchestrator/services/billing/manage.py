@@ -21,13 +21,7 @@ from typing import Any, Optional
 
 from services.billing.accounts import account_for_workspace, has_live_subscription
 from services.billing.catalog import price_for_plan
-from services.billing.checkout import (
-    BUSINESS_PLAN,
-    BillingRefused,
-    business_offered,
-    ensure_customer,
-    publishable_key,
-)
+from services.billing.checkout import BUSINESS_PLAN, BillingRefused, business_offered, publishable_key
 
 
 def _account(db: Any, workspace: Any) -> Any:
@@ -53,7 +47,9 @@ def card_view(db: Any, provider: Any, workspace: Any) -> dict:
 
 
 def start_card_change(db: Any, provider: Any, workspace: Any, *, email: Optional[str]) -> dict:
-    account = ensure_customer(db, provider, workspace, email)
+    """A setup session for a new card. Only for a workspace that has bought something:
+    a customer is created by a (gated) checkout or a Business offer, never here."""
+    account = _account(db, workspace)
     secret = provider.start_card_change(customer_id=account.customer_id, workspace_id=str(workspace.id))
     return {"client_secret": secret, "publishable_key": publishable_key()}
 

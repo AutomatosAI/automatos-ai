@@ -315,7 +315,14 @@ def test_cancel_change_undoes_a_scheduled_downgrade(monkeypatch, db, provider):
 
 
 def test_start_card_change_returns_the_providers_secret_and_the_publishable_key(monkeypatch, db, provider):
-    monkeypatch.setattr("services.billing.manage.ensure_customer",
-                        lambda db, provider, ws, email: _account())
+    monkeypatch.setattr("services.billing.manage.account_for_workspace", lambda db, ws: _account())
     result = start_card_change(db, provider, _workspace(), email="owner@example.com")
     assert result == {"client_secret": "seti_1_secret_abc", "publishable_key": "pk_test_1"}
+
+
+def test_a_card_change_needs_a_billing_account_and_never_creates_a_customer(monkeypatch, db, provider):
+    monkeypatch.setattr("services.billing.manage.account_for_workspace", lambda db, ws: None)
+    with pytest.raises(BillingRefused) as refused:
+        start_card_change(db, provider, _workspace(), email="owner@example.com")
+    assert refused.value.status == 404
+    assert provider.calls == []
