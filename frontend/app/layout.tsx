@@ -7,7 +7,6 @@ import { createThemeBootResolver, type CookieReader } from '@/lib/theme-host/boo
 import { CORE_FONT_VARIABLE_CLASSES } from '@/app/core-fonts'
 import { installedThemeBootResolver } from '@/lib/theme-host/boot-server'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
-import { PLAY_FONT_VARIABLE_CLASSES } from '@/lib/theme-host/builtin/play-fonts'
 import { ThemeBootScripts } from '@/components/theme-host/theme-boot'
 import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
 import './globals.css'
@@ -27,12 +26,9 @@ export const metadata: Metadata = {
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so
 // a server re-render (router.refresh after a client-side style switch) never rewrites the class
 // attribute and drops next-themes' tone class. The style's classes come from the theme boot
-// (PRD-261 A-03). Builtin Play's face classes are host-generated and defined here for every
-// page; with preload off, a face file downloads only when a Play type style uses it.
-const HTML_FONT_CLASSES = [
-  ...CORE_FONT_VARIABLE_CLASSES,
-  ...PLAY_FONT_VARIABLE_CLASSES,
-].join(' ')
+// (PRD-261 A-03). Only the core's faces are defined here: no theme's font is compiled into the
+// app (A-19f1); an installed theme brings its own with its stylesheet.
+const HTML_FONT_CLASSES = CORE_FONT_VARIABLE_CLASSES.join(' ')
 
 export default async function RootLayout({
   children,

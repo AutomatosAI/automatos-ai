@@ -946,7 +946,7 @@ export interface SocialSeriesApproval {
 }
 
 // ===== PRD-261 themes: the answers of orchestrator/api/themes_*.py (plan §2.2) =====
-/** PUT /api/themes/choice: 'classic' | 'studio' | 'builtin:play' | an install id (the server checks it). */
+/** PUT /api/themes/choice: 'classic' | 'studio' | an install id (the server checks it). */
 export type ThemeChoiceValue = string
 
 /** services/themes/optin.py opt_in_state: required until the member opts in to this package. */

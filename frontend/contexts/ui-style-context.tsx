@@ -9,7 +9,7 @@
  * document) and localStorage (a mirror), and never touches the tone. A switch to an installed
  * theme writes the cookie and reloads instead (PA-13): its first paint comes from the server.
  * What the switch must carry across that reload runs in its `beforeReload`, just before it (G3:
- * the note's 'Switch to Play' keeps focus for the screen's heading, lib/theme-host/switch-focus.ts).
+ * a switch can keep focus for the theme screen's heading, lib/theme-host/switch-focus.ts).
  *
  * PRD-261 A-02c (PA-12): the server holds the choice. `setStyle` is the local half (cookie, html,
  * reload); lib/theme-host/choice-sync.ts stores a pick on the server and checks the server's
@@ -109,10 +109,9 @@ function reloadDocument(): void {
   window.location.reload()
 }
 
-/** Builtin themes from the registry; an installed theme from its boot's entry, until the host releases it. */
+/** An installed theme from its boot's entry, until the host releases it; Classic and Studio have none. */
 function activeThemeOf(style: UiStyle, installed: ThemeEntry | null, released: UiStyle | null): ThemeEntry | null {
-  if (!isInstalledThemeStyle(style)) return findThemeEntry(style)
-  if (installed === null || released === style) return null
+  if (!isInstalledThemeStyle(style) || installed === null || released === style) return null
   return findThemeEntry(style, [installed])
 }
 

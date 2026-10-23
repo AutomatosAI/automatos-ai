@@ -10,8 +10,8 @@
  * off, and Studio shows with no notice.
  * Under an installed theme's style it reports 'loading' from the first render, before its effect
  * starts the load, so the frame slot never mounts the page in the fallback first (M69). Under
- * Classic, Studio and builtin Play (which keeps its compiled path until A-04b) it is off: it loads
- * nothing and puts no status on <html>, so those pages are exactly as without it.
+ * Classic and Studio it is off: it loads nothing and puts no status on <html>, so those pages are
+ * exactly as without it.
  *
  * The sources and the loader are reached only through import() inside the effect, after the
  * style and safe-mode checks, so safe mode and every other style never evaluate them or the
@@ -138,8 +138,7 @@ export const SAFE_MODE_QUERY = `?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`
  * layout's boot (THEME_BOOT_SCRIPT) has already put the theme's classes and its prepaint
  * variables there before any page code runs. Studio's classes go on, every other style's class
  * and the boot's own classes come off, and so does every custom property on <html>'s inline
- * style: in safe mode nothing else writes one there (no theme look runs, and the Play look
- * document runs only under Play).
+ * style: in safe mode nothing else writes one there (no theme look runs).
  */
 export const SAFE_MODE_ADD_CLASSES: readonly string[] = styleHtmlClasses(REVERT_STYLE)
 export const SAFE_MODE_REMOVE_CLASSES: readonly string[] = STYLE_HTML_CLASS_NAMES.filter(
