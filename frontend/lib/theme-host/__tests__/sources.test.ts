@@ -1,10 +1,11 @@
 /**
  * PRD-261 A-04a — where a theme comes from. A style names an installed theme's source only for
- * `theme:install:<uuid>`; Classic, Studio and builtin Play name none (builtin Play keeps its
- * compiled path until A-04b). A builtin source loads its compiled module and registers its frame
- * as soon as the import resolves, with no manifest, no look and no host module global. When
- * GET /api/themes/active names no theme for the install (a 404, a 200 with `theme: null`, a
- * `disable` revocation or another install) there is no theme to load, and no failure.
+ * `theme:install:<uuid>`; Classic, Studio and every other style name none. A builtin source
+ * (builtinThemeSource, which no theme uses since A-19f1: none is compiled in) loads its compiled
+ * module and registers its frame as soon as the import resolves, with no manifest, no look and no
+ * host module global. When GET /api/themes/active names no theme for the install (a 404, a 200
+ * with `theme: null`, a `disable` revocation or another install) there is no theme to load, and no
+ * failure.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
