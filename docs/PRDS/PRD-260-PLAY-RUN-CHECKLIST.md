@@ -1,5 +1,7 @@
 # PRD-260 Play: the RUN checklist
 
+> **Historical.** This checklist describes builtin Play, the theme compiled into core, before PRD-261 A-19 (wave W-A8) took it out of core; Play now ships as an installable package from the theme kit. It moved here from `docs/testing/` with the other owner-test checklists.
+
 For Gerard's local test of the Play wave (branch `feat/prd-260-play-theme`), on the local stack with the frontend built from the branch tip. CI proves the look engine, Auto's state machine and the screens against test data; it can't see a browser, a video's alpha channel, a real backend or a production build. These steps can.
 
 How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`. The spec: `docs/PRDS/PRD-260-PLAY-THEME.md`. The 15 Oct review and its fixes: `scripts/ralph/prd260-review-fix-plan.md`. The owner's test list these steps cover: `ownerTest` in `scripts/ralph/prd-260.json` (the map is at the end).
