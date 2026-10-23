@@ -8,8 +8,8 @@
  *         both editions). Webhooks / Widget SDK
  *         (hosted-edition surfaces) are hidden by the explicit allowlist, not by
  *         role — the local operator is super_admin.
- * saas  → the eight tabs as before plus Phones & devices, Socials and Appearance; no Profile tab
- *         (Clerk owns it).
+ * saas  → the eight tabs as before plus Phones & devices, Socials, Appearance and Billing
+ *         (PRD-265 US-011, hosted only); no Profile tab (Clerk owns it).
  *
  * Tab bodies are stubbed — this is about WHICH tabs exist, not their content.
  */
@@ -18,6 +18,13 @@ import { render, screen } from '@testing-library/react'
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: any) => <a href={href}>{children}</a>,
+}))
+
+// PRD-265 US-011: the open tab is read from `?tab=` (none here: the default tab).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+  usePathname: () => '/settings',
 }))
 
 vi.mock('@/contexts/role-context', () => ({
@@ -54,6 +61,7 @@ vi.mock('../SessionModeTab', () => ({ SessionModeTab: () => null }))  // PRD-234
 vi.mock('../WorkspaceSocialsCard', () => ({ WorkspaceSocialsCard: () => null }))  // PRD-251B US-B106
 vi.mock('../themes/appearance-tab', () => ({ AppearanceTab: () => null }))  // PRD-261 A-07d
 vi.mock('../phones-devices/phones-devices-tab', () => ({ PhonesDevicesTab: () => null }))  // PRD-266 US-005c
+vi.mock('../billing/billing-tab', () => ({ BillingTab: () => null }))  // PRD-265 US-011 (hosted only)
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({
@@ -93,7 +101,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Appearance',
     ])
     expect(screen.getByRole('link', { name: /your profile/i })).toHaveAttribute('href', '/settings/profile')
-    for (const hidden of ['webhooks', 'widget-sdk']) {
+    for (const hidden of ['webhooks', 'widget-sdk', 'billing']) {
       expect(LOCAL_EDITION_SETTINGS_TABS.has(hidden)).toBe(false)
     }
     // 2026-09-17: Channels is local — Telegram long-polls, so no public URL is needed
@@ -108,7 +116,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
     expect(LOCAL_EDITION_SETTINGS_TABS.has('phones-devices')).toBe(true)
   })
 
-  it('saas: the eight tabs render as before, plus Phones & devices, Socials and Appearance, and there is no Profile tab', async () => {
+  it('saas: the eight tabs render as before, plus Phones & devices, Socials, Appearance and Billing, and there is no Profile tab', async () => {
     const { SettingsPanel } = await loadPanel('saas')
     render(<SettingsPanel />)
 
@@ -117,6 +125,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Orchestrator',
       'Webhooks',
       'API Keys',
+      'Billing',
       'Credentials',
       'Channels',
       'Notifications',

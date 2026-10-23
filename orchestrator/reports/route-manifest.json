@@ -1,5 +1,5 @@
 {
-  "route_count": 957,
+  "route_count": 962,
   "routes": [
     {
       "method": "GET",
@@ -184,6 +184,10 @@
     {
       "method": "GET",
       "path": "/api/admin/workspaces/{workspace_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/business-invite"
     },
     {
       "method": "POST",
@@ -2818,12 +2822,28 @@
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
     },
     {
+      "method": "POST",
+      "path": "/api/v1/billing/checkout"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/billing/ledger"
     },
     {
       "method": "GET",
+      "path": "/api/v1/billing/plans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/portal"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/billing/summary"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/webhooks/stripe"
     },
     {
       "method": "GET",

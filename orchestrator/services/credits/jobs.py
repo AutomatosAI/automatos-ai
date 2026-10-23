@@ -5,6 +5,8 @@
   (``meter.meter_pending``).
 - ``credits_overhead_nightly`` — 03:15 UTC: record yesterday's absorbed overhead
   per workspace (``meter.record_overhead``), for margin reporting.
+- ``credits_expiry_hourly`` — every hour: expire months past their grace and
+  top-ups past their date (``expiry.expire_due``, PRD-265 §4.3).
 
 Both are plain functions (the Redis job store keeps references, not closures)
 and run on the scheduler's thread pool, off the event loop. The local edition
@@ -20,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 METER_JOB_ID = "credits_meter_tick"
 OVERHEAD_JOB_ID = "credits_overhead_nightly"
+EXPIRY_JOB_ID = "credits_expiry_hourly"
+EXPIRY_INTERVAL_HOURS = 1
 OVERHEAD_HOUR_UTC = 3
 OVERHEAD_MINUTE = 15
 
@@ -61,13 +65,31 @@ def overhead_nightly() -> None:
         db.close()
 
 
+def expiry_hourly() -> None:
+    """Expire the credits whose time is up."""
+    if not _metered_edition():
+        return
+    from core.database.database import SessionLocal
+    from services.credits.expiry import expire_due
+
+    db = SessionLocal()
+    try:
+        expired = expire_due(db)
+        if any(expired.values()):
+            logger.info("[credits] expired %d monthly and %d top-up credits", expired["monthly"], expired["topup"])
+    finally:
+        db.close()
+
+
 def register_credit_jobs(scheduler: Any) -> None:
-    """Put both jobs on ``scheduler`` (replacing any earlier registration)."""
+    """Put the jobs on ``scheduler`` (replacing any earlier registration)."""
     from config import config
 
     scheduler.add_job(meter_tick, "interval", seconds=int(config.CREDITS_METER_INTERVAL_SECONDS),
                       id=METER_JOB_ID, replace_existing=True, max_instances=1)
     scheduler.add_job(overhead_nightly, "cron", hour=OVERHEAD_HOUR_UTC, minute=OVERHEAD_MINUTE,
                       id=OVERHEAD_JOB_ID, replace_existing=True, max_instances=1)
+    scheduler.add_job(expiry_hourly, "interval", hours=EXPIRY_INTERVAL_HOURS,
+                      id=EXPIRY_JOB_ID, replace_existing=True, max_instances=1)
     logger.info("[credits] meter every %ss; overhead recorded daily at %02d:%02d UTC",
                 config.CREDITS_METER_INTERVAL_SECONDS, OVERHEAD_HOUR_UTC, OVERHEAD_MINUTE)
