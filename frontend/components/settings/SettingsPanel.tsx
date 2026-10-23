@@ -1,8 +1,7 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -16,6 +15,8 @@ import { SessionModeTab } from './SessionModeTab'
 import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
 import { AppearanceTab } from './themes/appearance-tab'
 import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
+import { BillingTab } from './billing/billing-tab'
+import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -40,6 +41,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  *
  * Phones & devices (PRD-266 US-005c) is in both editions: the device list everywhere, pairing
  * only on a local install in paired mode.
+ *
+ * Billing (PRD-265 US-011) is hosted-only — the local edition never meters — so it is not in
+ * this list. The open tab is read from and written to `?tab=` (./use-settings-tab.ts).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -57,7 +61,6 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
 
 export function SettingsPanel() {
   const { isAdmin } = useSystemRole()
-  const [activeTab, setActiveTab] = useState(isAdmin ? 'system-settings' : 'orchestrator')
 
   const allTabs = [
     ...(isLocal ? [{ value: 'profile', label: 'Profile', icon: UserCircle }] : []),
@@ -66,6 +69,7 @@ export function SettingsPanel() {
     { value: 'orchestrator', label: 'Orchestrator', icon: Brain },
     { value: 'webhooks', label: 'Webhooks', icon: Webhook },
     { value: 'api-keys', label: 'API Keys', icon: KeyRound },
+    { value: 'billing', label: 'Billing', icon: CreditCard },
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
@@ -75,6 +79,7 @@ export function SettingsPanel() {
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
+  const [activeTab, setActiveTab] = useSettingsTab(tabs, isAdmin ? 'system-settings' : 'orchestrator')
 
   return (
     <div className="space-y-6">
@@ -142,6 +147,11 @@ export function SettingsPanel() {
         {/* PRD-54: BYOK API Keys Tab */}
         <TabsContent value="api-keys">
           <ApiKeysSettingsTab />
+        </TabsContent>
+
+        {/* PRD-265 US-011: Billing — plan, credits, checkout and the ledger (hosted edition only) */}
+        <TabsContent value="billing">
+          <BillingTab />
         </TabsContent>
 
         {/* PRD-18: Credentials Management Tab */}

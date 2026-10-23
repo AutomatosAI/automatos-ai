@@ -177,6 +177,14 @@ async function renderAsleepFrame() {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  // AbortSignal.timeout's own timer isn't one fake timers can advance (an open
+  // vitest/sinon gap, not a vitest-version regression to chase): rebuild it on
+  // setTimeout, which they do advance.
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')), ms)
+    return controller.signal
+  })
 })
 
 afterEach(() => {

@@ -1425,6 +1425,20 @@ class ApiClient {
     }
   }
 
+  /**
+   * PRD-265 W2: a binary answer (an invoice PDF) as a Blob, with the same base URL, auth
+   * headers and ApiHttpError on a non-2xx answer as `request`.
+   */
+  async requestBlob(endpoint: string, options: RequestInit = {}): Promise<Blob> {
+    const token = await this.clerkTokenOrNull()
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      ...options,
+      headers: this.requestHeaders(options, options.body, token),
+    })
+    if (!response.ok) throw await httpErrorOf(response)
+    return response.blob()
+  }
+
   // ===== SYSTEM ENDPOINTS =====
 
   // Generic HTTP methods

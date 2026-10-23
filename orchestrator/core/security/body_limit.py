@@ -3,7 +3,8 @@
 ``main.py``'s ``limit_request_body`` reads only the ``Content-Length`` header, so an upload sent
 chunked (no length) passed it, and FastAPI read and spooled the whole multipart form before any
 dependency, the auth gates included, ran. This pure ASGI middleware covers the capped upload
-routes (``main.PATH_BODY_LIMITS``: brand logo and fonts, theme import and submit), for the
+routes (``main.PATH_BODY_LIMITS``: brand logo and fonts, theme import and submit, and Stripe's
+unauthenticated webhook), for the
 methods that carry a body:
 
 * a ``Content-Length`` over the cap is 413, and one that isn't a whole number is 400;
