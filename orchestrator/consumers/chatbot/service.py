@@ -3008,13 +3008,13 @@ class StreamingChatService:
     def _persist_turn_error(self, chat_id: str, err: Any) -> None:
         """PRD-239 S4: keep the failure in the conversation (an assistant note with
         provenance) so it survives a reload and the detached-turn path. Fail-soft."""
+        from consumers.chatbot.turn_errors import TURN_ERROR_ORIGIN  # the model's history reads it back
+
         try:
             self.chat_service.save_message(
-                chat_id=chat_id,
-                role="assistant",
-                parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
+                chat_id=chat_id, role="assistant", parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
                 workspace_id=self.workspace_id,
-                source={"origin": "turn_error", "label": "Error", "code": err.code},
+                source={"origin": TURN_ERROR_ORIGIN, "label": "Error", "code": err.code},
             )
         except Exception:  # noqa: BLE001
             logger.debug("[Chat] could not persist the turn error note", exc_info=True)

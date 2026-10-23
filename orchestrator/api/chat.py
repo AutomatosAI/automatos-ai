@@ -18,7 +18,7 @@ from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
-from consumers.chatbot import ChatService, StreamingChatService
+from consumers.chatbot import ChatService, StreamingChatService, history_for_model
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
@@ -269,14 +269,14 @@ def _with_attachments(history: List[Dict[str, Any]], current_msg: ChatMessageReq
 
 def _turn_history(chat_service: ChatService, chat_id: str, current_msg: ChatMessageRequest,
                   page_ctx: Any) -> List[Dict[str, Any]]:
-    """The conversation the turn reads: the chat's messages, the attachments, and the page.
+    """The conversation the turn reads: the chat's messages (history_for_model), the attachments, the page.
 
     PRD-221 S2 (extends PRD-220): the page context is the structured reference set
     {page, route, tab, selected, filters, visible_ids}, or the legacy {"page": <label>};
     one renderer serves both. It is sanitized against the allow-list (authz-looking
     fields never survive) and injected prompt-side only: the user message is already
     saved clean, so chat titles and reloaded history never show the hint."""
-    history = [{"role": m.role, "parts": m.parts} for m in chat_service.get_messages_by_chat_id(chat_id)]
+    history = history_for_model(chat_service.get_messages_by_chat_id(chat_id))
     return inject_page_preamble(_with_attachments(history, current_msg), page_ctx)
 
 

@@ -28,6 +28,11 @@ CODE_ACTIVATION_FAILED = "activation_failed"
 CODE_PROVIDER_FAILED = "provider_failed"
 CODE_TURN_FAILED = "turn_failed"
 
+# The ``source.origin`` of the note a failed turn leaves in the conversation
+# (StreamingChatService._persist_turn_error). The client shows the note by it; the
+# model's history reads it as a marker, never as a reply (consumers.chatbot.model_history).
+TURN_ERROR_ORIGIN = "turn_error"
+
 RAW_MESSAGE_CHARS = 200
 
 # F169 (night 5, B10/B26): an AI provider's HTTP error reached the reply as the
