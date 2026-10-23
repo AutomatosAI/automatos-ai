@@ -29,7 +29,8 @@
  * The answer's other fields: `optIn.required` (private code this member has not opted in to)
  * fails the load as `opt-in` before any theme file is asked for, since the files proxy would
  * 404 each one; a `warn` revocation (`theme.revoked`) loads the theme and hands the warning on
- * (ThemeLoadOk.revoked) for the host's notice. A 5xx from the files proxy, or a network failure,
+ * (ThemeLoadOk.revoked) for the host's notice; a `disable` one of this install (`theme: null`
+ * and a top-level `revoked`) loads nothing and hands its reason on (ThemeLoadAbsent.revoked, C-05l). A 5xx from the files proxy, or a network failure,
  * fails as `unavailable`: the files could not be reached, which is not the theme's fault.
  */
 import { apiClient } from '@/lib/api-client'
@@ -51,6 +52,7 @@ import type {
   ThemeLoadAbsent,
   ThemeLoadOk,
   ThemeLoadResult,
+  ThemeRevocationDisable,
   ThemeRevocationWarning,
   ThemeSource,
 } from './types'
@@ -69,6 +71,8 @@ const STATUS_PROBE_RANGE = 'bytes=0-0'
 const UNAVAILABLE_FROM_STATUS = 500
 /** The revocation level that still runs the theme (orchestrator/services/themes/revocations.py). */
 const REVOKE_WARN = 'warn'
+/** The revocation level that stops it: the active answer names no theme (defaults.py resolve_active). */
+const REVOKE_DISABLE = 'disable'
 
 /** The HTTP status apiClient puts on the error it throws, if it has one. */
 function httpStatusOf(error: unknown): unknown {
@@ -114,8 +118,8 @@ export async function fetchActiveInstall(): Promise<unknown> {
   }
 }
 
-function noActiveInstall(detail: string): ThemeLoadAbsent {
-  return { ok: false, reason: null, detail }
+function noActiveInstall(detail: string, revoked: ThemeRevocationDisable | null): ThemeLoadAbsent {
+  return revoked === null ? { ok: false, reason: null, detail } : { ok: false, reason: null, detail, revoked }
 }
 
 /**
@@ -148,6 +152,18 @@ export function optInRequired(answer: unknown): boolean {
   return isRecord(optIn) && optIn.required === true
 }
 
+/**
+ * The answer's `disable` revocation of `installId` (`theme: null` and a top-level `revoked` that
+ * names this install), or null: none, another level, or another install's.
+ */
+export function revocationDisableOf(answer: unknown, installId: string): ThemeRevocationDisable | null {
+  if (!isRecord(answer) || answer.theme !== null) return null
+  const revoked = answer.revoked
+  if (!isRecord(revoked) || revoked.level !== REVOKE_DISABLE) return null
+  if (typeof revoked.installId === 'string' && revoked.installId !== installId) return null
+  return { level: REVOKE_DISABLE, reason: typeof revoked.reason === 'string' ? revoked.reason : '' }
+}
+
 /** The answer's `warn` revocation of the running version, or null (a `disable` one names no theme). */
 export function revocationWarningOf(answer: unknown): ThemeRevocationWarning | null {
   const revoked = activeThemeOf(answer)?.revoked
@@ -157,7 +173,7 @@ export function revocationWarningOf(answer: unknown): ThemeRevocationWarning | n
 
 type ActiveManifest =
   | { readonly manifest: SpikeManifest; readonly revoked: ThemeRevocationWarning | null }
-  | { readonly absent: string }
+  | { readonly absent: string; readonly revoked: ThemeRevocationDisable | null }
 
 /**
  * A theme file's JSON, from the files proxy on the page's own origin; a failure carries its
@@ -241,7 +257,7 @@ async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<
   const timedOut = `GET ${THEME_ACTIVE_ENDPOINT} did not answer within ${deps.timeoutMs} ms`
   const answer = await withTimeout(refusedAsAuth(() => deps.fetchActive()), deps.timeoutMs, timedOut)
   const absent = absenceOf(answer, installId)
-  if (absent !== null) return { absent }
+  if (absent !== null) return { absent, revoked: revocationDisableOf(answer, installId) }
   if (optInRequired(answer)) {
     return failAs<ActiveManifest>('opt-in', new Error(`GET ${THEME_ACTIVE_ENDPOINT}: the member has not opted in to the install ${installId}`))
   }
@@ -262,7 +278,7 @@ export function installedThemeSource(installId: string): ThemeSource {
       settleLoad(async (): Promise<ThemeLoadOk | ThemeLoadAbsent> => {
         const host = await step('load', () => deps.exposeHost())
         const active = await step('manifest', () => readActiveManifest(installId, deps))
-        if ('absent' in active) return noActiveInstall(active.absent)
+        if ('absent' in active) return noActiveInstall(active.absent, active.revoked)
         const loaded = await loadFromManifest(ref, active.manifest, host.sdkVersion, deps)
         return active.revoked === null ? loaded : { ...loaded, revoked: active.revoked }
       }),

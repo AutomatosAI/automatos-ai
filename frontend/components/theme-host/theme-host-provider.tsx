@@ -7,7 +7,8 @@
  * placement slots (A-12b), and on any failure falls back to Studio with a notice; in safe mode
  * it loads no theme code at all. When the server names no theme for the install (GET
  * /api/themes/active answers `theme: null`, another install or 404: a stale cookie) it turns
- * off, and Studio shows with no notice.
+ * off, and Studio shows with no notice; when that is because the install's version has a
+ * `disable` revocation (C-05l), the notice says the theme was withdrawn, with the reason.
  * Under an installed theme's style it reports 'loading' from the first render, before its effect
  * starts the load, so the frame slot never mounts the page in the fallback first (M69). Under
  * Classic and Studio it is off: it loads nothing and puts no status on <html>, so those pages are
@@ -59,6 +60,7 @@ import {
   type ThemeHostStatus,
   type ThemeLoadOk,
   type ThemeLoadResult,
+  type ThemeRevocationDisable,
 } from '@/lib/theme-host/types'
 import {
   STYLE_HTML_CLASS_NAMES,
@@ -76,6 +78,8 @@ interface HostState {
   readonly active: ThemeLoadOk | null
   /** The installed theme's style this state is for; null when off for no style. */
   readonly style: UiStyle | null
+  /** Off because the install's version has a `disable` revocation (C-05l); absent otherwise. */
+  readonly withdrawn?: ThemeRevocationDisable
 }
 
 const OFF_STATE: HostState = { status: 'off', reason: null, active: null, style: null }
@@ -84,10 +88,15 @@ function loadingState(style: UiStyle): HostState {
   return { status: 'loading', reason: null, active: null, style }
 }
 
-/** A finished load as host state: active, off with no active install (no notice), or failed with its reason. */
+/**
+ * A finished load as host state: active, off with no active install (no notice, unless a `disable`
+ * revocation says why), or failed with its reason.
+ */
 function settledState(style: UiStyle, result: ThemeLoadResult): HostState {
   if (result.ok) return { status: 'active', reason: null, active: result, style }
-  if (result.reason === null) return { ...OFF_STATE, style }
+  if (result.reason === null) {
+    return result.revoked ? { ...OFF_STATE, style, withdrawn: result.revoked } : { ...OFF_STATE, style }
+  }
   return { status: 'failed', reason: result.reason, active: null, style }
 }
 
@@ -120,6 +129,8 @@ export const THEME_FAILURE_TEXT: Readonly<Record<ThemeFailureReason, string>> = 
 
 /** A `warn` revocation: the theme runs, and this notice says its version was withdrawn. */
 export const THEME_REVOKED_WARNING_NOTICE = 'This theme is still running, but its maintainer withdrew this version.'
+/** A `disable` revocation (C-05l): the theme does not run, and this notice says why, with the reason. */
+export const THEME_WITHDRAWN_NOTICE = 'This theme was withdrawn, so it is turned off for now.'
 
 /** The revert's notice has its own id, so the host turning off (which dismisses its notice) leaves it. */
 export const THEME_REVERT_NOTICE_ID = 'theme-host-revert'
@@ -304,9 +315,15 @@ function useThemeHostAttributes(status: ThemeHostStatus, reason: ThemeFailureRea
 
 /**
  * The one notice: the fallback with its reason, or safe mode; gone again once the theme is off or
- * active, except for an active theme whose version has a `warn` revocation (`warning` is its reason).
+ * active, except for an active theme whose version has a `warn` revocation (`warning` is its reason)
+ * and a theme off because of a `disable` one (`withdrawn` is its reason, C-05l).
  */
-function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | null, warning: string | null): void {
+function useThemeNotice(
+  status: ThemeHostStatus,
+  reason: ThemeFailureReason | null,
+  warning: string | null,
+  withdrawn: string | null,
+): void {
   useEffect(() => {
     if (status === 'active' && warning !== null) {
       const description = warning || THEME_FAILURE_TEXT.revoked
@@ -316,13 +333,16 @@ function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | nu
       toast.error(THEME_FALLBACK_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description: THEME_FAILURE_TEXT[reason] })
     } else if (status === 'safe-mode') {
       toast(THEME_SAFE_MODE_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity })
+    } else if (status === 'off' && withdrawn !== null) {
+      const description = withdrawn || THEME_FAILURE_TEXT.revoked
+      toast.warning(THEME_WITHDRAWN_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description })
     } else if (status === 'off') {
       toast.dismiss(THEME_NOTICE_ID)
     } else if (status === 'active') {
       toast.dismiss(THEME_NOTICE_ID)
       toast.dismiss(THEME_REVERT_NOTICE_ID)
     }
-  }, [status, reason, warning])
+  }, [status, reason, warning, withdrawn])
 }
 
 type SetStyle = UiStyleContextValue['setStyle']
@@ -387,7 +407,7 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
   const uiStyle = useUiStyleOptional()
   const { state, reportRenderFailure } = useThemeLoad(installedThemeStyle(uiStyle))
   useThemeHostAttributes(state.status, state.reason)
-  useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null)
+  useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null, state.withdrawn?.reason ?? null)
   useFailureRevert(state, uiStyle?.setStyle ?? null)
   useInstalledThemeRelease(state, uiStyle?.releaseInstalledTheme ?? null)
   const value = useMemo<ThemeHostContextValue>(
