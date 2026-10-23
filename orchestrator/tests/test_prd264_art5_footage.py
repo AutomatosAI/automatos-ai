@@ -146,3 +146,21 @@ def test_art5_a_providers_nsfw_refusal_ends_it_and_is_never_asked_of_another_too
     assert "Higgsfield refused to make this as unsafe content. It was not sent to any other provider." in comment
     logged = [record.getMessage() for record in caplog.records if record.name == "core.generation_guard"]
     assert logged == [f"[GenerationGuard] refused: workspace={WS} path=socials.footage reason=provider_refused"]
+
+
+def test_art5_with_the_read_off_no_reference_is_fetched_and_the_render_goes_ahead(env, monkeypatch):
+    """The model read ships off until after Web Summit: no read, and no reference fetched for one."""
+    asked = _guard_reads(monkeypatch, sexual=True, real_person=True)
+    monkeypatch.setattr(generation_guard.config, "GENERATION_GUARD_READ_ENABLED", False, raising=False)
+    monkeypatch.setattr(socials_brand, "liked_reference_links", lambda settings: (REFERENCE,))
+    env.files[REFERENCE] = REFERENCE_PNG
+    _cache_fal(env)
+    _connect(env, "FAL_AI")
+    _script_fal(env)
+    post = _create(env)
+
+    ok, _, _ = _render(env, post["id"], FakeStore())
+
+    assert ok is True and asked == []
+    assert REFERENCE not in [url for url, _, _ in env.fetched], "not fetched for a read that doesn't run"
+    assert FAL_SUBMIT in env.composio.slugs()
