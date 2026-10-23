@@ -8,6 +8,7 @@
  * `@clerk/nextjs` is the double review-queue.test.tsx uses (create and lift carry step-up).
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -138,6 +139,20 @@ describe('revoking', () => {
     fireEvent.change(screen.getByLabelText('Package digest'), { target: { value: ` ${DIGEST} ` } })
     fill(' Sends chat text away. ')
     fireEvent.click(revoke)
+    await waitFor(() =>
+      expect(api.createThemeRevocation).toHaveBeenCalledWith({ digest: DIGEST, level: 'disable', reason: 'Sends chat text away.' }),
+    )
+  })
+
+  it('keeps every hex character of a digest pasted with whitespace around it', async () => {
+    // user-event cuts a paste to the field's maxlength as a browser does (fireEvent.change does not).
+    api.createThemeRevocation.mockResolvedValue({ revocation: LOCAL_ROW, created: true })
+    const user = userEvent.setup()
+    renderWithQuery(<RevocationsPanel hosted={false} />)
+    await user.click(await screen.findByLabelText('Package digest'))
+    await user.paste(`  ${DIGEST}  `)
+    fill('Sends chat text away.')
+    fireEvent.click(screen.getByRole('button', { name: REVOKE }))
     await waitFor(() =>
       expect(api.createThemeRevocation).toHaveBeenCalledWith({ digest: DIGEST, level: 'disable', reason: 'Sends chat text away.' }),
     )

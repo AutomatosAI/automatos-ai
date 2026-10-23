@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { ThemeRevocationCreate, ThemeRevocationLevel } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
-import { DIGEST_LENGTH, LEVEL_HINTS, REVOCATION_REASON_MAX, REVOKE } from './review-words'
+import { LEVEL_HINTS, REVOCATION_REASON_MAX, REVOKE } from './review-words'
 import { useCreateRevocation } from './use-theme-revocations'
 
 export type RevocationTargetKind = 'digest' | 'theme'
@@ -76,12 +76,13 @@ function Choice<T extends string>({ name, value, options, onChange }: {
 
 function TargetInputs({ fields, set }: { fields: RevocationFields; set: (change: Partial<RevocationFields>) => void }) {
   if (fields.kind === 'digest') {
+    // No maxLength: a browser cuts a paste to it before the trim, so a digest copied with a space
+    // around it would lose hex characters off its end. The server's 64-hex check is the bound.
     return (
       <Input
         aria-label="Package digest"
         placeholder="The package's sha256, 64 hex characters"
         value={fields.digest}
-        maxLength={DIGEST_LENGTH}
         spellCheck={false}
         autoComplete="off"
         onChange={(event) => set({ digest: event.target.value })}

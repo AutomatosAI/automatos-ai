@@ -65,8 +65,6 @@ export const REVOCATION_REPEATED = 'A live revocation already says this, so noth
 export const REVOCATION_LIFTED = 'Revocation lifted. Members get the theme back on their next load.'
 /** revocation_admin.py REASON_MAX: the longest reason the server takes. */
 export const REVOCATION_REASON_MAX = 2000
-/** manifest.py SHA256_PATTERN: a package digest is 64 hex characters. */
-export const DIGEST_LENGTH = 64
 
 export const LEVEL_WORDS: Readonly<Record<string, string>> = {
   warn: 'Warn',
