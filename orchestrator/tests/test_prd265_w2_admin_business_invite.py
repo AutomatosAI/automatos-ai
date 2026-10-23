@@ -13,10 +13,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.admin_credits import router
+from config import config
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
@@ -30,6 +32,17 @@ class FakeProvider:
 
     def create_checkout(self, request):  # pragma: no cover - the offer never checks out itself
         raise AssertionError("offering Business never opens a checkout")
+
+
+@pytest.fixture(autouse=True)
+def hosted(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+
+
+def test_the_local_edition_has_no_business_offer(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    workspace = _workspace()
+    assert _post(_app(system_role="super_admin", workspace=workspace), workspace.id).status_code == 404
 
 
 def _workspace():

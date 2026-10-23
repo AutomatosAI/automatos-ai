@@ -75,5 +75,15 @@ const STRIPE_CSP = Object.freeze({
   connect: STRIPE_CONNECT_SOURCES.join(' '),
   img: STRIPE_IMG_SOURCES.join(' '),
 })
+const NO_STRIPE = Object.freeze({ script: '', frame: '', connect: '', img: '' })
 
-module.exports = { mediaOrigins, clerkFrontendApiOrigin, CLERK_PROTECT_SOURCE, CLERK_PROTECT_CONNECT_SOURCE, STRIPE_CSP }
+/**
+ * Stripe's sources for the build's edition (NEXT_PUBLIC_AUTH_EDITION, read the way
+ * lib/auth-edition.ts reads it): the local edition has no billing, so its policy names no
+ * Stripe host at all; anything else is the hosted edition.
+ */
+function stripeCspFor(edition) {
+  return String(edition || '').trim().toLowerCase() === 'local' ? NO_STRIPE : STRIPE_CSP
+}
+
+module.exports = { mediaOrigins, clerkFrontendApiOrigin, CLERK_PROTECT_SOURCE, CLERK_PROTECT_CONNECT_SOURCE, STRIPE_CSP, stripeCspFor }

@@ -1962,6 +1962,15 @@ class Config:
     # The share of a workspace's allowance (the trial, or the plan's monthly credits)
     # left when the "running low" alert fires; the second alert fires at zero.
     CREDITS_ALERT_LOW_SHARE: float = float(os.getenv("CREDITS_ALERT_LOW_SHARE", "0.20"))
+    # The people who never pay (Gerard, 23 Oct 2026: "Super Admin doesn't have to pay"):
+    # a workspace whose OWNER's email is in this comma-separated list runs on an
+    # allowance, like Enterprise: its calls on the platform's AI keys are recorded
+    # (for the margin numbers) but never charged and never paused. An email, not the
+    # super-admin role, because that role lives only in Clerk's sign-in token, and the
+    # meter and the scheduled work run with nobody signed in. Empty = nobody is free.
+    BILLING_FREE_OWNER_EMAILS: frozenset = frozenset(
+        email.strip().lower() for email in os.getenv("BILLING_FREE_OWNER_EMAILS", "").split(",") if email.strip()
+    )
     # A month's credits stay spendable this long past their period end when the
     # renewal hasn't been paid yet (Stripe retries a failed card for days); then
     # the hourly sweep expires them (services/credits/expiry.py).
