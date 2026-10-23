@@ -6,10 +6,15 @@
  * While billing is closed (`billing_open` false) the beta sentences show and no plan shows a
  * credit amount; once it opens the beta sentences go and Pro and Business show their
  * `monthly_credits`. Plan names and prices always come from the API (`name`, `price_usd`).
+ *
+ * PRD-265 W2: Business is by invite. While a platform admin's offer to this workspace stands
+ * (`business_offer_until` in the future) its card can be bought here and says until when;
+ * otherwise it offers "Contact Automatos", as Enterprise always does.
  */
-import type { BillingPlan, BillingPlans } from '@/hooks/use-billing-plans'
-import { formatCredits, formatUsd } from './billing-format'
+import { isStillOpen, type BillingPlan, type BillingPlans } from '@/hooks/use-billing-plans'
+import { formatCredits, formatDay, formatUsd } from './billing-format'
 
+export const BUSINESS_PLAN = 'business'
 export const CONTACT_URL = 'https://automatos.app/contact'
 export const CONTACT_LABEL = 'Contact Automatos'
 export const COMING_SOON = 'Coming soon'
@@ -32,9 +37,19 @@ const LOCAL_EDITION_SENTENCE =
   'The local edition is free and open source (Apache 2.0), on your own keys or your Claude Code / CLI subscription.'
 const DEFAULT_TRIAL_CREDITS = 500
 
-/** Bought by invitation or not sold here: the card offers "Contact Automatos", never checkout. */
-export function isContactOnly(plan: BillingPlan): boolean {
-  return plan.coming_soon || !plan.self_serve
+/**
+ * Not sold here, or Business without an open offer: the card offers "Contact Automatos" and
+ * never a payment form.
+ */
+export function isContactOnly(plan: BillingPlan, offerUntil: string | null | undefined = null): boolean {
+  if (plan.coming_soon || !plan.self_serve) return true
+  return plan.key === BUSINESS_PLAN && !isStillOpen(offerUntil)
+}
+
+/** "Offered to you until 6 Nov 2026." on Business while its offer stands; null otherwise. */
+export function planOfferLine(plan: BillingPlan, offerUntil: string | null | undefined): string | null {
+  if (plan.key !== BUSINESS_PLAN || isContactOnly(plan, offerUntil)) return null
+  return `Offered to you until ${formatDay(offerUntil)}.`
 }
 
 /** "$29 a month"; "Coming soon" for a plan not on sale yet. */
@@ -43,10 +58,10 @@ export function planPriceLabel(plan: BillingPlan): string {
   return `${formatUsd(plan.price_usd)} a month`
 }
 
-/** The plan's body copy, with the invitation sentence on an invite-only plan. */
-export function planDescription(plan: BillingPlan, billingOpen: boolean): string {
+/** The plan's body copy, with the invitation sentence on an invite-only plan nobody has offered. */
+export function planDescription(plan: BillingPlan, billingOpen: boolean, contactOnly: boolean = isContactOnly(plan)): string {
   const body = PLAN_BODIES[plan.key] ?? ''
-  if (plan.coming_soon || plan.self_serve) return body
+  if (plan.coming_soon || !contactOnly) return body
   return [body, billingOpen ? INVITE_OPEN : INVITE_BETA].filter(Boolean).join(' ')
 }
 

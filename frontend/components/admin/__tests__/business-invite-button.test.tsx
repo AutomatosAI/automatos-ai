@@ -1,13 +1,15 @@
 /**
- * PRD-265 US-007 — the operator console's "Business checkout link".
+ * PRD-265 US-007 / W2 — the operator console's "Offer Business".
  *
- * The button POSTs /api/admin/workspaces/{id}/business-invite, copies the answered link and
- * toasts until when it works; where the clipboard is refused the toast carries the link to copy
- * by hand; a refusal is toasted in the API's words. Hidden for a workspace already on Business.
- * The plan column (WorkspacePlanCell) mounts it beside the plan dropdown.
+ * The button POSTs /api/admin/workspaces/{id}/business-invite, which offers Business to that
+ * workspace in-app for 14 days, and toasts "Business offered to <name> until <date>". There is
+ * no link: nothing is copied to the clipboard. A refusal is toasted in the API's words. Hidden
+ * for a workspace already on Business. The plan column (WorkspacePlanCell) mounts it beside the
+ * plan dropdown.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { formatAbsoluteDate } from '@/lib/format-relative'
 
 const { postMock, toastMock } = vi.hoisted(() => ({
   postMock: vi.fn(),
@@ -20,86 +22,61 @@ vi.mock('../workspace-plan-select', () => ({
   WorkspacePlanSelect: ({ plan }: { plan: string | null }) => <span data-testid="plan-select">{plan}</span>,
 }))
 
-import { BusinessInviteButton, INVITE_FAILED, inviteExpiry } from '../business-invite-button'
+import { BusinessInviteButton, OFFER_FAILED, offeredToast } from '../business-invite-button'
 import { WorkspacePlanCell } from '../workspace-plan-cell'
 
-const INVITE = { url: 'https://checkout.stripe.com/c/pay/cs_test_business', expires_at: '2026-10-24T10:00:00+00:00' }
+const OFFER = { workspace_id: 'ws-1', business_offer_until: '2026-11-06T10:00:00+00:00' }
 const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
 const writeText = vi.fn()
 
-function setClipboard(clipboard: { writeText: (text: string) => Promise<void> } | undefined): void {
-  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: clipboard })
-}
-
-const inviteButton = () => screen.getByRole('button', { name: 'Business checkout link for Acme' })
+const offerButton = () => screen.getByRole('button', { name: 'Offer Business to Acme' })
 
 beforeEach(() => {
   postMock.mockReset()
   writeText.mockReset()
-  writeText.mockResolvedValue(undefined)
-  toastMock.success.mockReset()
-  toastMock.error.mockReset()
-  toastMock.info.mockReset()
-  setClipboard({ writeText })
+  Object.values(toastMock).forEach((mock) => mock.mockReset())
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
 })
 
 afterEach(() => {
   cleanup()
   if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard)
   else delete (window.navigator as { clipboard?: unknown }).clipboard
-  vi.restoreAllMocks()
 })
 
-describe('Business checkout link (PRD-265 US-007)', () => {
-  it('asks for the link, copies it and says until when it works', async () => {
-    postMock.mockResolvedValue(INVITE)
+describe('Offer Business (PRD-265 US-007 / W2)', () => {
+  it('offers Business in-app and says until when, with no link to copy', async () => {
+    postMock.mockResolvedValue(OFFER)
     render(<BusinessInviteButton workspaceId="ws-1" workspaceName="Acme" plan="pro" />)
 
-    fireEvent.click(inviteButton())
+    fireEvent.click(offerButton())
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(INVITE.url))
-    expect(postMock).toHaveBeenCalledWith('/api/admin/workspaces/ws-1/business-invite')
     await waitFor(() =>
-      expect(toastMock.success).toHaveBeenCalledWith('Business checkout link for Acme copied', {
-        description: `Send it to the workspace owner. ${inviteExpiry(INVITE.expires_at)}`,
-      }),
+      expect(toastMock.success).toHaveBeenCalledWith(`Business offered to Acme until ${formatAbsoluteDate(OFFER.business_offer_until)}`),
     )
-    expect(inviteExpiry(INVITE.expires_at)).toMatch(/^It works until .+\.$/)
+    expect(postMock).toHaveBeenCalledWith('/api/admin/workspaces/ws-1/business-invite')
+    expect(offeredToast('Acme', OFFER.business_offer_until)).toBe(`Business offered to Acme until ${formatAbsoluteDate(OFFER.business_offer_until)}`)
+    expect(writeText).not.toHaveBeenCalled()
   })
 
-  it('shows the link to copy by hand when the browser refuses the clipboard', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    writeText.mockRejectedValue(new Error('denied'))
-    postMock.mockResolvedValue(INVITE)
+  it("toasts the API's words when Business can't be offered, and the button works again", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error('Workspace not found'), { status: 404, body: { detail: 'Workspace not found.' } }))
+    render(<BusinessInviteButton workspaceId="ws-1" workspaceName="Acme" plan="basic" />)
+
+    fireEvent.click(offerButton())
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Workspace not found.'))
+    expect(toastMock.success).not.toHaveBeenCalled()
+    await waitFor(() => expect(offerButton()).toBeEnabled())
+  })
+
+  it('falls back to its own sentence for a server failure', async () => {
+    postMock.mockRejectedValue(Object.assign(new Error('boom'), { status: 500, body: { detail: 'Traceback …' } }))
     render(<BusinessInviteButton workspaceId="ws-1" workspaceName="Acme" plan={null} />)
 
-    fireEvent.click(inviteButton())
+    fireEvent.click(offerButton())
 
-    await waitFor(() => expect(toastMock.info).toHaveBeenCalledTimes(1))
-    const [, options] = toastMock.info.mock.calls[0] as [string, { description: string }]
-    expect(options.description).toContain(INVITE.url)
-    expect(toastMock.success).not.toHaveBeenCalled()
-  })
-
-  it("toasts the API's words when the link cannot be made", async () => {
-    postMock.mockRejectedValue(Object.assign(new Error("Billing isn't configured."), { status: 503, body: { detail: "Billing isn't configured." } }))
-    render(<BusinessInviteButton workspaceId="ws-1" workspaceName="Acme" plan="basic" />)
-
-    fireEvent.click(inviteButton())
-
-    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith("Billing isn't configured."))
-    expect(writeText).not.toHaveBeenCalled()
-    await waitFor(() => expect(inviteButton()).toBeEnabled())
-  })
-
-  it('never copies an answer that is not an https address', async () => {
-    postMock.mockResolvedValue({ url: 'http://example.test/x', expires_at: INVITE.expires_at })
-    render(<BusinessInviteButton workspaceId="ws-1" workspaceName="Acme" plan="basic" />)
-
-    fireEvent.click(inviteButton())
-
-    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(INVITE_FAILED))
-    expect(writeText).not.toHaveBeenCalled()
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(OFFER_FAILED))
   })
 
   it('is hidden for a workspace already on Business', () => {
@@ -122,6 +99,6 @@ describe('Business checkout link (PRD-265 US-007)', () => {
     )
 
     expect(screen.getByTestId('plan-select')).toHaveTextContent('pro')
-    expect(inviteButton()).toBeEnabled()
+    expect(offerButton()).toBeEnabled()
   })
 })

@@ -123,8 +123,11 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
     await expect(page.getByRole('button', { name: SWITCH_TO_PLAY })).toHaveCount(0)
     await expect(page.locator('html')).not.toHaveClass(PLAY_CLASS)
 
+    // Leave the app before choosing: an open page sees the new server choice and reloads itself, and
+    // a reload of ours racing that one aborts (net::ERR_ABORTED). Open the page fresh instead.
+    await page.goto('about:blank')
     await play.choose(page)
-    await page.reload()
+    await page.goto(LOOKS_PATH)
     await play.ready(page)
     const heading = page.getByRole('heading', { name: LOOKS_HEADING, level: 1 })
     await expect(heading).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })

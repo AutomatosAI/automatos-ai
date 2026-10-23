@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Iterable, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -24,6 +24,8 @@ FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 0.5
 _RETRY_STATUSES = frozenset({409, 429, 500, 502, 503, 504})
+# An invoice PDF Stripe hands out (``invoice.invoice_pdf``) lives on a Stripe host.
+STRIPE_FILE_HOST_SUFFIX = ".stripe.com"
 
 
 class StripeNotConfigured(Exception):
@@ -93,6 +95,22 @@ class StripeApi:
     def get(self, path: str, params: Optional[dict] = None) -> dict:
         return self._request("GET", path, params=encode_form(params), retry=True)
 
+    def fetch_file(self, url: str, *, max_bytes: int) -> bytes:
+        """A file Stripe links to (an invoice PDF), so our server can hand it to the
+        browser. Only Stripe's https hosts, before and after redirects; the secret key
+        is never sent to them (the link is signed); at most ``max_bytes``."""
+        if not _is_stripe_file_url(url):
+            raise StripeError(0, "not a Stripe file link")
+        with httpx.Client(timeout=self._timeout, transport=self._transport, follow_redirects=True) as client:
+            response = client.get(url)
+        if not _is_stripe_file_url(str(response.url)):
+            raise StripeError(0, "the file link left Stripe")
+        if response.status_code >= 400:
+            raise StripeError(response.status_code, "the file could not be fetched")
+        if len(response.content) > max_bytes:
+            raise StripeError(0, "the file is larger than expected")
+        return response.content
+
     def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         extra = kwargs.pop("headers", None) or {}
         with httpx.Client(base_url=STRIPE_API_BASE, timeout=self._timeout, transport=self._transport) as client:
@@ -115,6 +133,12 @@ class StripeApi:
                 raise _error_of(response)
             self._sleep(RETRY_BACKOFF_SECONDS * attempt)
         raise AssertionError("unreachable")  # the loop always returns or raises
+
+
+def _is_stripe_file_url(url: str) -> bool:
+    parts = urlsplit(url or "")
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and host.endswith(STRIPE_FILE_HOST_SUFFIX)
 
 
 def stripe_api(transport: Optional[httpx.BaseTransport] = None) -> StripeApi:

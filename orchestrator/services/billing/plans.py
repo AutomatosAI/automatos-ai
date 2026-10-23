@@ -2,14 +2,23 @@
 
 Prices and limits are read from ``config.PLAN_TIERS`` (the facts sheet's numbers),
 so the tab, Auto's plan proposal and the operator console never disagree. Stripe's
-own Prices are created from the same numbers (``scripts/stripe_setup.py``).
+own Prices are created from the same numbers (``scripts/stripe_setup.py``). The
+Billing tab's in-page checkout needs the publishable key and, when counsel's text is
+set, the consent wording; a platform admin's Business offer makes Business buyable
+for this workspace until it lapses.
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
 from services.billing.accounts import account_for_workspace
-from services.billing.checkout import checkout_open_for, is_configured, topup_available
+from services.billing.checkout import (
+    business_offered,
+    checkout_open_for,
+    is_configured,
+    publishable_key,
+    topup_available,
+)
 
 PLAN_ORDER = ("basic", "pro", "business", "enterprise")
 
@@ -32,13 +41,24 @@ def plan_card(key: str, tier: dict) -> dict:
     }
 
 
+def _iso(value: Any) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
 def _subscription(account: Any) -> dict:
     if account is None:
         return {"status": None, "cancel_at_period_end": False, "current_period_end": None,
-                "has_billing_account": False}
-    end = account.current_period_end or account.credited_period_end
+                "has_billing_account": False, "scheduled_change": None}
+    scheduled = ({"plan": account.scheduled_plan, "effective_at": _iso(account.scheduled_at)}
+                 if account.scheduled_plan else None)
     return {"status": account.subscription_status, "cancel_at_period_end": bool(account.cancel_at_period_end),
-            "current_period_end": end.isoformat() if end else None, "has_billing_account": True}
+            "current_period_end": _iso(account.current_period_end or account.credited_period_end),
+            "has_billing_account": True, "scheduled_change": scheduled}
+
+
+def _cards(tiers: dict, offered: bool) -> list:
+    cards = [plan_card(key, tiers[key]) for key in PLAN_ORDER if key in tiers]
+    return [{**card, "self_serve": True} if offered and card["key"] == "business" else card for card in cards]
 
 
 def plans_view(db: Any, workspace: Any, *, user: Any, can_manage: bool, tiers: Optional[dict] = None) -> dict:
@@ -47,14 +67,18 @@ def plans_view(db: Any, workspace: Any, *, user: Any, can_manage: bool, tiers: O
 
     resolved = tiers if tiers is not None else PLAN_TIERS
     account = account_for_workspace(db, workspace.id)
+    offered = business_offered(account)
     return {
         "billing_open": bool(config.BILLING_OPEN),
         "checkout_available": is_configured() and checkout_open_for(user),
         "can_manage": bool(can_manage),
         "current_plan": workspace.plan,
         "subscription": _subscription(account),
-        "plans": [plan_card(key, resolved[key]) for key in PLAN_ORDER if key in resolved],
+        "plans": _cards(resolved, offered),
         "topup": {"credits": int(config.TOPUP_CREDITS), "price_usd": int(config.TOPUP_PRICE_USD),
                   "valid_days": int(config.TOPUP_VALID_DAYS),
                   "available": topup_available(account, workspace.plan)},
+        "publishable_key": publishable_key(),
+        "consent_text": config.BILLING_WITHDRAWAL_CONSENT_TEXT or "",
+        "business_offer_until": _iso(account.business_offer_until) if offered else None,
     }

@@ -50,7 +50,7 @@ describe('the Content-Security-Policy', () => {
     expect((await policyWith('https://*.amazonaws.com'))['img-src']).toContain('https://*.amazonaws.com')
     const bare = await policyWith(undefined)
     expect(bare['img-src']).toBe(
-      "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
+      "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev https://*.link.com",
     )
     expect(bare['media-src']).toBe("media-src 'self' blob:")
   })

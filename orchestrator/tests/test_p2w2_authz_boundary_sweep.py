@@ -209,9 +209,10 @@ ADMIN_GATED_IN_HANDLER = {
     # (api/billing.py) carry the credit read surface — both are GET-only, so
     # the mutating-routes sweep below does not classify them.
     ("POST", "/api/admin/workspaces/{workspace_id}/credits"),
-    # PRD-265 US-007 (W2): a Business checkout link for one workspace
-    # (api/admin_credits.py create_business_invite) — the same in-handler
-    # `_require_platform_admin(ctx)` gate. POST /api/v1/billing/checkout and /portal
+    # PRD-265 US-007 (W2 v2): a Business offer for one workspace, bought on the
+    # owner's own in-page Billing tab — no portal, no link (api/admin_credits.py
+    # create_business_invite) — the same in-handler `_require_platform_admin(ctx)`
+    # gate. POST /api/v1/billing/checkout and the api/billing_manage.py routes
     # carry `require_workspace_admin` and classify as workspace-admin on their own.
     ("POST", "/api/admin/workspaces/{workspace_id}/business-invite"),
 }

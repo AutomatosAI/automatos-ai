@@ -31,24 +31,13 @@ from services.billing.grants import (
     granted_by_payment,
     restore_dispute,
 )
+from services.billing.notices import NOTICE_PAYMENT_FAILED, NOTICE_SUBSCRIPTION_ENDED, Notice
 
 logger = logging.getLogger(__name__)
 
 PROCESSED = "processed"
 IGNORED = "ignored"
 NEEDS_REVIEW = "needs_review"
-
-NOTICE_PAYMENT_FAILED = "billing_payment_failed"
-NOTICE_SUBSCRIPTION_ENDED = "billing_subscription_ended"
-
-
-@dataclass(frozen=True)
-class Notice:
-    """A notification to send once the event's transaction has committed."""
-
-    event_type: str
-    title: str
-    message: str
 
 
 @dataclass(frozen=True)
@@ -113,6 +102,8 @@ def on_period_paid(db: Any, fact: f.PeriodPaid, provider: str) -> Outcome:
     credits = grant_period(db, account, plan=plan, invoice_id=fact.invoice_id, period_end=fact.period_end,
                            period_start=fact.period_start)
     _move_plan(db, account.workspace_id, plan)
+    if account.scheduled_plan == plan:  # the downgrade the schedule waited for took effect
+        account.schedule_id = account.scheduled_plan = account.scheduled_at = None
     account.plan = plan
     account.subscription_id = fact.subscription_id or account.subscription_id
     if account.subscription_status not in ("active", "trialing"):
@@ -136,6 +127,7 @@ def _end(db: Any, account: Any) -> Notice:
     _move_plan(db, account.workspace_id, ENTRY_PLAN)
     ended = (get_tier(account.plan or "") or {}).get("display_name") or "paid"
     account.plan, account.period_credits = ENTRY_PLAN, 0
+    account.schedule_id = account.scheduled_plan = account.scheduled_at = None
     return Notice(NOTICE_SUBSCRIPTION_ENDED, "Your subscription has ended",
                   f"Your {ended} plan has ended, so work on Automatos's AI keys is paused. "
                   "Choose a plan on the Billing tab, or add your own AI key in Settings.")

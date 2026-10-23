@@ -23,7 +23,7 @@ vi.mock('@/lib/auth-edition', () => ({
   },
 }))
 
-import { BILLING_PLANS_PATH, hasLiveSubscription, useBillingPlans } from '@/hooks/use-billing-plans'
+import { BILLING_PLANS_PATH, hasLiveSubscription, isStillOpen, useBillingPlans } from '@/hooks/use-billing-plans'
 import { BILLING_LEDGER_PATH, billingLedgerPath, isForbidden, useBillingLedger } from '@/hooks/use-billing-ledger'
 
 function wrapper() {
@@ -67,6 +67,15 @@ describe('useBillingPlans', () => {
     expect(hasLiveSubscription({ ...base, status: 'incomplete' })).toBe(false)
     expect(hasLiveSubscription({ ...base, status: null })).toBe(false)
     expect(hasLiveSubscription(undefined)).toBe(false)
+  })
+
+  it('counts a Business offer as open only while its time is still ahead (PRD-265 W2)', () => {
+    const now = Date.parse('2026-10-23T10:00:00+00:00')
+    expect(isStillOpen('2026-11-06T10:00:00+00:00', now)).toBe(true)
+    expect(isStillOpen('2026-10-23T10:00:00+00:00', now)).toBe(false)
+    expect(isStillOpen('2026-10-01T10:00:00+00:00', now)).toBe(false)
+    expect(isStillOpen(null, now)).toBe(false)
+    expect(isStillOpen('not a date', now)).toBe(false)
   })
 })
 

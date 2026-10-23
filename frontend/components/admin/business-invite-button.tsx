@@ -1,32 +1,29 @@
 'use client'
 
 /**
- * PRD-265 US-007 — "Business checkout link" in the operator console (admin/workspaces).
+ * PRD-265 US-007 / W2 — "Offer Business" in the operator console (admin/workspaces).
  *
- * Business is by invite: a platform admin asks
- * `POST /api/admin/workspaces/{id}/business-invite` for a Stripe Checkout link that works for
- * that one workspace (for up to 24 hours), copies it, and sends it to the workspace's owner.
- * The link is put on the clipboard and a toast says until when it works; where the browser
- * refuses the clipboard, the toast shows the link to copy by hand. Hidden for a workspace that
- * is already on Business. Errors are toasted in the API's plain words (lib/billing-errors.ts).
+ * Business is by invite. A platform admin offers it to one workspace
+ * (`POST /api/admin/workspaces/{id}/business-invite`): for the next 14 days the owner sees
+ * Business as buyable on their own Billing tab, and gets a notification. There is no link to
+ * copy or send; the toast says until when the offer stands. Hidden for a workspace that is
+ * already on Business. Errors are toasted in the API's plain words (lib/billing-errors.ts).
  */
 import { useState } from 'react'
-import { Link2, Loader2 } from 'lucide-react'
+import { Gift, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
-import { billingErrorMessage, isHttpsUrl } from '@/lib/billing-errors'
-import { copyToClipboard } from '@/lib/utils'
+import { billingErrorMessage } from '@/lib/billing-errors'
+import { formatAbsoluteDate } from '@/lib/format-relative'
 
 export const BUSINESS_PLAN = 'business'
-export const INVITE_FAILED = "The Business checkout link couldn't be made. Try again in a moment."
-export const INVITE_LABEL = 'Business checkout link'
-/** The by-hand toast stays until it is closed: the admin needs time to copy the link. */
-const MANUAL_COPY_DURATION_MS = Number.POSITIVE_INFINITY
+export const OFFER_FAILED = "Business couldn't be offered. Try again in a moment."
+export const OFFER_LABEL = 'Offer Business'
 
-export interface BusinessInvite {
-  url: string
-  expires_at: string
+export interface BusinessOffer {
+  workspace_id: string
+  business_offer_until: string
 }
 
 interface BusinessInviteButtonProps {
@@ -40,43 +37,23 @@ export function businessInvitePath(workspaceId: string): string {
   return `/api/admin/workspaces/${encodeURIComponent(workspaceId)}/business-invite`
 }
 
-/** "It works until 24 Oct 2026, 10:00." (empty when the API sent no usable time). */
-export function inviteExpiry(expiresAt: string | null | undefined): string {
-  const until = expiresAt ? new Date(expiresAt) : null
-  if (!until || Number.isNaN(until.getTime())) return ''
-  return `It works until ${until.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.`
-}
-
-async function requestInvite(workspaceId: string): Promise<BusinessInvite> {
-  const invite = await apiClient.post<BusinessInvite>(businessInvitePath(workspaceId))
-  if (!isHttpsUrl(invite?.url)) throw new Error(INVITE_FAILED)
-  return invite
-}
-
-async function handOver(invite: BusinessInvite, workspaceName: string): Promise<void> {
-  const expiry = inviteExpiry(invite.expires_at)
-  if (await copyToClipboard(invite.url)) {
-    toast.success(`Business checkout link for ${workspaceName} copied`, {
-      description: ['Send it to the workspace owner.', expiry].filter(Boolean).join(' '),
-    })
-    return
-  }
-  toast.info(`Copy the Business checkout link for ${workspaceName}`, {
-    description: [invite.url, expiry].filter(Boolean).join(' '),
-    duration: MANUAL_COPY_DURATION_MS,
-  })
+/** "Business offered to Acme until 6 Nov 2026" (without the date when the API sent none). */
+export function offeredToast(workspaceName: string, until: string | null | undefined): string {
+  const date = formatAbsoluteDate(until)
+  return date === '—' ? `Business offered to ${workspaceName}` : `Business offered to ${workspaceName} until ${date}`
 }
 
 export function BusinessInviteButton({ workspaceId, workspaceName, plan, disabled = false }: BusinessInviteButtonProps) {
   const [busy, setBusy] = useState(false)
   if (plan === BUSINESS_PLAN) return null
 
-  async function issue() {
+  async function offer() {
     setBusy(true)
     try {
-      await handOver(await requestInvite(workspaceId), workspaceName)
+      const answer = await apiClient.post<BusinessOffer>(businessInvitePath(workspaceId))
+      toast.success(offeredToast(workspaceName, answer?.business_offer_until))
     } catch (error) {
-      toast.error(billingErrorMessage(error, INVITE_FAILED))
+      toast.error(billingErrorMessage(error, OFFER_FAILED))
     } finally {
       setBusy(false)
     }
@@ -88,12 +65,12 @@ export function BusinessInviteButton({ workspaceId, workspaceName, plan, disable
       size="sm"
       variant="outline"
       className="h-7 px-2"
-      title={INVITE_LABEL}
-      aria-label={`${INVITE_LABEL} for ${workspaceName}`}
+      title={OFFER_LABEL}
+      aria-label={`${OFFER_LABEL} to ${workspaceName}`}
       disabled={disabled || busy}
-      onClick={() => void issue()}
+      onClick={() => void offer()}
     >
-      {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Link2 className="h-3 w-3" aria-hidden="true" />}
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Gift className="h-3 w-3" aria-hidden="true" />}
     </Button>
   )
 }
