@@ -234,13 +234,16 @@ describe('PRD-261 A-19f2 — the scan reads the whole frontend', () => {
   })
 
   it('catches every banned name, and no lookalike', () => {
-    const samples = [
-      `color: var(${['--', 'pl-accent'].join('')})`, `src="/${['au', 'to'].join('')}/hello.webm"`,
-      `key: '${['automatos', PLAY].join('-')}.looks'`, `import { ${['LOOK', 'INTERFACE'].join('_')} } from './types'`,
-      `{ iface: '${PLAY}' }`, `:where(html.${PLAY}) body {}`, `'${['theme', 'builtin', PLAY].join(':')}'`,
-      `choice: '${['builtin', PLAY].join(':')}'`,
+    // Each sample with what it must be refused as; the retired style cookie is both a builtin style and Play's ref.
+    const samples: ReadonlyArray<readonly [string, readonly number[]]> = [
+      [`color: var(${['--', 'pl-accent'].join('')})`, [0]], [`src="/${['au', 'to'].join('')}/hello.webm"`, [1]],
+      [`key: '${['automatos', PLAY].join('-')}.looks'`, [2]], [`import { ${['LOOK', 'INTERFACE'].join('_')} } from './types'`, [3]],
+      [`{ iface: '${PLAY}' }`, [4]], [`:where(html.${PLAY}) body {}`, [5]], [`'${['theme', 'builtin', PLAY].join(':')}'`, [6, 7]],
+      [`choice: '${['builtin', PLAY].join(':')}'`, [7]],
     ]
-    expect(samples.map((sample) => bannedIn('x', sample, BANNED_TEXT).length)).toEqual(samples.map(() => 1))
+    expect(samples.map(([sample]) => bannedIn('x', sample, BANNED_TEXT)))
+      .toEqual(samples.map(([, hits]) => hits.map((index) => `x:1: ${BANNED_TEXT[index][0]}`)))
+    expect(new Set(samples.flatMap(([, hits]) => hits)).size).toBe(BANNED_TEXT.length)
     const lookalikes = ['reports/auto/pricing.md', 'display: flex', `video.${PLAY}()`, `'${PLAY}'`, `html.${PLAY}books`, 'builtin:x']
     expect(lookalikes.flatMap((sample) => bannedIn('x', sample, BANNED_TEXT))).toEqual([])
   })
