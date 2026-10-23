@@ -123,7 +123,10 @@ def _add_overdraft(rows: list[tuple[str, int]], bucket: str, amount: int) -> lis
     return merged + [(bucket, -amount)]
 
 
-def _lock_balance(db: Any, workspace_id: Any) -> Balance:
+def lock_balance(db: Any, workspace_id: Any) -> Balance:
+    """Lock the workspace's balance row for this transaction (creating it at zero
+    first) and return it: a writer that reads a bucket before deciding what to
+    move takes this first, so the meter can't spend the credits in between."""
     db.execute(
         text("INSERT INTO credit_balances (workspace_id) VALUES (CAST(:ws AS uuid)) "
              "ON CONFLICT (workspace_id) DO NOTHING"),
@@ -211,7 +214,7 @@ def record(
 ) -> bool:
     """Record ``entry`` for ``workspace_id`` once. Returns False when its source
     event was already recorded (nothing changed). Does not commit."""
-    balance = _lock_balance(db, workspace_id)
+    balance = lock_balance(db, workspace_id)
     if is_recorded(db, entry.source_type, entry.source_ref):
         return False
     rows = allocate(balance, entry, spend_buckets)

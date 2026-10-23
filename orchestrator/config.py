@@ -1948,8 +1948,10 @@ class Config:
     # Platform-wide daily ceiling on trial credits spent; new grants PAUSE once
     # today's trial spend reaches it. Grants already made keep working.
     TRIAL_GLOBAL_DAILY_CREDITS: int = int(os.getenv("TRIAL_GLOBAL_DAILY_CREDITS", "2500"))
-    # Paid plans are on sale. False (the beta): no monthly grants, no checkout, and
-    # plan prices carry the "beta" label (facts sheet §4). US-013 flips it.
+    # Paid plans are on sale. False (the beta): checkout is open to platform admins
+    # only (test mode, live card tests), and plan prices carry the "beta" label
+    # (facts sheet §4). Credits are granted only by a verified Stripe payment,
+    # open or not. US-013 flips it.
     BILLING_OPEN: bool = os.getenv("BILLING_OPEN", "false").lower() == "true"
     # Metered credits (Gerard, 20 Oct 2026: tokens × model price, like OpenRouter —
     # replaces the fixed-per-ask bands). Every platform-funded call costs
@@ -1960,6 +1962,46 @@ class Config:
     # The share of a workspace's allowance (the trial, or the plan's monthly credits)
     # left when the "running low" alert fires; the second alert fires at zero.
     CREDITS_ALERT_LOW_SHARE: float = float(os.getenv("CREDITS_ALERT_LOW_SHARE", "0.20"))
+    # A month's credits stay spendable this long past their period end when the
+    # renewal hasn't been paid yet (Stripe retries a failed card for days); then
+    # the hourly sweep expires them (services/credits/expiry.py).
+    BILLING_MONTHLY_EXPIRY_GRACE_HOURS: int = int(os.getenv("BILLING_MONTHLY_EXPIRY_GRACE_HOURS", "24"))
+    # A top-up (PRD-265 §3): credits per pack, the display price, and how long they last.
+    TOPUP_CREDITS: int = int(os.getenv("TOPUP_CREDITS", "1000"))
+    TOPUP_PRICE_USD: int = int(os.getenv("TOPUP_PRICE_USD", "10"))
+    TOPUP_VALID_DAYS: int = int(os.getenv("TOPUP_VALID_DAYS", "365"))
+
+    # =============================================================================
+    # STRIPE (PRD-265 W2): Checkout, the customer portal, Stripe Tax and webhooks
+    # =============================================================================
+    # Gerard, 20 + 23 Oct 2026: Stripe takes the money, Clerk only signs people in
+    # (Clerk Billing has no 3-D Secure, no VAT and no one-off purchases). Keys come
+    # from the environment only. Without STRIPE_SECRET_KEY billing is "not
+    # configured": checkout, the portal and the webhook answer 503.
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    # Every request pins this API version (Stripe-Version header), and
+    # scripts/stripe_setup.py creates the webhook endpoint at it, so event shapes
+    # never change under us when Stripe ships a new version.
+    STRIPE_API_VERSION: str = os.getenv("STRIPE_API_VERSION", "2025-03-31.basil")
+    # The Stripe Price behind each plan and the top-up (scripts/stripe_setup.py
+    # prints them). Business is sold only through the admin invite link.
+    STRIPE_PRICE_BASIC: str = os.getenv("STRIPE_PRICE_BASIC", "")
+    STRIPE_PRICE_PRO: str = os.getenv("STRIPE_PRICE_PRO", "")
+    STRIPE_PRICE_BUSINESS: str = os.getenv("STRIPE_PRICE_BUSINESS", "")
+    STRIPE_PRICE_TOPUP: str = os.getenv("STRIPE_PRICE_TOPUP", "")
+    # The customer-portal configuration to open (empty = the account's default).
+    STRIPE_PORTAL_CONFIGURATION_ID: str = os.getenv("STRIPE_PORTAL_CONFIGURATION_ID", "")
+    # The Stripe account (acct_…) payments go to, recorded on each billing account
+    # so a later move to a company's account can tell old customers from new.
+    STRIPE_ACCOUNT_ID: str = os.getenv("STRIPE_ACCOUNT_ID", "")
+    # How old a webhook's signed timestamp may be before it is refused as a replay.
+    STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = int(os.getenv("STRIPE_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    STRIPE_TIMEOUT_SECONDS: float = float(os.getenv("STRIPE_TIMEOUT_SECONDS", "20"))
+    # Counsel's EU withdrawal-consent wording for buying credits (decision D-4).
+    # When set, every checkout requires the buyer to accept the terms and shows
+    # this text beside the box; empty = no consent box.
+    BILLING_WITHDRAWAL_CONSENT_TEXT: str = os.getenv("BILLING_WITHDRAWAL_CONSENT_TEXT", "")
 
     # PRD-222 W1·S10 (D9) — DEV/OPS ONLY, TEMPORARY. Arms
     # POST /api/workspaces/current/onboarding/reset so the operator can re-run
