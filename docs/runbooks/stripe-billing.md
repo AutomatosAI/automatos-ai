@@ -1,6 +1,7 @@
 # Stripe billing: set up, test, go live (PRD-265 W2)
 
 **For:** whoever holds the Stripe account. **Time:** about 30 minutes in test mode.
+**How billing works overall:** [docs/billing/README.md](../billing/README.md) (plans, credits, the customer journey); for engineers, [docs/billing/architecture.md](../billing/architecture.md).
 
 **How the parts fit:**
 - **The customer never leaves Studio.**
