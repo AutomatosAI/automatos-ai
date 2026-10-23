@@ -96,12 +96,22 @@ export function applyUiStyleToDocument(style: UiStyle): void {
   persistUiStyle(style)
 }
 
-/** The stored defaults version, or null when storage is unavailable or unset. */
-function readAppliedDefaultsVersion(): string | null {
+/**
+ * Where this browser stands with the current appearance defaults (PRD-244 D1): `applied` (it holds
+ * the current version), `due` (it did not, and now does: the marker is stored before the defaults
+ * apply), or `unavailable` (its storage cannot keep the marker: blocked, or private mode).
+ */
+type AppearanceDefaults = 'applied' | 'due' | 'unavailable'
+
+/** Claims the current defaults version for this browser; see AppearanceDefaults. */
+function claimAppearanceDefaults(): AppearanceDefaults {
   try {
-    return window.localStorage.getItem(APPEARANCE_DEFAULTS_KEY)
+    const storage = window.localStorage
+    if (storage.getItem(APPEARANCE_DEFAULTS_KEY) === APPEARANCE_DEFAULTS_VERSION) return 'applied'
+    storage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
+    return storage.getItem(APPEARANCE_DEFAULTS_KEY) === APPEARANCE_DEFAULTS_VERSION ? 'due' : 'unavailable'
   } catch {
-    return null
+    return 'unavailable'
   }
 }
 
@@ -170,9 +180,13 @@ export function UiStyleProvider({
   // to them on its next load and then picks freely. This also retires the
   // pre-W3 "studio" tone value, since the tone is rewritten here.
   // PRD-260 M87: once per mount, not once per setTheme. next-themes 0.2.1 hands out a new
-  // setTheme whenever forcedTheme changes (a theme's look forcing its tone), and a browser whose
-  // storage can't be read never records the defaults version, so a re-run moved it straight
-  // back to Studio the moment it chose a theme.
+  // setTheme whenever forcedTheme changes (a theme's look forcing its tone).
+  // PRD-261 W-A8: a browser whose storage cannot keep the defaults version can never be moved
+  // "once", so the step leaves it alone: applying it on every load moved such a browser back to
+  // Studio after each reload, rewriting the style cookie, so no Classic or installed theme it
+  // chose could stick. Its stored choice wins instead: the style cookie the server painted the
+  // first paint from, then the server's choice (choice-sync.ts). Such a browser with no cookie
+  // already starts on the defaults: the server paints DEFAULT_UI_STYLE and next-themes Dark.
   // PRD-261 A-02c: this step runs once, at mount, before any workspace is known; the server's
   // choice is checked after it (choice-sync.ts), so the defaults never override a server choice.
   // It is local only: it never stores a choice on the server.
@@ -180,14 +194,9 @@ export function UiStyleProvider({
   useEffect(() => {
     if (defaultsChecked.current) return
     defaultsChecked.current = true
-    if (readAppliedDefaultsVersion() === APPEARANCE_DEFAULTS_VERSION) return
+    if (claimAppearanceDefaults() !== 'due') return
     setStyle(DEFAULT_UI_STYLE)
     setTheme(DEFAULT_TONE)
-    try {
-      window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
-    } catch {
-      // Storage blocked: the defaults apply again next load, which is harmless.
-    }
   }, [setTheme, setStyle])
 
   const value = useMemo<UiStyleContextValue>(
