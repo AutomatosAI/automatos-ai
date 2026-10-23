@@ -4,7 +4,10 @@
  *
  * The CLI's `install --to <web app URL>` reads `{schema: 1, apiUrl}` from here (the kit's
  * host-resolve, B-03g). The answer is exactly those two keys, never cached, NEXT_PUBLIC_API_URL read
- * per request; with the variable unset it is a 500 with a plain sentence. The file needs no sign-in
+ * when GET is called, not captured when the module loads; with the variable unset it is a 500 with a
+ * plain sentence. In a built image Next.js has already inlined NEXT_PUBLIC_API_URL, so there the answer
+ * is the build-time value (route.ts says so); this file runs the handler on plain process.env, where
+ * the call-time read is what it proves. The file needs no sign-in
  * because middleware.ts never runs for it: each `config.matcher` pattern is run here against the path
  * (as prd266-universal-links.test.ts reads the matcher) and none matches, since the first one skips a
  * path with an extension. If one ever does, this fails and the story stops for a D-point (DA-8),
@@ -49,7 +52,7 @@ describe('PRD-261 B-03j — the host file answers exactly {schema, apiUrl}, neve
     expect(await response.json()).toStrictEqual({ schema: 1, apiUrl: 'http://localhost:8000' })
   })
 
-  it('reads the variable per request', async () => {
+  it('reads the variable when called, not when the module loads (a built image has it inlined)', async () => {
     vi.stubEnv(API_URL_ENV, 'https://api.example.test')
     expect(await route.GET().json()).toStrictEqual({ schema: 1, apiUrl: 'https://api.example.test' })
     vi.stubEnv(API_URL_ENV, 'http://127.0.0.1:18000')

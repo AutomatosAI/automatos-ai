@@ -1,9 +1,12 @@
 // PRD-261 B-03j (PB-29): where this web app's API is, for the theme CLI. `automatos-theme install --to
 // http://localhost:3000` (PRD §8 item 7) reads this file to find the API base, so a theme author gives the
 // URL they open, not the local edition's API port. It answers exactly {schema, apiUrl} and nothing else:
-// NEXT_PUBLIC_API_URL is already public (the client bundle inlines it). middleware.ts's matcher skips a
-// path with an extension, so no middleware, Clerk's in SaaS, runs for it in either edition
-// (__tests__/route.test.ts holds the matcher to that).
+// NEXT_PUBLIC_API_URL is already public (the client bundle inlines it). Next.js inlines NEXT_PUBLIC_* into
+// the server bundle too, so a built image answers with the value it was BUILT with (frontend/Dockerfile takes
+// it as a build ARG), not the container's runtime env: changing it at deploy time needs a rebuild, as for
+// every other NEXT_PUBLIC_API_URL reader here. Only `next dev` and the tests see a per-call value.
+// middleware.ts's matcher skips a path with an extension, so no middleware, Clerk's in SaaS, runs for it in
+// either edition (__tests__/route.test.ts holds the matcher to that).
 export const dynamic = 'force-dynamic'
 
 const HOST_FILE_SCHEMA = 1
