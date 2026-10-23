@@ -5,6 +5,7 @@ const {
   clerkFrontendApiOrigin,
   CLERK_PROTECT_SOURCE,
   CLERK_PROTECT_CONNECT_SOURCE,
+  STRIPE_CSP,
 } = require('./csp-sources')
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
@@ -60,6 +61,8 @@ const SECURITY_HEADERS_RULE = {
     // 'unsafe-inline' needed for Next.js styled-jsx and Clerk components.
     // 'unsafe-eval' needed for Next.js dev mode — remove in production hardening phase.
     // connect-src includes api.automatos.app (cross-origin API) and Clerk auth endpoints.
+    // PRD-265 W2: Stripe's sources (STRIPE_CSP, csp-sources.js) for the payment forms inside
+    // Settings → Billing: Stripe.js, its card fields' frames, the 3-D Secure frame and Link.
     {
       key: 'Content-Security-Policy',
       value: [
@@ -69,9 +72,14 @@ const SECURITY_HEADERS_RULE = {
           clerkFrontendApi,
           CLERK_PROTECT_SOURCE,
           'https://challenges.cloudflare.com https://cdn.jsdelivr.net',
+          STRIPE_CSP.script,
         ),
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-        `img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev ${mediaSources}`.trim(),
+        directive(
+          "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
+          STRIPE_CSP.img,
+          mediaSources,
+        ),
         `media-src 'self' blob: ${mediaSources}`.trim(),
         "font-src 'self' data: https://cdn.jsdelivr.net",
         // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
@@ -82,14 +90,21 @@ const SECURITY_HEADERS_RULE = {
           `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev`,
           clerkFrontendApi,
           CLERK_PROTECT_CONNECT_SOURCE,
-          'https://api.clerk.com https://cdn.jsdelivr.net wss: ws:',
+          'https://api.clerk.com https://cdn.jsdelivr.net',
+          STRIPE_CSP.connect,
+          'wss: ws:',
         ),
         // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
         // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
         // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
         // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
         // object-src allows blob: too. Only this page's own script can mint a blob: URL.
-        directive("frame-src 'self' blob: https://*.clerk.accounts.dev", CLERK_PROTECT_SOURCE, 'https://challenges.cloudflare.com'),
+        directive(
+          "frame-src 'self' blob: https://*.clerk.accounts.dev",
+          CLERK_PROTECT_SOURCE,
+          'https://challenges.cloudflare.com',
+          STRIPE_CSP.frame,
+        ),
         "worker-src 'self' blob:",
         "object-src blob:",
         "base-uri 'self'",

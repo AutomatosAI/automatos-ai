@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * PRD-265 US-007 — the operator console's plan column: the plan dropdown
- * (./workspace-plan-select.tsx) and, beside it, the "Business checkout link" action
+ * PRD-265 US-007 / W2 — the operator console's plan column: the plan dropdown
+ * (./workspace-plan-select.tsx) and, beside it, "Offer Business"
  * (./business-invite-button.tsx). Same props as the dropdown.
  *
  * app/admin/workspaces/page.tsx imports this under the dropdown's name, so the console's

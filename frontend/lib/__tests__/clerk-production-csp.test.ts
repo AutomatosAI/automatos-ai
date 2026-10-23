@@ -99,7 +99,7 @@ describe('the Content-Security-Policy without a production key', () => {
   it('adds no Frontend API host when there is no key (the local edition)', async () => {
     const policy = await policyWith(undefined)
     expect(policy['script-src']).toBe(
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.protect.clerk.com https://challenges.cloudflare.com https://cdn.jsdelivr.net",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.protect.clerk.com https://challenges.cloudflare.com https://cdn.jsdelivr.net https://js.stripe.com https://*.js.stripe.com https://maps.googleapis.com",
     )
     expect(policy['connect-src']).not.toContain(PRODUCTION_HOST)
   })
