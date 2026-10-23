@@ -1,154 +1,89 @@
 import { expect, test, type Page } from '@playwright/test'
-import { fulfillBackendJson } from '../support/backend-route'
-import { chooseStyle, serveInstalledTheme, type InstalledTheme } from '../support/hello-theme'
+import { chooseStyle, countMounts, mountsOf, serveInstalledTheme, type InstalledTheme } from '../support/hello-theme'
 import { watchPage } from '../support/watch'
 
-// PRD-261 A-04b (@host): theme pages and routes through ThemeSlot.
+// PRD-261 A-04b (@host): theme pages and routes through ThemeSlot, with the hello theme
+// (fixtures/hello-a04b: a frame that only wraps the page, and the route `hello`), served as an
+// installed theme through route interception (support/hello-theme.ts). A-19f4 (W-A8): until then
+// tests 1 to 3 ran under builtin Play (the `play` cookie); they run on the hello theme now, and
+// specs/play-parity/play-routes.spec.ts holds the installed Play package to the same.
 //
-// 1. Under the Play cookie, /chat is Play's chat inside Play's frame at 1440 px (builtin Play
-//    registers it as its /chat page, lib/theme-host/builtin/play-slots.tsx), and the core chat
-//    at 800 px, below Play's width.
-// 2. On a cold load of /chat under Play, Play's frame mounts once: never the Studio shell or the
-//    core composer first, never a second frame (P260-FX-25, M69). An init script counts every
-//    element of each kind the page ever inserts.
-// 3. /x/conversations renders Play's Conversations (builtin Play's route `conversations`).
-// 4. The hello theme (fixtures/hello-a04b) registers the route `hello`; /x/hello renders it inside
-//    the theme's frame.
+// 1. Under the installed theme, /chat at 1440 px is the core chat inside the theme's frame, and at
+//    800 px, below the width the host draws an installed theme's frame from, the core chat with no
+//    frame.
+// 2. On a cold load of /chat under the theme, the theme's frame mounts once: never the Studio shell,
+//    never the core composer outside the frame, never a second frame (P260-FX-25, M69). An init
+//    script counts every element of each kind the page ever inserts.
+// 3. The theme registers the route `hello`; /x/hello renders it inside the theme's frame.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
-const PLAY_COOKIE = 'play'
 const CHAT_PATH = '/chat'
-const CONVERSATIONS_PATH = '/x/conversations'
 const HELLO_ROUTE_PATH = '/x/hello'
 const NARROW_VIEWPORT = { width: 800, height: 900 }
-const PLAY_CLASS = /\bplay\b/
 const STATUS_ATTR = 'data-theme-host'
-
-/** Play's frame: its sidebar (components/play/shell/play-sidebar.tsx). */
-const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
-/** The Studio desktop shell (components/layout/main-layout.tsx). */
-const STUDIO_SHELL = '.sh-shell'
-/** The core chat's composer (components/chatbot/multimodal-input.tsx). */
-const CORE_COMPOSER = 'textarea[placeholder="Send a message..."]'
-/** Play's chat: Auto opening the conversation, the first-open hello, or Play's composer. */
-const PLAY_OPENING = 'Opening this conversation…'
-const PLAY_HELLO = 'Say hello'
-const PLAY_COMPOSER = 'Message Auto'
-const CONVERSATIONS_HEADING = 'Conversations'
-const CONVERSATIONS_SEARCH = 'Search conversations'
-
-const ACTIVE_ROUTE = '**/api/themes/active'
-/**
- * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
- * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
- * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
- */
-const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
-const OK = 200
 
 const HELLO_A04B: InstalledTheme = { installId: '00000000-0000-4000-8000-0000000a04b0', fixture: 'hello-a04b' }
 const HELLO_FRAME_TEST_ID = 'hello-a04b-frame'
 const HELLO_ROUTE_TEST_ID = 'hello-a04b-route'
+/** The hello theme's frame (fixtures/hello-a04b/entry.js RouteFrame). */
+const HELLO_FRAME = `[data-testid="${HELLO_FRAME_TEST_ID}"]`
+/** The Studio desktop shell (components/layout/main-layout.tsx). */
+const STUDIO_SHELL = '.sh-shell'
+/** The core chat's composer (components/chatbot/multimodal-input.tsx). */
+const CORE_COMPOSER = 'textarea[placeholder="Send a message..."]'
+/** The core chat's composer anywhere but inside the theme's frame: drawn in a chrome before the frame. */
+const CORE_COMPOSER_OUTSIDE_FRAME = `${CORE_COMPOSER}:not(${HELLO_FRAME} *)`
 
 /** How long a cold load has to show a second mount, once the first has drawn. */
 const SETTLE_MS = 1_500
+const COUNTED = [HELLO_FRAME, STUDIO_SHELL, CORE_COMPOSER_OUTSIDE_FRAME]
 
-const COUNTED = [PLAY_FRAME, STUDIO_SHELL, CORE_COMPOSER] as const
-type MountWindow = Window & { __a04bMounts?: Record<string, number> }
-
-/** Counts, from before the first byte, every distinct element matching each selector the page inserts. */
-async function countMounts(page: Page): Promise<void> {
-  await page.addInitScript((selectors: readonly string[]) => {
-    const seen = new WeakSet<Element>()
-    const counts: Record<string, number> = {}
-    ;(window as MountWindow).__a04bMounts = counts
-    const tally = (node: Node): void => {
-      if (!(node instanceof Element)) return
-      for (const selector of selectors) {
-        const hits = Array.from(node.querySelectorAll(selector))
-        if (node.matches(selector)) hits.push(node)
-        for (const hit of hits.filter((element) => !seen.has(element))) {
-          seen.add(hit)
-          counts[selector] = (counts[selector] ?? 0) + 1
-        }
-      }
-    }
-    new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach(tally))).observe(document, {
-      childList: true,
-      subtree: true,
-    })
-  }, COUNTED)
-}
-
-/** Puts this browser on Play: the cookie, and a server answer that agrees with it (PLAY_CHOICE). */
-async function choosePlay(page: Page): Promise<void> {
-  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
-  await chooseStyle(page, PLAY_COOKIE, APP_URL)
-}
-
-async function mountsOf(page: Page): Promise<Record<string, number>> {
-  return page.evaluate(() => ({ ...((window as MountWindow).__a04bMounts ?? {}) }))
-}
-
-function playChat(page: Page) {
-  return page
-    .getByText(PLAY_OPENING)
-    .or(page.getByRole('region', { name: PLAY_HELLO }))
-    .or(page.getByRole('textbox', { name: PLAY_COMPOSER }))
-    .first()
+/** Puts this browser on the hello theme's install and serves it (its active answer and its files). */
+async function chooseHello(page: Page): Promise<void> {
+  const served = await serveInstalledTheme(page, HELLO_A04B)
+  await chooseStyle(page, served.style, APP_URL)
 }
 
 test.describe('theme pages and routes through ThemeSlot', () => {
-  test("under the Play cookie /chat is Play's chat in Play's frame at 1440 px", { tag: '@host' }, async ({ page }) => {
+  test("under an installed theme /chat at 1440 px is the core chat inside the theme's frame", { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await choosePlay(page)
+    await chooseHello(page)
     await page.goto(CHAT_PATH)
 
-    await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
-    await expect(page.locator(PLAY_FRAME)).toBeVisible()
-    await expect(playChat(page)).toBeVisible()
-    await expect(page.locator(CORE_COMPOSER)).toHaveCount(0)
+    await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, 'active')
+    const frame = page.getByTestId(HELLO_FRAME_TEST_ID)
+    await expect(frame).toBeVisible()
+    await expect(frame.locator(CORE_COMPOSER).filter({ visible: true }).first()).toBeVisible()
+    await expect(page.locator(STUDIO_SHELL)).toHaveCount(0)
     expect(watch.pageErrors).toEqual([])
   })
 
-  test('under the Play cookie /chat is the core chat at 800 px, below Play\'s width', { tag: '@host' }, async ({ page }) => {
+  test("under an installed theme /chat at 800 px is the core chat, with no theme frame", { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
     await page.setViewportSize(NARROW_VIEWPORT)
-    await choosePlay(page)
+    await chooseHello(page)
     await page.goto(CHAT_PATH)
 
-    await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
+    await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, 'active')
     await expect(page.locator(CORE_COMPOSER).filter({ visible: true }).first()).toBeVisible()
-    await expect(page.locator(PLAY_FRAME)).toHaveCount(0)
-    await expect(playChat(page)).toHaveCount(0)
+    await expect(page.getByTestId(HELLO_FRAME_TEST_ID)).toHaveCount(0)
     expect(watch.pageErrors).toEqual([])
   })
 
-  test("a cold load of /chat under Play mounts Play's frame once, and never the Studio shell or the core chat", { tag: '@host' }, async ({ page }) => {
-    await countMounts(page)
-    await choosePlay(page)
+  test("a cold load of /chat under an installed theme mounts its frame once, and never the Studio shell or the core chat outside it", { tag: '@host' }, async ({ page }) => {
+    await countMounts(page, COUNTED)
+    await chooseHello(page)
     await page.goto(CHAT_PATH)
 
-    await expect(playChat(page)).toBeVisible()
+    const frame = page.getByTestId(HELLO_FRAME_TEST_ID)
+    await expect(frame.locator(CORE_COMPOSER).filter({ visible: true }).first()).toBeVisible()
     await page.waitForTimeout(SETTLE_MS)
-    expect(await mountsOf(page)).toEqual({ [PLAY_FRAME]: 1 })
-  })
-
-  test("/x/conversations renders Play's Conversations under the Play cookie", { tag: '@host' }, async ({ page }) => {
-    const watch = watchPage(page)
-    await choosePlay(page)
-    await page.goto(CONVERSATIONS_PATH)
-
-    await expect(page.locator(PLAY_FRAME)).toBeVisible()
-    await expect(page.getByRole('heading', { level: 1, name: CONVERSATIONS_HEADING })).toBeVisible()
-    await expect(page.getByRole('searchbox', { name: CONVERSATIONS_SEARCH }).or(page.getByLabel(CONVERSATIONS_SEARCH)).first()).toBeVisible()
-    expect(watch.pageErrors).toEqual([])
+    expect(await mountsOf(page)).toEqual({ [HELLO_FRAME]: 1 })
   })
 
   test("an installed theme's registerRoute('hello') renders at /x/hello, inside its frame", { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await chooseStyle(page, `theme:install:${HELLO_A04B.installId}`, APP_URL)
-    await serveInstalledTheme(page, HELLO_A04B)
+    await chooseHello(page)
     await page.goto(HELLO_ROUTE_PATH)
 
     await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, 'active')

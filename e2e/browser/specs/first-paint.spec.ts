@@ -1,43 +1,66 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { fulfillBackendJson } from '../support/backend-route'
-import { THEME_E2E_PATH } from '../support/hello-theme'
+import {
+  answerCoreChoice,
+  chooseCoreStyle,
+  chooseStyle,
+  CORE_STYLES,
+  STUDIO_STYLE,
+  THEME_E2E_PATH,
+  type CoreStyle,
+} from '../support/hello-theme'
 
-// PRD-261 A-03 (@smoke, so it runs in every build of the lane): first paint from data. A Studio
-// page requests none of builtin Play's stylesheet and none of its face files; under the Play
-// cookie (legacy and current) <html> carries 'studio play' and the look's variables before the
-// first animation frame, and the server's own response links Play's stylesheet (render-blocking,
-// so the first paint is styled); and the theme import map is on a Studio page, ahead of every
+// PRD-261 A-03 (@smoke, so it runs in every build of the lane): first paint from data, under the
+// Classic and under the Studio style cookie (A-19f4). Since W-A8 Play is not in core: it runs only
+// as the package a workspace installs (specs/play-parity/). So a core page asks for none of Play:
+// no stylesheet that declares Play's tokens, none of Play's face variables, nothing from builtin
+// Play's old mascot folder or from a theme's files. The cookies builtin Play ran under (the legacy
+// `play`, and its builtin theme style) load Studio, with no `play` class on <html> before the first
+// animation frame or after, and no Play stylesheet in the server's own response. Builtin Play's old
+// page, /conversations, answers the 404. The theme import map is on every page, ahead of every
 // module script. Each test opens its own page.
+//
+// The old cookie and folder are built from their parts (BUILTIN_THEME_PREFIX, MASCOT_SEGMENT), so a
+// search of e2e/ for builtin Play's names finds nothing (A-19f4's seam check): what is gone is only
+// ever asserted absent here.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const STYLE_COOKIE = 'automatos-style'
-const PLAY_COOKIES = ['play', 'theme:builtin:play']
-const ACTIVE_ROUTE = '**/api/themes/active'
-/**
- * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
- * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
- * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
- */
-const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
-const OK = 200
-const APPEARANCE_DEFAULTS = { key: 'automatos-appearance-defaults', value: '2026-09-17-studio-dark' }
-/** A declaration only app/play-theme.css makes: Play's page colour token on html.play. */
+const PLAY = 'play'
+/** A builtin theme's style was `theme:builtin:<id>`; builtin Play's id was `play`. */
+const BUILTIN_THEME_PREFIX = 'theme:builtin:'
+/** The cookies builtin Play ran under, the legacy one and its theme style: both now parse to Studio. */
+const RETIRED_PLAY_COOKIES = [PLAY, `${BUILTIN_THEME_PREFIX}${PLAY}`]
+/** Builtin Play's mascot files were in public/ under this folder: the first segment of their path. */
+const MASCOT_SEGMENT = 'auto'
+/** A theme's own files (the files proxy): a core style asks for none. */
+const THEME_FILES_ROOT = '/api/themes/files/'
+/** A declaration only Play's stylesheet makes (its page colour token on html.play), in core or in the package. */
 const PLAY_THEME_MARKER = '--pl-color-bg:'
-/** The custom properties Play's face classes define on <html> (app/play-fonts.ts). */
+/** The prefix of Play's custom properties: the boot paints none of them on <html> for a core style. */
+const PLAY_TOKEN_PREFIX = '--pl-'
+/** The custom properties builtin Play's face classes defined on <html> (core's app/play-fonts.ts until W-A8). */
 const PLAY_FONT_VARS = ['--pl-font-instrument-serif', '--pl-font-bricolage', '--pl-font-fredoka']
-/** A ground's variable, a Studio token and the glow: what the boot paints from the look. */
-const LOOK_VARS = ['--pl-ground-bg', '--background', '--pl-glow']
-const STUDIO_AND_PLAY = ['studio', 'play']
+const NO_PLAY_FACES = Object.fromEntries(PLAY_FONT_VARS.map((name) => [name, '']))
+const STUDIO_CLASS = /\bstudio\b/
+const PLAY_CLASS = /\bplay\b/
+const CONVERSATIONS_PATH = '/conversations'
+const NOT_FOUND = 404
+/** app/not-found.tsx: Next's own 404 title, and its plain page's heading and words. */
+const NOT_FOUND_TITLE = '404: This page could not be found.'
+const NOT_FOUND_HEADING = '404'
+const NOT_FOUND_WORDS = 'This page could not be found.'
 const IMPORT_MAP_TAG = '<script type="importmap">'
 const LINK_TAG = /<link\b[^>]*>/gi
 const STYLESHEET_REL = /\brel="stylesheet"/i
 const HREF_ATTR = /\bhref="([^"]+)"/i
 const ESCAPED_AMPERSAND = /&amp;/g
 const MODULE_SCRIPT_TAG = /<script\b[^>]*\btype="module"[^>]*>/gi
+const FIRST_PAINT_TAGS = ['@smoke', '@first-paint']
 
 interface FirstFrame {
   readonly classes: string[]
-  readonly vars: Record<string, string>
+  /** The Play custom properties set inline on <html>. */
+  readonly playVars: string[]
 }
 
 type FirstFrameWindow = Window & { __firstFrame?: FirstFrame }
@@ -51,21 +74,25 @@ function watchStylesheets(page: Page): () => Promise<string[]> {
   return () => Promise.all(bodies)
 }
 
-/** The url() sources of the @font-face rules behind Play's face variables, as absolute URLs. */
-async function playFontUrls(page: Page): Promise<string[]> {
-  return page.evaluate((vars) => {
-    const unquote = (value: string) => value.trim().replace(/^['"]|['"]$/g, '')
+/** The URL of every request the page makes. Register before the first navigation. */
+function watchRequests(page: Page): string[] {
+  const urls: string[] = []
+  page.on('request', (request) => urls.push(request.url()))
+  return urls
+}
+
+/** The paths of the requests for builtin Play's old mascot folder or for a theme's files. */
+function playFileRequests(urls: readonly string[]): string[] {
+  return urls
+    .map((url) => new URL(url).pathname)
+    .filter((pathname) => pathname.split('/')[1] === MASCOT_SEGMENT || pathname.startsWith(THEME_FILES_ROOT))
+}
+
+/** The computed value of each of Play's face variables on <html> ('' when nothing defines it). */
+function playFaceVars(page: Page): Promise<Record<string, string>> {
+  return page.evaluate((names) => {
     const root = getComputedStyle(document.documentElement)
-    const families = vars.flatMap((name) => root.getPropertyValue(name).split(',')).map(unquote).filter(Boolean)
-    const urls: string[] = []
-    for (const sheet of Array.from(document.styleSheets)) {
-      const rules = Array.from(sheet.cssRules).filter((rule): rule is CSSFontFaceRule => rule instanceof CSSFontFaceRule)
-      for (const rule of rules.filter((face) => families.includes(unquote(face.style.getPropertyValue('font-family'))))) {
-        const sources = Array.from(rule.style.getPropertyValue('src').matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g))
-        urls.push(...sources.map((match) => new URL(match[1], sheet.href ?? document.baseURI).href))
-      }
-    }
-    return urls
+    return Object.fromEntries(names.map((name) => [name, root.getPropertyValue(name).trim()]))
   }, PLAY_FONT_VARS)
 }
 
@@ -79,81 +106,126 @@ function linkedStylesheets(html: string): string[] {
     })
 }
 
-/** The text of every stylesheet the server's HTML for the page links, under the style cookie. */
-async function serverLinkedCss(request: APIRequestContext, cookie: string): Promise<string[]> {
+/** The HTML the server sends for the page under the style cookie. */
+async function serverHtml(request: APIRequestContext, cookie: string): Promise<string> {
   const response = await request.get(THEME_E2E_PATH, { headers: { cookie: `${STYLE_COOKIE}=${cookie}` } })
   expect(response.ok()).toBe(true)
-  const hrefs = linkedStylesheets(await response.text())
+  return response.text()
+}
+
+/** The text of every stylesheet the server's HTML for the page links, under the style cookie. */
+async function serverLinkedCss(request: APIRequestContext, cookie: string): Promise<string[]> {
+  const hrefs = linkedStylesheets(await serverHtml(request, cookie))
   return Promise.all(hrefs.map(async (href) => (await request.get(href)).text()))
 }
 
-async function keepTheChosenStyle(page: Page): Promise<void> {
-  // Without the defaults marker, a fresh browser is moved to Studio once (ui-style-context.tsx).
-  await page.addInitScript(({ key, value }) => {
-    window.localStorage.setItem(key, value)
-  }, APPEARANCE_DEFAULTS)
+/** Records <html>'s classes and its inline Play custom properties at the first animation frame. */
+async function recordFirstFrame(page: Page): Promise<void> {
+  await page.addInitScript((prefix) => {
+    requestAnimationFrame(() => {
+      const root = document.documentElement
+      const playVars = Array.from(root.style).filter((name) => name.startsWith(prefix))
+      ;(window as FirstFrameWindow).__firstFrame = { classes: Array.from(root.classList), playVars }
+    })
+  }, PLAY_TOKEN_PREFIX)
 }
 
-test('a Studio page requests none of Play: no stylesheet chunk, no face file', { tag: ['@smoke', '@first-paint'] }, async ({ page }) => {
-  const requests: string[] = []
-  page.on('request', (request) => requests.push(request.url()))
-  const stylesheets = watchStylesheets(page)
-  await page.goto(THEME_E2E_PATH)
-  await expect(page.locator('.sh-shell')).toBeVisible()
-  await page.waitForLoadState('load')
-
-  const sheets = await stylesheets()
-  expect(sheets.length).toBeGreaterThan(0)
-  expect(sheets.filter((css) => css.includes(PLAY_THEME_MARKER))).toEqual([])
-
-  const fontUrls = await playFontUrls(page)
-  expect(fontUrls.length, "Play's @font-face rules are on the page, so the check below is not empty").toBeGreaterThan(0)
-  expect(fontUrls.filter((url) => requests.includes(url))).toEqual([])
-})
-
-for (const cookie of PLAY_COOKIES) {
-  test(`under the '${cookie}' cookie, <html> has 'studio play' and the look before the first frame`, { tag: ['@smoke', '@first-paint'] }, async ({ page, request }) => {
-    await keepTheChosenStyle(page)
-    await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
-    await page.addInitScript((vars) => {
-      requestAnimationFrame(() => {
-        const root = document.documentElement
-        const painted = Object.fromEntries(vars.map((name) => [name, root.style.getPropertyValue(name)]))
-        ;(window as FirstFrameWindow).__firstFrame = { classes: Array.from(root.classList), vars: painted }
-      })
-    }, LOOK_VARS)
-    await page.context().addCookies([{ name: STYLE_COOKIE, value: cookie, url: APP_URL }])
-    await page.goto(THEME_E2E_PATH)
-    await page.waitForFunction(() => (window as FirstFrameWindow).__firstFrame !== undefined)
-
-    const frame = await page.evaluate(() => (window as FirstFrameWindow).__firstFrame)
-    expect(frame?.classes).toEqual(expect.arrayContaining(STUDIO_AND_PLAY))
-    for (const name of LOOK_VARS) expect({ name, set: (frame?.vars[name] ?? '') !== '' }).toEqual({ name, set: true })
-
-    // Linked in the server's response, not added once scripts run: a <link rel="stylesheet"> in the
-    // first HTML blocks the first paint until it loads.
-    const linked = await serverLinkedCss(request, cookie)
-    expect(linked.length).toBeGreaterThan(0)
-    expect(linked.some((css) => css.includes(PLAY_THEME_MARKER))).toBe(true)
-  })
+async function firstFrame(page: Page): Promise<FirstFrame | undefined> {
+  await page.waitForFunction(() => (window as FirstFrameWindow).__firstFrame !== undefined)
+  return page.evaluate(() => (window as FirstFrameWindow).__firstFrame)
 }
 
-test('the import map is on a Studio page, ahead of every module script', { tag: ['@smoke', '@first-paint'] }, async ({ page, request }) => {
-  const html = await (await request.get(THEME_E2E_PATH)).text()
-  const mapAt = html.indexOf(IMPORT_MAP_TAG)
-  expect(mapAt).toBeGreaterThanOrEqual(0)
-  expect(html.indexOf(IMPORT_MAP_TAG, mapAt + 1)).toBe(-1)
-  const moduleTags = Array.from(html.matchAll(MODULE_SCRIPT_TAG), (match) => match.index ?? 0)
-  expect(moduleTags.filter((at) => at < mapAt)).toEqual([])
+/** <html> carries the style's own class (Studio's, or none for Classic) and never Play's. */
+async function expectStyleClasses(page: Page, core: CoreStyle): Promise<void> {
+  const html = page.locator('html')
+  if (core.studio) await expect(html).toHaveClass(STUDIO_CLASS)
+  else await expect(html).not.toHaveClass(STUDIO_CLASS)
+  await expect(html).not.toHaveClass(PLAY_CLASS)
+}
 
-  await page.goto(THEME_E2E_PATH)
-  await expect(page.locator('.sh-shell')).toBeVisible()
-  const order = await page.evaluate(() => {
+/** Where the import map sits among the page's scripts once it has run. */
+function importMapOrder(page: Page): Promise<{ maps: number; allAfter: boolean }> {
+  return page.evaluate(() => {
     const maps = Array.from(document.scripts).filter((script) => script.type === 'importmap')
     const modules = Array.from(document.scripts).filter((script) => script.type === 'module')
     const first = maps[0]
     const allAfter = first !== undefined && modules.every((script) => (first.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
     return { maps: maps.length, allAfter }
   })
-  expect(order).toEqual({ maps: 1, allAfter: true })
-})
+}
+
+for (const core of CORE_STYLES) {
+  test(`under the '${core.style}' cookie a page asks for none of Play: no stylesheet, no face, none of its files`, { tag: FIRST_PAINT_TAGS }, async ({ page }) => {
+    const requests = watchRequests(page)
+    const stylesheets = watchStylesheets(page)
+    await chooseCoreStyle(page, core, APP_URL)
+    await page.goto(THEME_E2E_PATH)
+    await expect(page.locator(core.shell)).toBeVisible()
+    await page.waitForLoadState('load')
+
+    const sheets = await stylesheets()
+    expect(sheets.length, 'the page fetched its stylesheets, so the check below is not empty').toBeGreaterThan(0)
+    expect(sheets.filter((css) => css.includes(PLAY_THEME_MARKER))).toEqual([])
+    expect(await playFaceVars(page)).toEqual(NO_PLAY_FACES)
+    expect(playFileRequests(requests)).toEqual([])
+    await expectStyleClasses(page, core)
+  })
+}
+
+for (const cookie of RETIRED_PLAY_COOKIES) {
+  test(`the retired Play cookie '${cookie}' loads Studio: no play class from the first frame, no Play CSS, none of its files`, { tag: FIRST_PAINT_TAGS }, async ({ page, request }) => {
+    const requests = watchRequests(page)
+    const stylesheets = watchStylesheets(page)
+    // The server agrees with the style the cookie now stands for, whatever another spec stored.
+    await answerCoreChoice(page, STUDIO_STYLE.style)
+    await chooseStyle(page, cookie, APP_URL)
+    await recordFirstFrame(page)
+    await page.goto(THEME_E2E_PATH)
+
+    const frame = await firstFrame(page)
+    expect(frame?.classes).toEqual(expect.arrayContaining([STUDIO_STYLE.style]))
+    expect(frame?.classes).not.toContain(PLAY)
+    expect(frame?.playVars).toEqual([])
+
+    await expect(page.locator(STUDIO_STYLE.shell)).toBeVisible()
+    await page.waitForLoadState('load')
+    await expectStyleClasses(page, STUDIO_STYLE)
+    expect((await stylesheets()).filter((css) => css.includes(PLAY_THEME_MARKER))).toEqual([])
+    expect(playFileRequests(requests)).toEqual([])
+
+    // Nor does the server's own response link a Play stylesheet under the cookie.
+    const linked = await serverLinkedCss(request, cookie)
+    expect(linked.length).toBeGreaterThan(0)
+    expect(linked.filter((css) => css.includes(PLAY_THEME_MARKER))).toEqual([])
+  })
+}
+
+for (const core of CORE_STYLES) {
+  test(`under the '${core.style}' cookie /conversations, builtin Play's old page, answers the 404`, { tag: FIRST_PAINT_TAGS }, async ({ page }) => {
+    await chooseCoreStyle(page, core, APP_URL)
+    const response = await page.goto(CONVERSATIONS_PATH)
+
+    expect(response?.status()).toBe(NOT_FOUND)
+    expect(new URL(page.url()).pathname, 'no redirect: the old page is gone').toBe(CONVERSATIONS_PATH)
+    await expect(page).toHaveTitle(NOT_FOUND_TITLE)
+    await expect(page.getByRole('heading', { level: 1, name: NOT_FOUND_HEADING })).toBeVisible()
+    await expect(page.getByText(NOT_FOUND_WORDS, { exact: true })).toBeVisible()
+    await expect(page.locator('html')).not.toHaveClass(PLAY_CLASS)
+  })
+}
+
+for (const core of CORE_STYLES) {
+  test(`under the '${core.style}' cookie the import map is on the page, ahead of every module script`, { tag: FIRST_PAINT_TAGS }, async ({ page, request }) => {
+    const html = await serverHtml(request, core.style)
+    const mapAt = html.indexOf(IMPORT_MAP_TAG)
+    expect(mapAt).toBeGreaterThanOrEqual(0)
+    expect(html.indexOf(IMPORT_MAP_TAG, mapAt + 1)).toBe(-1)
+    const moduleTags = Array.from(html.matchAll(MODULE_SCRIPT_TAG), (match) => match.index ?? 0)
+    expect(moduleTags.filter((at) => at < mapAt)).toEqual([])
+
+    await chooseCoreStyle(page, core, APP_URL)
+    await page.goto(THEME_E2E_PATH)
+    await expect(page.locator(core.shell)).toBeVisible()
+    expect(await importMapOrder(page)).toEqual({ maps: 1, allAfter: true })
+  })
+}

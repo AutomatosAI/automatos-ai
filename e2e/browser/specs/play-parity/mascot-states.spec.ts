@@ -2,16 +2,17 @@ import { expect, test, type Locator } from '@playwright/test'
 import { describeParity, openPlay, PARITY_TAG, type AvailablePlay } from '../../support/play-parity'
 import { watchPage, type ResponseSeen } from '../../support/watch'
 
-// PRD-261 A-17b (@parity): Auto's 12 states, on the style sheet (/looks/style), under builtin Play
-// and under the Design Kit's package. Each slot names its state, draws its still (the state's PNG,
-// served from builtin Play's /auto/ or from the package's assets/mascot/ through the files proxy)
-// and rings it in the state's tone (lib/mascot/ring.ts); "Play Auto's states" plays the 12 clips.
-// Chromium plays the VP9-alpha .webm; WebKit gets the HEVC-alpha .mp4 (lib/mascot/media.ts), which
-// a Linux WebKit may not decode, and then each slot falls back to its still, as AutoMascot does
-// after a clip that won't play: there every slot must show its clip or its still.
+// PRD-261 A-17b (@parity): Auto's 12 states, on the style sheet (/looks/style), under the Design
+// Kit's package (A-19f4: since W-A8 the only Play). Each slot names its state, draws its still (the
+// state's PNG, served from the package's assets/mascot/ through the files proxy) and rings it in the
+// state's tone (the kit's themes/play/src/lib/mascot/ring.ts); "Play Auto's states" plays the 12
+// clips. Chromium plays the VP9-alpha .webm; WebKit gets the HEVC-alpha .mp4 (the kit's
+// lib/mascot/media.ts), which a Linux WebKit may not decode, and then each slot falls back to its
+// still, as AutoMascot does after a clip that won't play: there every slot must show its clip or its
+// still.
 
 const STYLE_SHEET_PATH = '/looks/style'
-/** components/looks/style/style-mascots.tsx MASCOT_LABEL and PLAY_STATES. */
+/** The kit's themes/play/src/components/looks/style/style-mascots.tsx MASCOT_LABEL and PLAY_STATES. */
 const MASCOT_SECTION = 'Mascot slot · 12 states · ring drawn by the page'
 const PLAY_STATES = "Play Auto's states"
 const STILL_EXTENSION = 'png'
@@ -28,7 +29,7 @@ const SERVED_STATUSES = [200, 206, 304]
  */
 const MEDIA_STACK_STATUS = 0
 const MEDIA_STACK_CLIP = /\.mp4$/
-/** The 12 states in the style sheet's order, each with its ring tone (lib/mascot/types.ts, lib/mascot/ring.ts). */
+/** The 12 states in the style sheet's order, each with its ring tone (the kit's lib/mascot/types.ts and ring.ts). */
 const STATES: ReadonlyArray<readonly [string, string]> = [
   ['hello', 'light'],
   ['idle', 'light'],

@@ -2,8 +2,9 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 import { computedStyleOf, resolvedColour } from '../../support/computed-style'
 import { describeParity, openPlay, PARITY_TAG, type PlayVariant } from '../../support/play-parity'
 
-// PRD-261 A-17b (@parity), P260-FX-19 (M18, M19, M73): Make it yours stays readable, under builtin
-// Play and the installed package, read from what the page draws (computed styles).
+// PRD-261 A-17b (@parity), P260-FX-19 (M18, M19, M73): Make it yours stays readable, under the
+// installed package (A-19f4: since W-A8 the only Play), read from what the page draws (computed
+// styles).
 //
 // 1. M18, M19 on the default look (Ember): every chosen option and the chosen look card are edged in
 //    the accent as text (--pl-color-accent-text), every accent swatch carries its text2 edge, the
@@ -19,7 +20,7 @@ const EDITOR = 'Edit the look'
 const LOOKS_ROW = 'Looks'
 const MANAGE = 'This look'
 const DAYLIGHT = /^Daylight\b/
-/** The option groups whose chosen button is edged (components/looks/look-options.tsx). */
+/** The option groups whose chosen button is edged (the kit's themes/play/src/components/looks/look-options.tsx). */
 const EDGED_GROUPS = ['Background', 'Type', "Auto's shell", "Auto's light · ring"]
 const ACCENT_GROUP = /^Accent · /
 const ACCENT_TEXT = 'var(--pl-color-accent-text)'
@@ -32,7 +33,7 @@ const FORCED_OUTLINE = { style: 'solid', width: '2px' }
 /** 40 characters with no space (the M73 case, docs/testing/PRD-260-PLAY-RUN-CHECKLIST.md step 43). */
 const LONG_NAME = 'abcdefghijklmnopqrstuvwxyz0123456789abcd'
 const NARROW_DESKTOP = { width: 1024, height: 900 }
-/** .headerSide's max-width (components/looks/looks.module.css): the status never takes more of the row. */
+/** .headerSide's max-width (the kit's themes/play/src/components/looks/looks.module.css): the status never takes more of the row. */
 const STATUS_SIDE_MAX = 0.4
 const HEADING_SIDE_MIN = 0.5
 const ROUNDING_PX = 1
