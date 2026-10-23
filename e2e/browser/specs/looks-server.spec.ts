@@ -1,32 +1,26 @@
 import fs from 'fs'
 import path from 'path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { fulfillBackendJson } from '../support/backend-route'
-import { chooseStyle } from '../support/hello-theme'
+import { PLAY_THEME_ID } from '../support/kit-package'
+import { describeParity, THEME_LOAD_TIMEOUT_MS, type AvailablePlay } from '../support/play-parity'
 
-// PRD-261 A-09b (@host): builtin Play's looks are kept on the server, so a look saved in one
-// browser appears in another. Two browser contexts share nothing but the local edition's one
-// user and workspace: context A imports fixtures/hello-a09b/look.json on Play's Looks page and
-// waits for the PUT to /api/themes/looks/automatos/play; context B, opened before the save with
-// none of A's storage, shows the look after a reload, read from the server.
+// PRD-261 A-09b (@package): Play's looks are kept on the server, so a look saved in one browser
+// appears in another. Two browser contexts share nothing but the local edition's one user and
+// workspace: context A imports fixtures/hello-a09b/look.json on Play's Looks page and waits for the
+// PUT to /api/themes/looks/automatos/play; context B, opened before the save with none of A's
+// storage, shows the look after a reload, read from the server.
 //
-// Chromium only: the projects run in parallel against one backend user, and a save replaces the
-// user's whole list, so a second project saving at the same moment could replace this one's.
+// A-19f4 (W-A8): until then this ran under builtin Play; it runs under the installed package now
+// (support/play-parity.ts), whose look runtime keeps the looks under the same theme id. The
+// package and the member's choice live on the lane's one backend, so the spec is @package and runs
+// in the package step, one test at a time, which also keeps a second project from saving at the
+// same moment (a save replaces the user's whole list): both projects run it.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
-const PLAY_STYLE = 'theme:builtin:play'
 const LOOKS_URL = `${APP_URL}/looks`
-const LOOKS_API_PATH = '/api/themes/looks/automatos/play'
-const ACTIVE_ROUTE = '**/api/themes/active'
-/**
- * GET /api/themes/active naming builtin Play. The projects share one backend user, so the real
- * answer can name a choice or default another spec stored; ThemeChoiceSync would then move the tab
- * off Play (or reload it into an install) before the Looks page shows.
- */
-const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
+const LOOKS_API_PATH = `/api/themes/looks/${PLAY_THEME_ID}`
 const FIXTURE = path.resolve(__dirname, '..', 'fixtures', 'hello-a09b', 'look.json')
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
-const ONLY_PROJECT = 'chromium'
 const OK = 200
 /** Room for the store's pause before it sends (LOOK_SEND_DELAY_MS) and the round trip. */
 const SAVE_TIMEOUT_MS = 20_000
@@ -47,37 +41,41 @@ function lookCard(page: Page, name: string): Locator {
   return page.getByRole('region', { name: 'Looks' }).getByRole('button', { name: new RegExp(`^${escapeRegExp(name)}\\b`) })
 }
 
-async function openLooks(page: Page): Promise<void> {
-  await chooseStyle(page, PLAY_STYLE, APP_URL)
-  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
+/** Puts the page on installed Play and opens its Looks page, once the host has loaded the package. */
+async function openLooks(page: Page, play: AvailablePlay): Promise<void> {
+  await play.choose(page)
   await page.goto(LOOKS_URL)
-  await expect(page.getByRole('region', { name: 'Import a look' })).toBeVisible()
+  await play.ready(page)
+  await expect(page.getByRole('region', { name: 'Import a look' })).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
 function isLooksSave(method: string, url: string): boolean {
   return method === 'PUT' && new URL(url).pathname === LOOKS_API_PATH
 }
 
-test('a look saved in one browser appears in another after reload', { tag: ['@host', '@looks'] }, async ({ page, browser }, testInfo) => {
-  test.skip(testInfo.project.name !== ONLY_PROJECT, 'one project: a save replaces the shared user\'s whole list')
-  const look = uniqueLook()
-  const other = await browser.newContext({ viewport: DESKTOP_VIEWPORT })
-  try {
-    const second = await other.newPage()
-    await openLooks(second)
-    await expect(lookCard(second, look.name)).toHaveCount(0)
+describeParity("Play's looks kept on the server", (variant) => {
+  test('a look saved in one browser appears in another after reload', { tag: ['@package', '@looks'] }, async ({ page, browser, request }) => {
+    const play = await variant.makeAvailable(request)
+    const look = uniqueLook()
+    const other = await browser.newContext({ viewport: DESKTOP_VIEWPORT })
+    try {
+      const second = await other.newPage()
+      await openLooks(second, play)
+      await expect(lookCard(second, look.name)).toHaveCount(0)
 
-    await openLooks(page)
-    const importer = page.getByRole('region', { name: 'Import a look' })
-    await importer.getByLabel("Paste a Look's JSON").fill(look.json)
-    const saved = page.waitForResponse((response) => isLooksSave(response.request().method(), response.url()), { timeout: SAVE_TIMEOUT_MS })
-    await importer.getByRole('button', { name: 'Import pasted JSON' }).click()
-    await expect(importer.getByText(`Added ${look.name} to your Looks.`)).toBeVisible()
-    expect((await saved).status()).toBe(OK)
+      await openLooks(page, play)
+      const importer = page.getByRole('region', { name: 'Import a look' })
+      await importer.getByLabel("Paste a Look's JSON").fill(look.json)
+      const saved = page.waitForResponse((response) => isLooksSave(response.request().method(), response.url()), { timeout: SAVE_TIMEOUT_MS })
+      await importer.getByRole('button', { name: 'Import pasted JSON' }).click()
+      await expect(importer.getByText(`Added ${look.name} to your Looks.`)).toBeVisible()
+      expect((await saved).status()).toBe(OK)
 
-    await second.reload()
-    await expect(lookCard(second, look.name)).toBeVisible()
-  } finally {
-    await other.close()
-  }
+      await second.reload()
+      await play.ready(second)
+      await expect(lookCard(second, look.name)).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+    } finally {
+      await other.close()
+    }
+  })
 })

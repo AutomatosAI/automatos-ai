@@ -1,7 +1,7 @@
 import type { Locator } from '@playwright/test'
 
-// PRD-261 A-17b: what the page actually draws, read from computed styles, so a parity spec compares
-// builtin Play and the installed package by the colours on screen, never by class names (a CSS
+// PRD-261 A-17b: what the page actually draws, read from computed styles, so a Play spec checks
+// installed Play (the theme kit's package) by the colours on screen, never by class names (a CSS
 // module's class is hashed, and the package's stylesheet is built by the kit).
 
 /**

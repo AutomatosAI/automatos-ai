@@ -6,9 +6,8 @@
  *   file under `/api/themes/files/<digest>/` (a package's by its fixed layout and the answer's
  *   `defaultLook`, manifest.ts), then imports the entry with the browser's own
  *   import(), so its bare imports resolve through the page's import map to the host's modules.
- * - **builtin** (`builtin:<id>`): a module compiled into the app, loaded with a webpack import();
- *   its frame registers synchronously as soon as that import resolves. Builtin Play keeps its
- *   compiled path until A-04b registers it here.
+ *   It is the only source: no theme is compiled into the app since A-19f1 (builtin Play left
+ *   core; Play ships as a package from the theme kit).
  *
  * The active-theme request goes through apiClient's named method (getActiveTheme), so the
  * route-contract check sees it. When it names no theme for this install (a stale
@@ -40,12 +39,11 @@ import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
 import { isRecord } from './css-value'
 import { exposeHostModules } from './host-modules'
-import { cleanupOnce, definitionOf, loadFromManifest, registerTheme, settleLoad, step, withTimeout } from './loader'
+import { loadFromManifest, settleLoad, step, withTimeout } from './loader'
 import { parseActiveInstall, parseThemeManifest } from './manifest'
 import { importThemeModule } from './native-import'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
-import { SDK_VERSION } from './sdk'
 import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 import type {
   LoaderDeps,
@@ -271,32 +269,14 @@ export function installedThemeSource(installId: string): ThemeSource {
   }
 }
 
-/**
- * A theme compiled into the app. `importDefinition` is a webpack `import()` of its module (a
- * default export made with defineTheme). It renders with the app's own React, so the host's
- * module global is not installed, and its look comes with its chunk and the boot data (A-03).
- */
-export function builtinThemeSource(ref: `builtin:${string}`, importDefinition: () => Promise<unknown>): ThemeSource {
-  return {
-    ref,
-    load: (deps) =>
-      settleLoad(async (): Promise<ThemeLoadOk> => {
-        const timedOut = `the builtin theme ${ref} did not load within ${deps.timeoutMs} ms`
-        const definition = await step('load', async () => definitionOf(await withTimeout(importDefinition(), deps.timeoutMs, timedOut)))
-        const registrations = await step('register', () => registerTheme(definition, SDK_VERSION))
-        return { ok: true, ref, manifest: null, ...registrations, cleanup: cleanupOnce(() => undefined, definition) }
-      }),
-  }
-}
-
-/** The install a style names, or null for Classic, Studio and a builtin theme. */
+/** The install a style names, or null for Classic and Studio. */
 export function installIdOf(style: UiStyle): string | null {
   if (!isInstalledThemeStyle(style)) return null
   const ref = themeRefOf(style)
   return ref === null ? null : ref.slice(INSTALL_REF_PREFIX.length)
 }
 
-/** The source the host loads for a style: only an installed theme in A-04a (builtin Play: A-04b). */
+/** The source the host loads for a style: an installed theme's; Classic and Studio have none. */
 export function sourceForStyle(style: UiStyle): ThemeSource | null {
   const installId = installIdOf(style)
   return installId === null ? null : installedThemeSource(installId)

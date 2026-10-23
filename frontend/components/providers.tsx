@@ -9,11 +9,10 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { UiStyleProvider, useUiStyle } from '../contexts/ui-style-context'
+import { UiStyleProvider } from '../contexts/ui-style-context'
 import type { UiStyle } from '@/lib/ui-style'
 import type { ThemeTone } from '@/lib/theme-host/boot'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
-import { BUILTIN_THEME_CLIENTS } from '@/lib/theme-host/builtin/clients'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
@@ -77,13 +76,6 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** PRD-261 A-03: the active builtin theme's client module (its stylesheet chunk), or nothing. */
-function BuiltinThemeClient() {
-  const { activeTheme } = useUiStyle()
-  const Client = activeTheme === null ? undefined : BUILTIN_THEME_CLIENTS.get(activeTheme.ref)
-  return Client === undefined ? null : <Client />
-}
-
 interface ProvidersProps {
   children: React.ReactNode
   /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
@@ -101,7 +93,7 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
   // server's tone cookie, so next-themes' script forces it before paint. Forced at every
   // width: the look runtime paints <html> below the theme's minWidth too, and Studio's
   // semantic tokens and dark: classes must match its ground there.
-  const [playTone, setPlayTone] = useState<ThemeTone | undefined>(initialTone)
+  const [lookTone, setLookTone] = useState<ThemeTone | undefined>(initialTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -121,10 +113,9 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
-          forcedTheme={playTone}
+          forcedTheme={lookTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle} installedTheme={initialTheme}>
-          <BuiltinThemeClient />
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
               {/* PRD-222: a new workspace lands directly in the conversation
@@ -136,7 +127,7 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
                     either way, so a style switched in place never remounts the page (M69).
                     PRD-260 F5: looks are the signed-in user's in this workspace, so it sits inside
                     the WorkspaceProvider. */}
-                <ThemeLookRuntime onToneChange={setPlayTone}>{children}</ThemeLookRuntime>
+                <ThemeLookRuntime onToneChange={setLookTone}>{children}</ThemeLookRuntime>
               </ThemeHostProvider>
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />

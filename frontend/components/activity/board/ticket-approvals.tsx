@@ -7,8 +7,8 @@
  * (`&question=<grant id>`, the one link format), and the card there is the one
  * the Governance inbox shows, with Grant and Deny. A grant the ticket's blocked
  * reason names already has its Approve button in the Blocked panel, so it is not
- * shown twice. Approvals are a workspace admin's to give: anyone else sees
- * nothing here.
+ * shown twice. Approvals are an owner's, admin's or editor's to give (PRD-266
+ * D16; the API decides): a viewer's list is refused, so a viewer sees nothing here.
  */
 
 import { useEffect, useRef } from 'react'

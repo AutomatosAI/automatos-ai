@@ -1,10 +1,11 @@
-# Play parity: the manual pass (PRD-261 A-17b, Q22)
+# Play parity: the manual pass (PRD-261 A-17b, A-19f4, Q22)
 
-The browser lane holds builtin Play and the installed Play package to the same automated assertions
-(`specs/play-parity/`, see `README.md`). This list is the rest: what no lane can check (how it looks,
-real devices, real Safari, real forced colours, a screen reader) and what needs the hosted (SaaS)
-edition, which no lane runs. Each item is done twice, once under builtin Play and once under the
-package, and the results go in the table at the end.
+The browser lane holds the installed Play package to Play's automated assertions
+(`specs/play-parity/`, see `README.md`). Until W-A8 it held builtin Play (compiled into core) and the
+package to the same ones, and this pass was done under each; W-A8 deleted builtin Play, so Play is
+the package alone and each item is done once, under it. This list is the rest: what no lane can
+check (how it looks, real devices, real Safari, real forced colours, a screen reader) and what needs
+the hosted (SaaS) edition, which no lane runs. The results go in the table at the end.
 
 **Who and where** is decision D4 (Q22): the person, and the environment (a Railway preview or
 staging). Items marked **SaaS** need the hosted edition; the rest also work on the local edition.
@@ -18,33 +19,28 @@ Write down, in the results table's header:
 - the environment's URL, the edition (local or SaaS), the browser and its version, the device;
 - your name and the date.
 
-Get each Play:
+Get Play: download `automatos.play-1.1.0.autotheme` from the `play-package` artifact of a green
+browser-e2e run (or build it in the kit at `KIT_REF`: `npm ci --ignore-scripts`, then `npm run build`
+and `npm run pack` in `themes/play`). Settings › Appearance › Themes › Install theme, upload it, opt
+in to its private code, choose it. The style cookie `automatos-style` reads `theme:install:<uuid>`
+and `<html>` has `data-theme-host="active"`. The theme menu has no other Play: builtin Play's entry
+left with it in W-A8, and a browser still on its old cookie lands on Studio.
 
-1. **Builtin Play first.** Theme menu (the Appearance button) › Style › Play. The style cookie
-   `automatos-style` reads `theme:builtin:play`. Do every item now, in a workspace that has **not**
-   installed Play's package: once it has, the menu hides the builtin entry (D1-c).
-2. **Then the package.** Download `automatos.play-1.0.0.autotheme` from the `play-package` artifact
-   of a green browser-e2e run (or build it in the kit at `KIT_REF`: `npm ci --ignore-scripts`, then
-   `npm run build` and `npm run pack` in `themes/play`). Settings › Appearance › Themes › Install
-   theme, upload it, opt in to its private code, choose it. The style cookie reads
-   `theme:install:<uuid>` and `<html>` has `data-theme-host="active"`. Do every item again.
-
-Screenshots: name each `<item>-builtin.png` and `<item>-package.png` (for example
-`A1-chat-builtin.png`), attach them to the wave's pull request (or the Q22 issue), and put the
-link in the table. Don't commit them to this repo. Use the test workspace's own data only: no
-customer data in a screenshot.
+Screenshots: name each `<item>-package.png` (for example `A1-chat-package.png`), attach them to the
+wave's pull request (or the Q22 issue), and put the link in the table. Don't commit them to this
+repo. Use the test workspace's own data only: no customer data in a screenshot.
 
 ## A. What automation can't see
 
 | # | What to do | What to see |
 |---|---|---|
-| A1 | At 1440 px, take the same screenshot under each Play: the chat on first open; a reply with tool lines and "What Auto did"; the shelf; one Deliverable; Conversations; Make it yours in Ember and in Daylight; the style sheet; a 404 (`/nope`); the asleep screen (stop the backend). | The two Plays are the same page: layout, type, colours, the page glow, Auto's ring. Any difference is a finding, with both screenshots. |
+| A1 | At 1440 px, take each screenshot under the package: the chat on first open; a reply with tool lines and "What Auto did"; the shelf; one Deliverable; Conversations; Make it yours in Ember and in Daylight; the style sheet; a 404 (`/nope`); the asleep screen (stop the backend). | Each page is Play as it was in core: layout, type, colours, the page glow, Auto's ring. Compare with the builtin screenshots of the last pass before W-A8, where there is one; any difference is a finding, with both screenshots. |
 | A2 | Open the chat in real Safari (macOS and iOS) and in Chrome; send a message; open the style sheet and press "Play Auto's states". | Auto plays with a transparent background (HEVC alpha in Safari, VP9 alpha in Chrome), never a black box; Pause Auto stops him and he stays paused after a reload; with Reduce motion on (system setting) he is a still and "Play Auto's states" is off. |
-| A3 | Make it yours: pick each Type (Editorial, Clean, Characterful, Playful). DevTools › Network › Font. | Each face renders in its own style. Under the package the woff2 files come from `/api/themes/files/<digest>/assets/fonts/`; under builtin Play from the app's own font files (`/_next/static/media/`). |
+| A3 | Make it yours: pick each Type (Editorial, Clean, Characterful, Playful). DevTools › Network › Font. | Each face renders in its own style, its woff2 file from `/api/themes/files/<digest>/assets/fonts/`; none of Play's faces comes from the app's own font files (`/_next/static/media/`). |
 | A4 | On Windows, turn on a Contrast theme (Settings › Accessibility › Contrast themes). Open `/looks` in Ember, then Daylight, and Tab through it; then the shelf and Conversations. (FX-19, M19) | Every focused control has a visible outline; the chosen option, card, accent and light are marked; the colour swatches keep their own colours. The lane emulates forced colours in Chromium only. |
 | A5 | VoiceOver (Cmd F5): import the same look twice; stop and start the backend; open `/looks/style`. (FX-22, FX-24) | Each import is announced, also the second; "Automatos is asleep", then "Automatos is back"; the style sheet's 12 Autos are not announced as live status. |
 | A6 | Send a message that runs a web search, then one that makes a Deliverable. | The glow behind the page follows Auto: brighter while he works, brightest when he celebrates, coral on a snag. |
-| A7 | On a real phone and a tablet (below 1024 px), under each Play: open `/agents`, `/chat`, the theme menu. | The core's own chrome and pages, in the look's colours; the Tone items rest under "Set by your look"; no Play frame. |
+| A7 | On a real phone and a tablet (below 1024 px), under the package: open `/agents`, `/chat`, the theme menu. | The core's own chrome and pages, in the look's colours; the Tone items rest under "Set by your look"; no Play frame. |
 | A8 | With a real model: ask Auto for something that needs a grant (for example "delete the document X"), approve it; ask for a Mission, approve its plan. | The approval cards show in Auto's reply; Approve & run runs the action and the card says so; the Mission starts. The lane checks these cards with recorded turns only. |
 
 ## B. SaaS only
@@ -109,33 +105,34 @@ once by itself, and none loops (risk R16).
 
 ## C. The gaps the automated pass found (PRD-261 A-17b)
 
-These tests keep their assertions and are `test.fixme` for the package only (builtin Play runs
-them), each naming its gap (`GAP_*` in `support/play-parity.ts`). Until the owner fixes them, the
-package is **expected to fail** these checks by hand too; record what you see, don't count it as a
-new finding.
+The automated pass found three places where core treated an installed theme differently from
+builtin Play (G1–G3). All three closed before W-A8 (G1 and G2 in W-A6b, G3 with the reload hand-off
+of builtin Play's "Switch to Play"), and with builtin Play gone there is no second Play to differ
+from: the `test.fixme` marks and the `GAP_*` texts are gone from `support/play-parity.ts`. What is
+left to check by hand:
 
-| Gap | Where in core | What the package does differently | Tests marked fixme for the package |
-|---|---|---|---|
-| G1 | **Closed in W-A6b.** Was: `contexts/ui-style-context.tsx` set `activeTheme` to `findThemeEntry(style)` with no installed entries, so under `theme:install:*` `useActiveTheme()` was null. Now the backend's boot route answers a theme that runs with its registry entry from `theme.json` (`serve.py` `theme_entry`), the root layout builds the entry from the boot (`lib/theme-host/installed-entry.ts`) and hands it to `Providers`, and the UiStyle context publishes it as `activeTheme` until the theme host releases it (failed, safe mode, no install to run) | None now: the look runtime mounts for the package as for builtin Play (Make it yours picks, saves, renames and deletes looks; the look forces the tone; the theme menu shows "Set by your look" and Customise look…; ⌘K lists Play's pages). Check by hand that each of these matches builtin Play, and that the colours stay after the page settles | None (the fixme marks are gone: FX-19 Daylight; FX-19 long name; FX-22 This look's toolbar; below 1024 px the tone forced) |
-| G2 | **Closed in W-A6b.** Was: `orchestrator/services/themes/serve.py` `_boot`/`theme_boot` sent `lookStorage` and `lookGuard` as null; `lib/theme-host/boot.ts` read the tone cookie for builtin boots only; `lib/theme-host/boot-sanitize.ts` `STORAGE_KEY` refused the `/` in `automatos-theme.<publisher>/<name>.*` keys; the look runtime kept every theme's looks under builtin Play's keys. Now the boot of a theme that runs names the theme's own look keys (`serve.py` `look_storage`, the same as `installedLookKeys`: `orchestrator/tests/fixtures/themes/look-storage.json` holds both equal) and a guard from its `looks/schema.json` look header (`theme_looks`); a `from-look` installed boot takes its tone from the tone cookie (`boot.ts` `withLookTone`); the gate accepts the `/`; and under Play's package the look runtime keeps the looks under the theme's id (its registry entry's `themeId`): `automatos-theme.automatos/play.*` in the browser, `/api/themes/looks/automatos/play` on the server | None now: a stored look and its tone paint from the first frame, as under builtin Play. Check by hand that a look picked under the package comes back on reload with no flash of Ember, and that builtin Play's own looks (`automatos-play.*` in the browser) are not changed by the package | None (the fixme mark is gone: below 1024 px a stored look from the first frame) |
-| G3 (closed) | `lib/theme-host/builtin/play-only-route.tsx` `playStyleFor` picks the install and `contexts/ui-style-context.tsx` `setStyle` still reloads for an installed style (PA-13), but runs the switch's `beforeReload` just before it: the note's Switch to Play leaves word for the next load in sessionStorage (`lib/theme-host/switch-focus.ts`), which `components/theme-host/theme-slot-page.tsx` takes once | Nothing now: the page reloads into the package, and once the host has loaded it the screen's heading takes focus, as under builtin Play (FX-22, M21). By hand: Studio › /looks › Switch to Play by keyboard; after the reload the focus ring is on "Make it yours." | None: FX-22 Switch to Play runs under both |
+| Was | Check under the package |
+|---|---|
+| G1 (the look runtime under an installed theme) | Make it yours picks, saves, renames and deletes looks; the look forces the tone; the theme menu shows "Set by your look" and Customise look…; ⌘K lists Play's pages; the colours stay after the page settles. |
+| G2 (an installed theme's looks from the first frame) | A look picked under the package comes back on reload with no flash of Ember. |
+| G3 (focus after a switch onto the package) | W-A8 took "Switch to Play" off Studio's `/looks` note with builtin Play, so there is no switch to check: under Studio, `/looks` shows the generic note and names no Play. With the package chosen, Tab through Make it yours: the focus ring is visible on every control. |
 
 ## Results
 
 Core commit: ______ · Kit commit: ______ · Environment: ______ · Edition: ______ · Browser and
 device: ______ · Person: ______ · Date: ______
 
-| Item | Builtin Play | Package | Screenshot (builtin) | Screenshot (package) | Notes |
-|---|---|---|---|---|---|
-| A1 | | | | | |
-| A2 | | | | | |
-| A3 | | | | | |
-| A4 | | | | | |
-| A5 | | | | | |
-| A6 | | | | | |
-| A7 | | | | | |
-| A8 | | | | | |
-| B1 | | | | | |
-| B2 | | | | | |
-| B3 | | | | | |
-| C (G1–G3 by hand) | | | | | |
+| Item | Package | Screenshot | Notes |
+|---|---|---|---|
+| A1 | | | |
+| A2 | | | |
+| A3 | | | |
+| A4 | | | |
+| A5 | | | |
+| A6 | | | |
+| A7 | | | |
+| A8 | | | |
+| B1 | | | |
+| B2 | | | |
+| B3 | | | |
+| C (by hand) | | | |

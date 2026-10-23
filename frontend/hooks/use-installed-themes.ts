@@ -110,7 +110,7 @@ export function choiceSourceOf(active: unknown): ChoiceSource | null {
   return typeof source === 'string' && CHOICE_SOURCES.includes(source) ? (source as ChoiceSource) : null
 }
 
-/** The member's current choice here, as the server holds it ('studio', 'builtin:play', an install id…). */
+/** The member's current choice here, as the server holds it ('classic', 'studio' or an install id). */
 export function useActiveThemeChoice() {
   const workspaceId = useWorkspaceId()
   return useQuery<string | null>({

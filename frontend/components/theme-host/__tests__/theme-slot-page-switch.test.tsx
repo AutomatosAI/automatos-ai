@@ -1,10 +1,9 @@
 /**
- * PRD-261 G3 (P260-FX-22, M21) — ThemeSlotPage after 'Switch to Play' onto an installed theme. The
- * switch reloads the page (PA-13), so this load never saw the note that offered it; the note left
- * word in this tab's sessionStorage just before the reload (switch-focus.test.tsx), and here the
- * installed theme's screen heading takes the focus once it renders, however late the host loads
- * the theme. A load with no word (or another page's) leaves focus alone, and the word is taken
- * once. looks-screen.test.tsx holds the in-place switch onto builtin Play.
+ * PRD-261 G3 (P260-FX-22, M21) — ThemeSlotPage after a switch onto an installed theme. The switch
+ * reloads the page (PA-13), so this load never saw the page that made it; the switch left word in
+ * this tab's sessionStorage just before the reload (switch-focus.test.tsx), and here the installed
+ * theme's screen heading takes the focus once it renders, however late the host loads the theme. A
+ * load with no word (or another page's) leaves focus alone, and the word is taken once.
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -28,7 +27,7 @@ import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-cont
 import { ThemeSlotPage } from '../theme-slot-page'
 
 const LOOKS_PATH = '/looks'
-/** The mark the theme's screen puts on its h1 (Play's is data-play-only-heading). */
+/** The mark the theme's screen puts on its h1 (a theme's own; the core's is THEME_HEADING_SELECTOR). */
 const HEADING_SELECTOR = '[data-test-screen-heading]'
 
 function InstalledLookEditor() {
@@ -60,7 +59,7 @@ function page(status: ThemeHostStatus) {
     <ThemeHostContext.Provider value={installedHost(status)}>
       <ThemeSlotPage
         slot="lookEditor@1"
-        note={<p>Make it yours is part of the Play theme.</p>}
+        note={<p>This style has no look to edit.</p>}
         narrowNote={<p>It opens on a wider screen.</p>}
         headingSelector={HEADING_SELECTOR}
       />

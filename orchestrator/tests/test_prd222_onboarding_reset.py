@@ -225,43 +225,39 @@ def test_advance_validator_stays_strict_no_backward_or_terminal_escape():
         advance_onboarding_stage(None, ws3, "questions")
 
 
-def test_reset_trial_regrants_via_provisioning_grant(monkeypatch):
-    """reset_trial re-grants through grant_trial_at_provisioning (REUSE, not a
-    second grant path) and threads its result into the report."""
+def test_reset_trial_regrants_via_credits_reset(monkeypatch):
+    """reset_trial re-grants through ``services.credits.trial.reset_trial``
+    (PRD-265: REUSE, not a second grant path) and threads its result into the
+    report. The grant itself now returns a credits int, not a USD trial dict —
+    ``_regrant_trial`` wraps it as ``{"credits": n}`` for the report."""
     calls = {}
-    fresh = {"granted_usd": 5.0, "spent_usd": 0, "state": "active"}
 
-    def _fake_grant(db, workspace_id, *, owner_id):
+    def _fake_reset(db, workspace_id, *, owner_id):
         calls["args"] = (db, workspace_id, owner_id)
-        return fresh
+        return 500
 
-    monkeypatch.setattr(
-        "services.trial_ledger.grant_trial_at_provisioning", _fake_grant
-    )
-    ws = _FakeWorkspace(
-        onboarding={"stage": "powerup", "trial": {"granted_usd": 5.0, "spent_usd": 5.0, "state": "exhausted"}},
-        owner_id=42,
-    )
+    monkeypatch.setattr("services.credits.trial.reset_trial", _fake_reset)
+    ws = _FakeWorkspace(onboarding={"stage": "powerup"}, owner_id=42)
 
     report = reset_onboarding(None, ws, reset_trial=True)
 
     assert calls["args"][1] == ws.id and calls["args"][2] == 42   # reuse call-site
-    assert report["trial"] == fresh
+    assert report["trial"] == {"credits": 500}
     assert report["trial_note"] == "granted"
-    assert "trial" not in ws.onboarding   # doc was rebuilt trial-less (grant writes the row)
+    assert "trial" not in ws.onboarding   # the legacy onboarding.trial key is never written back
 
 
 def test_reset_trial_decline_is_a_reported_pause_not_an_error(monkeypatch):
     monkeypatch.setattr(
-        "services.trial_ledger.grant_trial_at_provisioning",
-        lambda db, workspace_id, *, owner_id: None,   # kill switch / cap / already held
+        "services.credits.trial.reset_trial",
+        lambda db, workspace_id, *, owner_id: None,   # kill switch / daily cap reached
     )
-    ws = _FakeWorkspace(onboarding={"stage": "boom", "trial": {"state": "active"}})
+    ws = _FakeWorkspace(onboarding={"stage": "boom"})
 
     report = reset_onboarding(None, ws, reset_trial=True)   # must NOT raise
 
     assert report["trial"] is None
-    assert report["trial_note"].startswith("paused")
+    assert report["trial_note"] == "paused (trial disabled, or daily cap reached)"
 
 
 # =========================================================================== #
@@ -622,13 +618,19 @@ def test_wipe_credentials_spares_platform_key_workspace(engine, new_session, mon
 
 @pytest.mark.integration
 def test_reset_trial_regrants_fresh_active_trial(engine, new_session, monkeypatch):
+    """PRD-265: the trial is credits in the ledger now, not a USD dict in the
+    onboarding JSONB doc. A workspace that already granted and fully spent its
+    trial gets topped back up to ``TRIAL_CREDITS`` in the ``credit_balances``
+    row on reset — read through the ledger, not ``onboarding["trial"]``."""
     from sqlalchemy import text
 
     from core.models.workspaces import Workspace
+    from services.credits.ledger import BUCKET_TRIAL, KIND_DEBIT, Entry, read_balance, record
+    from services.credits.trial import grant_trial
 
     monkeypatch.setattr(config, "TRIAL_ENABLED", True)
-    monkeypatch.setattr(config, "TRIAL_CREDIT_USD", 5.0)
-    monkeypatch.setattr(config, "TRIAL_GLOBAL_DAILY_USD", 1_000_000.0)  # cap never blocks the test
+    monkeypatch.setattr(config, "TRIAL_CREDITS", 500)
+    monkeypatch.setattr(config, "TRIAL_GLOBAL_DAILY_CREDITS", 1_000_000)  # cap never blocks the test
 
     s = new_session()
     uniq = uuid.uuid4().hex
@@ -637,26 +639,32 @@ def test_reset_trial_regrants_fresh_active_trial(engine, new_session, monkeypatc
         {"u": f"reset-{uniq}", "e": f"reset-{uniq}@example.test"},
     ).fetchone()[0]
     ws1 = str(uuid.uuid4())
-    _mk_ws(
-        s, ws1, "reset-trial-ws", owner_id=uid,
-        onboarding={"stage": "boom", "trial": {"granted_usd": 5.0, "spent_usd": 5.0, "state": "exhausted"}},
-    )
+    _mk_ws(s, ws1, "reset-trial-ws", owner_id=uid, onboarding={"stage": "boom"})
     s.commit()
+
+    # Grant the one-time trial, then spend it all — the state a workspace that
+    # has exhausted its trial is in before a reset.
+    assert grant_trial(s, ws1, owner_id=uid) == 500
+    s.commit()
+    record(s, ws1, Entry(
+        kind=KIND_DEBIT, source_type="ask", source_ref=f"spend-{uniq}",
+        credits=-500, bucket=BUCKET_TRIAL, actor="test", reason="spend it all",
+    ))
+    s.commit()
+    assert read_balance(s, ws1).trial == 0
 
     ws1_obj = s.query(Workspace).get(ws1)
     report = reset_onboarding(s, ws1_obj, reset_trial=True)
 
     v = new_session()
     try:
-        ob = v.execute(
-            text("SELECT onboarding FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": ws1}
-        ).fetchone()[0]
-        assert ob["trial"]["state"] == "active"
-        assert ob["trial"]["spent_usd"] == 0
-        assert ob["trial"]["granted_usd"] == 5.0
+        assert read_balance(v, ws1).trial == config.TRIAL_CREDITS
+        assert report["trial"] == {"credits": config.TRIAL_CREDITS}
         assert report["trial_note"] == "granted"
     finally:
         sw = new_session.sweep()
+        sw.execute(text("DELETE FROM credit_ledger WHERE workspace_id = CAST(:i AS uuid)"), {"i": ws1})
+        sw.execute(text("DELETE FROM credit_balances WHERE workspace_id = CAST(:i AS uuid)"), {"i": ws1})
         sw.execute(text("DELETE FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": ws1})
         sw.execute(text("DELETE FROM users WHERE id = :u"), {"u": uid})
         sw.commit()

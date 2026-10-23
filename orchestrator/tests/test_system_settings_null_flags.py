@@ -49,35 +49,9 @@ def test_by_category_group_survives_one_null_row():
     assert len(grouped.settings) == 2 and all(s.is_required is False for s in grouped.settings)
 
 
-class _Result:
-    def __init__(self, row=None):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _CapturingDB:
-    """SELECTs find nothing (so the INSERT path runs); every statement is recorded."""
-
-    def __init__(self):
-        self.statements = []
-
-    def execute(self, clause, params=None):
-        sql = str(getattr(clause, "text", clause))
-        self.statements.append((sql, dict(params or {})))
-        return _Result(None)
-
-
-def test_trial_ledger_insert_names_the_flag_columns():
-    from services import trial_ledger
-
-    db = _CapturingDB()
-    total = trial_ledger._increment_daily_spend(db, 0.0025)
-    assert total == 0.0025
-    inserts = [s for s, _ in db.statements if s.lstrip().upper().startswith("INSERT INTO SYSTEM_SETTINGS")]
-    assert len(inserts) == 1, db.statements
-    sql = inserts[0]
-    for col in ("is_sensitive", "is_required", "created_by"):
-        assert col in sql, f"INSERT must set {col}: {sql}"
-    assert "false, false, 'system'" in sql
+# REMOVED: test_trial_ledger_insert_names_the_flag_columns (and the _Result /
+# _CapturingDB fakes it alone used) — its subject, services.trial_ledger.
+# _increment_daily_spend's raw INSERT into system_settings, is deleted
+# (PRD-265 W1): the daily platform-wide trial spend is now a SELECT over
+# credit_ledger (services.credits.trial.trial_spent_today), which writes
+# nothing to system_settings at all.

@@ -64,7 +64,9 @@ class _Model:
 
 @pytest.fixture
 def settings(monkeypatch):
-    monkeypatch.setattr(guard, "config", SimpleNamespace(GENERATION_GUARD_MODEL="", GENERATION_GUARD_TIMEOUT_SECONDS=5))
+    monkeypatch.setattr(guard, "config", SimpleNamespace(
+        GENERATION_GUARD_MODEL="", GENERATION_GUARD_TIMEOUT_SECONDS=5, GENERATION_GUARD_READ_ENABLED=True,
+    ))
     return guard.config
 
 
@@ -183,3 +185,19 @@ def test_a_providers_own_refusal_is_logged_and_worded_plainly(caplog):
         message = guard.provider_refusal(WS, PATH, "Higgsfield")
     assert message == "Higgsfield refused to make this as unsafe content. It was not sent to any other provider."
     assert f"workspace={WS} path={PATH} reason=provider_refused" in caplog.text
+
+
+def test_the_model_read_ships_off_until_after_web_summit():
+    """Gerard, 23 Oct 2026: off by default (cost and demo failures); PRD-264 ART5-1 says when it returns."""
+    from config import config
+
+    assert config.GENERATION_GUARD_READ_ENABLED is False
+
+
+def test_with_the_read_off_nothing_is_read_and_only_the_keyword_block_refuses(monkeypatch, settings):
+    model = _use(monkeypatch, _Model(json.dumps({"sexual": True, "minor": False, "real_person": True})))
+    monkeypatch.setattr(settings, "GENERATION_GUARD_READ_ENABLED", False)
+    assert guard.reads_enabled() is False
+    assert _check(PROMPT, images=((PNG, "image/png"),)) == guard.ALLOWED
+    assert model.created == [], "no model read, no cost"
+    assert _check("child porn").reason == guard.SEXUAL_MINOR

@@ -100,23 +100,6 @@ const SECURITY_HEADERS_RULE = {
   ],
 }
 
-// PRD-260 (P260-FX-15): Auto's clips and stills (public/auto/, lib/mascot/media.ts MASCOT_DIR).
-// Next serves public files with max-age=0, so every state swap waited a revalidation round trip:
-// they stay fresh for a day, then a stale copy plays while the browser revalidates in the
-// background. Not `immutable`: the file names carry no version, so a changed clip must still arrive.
-const SECONDS_PER_DAY = 24 * 60 * 60
-const MASCOT_MAX_AGE_S = SECONDS_PER_DAY
-const MASCOT_SWR_S = 7 * SECONDS_PER_DAY
-const MASCOT_CACHE_RULE = {
-  source: '/auto/:file*',
-  headers: [
-    {
-      key: 'Cache-Control',
-      value: `public, max-age=${MASCOT_MAX_AGE_S}, stale-while-revalidate=${MASCOT_SWR_S}`,
-    },
-  ],
-}
-
 // PRD-262 US-046: what the standalone server never loads stays out of its trace, and so out of
 // the image: sharp and its libvips builds (image optimisation is off, below), TypeScript (this
 // config is .js and only `next build` reads TypeScript) and Next's AMP validator (no page is AMP).
@@ -223,9 +206,10 @@ const nextConfig = {
     ]
   },
 
-  // SECURITY_HEADERS_RULE for every route; MASCOT_CACHE_RULE for Auto's clips and stills.
+  // SECURITY_HEADERS_RULE for every route. PRD-261 A-19f1: Auto's clips left public/ with builtin
+  // Play (they ship in Play's package, served by the theme files route), and their cache rule with them.
   async headers() {
-    return [SECURITY_HEADERS_RULE, MASCOT_CACHE_RULE]
+    return [SECURITY_HEADERS_RULE]
   },
 }
 

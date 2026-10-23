@@ -3,11 +3,13 @@
  * `cards.FirstRunNudge`.
  *
  * HeaderUtilities is the Studio header's utilities cluster (components/layout/studio-header.tsx):
- * Help and the docs, notifications, the theme menu and the profile control by edition. Every frame
- * must render it (PRD §4.4), so the way back to the theme menu, safe mode's entry and the account
- * are always on screen; lib/theme-sdk/__tests__/header-utilities.test.tsx checks builtin Play's
- * frame does. The banner and the nudge are the host's own: the trial's exhausted state with its
- * power-up card, and the local edition's "add an LLM key" nudge.
+ * the credit balance (hosted edition, PRD-265), Help and the docs, notifications, the theme menu
+ * and the profile control by edition. Every frame must render it (PRD §4.4), so the way back to
+ * the theme menu, safe mode's entry and the account are always on screen;
+ * lib/theme-sdk/__tests__/header-utilities.test.tsx checks an installed theme's frame does. The banner
+ * and the nudge are the host's own: the paused state once the workspace's credits are used up
+ * (PRD-265; the card keeps its SDK name) with its power-up card, and the local edition's "add an
+ * LLM key" nudge.
  */
 import type { ReactElement } from 'react'
 
@@ -16,7 +18,7 @@ import { FirstRunNudge as HostFirstRunNudge } from '@/components/local/first-run
 import { TrialExhaustedBanner as HostTrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
 
 export interface TrialExhaustedBannerProps {
-  /** The typed error a blocked request returned (`trial_exhausted`), before the workspace's snapshot catches up. */
+  /** The typed error a refused request returned (`credits_exhausted`), before the workspace's balance catches up. */
   readonly errorCode?: string | null
 }
 
@@ -25,7 +27,7 @@ export function HeaderUtilities(): ReactElement {
   return <StudioHeaderUtilities />
 }
 
-/** The host's banner for an exhausted trial; it draws nothing while the trial is not exhausted. */
+/** The host's banner for used-up credits (work on Automatos's AI keys paused); it draws nothing while work runs. */
 export function TrialExhaustedBanner({ errorCode }: TrialExhaustedBannerProps): ReactElement {
   return <HostTrialExhaustedBanner errorCode={errorCode} />
 }

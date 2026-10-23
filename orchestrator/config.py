@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # Default tenant UUID for single-tenant deployments
 DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
+# The hosted product's API host: PUBLIC_API_HOST's default. A local install still on it
+# has not named its own host, so it never advertises this one (PRD-266 K15).
+HOSTED_PUBLIC_API_HOST = "api.automatos.app"
+
+# An unset publish address is this machine only, as compose's own default (PRD-266 §4.3).
+DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -639,6 +646,10 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-266 US-016b: the Automatos moderation inbox for content reports. SaaS only
+    # (a local install posts nothing even when it is set); an https URL; a credential,
+    # never logged. PRD-266 open question 2 names the destination.
+    MODERATION_WEBHOOK_URL: str = os.getenv("MODERATION_WEBHOOK_URL", "")
     # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
     # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
     # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
@@ -1926,21 +1937,29 @@ class Config:
     PREMIUM_TO_BUDGET_SAVINGS_RATIO: float = float(os.getenv("PREMIUM_TO_BUDGET_SAVINGS_RATIO", "0.85"))
 
     # =============================================================================
-    # TRIAL CREDIT (PRD-222 W1·S9: the $5 onboarding trial ledger)
+    # CREDITS (PRD-265 W1): the ledger behind hosted Studio's plans and trial
     # =============================================================================
-    # A one-time, platform-funded usage allowance that funds a new user's
-    # onboarding "first mile" on the platform key, so the value moment (BOOM)
-    # lands BEFORE the BYOK ask (D4). The ledger itself lives in
-    # workspaces.onboarding.trial JSONB — no new table; enforcement + spend
-    # accumulation live in services/trial_ledger.py. These are the only tunables.
+    # 1 credit = 1 US cent of AI usage at Automatos prices. Every movement is a
+    # credit_ledger row (services/credits/). The local edition never meters.
     # Kill switch — false disables all trial grants; provisioning otherwise unchanged.
     TRIAL_ENABLED: bool = os.getenv("TRIAL_ENABLED", "true").lower() == "true"
-    # Dollars granted per new Clerk user (once — checked across all their workspaces).
-    TRIAL_CREDIT_USD: float = float(os.getenv("TRIAL_CREDIT_USD", "5.00"))
-    # Platform-wide daily ceiling on aggregate trial spend; new grants PAUSE once
-    # today's accumulated trial spend reaches this (US-005's daily counter feeds it).
-    TRIAL_GLOBAL_DAILY_USD: float = float(os.getenv("TRIAL_GLOBAL_DAILY_USD", "25.00"))
-    # Models a trial workspace may use on the platform key. Reuses the platform's
+    # Credits granted once per person (checked across all their workspaces).
+    TRIAL_CREDITS: int = int(os.getenv("TRIAL_CREDITS", "500"))
+    # Platform-wide daily ceiling on trial credits spent; new grants PAUSE once
+    # today's trial spend reaches it. Grants already made keep working.
+    TRIAL_GLOBAL_DAILY_CREDITS: int = int(os.getenv("TRIAL_GLOBAL_DAILY_CREDITS", "2500"))
+    # Paid plans are on sale. False (the beta): no monthly grants, no checkout, and
+    # plan prices carry the "beta" label (facts sheet §4). US-013 flips it.
+    BILLING_OPEN: bool = os.getenv("BILLING_OPEN", "false").lower() == "true"
+    # Metered credits (Gerard, 20 Oct 2026: tokens × model price, like OpenRouter —
+    # replaces the fixed-per-ask bands). Every platform-funded call costs
+    # ceil(its llm_usage cost in cents × this markup) credits. Decision D-1 sets it.
+    CREDITS_MARKUP: float = float(os.getenv("CREDITS_MARKUP", "1.2"))
+    # How often the meter turns the calls since its last run into ledger debits.
+    CREDITS_METER_INTERVAL_SECONDS: int = int(os.getenv("CREDITS_METER_INTERVAL_SECONDS", "60"))
+    # The share of a workspace's allowance (the trial, or the plan's monthly credits)
+    # left when the "running low" alert fires; the second alert fires at zero.
+    CREDITS_ALERT_LOW_SHARE: float = float(os.getenv("CREDITS_ALERT_LOW_SHARE", "0.20"))
 
     # PRD-222 W1·S10 (D9) — DEV/OPS ONLY, TEMPORARY. Arms
     # POST /api/workspaces/current/onboarding/reset so the operator can re-run
@@ -2080,9 +2099,29 @@ class Config:
     # injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_API_HOST overrides it (the local
     # tunnel's domain, set in the compose override). No trailing slash.
     PUBLIC_API_HOST: str = (
-        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
-        or "api.automatos.app"
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", HOSTED_PUBLIC_API_HOST))
+        or HOSTED_PUBLIC_API_HOST
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-266 Automatos Go: pairing a phone (or a browser) with a local install
+    # =============================================================================
+    # LOCAL_REMOTE_ACCESS (local edition, §4.3): 'off' (the default) keeps the install on this
+    # machine; 'paired' opens POST /api/v1/mobile/pair and closes the anonymous lane; 'open'
+    # keeps it on a published install, warned at every boot. Boot refuses an unknown value and
+    # 'off' with a publish address beyond loopback (services/mobile/remote_access.py).
+    LOCAL_REMOTE_ACCESS: str = (os.getenv("LOCAL_REMOTE_ACCESS", "off") or "off").strip().lower()
+    # The addresses compose publishes the API and the web app on (docker-compose.yml passes
+    # both in), so the API knows whether it is reachable beyond this machine.
+    API_PUBLISH_ADDRESS: str = (os.getenv("API_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    WEB_PUBLISH_ADDRESS: str = (os.getenv("WEB_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    # A paired device is asked to rotate its token this many days after it was issued
+    # (``rotate_after`` in the pairing answer), at least one.
+    MOBILE_TOKEN_ROTATE_DAYS: int = max(1, int(os.getenv("MOBILE_TOKEN_ROTATE_DAYS", "30")))
+    # After a rotation the previous token keeps working this long (§4.2: ten minutes).
+    MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
+        0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
+    )
 
     # =============================================================================
     # PRD-251 Socials
@@ -2182,6 +2221,9 @@ class Config:
     # workspace's own), and how long it may take. A read that fails refuses the request.
     GENERATION_GUARD_MODEL: str = os.getenv("GENERATION_GUARD_MODEL", "")
     GENERATION_GUARD_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_GUARD_TIMEOUT_SECONDS", "30"))
+    # Off until after Web Summit (Gerard, 23 Oct 2026): no model read, so no cost and no refused
+    # demo when the read fails. Only the CSAM keyword block and the providers' own refusals run.
+    GENERATION_GUARD_READ_ENABLED: bool = os.getenv("GENERATION_GUARD_READ_ENABLED", "false").lower() in ("true", "1", "yes")
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation
@@ -2358,6 +2400,8 @@ class Config:
         - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
           workspace the auto-authenticated local session resolves to (W6 seeds it).
           It requires NO Clerk env.
+        - PRD-266 §4.3: a ``local`` install published beyond loopback needs
+          ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
@@ -2395,6 +2439,13 @@ class Config:
                     "local workspace the auto-authenticated local session resolves "
                     "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
                 )
+
+        # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
+        from services.mobile import remote_access
+        remote_access.enforce_boot_decision(self.AUTH_EDITION, self.LOCAL_REMOTE_ACCESS, {
+            "API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS,
+            "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS,
+        })
 
     def validate(self) -> bool:
         """
@@ -2455,20 +2506,34 @@ COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
 orchestrator_config = config
 
 # ---------------------------------------------------------------------------
-# PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
-# 2026-08-28). DISPLAY PRICING ONLY — no billing or commerce is wired anywhere
-# (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
-# charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
-# both derive from here: US-024 reads them for exposure profiles, and US-025's
-# assignment helper (services/plan_tiers.py) writes the limits into
+# PRD-222 W2·S1 (US-023), re-priced by PRD-265 US-001: PLAN_TIERS — the tier
+# contract the public facts sheet sells (§4): Own keys $9, Pro $29, Business $99
+# (by invite), Enterprise coming soon. Capability families (codegraph/nl2sql/
+# team/voice) and the quota limits derive from here: exposure profiles read them,
+# and the assignment helper (services/plan_tiers.py) writes the limits into
 # ``workspaces.plan_limits`` under the keys live code already reads
 # (seats→max_members, max_agents, budget). ``enterprise`` is a COMING-SOON
 # display entry only — never assignable.
 #
+# PRD-265 fields:
+#   * ``platform_ai`` — whether the plan's monthly and top-up credits may pay for
+#     calls on the platform's own AI keys. Own keys (DB key ``basic``) is False:
+#     its calls run on the customer's keys only. Trial credits fund platform AI on
+#     any plan (services/credits/routing.py).
+#   * ``monthly_credits`` — the credits a paid period grants (granted by billing
+#     from W2 on; nothing grants them while ``BILLING_OPEN`` is false).
+#   * ``self_serve`` — bought through checkout by the owner. Business is False:
+#     by invite, assigned by a platform admin only.
+#   * ``metered`` — False only for enterprise: an explicit platform allowance,
+#     contract-billed, so its platform calls are recorded but never gated.
+# The DB key ``basic`` stays (workspaces.plan defaults to it); only the display
+# name changed. Own keys is the same service as Pro (facts sheet §4): same seats,
+# agents, render minutes and families — only the credits differ.
+#
 # Every number is env-overridable WITHOUT a redeploy via
-# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
-# so tiers can be tuned live while testing. ``0`` means "unlimited" for
-# max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults).
+# ``0`` means "unlimited" for max_agents / watcher_limit, and "no ceiling /
+# custom" for budget_usd.
 #
 # PRD-251 S1.1c (owner, 2026-09-23): every plan gets Socials, and plans differ
 # only in hosting: ``render_minutes_month`` is the monthly render quota
@@ -2476,40 +2541,46 @@ orchestrator_config = config
 # max_agents: enterprise has none until the owner sets one, and the local
 # edition never has one.
 # ---------------------------------------------------------------------------
+_PRO_LIMITS: dict = {
+    "seats": 5,
+    "max_agents": 20,
+    "mission_concurrency": 3,
+    "watcher_limit": 5,
+    "marketplace_depth": 2,
+    "budget_usd": 100,
+    "render_minutes_month": 60,
+    "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+}
+
 _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
     "basic": {
-        "display_name": "Basic",
-        "display_price_usd": 19,
-        "price_label": "early access",
+        **copy.deepcopy(_PRO_LIMITS),
+        "display_name": "Own keys",
+        "display_price_usd": 9,
         "assignable": True,
-        "seats": 1,
-        "max_agents": 5,
-        "mission_concurrency": 1,
-        "watcher_limit": 1,
-        "marketplace_depth": 1,
-        "budget_usd": 25,
-        "render_minutes_month": 10,
-        "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
+        "self_serve": True,
+        "platform_ai": False,
+        "metered": True,
+        "monthly_credits": 0,
     },
     "pro": {
+        **copy.deepcopy(_PRO_LIMITS),
         "display_name": "Pro",
-        "display_price_usd": 49,
-        "price_label": "early access",
+        "display_price_usd": 29,
         "assignable": True,
-        "seats": 5,
-        "max_agents": 20,
-        "mission_concurrency": 3,
-        "watcher_limit": 5,
-        "marketplace_depth": 2,
-        "budget_usd": 100,
-        "render_minutes_month": 60,
-        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+        "self_serve": True,
+        "platform_ai": True,
+        "metered": True,
+        "monthly_credits": 2000,
     },
     "business": {
         "display_name": "Business",
         "display_price_usd": 99,
-        "price_label": "early access",
         "assignable": True,
+        "self_serve": False,
+        "platform_ai": True,
+        "metered": True,
+        "monthly_credits": 8000,
         "seats": 25,
         "max_agents": 0,
         "mission_concurrency": 10,
@@ -2530,6 +2601,9 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "display_name": "Enterprise",
         "assignable": False,
         "coming_soon": True,
+        "platform_ai": True,
+        "metered": False,
+        "monthly_credits": 0,
     },
 }
 

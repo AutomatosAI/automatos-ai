@@ -43,9 +43,9 @@ F293 (night 8): what waited for the owner was missed, and what didn't was counte
   a step waiting for the owner's check opens the step, where it is approved or
   sent back; the mission's decisions open the mission.
 
-Questions and approval grants are answered by workspace admins only (the
-grants API), so for anyone else they are neither counted nor listed: each
-viewer's number is the number of rows they can open. ``needs_you`` serves the
+Questions and approval grants are answered by owners, admins and editors only
+(the grants API, PRD-266 D16), so for a viewer they are neither counted nor listed:
+each viewer's number is the number of rows they can open. ``needs_you`` serves the
 count and the rows; ATTENTION and every badge read the same count.
 """
 from __future__ import annotations
@@ -203,8 +203,8 @@ _STUCK_ROWS = text("""
 
 def needs_you_counts(db: Session, workspace_id: Any, *, may_answer: bool = True) -> Dict[str, int]:
     """Each kind's count and their ``total``: the one Needs-you number.
-    ``may_answer`` False (not a workspace admin) leaves questions and approval
-    grants out, since that viewer can neither open nor answer them."""
+    ``may_answer`` False (a viewer: not an owner, admin or editor, PRD-266 D16) leaves
+    questions and approval grants out, since they can neither open nor answer them."""
     return _counted(db, workspace_id, may_answer=may_answer, limit=1)[0]
 
 

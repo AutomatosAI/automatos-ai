@@ -253,11 +253,11 @@ async def _validate_provider_key(
 
 
 def _enable_proven_key(db: Session, workspace_id: Any, provider: str) -> None:
-    """A key that passed its check switches BYOK on for its provider and converts the trial.
+    """A key that passed its check switches BYOK on for its provider.
 
-    Only a proven key auto-enables BYOK for this provider, and only a proven key
-    converts the trial (US-006 hook into the US-005 ledger; a no-op for a converted
-    or never-granted workspace).
+    Only a proven key auto-enables BYOK. Since PRD-265 nothing else changes: the
+    workspace's calls on that provider run on its own key, and whatever trial
+    credits are left keep paying for the rest.
     """
     from core.models.workspaces import Workspace
     from sqlalchemy.orm.attributes import flag_modified
@@ -270,11 +270,6 @@ def _enable_proven_key(db: Session, workspace_id: Any, provider: str) -> None:
         settings["byok_overrides"] = overrides
         workspace.settings = settings
         flag_modified(workspace, "settings")
-
-    from services.trial_ledger import mark_trial_converted
-
-    if mark_trial_converted(db, workspace_id):
-        logger.info(f"Trial converted on validated key save workspace={workspace_id}")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────

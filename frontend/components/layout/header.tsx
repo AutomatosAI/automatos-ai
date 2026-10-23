@@ -6,6 +6,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ProfileMenu } from '@/components/auth/profile-menu'
 import { UserProfileButton } from '@/components/auth/user-profile-button'
 import { NotificationBell } from '@/components/notifications/notification-bell'
+import { CreditBalancePill } from '@/components/billing/credit-balance-pill'
 import { isSaaS } from '@/lib/auth-edition'
 import {
   DropdownMenu,
@@ -87,6 +88,9 @@ export function Header({ onMenuClick }: HeaderProps) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Credit balance — hosted edition only (PRD-265 US-008); nothing is metered locally. */}
+          {isSaaS && <CreditBalancePill />}
 
           {/* Theme Toggle */}
           <ThemeToggle />

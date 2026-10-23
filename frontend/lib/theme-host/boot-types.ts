@@ -1,6 +1,6 @@
 /**
  * PRD-261 A-03 — the shape of a theme's first-paint data (plan §2.2), in a file of its own so
- * the modules that build a theme's prepaint table (lib/theme-host/builtin/play-prepaint.ts) can name the types
+ * the modules that read a theme's prepaint table (lib/theme-host/looks/**) can name the types
  * without loading the boot resolver. lib/theme-host/boot.ts re-exports every one of them.
  */
 import type { SlotId, ThemeBase, ThemeNavItem, ThemeTonePolicy, UiStyle } from './registry-types'
@@ -68,7 +68,7 @@ export interface PrepaintTable {
   readonly tone?: PrepaintToneRule
 }
 
-/** Where the boot script finds the cached active look (Play: lib/theme-host/builtin/play-look-storage.ts). */
+/** Where the boot script finds the cached active look (an installed theme's: lib/theme-host/looks/storage.ts). */
 export interface ThemeLookStorage {
   /** Holds the current scope; the scoped key is scopedPrefix + that scope. */
   readonly pointerKey: string
@@ -139,15 +139,6 @@ export interface ThemeBoot {
    * it, null for every other boot; a boot built in the app may leave it out.
    */
   readonly looks?: ThemeBootLooks | null
-}
-
-/** A theme compiled into the app: its first-paint data, server-safe (no CSS, no client code). */
-export interface BuiltinThemeBootData {
-  readonly prepaint: PrepaintTable | null
-  readonly lookStorage: ThemeLookStorage | null
-  readonly lookGuard: ThemeLookGuard | null
-  /** The cookie the client writes the look's tone to, read on the server (PRD-260 K4); null: none. */
-  readonly toneCookie: string | null
 }
 
 /** Reads one request cookie by name. */

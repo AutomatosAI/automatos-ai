@@ -1,15 +1,18 @@
 /**
- * PRD-260 P260-FX-03 (M04) — Play's New chat on a page that isn't the chat.
- * The sidebar's New chat runs on every page, where nothing else binds the chat
- * session store: useStartChat hydrates it and does nothing until it is, so the
- * draft is never overwritten by the stored session and, in SaaS, an empty tab
- * list never reaches the server. The real store and the real hydration hook;
- * the identity, the workspace and the server copy are stand-ins.
+ * PRD-260 P260-FX-03 (M04) — New chat on a page that isn't the chat.
+ * A theme's New chat (the SDK's useStartChat, lib/theme-sdk/chat.ts, hands a
+ * theme this hook's startChat and ready) runs on every page, where nothing else
+ * binds the chat session store: useStartChat hydrates it and does nothing until
+ * it is, so the draft is never overwritten by the stored session and, in SaaS,
+ * an empty tab list never reaches the server. The real hook, store and hydration
+ * hook, under a stand-in New chat button; the identity, the workspace and the
+ * server copy are stand-ins.
  */
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { StartChat } from '@/hooks/use-start-chat'
 import { chatSessionKey, EMPTY_CHAT_SESSION, type ServerChatSession } from '@/lib/chat/chat-session'
 import { SERVER_SAVE_DEBOUNCE_MS } from '@/stores/chat-session-store'
 
@@ -23,8 +26,6 @@ vi.mock('@/lib/auth-hooks', () => ({ useUser: () => ({ isLoaded: true, user: { i
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: { id: ids.workspace }, isLoading: false }),
 }))
-vi.mock('@/contexts/role-context', () => ({ useSystemRoleOptional: () => ({ isAdmin: false }) }))
-vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', host: 'localhost' }) }))
 
 const chatApi = vi.hoisted(() => ({ getChatHistory: vi.fn(), getChatSession: vi.fn(), putChatSession: vi.fn() }))
 vi.mock('@/lib/chat/api', () => chatApi)
@@ -54,18 +55,22 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-/** The sidebar on /deliverables, in an edition read afresh (it is read once at import). */
-async function renderSidebar(edition: 'local' | 'saas') {
-  vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', edition)
-  const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
-  const { PlaySidebar } = await import('@/components/play/shell/play-sidebar')
-  const { useChatSessionStore } = await import('@/stores/chat-session-store')
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={client}>
-      <PlaySidebar />
-    </QueryClientProvider>,
+/** A theme's New chat button, as a theme draws one: pressable once the hook is ready. */
+function NewChatButton({ useStartChat }: { readonly useStartChat: () => StartChat }) {
+  const { startChat, ready } = useStartChat()
+  return (
+    <button type="button" onClick={startChat} disabled={!ready}>
+      New chat
+    </button>
   )
+}
+
+/** New chat on /deliverables, in an edition read afresh (it is read once at import). */
+async function renderNewChat(edition: 'local' | 'saas') {
+  vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', edition)
+  const { useStartChat } = await import('@/hooks/use-start-chat')
+  const { useChatSessionStore } = await import('@/stores/chat-session-store')
+  render(<NewChatButton useStartChat={useStartChat} />)
   return useChatSessionStore
 }
 
@@ -78,15 +83,15 @@ async function hydrate() {
 
 const sentTabLists = () => chatApi.putChatSession.mock.calls.map(([session]) => (session as ServerChatSession).openChatIds)
 
-describe("Play's New chat away from the chat (saas)", () => {
+describe('New chat away from the chat (saas)', () => {
   it('is disabled until the chat session store is hydrated', async () => {
-    await renderSidebar('saas')
+    await renderNewChat('saas')
     expect(newChat()).toBeDisabled()
     await hydrate()
   })
 
   it('then opens a fresh draft beside the stored tabs, and the chat', async () => {
-    const store = await renderSidebar('saas')
+    const store = await renderNewChat('saas')
     await hydrate()
     fireEvent.click(newChat())
     expect(store.getState().session).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: ['abc'] })
@@ -101,7 +106,7 @@ describe("Play's New chat away from the chat (saas)", () => {
   })
 
   it('never saves an empty tab list to the server, even when pressed before hydration', async () => {
-    await renderSidebar('saas')
+    await renderNewChat('saas')
     fireEvent.click(newChat())
     await hydrate()
     fireEvent.click(newChat())
@@ -111,9 +116,9 @@ describe("Play's New chat away from the chat (saas)", () => {
   })
 })
 
-describe("Play's New chat away from the chat (local)", () => {
+describe('New chat away from the chat (local)', () => {
   it('opens a fresh draft beside the stored tabs, and nothing goes to the server', async () => {
-    const store = await renderSidebar('local')
+    const store = await renderNewChat('local')
     await waitFor(() => expect(store.getState().hydrated).toBe(true))
     fireEvent.click(newChat())
     expect(store.getState().session).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: ['abc'] })

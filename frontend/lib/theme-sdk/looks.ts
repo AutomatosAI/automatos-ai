@@ -15,8 +15,8 @@
  *
  * `useLookScope()` (W-A5's seam owner) is whose looks these are: the scope the host's
  * AccountLookScope provides (components/theme-host/look-scope.ts; the signed-in user in this
- * workspace, PRD-260 F5), so a theme keeps what it remembers per account in this browser (builtin
- * Play: its seen Deliverables record) as the host keeps the looks.
+ * workspace, PRD-260 F5), so a theme keeps what it remembers per account in this browser as the
+ * host keeps the looks.
  */
 import { useContext } from 'react'
 

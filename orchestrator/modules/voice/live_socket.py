@@ -3,9 +3,9 @@ PRD-207 / PRD-258: one Auto Live call on Retell's custom-LLM WebSocket
 =======================================================================
 
 The session behind ``WS /api/voice/retell/llm-websocket/{call_id}``. The route
-(``api/voice_retell.py``) refuses unminted and superseded calls before accept;
-this class runs the accepted socket. Protocol: the server speaks FIRST with a
-``config`` frame; ``call_details`` delivers the dynamic variables once and is
+(``api/voice_retell.py``) refuses unminted calls, and every call that is not
+live, before accept; this class runs the accepted socket. Protocol: the
+server speaks FIRST with a ``config`` frame; ``call_details`` delivers the dynamic variables once and is
 answered by response 0, the begin frame, whose content Retell speaks as the
 opening line (Auto speaks first); ``ping_pong`` must be echoed;
 ``update_only`` owes nothing; ``response_required`` / ``reminder_required``
@@ -25,6 +25,12 @@ PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto speaks first and says it is an
 AI (the begin frame carries the greeting the route lends, never empty);
 after an automatic reconnect, and every ``VOICE_AI_REMINDER_MINUTES`` of call
 time, the next response opens with the reminder (``modules/voice/ai_notice.py``).
+
+PRD-266 US-008b (live-only socket): a call is live only while its status is in
+``LIVE_CALL_STATUSES``. The route refuses any other status (ended, failed,
+superseded, anything unknown) with ``WS_CLOSE_NOT_LIVE`` before accept, and a
+turn whose re-read status has left the live set closes the socket, so a leaked
+``call_id`` cannot drive Auto's tools after the call.
 """
 
 from __future__ import annotations
@@ -58,8 +64,12 @@ logger = logging.getLogger(__name__)
 TURN_EXIT_GRACE_SECONDS = 3.0
 # The call status a newer mint gives the caller's older calls.
 CALL_STATUS_SUPERSEDED = "superseded"
-# Close codes: a normal close, sent when a superseded call tries to speak.
+# The statuses of a live call: the only ones that open the socket or start a turn.
+LIVE_CALL_STATUSES = ("minted", "started")
+# Close codes: a normal close, sent when a call that is no longer live tries to
+# speak; the refusal, before accept, of a call that is not live.
 WS_CLOSE_NORMAL = 1000
+WS_CLOSE_NOT_LIVE = 4409
 # Handshake per Retell's own demo: ask for call_details; enable auto_reconnect.
 CONFIG_FRAME = {"response_type": "config", "config": {"auto_reconnect": True, "call_details": True}}
 # The begin frame: response 0, whose content Retell speaks as the opening line.
@@ -85,6 +95,11 @@ class SocketPorts:
     ai_reminder: str
     socket_reconnected: Callable[[str], Awaitable[bool]] = ai_notice.socket_reconnected
     clock: Callable[[], float] = monotonic
+
+
+def is_live(status: Optional[str]) -> bool:
+    """Whether a ``voice_calls.status`` is a live call's (None, no row, is not)."""
+    return status in LIVE_CALL_STATUSES
 
 
 def _closing_frame(response_id: int) -> dict:
@@ -221,13 +236,15 @@ class LiveCallSocket:
         logger.info(
             "voice_live_ws_turn call=%s rid=%s type=%s", self._call_id, message.get("response_id"), itype
         )
-        # ONE LIVE CALL PER USER: a newer mint marked this call 'superseded'.
-        # It must NOT speak — several superseded calls on one mic is the "Auto
-        # talking over herself" bug. Close quietly (the newest call owns the
-        # conversation). Checked at the turn boundary: exactly where a stale
-        # call would otherwise talk.
-        if self._ports.call_status(self._call_id) == CALL_STATUS_SUPERSEDED:
-            logger.info("voice_live_ws_superseded_closing call=%s", self._call_id)
+        # LIVE-ONLY: a call whose status left the live set must NOT speak. A
+        # newer mint marked it 'superseded' (ONE LIVE CALL PER USER: several
+        # superseded calls on one mic is the "Auto talking over herself" bug),
+        # or call_ended stamped it ended/failed (a leaked call_id must not drive
+        # Auto's tools after the call). Close quietly. Checked at the turn
+        # boundary: exactly where a stale call would otherwise talk.
+        status = self._ports.call_status(self._call_id)
+        if not is_live(status):
+            logger.info("voice_live_ws_not_live_closing call=%s status=%s", self._call_id, status)
             self._cancel_speaking()  # silence any in-flight reply at once
             await self._ws.close(code=WS_CLOSE_NORMAL)
             return False

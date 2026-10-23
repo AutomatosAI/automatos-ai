@@ -164,29 +164,30 @@ def test_post_onboarding_install_is_unrestricted(monkeypatch):
 
 
 def test_over_quota_returns_plan_conversation_with_zero_installs(monkeypatch):
-    # basic tier max_agents=5; a 6-agent package is over quota (hosted: the local edition has no plan limit, F230).
+    # basic (Own keys) has Pro's max_agents=20 since PRD-265; a 21-agent package is over quota
+    # (hosted: the local edition has no plan limit, F230).
     from config import config
 
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     ws = FakeWS(stage="proposal", plan="basic")
     monkeypatch.setattr(hp, "_load_workspace", lambda db, wid: ws)
     monkeypatch.setattr(hp, "_workspace_agent_count", lambda db, wid: 0)
-    monkeypatch.setattr("services.marketplace_packages.get_by_slug", lambda db, slug: _pkg(agents=6))
+    monkeypatch.setattr("services.marketplace_packages.get_by_slug", lambda db, slug: _pkg(agents=21))
     spy = _install_spy(monkeypatch)
 
     out = _run(hp.install_package_tool(FakeDB(), "ws-1", {"slug": "big-team"}))
     assert out["success"] is False
     assert out["over_quota"] is True
-    assert out["package_agents"] == 6 and out["max_agents"] == 5
+    assert out["package_agents"] == 21 and out["max_agents"] == 20
     assert out["plan_recommendation"] in ("pro", "business")
     assert spy["calls"] == 0                               # ZERO partial registrations
 
 
 def test_within_quota_installs(monkeypatch):
-    ws = FakeWS(stage="completed", plan="basic")           # 5-cap
+    ws = FakeWS(stage="completed", plan="basic")           # 20-cap (Pro's, PRD-265)
     monkeypatch.setattr(hp, "_load_workspace", lambda db, wid: ws)
     monkeypatch.setattr(hp, "_workspace_agent_count", lambda db, wid: 1)
-    monkeypatch.setattr("services.marketplace_packages.get_by_slug", lambda db, slug: _pkg(agents=3))  # 1+3=4 ≤ 5
+    monkeypatch.setattr("services.marketplace_packages.get_by_slug", lambda db, slug: _pkg(agents=3))  # 1+3=4 ≤ 20
     spy = _install_spy(monkeypatch)
     out = _run(hp.install_package_tool(FakeDB(), "ws-1", {"slug": "fits"}))
     assert out["success"] is True and spy["calls"] == 1

@@ -17,6 +17,7 @@ from .composio_cache import *  # Redesign: Composio metadata cache
 from .tool_routing import *  # PRD-139: Tool Routing Graph (edges, affinities, intent clusters)
 from .approval_grants import ApprovalGrant, GrantStatus  # noqa: F401  # PRD-181 S2 (F060)
 from .cli_hosts import CliHost, CliHostStatus  # noqa: F401  # PRD-234 S1a (session mode)
+from .mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus  # noqa: F401  # PRD-266 §4.2
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
@@ -110,6 +111,7 @@ from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger;
 from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
 from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
+from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

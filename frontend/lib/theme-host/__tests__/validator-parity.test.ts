@@ -231,7 +231,7 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(SDK_VERSION).toBe(CONTRACT_VERSION)
   })
 
-  it('reserves the same <html> classes, with Play keeping html.play (PA-8)', () => {
+  it("reserves the same <html> classes, with Play's package keeping its own class (PA-8)", () => {
     expect(strings('RESERVED_HTML_CLASSES')).toEqual([...RESERVED_HTML_CLASSES])
     expect(strings('HTML_CLASS_OWNERS')).toEqual(Array.from(HTML_CLASS_OWNERS).flat())
     expect(strings('HTML_CLASS_PATTERN')).toEqual([HTML_CLASS_PATTERN.source.replace(/^\^|\$$/g, '')])

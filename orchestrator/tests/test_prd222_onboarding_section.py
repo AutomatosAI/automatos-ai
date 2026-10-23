@@ -36,20 +36,26 @@ class _FakeWorkspace:
         self.onboarding = onboarding
 
 
-def _doc(stage, *, comfort=None, trial=None):
+def _doc(stage, *, comfort=None):
     seg = {"comfort": comfort} if comfort else {}
-    doc = {"stage": stage, "stages": {}, "segment": seg}
-    if trial is not None:
-        doc["trial"] = trial
-    return doc
+    return {"stage": stage, "stages": {}, "segment": seg}
 
 
-def _ctx(*, workspace=None, messages=None, workspace_id="ws-1"):
-    """SectionContext with a MagicMock session returning ``workspace``."""
+def _ctx(*, workspace=None, messages=None, workspace_id="ws-1", trial_balance=0, trial_read_fails=False):
+    """SectionContext with a MagicMock session returning ``workspace``, and —
+    since PRD-265 — a ``credit_balances`` read for ``_trial_line`` (the trial
+    is credits in the ledger now, not a doc key): ``db.execute(...).fetchone()``
+    answers the ``(trial, monthly, topup, period_end)`` row ``read_balance``
+    expects, or raises when ``trial_read_fails`` (proving the honest fallback).
+    """
     db = None
     if workspace is not None or workspace_id is not None:
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = workspace
+        if trial_read_fails:
+            db.execute.side_effect = RuntimeError("ledger unreachable")
+        else:
+            db.execute.return_value.fetchone.return_value = (trial_balance, 0, 0, None)
     return SectionContext(
         agent=None,
         workspace_id=workspace_id,
@@ -62,9 +68,11 @@ def _render(ctx):
     return asyncio.run(OnboardingSection().render(ctx))
 
 
-def _render_stage(stage, *, comfort=None, trial=None, messages=None):
-    ws = _FakeWorkspace(_doc(stage, comfort=comfort, trial=trial))
-    return _render(_ctx(workspace=ws, messages=messages))
+def _render_stage(stage, *, comfort=None, messages=None, trial_balance=0, trial_read_fails=False):
+    ws = _FakeWorkspace(_doc(stage, comfort=comfort))
+    return _render(_ctx(
+        workspace=ws, messages=messages, trial_balance=trial_balance, trial_read_fails=trial_read_fails,
+    ))
 
 
 # --------------------------------------------------------------------------- #
@@ -228,19 +236,24 @@ def test_teach_suppresses_scan_when_firecrawl_unconfigured():
 
 
 # --------------------------------------------------------------------------- #
-# Trial balance surfaced in the power-up copy
+# Trial balance surfaced in the power-up copy (PRD-265: credits in the
+# ledger, read via services.credits.ledger.read_balance — not a USD dict on
+# the onboarding document).
 # --------------------------------------------------------------------------- #
 
 
 def test_powerup_shows_concrete_trial_balance_when_known():
-    trial = {"granted_usd": 5.0, "spent_usd": 1.6, "state": "active"}
-    out = _render_stage("powerup", trial=trial)
-    assert "$3.40 of $5.00" in out
+    from config import config
+
+    out = _render_stage("powerup", trial_balance=340)
+    assert f"They have 340 of {config.TRIAL_CREDITS} trial credits left." in out
 
 
-def test_powerup_trial_line_falls_back_when_no_trial():
-    out = _render_stage("powerup")
-    assert "trial credit" in out.lower()
+def test_powerup_trial_line_falls_back_when_balance_unreadable():
+    # The balance read must never blank the power-up copy — any failure (the
+    # ledger unreachable, here) degrades to the generic fallback sentence.
+    out = _render_stage("powerup", trial_read_fails=True)
+    assert "Mention their remaining trial credits." in out
 
 
 # --------------------------------------------------------------------------- #
@@ -250,10 +263,9 @@ def test_powerup_trial_line_falls_back_when_no_trial():
 
 def test_largest_variant_within_budget():
     sec = OnboardingSection()
-    trial = {"granted_usd": 5.0, "spent_usd": 1.6, "state": "active"}
     worst = 0
     for stage in _ACTIVE_STAGES:
-        out = _render_stage(stage, comfort="brand new", trial=trial)
+        out = _render_stage(stage, comfort="brand new", trial_balance=340)
         worst = max(worst, count_tokens(out))
     assert sec.max_tokens is not None
     assert worst <= sec.max_tokens, f"largest variant {worst} > cap {sec.max_tokens}"

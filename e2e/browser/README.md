@@ -20,6 +20,8 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 3. Installs this package (`npm ci`), the browsers (`npx playwright install --with-deps`),
    type-checks the specs (`npx tsc`) and runs them.
 4. Runs the `@package` and `@parity` specs in a step of their own (below), after the others.
+   Since W-A8 (PRD-261 A-19f4) these are core's only proof that Play still runs: builtin Play left
+   core, and Play lives only in the Design Kit.
 5. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
    frontend server logs as `browser-e2e-report` (kept 7 days).
 
@@ -28,8 +30,9 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-play`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
-uploads `automatos.play-1.0.0.autotheme` as the `play-package` artifact. Play's build fetches Auto's
-clips from core at the commit its `mascot.lock.json` pins. The two jobs run side by side (no
+uploads `automatos.play-1.1.0.autotheme` as the `play-package` artifact (the job's summary shows its
+size and sha256). The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with
+the rest of Play. The two jobs run side by side (no
 `needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
 downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
 `PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
@@ -44,31 +47,66 @@ which every other spec's tab reads, so they run in their own step, one test at a
 `test-results-package`). Each test puts the choice back on Studio and removes the install.
 
 To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the Play
-change it carries (the mirror rule, `docs/frontend-architecture/play-theme.md`).
+change it carries, and only forward in the kit's history (Play's own rules are in the kit's
+`themes/play/README.md`).
 
-## Play parity (PRD-261 A-17b)
+## Play's preview shots (PRD-261 C-06q1)
 
-`specs/play-parity/*.spec.ts` hold builtin Play and the installed package to the same assertions.
-Each spec writes its tests once inside `describeParity` (`support/play-parity.ts`), which runs them
-under each Play: builtin Play (the server choice `builtin:play`, then the style cookie
-`theme:builtin:play`) and the kit's package (uploaded, opted in to and chosen through
-`support/kit-package.ts`). They cover Auto's 12 states on the style sheet (each still and clip
-served from that Play's own files), approvals in the chat (a tool card and a Mission card, approve,
-deny and reject), P260-FX-19 (Make it yours readable on Paper, in forced colours and with a long
-name), P260-FX-22 (focus after Try again, the asleep screen, This look's toolbar and Switch to
-Play), P260-FX-30 (Stop keeps the reply) and Play below 1024 px (the core chrome in the look's
-colours, the look's tone forced, a stored look painted from the first frame). Play's chat runs on
-recorded turns (`fixtures/play-parity/chat-turns.json`, through `support/chat-stream.ts`); no model
-is called.
+`specs/play-previews.spec.ts` (`@package`, Chromium only, in the package step) shoots the installed
+Play 1.1.0 for its listing previews (PB-24, PB-26). For each preset the page's boot carries (Ember,
+Obsidian, Aurora, Workshop, Daylight), picked on Make it yours as a member picks it, it saves the frame
+on `/chat` as `<preset>.png`, and under the default preset also `/deliverables` and `/looks` as
+`ember-deliverables.png` and `ember-looks.png`, in `previews/`: 1280×800 at device scale 1, one image
+pixel per CSS pixel (`scale: 'css'`). A shot is taken under reduced motion (Auto is his still, never a
+clip frame), once his still and the fonts have loaded, Auto is at rest (the first open's hello is over)
+and the look's variables are on `<html>`, with animations off, and only when two shots in a row are
+equal. The conversations list and the shelf are answered with none, so the shots show only the lane's
+own member and workspace. The spec fails when a file is missing, is not a PNG of that size, is over
+512 KB (`package.py` `IMAGE_MAX_BYTES`), or has a name the manifest's `previews` pattern refuses or no
+preset claims by the listing's longest-match rule (`manifest.py` `PREVIEW_PATTERN`, `listings.py`
+`_owner_preset`). The step after it uploads `previews/` as the `play-previews` artifact, also when the
+specs failed; a run that saved none fails there. Nothing here commits a shot: the owner picks from a
+run's artifact and the kit commits the picks into `themes/play/assets/previews/` (C-06q2), so a
+package's bytes, and its signature, stay the same from build to build.
 
-They store the member's choice and builtin Play's looks on the lane's one backend, so they carry
-`@parity` and run in the `@package` step, one test at a time. Each test starts and ends on Studio,
-with no install of Play's package and no looks kept for Play on the server.
+## Play parity (PRD-261 A-17b, A-19f4)
 
-Where core treats an installed theme differently, so the package cannot pass what builtin Play
-passes, the test keeps its assertions and is `test.fixme` for the package only, naming the gap
-(`GAP_*` in `support/play-parity.ts`). The gaps, and the checks no browser lane can make, are in
-`parity-checklist.md`, the manual pass (Q22).
+`specs/play-parity/*.spec.ts` hold the installed Play package to Play's assertions. Until W-A8 they
+ran each test twice, under builtin Play (compiled into core) and under the package, and held the two
+to the same assertions; W-A8 deleted builtin Play, so `PLAY_VARIANTS` (`support/play-parity.ts`) is
+the package alone and each test runs once. Each spec still writes its tests inside `describeParity`,
+which installs the kit's package (uploaded, opted in to and chosen through `support/kit-package.ts`).
+They cover Auto's 12 states on the style sheet (each still and clip served from the package's own
+files), approvals in the chat (a tool card and a Mission card, approve, deny and reject), P260-FX-19
+(Make it yours readable on Paper, in forced colours and with a long name), P260-FX-22 (focus after
+Try again, the asleep screen and This look's toolbar; Studio's `/looks` note names no Play switch),
+P260-FX-30 (Stop keeps the reply), Play below 1024 px (the core chrome in the look's colours, the
+look's tone forced, a stored look painted from the first frame) and Play's pages and route through
+ThemeSlot (`play-routes.spec.ts`: its chat in its frame, the core chat below its width, one frame
+mount on a cold load, Conversations at `/x/conversations`). Play's chat runs on recorded turns
+(`fixtures/play-parity/chat-turns.json`, through `support/chat-stream.ts`); no model is called.
+
+They store the member's choice and Play's looks on the lane's one backend, so they carry `@parity`
+and run in the `@package` step, one test at a time. Each test starts and ends on Studio, with no
+install of Play's package and no looks kept for Play on the server: the server holds Play's looks
+only while the package is installed and keeps them across an uninstall, so `describeParity` empties
+them right after each install and again before it removes the package. Two more Play specs run
+there as `@package` on the same harness: `looks-server.spec.ts` (a look saved in one browser shows in
+another) and the CSS layer model's check in `protected-surfaces.spec.ts` (the body takes Play's page
+background).
+
+The checks no browser lane can make are in `parity-checklist.md`, the manual pass (Q22).
+
+## The core styles (PRD-261 A-19f4)
+
+`first-paint`, `default-build` and `smoke` run under the Classic and under the Studio style cookie
+(`CORE_STYLES` in `support/hello-theme.ts`, each with the desktop chrome only it draws), on Chromium
+and WebKit. Under either, a page asks for none of Play: no stylesheet that declares Play's tokens,
+none of Play's face variables, nothing from builtin Play's old mascot folder or from a theme's files.
+The cookies builtin Play ran under (the legacy `play`, and its builtin theme style) load Studio, with
+no `play` class on `<html>` from the first frame, and builtin Play's old `/conversations` page
+answers the 404. The specs build those retired names from their parts, so a search of `e2e/` for
+them finds nothing.
 
 The package pins `@playwright/test`, `typescript`, `@types/node`, `@types/react` and
 `@types/react-dom` exactly and commits its own `package-lock.json` (every package from
@@ -95,7 +133,9 @@ lane type-checks the theme against `@types/react` 19 and the test SDK's types
 (`types/theme-sdk.d.ts`) with `npx tsc -p fixtures/hello-theme/tsconfig.json`.
 
 `support/hello-theme.ts` is read-only after A-04a (PA-17): a later story adds its own fixture under
-`fixtures/hello-<story>/` and its own spec, and serves it with `serveInstalledTheme`.
+`fixtures/hello-<story>/` and its own spec, and serves it with `serveInstalledTheme`. A-19f4 added
+beside it, leaving the serving as it was, the two core styles (`CORE_STYLES`, `chooseCoreStyle`) and
+the mount counter the route specs share (`countMounts`, `mountsOf`).
 
 ## Tags
 
@@ -103,16 +143,17 @@ Every test carries one tag through the `tag` option, for example
 `test('…', { tag: '@smoke' }, async ({ page }) => { … })`. The workflow selects by tag with
 `--grep`.
 
-- `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell.
-- `@off` — a fresh browser on Studio loads none of the theme host, and the server sends a page a
-  ThemeSlot page entry wraps (`/agents`, `/chat`, `/deliverables`) with one Studio shell, in no
-  outlined boundary. CI traces caught `/agents` and `/chat` coming down twice before the change;
+- `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell,
+  and under each core style's cookie that style's chrome (A-19f4).
+- `@off` — a fresh browser on Studio, and a browser on either core style's cookie, loads none of the
+  theme host, and the server sends a page a ThemeSlot page entry wraps (`/agents`, `/chat`,
+  `/deliverables`) with one shell of its style, in no outlined boundary. CI traces caught `/agents` and `/chat` coming down twice before the change;
   `/deliverables` was not captured then, so its check has not been seen to fail without it.
 - `@host` — the theme host loads an installed theme, falls back on the theme's own failures, keeps
   the theme when the page inside its frame fails, and stays off where it should.
 - `@package` — Play installed from the Design Kit's package (above). Selected only by the
   workflow's own step for it, never by the main run's `--grep`.
-- `@parity` — the Play parity specs (above), run under builtin Play and the installed package.
+- `@parity` — the Play parity specs (above), run against the installed package.
   Selected by the same step as `@package`.
 - `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.
   The only tag Firefox runs (the `firefox` project has `grep: /@record/`).
@@ -125,12 +166,12 @@ Specs live in `specs/`, shared helpers in `support/`.
 
 On a pull request (any base branch) or a push to `main` that changes one of the paths in the
 workflow's `paths:` list: the root layout, the pages and components PRD-261 Phase A touches (PA-6:
-the Q3 pages, the theme host, Play, the looks, the Style axis files, the theme routes and services
-on the backend; since A-17b also all of what counts as Play in
-`docs/frontend-architecture/play-theme.md`, with `public/auto/`, and the chat code the parity specs
-read, `lib/chat/` and `components/widgets/`), `next.config.js`, the middleware, the frontend's package files, the compose boot
-files and this folder. It does not watch the rest of
-the backend or the other pages, so a change there can break the lane without running it.
+the Q3 pages, the theme host, the looks pages, the Style axis files, the theme routes and services
+on the backend; since A-17b also the chat code the Play specs read through the SDK, `lib/chat/` and
+`components/widgets/`), `next.config.js`, the middleware, the frontend's package files, the compose
+boot files and this folder. Builtin Play's folders left the list when W-A8 deleted them (A-19f4):
+Play is the kit's now, and the lane installs it from `KIT_REF`. It does not watch the rest of the
+backend or the other pages, so a change there can break the lane without running it.
 
 Until the workflow is on `main`, it runs only on a `pull_request` whose HEAD commit has no
 `[skip ci]`: GitHub dispatches (`workflow_dispatch`) only workflows that exist on the default

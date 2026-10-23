@@ -16,9 +16,8 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  *
  * - a **page** entry (`page="/chat"`, registerPage): on that route only, unless the link asks for
  *   a surface only the core page has (`keepCorePage` names those query parameters; `themeServes`
- *   names values of one that the theme's page still is). An installed theme's page draws full
- *   bleed inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d); builtin
- *   Play's pages draw MainLayout themselves (ActiveThemeSlots.framesPages).
+ *   names values of one that the theme's page still is). The theme's page draws full bleed
+ *   inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d).
  *   The theme's page is handed the core page (CorePageProvider, A-12a), so its `cards.CorePage`
  *   draws the core page where the theme keeps a surface only the core page has.
  * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed. A slot has no core page
@@ -45,7 +44,7 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  * they never suspend, and the core pages under this seam read them with no boundary of their own
  * (app/playbooks/page.tsx, app/chat/page.tsx). Were a route prerendered, `next build` would stop
  * on it (missing-suspense-with-csr-bailout) rather than ship a broken page. And the core page sits
- * at one place in the tree in every state: a style switched in place (Studio and builtin Play, an
+ * at one place in the tree in every state: a style switched in place (Classic and Studio, an
  * installed theme and Studio), the width becoming known, an installed theme settling or failing,
  * never remounts it (M69).
  */
@@ -98,22 +97,17 @@ export function corePageAsked(
   )
 }
 
-/** How a page entry draws the theme's page: `framed` inside MainLayout (an installed theme's page). */
-interface PageEntryVersion {
-  readonly framed: boolean
-}
-
 /**
  * The theme's version if it draws here now, null for nothing yet, or the core's version. A page
- * entry (`page`) hands the core page down to the theme's page and may frame it.
+ * entry (`asPage`) hands the core page down to the theme's page and frames it in MainLayout.
  */
-function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, page?: PageEntryVersion): ReactNode {
+function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, asPage = false): ReactNode {
   const Theme = registeredComponent(registered)
   if (active.layout === 'none' || active.layout === 'narrow') return core
   if (active.layout === 'pending') return active.registrations === null || Theme !== null ? null : core
   if (Theme === null) return core
-  if (page === undefined) return <ThemeVersion component={Theme} framed={false} />
-  return <ThemeVersion component={Theme} framed={page.framed} corePage={{ page: core }} />
+  if (!asPage) return <ThemeVersion component={Theme} framed={false} />
+  return <ThemeVersion component={Theme} framed corePage={{ page: core }} />
 }
 
 interface ThemeVersionProps {
@@ -141,7 +135,7 @@ function ThemePageSlot({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED
   const params = useSearchParams()
   const here = routeMatches(page, pathname) && !corePageAsked(params, keepCorePage, themeServes)
   if (!here) return <>{children}</>
-  const version = chooseVersion(active, active.registrations?.pages.get(page), children, { framed: active.framesPages })
+  const version = chooseVersion(active, active.registrations?.pages.get(page), children, true)
   return <>{version}</>
 }
 

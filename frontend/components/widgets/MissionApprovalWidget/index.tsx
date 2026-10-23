@@ -20,36 +20,19 @@
  * an ancestor, an element drawn over the card, and a theme's code in the page.
  */
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { ClipboardCheck, Check, X, Clock } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
 import { ProtectedSurface } from '@/components/theme-host/protected-surface'
+import { useCountdown } from '@/hooks/use-countdown'
 import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalTask, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { roleEdit, withPlanPicks } from './role-edit'
 import { toast } from 'sonner'
 
-
-function useCountdown(deadlineIso?: string): number | null {
-  const [secsLeft, setSecsLeft] = useState<number | null>(null)
-  useEffect(() => {
-    if (!deadlineIso) {
-      setSecsLeft(null)
-      return
-    }
-    const tick = () => {
-      const ms = new Date(deadlineIso).getTime() - Date.now()
-      setSecsLeft(Math.max(0, Math.round(ms / 1000)))
-    }
-    tick()
-    const t = setInterval(tick, 1000)
-    return () => clearInterval(t)
-  }, [deadlineIso])
-  return secsLeft
-}
 
 /** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
 export function MissionApprovalWidget(props: WidgetBaseProps<MissionApprovalWidgetData>) {

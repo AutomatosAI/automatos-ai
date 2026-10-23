@@ -1,0 +1,15 @@
+{
+  "access_token": "tok_v2fx",
+  "agent_id": "agent_fx",
+  "agent_version": 3,
+  "call_id": "call_v2fx",
+  "call_status": "registered",
+  "call_type": "web_call",
+  "metadata": {},
+  "opt_out_sensitive_data_storage": false,
+  "retell_llm_dynamic_variables": {
+    "chat_id": "chat_fx",
+    "user_id": "7",
+    "workspace_id": "ws_fx"
+  }
+}

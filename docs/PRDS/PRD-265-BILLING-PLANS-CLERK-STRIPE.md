@@ -4,7 +4,7 @@
 
 **Decisions taken (Gerard, 20 Oct 2026):**
 - **P1, stack:** Clerk for sign-in and entitlements, Stripe for billing. Stripe runs the subscriptions, credit top-ups, Checkout (3-D Secure), the customer portal and Stripe Tax for VAT. **Clerk Billing is not used:** it has no 3-D Secure, no VAT and no one-off purchases.
-- **P2, pricing unit:** fixed credits per *ask*, by band; premium models are metered on top (Rikki's proposal).
+- **P2, pricing unit — REVISED 20 Oct 2026 (Gerard): metered, like OpenRouter.** Every platform-funded model call costs its real cost in cents × one markup (`CREDITS_MARKUP`, default 1.2×). The earlier fixed credits per *ask* by band (Rikki's proposal) is dropped: a fixed charge could not price a $0.50 report and a $10 app build alike.
 - **P3, timing:** the beta opens Tue 3 Nov on the trial plus customers' own keys, with nothing charged. **Paid plans open Mon 9 Nov 2026**, before Web Summit (10–12 Nov).
 - **P4, legal entity:** left open. It gates the Stripe account and the VAT registrations (§9).
 
@@ -35,7 +35,7 @@
 - P4 entity;
 - the Stripe account and VAT registrations;
 - Terms v2.3 and counsel;
-- price-band numbers (§4.2);
+- the markup on metered calls (§4, D-1);
 - the Clerk dashboard, DNS and secret steps;
 - live card tests;
 - the 9 Nov opening switch.
@@ -90,29 +90,23 @@ Customers on their own keys (the Own keys plan, or any plan after the trial) are
 ### 4.1 Units
 
 - **Credit:** 1 credit = 1 US cent at Automatos prices.
-- **Ask:** one user turn, including every agent, tool and sub-call it causes. Model calls are grouped by `execution_id` **[R]**.
-- **Scheduled work:** a heartbeat, playbook run or scheduled task is one ask per run.
+- **Metered calls (P2, revised 20 Oct):** a platform-funded model call costs `ceil(its cost in cents × CREDITS_MARKUP)` credits. Its cost is `llm_usage.total_cost` — the provider's own figure when it reports one (OpenRouter), else the model's registered price — one price source.
+- **$0 that is real:** the customer's own key; a free route (NVIDIA, price multiplier 0); a CLI subscription session (the person's own plan pays); the local edition (never metered).
+- **$0 that is not:** a paid route whose price is unknown books $0; the meter charges it at the conservative estimate and logs the model, so its price gets added.
+- **Ask:** one user turn (every agent, tool and sub-call it causes) or one run of a mission task, Task, scheduled task, heartbeat or playbook. Asks group calls (receipts: "this cost N credits") and carry an in-flight budget.
 
-### 4.2 Bands (fixed credits per ask, P2)
+### 4.2 Guards
 
-Gerard and Rikki set the numbers before Thu 29 Oct (D-1). The code reads them from config. The rows are a starting shape, not prices:
-
-| Band | Applies to | Charge |
-|---|---|---|
-| Standard | Asks where Auto picks the model (routing to the cheapest model that passes) | Fixed N credits per ask |
-| Premium | The user explicitly picks a premium model (Opus / Fable class) | Metered: tokens × list price × markup, shown in the model picker |
-| Render | Video / image / audio render jobs | Fixed per output unit (per render minute / image) |
-| Voice | Live voice | Per minute (only if voice ships in the beta, D-6) |
-
-**Guards:**
-- Each ask has a **cost cap**. When the platform's real cost passes the cap, the run stops with a clear message, so a runaway agent can't eat the margin.
-- Failed asks are refunded in full.
-- The ledger records **both** the band charge and the real `llm_usage` cost for every ask, so margin per band is visible.
+- **Paused at zero:** platform-funded work needs spendable credits; at zero it pauses with a clear way out (add a key, top up, upgrade). Own-key calls keep working.
+- **No overdraft by a long run:** an ask's budget is the balance at its first call; once its running cost reaches it, the next call stops.
+- **Overhead absorbed (D-3):** routing, memory, retrieval, verification and similar calls are never charged; they are recorded (`charge_class = 'overhead'`, rolled up nightly) for margin review.
+- **Alerts:** "running low" at `CREDITS_ALERT_LOW_SHARE` (20%) of the allowance (the month's credits on a paid plan, else the trial), and "run out" at zero — once per crossing, to the workspace's notification destinations.
+- **Margin** is the markup plus the plan fee (Pro $29 includes $20 of credits). The ledger records each call's real cost beside its charge.
 
 ### 4.3 Buckets and order
 
 - **Buckets:** `trial`, `monthly` and `topup`.
-- **Spend order:** trial, then monthly, then top-up.
+- **Spend order:** trial, then monthly, then top-up. Background work never spends the trial.
 - **Expiry:** monthly credits expire at period end; top-ups expire after 12 months.
 - **Paused state:** at zero, platform-funded work pauses, and the workspace and own-key calls keep working.
 
@@ -148,17 +142,15 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 - [ ] Inserting the same source event twice changes nothing (test).
 - [ ] Billing records key on `workspace_id`, never on a Clerk user ID.
 
-#### US-003: Ask accounting (fixed credits per ask, by band)
-**Description:** As Automatos, I want each ask charged a fixed number of credits by band, so customers get predictable prices and routing savings become margin.
+#### US-003: Metered credits (revised 20 Oct: tokens × model price, like OpenRouter)
+**Description:** As Automatos, I want every platform-funded call charged at its real cost × one markup, so a cheap report and an expensive build are both priced fairly.
 
 **Acceptance Criteria:**
-- [ ] **Reserve, then settle:**
-  - An ask reserves its band charge when it starts (fails fast if the balance can't cover it).
-  - It settles on completion and releases the reservation on failure.
-- [ ] Premium-model calls are metered on top from `llm_usage.total_cost` (one price source, not the trial pricer) **[R leak 5]**.
-- [ ] The per-ask cost cap stops the run with a typed error and a user-facing message.
-- [ ] The ledger rows for an ask carry `band`, `charged_credits` and `actual_cost_usd`.
-- [ ] A nightly job reconciles `llm_usage` rows that missed a debit.
+- [ ] The meter debits each customer call once (keyed on its `llm_usage` row) at `ceil(cost in cents × CREDITS_MARKUP)`, from `llm_usage.total_cost` (one price source) **[R leak 5]**.
+- [ ] Free routes (NVIDIA), subscription sessions, own keys and the local edition cost nothing; an unpriced paid route is charged at the conservative estimate.
+- [ ] Each ledger row carries the band (`metered`), the credits charged and the real cost.
+- [ ] An ask stops at its next call once its running cost reaches the balance read at its start.
+- [ ] Running-low (20%) and run-out alerts, once per crossing.
 
 #### US-004: The gate in front of platform keys
 **Description:** As Automatos, I need every platform-funded call to require credits, so nothing runs on our keys unmetered.
@@ -202,7 +194,7 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 
 **Acceptance Criteria:**
 - [ ] `GET /api/v1/billing/summary` (members): plan, status, renewal date, balance by bucket.
-- [ ] `GET /api/v1/billing/ledger` (owner/admin): paged ledger, plus usage by band and model.
+- [ ] `GET /api/v1/billing/ledger` (owner/admin): paged ledger (a line per metered call), plus the last 30 days' credits by model.
 - [ ] The header shows the balance. A paused banner appears at zero, with "Top up" or "Add your own key" actions.
 - [ ] Verify in the browser on a CI preview or staging, not locally.
 
@@ -284,7 +276,7 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 - **FR-6:** Stripe webhooks must be signature-verified and processed exactly once.
 - **FR-7:** Refunds and disputes must take back the credits they paid for.
 - **FR-8:** VAT is calculated and collected by Stripe Tax. Receipts name the P4 entity.
-- **FR-9:** Prices, Price IDs, band values and the opening flag live in config or the environment, never hard-coded.
+- **FR-9:** Prices, Price IDs, the markup and the opening flag live in config or the environment, never hard-coded.
 - **FR-10:** Billing records key on `workspace_id`.
 - **FR-11:** Public copy follows the facts sheet: beta block until `BILLING_OPEN`, then the paid block.
 
@@ -323,9 +315,9 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 
 | # | Decision | Needed by | Default if not decided |
 |---|---|---|---|
-| D-1 | Band values (credits per Standard ask, the premium markup, render and voice rates) | Thu 29 Oct | Standard = the 1.65c tuned cost × 3, rounded; premium = list × 1.3 |
+| D-1 | The markup on metered calls (`CREDITS_MARKUP`), and render/voice rates | Thu 29 Oct | 1.2× on every model (P2 revised 20 Oct: metered); render and voice unpriced until decided |
 | D-2 | **Legal entity (P4).** Which company or sole trader sells, its country, VAT registrations, and who owns the Stripe account | **Tue 27 Oct** (Stripe live keys) | Without it, 9 Nov runs on trial and admin grants only; no checkout |
-| D-3 | Background and system calls: absorb as overhead, or charge to the customer | Fri 23 Oct | Absorb, record as overhead, review margins after two weeks |
+| D-3 | Background and system calls: absorb as overhead, or charge to the customer | **Decided 20 Oct (Gerard): absorb** | Absorbed and recorded as overhead (`bucket = overhead`); margins reviewed after two weeks |
 | D-4 | Terms v2.3 (seller, renewal, cancellation, withdrawal, credit terms) and counsel | Mon 2 Nov | No checkout until reviewed |
 | D-5 | Business credits: keep 8,000 or rebalance (Rikki: fewer credits, more non-token value) | Thu 29 Oct | Keep 8,000 |
 | D-6 | Does voice ship in the beta, and at what per-minute rate | Thu 29 Oct | Voice stays Business-only and unpriced until decided |
@@ -336,7 +328,7 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 
 | By | What | Who |
 |---|---|---|
-| Tue 20 – Fri 23 Oct | D-3 decided; W1 build starts | Gerard; engineering |
+| Tue 20 – Fri 23 Oct | D-3 decided (20 Oct: absorb); W1 build starts (20 Oct) | Gerard; engineering |
 | Tue 27 Oct | **D-2 entity**; Stripe account live mode; **Clerk cutover** (US-014) | Gerard |
 | Thu 29 Oct | D-1, D-5, D-6, D-7 decided | Gerard + Rikki |
 | Fri 30 Oct | W1 merged; W2 working in Stripe test mode | Engineering |
@@ -354,13 +346,13 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 - 0 platform-key calls from Own keys workspaces, from workspaces with a zero balance, or without a trial (production check by query).
 - Each Stripe event's effect on the ledger is applied once (idempotency test plus a production duplicate count of 0).
 - All live-card test cases pass before 9 Nov.
-- Gross margin per band is visible from day 1 (band charge against actual cost).
+- Gross margin per model and per plan is visible from day 1 (credits charged against real cost on every ledger row).
 
 ## 12. Size [R, I]
 
 | Wave | Contents | Engineer-days |
 |---|---|---|
-| W1 | US-001 to US-008 (fixed-per-ask adds about 3–5 over per-call) | 8–12 |
+| W1 | US-001 to US-008 (metered per call since 20 Oct) | 8–12 |
 | W2 | US-009 to US-011 | 4–6 |
 | C | Clerk cutover (code merged; runbook steps) | 1–2 |
 | W3 | Live tests and opening | 1–2 |

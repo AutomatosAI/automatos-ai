@@ -11,6 +11,11 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import text
 
 from config import config
+from core.auth.bearer_registry import (
+    api_key as _get_api_key,
+    bearer_token as _get_bearer_token,
+    resolve_registered_bearers,
+)
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.personal_workspace import insert_personal_workspace, seed_new_workspace
@@ -140,6 +145,25 @@ def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[st
             "LIMIT 1"
         ),
         {"workspace_id": str(workspace_id), "clerk_user_id": clerk_user_id},
+    ).fetchone()
+    return bool(row)
+
+
+def _user_pk_is_workspace_member(db, workspace_id: UUID, user_pk: int) -> bool:
+    """Return True if the user (by internal PK, not clerk_user_id) is an active member.
+
+    For lanes bound to a local ``users.id`` rather than a Clerk identity — the device
+    lane (PRD-266 §4.3) being the first — where there is no clerk_user_id to key off.
+    """
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_members wm "
+            "WHERE wm.workspace_id = :workspace_id "
+            "AND wm.user_id = :user_pk "
+            "AND wm.is_active = true "
+            "LIMIT 1"
+        ),
+        {"workspace_id": str(workspace_id), "user_pk": user_pk},
     ).fetchone()
     return bool(row)
 
@@ -576,32 +600,6 @@ def _local_operator_user_context(db) -> Optional[UserContext]:
     )
 
 
-def _get_api_key(request: Request) -> Optional[str]:
-    # Common patterns
-    api_key = request.headers.get("x-api-key") or request.headers.get("X-Api-Key")
-    if api_key:
-        return api_key.strip()
-
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not auth:
-        return None
-
-    # Allow "ApiKey <key>" (optional)
-    if auth.lower().startswith("apikey "):
-        return auth.split(" ", 1)[1].strip()
-
-    return None
-
-
-def _get_bearer_token(request: Request) -> Optional[str]:
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not auth:
-        return None
-    if not auth.lower().startswith("bearer "):
-        return None
-    return auth.split(" ", 1)[1].strip()
-
-
 def _extract_origin(request: Request) -> Optional[str]:
     """Return the request origin hostname from the Origin (or Referer) header.
 
@@ -759,6 +757,7 @@ def require_task_context(required_scope: str) -> Callable:
     return _dep
 
 
+@resolve_registered_bearers
 async def get_request_context_hybrid(request: Request) -> RequestContext:
     """
     FastAPI dependency that supports:

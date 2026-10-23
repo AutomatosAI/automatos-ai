@@ -161,7 +161,7 @@ def test_attention_is_the_needs_you_number(floor, new_session, monkeypatch, may_
 def test_the_endpoint_serves_the_viewers_number(floor, new_session, monkeypatch):
     import api.activity as activity
 
-    monkeypatch.setattr(activity, "may_see_own_workspace_health", lambda db, ctx: False)
+    monkeypatch.setattr(activity, "may_answer_workspace_questions", lambda db, ctx: False)
     out = activity.get_needs_you(db=new_session(), ctx=NS(workspace_id=UUID(floor.ws)))
 
     assert out["total"] == 6 and out["rows"]["question"] == []
@@ -174,7 +174,7 @@ def test_a_failed_read_is_never_nothing_needs_you(monkeypatch):
     def broken(*a, **k):
         raise RuntimeError("relation does not exist")
 
-    monkeypatch.setattr(activity, "may_see_own_workspace_health", lambda db, ctx: True)
+    monkeypatch.setattr(activity, "may_answer_workspace_questions", lambda db, ctx: True)
     monkeypatch.setattr(activity, "needs_you", broken)
     with pytest.raises(HTTPException) as failed:
         activity.get_needs_you(db=NS(), ctx=NS(workspace_id=uuid.uuid4()))

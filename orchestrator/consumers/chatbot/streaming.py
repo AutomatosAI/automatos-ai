@@ -14,7 +14,7 @@ Handles:
 
 import json
 import logging
-from typing import Dict, Any, AsyncGenerator, List, Optional
+from typing import Dict, Any, AsyncGenerator, List, Mapping, Optional, Union
 import asyncio
 
 from consumers.chatbot import on_screen
@@ -42,8 +42,16 @@ class StreamingHandler:
         escaped = json.dumps(text)
         return f'0:{escaped}\n'
 
-    def format_aisdk_data(self, event_type: str, data: Dict[str, Any] = None) -> str:
-        """Format data event for AI SDK Data Stream."""
+    def format_aisdk_data(self, event_type: Union[str, Mapping[str, Any]], data: Dict[str, Any] = None) -> str:
+        """Format data event for AI SDK Data Stream.
+
+        PRD-266 US-007b: a mapping that carries its own ``type`` is the frame itself, so the
+        agent-info frame is ``d:{"type": "agent-info", "agent": {…}}``, the shape
+        ``frontend/lib/chat/hooks.ts`` reads (it was ``d:{"type": {…}}``). A string is the
+        event's type and ``data`` its payload, as every other caller passes them.
+        """
+        if isinstance(event_type, Mapping) and "type" in event_type:
+            return f'd:{json.dumps(dict(event_type))}\n'
         payload = {"type": event_type}
         if data:
             payload["data"] = data

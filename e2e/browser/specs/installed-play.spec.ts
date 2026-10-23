@@ -4,7 +4,7 @@ import { chooseKitPackage, installKitPackage, readKitPackage, resetKitPackage } 
 import { watchPage } from '../support/watch'
 
 // PRD-261 A-17a (@package): Play installed from the Design Kit's package, end to end on the local
-// edition. The lane's `package` job packs automatos.play-1.0.0.autotheme from the kit at its
+// edition. The lane's `package` job packs automatos.play-1.1.0.autotheme from the kit at its
 // pinned commit; it is uploaded, opted in to and chosen through the Install theme UI's routes
 // (support/kit-package.ts), with nothing intercepted: the server's active answer, boot and files
 // route serve it. On a Studio page the host loads the package and reports `active`, and the page
@@ -17,7 +17,7 @@ import { watchPage } from '../support/watch'
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const STATUS_ATTR = 'data-theme-host'
 const PLAY_CLASS = /\bplay\b/
-/** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx, as core's). */
+/** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx). */
 const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
 /** The Studio desktop shell (components/layout/main-layout.tsx). */
 const STUDIO_SHELL = '.sh-shell'

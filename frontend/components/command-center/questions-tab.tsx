@@ -5,25 +5,25 @@
  * queued: each ask parked its subject, and answering it here resumes the work
  * automatically. Each question is a QuestionCard (its own module, since PRD-252
  * R1 renders the same card inside the ticket the question was asked on).
+ * PRD-266 D16: owners, admins and editors answer; a viewer's 403 says so plainly.
  */
 
 import { Clock } from 'lucide-react'
 import { useQuestions } from '@/hooks/use-approval-grants'
+import { grantsLoadErrorLine } from '@/lib/grant-refusal'
 import { QuestionCard } from './question-card'
 
+const LOAD_ERROR = 'Could not load questions.'
+
 export function QuestionsTab() {
-  const { data, isLoading, isError } = useQuestions()
+  const { data, isLoading, isError, error } = useQuestions()
   const questions = data?.grants ?? []
 
   if (isLoading) {
     return <p className="p-3 text-sm text-muted-foreground">Loading questions…</p>
   }
   if (isError) {
-    return (
-      <p className="p-3 text-sm text-muted-foreground">
-        Could not load questions. You may not be a workspace admin.
-      </p>
-    )
+    return <p className="p-3 text-sm text-muted-foreground">{grantsLoadErrorLine(error, LOAD_ERROR)}</p>
   }
   if (questions.length === 0) {
     return (

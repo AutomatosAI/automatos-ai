@@ -8,20 +8,23 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { baseThemeBoot, builtinThemeBoot } from '@/lib/theme-host/boot'
+import { baseThemeBoot } from '@/lib/theme-host/boot'
 import { sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import {
   INSTALLED_FRAME_MIN_WIDTH_PX,
   installedThemeEntry,
   sanitizeInstalledEntry,
 } from '@/lib/theme-host/installed-entry'
 import { findThemeEntry } from '@/lib/theme-host/registry'
+import type { UiStyle } from '@/lib/theme-host/registry-types'
 
 import { HELLO_PACKAGE_ENTRY, INSTALLED_HELLO_STYLE, INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY } from './installed-entry-fixture'
 
-const NO_COOKIES = () => undefined
 const INSTALL_ID = INSTALLED_PLAY_STYLE.slice('theme:install:'.length)
+/** A theme style in no installed theme's exact shape: it names no theme this build knows. */
+const UNKNOWN_THEME_STYLE: UiStyle = 'theme:install:not-a-uuid'
+/** Every style but an installed theme's: Classic, Studio and a theme style that names none. */
+const OTHER_STYLES: readonly UiStyle[] = ['classic', 'studio', UNKNOWN_THEME_STYLE]
 
 describe('PRD-261 W-A6b — the boot route entry, checked', () => {
   it("keeps the Play package's entry whole", () => {
@@ -73,7 +76,7 @@ describe('PRD-261 W-A6b — the boot route entry, checked', () => {
     expect(running.entry).toEqual(PLAY_PACKAGE_ENTRY)
     expect(sanitizeThemeBoot({ ...running, entry: { ...PLAY_PACKAGE_ENTRY, tone: 'sepia' } as never }).entry).toBeNull()
     expect(baseThemeBoot(INSTALLED_PLAY_STYLE).entry).toBeNull()
-    for (const style of ['classic', 'studio', BUILTIN_PLAY_STYLE] as const) expect(builtinThemeBoot(style, NO_COOKIES).entry).toBeNull()
+    for (const style of OTHER_STYLES) expect(baseThemeBoot(style).entry).toBeNull()
   })
 })
 
@@ -92,7 +95,7 @@ describe("PRD-261 W-A6b — the installed theme's registry entry", () => {
   })
 
   it('is null for every other style, and for an install whose boot carried no entry', () => {
-    for (const style of ['classic', 'studio', BUILTIN_PLAY_STYLE] as const) expect(installedThemeEntry(style, PLAY_PACKAGE_ENTRY)).toBeNull()
+    for (const style of OTHER_STYLES) expect(installedThemeEntry(style, PLAY_PACKAGE_ENTRY)).toBeNull()
     expect(installedThemeEntry(INSTALLED_PLAY_STYLE, null)).toBeNull()
   })
 })

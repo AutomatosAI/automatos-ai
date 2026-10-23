@@ -26,7 +26,7 @@ from config import config
 from services.schedule_util import next_run as _util_next_run
 from services.scheduled_task_steps import (  # noqa: F401 — DELIVER_* and DELIVERY_MODES are imported from here
     DELIVER_BOARD_TASK, DELIVER_CHAT, DELIVERY_MODES, count_the_run, one_shot_time, request_error,
-    schedule_error, scheduled_message, skipped_for_trial, tell_the_chat, ticket_for,
+    schedule_error, scheduled_message, skipped_for_credits, tell_the_chat, ticket_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -434,7 +434,7 @@ class ScheduledTaskService:
             if not task:
                 logger.warning("[ScheduledTask] Task %d not found or not active", task_id)
                 return
-            if skipped_for_trial(db, task, task_id):
+            if skipped_for_credits(db, task, task_id):
                 return
 
             logger.info(

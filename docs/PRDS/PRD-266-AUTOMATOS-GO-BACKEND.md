@@ -183,7 +183,7 @@ A new dependency `require_workspace_answerer` (owner, admin or editor of the wor
 | What | Where | Pattern it follows |
 |---|---|---|
 | Shared pairing kernel: code alphabet, TTL, `hash_secret`, one-time token minting with a prefix, constant-time compare, rotation overlap | **new `core/auth/pairing.py`** | Extracted from `services/cli_host_service.py`; CLI hosts switch to it and their copies are **deleted in the same PR** (AGENTS.md "Replace, don't shim"). PRD-257's estate runners use it next. |
-| Bearer-prefix resolvers | **new `core/auth/credentials.py`**: a small registry `{prefix: resolver}`; `hybrid.py` calls it once before the Clerk lane | Keeps `hybrid.py` from growing; PRD-257's runner tokens and OIDC workload identity add a resolver, not another branch |
+| Bearer-prefix resolvers | **new `core/auth/bearer_registry.py`**: a small registry `{prefix: resolver}`; `hybrid.py` calls it once before the Clerk lane | Keeps `hybrid.py` from growing; PRD-257's runner tokens and OIDC workload identity add a resolver, not another branch |
 | The device lane | **new `core/auth/device.py`** (`resolve_device_context`) | Builds the same `RequestContext` / `UserContext` the Clerk and local-operator lanes build |
 | Editors-answer gate | **`core/auth/workspace_admin.py`** gains `require_workspace_answerer` (the file is small); `api/approval_grants.py` only swaps the dependency | Same shape as `require_workspace_admin` |
 | Device model | **new `core/models/mobile_devices.py`** | `core/models/cli_hosts.py` |
@@ -208,7 +208,7 @@ Code shape on every changed line: functions under 50 lines, nesting under 4, cyc
 
 PRD-257 (draft, branch `docs/prd-257-enterprise-estate-agents`) plans registered estate runners (pairing code → one-time token, scopes, expiry, revoke, short-lived job tokens) and OIDC identity: runners by workload identity against a configured JWKS (the `PyJWKClient` pattern in `core/auth/clerk.py`), and people through the customer's OIDC provider (its open question 4). No OIDC or SSO PRD exists elsewhere [T]. This PRD builds the shared pieces so enterprise slots in rather than branching off:
 - **One pairing kernel** (`core/auth/pairing.py`) for CLI hosts, phones and, next, runners.
-- **One credential registry** (`core/auth/credentials.py`): phones add `amd_`; runners and workload-identity tokens add their own resolvers later.
+- **One credential registry** (`core/auth/bearer_registry.py`): phones add `amd_`; runners and workload-identity tokens add their own resolvers later.
 - **Discovery reserves OIDC.** `auth.modes` may later include `"oidc"` with `{issuer, client_id, scopes}`; v1 never emits it, but the app treats an unknown mode as "not supported by this app version" rather than failing, and the schema version stays `v1` when it is added.
 - **Device rows carry `kind`**, so an OIDC-signed phone becomes a third kind, not a new table.
 - Nothing here chooses PRD-257's answer to its open question 4 (a third sign-in path beside Clerk, or generic OIDC everywhere). That stays Gerard's call after WebSummit [D2].
@@ -255,7 +255,7 @@ Every story: tests go in with the story; CI is the gate and nothing runs on a ma
 - [ ] A different `X-Workspace-ID` is 403
 - [ ] `workspace_permission`, `workspace_admin`, `themes/membership.py` (`PERSON_AUTH_TYPES`), `step_up`, the notifications user resolver and `voice/caller.py` accept `device`; one test per resolver
 - [ ] A paired phone can chat, read the board, answer a question and load `GET /api/themes/mobile/{install_id}` (PRD-261 M-04) in an integration test
-- [ ] The lane lives in `core/auth/device.py`, reached through the `core/auth/credentials.py` prefix registry; `core/auth/hybrid.py` does not grow
+- [ ] The lane lives in `core/auth/device.py`, reached through the `core/auth/bearer_registry.py` prefix registry; `core/auth/hybrid.py` does not grow
 
 #### US-005: Remote-access mode and publish addresses
 **Description:** As a self-hoster, I want to expose only the API and the web app, and have every client prove who it is, so pairing a phone never opens my database or makes the network my owner.

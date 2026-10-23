@@ -9,6 +9,10 @@ run's report found none of them, and its "LLM calls: 0 … Cost $0.0000" was wro
 A cron run (cron-61e1db0e63b6, 3 Oct 06:00Z) was booked to a chat the same way.
 
 The run now opens its own scope, inheriting nothing; each step names its agent.
+
+PRD-265 US-003: a run is also one ask of its own (a run started from chat is not
+part of that chat turn's ask). A run the scheduler started is background work, so
+the trial never pays for it.
 """
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ import inspect
 from typing import Any, Awaitable, Callable
 
 from core.llm.usage_context import LANE_RECIPE, usage_scope
+from services.credits.asks import ask_scope
+
+# The run ids the cron scheduler mints (services/playbook_scheduler.py).
+CRON_RUN_PREFIX = "cron-"
 
 
 def books_spend_to_the_run(run: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -28,8 +36,11 @@ def books_spend_to_the_run(run: Callable[..., Awaitable[Any]]) -> Callable[..., 
     async def wrapped(*args: Any, **kwargs: Any) -> Any:
         given = signature.bind_partial(*args, **kwargs).arguments
         workspace_id = given.get("workspace_id")
-        with usage_scope(request_type=LANE_RECIPE, execution_id=given.get("recipe_execution_id"),
-                         workspace_id=str(workspace_id) if workspace_id else None, inherit=False):
+        run_id = given.get("recipe_execution_id")
+        with usage_scope(request_type=LANE_RECIPE, execution_id=run_id,
+                         workspace_id=str(workspace_id) if workspace_id else None, inherit=False), \
+                ask_scope(LANE_RECIPE, workspace_id=workspace_id, new=True,
+                          background=str(run_id or "").startswith(CRON_RUN_PREFIX)):
             return await run(*args, **kwargs)
     return wrapped
 

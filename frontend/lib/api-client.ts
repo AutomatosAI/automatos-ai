@@ -35,6 +35,7 @@ import type {
   SocialPostedResponse,
   SocialVoiceExample,
 } from './socials-results-types'
+import { reportUnauthorized } from './api-unauthorized'
 
 interface ApiResponse<T = any> {
   data: T
@@ -945,7 +946,7 @@ export interface SocialSeriesApproval {
 }
 
 // ===== PRD-261 themes: the answers of orchestrator/api/themes_*.py (plan §2.2) =====
-/** PUT /api/themes/choice: 'classic' | 'studio' | 'builtin:play' | an install id (the server checks it). */
+/** PUT /api/themes/choice: 'classic' | 'studio' | an install id (the server checks it). */
 export type ThemeChoiceValue = string
 
 /** services/themes/optin.py opt_in_state: required until the member opts in to this package. */
@@ -1257,6 +1258,7 @@ async function httpErrorOf(response: Response): Promise<ApiHttpError> {
   }
   const withBody = errorBody === undefined ? {} : { body: errorBody }
   if (response.status === 401) {
+    reportUnauthorized(errorBody)
     return Object.assign(new Error(
       'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
       'Make sure you are signed in and the API client is configured with Clerk.'
@@ -1310,8 +1312,6 @@ class ApiClient {
   // PRD-168 S3: mock control removed. setCurrentPage kept as a no-op so existing
   // usePageAPI() callers don't break; it drives no behaviour now.
   public setCurrentPage(_pageName: string) {}
-
-
 
   /** Public base URL for building backend requests (e.g. skills API that uses raw fetch). */
   getBaseUrl(): string {

@@ -11,5 +11,6 @@ The fixture behind `specs/theme-routes.spec.ts`. It is served as an installed th
 | `presets/default.look.json` | The preset the manifest needs. |
 
 The spec opens `/x/hello` under the install's style and checks that the route renders inside the
-theme's frame. The same spec covers builtin Play under the `play` cookie: `/chat` at 1440 px and
-800 px, one mount of Play's chat on a cold load, and `/x/conversations`.
+theme's frame. Under the same style it also checks `/chat` at 1440 px and 800 px and that a cold
+load mounts the theme's frame once (until W-A8 those cases ran under builtin Play);
+`specs/play-parity/play-routes.spec.ts` holds installed Play, the theme kit's package, to the same.

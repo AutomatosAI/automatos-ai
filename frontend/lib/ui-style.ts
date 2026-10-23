@@ -14,20 +14,13 @@
  * `studio` and the theme's own class — so a page the theme has no design for
  * renders Studio's version inside the theme's frame.
  */
-import {
-  BUILTIN_THEME_HTML_CLASSES,
-  BUILTIN_THEME_STYLES,
-  DEFAULT_THEME_BASE,
-  findThemeEntry,
-  isInstalledThemeStyle,
-  resolveStyleAlias,
-} from '@/lib/theme-host/registry'
+import { DEFAULT_THEME_BASE, isInstalledThemeStyle } from '@/lib/theme-host/registry'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
 
 export type { UiStyle }
 
-/** The styles the app knows without asking the server: Classic, Studio, then every builtin theme. */
-export const UI_STYLES: readonly UiStyle[] = ['classic', 'studio', ...BUILTIN_THEME_STYLES]
+/** The styles the app knows without asking the server: Classic and Studio (no theme is compiled in). */
+export const UI_STYLES: readonly UiStyle[] = ['classic', 'studio']
 
 /**
  * The defaults (Gerard, 2026-09-17): Studio in the Dark tone. A browser with
@@ -57,40 +50,38 @@ export const STUDIO_HTML_CLASS = 'studio'
 /**
  * Every class the Style axis may put on <html>; switching style toggles each, and a style's
  * theme boot (lib/theme-host/boot.ts) removes the ones its style does not carry before first
- * paint (PRD-260 M07, PRD-261 A-03).
+ * paint (PRD-260 M07, PRD-261 A-03). An installed theme's own class comes from its boot and goes
+ * with the host's cleanup (lib/theme-host/look.ts), not from this list.
  */
-export const STYLE_HTML_CLASS_NAMES: readonly string[] = [STUDIO_HTML_CLASS, ...BUILTIN_THEME_HTML_CLASSES]
+export const STYLE_HTML_CLASS_NAMES: readonly string[] = [STUDIO_HTML_CLASS]
 
 /**
  * PRD-260 D2: whether the Studio layout renders: Studio, and every theme drawn on Studio, where
- * the theme has no design of its own. A theme the registry doesn't know yet is drawn on
- * DEFAULT_THEME_BASE.
+ * the theme has no design of its own. The axis knows no theme's entry (an installed one comes
+ * with its boot), so a theme is drawn on DEFAULT_THEME_BASE.
  */
 export function rendersStudio(style: UiStyle): boolean {
   if (style === 'classic') return false
-  if (style === 'studio') return true
-  return (findThemeEntry(style)?.base ?? DEFAULT_THEME_BASE) === 'studio'
+  return style === 'studio' || DEFAULT_THEME_BASE === 'studio'
 }
 
-/** The <html> classes for a style: [] Classic, ['studio'] Studio, the base's plus the theme's own for a theme. */
+/** The <html> classes for a style: [] Classic, ['studio'] Studio and a theme drawn on it (its own class comes with its boot). */
 export function styleHtmlClasses(style: UiStyle): string[] {
-  const base = rendersStudio(style) ? [STUDIO_HTML_CLASS] : []
-  const entry = findThemeEntry(style)
-  return entry === null ? base : [...base, entry.htmlClass]
+  return rendersStudio(style) ? [STUDIO_HTML_CLASS] : []
 }
 
-/** Classic, Studio, a builtin theme's style, or an installed theme's (`theme:install:<uuid>`). */
+/** Classic, Studio, or an installed theme's style (`theme:install:<uuid>`). */
 export function isUiStyle(value: unknown): value is UiStyle {
   if (typeof value !== 'string') return false
   return (UI_STYLES as readonly string[]).includes(value) || isInstalledThemeStyle(value)
 }
 
 /**
- * The stored style as the axis reads it: a legacy value becomes the style it
- * stood for (LEGACY_STYLE_ALIASES); unknown, missing or tampered → the default style.
+ * The stored style as the axis reads it; unknown, missing or tampered → the default style. The
+ * values builtin Play's choice left in the cookie (its bare name, written before the axis took
+ * theme refs, and its compiled-in theme ref) name no style any more, so they read as the
+ * default (A-19f1; lib/__tests__/ui-style.test.ts holds both).
  */
 export function parseUiStyle(value: string | null | undefined): UiStyle {
-  if (typeof value !== 'string') return DEFAULT_UI_STYLE
-  const resolved = resolveStyleAlias(value)
-  return isUiStyle(resolved) ? resolved : DEFAULT_UI_STYLE
+  return isUiStyle(value) ? value : DEFAULT_UI_STYLE
 }

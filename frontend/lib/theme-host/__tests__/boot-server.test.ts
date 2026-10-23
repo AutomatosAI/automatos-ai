@@ -15,7 +15,7 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { baseThemeBoot, builtinThemeBoot, createThemeBootResolver, type ThemeBoot } from '@/lib/theme-host/boot'
+import { baseThemeBoot, createThemeBootResolver, type ThemeBoot } from '@/lib/theme-host/boot'
 import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
 import type { ThemeBootPreset } from '@/lib/theme-host/boot-types'
 import {
@@ -28,7 +28,6 @@ import {
   type BootCaller,
   type InstalledBootDeps,
 } from '@/lib/theme-host/boot-server'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { importMapScriptBody } from '@/lib/theme-host/import-map'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
 import { THEME_DIGEST_COOKIE } from '@/lib/theme-host/types'
@@ -38,6 +37,8 @@ const clerk = vi.hoisted(() => ({ auth: vi.fn() }))
 const INSTALL_ID = '0b7e4c1a-9f3d-4c2e-8a51-3d2f6b7a9c10'
 const INSTALL_STYLE: UiStyle = `theme:install:${INSTALL_ID}`
 const OTHER_INSTALL_STYLE: UiStyle = 'theme:install:5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d'
+/** A theme style in no installed theme's exact shape: it names no theme this build knows. */
+const UNKNOWN_THEME_STYLE: UiStyle = 'theme:install:not-a-uuid'
 const DIGEST = 'a'.repeat(64)
 const NEW_DIGEST = 'b'.repeat(64)
 const SHA = `sha256-${'A'.repeat(43)}=`
@@ -154,6 +155,17 @@ describe('PRD-261 A-08c — the installed theme boot, fetched on the server', ()
     expect(logged).not.toHaveBeenCalled()
   })
 
+  it("PRD-266 K8: a paired install's 401 device_pairing_required paints the base boot, nothing logged or kept", async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const cache: InstalledBootDeps['cache'] = new Map()
+    const refusal = () => json({ detail: { code: 'device_pairing_required', message: 'Pair this browser.' } }, 401)
+    const local = { caller: async () => caller('local-operator', null), cache }
+    const installed = createInstalledBootResolver(deps(answering(refusal), local))
+    expect(await createThemeBootResolver(NO_COOKIES, installed)(INSTALL_STYLE)).toEqual(baseThemeBoot(INSTALL_STYLE))
+    expect(cache.size).toBe(0)
+    expect(logged).not.toHaveBeenCalled()
+  })
+
   it('asks nothing when signed out or when the session has no token', async () => {
     const fetchBoot = answering(() => json(runningBoot()))
     expect(await createInstalledBootResolver(deps(fetchBoot, { caller: async () => null }))(INSTALL_STYLE)).toEqual(
@@ -166,12 +178,12 @@ describe('PRD-261 A-08c — the installed theme boot, fetched on the server', ()
     expect(fetchBoot).not.toHaveBeenCalled()
   })
 
-  it('is never asked for Classic, Studio or a builtin theme', async () => {
+  it('is never asked for Classic, Studio or a style that names no installed theme', async () => {
     const fetchBoot = answering(() => json(runningBoot()))
     const installed = createInstalledBootResolver(deps(fetchBoot))
     const resolve = createThemeBootResolver(NO_COOKIES, installed)
-    for (const style of ['classic', 'studio', BUILTIN_PLAY_STYLE] as const) {
-      expect(await resolve(style)).toEqual(builtinThemeBoot(style, NO_COOKIES))
+    for (const style of ['classic', 'studio', UNKNOWN_THEME_STYLE] as const) {
+      expect(await resolve(style)).toEqual(baseThemeBoot(style))
       expect(await installed(style)).toEqual(baseThemeBoot(style))
     }
     expect(fetchBoot).not.toHaveBeenCalled()
@@ -453,12 +465,12 @@ describe("PRD-261 A-19c — the boot carries a theme's presets and its tone rule
     for (const looks of shapes) expect({ looks, kept: gate({ looks }).looks }).toEqual({ looks, kept: null })
   })
 
-  it("gives every boot without presets null looks: a 1.0.0 host's, the base boot and builtin boots", async () => {
+  it("gives every boot without presets null looks: a 1.0.0 host's, and every style's base boot", async () => {
     const boot = await createInstalledBootResolver(deps(answering(() => json(runningBoot()))))(INSTALL_STYLE)
     expect(boot.looks).toBeNull()
-    for (const style of ['classic', 'studio', BUILTIN_PLAY_STYLE, INSTALL_STYLE] as const) {
+    for (const style of ['classic', 'studio', INSTALL_STYLE] as const) {
       expect(baseThemeBoot(style).looks).toBeNull()
-      expect(builtinThemeBoot(style, NO_COOKIES).looks).toBeNull()
+      expect((await createThemeBootResolver(NO_COOKIES)(style)).looks).toBeNull()
     }
   })
 })

@@ -7,10 +7,11 @@ import { ThemeSlot } from '@/components/theme-host/theme-slot'
  * PRD-260 §4, PRD-261 A-04b — the 404, for any address the app doesn't have. A server
  * component, so it can keep the document title Next's default 404 sets (P260-FX-21, M68): every
  * style's tab and screen reader say it, never the app's own title. The active theme's notFound@1
- * slot draws at its width (builtin Play: "This page wandered off", through its lazy slot, so
- * Classic and Studio never download it, P260-FX-23, M17); otherwise the plain page below. Under a
- * theme that draws one, nothing until the width is known (the server, hydration), so a phone never
- * mounts the theme's screen and a desktop never shows the plain page first (P260-FX-25, M69).
+ * slot draws at its width (installed Play's: "This page wandered off"; an installed theme's code
+ * loads only under its style, so Classic and Studio never download it); otherwise the plain page
+ * below. Under a theme that draws one, nothing until the width is known (the server, hydration),
+ * so a phone never mounts the theme's screen and a desktop never shows the plain page first
+ * (P260-FX-25, M69).
  */
 
 /** Next's own 404 title. */

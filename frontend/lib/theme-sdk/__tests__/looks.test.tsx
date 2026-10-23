@@ -2,16 +2,21 @@
  * PRD-261 A-13c — SDK area `looks` (lib/theme-sdk/looks.ts) against the seam the host's look runtime fills
  * (internal/look-runtime.ts). Outside a runtime every name answers "no looks here" and none throws; inside one,
  * useLook reads the runtime through context and the plain functions reach the runtime registered now, which a
- * stale runtime's cleanup never drops. The host's real runtime is proved by
- * components/theme-host/__tests__/theme-look-runtime.test.tsx. useLookScope reads the scope the host's
- * AccountLookScope provides (components/looks/__tests__/look-scope.test.tsx runs the real one under Play's shelf).
+ * stale runtime's cleanup never drops. The host's real runtimes are proved by
+ * components/theme-host/__tests__/theme-look-runtime{,-installed}.test.tsx. useLookScope reads the scope the
+ * host's AccountLookScope provides (components/theme-host/__tests__/account-look-scope.test.tsx runs the real one under an installed theme).
+ *
+ * PRD-261 A-19d2: an installed theme's looks run on the generic look runtime (lib/theme-host/looks), whose bridge
+ * fills the same seam; the last block reaches it through the SDK's names alone, on hello-a09b's boot.
  */
-import { renderHook } from '@testing-library/react'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { LookScopeContext } from '@/components/theme-host/look-scope'
-import { DEFAULT_LOOK_SCOPE, lookScope } from '@/lib/looks/scope'
+import { DEFAULT_LOOK_SCOPE, lookScope } from '@/lib/look-kit/scope'
+import { ThemeLookProvider } from '@/lib/theme-host/looks/provider'
+import { HELLO_THEME_ID, helloThemeBoot, memoryStorage, myLook, PAPER, putPageBoot } from '@/lib/theme-host/looks/__tests__/hello-looks'
 
 import { LookRuntimeContext, currentLookRuntime, registerLookRuntime, type HostLookRuntime } from '../internal/look-runtime'
 import { exportLook, importLook, listLooks, saveLook, useLook, useLookScope, type HostLook, type HostLookState } from '../looks'
@@ -118,5 +123,37 @@ describe("PRD-261 W-A5 — useLookScope, whose looks these are", () => {
 
   it("answers the host's default scope outside it (an isolated mount)", () => {
     expect(renderHook(() => useLookScope()).result.current).toBe(DEFAULT_LOOK_SCOPE)
+  })
+})
+
+describe('PRD-261 A-19d2 — looks on the generic runtime an installed theme runs on', () => {
+  const store = memoryStorage()
+  const storage = () => store
+  const seen: { current: HostLookState | null } = { current: null }
+
+  function Probe() {
+    seen.current = useLook()
+    return null
+  }
+
+  it("useLook and the plain functions reach it: the theme's own look, its checks, a frozen saved look", async () => {
+    const removeBoot = putPageBoot(helloThemeBoot())
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { unmount } = render(
+      <ThemeLookProvider themeId={HELLO_THEME_ID} enabled tonePolicy="from-look" scope={lookScope('ws-1', 'user_a')} storage={storage} server={null}>
+        <Probe />
+      </ThemeLookProvider>,
+    )
+    await waitFor(() => expect(seen.current?.loaded).toBe(true))
+    expect(seen.current).toMatchObject({ available: true, look: PAPER, tone: 'light' })
+    expect(saveLook({ ...myLook(), glow: 99 }).ok).toBe(false)
+    act(() => void saveLook(myLook()))
+    await waitFor(() => expect(listLooks().map((look) => look.id)).toEqual(['my-look-1']))
+    expect(Object.isFrozen(listLooks()[0])).toBe(true)
+    expect(exportLook(myLook())?.fileName).toBe('My look 1.look.json')
+    expect(importLook('not json').ok).toBe(false)
+    unmount()
+    removeBoot()
+    expect(currentLookRuntime()).toBeNull()
   })
 })

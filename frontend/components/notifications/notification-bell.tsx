@@ -72,6 +72,10 @@ export function linkFor(row: NotificationRow): string | null {
       return '/command-center?tab=governance'
     case 'watch':
       return '/command-center?tab=watchlist'
+    // PRD-266 US-016c: a content report → Governance, whose Audit pane lists it
+    // (owners and admins: who receives the notice and who can open the tab).
+    case 'content_report':
+      return '/command-center?tab=governance'
     // PRD-225: an agent question → answering resumes the work. PRD-252 R1: the
     // board opens the ticket it was asked on, at the question.
     case 'question':

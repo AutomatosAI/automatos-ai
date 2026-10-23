@@ -13,13 +13,13 @@
  *   (signed in with no user id), its one user `local`.
  * `workspaceKey` is the WorkspaceProvider's workspace id, and null while it loads, after it failed
  * and outside a provider: then `within: 'workspace'` state is not ready, and `account` state is.
- * Anything else (Classic, Studio, a builtin theme, safe mode, signed out) clears the scope, so the
- * SDK reads not-ready and never touches the browser's storage.
+ * Anything else (Classic, Studio, an entry with no theme id, safe mode, signed out) clears the
+ * scope, so the SDK reads not-ready and never touches the browser's storage.
  *
  * It renders its children and nothing else, whatever the scope: the tree above the page keeps one
  * shape, so a style switched in place never remounts the page below (M69). The host's look runtime
  * mounts it (./theme-look-runtime.tsx), which renders its children for every style. It reads no
- * looks and no builtin theme: the scope is the host's, the same for every installed theme.
+ * looks: the scope is the host's, the same for every installed theme.
  */
 import { useEffect, type ReactNode } from 'react'
 
@@ -42,7 +42,7 @@ function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-/** An installed theme's id; null for Classic and Studio (no entry), a builtin theme, or no id. */
+/** An installed theme's id; null for Classic and Studio (no entry), or an entry with no id. */
 function installedThemeId(theme: ThemeEntry | null): string | null {
   return theme !== null && theme.kind === 'installed' ? nonEmpty(theme.themeId) : null
 }

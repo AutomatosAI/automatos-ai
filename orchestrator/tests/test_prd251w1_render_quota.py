@@ -6,8 +6,8 @@ its composition's declared duration (a ``reserved`` row in ``llm_usage``) from
 before anything reaches media-render until it ends, and the check and the hold
 are one step under one lock per workspace (``core/media_render_quota.py``). Pins:
 
-* 20 renders of a 60-second template asked for at once on Basic (10 minutes,
-  nothing used), through the real route: exactly 10 start (202) and 10 are
+* 20 renders of a 60-second template asked for at once on Basic with a
+  10-minute quota (nothing used), through the real route: exactly 10 start (202) and 10 are
   refused (429) before any request reaches media-render; the ten submit, book
   their seconds and give their holds back, and the month is then used up. The
   same with 20 concurrent ``generate_document`` renders of a social template,
@@ -84,7 +84,10 @@ WS = uuid.UUID("00000000-0000-0000-0000-0000000000b1")
 TEMPLATE_ID = uuid.UUID("00000000-0000-0000-0000-0000000000bc")
 CREATED = datetime(2026, 9, 1, 9, 0)
 RENDERS = 20
-# Basic: 10 minutes; a 60-second composition: ten fit.
+# A 10-minute quota on the workspace; a 60-second composition: ten fit.
+# PRD-265 gave Basic (Own keys) Pro's 60 minutes, so the quota is pinned on
+# plan_limits, which is where plan assignment writes it.
+QUOTA_MINUTES = 10
 STARTED = 10
 HTML_60 = (
     '<!doctype html><html><head></head><body><div id="root" data-composition-id="main" data-width="1080" '
@@ -162,7 +165,7 @@ def env(tmp_path, monkeypatch):
     with factory() as db:
         db.add(
             Workspace(
-                id=WS, name="Harbourline", plan="basic", plan_limits={},
+                id=WS, name="Harbourline", plan="basic", plan_limits={render_quota.QUOTA_KEY: QUOTA_MINUTES},
                 settings={"socials": {"enabled": True}}, onboarding={}, created_at=CREATED, updated_at=CREATED,
             )
         )
@@ -289,7 +292,7 @@ def test_twenty_renders_asked_at_once_on_basic_start_ten_and_refuse_ten_before_m
     assert (len(started), len(refused)) == (STARTED, RENDERS - STARTED), [r.status_code for r in responses]
     for resp in refused:
         assert resp.json()["detail"] == (
-            "This workspace has used 0.0 of its 10 render minutes this month on the Basic plan, and renders in "
+            "This workspace has used 0.0 of its 10 render minutes this month on the Own keys plan, and renders in "
             f"progress hold 10.0 more until they finish. Rendering resumes on {_resumes()}, or sooner if they use less."
         )
     # Only the renders that started reached media-render (its health check); none submitted yet.
@@ -305,7 +308,7 @@ def test_twenty_renders_asked_at_once_on_basic_start_ten_and_refuse_ten_before_m
     (resp,) = asyncio.run(_ask(env, _drafts(env, 1)))
     assert resp.status_code == 429
     assert resp.json()["detail"] == (
-        f"This workspace has used 10.0 of its 10 render minutes this month on the Basic plan. Rendering resumes on {_resumes()}."
+        f"This workspace has used 10.0 of its 10 render minutes this month on the Own keys plan. Rendering resumes on {_resumes()}."
     )
 
 
@@ -583,7 +586,8 @@ def test_a_render_with_nothing_to_hold_never_touches_the_callers_session(monkeyp
 def test_with_no_quota_a_render_holds_nothing(env, monkeypatch, edition, plan):
     _set_config(monkeypatch, AUTH_EDITION=edition)
     with env.factory() as db:
-        db.get(Workspace, WS).plan = plan
+        workspace = db.get(Workspace, WS)
+        workspace.plan, workspace.plan_limits = plan, {}
         db.commit()
 
     responses = asyncio.run(_ask(env, _drafts(env, 3)))

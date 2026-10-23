@@ -16,9 +16,7 @@ workspace-scoped through the host row; a host never sees another workspace.
 from __future__ import annotations
 
 import json
-import hashlib
 import re
-import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -29,6 +27,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from config import config
+from core.auth.pairing import PAIRING_CODE_TTL_SECONDS, hash_secret, mint_token, new_pairing_code, normalize_pairing_code, secrets_match
 from services.session_tool_groups import agent_tool_names as session_tool_names
 from services.session_tool_groups import default_definitions as session_tool_definitions
 from core.cli_runtime import (
@@ -59,11 +58,8 @@ from core.session_permission_modes import (
 
 logger = logging.getLogger(__name__)
 
-PAIRING_CODE_TTL_SECONDS = 600
 HOST_TOKEN_BYTES = 32
 MAX_CLAIM_LIMIT = 50
-# No 0/O/1/I — a code is read off a screen and typed once.
-_PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # PRD-245 S1.1 — the credential a ticket session calls Automatos with. Minted at
 # claim, only its HASH is kept (on the ticket, no migration), handed to the host
 # once in the claim payload, and dead the moment the ticket leaves in_progress.
@@ -117,8 +113,7 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
 
 def mint_session_token(ref: Dict[str, Any]) -> str:
     """A fresh per-ticket token; the ref keeps only its hash (PRD-245 S1.1)."""
-    token = secrets.token_urlsafe(SESSION_TOKEN_BYTES)
-    ref[SESSION_TOKEN_HASH_KEY] = hash_secret(token)
+    token, ref[SESSION_TOKEN_HASH_KEY] = mint_token("", SESSION_TOKEN_BYTES)
     return token
 
 
@@ -159,7 +154,8 @@ def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[B
     """
     if not token or not str(token).strip():
         return None
-    digest = hash_secret(str(token).strip())
+    presented = str(token).strip()
+    digest = hash_secret(presented)
     try:
         task = (
             db.query(BoardTask)
@@ -173,14 +169,14 @@ def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[B
         )
     except Exception:  # noqa: BLE001 — a backend without JSONB text indexing, or a test double
         logger.debug("[cli-host] session-token lookup by JSONB failed; scanning in_progress tickets", exc_info=True)
-        task = _scan_for_session_token(db, digest)
+        task = _scan_for_session_token(db, presented)
     if task is None:
         return None
     agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
     return task, agent
 
 
-def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
+def _scan_for_session_token(db: Session, presented: str) -> Optional[BoardTask]:
     """Fallback lookup: the local edition has a handful of running tickets."""
     try:
         rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
@@ -189,7 +185,7 @@ def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
     now = _now()
     for task in rows or []:
         ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
-        if not secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
+        if not secrets_match(ref.get(SESSION_TOKEN_HASH_KEY), presented):
             continue
         # The same live-lease rule the indexed query applies — a fallback that
         # answered where the query would not is a way around the rule.
@@ -200,26 +196,13 @@ def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
     return None
 
 
-def hash_secret(value: str) -> str:
-    return hashlib.sha256((value or "").encode("utf-8")).hexdigest()
-
-
-def normalize_pairing_code(code: Optional[str]) -> str:
-    return (code or "").strip().upper().replace(" ", "")
-
-
-def _new_pairing_code() -> str:
-    raw = "".join(secrets.choice(_PAIRING_ALPHABET) for _ in range(8))
-    return f"{raw[:4]}-{raw[4:]}"
-
-
 # ── pairing ─────────────────────────────────────────────────────────────────
 
 def create_pairing_code(
     db: Session, workspace_id: Any, name: Optional[str] = None
 ) -> Tuple[CliHost, str, datetime]:
     """Issue a one-time pairing code (returned in clear ONCE) as a pending host row."""
-    code = _new_pairing_code()
+    code = new_pairing_code()
     expires = _now() + timedelta(seconds=PAIRING_CODE_TTL_SECONDS)
     host = CliHost(
         workspace_id=workspace_id,
@@ -264,8 +247,7 @@ def pair_host(
             expires = expires.replace(tzinfo=timezone.utc)
         if expires < _now():
             return None
-    token = secrets.token_urlsafe(HOST_TOKEN_BYTES)
-    host.token_hash = hash_secret(token)
+    token, host.token_hash = mint_token("", HOST_TOKEN_BYTES)
     host.pairing_code_hash = None
     host.pairing_expires_at = None
     host.status = CliHostStatus.PAIRED.value
@@ -291,7 +273,7 @@ def resolve_host_by_token(db: Session, token: Optional[str]) -> Optional[CliHost
         .filter(CliHost.token_hash == digest, CliHost.status == CliHostStatus.PAIRED.value)
         .first()
     )
-    if host is None or not hmac.compare_digest(host.token_hash or "", digest):
+    if host is None or not secrets_match(host.token_hash, token):
         return None
     return host
 

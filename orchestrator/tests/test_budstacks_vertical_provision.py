@@ -250,7 +250,7 @@ def test_vertical_key_verifier_triad(monkeypatch):
 
 def test_a_roster_seeded_over_the_plan_is_logged_not_refused(monkeypatch, caplog):
     """F200: the vertical's roster is the product's own, so provisioning never meets
-    the plan's agent limit; one bigger than the plan is logged (Shopify's is 9 on basic's 5).
+    the plan's agent limit; one bigger than the plan is logged (basic's limit is Pro's 20 since PRD-265).
     Plans are the hosted edition's (F230), and so is vertical provisioning."""
     import logging
 
@@ -265,7 +265,7 @@ def test_a_roster_seeded_over_the_plan_is_logged_not_refused(monkeypatch, caplog
         }
     )
     monkeypatch.setattr("integrations.provisioning._create_widget_key", _mint_counter([]))
-    monkeypatch.setattr("integrations.provisioning._seed_roster", lambda db, ws_id, provisioner: 9)
+    monkeypatch.setattr("integrations.provisioning._seed_roster", lambda db, ws_id, provisioner: 21)
 
     with caplog.at_level(logging.WARNING, logger="integrations.provisioning"):
         result = provision_vertical(
@@ -274,4 +274,4 @@ def test_a_roster_seeded_over_the_plan_is_logged_not_refused(monkeypatch, caplog
         )
 
     assert result["is_new"] is True                                   # provisioned, never refused
-    assert "[F200] vertical budstacks seeded 9 agents on a basic plan of 5" in caplog.text   # before: silent
+    assert "[F200] vertical budstacks seeded 21 agents on a basic plan of 20" in caplog.text   # before: silent

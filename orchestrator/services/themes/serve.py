@@ -40,7 +40,7 @@ nav and slots, from the checked ``theme.json``), so the root layout hands the cl
 registry entry on the server render and the first client render. The base boot's is null.
 
 PRD-261 W-A6b (gap G2): the boot of a theme that runs paints the member's stored look before first
-paint, as builtin Play's does. ``lookStorage`` names the browser keys the host's look store keeps
+paint. ``lookStorage`` names the browser keys the host's look store keeps
 the theme's active look under (``look_storage``, the frontend's ``installedLookKeys`` format,
 ``tests/fixtures/themes/look-storage.json`` holds the two equal), and ``lookGuard`` is the look
 header of the theme's checked ``looks/schema.json``, so only a look of this theme's format paints.
@@ -100,15 +100,16 @@ MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 
 STUDIO_BASE = "studio"
 STUDIO_HTML_CLASS = "studio"
-# Every class a style may put on <html> (lib/ui-style.ts STYLE_HTML_CLASS_NAMES): Studio's
-# and each builtin theme's.
+# Every class a boot takes off <html> unless its style carries it: the Style axis's (frontend
+# lib/ui-style.ts STYLE_HTML_CLASS_NAMES, Studio's) and each class PA-8 keeps for one theme's
+# package (contract.py HTML_CLASS_OWNERS, Play's until A-20).
 STYLE_HTML_CLASSES: Tuple[str, ...] = (STUDIO_HTML_CLASS, *sorted(HTML_CLASS_OWNERS))
 USER_TONE = "user"
 # theme.json requires minWidth; a manifest stored before it was required draws at every width.
 DEFAULT_MIN_WIDTH = 0
 FIXED_TONES = frozenset({"light", "dark"})
 # Where the host's look store keeps an installed theme's active look in the browser (frontend
-# lib/theme-host/builtin/play-look-storage.ts installedLookKeys and bootLookStorage):
+# lib/theme-host/looks/storage.ts themeLookKeys and bootLookStorage):
 # `automatos-theme.<theme id>.look`, with `:<scope>` appended per account, and `.current` naming
 # the scope the boot script paints.
 INSTALLED_LOOK_KEY_PREFIX = "automatos-theme."

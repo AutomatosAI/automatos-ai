@@ -56,15 +56,17 @@ export function discussionLabel(discussion: Pick<Discussion, 'number' | 'ticketI
 }
 
 /** The line under the bar on an agent's ticket: the chat answers as Auto, so it says how to
- * ask the ticket's agent instead. Play's chat has no agent picker (PRD-260 M67; a picker there
- * is decision F3), so under it the way is Studio. Null on a mission's ticket or with no agent. */
+ * ask the ticket's agent instead. `inThemeChat`: an installed theme's own chat is on screen
+ * (components/chatbot/discussion-bar.tsx). Its message box has no agent picker (installed Play's,
+ * PRD-260 M67; a picker there is decision F3), so the way there is Studio. The words are M67's,
+ * written for Play's chat, under any theme's own chat. Null on a mission's ticket or with no agent. */
 export function discussionHint(
   discussion: Pick<Discussion, 'agentName' | 'missionId'>,
-  inPlayChat: boolean,
+  inThemeChat: boolean,
 ): string | null {
   const agent = discussion.agentName
   if (!agent || discussion.missionId) return null
-  return inPlayChat
+  return inThemeChat
     ? `You are talking to Auto in Play's chat. To ask ${agent}, switch to Studio from the theme menu.`
     : `You are talking to Auto. To ask ${agent} instead, pick them in the message box.`
 }

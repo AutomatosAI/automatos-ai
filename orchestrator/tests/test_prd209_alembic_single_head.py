@@ -121,6 +121,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
 # prd264_blog_review — a new table only, the audit record of the one-time relink
 # of returning users to production IDs.
+# 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto clerk_user_relinks_20261019
+# — credit_ledger + credit_balances (new tables), llm_usage.ask_id (a nullable column and a
+# concurrent partial index), and the dollar trials converted into credit grants.
 # 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto
 # clerk_user_relinks_20261019 — theme_revocations.origin ('local' | 'feed') and the
 # single-row theme_revocation_sync table the local edition's feed pull writes.

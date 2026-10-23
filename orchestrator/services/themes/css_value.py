@@ -82,7 +82,7 @@ def _var_problem(value: str, at: int) -> Optional[str]:
     """var() must start with a custom property name."""
     name = re.match(r"[ ]*(--[A-Za-z0-9_-]*)", value[at:])
     if name is None or CUSTOM_PROPERTY_PATTERN.fullmatch(name.group(1)) is None:
-        return "var() must name a custom property such as --pl-accent"
+        return "var() must name a custom property such as --theme-accent"
     return None
 
 

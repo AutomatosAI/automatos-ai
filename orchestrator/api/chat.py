@@ -19,7 +19,9 @@ from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
+from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
+from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
@@ -31,6 +33,7 @@ from services.board_events import notify_chat_event
 from services.chat_agent_switch import record_agent_switch
 from services.chat_turns import get_turn_registry, run_detached_turn
 from services.page_context import inject_page_preamble, sanitize_page_context
+from modules.voice.spoken_stream import spoken_text_frames
 
 logger = logging.getLogger(__name__)
 
@@ -38,44 +41,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
 
 
-# Request/Response Models
-class MessagePart(BaseModel):
-    type: str
-    text: Optional[str] = None
-    filename: Optional[str] = None
-    mediaType: Optional[str] = None
-    url: Optional[str] = None
-    # PRD-127: ephemeral attachment reference (sent by multimodal-input.tsx)
-    attachment_id: Optional[str] = None
-
-
-class ChatMessageRequest(BaseModel):
-    role: str = "user"
-    parts: Optional[List[MessagePart]] = None
-    # Compatibility with older/alternate clients
-    content: Optional[str] = None
-    # PRD-127: top-level list of ephemeral attachment ids for the current message
-    attachment_ids: Optional[List[str]] = None
-
-
-class ChatRequest(BaseModel):
-    id: Optional[str] = None
-    message: ChatMessageRequest
-    # Compatibility with AI SDK "messages" payloads
-    messages: Optional[List[ChatMessageRequest]] = None
-    # PRD-180 S3 (F035): the per-message model selector was a placebo — nothing
-    # ever read the chosen model. Field removed; the model resolves via the Auto
-    # tier / the selected agent's own config, never a client-picked override.
-    selectedVisibilityType: Optional[str] = "private"
-    context: Optional[dict] = None
-    # PRD: Unified Agent-Chat System
-    agentId: Optional[int] = None  # Selected agent ID (default: system agent id=1)
-    # PRD-82A: Mission mode — conversational mission planning
-    missionMode: Optional[bool] = False
-    # Plan mode — research and strategy output, no execution
-    planMode: Optional[bool] = False
-
-
+# Request/Response Models (ChatRequest and its parts: api.chat_models)
 class UpdateTitleRequest(BaseModel):
     title: str
 
@@ -350,6 +316,7 @@ class _Turn:
     plan_mode: bool
     is_super_admin: bool
     page_context: Any
+    spoken_mode: bool
 
 
 async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn):
@@ -369,7 +336,7 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         yield service.streaming_handler.format_aisdk_data("mission-suggestion", {
             "goal": turn.message_text, "complexity": lane.assessment.complexity.value, "agent_id": lane.agent_id,
         })
-    async for chunk in service.stream_response_with_agent(
+    reply = service.stream_response_with_agent(
         chat_id=turn.chat_id, messages=turn.messages, agent_id=lane.agent_id, user_id=turn.user_id,
         skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
@@ -377,7 +344,13 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         # PRD-221 S3/S4: the sanitized reference set rides into the turn's
         # context_trace and the page-prior action exposure.
         page_context=turn.page_context,
-    ):
+        # PRD-266 US-007a (D32): the reply is heard (the app's quick-ask voice); Auto is told so.
+        spoken_mode=turn.spoken_mode,
+    )
+    if turn.spoken_mode:
+        # The prompt alone is no guarantee (modules.voice.spoken_style): the text is speechified too.
+        reply = spoken_text_frames(reply, service.streaming_handler.format_aisdk_text)
+    async for chunk in reply:
         yield chunk
 
 
@@ -442,7 +415,7 @@ async def stream_chat(
     turn = _Turn(
         workspace_id=ctx.workspace_id, chat_id=chat_id, user_id=user_id, messages=history, lane=lane,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
-        is_super_admin=_is_super_admin(ctx), page_context=page_ctx,
+        is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
     )
     return StreamingResponse(
         run_detached_turn(
@@ -458,31 +431,22 @@ async def stream_chat(
 @router.get("/history")
 def get_chat_history(
     limit: int = 20,
+    starting_after: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get chat history for the current user within their workspace"""
+    """Get chat history for the current user within their workspace.
+
+    ``starting_after`` (PRD-266 US-007b): a chat id; the page after it, 404 when not the caller's."""
     chat_service = ChatService(db)
     user_id = get_user_id(db, ctx)
-
-    chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
+    try:
+        chats = chat_service.get_chat_history(
+            user_id=user_id, limit=limit, starting_after=starting_after, workspace_id=ctx.workspace_id)
+    except ChatCursorNotFound:
+        raise HTTPException(status_code=404, detail="Chat not found") from None
     previews = _last_message_previews(db, [str(chat.id) for chat in chats])
-
-    return [
-        {
-            "id": str(chat.id),
-            "userId": chat.user_id,
-            "title": chat.title,
-            "createdAt": utc_iso(chat.created_at),
-            "updatedAt": utc_iso(chat.updated_at),
-            "visibility": chat.visibility,
-            "lastContext": chat.last_context,
-            "lastMessagePreview": previews.get(str(chat.id)),
-            # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
-            "kind": chat.kind,
-        }
-        for chat in chats
-    ]
+    return [history_row(chat, previews.get(str(chat.id))) for chat in chats]
 
 
 # ---------------------------------------------------------------------------

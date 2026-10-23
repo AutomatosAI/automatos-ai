@@ -5,10 +5,9 @@
  * place that took over instead, and only when focus really was dropped, never taking it from where
  * the user or the page (an autoFocus field) already put it.
  *
- * The host's own (components/theme-host/theme-slot-page.tsx), so deleting Play's folders can never
- * take it with them. Builtin Play keeps its copy (lib/play/focus.ts) until it leaves core: Play's
- * code may import only Play's folders (lib/__tests__/prd261-port-conversations.test.ts), and
- * lib/__tests__/prd261-a19-seams.test.ts holds the copy to this file.
+ * The host's own (components/theme-host/theme-slot-page.tsx). Builtin Play kept a copy of it until
+ * A-19f1 took Play out of core; no theme imports this file (a theme reaches the host only through
+ * the theme SDK).
  */
 
 /** Focus was dropped: nothing has it, or only <body>. */

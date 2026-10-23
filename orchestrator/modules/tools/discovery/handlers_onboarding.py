@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.workspaces import Workspace
+from modules.tools.discovery.onboarding_plan_choice import plan_is_chosen_never_assigned
 from services.onboarding_state import (
     ALL_STAGES,
     INITIAL_STAGE,
@@ -198,6 +199,7 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     return out, notes
 
 
+@plan_is_chosen_never_assigned  # PRD-265 US-006: a plan is recorded as a choice, never assigned
 async def update_onboarding(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -324,25 +326,6 @@ async def update_onboarding(
                 "message": f"Already at '{stage}' — nothing changed (re-assert {n}). {hint}".strip(),
             }
 
-    # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.
-    if plan is not None:
-        from services.plan_tiers import is_assignable
-
-        if not is_assignable(plan):
-            # Honest copy: only enterprise is "coming soon"; anything else is not
-            # a tier at all (live-test 2026-09-02: 'Basic' was answered with
-            # "Enterprise is coming soon" — case is forgiven above, so this
-            # branch now only sees genuine non-tiers).
-            return {
-                "success": False,
-                "error": (
-                    "'enterprise' can't be assigned yet — Enterprise is coming soon. "
-                    "Choose basic, pro, or business."
-                    if plan == "enterprise"
-                    else f"'{plan}' isn't a plan tier — choose basic, pro, or business."
-                ),
-            }
-
     # ATOMICITY (FR-4, RVW-2): every writer below runs with commit=False and the
     # WHOLE tool call is committed ONCE at the end. A state change (plan +
     # plan_limits, or a stage advance) and its funnel audit stamp therefore land
@@ -362,14 +345,6 @@ async def update_onboarding(
 
             rec_plan, _reason = recommend_plan(get_onboarding(workspace).get("segment") or {})
             record_plan_event(db, workspace, "plan_recommended", rec_plan, commit=False)
-
-        # Accepting a plan writes plan + plan_limits through the US-023 helper and
-        # stamps plan_accepted — state changes only through this tool (FR-4).
-        if plan is not None:
-            from services.plan_tiers import assign_plan
-
-            assign_plan(db, workspace, plan, commit=False)
-            record_plan_event(db, workspace, "plan_accepted", plan, commit=False)
 
         zone_outcome = _set_business_zone(workspace, zone) if zone else None
 

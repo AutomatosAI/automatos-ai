@@ -36,10 +36,13 @@ def test_local_marketplace_depth_is_the_deepest_tier():
 
 
 def test_saas_tiers_unchanged():
-    # The entry tier still restricts (nav.team off) — S7 only adds a profile.
+    # S7 only adds the local-edition profile — it does not touch SaaS tiers.
+    # PRD-265 US-001 repriced the entry tier itself (basic now carries exactly
+    # Pro's limits, nav.team included), so this guard pins THAT contract, not
+    # the pre-PRD-265 restrictive shape.
     basic = exposure_for_plan("basic")
     assert basic["plan"] == "basic"
-    assert basic["nav"].get("team") is False
+    assert basic["nav"].get("team") is True
     assert exposure_for_plan("nonsense")["plan"] == "nonsense"  # unknown ⇒ entry-tier profile, label kept
 
 

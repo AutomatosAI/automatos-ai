@@ -3,6 +3,7 @@ import path from 'path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fulfillBackendJson } from '../support/backend-route'
 import { chooseStyle, serveInstalledTheme, THEME_E2E_PATH } from '../support/hello-theme'
+import { describeParity, openPlay } from '../support/play-parity'
 
 // PRD-261 A-12c (@host): protected surfaces and the CSS layer model (PA-15).
 //
@@ -14,9 +15,13 @@ import { chooseStyle, serveInstalledTheme, THEME_E2E_PATH } from '../support/hel
 //    their Approve & run button still posts the decision. The cards arrive the way they do in the
 //    app: a chat turn (recorded, fixtures/hello-a12c/chat-turns.json) carries the tool-data that
 //    chat.tsx turns into the widget on the canvas.
-// 2. Under the Play cookie, the body takes Play's page background (play-theme.css:204-209), not
-//    Studio's bg-background: theme CSS is unlayered, so a theme rule meets core's unlayered
-//    Tailwind output on specificity and order. In a cascade layer it would lose to it outright.
+// 2. Under installed Play (the Design Kit's package, support/play-parity.ts; A-19f4: since W-A8
+//    the only Play), the body takes Play's page background (the kit's
+//    themes/play/src/app/play-theme.css, its `:where(html.play) body` rule), not Studio's
+//    bg-background: theme CSS is unlayered, so a theme rule meets core's unlayered Tailwind output
+//    on specificity and order. In a cascade layer it would lose to it outright. It needs the
+//    package and stores the member's choice on the lane's one backend, so it is @package and runs
+//    in the package step, one test at a time.
 //
 // This proves what CSS can reach. For code a theme runs inside the page it is a review rule, not
 // a guarantee (PRD §4.4): see fixtures/hello-a12c/README.md.
@@ -40,15 +45,6 @@ const TEXT_LINE = '0:'
 const DATA_LINE = 'd:'
 const OK = 200
 
-const PLAY_STYLE = 'theme:builtin:play'
-const ACTIVE_ROUTE = '**/api/themes/active'
-/**
- * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
- * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
- * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
- */
-const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
-const PLAY_CLASS = /\bplay\b/
 const PLAY_PAGE_BACKGROUND = '--pl-page-background'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 const SENTINEL = 'rgb(1, 2, 3)'
@@ -257,26 +253,25 @@ function backgrounds(page: Page, variable: string): Promise<{ body: string; vari
   }, variable)
 }
 
-test("under the Play cookie, the body takes Play's page background, not Studio's bg-background", { tag: '@host' }, async ({ page }) => {
-  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
-  await chooseStyle(page, PLAY_STYLE, APP_URL)
-  await page.goto(THEME_E2E_PATH)
-  await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
+describeParity('the CSS layer model under installed Play', (variant) => {
+  test("under installed Play, the body takes Play's page background, not Studio's bg-background", { tag: '@package' }, async ({ page, request }) => {
+    await openPlay(page, request, variant, THEME_E2E_PATH)
 
-  // Play's token is defined (not the transparent of an unset variable) and the body wears it.
-  await expect
-    .poll(async () => {
-      const seen = await backgrounds(page, PLAY_PAGE_BACKGROUND)
-      return seen.variable !== TRANSPARENT && seen.body === seen.variable
-    })
-    .toBe(true)
+    // Play's token is defined (not the transparent of an unset variable) and the body wears it.
+    await expect
+      .poll(async () => {
+        const seen = await backgrounds(page, PLAY_PAGE_BACKGROUND)
+        return seen.variable !== TRANSPARENT && seen.body === seen.variable
+      })
+      .toBe(true)
 
-  // The look writes Studio's --background from the same ground, so the colours alone could
-  // agree by design. A sentinel on Play's token, which core's body rule never reads, shows which
-  // rule paints the body: it follows the sentinel only if Play's rule wins the cascade.
-  await page.evaluate(
-    ({ name, value }) => document.documentElement.style.setProperty(name, value),
-    { name: PLAY_PAGE_BACKGROUND, value: SENTINEL },
-  )
-  await expect.poll(async () => (await backgrounds(page, PLAY_PAGE_BACKGROUND)).body).toBe(SENTINEL)
+    // The look writes Studio's --background from the same ground, so the colours alone could
+    // agree by design. A sentinel on Play's token, which core's body rule never reads, shows which
+    // rule paints the body: it follows the sentinel only if Play's rule wins the cascade.
+    await page.evaluate(
+      ({ name, value }) => document.documentElement.style.setProperty(name, value),
+      { name: PLAY_PAGE_BACKGROUND, value: SENTINEL },
+    )
+    await expect.poll(async () => (await backgrounds(page, PLAY_PAGE_BACKGROUND)).body).toBe(SENTINEL)
+  })
 })
