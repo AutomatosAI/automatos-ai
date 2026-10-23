@@ -114,6 +114,23 @@ def test_a_bmp_or_tiff_goes_as_a_jpeg(fmt, mime):
     assert (media_type, image.size, failures) == ("image/jpeg", (40, 30), [])
 
 
+def test_an_image_over_the_pixel_cap_is_refused_before_it_is_decoded(monkeypatch):
+    """A file can name a far bigger picture than it holds; the header alone decides."""
+    import core.image_read as image_read
+
+    monkeypatch.setattr(image_read, "MAX_READ_PIXELS", 40 * 30 - 1)
+    picture = _encoded(Image.new("RGB", (40, 30), (10, 10, 200)), "BMP")
+    parts, failures = _resolved(picture, "image/bmp")
+    assert [failure["reason"] for failure in failures] == ["image could not be loaded"]
+    assert len(parts) == 1 and parts[0]["text"].startswith("[ATTACHMENT UNAVAILABLE]")
+
+
+def test_a_format_outside_the_read_list_is_never_opened():
+    icon = _encoded(Image.new("RGB", (32, 32), (10, 10, 200)), "ICO")
+    parts, failures = _resolved(icon, "image/x-icon")
+    assert [failure["reason"] for failure in failures] == ["image could not be loaded"]
+
+
 def test_an_svg_is_reported_as_an_image_that_could_not_be_loaded():
     svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>'
     parts, failures = _resolved(svg, "image/svg+xml")
