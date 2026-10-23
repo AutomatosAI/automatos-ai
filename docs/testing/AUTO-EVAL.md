@@ -16,7 +16,7 @@ This applies to PRD-263 work only. CI jobs and Ralph loops stay out, and so does
 
 - The build session may also edit `compare-arms.py`, `rescore.py` and `arm-report.py`; create `make_split.py` and `split.json`; and run `replay.py`, `compare-arms.py`, `rescore.py`, `arm-report.py` and `lab.py` in fixture mode only (no backend request, no model call, no DB write).
 - The Lab driver may also run `phase.sh --reset-only`, `compare-arms.py --gate` and `arm-report.py`, and read `split.json`, the aggregate outputs under `runs/` and `auto-eval.jsonl` (for its gold scan only). The only thing it writes where improver sessions can read it is the accept/reject bit.
-- Set v2 rows may be authored by a row-author session Gerard names (never an improver session), and the build session may run the $0 rescore. The calibration runs are covered too; Gerard still launches every pass that spends, with his own `--max-spend` and `--cost-factor` (PRD-263 D4).
+- Set v2 rows may be authored by a row-author session Gerard names (never an improver session), and the build session may run the $0 rescore. The calibration runs are covered too; Gerard still launches every pass that spends; what it may spend is c1's own workspace budget (next section).
 - Checks that touch the local DB or a live session (the US-036 dry run, the US-041 planted rows, the US-076 lockdown session) stay Gerard's.
 
 ## Where it lives
@@ -47,16 +47,15 @@ It runs against the local stack in **c1** (`00000000-0000-0000-0000-0000000000c1
 
 Background writers move results between passes, so calibration and the Lab run on the **quiet stack**. Set `HEARTBEAT_ENABLED=false`, `RECIPE_SCHEDULER_ENABLED=false` and `COORDINATOR_ENABLED=false` together. With all three false, `main.py` does not start the unified scheduler. The scheduler is what runs the reconciler, the watch ticker, the memory jobs, the nightly EdgeBuilder (which starts whatever its own flag says), the Composio sync, agents' scheduled tasks, the mission coordinator and HARNESS.
 
-## Spending: the operator's limit and factor (PRD-263 D4)
+## Spending: c1's own workspace budget
 
-`replay.py` requires `--max-spend` (USD) and `--cost-factor`, and neither has a default. Without either, it exits before any request with "refusing to start: --max-spend and --cost-factor are required". No spend limit, price or cost factor is written into any of the tools.
+The test tools own no spend cap, cost factor, price, model or provider (Gerard, 23 Oct 2026; this replaces PRD-263 D4's per-run `--max-spend` and `--cost-factor`). c1 is a workspace like any customer's, so its spending is governed by its own workspace budget, set in **Command Center → Governance** (`plan_limits.budget`: a $ or token ceiling per day or per month). Each owner decides theirs; so does the operator for c1.
 
-- **Booked** is the sum of `llm_usage.total_cost` over every row in the pass window: every workspace and every request type, embeddings included.
-- **Metered** is booked × `--cost-factor`.
-- **True** is what the providers billed for the same window. The owner reads it from the provider consoles and records it beside calibration runs. That is how the factor is measured.
-- **The stop rule.** Before each row after the first, the run stops with "stopped: spend limit" when metered-so-far plus the largest per-row metered cost seen in the run would pass `--max-spend`. The launch line prints the factor in use.
-- **Unpriced usage stops the run.** This covers a usage row with tokens and a cost of 0, from any provider except the CLI subscription runtime (`claude_code`). The run either refuses to start (checked against the latest pass window) or stops, with "unpriced usage: <request type>/<model>". The platform books embeddings at $0 when it has no price for them, so a paid pass needs embedding prices first (PRD-263 §11-Q29).
-- **A night chain's pre-night eval** reads `NIGHT_MAX_SPEND` and `NIGHT_COST_FACTOR` from the local, never-committed `~/.automatos-analyst/harness-lab/operator.env`. `phase.sh <arm>` refuses with "refusing to start: night eval spend limit unset" without them.
+- **The check is the platform's own.** Before every row, `replay.py` asks the platform's budget check (`modules.policy.budget.check_budget`) whether c1's budget allows the next row, estimated at the largest row booked so far in the run. A "no" stops the pass with "stopped: workspace budget" and the platform's reason. A run refuses to start when the budget is already used up. With no budget set, nothing is capped, as for any workspace.
+- **Booked** is the sum of `llm_usage.total_cost` over every row in the pass window (every workspace and request type, embeddings included), priced by the platform's model registry: the same prices customers are billed at. A wrong price is fixed once in the registry, not in the tools.
+- **Which model and provider** come from the platform too: Auto as configured in c1's Settings, or a model named for a comparison, which the platform's registry resolves to the provider that serves it.
+- **Unpriced usage stops the run.** This covers a usage row with tokens and a cost of 0, except a subscription runtime (`llm_usage.tier` = `subscription`) and embeddings, which are allowed and reported (§11-Q29). The run either refuses to start (checked against the latest pass window) or stops, with "unpriced usage: <request type>/<model>".
+- **The Lab** asks the same check before each probe pass (`arm-report.py --budget --projected <usd>`), with the pass estimated from the booked cost per row-run.
 
 ## Passes and verified resets
 
@@ -141,7 +140,7 @@ At every fingerprint, each row's tool patterns (with a `:status` suffix stripped
 - The p90 turn latency.
 - The ATOM share, from each turn's `x-auto-complexity` header.
 - Embedding $.
-- Booked, factor and metered.
+- Booked $.
 
 ## The skill arm and the night preflight
 
@@ -215,7 +214,7 @@ There is one line per pass. The columns are:
 - claims backed (graded rows), ungraded, and claim errors;
 - tools, forbidden, owner-only and lane rates;
 - p50 latency and median tokens per turn;
-- booked $, factor and metered $;
+- booked $;
 - the fingerprint, VOID, and the run directory.
 
 Lines from before 20 Oct 2026 use the older columns. Their claims-backed figures came from a checker that counted an error as backed, so read them through `rescore.py`.
