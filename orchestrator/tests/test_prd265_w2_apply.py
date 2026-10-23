@@ -35,7 +35,9 @@ def _db():
 def _account(**overrides):
     base = dict(workspace_id="ws-1", customer_id="cus_1", subscription_id="sub_1",
                subscription_status="active", plan="pro", current_period_end=None,
-               credited_period_end=None, cancel_at_period_end=False, period_credits=0)
+               credited_period_start=None, credited_period_end=None, cancel_at_period_end=False,
+               period_credits=0, schedule_id=None, scheduled_plan=None, scheduled_at=None,
+               business_offer_until=None)
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -113,6 +115,37 @@ def test_period_paid_for_an_invoice_that_sells_no_plan_needs_review(monkeypatch)
     assert "in_1" in outcome.note
 
 
+def test_period_paid_for_the_scheduled_downgrade_clears_the_schedule(monkeypatch):
+    # PRD-265 W2 v2: once the invoice that pays for the scheduled plan lands, the
+    # downgrade has taken effect — nothing is left waiting for the period end.
+    account = _account(plan="pro", schedule_id="sub_sched_1", scheduled_plan="basic",
+                       scheduled_at=datetime.now(timezone.utc))
+    monkeypatch.setattr("services.billing.apply.resolve_account", lambda *a, **k: account)
+    monkeypatch.setattr("services.billing.apply.plan_for_prices", lambda price_ids: "basic")
+    monkeypatch.setattr("services.billing.apply.grant_period", lambda *a, **k: 0)
+    monkeypatch.setattr("services.plan_tiers.assign_plan", lambda *a, **k: None)
+    fact = f.PeriodPaid(customer_id="cus_1", invoice_id="in_1", subscription_id="sub_1",
+                        price_ids=("price_basic",), period_end=datetime.now(timezone.utc),
+                        payment_ref="pi_1", amount_cents=900)
+    apply_fact(_db(), fact, provider="stripe")
+    assert account.plan == "basic"
+    assert account.schedule_id is None and account.scheduled_plan is None and account.scheduled_at is None
+
+
+def test_period_paid_for_a_different_plan_than_scheduled_leaves_the_schedule(monkeypatch):
+    account = _account(plan="pro", schedule_id="sub_sched_1", scheduled_plan="basic",
+                       scheduled_at=datetime.now(timezone.utc))
+    monkeypatch.setattr("services.billing.apply.resolve_account", lambda *a, **k: account)
+    monkeypatch.setattr("services.billing.apply.plan_for_prices", lambda price_ids: "pro")
+    monkeypatch.setattr("services.billing.apply.grant_period", lambda *a, **k: 2000)
+    monkeypatch.setattr("services.plan_tiers.assign_plan", lambda *a, **k: None)
+    fact = f.PeriodPaid(customer_id="cus_1", invoice_id="in_1", subscription_id="sub_1",
+                        price_ids=("price_pro",), period_end=datetime.now(timezone.utc),
+                        payment_ref="pi_1", amount_cents=2900)
+    apply_fact(_db(), fact, provider="stripe")
+    assert account.schedule_id == "sub_sched_1"  # a renewal of the same plan: the downgrade still waits
+
+
 def test_period_paid_for_a_known_price_grants_credits_and_moves_the_plan(monkeypatch):
     account = _account(plan="basic")
     moved = []
@@ -164,6 +197,18 @@ def test_a_subscription_ending_moves_the_workspace_back_to_entry_and_notifies(mo
     assert account.plan == "basic"  # ENTRY_PLAN
     assert account.period_credits == 0
     assert outcome.notice.event_type == "billing_subscription_ended"
+
+
+def test_a_subscription_ending_clears_any_scheduled_downgrade(monkeypatch):
+    account = _account(subscription_status="active", plan="pro", schedule_id="sub_sched_1",
+                       scheduled_plan="basic", scheduled_at=datetime.now(timezone.utc))
+    monkeypatch.setattr("services.billing.apply.resolve_account", lambda *a, **k: account)
+    monkeypatch.setattr("services.credits.expiry.expire_monthly", lambda *a, **k: 0)
+    monkeypatch.setattr("services.plan_tiers.assign_plan", lambda *a, **k: None)
+    fact = f.SubscriptionChanged(customer_id="cus_1", subscription_id="sub_1", status="canceled",
+                                 price_ids=(), current_period_end=None, cancel_at_period_end=False)
+    on_subscription_changed(_db(), fact, "stripe")
+    assert account.schedule_id is None and account.scheduled_plan is None and account.scheduled_at is None
 
 
 def test_subscription_deleted_delegates_to_subscription_changed_as_canceled(monkeypatch):

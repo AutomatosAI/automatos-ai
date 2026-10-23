@@ -4,6 +4,9 @@
 auth header, the pinned ``Stripe-Version``, and a form body; it retries a POST
 only when it carries an idempotency key, retries a GET unconditionally, and
 turns a 4xx into a :class:`StripeError` carrying Stripe's own message and code.
+``fetch_file`` hands an invoice PDF to our server (never the browser to Stripe):
+only an ``https://*.stripe.com`` host, before and after any redirect, at most
+``max_bytes``, and never carrying the secret key (the link is itself signed).
 """
 from __future__ import annotations
 
@@ -194,3 +197,79 @@ def test_stripe_api_factory_raises_not_configured_without_a_key(monkeypatch):
     monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "")
     with pytest.raises(StripeNotConfigured):
         stripe_api()
+
+
+# --------------------------------------------------------------------------- #
+# fetch_file — only Stripe's own https hosts, before and after a redirect
+# --------------------------------------------------------------------------- #
+
+
+FILE_URL = "https://files.stripe.com/v1/files/file_1/contents"
+
+
+def test_fetch_file_rejects_a_plain_http_link():
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - never reached
+        raise AssertionError("no request should be sent for a rejected url")
+
+    with pytest.raises(StripeError):
+        _api(handler).fetch_file("http://files.stripe.com/v1/files/file_1/contents", max_bytes=1024)
+
+
+@pytest.mark.parametrize("host", [
+    "evilstripe.com",
+    "stripe.com.evil.com",
+    "stripe.com.attacker.test",
+])
+def test_fetch_file_rejects_a_lookalike_host(host):
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - never reached
+        raise AssertionError("no request should be sent for a rejected url")
+
+    with pytest.raises(StripeError):
+        _api(handler).fetch_file(f"https://{host}/v1/files/file_1/contents", max_bytes=1024)
+
+
+def test_fetch_file_follows_a_redirect_that_stays_on_stripe():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "files.stripe.com":
+            return httpx.Response(302, headers={"Location": "https://files-2.stripe.com/v1/files/file_1/contents"})
+        return httpx.Response(200, content=b"%PDF-1.4 fake invoice bytes")
+
+    content = _api(handler).fetch_file(FILE_URL, max_bytes=1024)
+    assert content == b"%PDF-1.4 fake invoice bytes"
+
+
+def test_fetch_file_rejects_a_redirect_that_leaves_stripe():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "files.stripe.com":
+            return httpx.Response(302, headers={"Location": "https://attacker.test/steal"})
+        return httpx.Response(200, content=b"stolen")
+
+    with pytest.raises(StripeError):
+        _api(handler).fetch_file(FILE_URL, max_bytes=1024)
+
+
+def test_fetch_file_rejects_a_file_larger_than_the_cap():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * 2048)
+
+    with pytest.raises(StripeError):
+        _api(handler).fetch_file(FILE_URL, max_bytes=1024)
+
+
+def test_fetch_file_raises_on_an_error_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, content=b"not found")
+
+    with pytest.raises(StripeError):
+        _api(handler).fetch_file(FILE_URL, max_bytes=1024)
+
+
+def test_fetch_file_never_sends_the_authorization_header_to_the_file_host():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"%PDF-1.4")
+
+    _api(handler).fetch_file(FILE_URL, max_bytes=1024)
+    assert all("authorization" not in r.headers for r in seen)

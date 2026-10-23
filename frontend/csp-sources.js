@@ -1,6 +1,7 @@
 /**
  * Build-time sources for the Content-Security-Policy in next.config.js: the media origins (F237,
- * below) and Clerk's hosts (clerkFrontendApiOrigin and the protection hosts, further down).
+ * below), Clerk's hosts (clerkFrontendApiOrigin and the protection hosts, further down) and
+ * Stripe's (PRD-265 W2, at the end).
  *
  * F237 (PRD-251B): the origins the browser may load media from. Socials thumbnails and a post's media are presigned links to object storage
  * (a MinIO host locally, AWS S3 in SaaS), so img-src and media-src must allow its public origin.
@@ -53,4 +54,26 @@ function clerkFrontendApiOrigin(publishableKey) {
   return FRONTEND_API_HOST.test(host) ? `https://${host}` : ''
 }
 
-module.exports = { mediaOrigins, clerkFrontendApiOrigin, CLERK_PROTECT_SOURCE, CLERK_PROTECT_CONNECT_SOURCE }
+/**
+ * PRD-265 W2: payments happen inside Settings → Billing. Stripe's card and address fields are
+ * iframes in our own form, loaded by Stripe.js; Link (Stripe's saved-card wallet) adds its own
+ * frames, calls and card art; and a bank's 3-D Secure check is framed from hooks.stripe.com.
+ * These are the sources Stripe's CSP guide lists (docs.stripe.com/security/guide#content-security-policy),
+ * maps.googleapis.com being the address field's autocomplete. Fixed hosts, no wildcard beyond
+ * Stripe's and Link's own subdomains.
+ */
+const LINK_SOURCES = ['https://link.com', 'https://*.link.com']
+const STRIPE_SCRIPT_SOURCES = ['https://js.stripe.com', 'https://*.js.stripe.com', 'https://maps.googleapis.com']
+const STRIPE_FRAME_SOURCES = ['https://js.stripe.com', 'https://*.js.stripe.com', 'https://hooks.stripe.com', ...LINK_SOURCES]
+const STRIPE_CONNECT_SOURCES = ['https://api.stripe.com', 'https://maps.googleapis.com', ...LINK_SOURCES]
+const STRIPE_IMG_SOURCES = ['https://*.link.com']
+
+/** Stripe's sources for each directive, space-separated, for next.config.js. */
+const STRIPE_CSP = Object.freeze({
+  script: STRIPE_SCRIPT_SOURCES.join(' '),
+  frame: STRIPE_FRAME_SOURCES.join(' '),
+  connect: STRIPE_CONNECT_SOURCES.join(' '),
+  img: STRIPE_IMG_SOURCES.join(' '),
+})
+
+module.exports = { mediaOrigins, clerkFrontendApiOrigin, CLERK_PROTECT_SOURCE, CLERK_PROTECT_CONNECT_SOURCE, STRIPE_CSP }

@@ -1,14 +1,17 @@
 /**
- * PRD-265 US-011 — Settings → Billing, in each state the API can put it in.
+ * PRD-265 US-011 / W2 — Settings → Billing, in each state the API can put it in.
  *
  * - beta, ordinary member: the facts-sheet beta copy, no credit amounts, no buttons, no ledger;
- * - beta, platform admin: checkout buttons for Own keys and Pro, Business offers contact only;
+ * - beta, platform admin: buttons for Own keys and Pro, Business offers contact only;
+ * - Business offered by a platform admin: buyable here, "Offered to you until <date>";
  * - billing open, a Pro subscriber who cancelled: "Ends on <date>", "Current plan" disabled,
- *   monthly credits per plan, no beta sentences, Manage payment and Buy a top-up;
+ *   monthly credits per plan, no beta sentences, Resume plan, the Payment section and Buy a
+ *   top-up; there is no "Manage payment" (no Stripe portal) anywhere;
  * - billing open, renewal failed: the payment-failed notice;
  * - `?plan=` highlights that plan; the balance by bucket and the paused state.
  *
- * A real QueryClient; apiClient, the edition flag, the router and sonner are stand-ins.
+ * A real QueryClient; apiClient, the edition flag, the router, sonner and Stripe's modules are
+ * stand-ins.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, within } from '@testing-library/react'
@@ -17,7 +20,10 @@ import type { BillingPlans } from '@/hooks/use-billing-plans'
 import type { BillingSummary } from '@/hooks/use-billing-summary'
 import {
   BETA_ADMIN,
+  BETA_ADMIN_OFFERED,
   BETA_MEMBER,
+  OFFER_EXPIRED,
+  OFFER_UNTIL,
   OPEN_PRO_CANCELLING,
   OPEN_PRO_PAST_DUE,
   PAUSED_SUMMARY,
@@ -35,7 +41,7 @@ const { requestMock, postMock, nav, toastMock } = vi.hoisted(() => ({
   toastMock: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
-vi.mock('@/lib/api-client', () => ({ apiClient: { request: requestMock, post: postMock } }))
+vi.mock('@/lib/api-client', () => ({ apiClient: { request: requestMock, post: postMock, requestBlob: vi.fn() } }))
 vi.mock('@/lib/auth-edition', () => ({ isSaaS: true, isLocal: false }))
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: nav.replace, push: vi.fn() }),
@@ -43,6 +49,9 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/settings',
 }))
 vi.mock('sonner', () => ({ toast: toastMock }))
+vi.mock('@stripe/stripe-js/pure', async () => (await import('./stripe-mocks')).stripeJsModule)
+vi.mock('@stripe/react-stripe-js', async () => (await import('./stripe-mocks')).reactStripeModule)
+vi.mock('@stripe/react-stripe-js/checkout', async () => (await import('./stripe-mocks')).checkoutModule)
 
 import { BillingTab } from '../billing-tab'
 import { CONTACT_URL } from '../plan-copy'
@@ -98,9 +107,30 @@ describe('Billing tab (PRD-265 US-011)', () => {
     expect(screen.getByTestId('billing-top-up')).toHaveTextContent('1,000 credits for $10, valid 12 months')
     expect(screen.getByTestId('billing-top-up')).toHaveTextContent('Top-ups need an active Pro or Business subscription.')
     expect(screen.queryByRole('button', { name: 'Buy a top-up' })).toBeNull()
-    // No billing account yet: no portal.
-    expect(screen.queryByRole('button', { name: 'Manage payment' })).toBeNull()
+    // No billing account yet: no card or invoices to show.
+    expect(screen.queryByTestId('billing-payment')).toBeNull()
     expect(await screen.findByTestId('billing-ledger-table')).toBeInTheDocument()
+  })
+
+  it('Business offered by a platform admin: buyable here, and says until when', async () => {
+    serve(BETA_ADMIN_OFFERED)
+    renderWithClient(<BillingTab />)
+
+    const business = await screen.findByTestId('billing-plan-business')
+    expect(within(business).getByRole('button', { name: 'Choose Business' })).toBeEnabled()
+    expect(within(business).getByText(`Offered to you until ${formatAbsoluteDate(OFFER_UNTIL)}.`)).toBeInTheDocument()
+    expect(within(business).queryByRole('link', { name: 'Contact Automatos' })).toBeNull()
+    expect(within(business).queryByText(/By invite/)).toBeNull()
+  })
+
+  it('an offer that has run out: Business is contact-only again', async () => {
+    serve({ ...BETA_ADMIN_OFFERED, business_offer_until: OFFER_EXPIRED })
+    renderWithClient(<BillingTab />)
+
+    const business = await screen.findByTestId('billing-plan-business')
+    expect(within(business).queryByRole('button')).toBeNull()
+    expect(within(business).getByRole('link', { name: 'Contact Automatos' })).toBeInTheDocument()
+    expect(within(business).queryByText(/Offered to you/)).toBeNull()
   })
 
   it('billing open, Pro subscriber who cancelled: ends on the date, current plan disabled, credits per plan', async () => {
@@ -115,7 +145,9 @@ describe('Billing tab (PRD-265 US-011)', () => {
     expect(within(planCard('business')).getByText(/By invite: contact Automatos\./)).toBeInTheDocument()
     expect(screen.queryByText(/Beta pricing/)).toBeNull()
     expect(screen.getByText(/A credit is one US cent of AI usage at Automatos prices\./)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Manage payment' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Manage payment' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Resume plan' })).toBeEnabled()
+    expect(screen.getByTestId('billing-payment')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Buy a top-up' })).toBeEnabled()
     expect(within(screen.getByTestId('billing-current-plan')).getByText('Pro')).toBeInTheDocument()
     expect(within(screen.getByTestId('billing-current-plan')).getByText('$29 a month')).toBeInTheDocument()
@@ -128,7 +160,8 @@ describe('Billing tab (PRD-265 US-011)', () => {
     const notice = await screen.findByTestId('billing-subscription-notice')
     expect(notice).toHaveTextContent(PAST_DUE_NOTICE)
     expect(notice).toHaveAttribute('role', 'alert')
-    expect(screen.getByRole('button', { name: 'Manage payment' })).toBeInTheDocument()
+    // "Update your card": the card form is right here in the tab.
+    expect(await screen.findByRole('button', { name: /Change card|Add a card/ })).toBeInTheDocument()
   })
 
   it('billing open, a member who cannot manage: no buttons, and says who can', async () => {

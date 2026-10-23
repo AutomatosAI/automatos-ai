@@ -1,20 +1,21 @@
 'use client'
 
 /**
- * PRD-265 US-011 — the workspace's plan as it stands: name and price, the subscription's state
- * ("Payment failed, Stripe is retrying — update your card", "Ends on …", "Active · renews on …"),
- * and "Manage payment" (Stripe's portal: invoices, card, cancel) for an owner or admin once the
- * workspace has a billing account. The credits by bucket sit underneath (./credit-balance.tsx).
+ * PRD-265 US-011 / W2 — the workspace's plan as it stands: name and price, the subscription's
+ * state ("Payment failed, Stripe is retrying — update your card", "Ends on …", "Active · renews
+ * on …"), a downgrade waiting for the period end (./scheduled-change-notice.tsx), and, for an
+ * owner or admin, "Cancel plan" / "Resume plan" (./cancel-plan.tsx). The credits by bucket sit
+ * underneath (./credit-balance.tsx). The card and the invoices are in the Payment section
+ * (./payment-section.tsx).
  */
-import { Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { isLeaving, useBillingPortal } from '@/hooks/use-billing-actions'
 import type { BillingPlans } from '@/hooks/use-billing-plans'
 import type { BillingSummary } from '@/hooks/use-billing-summary'
 import { subscriptionNotice, type NoticeTone } from './billing-format'
+import { CancelPlan } from './cancel-plan'
 import { CreditBalance } from './credit-balance'
 import { planPriceLabel } from './plan-copy'
+import { ScheduledChangeNotice } from './scheduled-change-notice'
 
 const NOTICE_CLASSES: Readonly<Record<NoticeTone, string>> = {
   ok: 'text-sm text-foreground',
@@ -26,21 +27,6 @@ const NO_PLAN = 'No plan'
 interface CurrentPlanCardProps {
   readonly plans: BillingPlans
   readonly summary: BillingSummary | undefined
-}
-
-function ManagePaymentButton({ plans }: { plans: BillingPlans }) {
-  const portal = useBillingPortal()
-  if (!plans.can_manage || !plans.subscription.has_billing_account) return null
-  const leaving = isLeaving(portal)
-  return (
-    <div className="flex flex-col items-start gap-1 sm:items-end">
-      <Button type="button" size="sm" variant="outline" disabled={leaving} onClick={() => portal.mutate()}>
-        {leaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
-        Manage payment
-      </Button>
-      <span className="text-xs text-muted-foreground">Invoices, card and cancellation</span>
-    </div>
-  )
 }
 
 export function CurrentPlanCard({ plans, summary }: CurrentPlanCardProps) {
@@ -57,7 +43,7 @@ export function CurrentPlanCard({ plans, summary }: CurrentPlanCardProps) {
           <p className="text-xl font-semibold text-foreground">{name}</p>
           {plan && <p className="text-sm text-muted-foreground">{planPriceLabel(plan)}</p>}
         </div>
-        <ManagePaymentButton plans={plans} />
+        <CancelPlan plans={plans} />
       </div>
       <p
         data-testid="billing-subscription-notice"
@@ -66,6 +52,7 @@ export function CurrentPlanCard({ plans, summary }: CurrentPlanCardProps) {
       >
         {notice.text}
       </p>
+      <ScheduledChangeNotice plans={plans} />
       {summary && <CreditBalance summary={summary} billingOpen={plans.billing_open} />}
     </Card>
   )

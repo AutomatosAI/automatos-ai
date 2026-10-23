@@ -78,6 +78,7 @@ from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Pl
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
 from api.admin_credits import router as admin_credits_router  # PRD-265 US-007: admin credit grants
 from api.billing import router as billing_router  # PRD-265 US-008: balance, status, ledger
+from api.billing_manage import router as billing_manage_router  # PRD-265 W2: card, invoices, plan changes in-app
 from api.billing_webhooks import STRIPE_WEBHOOK_MAX_BYTES, STRIPE_WEBHOOK_ROUTE  # PRD-265: its body cap
 from api.billing_webhooks import router as billing_webhooks_router  # PRD-265 US-010: Stripe webhook (no auth)
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
@@ -1281,6 +1282,7 @@ app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
 app.include_router(admin_credits_router)  # PRD-265 US-007: admin credit grants
 app.include_router(billing_router)  # PRD-265 US-008: balance, status, ledger
 app.include_router(billing_webhooks_router)  # PRD-265 US-010: Stripe webhook (signature-checked, no auth)
+app.include_router(billing_manage_router)  # PRD-265 W2: card, invoices, cancel, plan change — all in Studio
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)

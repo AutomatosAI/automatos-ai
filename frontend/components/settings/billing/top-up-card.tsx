@@ -1,17 +1,15 @@
 'use client'
 
 /**
- * PRD-265 US-011 — "Top up": the one-off credit pack from the plans answer's `topup` block
- * ("1,000 credits for $10, valid 12 months"). Buying POSTs `{kind: 'topup'}` to the checkout
- * route and follows the Stripe address. The button shows only when the workspace can take a
- * top-up (an active subscription on a plan with platform AI), the caller is an owner or admin,
- * and checkout is available; otherwise the card says why not. The Billing tab mounts the card
- * only once billing is open, or for a platform admin testing checkout before then.
+ * PRD-265 US-011 / W2 — "Top up": the one-off credit pack from the plans answer's `topup`
+ * block ("1,000 credits for $10, valid 12 months"). "Buy a top-up" opens the tab's own payment
+ * form for `{kind: 'topup'}` (`onBuy`, ./checkout-panel.tsx). The button shows only when the
+ * workspace can take a top-up (an active subscription on a plan with platform AI), the caller
+ * is an owner or admin, and paying is available; otherwise the card says why not. The Billing
+ * tab mounts the card only once billing is open, or for a platform admin testing before then.
  */
-import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { isLeaving, useBillingCheckout } from '@/hooks/use-billing-actions'
 import type { BillingPlans, BillingTopUpOffer } from '@/hooks/use-billing-plans'
 import { formatCredits, formatUsd, validMonths } from './billing-format'
 import { CHECKOUT_CLOSED_NOTE, OWNER_ONLY_NOTE } from './plan-copy'
@@ -36,9 +34,7 @@ export function topUpNote(plans: BillingPlans): string {
   return plans.checkout_available ? TOP_UP_SPEND_NOTE : CHECKOUT_CLOSED_NOTE
 }
 
-export function TopUpCard({ plans }: { plans: BillingPlans }) {
-  const checkout = useBillingCheckout()
-  const leaving = isLeaving(checkout)
+export function TopUpCard({ plans, onBuy }: { plans: BillingPlans; onBuy: () => void }) {
   const canBuy = plans.topup.available && plans.can_manage && plans.checkout_available
 
   return (
@@ -50,8 +46,7 @@ export function TopUpCard({ plans }: { plans: BillingPlans }) {
           <p className="text-sm text-muted-foreground">{topUpNote(plans)}</p>
         </div>
         {canBuy && (
-          <Button type="button" size="sm" disabled={leaving} onClick={() => checkout.mutate({ kind: 'topup' })}>
-            {leaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+          <Button type="button" size="sm" onClick={onBuy}>
             Buy a top-up
           </Button>
         )}

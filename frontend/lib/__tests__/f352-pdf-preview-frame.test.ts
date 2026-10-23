@@ -25,7 +25,7 @@ async function directives(): Promise<Record<string, string>> {
 describe('F352: a PDF preview can be framed as a blob: URL', () => {
   it('lets the app frame a blob: URL it made, beside its existing frame sources', async () => {
     expect((await directives())['frame-src']).toBe(
-      "frame-src 'self' blob: https://*.clerk.accounts.dev https://*.protect.clerk.com https://challenges.cloudflare.com",
+      "frame-src 'self' blob: https://*.clerk.accounts.dev https://*.protect.clerk.com https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com",
     )
   })
 

@@ -1,10 +1,13 @@
 /**
- * PRD-265 US-011 — what a billing call's failure says to the person who clicked.
+ * PRD-265 US-011 / W2 — what a billing call's failure says to the person who clicked.
  *
  * The billing routes refuse in plain sentences (FastAPI `{"detail": "Paid plans aren't on
  * sale yet."}`), so a string `detail` is shown as it is. Anything else (a structured detail,
- * a server error, a network failure) gets the surface's own fallback: the toast never shows
+ * a server error, a network failure) gets the surface's own fallback: the message never shows
  * raw JSON, a status line or a stack.
+ *
+ * Stripe.js answers a declined card or a failed check with an error whose `message` is
+ * written for the buyer ("Your card was declined."), so that is shown as it is too.
  */
 import type { ApiHttpError } from '@/lib/api-client'
 
@@ -20,12 +23,8 @@ export function billingErrorMessage(error: unknown, fallback: string): string {
   return typeof detail === 'string' && detail.trim() ? detail.trim() : fallback
 }
 
-/** Only an https address is followed: Stripe's checkout and portal pages are https. */
-export function isHttpsUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  try {
-    return new URL(value).protocol === 'https:'
-  } catch {
-    return false
-  }
+/** Stripe's own sentence for the buyer ("Your card was declined."), else `fallback`. */
+export function stripeErrorMessage(error: { message?: unknown } | null | undefined, fallback: string): string {
+  const message = error?.message
+  return typeof message === 'string' && message.trim() ? message.trim() : fallback
 }

@@ -18,6 +18,7 @@ const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD',
 const BUCKET_LABELS: Readonly<Record<string, string>> = { trial: 'Trial', monthly: 'Monthly', topup: 'Top-up' }
 const DAYS_PER_YEAR = 365
 const MONTHS_PER_YEAR = 12
+const CENTS_PER_UNIT = 100
 
 export type NoticeTone = 'ok' | 'warning' | 'muted'
 
@@ -44,6 +45,16 @@ export function signedCredits(credits: number): string {
 /** "$29". */
 export function formatUsd(amount: number): string {
   return USD.format(amount)
+}
+
+/** "$13.50" for 1350 cents in "usd"; any ISO currency Stripe bills in. */
+export function formatMoney(cents: number, currency: string): string {
+  const code = (currency || 'usd').toUpperCase()
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(cents / CENTS_PER_UNIT)
+  } catch {
+    return `${(cents / CENTS_PER_UNIT).toFixed(2)} ${code}`
+  }
 }
 
 /** "23 Nov 2026" (in the viewer's locale); "—" when there is no date. */

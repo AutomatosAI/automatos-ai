@@ -6,9 +6,10 @@ audit event. A positive amount grants, a negative one takes back; the trial buck
 is the default, because trial credits pay for platform AI on every plan (the beta
 runs on trial credits and admin grants until billing opens, PRD-265 §10).
 
-``POST /api/admin/workspaces/{workspace_id}/business-invite`` returns a Business
-checkout link for that one workspace (valid just under 24 hours): Business is by
-invite, never self-serve, so this link is the only way to buy it (PRD-265 US-007).
+``POST /api/admin/workspaces/{workspace_id}/business-invite`` offers Business to that
+one workspace for ``BUSINESS_OFFER_DAYS``: its owner then buys it on their own
+Billing tab, inside Studio, and is told so by a notification. Business is by invite,
+never self-serve, so this offer is the only way to buy it (PRD-265 US-007).
 
 It sits beside the operator console's other workspace routes
 (``api/admin_workspaces.py``, same prefix) and has the same gate: platform admins
@@ -107,15 +108,20 @@ def create_business_invite(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """A Business checkout link for one workspace, to send to its owner. Platform admin only."""
+    """Offer Business to one workspace; its owner buys it on their Billing tab. Platform admin only."""
     _require_platform_admin(ctx)
     from api.billing import billing_call
-    from services.billing.checkout import business_invite
+    from services.billing.checkout import offer_business
+    from services.billing.notices import NOTICE_BUSINESS_OFFERED, Notice, send_notice
 
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if workspace is None or getattr(workspace, "deleted_at", None):
         raise HTTPException(status_code=404, detail="Workspace not found")
-    invite = billing_call(lambda provider: business_invite(db, provider, workspace))
-    logger.info("[billing] admin %s issued a Business checkout link for workspace %s",
-                getattr(ctx.user, "email", "?"), workspace_id)
-    return {"workspace_id": str(workspace_id), **invite}
+    until = billing_call(lambda provider: offer_business(db, provider, workspace))
+    send_notice(db, workspace_id, Notice(
+        NOTICE_BUSINESS_OFFERED, "Business is available to you",
+        f"Automatos has offered this workspace the Business plan until {until:%d %b %Y}. "
+        "Subscribe on the Billing tab in Settings.", status="info"))
+    logger.info("[billing] admin %s offered Business to workspace %s until %s",
+                getattr(ctx.user, "email", "?"), workspace_id, until.isoformat())
+    return {"workspace_id": str(workspace_id), "business_offer_until": until.isoformat()}

@@ -5,7 +5,9 @@
   credits were granted (``credited_period_end`` + ``period_credits``, so an upgrade
   mid-period grants only the difference and a renewal grants a fresh month).
   ``provider_account`` records which provider account the customer lives in, so a
-  later move to a company's account can tell old customers from new.
+  later move to a company's account can tell old customers from new. A downgrade
+  waiting for the period end is ``schedule_id`` + ``scheduled_plan`` +
+  ``scheduled_at``; ``business_offer_until`` is a platform admin's Business offer.
 - ``billing_events``: every verified webhook, stored before it is processed,
   unique per ``(provider, event_id)`` so a redelivery changes nothing. A row that
   granted credits keeps ``payment_ref`` (the payment that paid) and
@@ -58,6 +60,12 @@ class BillingAccount(Base):
     credited_period_start = Column(DateTime(timezone=True), nullable=True)
     credited_period_end = Column(DateTime(timezone=True), nullable=True)
     period_credits = Column(Integer, nullable=False, default=0, server_default="0")
+    # A downgrade waiting for the period end (a Stripe subscription schedule).
+    schedule_id = Column(String(64), nullable=True)
+    scheduled_plan = Column(String(32), nullable=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    # A platform admin offered Business to this workspace until then (by invite).
+    business_offer_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
