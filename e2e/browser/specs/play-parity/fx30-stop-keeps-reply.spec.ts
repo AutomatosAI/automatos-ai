@@ -3,11 +3,12 @@ import { recordCancels } from '../../support/chat-stream'
 import { ask, autoReplies, openPlayChat, readPlayTurns } from '../../support/play-chat'
 import { describeParity, PARITY_TAG } from '../../support/play-parity'
 
-// PRD-261 A-17b (@parity), P260-FX-30 (decision F4): Stop keeps what Auto had written, under builtin
-// Play and the installed package. The first reply ('partial') streams its words and stays open;
-// Stop cancels the turn on the server (POST /api/chat/{id}/cancel, answered here), and the reply
-// stays with its words and "You stopped this answer." (components/play/chat/auto-reply.tsx
-// STOPPED_NOTICE). The next message streams a new reply under it, and the stopped one stays.
+// PRD-261 A-17b (@parity), P260-FX-30 (decision F4): Stop keeps what Auto had written, under the
+// installed package (A-19f4: since W-A8 the only Play). The first reply ('partial') streams its
+// words and stays open; Stop cancels the turn on the server (POST /api/chat/{id}/cancel, answered
+// here), and the reply stays with its words and "You stopped this answer." (the kit's
+// themes/play/src/components/play/chat/auto-reply.tsx STOPPED_NOTICE). The next message streams a
+// new reply under it, and the stopped one stays.
 
 const ASK = 'Compare these three laptops for me'
 const ASK_AGAIN = 'Just give me the shortlist'
