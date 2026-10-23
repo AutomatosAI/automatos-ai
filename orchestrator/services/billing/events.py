@@ -15,7 +15,6 @@ fresh balance-alert check, so a top-up clears a "running low" state at once.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any
@@ -70,21 +69,18 @@ def _mark_failed(db: Any, event: WebhookEvent, error: BaseException) -> None:
 
 
 def _after_commit(db: Any, outcome: Outcome) -> None:
-    from core.services.notification_dispatcher import NotificationDispatcher
+    from services.billing.notices import send_notice
     from services.credits.alerts import check_alerts
 
     if not outcome.workspace_id:
         return
     try:
         check_alerts(db, str(outcome.workspace_id))
-        if outcome.notice is not None:
-            asyncio.run(NotificationDispatcher(db, str(outcome.workspace_id)).dispatch(
-                event_type=outcome.notice.event_type, title=outcome.notice.title,
-                message=outcome.notice.message, status="warning",
-            ))
-    except Exception:  # noqa: BLE001 — the payment is settled; a notice that can't be sent never undoes it
+    except Exception:  # noqa: BLE001 — the payment is settled; an alert that can't be sent never undoes it
         db.rollback()
-        logger.exception("[billing] follow-up for workspace %s not sent", outcome.workspace_id)
+        logger.exception("[billing] balance alert for workspace %s not checked", outcome.workspace_id)
+    if outcome.notice is not None:
+        send_notice(db, outcome.workspace_id, outcome.notice)
 
 
 def process(db: Any, event: WebhookEvent, provider: Any) -> str:

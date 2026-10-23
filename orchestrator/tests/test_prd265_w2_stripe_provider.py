@@ -1,36 +1,38 @@
-"""PRD-265 W2 — ``StripeProvider`` (``services/billing/stripe_provider.py``).
+"""PRD-265 W2 v2 — ``StripeProvider`` (``services/billing/stripe_provider.py``).
 
 ``parse_webhook`` checks the signature before anything else is trusted, then
-turns the raw body into a :class:`WebhookEvent`. ``checkout_params`` is Stripe
-Checkout's own request shape, pure. ``portal_link`` with a :class:`PlanChange`
-reads the subscription's item id before asking Stripe to open the confirm page.
+turns the raw body into a :class:`WebhookEvent`. ``checkout_params`` is the
+in-page Checkout Session request shape, pure: cards never leave Studio
+(``ui_mode=elements``), so there is no success/cancel URL, no consent
+collection and no expiry — only ``return_url``, used by a redirect-based
+method, never a card. There is no portal any more: the constructor takes no
+``portal_configuration``.
 """
 from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
 
 import httpx
 import pytest
 
 from services.billing.facts import WebhookEvent
-from services.billing.provider import KIND_PLAN, KIND_TOPUP, CheckoutRequest, PlanChange
+from services.billing.provider import KIND_PLAN, KIND_TOPUP, CheckoutRequest, CheckoutSession
 from services.billing.stripe_api import StripeApi
-from services.billing.stripe_provider import StripeProvider, checkout_params
+from services.billing.stripe_provider import BILLING_MODE, UI_MODE, StripeProvider, checkout_params
 from services.billing.stripe_signature import SignatureError, expected_signature
 
-SECRET = "whsec_test"
+SECRET = "whsec_t1"
 
 
 def _api(handler) -> StripeApi:
-    return StripeApi("sk_test", api_version="2025-03-31.basil", timeout=5.0,
+    return StripeApi("sk_test_1", api_version="2026-09-30.endive", timeout=5.0,
                      transport=httpx.MockTransport(handler), sleep=lambda s: None)
 
 
-def _provider(handler=None, **kwargs) -> StripeProvider:
+def _provider(handler=None) -> StripeProvider:
     handler = handler or (lambda request: httpx.Response(200, json={}))
-    return StripeProvider(_api(handler), webhook_secret=SECRET, tolerance_seconds=300, **kwargs)
+    return StripeProvider(_api(handler), webhook_secret=SECRET, tolerance_seconds=300)
 
 
 def _signed(body: dict) -> tuple[bytes, str]:
@@ -73,15 +75,28 @@ def test_parse_webhook_with_a_bad_signature_raises_signature_error():
 
 def _request(**overrides) -> CheckoutRequest:
     base = dict(workspace_id="ws-1", customer_id="cus_1", kind=KIND_PLAN, price_id="price_pro",
-               success_url="https://app/success", cancel_url="https://app/cancel")
+               return_url="https://app.automatos.ai/settings?tab=billing&checkout=return")
     base.update(overrides)
     return CheckoutRequest(**base)
 
 
-def test_checkout_params_for_a_plan_is_a_subscription_with_metadata_on_the_subscription():
+def test_checkout_params_is_an_in_page_elements_session_with_a_return_url():
+    params = checkout_params(_request())
+    assert params["ui_mode"] == UI_MODE == "elements"
+    assert params["return_url"] == "https://app.automatos.ai/settings?tab=billing&checkout=return"
+
+
+def test_checkout_params_never_carries_hosted_checkout_fields():
+    params = checkout_params(_request(metadata={"workspace_id": "ws-1"}))
+    for field in ("success_url", "cancel_url", "consent_collection", "custom_text", "expires_at"):
+        assert field not in params
+
+
+def test_checkout_params_for_a_plan_is_a_subscription_in_classic_billing_mode():
     params = checkout_params(_request(metadata={"workspace_id": "ws-1"}))
     assert params["mode"] == "subscription"
     assert params["subscription_data"]["metadata"] == {"workspace_id": "ws-1"}
+    assert params["subscription_data"]["billing_mode"] == {"type": BILLING_MODE} == {"type": "classic"}
     assert "invoice_creation" not in params
     assert "payment_intent_data" not in params
 
@@ -101,72 +116,41 @@ def test_checkout_params_always_sets_tax_and_address_collection():
     assert params["customer_update"] == {"address": "auto", "name": "auto"}
     assert params["billing_address_collection"] == "required"
     assert params["client_reference_id"] == "ws-1"
-
-
-def test_checkout_params_adds_consent_text_only_when_given():
-    with_consent = checkout_params(_request(consent_text="You may withdraw consent at any time."))
-    assert with_consent["consent_collection"] == {"terms_of_service": "required"}
-    assert with_consent["custom_text"]["terms_of_service_acceptance"]["message"] == (
-        "You may withdraw consent at any time.")
-    without_consent = checkout_params(_request())
-    assert "consent_collection" not in without_consent
-    assert "custom_text" not in without_consent
-
-
-def test_checkout_params_sets_expires_at_as_a_unix_int_when_given():
-    expires = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
-    params = checkout_params(_request(expires_at=expires))
-    assert params["expires_at"] == int(expires.timestamp())
-    assert "expires_at" not in checkout_params(_request())
+    assert params["line_items"] == [{"price": "price_pro", "quantity": 1}]
 
 
 # --------------------------------------------------------------------------- #
-# portal_link
+# create_checkout
 # --------------------------------------------------------------------------- #
 
 
-def test_portal_link_with_a_plan_change_gets_the_subscription_then_sends_the_update_confirm_flow():
+def test_create_checkout_returns_the_sessions_client_secret():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "cs_1", "client_secret": "cs_1_secret_abc"})
+
+    session = _provider(handler).create_checkout(_request())
+    assert session == CheckoutSession(session_id="cs_1", client_secret="cs_1_secret_abc")
+
+
+def test_create_checkout_posts_to_the_checkout_sessions_endpoint():
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        if request.method == "GET":
-            return httpx.Response(200, json={"items": {"data": [{"id": "si_1"}]}})
-        return httpx.Response(200, json={"url": "https://billing.stripe.com/session/1"})
+        return httpx.Response(200, json={"id": "cs_1", "client_secret": "cs_1_secret"})
 
-    change = PlanChange(subscription_id="sub_1", price_id="price_pro")
-    url = _provider(handler).portal_link(customer_id="cus_1", return_url="https://app/return", change=change)
-    assert url == "https://billing.stripe.com/session/1"
-    get_request, post_request = seen
-    assert get_request.method == "GET" and "/v1/subscriptions/sub_1" in str(get_request.url)
-    body = post_request.content.decode()
-    assert "flow_data%5Btype%5D=subscription_update_confirm" in body
-    assert "si_1" in body and "price_pro" in body
+    _provider(handler).create_checkout(_request())
+    (request,) = seen
+    assert request.method == "POST" and request.url.path == "/v1/checkout/sessions"
 
 
-def test_portal_link_with_a_malformed_subscription_id_raises_before_any_http_call():
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json={})
-
-    change = PlanChange(subscription_id="not-a-stripe-id", price_id="price_pro")
-    with pytest.raises(ValueError):
-        _provider(handler).portal_link(customer_id="cus_1", return_url="https://app/return", change=change)
-    assert seen == []
+# --------------------------------------------------------------------------- #
+# the constructor takes no portal configuration — there is no portal
+# --------------------------------------------------------------------------- #
 
 
-def test_portal_link_sends_configuration_only_when_configured():
-    seen = []
+def test_the_constructor_has_no_portal_configuration_parameter():
+    import inspect
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json={"url": "https://billing.stripe.com/session/1"})
-
-    _provider(handler, portal_configuration="bpc_1").portal_link(customer_id="cus_1", return_url="https://app/return")
-    assert "configuration=bpc_1" in seen[0].content.decode()
-
-    seen.clear()
-    _provider(handler).portal_link(customer_id="cus_1", return_url="https://app/return")
-    assert "configuration" not in seen[0].content.decode()
+    params = inspect.signature(StripeProvider.__init__).parameters
+    assert "portal_configuration" not in params

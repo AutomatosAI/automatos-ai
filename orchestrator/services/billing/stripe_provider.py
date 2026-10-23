@@ -1,44 +1,47 @@
 """Stripe as the billing provider (PRD-265 US-009).
 
-- **Checkout** (Stripe-hosted, so 3-D Secure is Stripe's): ``mode=subscription``
-  for a plan, ``mode=payment`` (with a VAT invoice) for a top-up. Every session
-  has Stripe Tax on, collects a VAT number and a billing address, carries the
-  workspace in ``client_reference_id`` and metadata, and shows counsel's
-  withdrawal-consent text when it is configured (D-4).
-- **Portal**: invoices, card and cancellation; a plan change for an existing
-  subscriber opens the portal's confirm-update page, so proration and any 3-D
-  Secure step are Stripe's too.
+The customer never leaves Studio (Gerard, 23 Oct 2026):
+
+- **Checkout** is an in-page session (``ui_mode=elements``, API 2026-09-30.endive):
+  the Billing tab mounts Stripe's card fields inside our own form with the
+  session's ``client_secret``, and the bank's 3-D Secure step (if any) shows over
+  our page. ``mode=subscription`` sells a plan (classic billing mode, so prorations
+  read as they always have), ``mode=payment`` a top-up (with a VAT invoice). Every
+  session has Stripe Tax on, takes a VAT number and a billing address, and carries
+  the workspace in ``client_reference_id`` and metadata.
+- **Card, invoices, cancelling and plan changes** are API calls our tab makes
+  (``stripe_manage.py``). There is no hosted page and no portal.
 - **Webhooks**: the signature is checked (``stripe_signature.py``) before the
   body is read as JSON, then ``stripe_events.translate`` states the fact.
 """
 from __future__ import annotations
 
 import json
-import re
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from services.billing.facts import WebhookEvent
-from services.billing.provider import KIND_PLAN, CheckoutLink, CheckoutRequest, PlanChange
+from services.billing.provider import KIND_PLAN, CheckoutRequest, CheckoutSession
 from services.billing.stripe_api import StripeApi, stripe_api
 from services.billing.stripe_events import translate
+from services.billing.stripe_manage import StripeManagement
 from services.billing.stripe_signature import SignatureError, verify
 
 PROVIDER_STRIPE = "stripe"
-_SUBSCRIPTION_ID = re.compile(r"^sub_[A-Za-z0-9]+$")
+UI_MODE = "elements"
+# Prorations computed the classic way (the invoice lines our webhook readers know).
+BILLING_MODE = "classic"
 
 
-class StripeProvider:
+class StripeProvider(StripeManagement):
     """:class:`services.billing.provider.BillingProvider` on Stripe."""
 
     name = PROVIDER_STRIPE
 
     def __init__(self, api: StripeApi, *, webhook_secret: str, tolerance_seconds: int,
-                 portal_configuration: str = "", expect_livemode: Optional[bool] = None):
+                 expect_livemode: Optional[bool] = None):
         self._api = api
         self._webhook_secret = webhook_secret
         self._tolerance = tolerance_seconds
-        self._portal_configuration = portal_configuration
         self._expect_livemode = expect_livemode
 
     def ensure_customer(self, *, workspace_id: str, name: str, email: Optional[str]) -> str:
@@ -47,33 +50,9 @@ class StripeProvider:
         }, idempotency_key=f"automatos-customer-{workspace_id}")
         return customer["id"]
 
-    def create_checkout(self, request: CheckoutRequest) -> CheckoutLink:
+    def create_checkout(self, request: CheckoutRequest) -> CheckoutSession:
         session = self._api.post("/v1/checkout/sessions", checkout_params(request))
-        expires = session.get("expires_at")
-        return CheckoutLink(url=session["url"], session_id=session["id"],
-                            expires_at=datetime.fromtimestamp(int(expires), tz=timezone.utc) if expires else None)
-
-    def portal_link(self, *, customer_id: str, return_url: str, change: Optional[PlanChange] = None) -> str:
-        params: dict[str, Any] = {"customer": customer_id, "return_url": return_url}
-        if self._portal_configuration:
-            params["configuration"] = self._portal_configuration
-        if change is not None:
-            params["flow_data"] = self._plan_change_flow(change, return_url)
-        return self._api.post("/v1/billing_portal/sessions", params)["url"]
-
-    def _plan_change_flow(self, change: PlanChange, return_url: str) -> dict:
-        if not _SUBSCRIPTION_ID.match(change.subscription_id or ""):
-            raise ValueError("not a Stripe subscription id")
-        subscription = self._api.get(f"/v1/subscriptions/{change.subscription_id}")
-        item_id = subscription["items"]["data"][0]["id"]
-        return {
-            "type": "subscription_update_confirm",
-            "subscription_update_confirm": {
-                "subscription": change.subscription_id,
-                "items": [{"id": item_id, "price": change.price_id, "quantity": 1}],
-            },
-            "after_completion": {"type": "redirect", "redirect": {"return_url": return_url}},
-        }
+        return CheckoutSession(session_id=session["id"], client_secret=session["client_secret"])
 
     def parse_webhook(self, payload: bytes, signature: str) -> WebhookEvent:
         verify(payload, signature, self._webhook_secret, tolerance_seconds=self._tolerance)
@@ -94,14 +73,16 @@ class StripeProvider:
 
 
 def checkout_params(request: CheckoutRequest) -> dict:
-    """The Checkout Session a :class:`CheckoutRequest` becomes. Pure."""
+    """The in-page Checkout Session a :class:`CheckoutRequest` becomes. Pure.
+    ``return_url`` is used only by a redirect-based payment method; cards stay on
+    our page (the client confirms with ``redirect: 'if_required'``)."""
     params: dict[str, Any] = {
+        "ui_mode": UI_MODE,
         "mode": "subscription" if request.kind == KIND_PLAN else "payment",
         "customer": request.customer_id,
         "client_reference_id": request.workspace_id,
         "line_items": [{"price": request.price_id, "quantity": request.quantity}],
-        "success_url": request.success_url,
-        "cancel_url": request.cancel_url,
+        "return_url": request.return_url,
         "automatic_tax": {"enabled": True},
         "tax_id_collection": {"enabled": True},
         "customer_update": {"address": "auto", "name": "auto"},
@@ -109,15 +90,10 @@ def checkout_params(request: CheckoutRequest) -> dict:
         "metadata": request.metadata,
     }
     if request.kind == KIND_PLAN:
-        params["subscription_data"] = {"metadata": request.metadata}
+        params["subscription_data"] = {"metadata": request.metadata, "billing_mode": {"type": BILLING_MODE}}
     else:
         params["invoice_creation"] = {"enabled": True, "invoice_data": {"metadata": request.metadata}}
         params["payment_intent_data"] = {"metadata": request.metadata}
-    if request.consent_text:
-        params["consent_collection"] = {"terms_of_service": "required"}
-        params["custom_text"] = {"terms_of_service_acceptance": {"message": request.consent_text}}
-    if request.expires_at is not None:
-        params["expires_at"] = int(request.expires_at.timestamp())
     return params
 
 
@@ -140,5 +116,4 @@ def stripe_provider() -> StripeProvider:
 
     return StripeProvider(stripe_api(), webhook_secret=config.STRIPE_WEBHOOK_SECRET,
                           tolerance_seconds=int(config.STRIPE_WEBHOOK_TOLERANCE_SECONDS),
-                          portal_configuration=config.STRIPE_PORTAL_CONFIGURATION_ID,
                           expect_livemode=livemode_of(config.STRIPE_SECRET_KEY))

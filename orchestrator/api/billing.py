@@ -7,9 +7,11 @@
   ledger, newest first (a line per metered call), and the last 30 days' credits by model.
 - ``GET /api/v1/billing/plans`` — any member: the plans, the top-up and this
   workspace's subscription, for the Billing tab (PRD-265 US-011).
-- ``POST /api/v1/billing/checkout`` / ``POST /api/v1/billing/portal`` — the owner
-  or admins: a Stripe Checkout or customer-portal link to redirect to (US-009).
-  While billing is closed only platform admins may check out.
+- ``POST /api/v1/billing/checkout`` — the owner or admins: an in-page checkout
+  session (its client secret) the Billing tab mounts Stripe's card fields with; the
+  customer never leaves Studio (US-009). While billing is closed only platform
+  admins may check out. The card, invoices, cancelling and plan changes are in
+  ``api/billing_manage.py``.
 
 Hosted edition only: the local edition never meters, so both answer 404 there.
 Plain ``def`` routes: they read a synchronous session (FastAPI runs them in its
@@ -38,7 +40,7 @@ LEDGER_PAGE_SIZE = 50
 LEDGER_PAGE_SIZE_MAX = 200
 
 
-def _hosted_workspace(db: Session, ctx: RequestContext) -> Workspace:
+def hosted_workspace(db: Session, ctx: RequestContext) -> Workspace:
     from config import config
 
     if config.AUTH_EDITION == "local":
@@ -59,7 +61,7 @@ def get_billing_summary(
     """Plan, status, renewal date and credits by bucket for the caller's workspace."""
     from services.credits.summary import billing_summary
 
-    return billing_summary(db, _hosted_workspace(db, ctx))
+    return billing_summary(db, hosted_workspace(db, ctx))
 
 
 @router.get("/ledger")
@@ -72,16 +74,18 @@ def get_billing_ledger(
     """The workspace's credit ledger, newest first, with the last 30 days' credits by model."""
     from services.credits.summary import ledger_page
 
-    workspace = _hosted_workspace(db, ctx)
+    workspace = hosted_workspace(db, ctx)
     return ledger_page(db, workspace.id, page=page, page_size=page_size)
 
 
 class CheckoutBody(BaseModel):
     kind: Literal["plan", "topup"]
     plan: Optional[str] = Field(None, min_length=1, max_length=32)
+    # Required true when counsel's consent text is set (the box on our form).
+    accept_terms: bool = False
 
 
-def billing_call(work: Callable[[Any], Dict[str, Any]]) -> Dict[str, Any]:
+def billing_call(work: Callable[[Any], Any]) -> Any:
     """Run ``work(provider)``, answering in plain words when billing can't."""
     import httpx
 
@@ -117,7 +121,7 @@ def get_billing_plans(
     from core.auth.workspace_admin import may_see_own_workspace_health
     from services.billing.plans import plans_view
 
-    workspace = _hosted_workspace(db, ctx)
+    workspace = hosted_workspace(db, ctx)
     return plans_view(db, workspace, user=ctx.user, can_manage=may_see_own_workspace_health(db, ctx))
 
 
@@ -127,28 +131,17 @@ def start_billing_checkout(
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """A Stripe link for buying a plan or a top-up (or changing plan in the portal)."""
+    """An in-page checkout session for buying a plan or a top-up."""
     from services.billing.checkout import start_plan_checkout, start_topup_checkout
     from services.plan_tiers import tier_key
 
-    workspace = _hosted_workspace(db, ctx)
+    workspace = hosted_workspace(db, ctx)
     _require_open(ctx)
-    email = getattr(ctx.user, "email", None)
+    email, terms = getattr(ctx.user, "email", None), body.accept_terms
     if body.kind == "topup":
-        return billing_call(lambda provider: start_topup_checkout(db, provider, workspace, email=email))
+        return billing_call(lambda provider: start_topup_checkout(db, provider, workspace, accept_terms=terms))
     if not body.plan:
         raise HTTPException(status_code=422, detail="Name the plan to buy.")
     plan = tier_key(body.plan) or ""
-    return billing_call(lambda provider: start_plan_checkout(db, provider, workspace, plan=plan, email=email))
-
-
-@router.post("/portal")
-def open_billing_portal(
-    ctx: RequestContext = Depends(require_workspace_admin),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    """Stripe's customer portal: invoices, the card, cancelling."""
-    from services.billing.checkout import open_portal
-
-    workspace = _hosted_workspace(db, ctx)
-    return billing_call(lambda provider: {"url": open_portal(db, provider, workspace)})
+    return billing_call(lambda provider: start_plan_checkout(db, provider, workspace, plan=plan, email=email,
+                                                             accept_terms=terms))

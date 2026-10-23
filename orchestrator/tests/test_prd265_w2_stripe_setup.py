@@ -1,19 +1,20 @@
-"""PRD-265 W2: ``scripts/stripe_setup.py`` against an in-memory Stripe.
+"""PRD-265 W2 v2: ``scripts/stripe_setup.py`` against an in-memory Stripe.
 
-No network. An ``httpx.MockTransport`` plays Stripe's prices, portal
-configurations, webhook endpoints and account: it records every request and answers
-the way Stripe does (list pages, create payloads, a lookup key moved only with
-``transfer_lookup_key``, the webhook signing secret on create). The tests pin what
-the script sends (the form fields of every create), that a second run creates
-nothing, the live/test key guard, ``--dry-run``, the stop on a Price that doesn't
-match config, and that neither the secret key nor the webhook signing secret is ever
-printed (the Dashboard reveals it).
+No network. An ``httpx.MockTransport`` plays Stripe's prices, webhook endpoints
+and account: it records every request and answers the way Stripe does (list
+pages, create payloads, a lookup key moved only with ``transfer_lookup_key``,
+the webhook signing secret on create). There is no portal step (no hosted
+page, ever): the tests pin what the script sends (the form fields of every
+create), that a second run creates nothing, the live/test key guard,
+``--dry-run``, the stop on a Price that doesn't match config, and that neither
+the secret key nor the webhook signing secret (nor the publishable key, which
+this script never reads) is ever printed.
 """
 from __future__ import annotations
 
 import io
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 from urllib.parse import parse_qsl
 
@@ -30,14 +31,12 @@ RESTRICTED_LIVE_KEY = "rk_live_fake"
 WEBHOOK_SECRET = "whsec_fake"
 ACCOUNT_ID = "acct_fake"
 API_VERSION = "2025-03-31.basil"
-FRONTEND_URL = "https://app.example.test"
 WEBHOOK_URL = "https://api.example.test/api/v1/billing/webhooks/stripe"
 RUN_ID = "run1"
 
 PRICES = "/v1/prices"
-PORTALS = "/v1/billing_portal/configurations"
 WEBHOOKS = "/v1/webhook_endpoints"
-CREATE_PATHS = (PRICES, PORTALS, WEBHOOKS)
+CREATE_PATHS = (PRICES, WEBHOOKS)
 
 LOOKUP_KEYS = {
     "automatos_own_keys_monthly": "STRIPE_PRICE_BASIC",
@@ -75,7 +74,6 @@ class FakeStripe:
     def __init__(self) -> None:
         self.prices: list[dict] = []
         self.products: dict[str, dict] = {}
-        self.portals: list[dict] = []
         self.webhooks: list[dict] = []
         self.calls: list[Call] = []
         self.failures: dict[tuple[str, str], tuple[int, dict]] = {}
@@ -100,16 +98,12 @@ class FakeStripe:
             ("GET", "/v1/account"): lambda _call: {"id": ACCOUNT_ID, "object": "account"},
             ("GET", PRICES): self._list_prices,
             ("POST", PRICES): self._create_price,
-            ("GET", PORTALS): lambda _call: _page(self.portals),
-            ("POST", PORTALS): self._create_portal,
             ("GET", WEBHOOKS): lambda _call: _page(self.webhooks),
             ("POST", WEBHOOKS): self._create_webhook,
         }
         handler = routes.get((call.method, call.path))
         if handler is not None:
             return handler
-        if call.method == "POST" and call.path.startswith(PORTALS + "/"):
-            return self._update_portal
         if call.method == "POST" and call.path.startswith(WEBHOOKS + "/"):
             return self._update_webhook
         raise AssertionError(f"unexpected Stripe call {call.method} {call.path}")
@@ -164,15 +158,6 @@ class FakeStripe:
                                tax_behavior=call.field("tax_behavior"))
         return self._expand(price) if ("expand[0]", "product") in call.form else price
 
-    def _create_portal(self, call: Call) -> dict:
-        portal = {"id": self._next_id("bpc"), "object": "billing_portal.configuration", "active": True,
-                  "metadata": {"automatos_key": call.field("metadata[automatos_key]")}}
-        self.portals.append(portal)
-        return portal
-
-    def _update_portal(self, call: Call) -> dict:
-        return self._by_id(self.portals, call.path)
-
     def _create_webhook(self, call: Call) -> dict:
         endpoint = {"id": self._next_id("we"), "object": "webhook_endpoint", "url": call.field("url"),
                     "api_version": call.field("api_version"), "enabled_events": call.values("enabled_events["),
@@ -197,7 +182,7 @@ def _settings(secret_key: str = TEST_KEY) -> stripe_setup.Settings:
     plans = (stripe_setup.PlanPrice("basic", "Own keys", 9, True), stripe_setup.PlanPrice("pro", "Pro", 29, True),
              stripe_setup.PlanPrice("business", "Business", 99, False))
     return stripe_setup.Settings(secret_key=secret_key, api_version=API_VERSION, timeout=5.0,
-                          frontend_url=FRONTEND_URL, plans=plans, topup_credits=1000, topup_price_usd=10)
+                          plans=plans, topup_credits=1000, topup_price_usd=10)
 
 
 def _options(**overrides) -> stripe_setup.Options:
@@ -251,38 +236,6 @@ def test_empty_account_gets_four_prices_each_with_its_product():
     assert len({call.idempotency_key for call in creates.values()}) == 4
 
 
-def test_empty_account_gets_the_portal_configuration():
-    fake = FakeStripe()
-    code, output = _run(fake)
-    assert code == stripe_setup.EXIT_OK, output
-
-    [call] = _posts(fake, PORTALS)
-    basic, pro = fake.price("automatos_own_keys_monthly"), fake.price("automatos_pro_monthly")
-    business = fake.price("automatos_business_monthly")
-    assert call.field("default_return_url") == "https://app.example.test/settings?tab=billing"
-    assert call.field("metadata[automatos_key]") == "portal"
-    assert call.field("features[invoice_history][enabled]") == "true"
-    assert call.field("features[payment_method_update][enabled]") == "true"
-    assert call.field("features[customer_update][enabled]") == "true"
-    assert call.values("features[customer_update][allowed_updates][") == ["email", "address", "tax_id"]
-    assert call.field("features[subscription_cancel][enabled]") == "true"
-    assert call.field("features[subscription_cancel][mode]") == "at_period_end"
-    update = "features[subscription_update]"
-    assert call.field(f"{update}[enabled]") == "true"
-    assert call.values(f"{update}[default_allowed_updates][") == ["price"]
-    assert call.field(f"{update}[proration_behavior]") == "always_invoice"
-    assert call.field(f"{update}[schedule_at_period_end][conditions][0][type]") == "decreasing_item_amount"
-    assert call.field(f"{update}[products][0][product]") == basic["product"]
-    assert call.values(f"{update}[products][0][prices][") == [basic["id"]]
-    assert call.field(f"{update}[products][1][product]") == pro["product"]
-    assert call.values(f"{update}[products][1][prices][") == [pro["id"]]
-    # Business is never self-serve: neither its product nor its price is in the switcher.
-    assert call.field(f"{update}[products][2][product]") is None
-    sent = [value for _key, value in call.form]
-    assert business["id"] not in sent and business["product"] not in sent
-    assert call.idempotency_key and call.idempotency_key.startswith(f"automatos-stripe-setup-{RUN_ID}-")
-
-
 def test_empty_account_gets_the_webhook_at_the_pinned_version_with_every_event():
     fake = FakeStripe()
     code, output = _run(fake)
@@ -295,7 +248,26 @@ def test_empty_account_gets_the_webhook_at_the_pinned_version_with_every_event()
     assert call.idempotency_key and call.idempotency_key.startswith(f"automatos-stripe-setup-{RUN_ID}-")
 
 
-def test_empty_account_prints_every_env_line_and_where_to_reveal_the_signing_secret():
+def test_the_webhook_is_created_at_whatever_api_version_settings_carry():
+    # Not hardcoded: whatever Settings.api_version the caller passes is what's sent.
+    fake = FakeStripe()
+    other_version = "2099-01-01.other"
+    code, output = _run(fake, settings=replace(_settings(), api_version=other_version))
+    assert code == stripe_setup.EXIT_OK, output
+    [call] = _posts(fake, WEBHOOKS)
+    assert call.field("api_version") == other_version
+
+
+def test_there_is_no_portal_step_at_all():
+    fake = FakeStripe()
+    code, output = _run(fake)
+    assert code == stripe_setup.EXIT_OK, output
+    assert not any("billing_portal" in call.path for call in fake.calls)
+    assert "portal" not in output.lower()
+    assert "STRIPE_PORTAL_CONFIGURATION_ID" not in output
+
+
+def test_empty_account_prints_every_env_line_a_publishable_key_hint_and_where_to_reveal_the_signing_secret():
     fake = FakeStripe()
     code, output = _run(fake)
     assert code == stripe_setup.EXIT_OK, output
@@ -303,12 +275,16 @@ def test_empty_account_prints_every_env_line_and_where_to_reveal_the_signing_sec
     lines = output.splitlines()
     for lookup_key, env_name in LOOKUP_KEYS.items():
         assert f"{env_name}={fake.price(lookup_key)['id']}" in lines
-    assert f"STRIPE_PORTAL_CONFIGURATION_ID={fake.portals[0]['id']}" in lines
     assert f"STRIPE_ACCOUNT_ID={ACCOUNT_ID}" in lines
+    assert "STRIPE_PORTAL_CONFIGURATION_ID" not in output
     # Stripe returned the signing secret, but it never reaches the output.
     assert WEBHOOK_SECRET not in output and "STRIPE_WEBHOOK_SECRET=" not in output
     assert f"# STRIPE_WEBHOOK_SECRET: {stripe_setup.WHERE_TO_REVEAL_SIGNING}" in lines
     assert "set STRIPE_WEBHOOK_SECRET too" in output
+    # The publishable key is never read or printed — only a hint to copy it by hand.
+    assert "STRIPE_PUBLISHABLE_KEY" in output
+    assert "publishable key" in output
+    assert "pk_" not in output.replace("pk_…", "")  # the literal placeholder, never a real value
 
 
 # ---------------------------------------------------------------------------
@@ -321,13 +297,10 @@ def test_a_second_run_creates_nothing_and_prints_the_same_ids():
     code, second = _run(fake)
     assert code == stripe_setup.EXIT_OK, second
 
-    assert [call for call in _posts(fake, since=seen) if call.path in CREATE_PATHS] == []
-    # The only write is the portal brought to our settings; the webhook already matches.
-    assert [call.path for call in _posts(fake, since=seen)] == [f"{PORTALS}/{fake.portals[0]['id']}"]
-    assert _posts(fake, since=seen)[0].field("active") == "true"
-    assert (len(fake.prices), len(fake.portals), len(fake.webhooks)) == (4, 1, 1)
+    # No portal to bring in step either: a second run writes nothing at all.
+    assert _posts(fake, since=seen) == []
+    assert (len(fake.prices), len(fake.webhooks)) == (4, 1)
     assert _env(second, "STRIPE_PRICE_") == _env(first, "STRIPE_PRICE_")
-    assert _env(second, "STRIPE_PORTAL_CONFIGURATION_ID=") == _env(first, "STRIPE_PORTAL_CONFIGURATION_ID=")
     assert "STRIPE_WEBHOOK_SECRET=" not in second
     assert WEBHOOK_SECRET not in second
 
@@ -530,7 +503,7 @@ def test_settings_come_from_config_and_plan_tiers():
         assert plan.self_serve == bool(PLAN_TIERS[key].get("self_serve"))
         assert plan.name == PLAN_TIERS[key]["display_name"]
     assert settings.api_version == config.STRIPE_API_VERSION
-    assert settings.frontend_url == config.FRONTEND_URL
+    assert not hasattr(settings, "frontend_url")  # no portal, no return URL: this script never reads it
     assert settings.topup_credits == config.TOPUP_CREDITS
     assert settings.topup_price_usd == float(config.TOPUP_PRICE_USD)
 

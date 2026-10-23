@@ -1,5 +1,5 @@
 {
-  "route_count": 962,
+  "route_count": 971,
   "routes": [
     {
       "method": "GET",
@@ -2827,7 +2827,39 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/billing/invoices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/invoices/{invoice_id}/pdf"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/billing/ledger"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/payment-method"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/payment-method"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/payment-method/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change/preview"
     },
     {
       "method": "GET",
@@ -2835,7 +2867,11 @@
     },
     {
       "method": "POST",
-      "path": "/api/v1/billing/portal"
+      "path": "/api/v1/billing/subscription/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/subscription/resume"
     },
     {
       "method": "GET",

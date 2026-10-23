@@ -38,6 +38,10 @@ def upgrade() -> None:
             credited_period_start TIMESTAMPTZ,
             credited_period_end TIMESTAMPTZ,
             period_credits INTEGER NOT NULL DEFAULT 0,
+            schedule_id VARCHAR(64),
+            scheduled_plan VARCHAR(32),
+            scheduled_at TIMESTAMPTZ,
+            business_offer_until TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT billing_accounts_customer_id_key UNIQUE (customer_id)

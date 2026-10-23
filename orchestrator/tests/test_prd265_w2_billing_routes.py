@@ -1,8 +1,9 @@
-"""PRD-265 W2 — the Billing tab's routes (``api/billing.py``): plans, checkout, portal.
+"""PRD-265 W2 v2 — the Billing tab's routes (``api/billing.py``): plans, checkout.
 
-Hosted edition only (404 in local). ``/checkout`` and ``/portal`` are owner/admin
-only (``require_workspace_admin``); while ``BILLING_OPEN`` is false, buying a
-plan is further refused to everyone but a platform admin (``checkout_open_for``).
+Hosted edition only (404 in local). ``/checkout`` is owner/admin only
+(``require_workspace_admin``); while ``BILLING_OPEN`` is false, buying a plan is
+further refused to everyone but a platform admin (``checkout_open_for``). There
+is no ``/portal`` route any more — no hosted page, ever.
 """
 from __future__ import annotations
 
@@ -20,27 +21,23 @@ from core.auth.dependencies import RequestContext, UserContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
-from services.billing.provider import CheckoutLink
+from services.billing.provider import CheckoutSession
 from services.billing.stripe_api import StripeError
 
 
 class FakeProvider:
     name = "fake"
 
-    def __init__(self, *, ensure_customer=None, create_checkout=None, portal_link=None):
+    def __init__(self, *, ensure_customer=None, create_checkout=None):
         self._ensure_customer = ensure_customer or (lambda **k: "cus_new")
-        self._create_checkout = create_checkout or (lambda request: CheckoutLink(url="https://checkout/1",
-                                                                                 session_id="cs_1"))
-        self._portal_link = portal_link or (lambda **k: "https://billing/portal-1")
+        self._create_checkout = create_checkout or (lambda request: CheckoutSession(session_id="cs_1",
+                                                                                     client_secret="cs_1_secret_abc"))
 
     def ensure_customer(self, **kwargs):
         return self._ensure_customer(**kwargs)
 
     def create_checkout(self, request):
         return self._create_checkout(request)
-
-    def portal_link(self, **kwargs):
-        return self._portal_link(**kwargs)
 
 
 def _workspace():
@@ -68,6 +65,7 @@ def _app(*, ctx=None, bypass_admin_gate=False):
 def hosted(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(config, "BILLING_OPEN", False)
+    monkeypatch.setattr(config, "STRIPE_PUBLISHABLE_KEY", "pk_test_123")
 
 
 # --------------------------------------------------------------------------- #
@@ -89,7 +87,8 @@ def test_plans_has_the_expected_shape_for_a_member(hosted, monkeypatch):
     db.query.return_value.filter.return_value.first.return_value = _workspace()
     body = TestClient(app).get("/api/v1/billing/plans").json()
     assert body["can_manage"] is False
-    assert {"billing_open", "checkout_available", "current_plan", "subscription", "plans", "topup"} <= body.keys()
+    assert {"billing_open", "checkout_available", "current_plan", "subscription", "plans", "topup",
+            "publishable_key", "consent_text", "business_offer_until"} <= body.keys()
     assert [p["key"] for p in body["plans"]] == ["basic", "pro", "business", "enterprise"]
 
 
@@ -123,7 +122,7 @@ def test_checkout_is_422_for_kind_plan_without_naming_a_plan(hosted):
     assert _checkout(app, {"kind": "plan"}).status_code == 422
 
 
-def test_checkout_200_for_a_platform_admin_before_billing_opens(hosted, monkeypatch):
+def test_checkout_200_returns_the_client_secret_and_publishable_key(hosted, monkeypatch):
     provider = FakeProvider()
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: provider)
     monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
@@ -132,7 +131,23 @@ def test_checkout_200_for_a_platform_admin_before_billing_opens(hosted, monkeypa
     db.query.return_value.filter.return_value.first.return_value = _workspace()
     res = _checkout(app, {"kind": "plan", "plan": "basic"})
     assert res.status_code == 200
-    assert res.json() == {"url": "https://checkout/1", "flow": "checkout"}
+    assert res.json() == {"client_secret": "cs_1_secret_abc", "publishable_key": "pk_test_123"}
+
+
+def test_checkout_passes_accept_terms_through(hosted, monkeypatch):
+    seen = {}
+
+    def _start_plan_checkout(db, provider, workspace, *, plan, email, accept_terms):
+        seen["accept_terms"] = accept_terms
+        return {"client_secret": "cs_1_secret_abc", "publishable_key": "pk_test_123"}
+
+    monkeypatch.setattr("services.billing.checkout.start_plan_checkout", _start_plan_checkout)
+    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
+    app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
+    db.query.return_value.filter.return_value.first.return_value = _workspace()
+    res = _checkout(app, {"kind": "plan", "plan": "basic", "accept_terms": True})
+    assert res.status_code == 200
+    assert seen["accept_terms"] is True
 
 
 def test_checkout_503_when_stripe_isnt_configured(hosted, monkeypatch):
@@ -158,9 +173,9 @@ def test_checkout_502_when_stripe_refuses(hosted, monkeypatch):
 def test_checkout_accepts_the_display_name_own_keys_as_basic(hosted, monkeypatch):
     seen = {}
 
-    def _start_plan_checkout(db, provider, workspace, *, plan, email):
+    def _start_plan_checkout(db, provider, workspace, *, plan, email, accept_terms):
         seen["plan"] = plan
-        return {"url": "https://checkout/1", "flow": "checkout"}
+        return {"client_secret": "cs_1_secret_abc", "publishable_key": "pk_test_123"}
 
     monkeypatch.setattr("services.billing.checkout.start_plan_checkout", _start_plan_checkout)
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
@@ -181,14 +196,12 @@ def test_checkout_409_for_a_topup_without_a_live_subscription(hosted, monkeypatc
 
 
 # --------------------------------------------------------------------------- #
-# POST /portal
+# POST /portal — gone (PRD-265 W2 v2: no portal, ever)
 # --------------------------------------------------------------------------- #
 
 
-def test_portal_404_with_no_billing_account(hosted, monkeypatch):
-    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
-    monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
+def test_portal_route_no_longer_exists(hosted, monkeypatch):
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()
     res = TestClient(app).post("/api/v1/billing/portal")
-    assert res.status_code == 404
+    assert res.status_code in (404, 405)

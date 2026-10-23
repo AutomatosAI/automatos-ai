@@ -81,6 +81,8 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # PRD-265 W2: a subscription payment failed (Stripe retries), or a paid plan ended.
         "billing_payment_failed",
         "billing_subscription_ended",
+        # PRD-265 W2: a platform admin offered the workspace the Business plan (by invite).
+        "billing_business_offered",
         # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
         # actions S7/S8, escalations).
         "watch_verdict",
