@@ -5,9 +5,11 @@
  * data-theme-motion and --theme-motion there and never data-pl-motion, and points the next load's
  * boot script at the account's look (F5). It runs only the looks of a boot of its own theme. Off,
  * a failed load or another style takes the table's variables and the motion marks off; while the
- * host loads or runs an installed theme (keepFirstPaint) the boot's first paint stays.
+ * host loads or runs an installed theme (keepFirstPaint) the boot's first paint stays. A look set
+ * here repaints at once and is kept, also on blocked storage (on the default look); another tab's
+ * change arrives, its tone with it, and is never written back (M25).
  */
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { lookScope } from '@/lib/look-kit/scope'
@@ -16,19 +18,24 @@ import { THEME_MOTION_ATTRIBUTE, THEME_MOTION_VAR } from '@/lib/theme-host/looks
 import { paint, paintNames } from '@/lib/theme-host/looks/paint'
 import { ThemeLookProvider, type ThemeLookProviderProps } from '@/lib/theme-host/looks/provider'
 import { lookKeys, type StorageSource } from '@/lib/theme-host/looks/storage'
-import { useLook } from '@/lib/theme-sdk/looks'
+import { clearThemeToneCookie, THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
+import { importLook, saveLook, useLook, type HostLookState } from '@/lib/theme-sdk/looks'
 
 import { runThemeBoot } from '@/lib/theme-host/__tests__/boot-harness'
-import { DUSK, HELLO, HELLO_ENTRY, HELLO_RULES, HELLO_THEME_ID, helloThemeBoot, INK, memoryStorage, PAPER, putPageBoot } from './hello-looks'
+import { blockedStorage, DUSK, HELLO, HELLO_ENTRY, HELLO_RULES, HELLO_THEME_ID, helloThemeBoot, INK, memoryStorage, myLook, PAPER, putPageBoot } from './hello-looks'
+import { cookieValue } from './look-test-helpers'
 
 const TABLE = HELLO_RULES.table
 const SCOPE = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_a')
 const OTHER_SCOPE = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_b')
-/** Builtin Play's own motion mark (its look provider sets it), never set by the generic runtime. */
-const BUILTIN_MOTION_ATTRIBUTE = 'data-pl-motion'
+/** A theme's own motion mark (Play's name), not a theme-neutral one: the generic runtime never sets it. */
+const THEME_OWN_MOTION_ATTRIBUTE = 'data-pl-motion'
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
 /** A value another look runtime puts on one of the table's names. */
 const ANOTHER_RUNTIMES_VALUE = '#123456'
+const KEYS = lookKeys(SCOPE, HELLO.keys)
+/** A saved look another tab kept, under an id a fresh one must not take. */
+const THEIRS = myLook({ id: 'look-1', name: 'Theirs' })
 
 function root(): HTMLElement {
   return document.documentElement
@@ -43,9 +50,13 @@ function motion(): { readonly attribute: string | null; readonly variable: strin
   return { attribute: root().getAttribute(THEME_MOTION_ATTRIBUTE), variable: root().style.getPropertyValue(THEME_MOTION_VAR) }
 }
 
+/** What useLook() last handed the theme below the provider. */
+const seen: { current: HostLookState | null } = { current: null }
+
 function Probe() {
-  const { available, look } = useLook()
-  return <p>Looks: {available ? look?.id : 'none'}</p>
+  const state = useLook()
+  seen.current = state
+  return <p>Looks: {state.available ? state.look?.id : 'none'}</p>
 }
 
 /** One storage source per test: the provider reads again whenever its source changes. */
@@ -60,6 +71,18 @@ function providerFor(storage: StorageSource, fields: Partial<ThemeLookProviderPr
       <Probe />
     </ThemeLookProvider>
   )
+}
+
+function stored(store: Storage, key: string): unknown {
+  const raw = store.getItem(key)
+  return raw === null ? null : JSON.parse(raw)
+}
+
+/** What another tab does: writes the key itself, and the browser tells this tab with a storage event (key null: cleared). */
+function fromAnotherTab(key: string | null): void {
+  act(() => {
+    window.dispatchEvent(new StorageEvent('storage', { key }))
+  })
 }
 
 function stubReducedMotion(reduced: boolean): void {
@@ -93,6 +116,7 @@ function pageBoot(boot: ThemeBoot | string): void {
 }
 
 beforeEach(() => {
+  seen.current = null
   root().removeAttribute('style')
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 })
@@ -104,7 +128,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   root().removeAttribute('style')
-  root().removeAttribute(BUILTIN_MOTION_ATTRIBUTE)
+  root().removeAttribute(THEME_OWN_MOTION_ATTRIBUTE)
+  clearThemeToneCookie()
 })
 
 describe('under an installed theme with looks', () => {
@@ -112,7 +137,7 @@ describe('under an installed theme with looks', () => {
     pageBoot(helloThemeBoot())
     render(providerFor(sourceOf().storage))
     await waitFor(() => expect(motion()).toEqual({ attribute: 'full', variable: '1' }))
-    expect(root().hasAttribute(BUILTIN_MOTION_ATTRIBUTE)).toBe(false)
+    expect(root().hasAttribute(THEME_OWN_MOTION_ATTRIBUTE)).toBe(false)
   })
 
   it('marks reduced motion when the user asks for it', async () => {
@@ -120,7 +145,7 @@ describe('under an installed theme with looks', () => {
     pageBoot(helloThemeBoot())
     render(providerFor(sourceOf().storage))
     await waitFor(() => expect(motion()).toEqual({ attribute: 'reduce', variable: '0' }))
-    expect(root().hasAttribute(BUILTIN_MOTION_ATTRIBUTE)).toBe(false)
+    expect(root().hasAttribute(THEME_OWN_MOTION_ATTRIBUTE)).toBe(false)
   })
 
   it("paints the boot script's look until the account is known, then the account's own, and points the next load at it", async () => {
@@ -140,11 +165,101 @@ describe('under an installed theme with looks', () => {
     await waitFor(() => expect(store.getItem(HELLO.keys.pointer)).toBe(SCOPE))
   })
 
-  it("paints the theme's default look for an account with none stored", async () => {
+  it("paints the theme's default look for an account with none stored, and writes no look", async () => {
     pageBoot(helloThemeBoot())
-    render(providerFor(sourceOf().storage))
+    const { store, storage } = sourceOf()
+    render(providerFor(storage))
     expect(await screen.findByText(`Looks: ${PAPER.id}`)).toBeInTheDocument()
     await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    expect(store.getItem(KEYS.active)).toBeNull()
+    expect(store.getItem(KEYS.saved)).toBeNull()
+  })
+})
+
+describe('a look set here', () => {
+  it('repaints <html> at once and is kept', async () => {
+    pageBoot(helloThemeBoot())
+    const { store, storage } = sourceOf()
+    render(providerFor(storage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    act(() => void seen.current?.setLook(DUSK))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, DUSK)))
+    expect(stored(store, KEYS.active)).toEqual(DUSK)
+  })
+
+  it("runs on the theme's default look with storage blocked, still switches looks, and says they aren't kept", async () => {
+    pageBoot(helloThemeBoot())
+    render(providerFor(blockedStorage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    act(() => void seen.current?.setLook(DUSK))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, DUSK)))
+    expect(seen.current?.persisted).toBe(false)
+    expect(console.warn).toHaveBeenCalled()
+  })
+})
+
+describe('another tab (M25)', () => {
+  it('takes the saved looks another tab stored, so an import keeps both under different ids', async () => {
+    pageBoot(helloThemeBoot())
+    const { store, storage } = sourceOf()
+    render(providerFor(storage))
+    expect(await screen.findByText(`Looks: ${PAPER.id}`)).toBeInTheDocument()
+    store.setItem(KEYS.saved, JSON.stringify([THEIRS]))
+    fromAnotherTab(KEYS.saved)
+    expect(seen.current?.saved).toEqual([THEIRS])
+    const imported = importLook(JSON.stringify(THEIRS))
+    if (!imported.ok) throw new Error(imported.errors.join(' '))
+    act(() => void saveLook(imported.look))
+    await waitFor(() => expect(seen.current?.saved.map((look) => look.id)).toEqual([THEIRS.id, imported.look.id]))
+    expect(imported.look.id).not.toBe(THEIRS.id)
+    const kept = stored(store, KEYS.saved) as readonly { readonly id: string }[]
+    expect(kept.map((look) => look.id)).toEqual([THEIRS.id, imported.look.id])
+    expect(kept[0]).toEqual(THEIRS)
+  })
+
+  it('follows the active look another tab stored, and the tone cookie with it', async () => {
+    pageBoot(helloThemeBoot())
+    const { store, storage } = sourceOf()
+    const onToneChange = vi.fn()
+    render(providerFor(storage, { onToneChange }))
+    await waitFor(() => expect(cookieValue(THEME_TONE_COOKIE)).toBe(themeToneCookieValue(HELLO_THEME_ID, 'light')))
+    store.setItem(KEYS.active, JSON.stringify(INK))
+    fromAnotherTab(KEYS.active)
+    expect(await screen.findByText(`Looks: ${INK.id}`)).toBeInTheDocument()
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, INK)))
+    await waitFor(() => expect(cookieValue(THEME_TONE_COOKIE)).toBe(themeToneCookieValue(HELLO_THEME_ID, 'dark')))
+    expect(onToneChange).toHaveBeenLastCalledWith('dark')
+  })
+
+  it('never writes back what it took, so two tabs cannot ping-pong', async () => {
+    pageBoot(helloThemeBoot())
+    const { store, storage } = sourceOf()
+    render(providerFor(storage))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    const setItem = vi.spyOn(store, 'setItem')
+    store.setItem(KEYS.active, JSON.stringify(INK))
+    fromAnotherTab(KEYS.active)
+    store.setItem(KEYS.saved, JSON.stringify([THEIRS]))
+    fromAnotherTab(KEYS.saved)
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, INK)))
+    expect(seen.current?.saved).toEqual([THEIRS])
+    const keys = setItem.mock.calls.map(([key]) => key)
+    // Only the other tab's own two writes: nothing written back.
+    expect(keys.filter((key) => key === KEYS.active || key === KEYS.saved)).toEqual([KEYS.active, KEYS.saved])
+  })
+
+  it("ignores another key's event, and takes a cleared storage as nothing stored", async () => {
+    pageBoot(helloThemeBoot())
+    const { store, storage } = sourceOf({ [KEYS.active]: JSON.stringify(DUSK) })
+    render(providerFor(storage))
+    expect(await screen.findByText(`Looks: ${DUSK.id}`)).toBeInTheDocument()
+    const otherKey = lookKeys(OTHER_SCOPE, HELLO.keys).active
+    store.setItem(otherKey, JSON.stringify(INK))
+    fromAnotherTab(otherKey)
+    expect(screen.getByText(`Looks: ${DUSK.id}`)).toBeInTheDocument()
+    store.clear()
+    fromAnotherTab(null)
+    expect(await screen.findByText(`Looks: ${PAPER.id}`)).toBeInTheDocument()
   })
 })
 

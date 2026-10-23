@@ -12,13 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { hexToTriplet } from '@/lib/look-kit/hsl'
 import { lookScope } from '@/lib/look-kit/scope'
-import { baseThemeBoot, builtinThemeBoot, type ThemeBoot } from '@/lib/theme-host/boot'
-import type { PrepaintKnobTable, PrepaintTable } from '@/lib/theme-host/boot-types'
+import { baseThemeBoot, type ThemeBoot } from '@/lib/theme-host/boot'
+import type { PrepaintKnobTable, PrepaintPairTable, PrepaintTable } from '@/lib/theme-host/boot-types'
 import { applyPaint, clearPaint, paint, paintNames } from '@/lib/theme-host/looks/paint'
 import { lookKeys } from '@/lib/theme-host/looks/storage'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
 
-import { cookieReader, runThemeBoot } from '@/lib/theme-host/__tests__/boot-harness'
+import { runThemeBoot } from '@/lib/theme-host/__tests__/boot-harness'
 import { DUSK, HELLO, HELLO_RULES, helloThemeBoot, INK, myLook, PAPER } from './hello-looks'
 
 const TABLE = HELLO_RULES.table
@@ -29,6 +29,13 @@ const THEIRS = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_b')
 const STUDIO_BACKGROUND = '--background'
 const STUDIO_FOREGROUND = '--foreground'
 const OTHER_INLINE = 'outline-color'
+/** hello's glow variable, and a safe glow per ground and accent that caps it (an alpha, as a theme's table holds it). */
+const GLOW_VAR = '--a09b-glow'
+const GLOW_CAPS: PrepaintPairTable<number> = {
+  paper: { blue: 0.1, green: 0.15 },
+  ink: { blue: 0.3, green: 0.25 },
+  dusk: { blue: 0.2, green: 0.2 },
+}
 
 function root(): HTMLElement {
   return document.documentElement
@@ -58,6 +65,11 @@ function withStudioTokens(table: PrepaintTable): PrepaintTable {
     ]),
   )
   return { ...table, knobs: { ...table.knobs, ground } }
+}
+
+/** hello's table with its glow capped by ground and accent, as a theme caps a glow past its safe value (M50). */
+function withGlowCaps(table: PrepaintTable): PrepaintTable {
+  return { ...table, numeric: table.numeric.map((rule) => ({ ...rule, capTable: ['ground', 'accent'] as const, caps: GLOW_CAPS })) }
 }
 
 function resetRoot(): void {
@@ -107,10 +119,23 @@ describe('the boot script under an installed theme with looks', () => {
     expect(root().style.getPropertyValue(STUDIO_BACKGROUND)).toBe(hexToTriplet(TABLE.knobs.ground.dusk['--a09b-bg']))
   })
 
+  it("caps a stored value past its cap table's entry at that cap, as paint() does (M50)", () => {
+    const table = withGlowCaps(TABLE)
+    const [glow] = TABLE.numeric
+    const glowing = myLook({ ground: 'paper', accent: 'green', glow: glow.max })
+    const cap = GLOW_CAPS.paper.green
+    expect(cap).toBeLessThan(glow.max / glow.scale)
+    storeActive(MINE, glowing)
+    pointAt(MINE)
+    runThemeBoot(helloThemeBoot({ prepaint: table }))
+    expect(painted(table)[GLOW_VAR]).toBe(`rgba(${glow.color.rgb.green},${cap})`)
+    expect(painted(table)).toEqual(paint(table, glowing))
+  })
+
   it.each<UiStyle>(['studio', 'classic'])("sets nothing on <html> under %s's boot", (style) => {
     storeActive(MINE, DUSK)
     pointAt(MINE)
-    runThemeBoot(builtinThemeBoot(style, cookieReader()))
+    runThemeBoot(baseThemeBoot(style))
     expect(root().style.length).toBe(0)
   })
 
@@ -179,6 +204,11 @@ describe('the per-account pointer picks the scope (F5)', () => {
   it('paints the default look when the account the pointer names has no active look yet', () => {
     storeActive(THEIRS, DUSK)
     pointAt(MINE)
+    runThemeBoot(helloThemeBoot())
+    expect(painted()).toEqual(paint(TABLE, PAPER))
+  })
+
+  it('paints the default look when nothing is stored', () => {
     runThemeBoot(helloThemeBoot())
     expect(painted()).toEqual(paint(TABLE, PAPER))
   })

@@ -271,6 +271,17 @@ describe('which keys and which server id', () => {
     expect(server.read).not.toHaveBeenCalled()
   })
 
+  it('asks the server nothing while no theme with looks runs', async () => {
+    const store = memoryStorage({ [HELLO_KEYS.active]: JSON.stringify(DUSK) })
+    metServer(store)
+    const server = fakeServer()
+    const { result } = renderStore(store, server, SCOPE, null)
+    await act(async () => undefined)
+    expect(result.current).toMatchObject({ look: null, loaded: false })
+    expect(server.read).not.toHaveBeenCalled()
+    expect(server.write).not.toHaveBeenCalled()
+  })
+
   it('reads the server once for a theme built on every render', async () => {
     const store = memoryStorage()
     metServer(store)

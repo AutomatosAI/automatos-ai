@@ -2,9 +2,9 @@
  * PRD-261 A-19d2 (PB-8a, the W-E3 seam review) — the workspace retry is the host's: a workspace
  * that failed to load (the backend asleep) is asked for again once the backend answers GET /health,
  * once per failure, by ThemeLookRuntime's one call of ./use-workspace-retry.ts, whenever the host
- * runs an installed theme (with looks, or without, when no look scope is mounted) or a builtin
- * theme with looks is the style. AccountLookScope no longer asks: one subscriber, never a double
- * refetch. Classic and Studio ask nothing.
+ * loads or runs an installed theme (with looks, or without, when no look scope is mounted).
+ * AccountLookScope no longer asks: one subscriber, never a double refetch. Classic and Studio, and a
+ * theme the host stopped running, ask nothing.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -38,7 +38,6 @@ import { workspaceFailed } from '@/components/theme-host/use-workspace-retry'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { BACKEND_HEALTH_QUERY_KEY } from '@/hooks/use-backend-health'
 import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_STYLE } from '@/lib/theme-host/__tests__/fixture-theme-entry'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
@@ -141,13 +140,6 @@ describe('PB-8a — the host asks for a failed workspace again, exactly once', (
 
   it('while the host loads the installed theme too', async () => {
     render(<App style={FIXTURE_THEME_STYLE} status="loading" entry={FIXTURE_THEME_ENTRY} />)
-    await backendAnswers(true)
-    expect(account.refreshWorkspace).toHaveBeenCalledTimes(1)
-  })
-
-  it('for a builtin theme with looks (builtin Play, until W-A8)', async () => {
-    render(<App style={BUILTIN_PLAY_STYLE} status="off" />)
-    await backendAnswers(true)
     await backendAnswers(true)
     expect(account.refreshWorkspace).toHaveBeenCalledTimes(1)
   })

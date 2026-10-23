@@ -4,7 +4,7 @@
  * useLook reads the runtime through context and the plain functions reach the runtime registered now, which a
  * stale runtime's cleanup never drops. The host's real runtimes are proved by
  * components/theme-host/__tests__/theme-look-runtime{,-installed}.test.tsx. useLookScope reads the scope the
- * host's AccountLookScope provides (components/looks/__tests__/look-scope.test.tsx runs the real one under Play's shelf).
+ * host's AccountLookScope provides (components/theme-host/__tests__/account-look-scope.test.tsx runs the real one under an installed theme).
  *
  * PRD-261 A-19d2: an installed theme's looks run on the generic look runtime (lib/theme-host/looks), whose bridge
  * fills the same seam; the last block reaches it through the SDK's names alone, on hello-a09b's boot.
