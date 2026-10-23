@@ -1,48 +1,35 @@
 // @vitest-environment node
 /**
- * PRD-261 A-13a — the look runtime names no theme, and its move left nothing behind.
+ * PRD-261 A-13a — the look runtime names no theme.
  *
- * - lib/look-kit's runtime files (not their tests) hold no theme's code or names: no import of
- *   Play's folders or of components, no --pl- variable, no 'play' interface, no automatos-play,
- *   no LOOK_INTERFACE. A theme hands the runtime its catalogue, prefix and spec (PA-9).
- * - lib/looks keeps none of the moved modules (css, contrast, hsl, validate, studio-tokens), and
- *   no prepaint-apply.ts exists in either folder (the plan's S2-19: it never existed).
- * - No source file in the frontend imports a moved module from its old place, by alias or by a
- *   relative path.
- * - PRD-261 A-19a: the look scope (scope.ts) moved in from lib/looks too, and is held to the same
- *   markers; its old path stays as a re-export for Play's own code (lib/__tests__/prd261-a19-seams).
+ * - lib/look-kit's runtime files (not their tests) hold no theme's code or names: no import of a
+ *   theme's folders or of components, no theme variable prefix, no quoted theme interface, no theme
+ *   storage key, no theme look format (./theme-markers.ts, which the generic look runtime's scan
+ *   shares). A theme hands the runtime its catalogue, prefix and spec (PA-9).
+ * - The modules A-13a moved in (css, contrast, hsl, validate, studio-tokens) and the look scope A-19a
+ *   moved in (scope) are all here, so the scan holds them; no prepaint-apply.ts exists (the plan's
+ *   S2-19: it never existed). QB-19 (PB-38): core keeps every one of them after W-A8.
+ *
+ * PRD-261 A-19f2: builtin Play's lib/looks, where these modules came from, is gone with builtin Play
+ * (A-19f1), so the old checks that it kept none of them and that no file imported one from there are
+ * lib/__tests__/prd261-no-theme-in-core.test.ts's now, over the whole frontend: no file is left under
+ * lib/looks and no file imports anything there.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
+import { markersIn } from './theme-markers'
+
 const FRONTEND = path.resolve(__dirname, '../../..')
 const KIT_DIR = path.join(FRONTEND, 'lib', 'look-kit')
-const OLD_DIR = path.join(FRONTEND, 'lib', 'looks')
 const MOVED: readonly string[] = ['css', 'contrast', 'hsl', 'validate', 'studio-tokens']
 const NEVER_CREATED = 'prepaint-apply.ts'
-/** Moved in by A-19a; lib/looks keeps a re-export at the old path, so it is not one of MOVED. */
+/** Moved in by A-19a (git mv of the old look scope). */
 const MOVED_IN_A19A: readonly string[] = ['scope']
-const SOURCE_DIRS: readonly string[] = ['app', 'components', 'lib', 'hooks', 'contexts', 'stores', 'e2e']
 const SKIP_DIRS = new Set(['node_modules'])
 const TEST_DIR = '__tests__'
 const SOURCE_FILE = /\.(ts|tsx)$/
-/** ` from '…'`, `import('…')`, `vi.mock('…')` and a bare `import '…'`, in single or double quotes. */
-const IMPORT_SPECIFIER = /(?:\sfrom\s+|\bimport\s*\(\s*|\bvi\.(?:do)?[mM]ock\(\s*|^\s*import\s+)(['"])([@.\w][^'"\s]*)\1/gm
-const OLD_ALIAS = new RegExp(`^@/lib/looks/(${MOVED.join('|')})$`)
-
-/** What a theme's own code or names look like; none may appear in the runtime. */
-const THEME_MARKERS: readonly RegExp[] = [
-  /--pl-/,
-  /['"`]play['"`]/,
-  /automatos-play/,
-  /LOOK_INTERFACE/,
-  /@\/lib\/(looks|play|mascot)(\/|['"])/,
-  /@\/components\//,
-]
-
-/** Parsing every source file takes a few seconds; the default 5 s is too tight on a busy runner. */
-const SCAN_TIMEOUT_MS = 120_000
 
 function walk(dir: string, keep: (file: string) => boolean): string[] {
   if (!existsSync(dir)) return []
@@ -57,76 +44,40 @@ function relative(file: string): string {
   return path.relative(FRONTEND, file).split(path.sep).join('/')
 }
 
-function markersIn(source: string): string[] {
-  return THEME_MARKERS.filter((marker) => marker.test(source)).map(String)
-}
-
-function specifiersOf(source: string): string[] {
-  return Array.from(source.matchAll(IMPORT_SPECIFIER), (match) => match[2])
-}
-
-/** True when `specifier`, written in `file`, names a moved module at its old place. */
-function reachesOldPlace(file: string, specifier: string): boolean {
-  if (OLD_ALIAS.test(specifier)) return true
-  if (!specifier.startsWith('.')) return false
-  const target = path.resolve(path.dirname(file), specifier)
-  return MOVED.some((name) => target === path.join(OLD_DIR, name) || target === path.join(OLD_DIR, `${name}.ts`))
-}
-
 const RUNTIME_FILES = walk(KIT_DIR, (file) => SOURCE_FILE.test(file) && !file.split(path.sep).includes(TEST_DIR))
+const RUNTIME_NAMES = RUNTIME_FILES.map((file) => path.basename(file, '.ts'))
 
 describe('PRD-261 A-13a — the look runtime is theme-neutral', () => {
   it('has the moved modules', () => {
-    const names = RUNTIME_FILES.map((file) => path.basename(file, '.ts'))
-    expect(MOVED.filter((name) => !names.includes(name))).toEqual([])
+    expect(MOVED.filter((name) => !RUNTIME_NAMES.includes(name))).toEqual([])
   })
 
-  it("scans the look scope A-19a moved in, so the markers hold it", () => {
-    const names = RUNTIME_FILES.map((file) => path.basename(file, '.ts'))
-    expect(MOVED_IN_A19A.filter((name) => !names.includes(name))).toEqual([])
+  it('scans the look scope A-19a moved in, so the markers hold it', () => {
+    expect(MOVED_IN_A19A.filter((name) => !RUNTIME_NAMES.includes(name))).toEqual([])
   })
 
   it("holds no theme's code or names in its runtime files", () => {
-    const found = RUNTIME_FILES.flatMap((file) => markersIn(readFileSync(file, 'utf8')).map((m) => `${relative(file)}: ${m}`))
+    const found = RUNTIME_FILES.flatMap((file) => markersIn(readFileSync(file, 'utf8')).map((marker) => `${relative(file)}: ${marker}`))
     expect(found).toEqual([])
   })
 
   it("the markers catch a theme's code, so the scan can't pass by matching nothing", () => {
+    const quoted = (text: string) => `'${text}'`
     const samples = [
-      "import { GROUNDS } from '@/lib/looks/catalogue'",
-      "const v = '--pl-accent'",
-      "const i = 'play'",
-      "import { LOOK_INTERFACE } from './types'",
-      "import x from '@/components/play/frame'",
+      `import { GROUNDS } from ${quoted(['@', 'lib', 'looks', 'catalogue'].join('/'))}`,
+      `const v = ${quoted(['-', '-pl-accent'].join(''))}`,
+      `const i = ${quoted(['pl', 'ay'].join(''))}`,
+      `const k = ${quoted(['automatos', 'pl' + 'ay.looks'].join('-'))}`,
+      `import { ${['LOOK', 'INTERFACE'].join('_')} } from './types'`,
+      `import x from ${quoted(['@', 'components', 'theme-host', 'look-scope'].join('/'))}`,
     ]
     expect(samples.filter((sample) => markersIn(sample).length === 0)).toEqual([])
   })
 })
 
-describe('PRD-261 A-13a — the move left nothing behind', () => {
-  it('lib/looks keeps none of the moved modules, and no prepaint-apply.ts exists', () => {
-    const left = MOVED.map((name) => path.join(OLD_DIR, `${name}.ts`)).filter((file) => existsSync(file))
-    expect(left.map(relative)).toEqual([])
-    expect(existsSync(path.join(OLD_DIR, NEVER_CREATED))).toBe(false)
+describe('PRD-261 A-13a — no prepaint-apply.ts was ever made', () => {
+  it('exists in neither the look runtime nor its old folder', () => {
     expect(existsSync(path.join(KIT_DIR, NEVER_CREATED))).toBe(false)
-  })
-
-  it('no source file imports a moved module from its old place', () => {
-    const files = SOURCE_DIRS.flatMap((dir) => walk(path.join(FRONTEND, dir), (file) => SOURCE_FILE.test(file)))
-    const stale = files.flatMap((file) => specifiersOf(readFileSync(file, 'utf8'))
-      .filter((specifier) => reachesOldPlace(file, specifier))
-      .map((specifier) => `${relative(file)}: ${specifier}`))
-    expect(stale).toEqual([])
-  }, SCAN_TIMEOUT_MS)
-
-  it('the import scan sees aliased and relative specifiers, and resolves the relative ones', () => {
-    const file = path.join(OLD_DIR, 'style.ts')
-    // Built by parts, so this file's own text never reads as an import of the old place to the scan.
-    const oldCss = ['@/lib/looks', 'css'].join('/')
-    expect(specifiersOf(`import { a } from '${oldCss}'\nvi.mock('./validate')`)).toEqual([oldCss, './validate'])
-    expect(reachesOldPlace(file, oldCss)).toBe(true)
-    expect(reachesOldPlace(file, './validate')).toBe(true)
-    expect(reachesOldPlace(file, './engine')).toBe(false)
-    expect(reachesOldPlace(path.join(KIT_DIR, 'css.ts'), './contrast')).toBe(false)
+    expect(existsSync(path.join(FRONTEND, 'lib', 'looks', NEVER_CREATED))).toBe(false)
   })
 })

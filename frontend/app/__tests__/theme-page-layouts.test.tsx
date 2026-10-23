@@ -13,10 +13,10 @@
  * the core page in no Suspense boundary (a boundary around it streamed the page twice, see
  * components/theme-host/theme-slot.tsx).
  *
- * Home: the core has no page there. Under Classic, Studio and builtin Play the server forwards to
- * /chat as before; under an installed theme the page renders ThemeSlot, the theme's `/` page
- * draws when it registered one, and otherwise the browser forwards to /chat. (Builtin Play's two
- * style cookies forward there after W-A8 too: they then parse to the default style.)
+ * Home: the core has no page there. Under Classic, Studio and a style cookie that names no theme
+ * this build knows (it reads as the default style) the server forwards to /chat; under an installed
+ * theme the page renders ThemeSlot, the theme's `/` page draws when it registered one, and
+ * otherwise the browser forwards to /chat.
  */
 import fs from 'fs'
 import path from 'path'
@@ -263,9 +263,9 @@ describe('app/page.tsx (home)', () => {
     ['no cookie', undefined],
     ['Classic', 'classic'],
     ['Studio', 'studio'],
-    ['builtin Play, which owns no home page', 'theme:builtin:play'],
-    ['a legacy play cookie', 'play'],
-  ])('forwards to /chat on the server under %s, as before', async (_label, style) => {
+    ['a style that names no theme this build knows', 'theme:other'],
+    ['a malformed installed style', 'theme:install:not-a-uuid'],
+  ])('forwards to /chat on the server under %s', async (_label, style) => {
     state.style = style
     await expect(Home()).rejects.toThrow('redirect /chat')
     expect(state.redirect).toHaveBeenCalledWith('/chat')

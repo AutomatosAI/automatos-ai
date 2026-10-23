@@ -4,7 +4,7 @@
  * the current one; every look a theme hands in passes the theme's checks first (a look outside its
  * knobs, or over a preset, is refused and never kept); what the SDK hands out is a frozen copy;
  * Export writes the look as its checks keep it and Import gives a fresh id. While no installed theme
- * with looks runs, the bridge hands on the runtime above it (builtin Play's until W-A8) and
+ * with looks runs, the bridge hands on whatever runtime is above it (none, in the host's tree) and
  * registers nothing.
  */
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -138,7 +138,7 @@ describe('the plain functions on the generic runtime', () => {
 })
 
 describe('while no installed theme with looks runs here', () => {
-  /** Another runtime mounted above this one (builtin Play's, until W-A8). */
+  /** A runtime mounted above this one: the bridge hands it on unchanged rather than hide it. */
   function fakeRuntime(): HostLookRuntime {
     const refused: HostLookResult = { ok: false, errors: ['Not this runtime.'] }
     const state: HostLookState = {

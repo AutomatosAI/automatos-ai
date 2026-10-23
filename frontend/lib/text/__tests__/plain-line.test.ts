@@ -1,7 +1,7 @@
 /**
  * PRD-260 P260-FX-10 (M56) — one line of plain text (lib/text/plain-line.ts):
  * the gate a Look's name passes (lib/look-kit/validate.ts) and the fold a link's
- * ?draft= goes through (lib/play/draft.ts). Every special character is written
+ * ?draft= goes through (Play's draft.ts, in the theme kit since A-19). Every special character is written
  * as an escape, so none of them hides in this file. P260-FP-1 adds the rest of
  * Unicode's format characters, private use, unassigned code points and
  * variation selectors 17 to 256.

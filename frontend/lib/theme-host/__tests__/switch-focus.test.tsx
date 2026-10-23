@@ -1,18 +1,23 @@
 /**
- * PRD-261 G3 (P260-FX-22, M21) — 'Switch to Play' onto Play's installed package reloads the page
- * (PA-13), so the note leaves word in this tab's sessionStorage just before the reload, and the
- * next load takes it once (theme-slot-page-switch.test.tsx proves the heading then takes focus).
+ * PRD-261 G3 (P260-FX-22, M21) — a switch onto an installed theme reloads the page (PA-13), so the
+ * switch can leave word in this tab's sessionStorage just before the reload, and the next load
+ * takes it once: the page's heading then takes the focus that dropped to <body>.
  *
  * - The word: the page's path under one key, read and cleared together; another path's word is
  *   cleared and ignored; blocked storage never throws.
  * - setStyle runs a switch's `beforeReload` after the cookie is written and just before the
  *   reload, and never for a switch made in place.
- * - useChooseStyle hands it on: after the server stored the pick, and not when it refused it.
- * - The note's Switch to Play leaves the word when it picks the install, and none for builtin Play.
+ * - useChooseStyle hands it on: after the server stored the pick, not when it refused it, and
+ *   never for a pick applied in place (a Classic pick).
+ * - The next load of /looks (ThemeSlotPage, as app/looks/page.tsx draws it with
+ *   THEME_HEADING_SELECTOR): the installed theme's screen heading takes the focus, or the core's
+ *   note (components/theme-host/no-look-editor-note.tsx, the same mark on its region) when the
+ *   theme has no screen for the page; with no word, focus stays where it is.
+ *   components/theme-host/__tests__/theme-slot-page-switch.test.tsx holds the late-loading screen.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
-import { useEffect } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn() }))
 vi.mock('next-themes', () => ({ useTheme: () => tone }))
@@ -23,12 +28,18 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
 vi.mock('sonner', () => ({ toast: toasts }))
+/** The theme's frame around the page: its content alone here. */
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children }: { readonly children?: ReactNode }) => <div data-testid="main-layout">{children}</div>,
+}))
 
+import { NoLookEditorNote, LOOKS_NOTE, LOOKS_TITLE, THEME_HEADING_ATTRIBUTE, THEME_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/components/theme-host/no-look-editor-note'
+import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
+import { ThemeSlotPage } from '@/components/theme-host/theme-slot-page'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
-import { apiClient, type InstalledTheme } from '@/lib/api-client'
-import { PlayOnlyNote, SWITCH_TO_PLAY } from '@/lib/theme-host/builtin/play-only-route'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { apiClient } from '@/lib/api-client'
 import { forgetChecksInThisDocumentForTests, useChooseStyle } from '@/lib/theme-host/choice-sync'
+import type { SlotId } from '@/lib/theme-host/registry-types'
 import {
   SWITCH_FOCUS_STORAGE_KEY,
   rememberHeadingFocusAfterReload,
@@ -37,16 +48,16 @@ import {
 } from '@/lib/theme-host/switch-focus'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
 
-const LOOKS_PATH = '/looks'
-const PLAY_INSTALL_ID = '44444444-4444-4444-8444-444444444444'
-const PLAY_INSTALL_STYLE = `theme:install:${PLAY_INSTALL_ID}` as UiStyle
+import { fixtureThemeHost } from './fixture-theme-entry'
 
-const PLAY_INSTALL: InstalledTheme = {
-  installId: PLAY_INSTALL_ID, themeId: 'automatos/play', name: 'Play', packageId: '22222222-2222-4222-8222-222222222222',
-  version: '1.0.0', ownerType: 'first_party', reviewed: true, private: false, isDefault: false,
-  pinnedVersion: null, previousPackageId: null, pendingPackageId: null, pendingVersion: null,
-  installedAt: null, optIn: { required: false, wording: '', packageId: '' }, revoked: null, needsUpdate: false,
-}
+const LOOKS_PATH = '/looks'
+const LOOK_EDITOR_SLOT: SlotId = 'lookEditor@1'
+const INSTALL_ID = '44444444-4444-4444-8444-444444444444'
+const INSTALL_STYLE = `theme:install:${INSTALL_ID}` as UiStyle
+/** The installed theme's look editor heading. */
+const SCREEN_HEADING = 'Make it yours.'
+/** The mark and the focusability a theme's screen puts on its h1, as the core's note does on its region. */
+const SCREEN_HEADING_MARK = { [THEME_HEADING_ATTRIBUTE]: true, tabIndex: -1 } as const
 
 const word = () => window.sessionStorage.getItem(SWITCH_FOCUS_STORAGE_KEY)
 
@@ -120,7 +131,7 @@ function SetStyleProbe({ beforeReload }: { beforeReload: () => void }) {
   const { setStyle } = useUiStyle()
   return (
     <div>
-      <button onClick={() => setStyle(PLAY_INSTALL_STYLE, { beforeReload })}>to the install</button>
+      <button onClick={() => setStyle(INSTALL_STYLE, { beforeReload })}>to the install</button>
       <button onClick={() => setStyle('classic', { beforeReload })}>to classic</button>
     </div>
   )
@@ -136,8 +147,8 @@ describe('setStyle carries a switch across the reload (PA-13)', () => {
     })
     render(<UiStyleProvider initialStyle="studio" reloadPage={reload}><SetStyleProbe beforeReload={beforeReload} /></UiStyleProvider>)
     act(() => { screen.getByText('to the install').click() })
-    expect(atBefore).toEqual([{ cookie: expect.stringContaining(`${UI_STYLE_COOKIE}=${PLAY_INSTALL_STYLE}`), reloads: 0 }])
-    expect(seen).toEqual([{ word: LOOKS_PATH, cookie: expect.stringContaining(PLAY_INSTALL_STYLE) }])
+    expect(atBefore).toEqual([{ cookie: expect.stringContaining(`${UI_STYLE_COOKIE}=${INSTALL_STYLE}`), reloads: 0 }])
+    expect(seen).toEqual([{ word: LOOKS_PATH, cookie: expect.stringContaining(INSTALL_STYLE) }])
   })
 
   it('never runs it for a switch made in place', () => {
@@ -152,7 +163,12 @@ describe('setStyle carries a switch across the reload (PA-13)', () => {
 
 function ChooseProbe({ beforeReload }: { beforeReload: () => void }) {
   const choose = useChooseStyle()
-  return <button onClick={() => choose(PLAY_INSTALL_STYLE, { beforeReload })}>pick the install</button>
+  return (
+    <div>
+      <button onClick={() => choose(INSTALL_STYLE, { beforeReload })}>pick the install</button>
+      <button onClick={() => choose('classic', { beforeReload })}>pick classic</button>
+    </div>
+  )
 }
 
 describe('useChooseStyle hands the switch on', () => {
@@ -164,7 +180,7 @@ describe('useChooseStyle hands the switch on', () => {
     act(() => { screen.getByText('pick the install').click() })
     expect(beforeReload).not.toHaveBeenCalled()
     await settle()
-    expect(put).toHaveBeenCalledWith(PLAY_INSTALL_ID)
+    expect(put).toHaveBeenCalledWith(INSTALL_ID)
     expect(beforeReload).toHaveBeenCalledTimes(1)
     expect(reload).toHaveBeenCalledTimes(1)
   })
@@ -179,44 +195,79 @@ describe('useChooseStyle hands the switch on', () => {
     expect(beforeReload).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
   })
+
+  it('never for a pick applied in place (Classic): no word, no reload', async () => {
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    const reload = vi.fn()
+    const beforeReload = vi.fn(() => rememberHeadingFocusAfterReload())
+    render(<UiStyleProvider initialStyle="studio" reloadPage={reload}><ChooseProbe beforeReload={beforeReload} /></UiStyleProvider>)
+    act(() => { screen.getByText('pick classic').click() })
+    await settle()
+    expect(put).toHaveBeenCalledWith('classic')
+    expect(beforeReload).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(word()).toBeNull()
+  })
 })
 
-/** The workspace's installs, as ThemeChoiceSync hands them to the style context. */
-function SeedInstalls({ rows }: { rows: readonly InstalledTheme[] }) {
-  const { setInstalledThemes } = useUiStyle()
-  useEffect(() => {
-    setInstalledThemes(rows)
-  }, [rows, setInstalledThemes])
-  return null
+/** The installed theme's look editor: its h1 carries the heading mark. */
+function ThemeLookEditor() {
+  return <h1 {...SCREEN_HEADING_MARK}>{SCREEN_HEADING}</h1>
 }
 
-function renderNote(rows: readonly InstalledTheme[], reload: () => void) {
+/** The theme host for an installed theme, its look editor registered or (null) none. */
+function hostWith(lookEditor: ComponentType | null): ThemeHostContextValue {
+  const registered: Array<[SlotId, unknown]> = lookEditor === null ? [] : [[LOOK_EDITOR_SLOT, lookEditor]]
+  return fixtureThemeHost('active', { slots: new Map<SlotId, unknown>(registered) })
+}
+
+/** /looks on the next load, as app/looks/page.tsx draws it, under the theme host's value. */
+function looksPage(host: ThemeHostContextValue) {
   return render(
-    <UiStyleProvider initialStyle="studio" reloadPage={reload}>
-      <SeedInstalls rows={rows} />
-      <PlayOnlyNote title="Make it yours" note="Make it yours is part of the Play theme." offerSwitch />
-    </UiStyleProvider>,
+    <ThemeHostContext.Provider value={host}>
+      <ThemeSlotPage
+        slot={LOOK_EDITOR_SLOT}
+        note={<NoLookEditorNote title={LOOKS_TITLE} note={LOOKS_NOTE} />}
+        narrowNote={<NoLookEditorNote title={LOOKS_TITLE} note={WIDER_SCREEN_NOTE} />}
+        headingSelector={THEME_HEADING_SELECTOR}
+      />
+    </ThemeHostContext.Provider>,
   )
 }
 
-describe("the note's Switch to Play (G3)", () => {
-  it("onto Play's install leaves word for this page just before the reload", async () => {
-    ws.id = null
+const markedHeading = () => document.querySelector<HTMLElement>(THEME_HEADING_SELECTOR)
+
+describe('the next load hands focus to the heading the switch left word for (G3)', () => {
+  it("the installed theme's screen heading, after a switch from this page reloaded into it", () => {
     const { reload, seen } = recordingReload()
-    renderNote([PLAY_INSTALL], reload)
-    await settle()
-    act(() => { screen.getByRole('button', { name: SWITCH_TO_PLAY }).click() })
-    expect(seen).toEqual([{ word: LOOKS_PATH, cookie: expect.stringContaining(PLAY_INSTALL_STYLE) }])
+    const beforeReload = () => rememberHeadingFocusAfterReload()
+    render(<UiStyleProvider initialStyle="studio" reloadPage={reload}><SetStyleProbe beforeReload={beforeReload} /></UiStyleProvider>)
+    act(() => { screen.getByText('to the install').click() })
+    expect(seen).toEqual([{ word: LOOKS_PATH, cookie: expect.stringContaining(INSTALL_STYLE) }])
+    cleanup()
+
+    looksPage(hostWith(ThemeLookEditor))
+    expect(screen.getByRole('heading', { level: 1, name: SCREEN_HEADING })).toHaveFocus()
+    expect(markedHeading()).toBe(screen.getByRole('heading', { level: 1, name: SCREEN_HEADING }))
+    expect(word()).toBeNull()
   })
 
-  it('onto builtin Play switches in place and leaves no word', async () => {
-    ws.id = null
-    const reload = vi.fn()
-    renderNote([], reload)
-    await settle()
-    act(() => { screen.getByRole('button', { name: SWITCH_TO_PLAY }).click() })
-    expect(reload).not.toHaveBeenCalled()
-    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`)
+  it("the core's note when the theme switched to has no screen for the page: its region carries the mark", () => {
+    rememberHeadingFocusAfterReload(LOOKS_PATH)
+    looksPage(hostWith(null))
+    const note = markedHeading()
+    expect(note).toHaveAttribute('aria-label', LOOKS_TITLE)
+    expect(note).toHaveTextContent(LOOKS_NOTE)
+    expect(note).toHaveFocus()
     expect(word()).toBeNull()
+  })
+
+  it('a load with no word leaves focus where it is, on the note and on the screen', () => {
+    looksPage(hostWith(null))
+    expect(markedHeading()).not.toHaveFocus()
+    cleanup()
+    looksPage(hostWith(ThemeLookEditor))
+    expect(markedHeading()).not.toHaveFocus()
+    expect(document.activeElement).toBe(document.body)
   })
 })

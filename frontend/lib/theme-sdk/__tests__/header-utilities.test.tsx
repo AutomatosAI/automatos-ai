@@ -3,13 +3,17 @@
  * header utilities (Help and the docs, notifications, the theme menu, the account), so the way back
  * to the theme menu and the account is on screen whatever the theme draws. The SDK's
  * `cards.HeaderUtilities` is that cluster (the Studio header's StudioHeaderUtilities, stood in for
- * here by a marker), and every builtin theme's frame@1 renders it in its header, around the page.
- * An installed theme's frame is checked in the browser lane (e2e/browser/specs/host-cards.spec.ts,
- * fixtures/hello-a12a).
+ * here by a marker), and it is what a theme takes from '@automatos/theme-sdk'.
+ *
+ * No theme is compiled into the core (A-19f1), so the frame here is an installed theme's: the neutral
+ * fixture theme (lib/theme-host/__tests__/fixture-theme-entry.ts) with a frame@1 drawn from the SDK
+ * alone, as the host-cards hello theme's is (e2e/browser/fixtures/hello-a12a/entry.js, held to
+ * rendering HeaderUtilities by hello-a12a-fixture.test.ts), under the host's frame slot. The real
+ * installed frame is checked in the browser lane (e2e/browser/specs/host-cards.spec.ts).
  */
 import React from 'react'
 import { render, screen, within } from '@testing-library/react'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 const UTILITIES = 'host-header-utilities'
 
@@ -17,24 +21,32 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
-// GET /health answers, so the frame shows (the asleep screen has its own tests).
-vi.mock('@/hooks/use-backend-health', () => ({
-  useBackendHealth: () => ({ connection: 'connected', checking: false, check: vi.fn() }),
-}))
-// The sidebar has its own tests.
-vi.mock('@/components/play/shell/play-sidebar', () => ({ PlaySidebar: () => <aside data-testid="play-sidebar" /> }))
 vi.mock('@/components/layout/studio-header', () => ({
   StudioHeaderUtilities: () => <div data-testid="host-header-utilities" />,
 }))
 
-import { HeaderUtilities } from '../cards'
-import { BUILTIN_THEME_REGISTRATIONS } from '@/lib/theme-host/builtin/slots'
+import * as ThemeSdk from '@automatos/theme-sdk'
+import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
+import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
+import { fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
+import type { FrameProps } from '@/lib/theme-host/types'
 
-// Builtin Play's frame is a lazy slot: its chunk is fetched once here, so each findBy waits on the
-// render, not on the module's first transform.
-beforeAll(async () => {
-  await import('@/components/play/shell/play-frame')
-})
+import { HeaderUtilities } from '../cards'
+
+const FALLBACK = 'core-chrome'
+
+/** An installed theme's frame@1, from the SDK alone: its own header around the host's cluster, then the page. */
+function HeaderFrame({ children }: FrameProps) {
+  return (
+    <div data-testid="theme-frame">
+      <header>
+        <strong>Fixture theme</strong>
+        <ThemeSdk.HeaderUtilities />
+      </header>
+      <main>{children}</main>
+    </div>
+  )
+}
 
 describe('PRD-261 A-12a — the frame renders HeaderUtilities (PRD §4.4)', () => {
   it("the SDK's HeaderUtilities is the host's header utilities cluster", () => {
@@ -42,20 +54,23 @@ describe('PRD-261 A-12a — the frame renders HeaderUtilities (PRD §4.4)', () =
     expect(screen.getByTestId(UTILITIES)).toBeInTheDocument()
   })
 
-  it('has a builtin theme to check', () => {
-    expect(BUILTIN_THEME_REGISTRATIONS.size).toBeGreaterThan(0)
+  it("is the HeaderUtilities a theme imports from '@automatos/theme-sdk'", () => {
+    expect(ThemeSdk.HeaderUtilities).toBe(HeaderUtilities)
   })
 
-  it.each(Array.from(BUILTIN_THEME_REGISTRATIONS))('%s: frame@1 renders HeaderUtilities in its header, around the page', async (_ref, registrations) => {
-    const Frame = registrations.frame
+  it("an installed theme's frame@1 renders it in its header, around the page, under the host's frame slot", () => {
     render(
-      <Frame>
-        <div data-testid="page" />
-      </Frame>,
+      <ThemeHostContext.Provider value={fixtureThemeHost('active', { frame: HeaderFrame })}>
+        <ThemeFrameSlot fallback={<div data-testid={FALLBACK} />}>
+          <div data-testid="page" />
+        </ThemeFrameSlot>
+      </ThemeHostContext.Provider>,
     )
-    const header = await screen.findByRole('banner')
+    const header = screen.getByRole('banner')
+    expect(within(screen.getByTestId('theme-frame')).getByRole('banner')).toBe(header)
     expect(within(header).getByTestId(UTILITIES)).toBeInTheDocument()
     expect(screen.getByTestId('page')).toBeInTheDocument()
     expect(header).not.toContainElement(screen.getByTestId('page'))
+    expect(screen.queryByTestId(FALLBACK)).toBeNull()
   })
 })
