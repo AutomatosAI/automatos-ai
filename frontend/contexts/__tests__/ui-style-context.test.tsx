@@ -118,10 +118,13 @@ describe('UiStyleProvider', () => {
 type StorageMethod = 'getItem' | 'setItem'
 const REFUSING_STORAGE: ReadonlyArray<readonly [string, StorageMethod]> = [['reading', 'getItem'], ['writing', 'setItem']]
 
-function refuseStorage(method: StorageMethod) {
-  return vi.spyOn(Storage.prototype, method).mockImplementation(() => {
+function refuseStorage(method: StorageMethod): { mockRestore: () => void } {
+  const refuse = (): never => {
     throw new DOMException('The operation is insecure.', 'SecurityError')
-  })
+  }
+  return method === 'getItem'
+    ? vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse)
+    : vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse)
 }
 
 describe('PRD-261 W-A8 — a browser whose storage cannot keep the defaults version keeps its stored choice', () => {
