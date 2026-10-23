@@ -42,6 +42,7 @@ Related:
 **What is charged:**
 - Only calls on **Automatos's own AI keys** are charged.
 - These cost nothing: calls on the customer's own keys, free models (NVIDIA), Claude Code / CLI subscription sessions, and the local edition.
+- **Our own workspaces never pay.** A workspace whose owner's email is in `BILLING_FREE_OWNER_EMAILS` runs on an allowance on any plan, like Enterprise: its calls are recorded, but never charged or paused.
 - Background platform work (routing, memory, retrieval, checks) is **absorbed**. We record it as overhead for margin review, but never charge the customer for it.
 
 **Where credits sit:** three buckets, spent in this order.
@@ -93,6 +94,7 @@ Related:
 - **Grant or take back credits:** `POST /api/admin/workspaces/{id}/credits` with an amount, a bucket and a reason. It is recorded in the ledger as "Adjustment by Automatos". *There is no button for this in the console yet; it's an API call.*
 - **Refund, cancel or see a payment:** in the Stripe Dashboard. The app follows within seconds.
 - **Test purchases before 9 Nov:** platform admins can buy even while billing is closed.
+- **Never charge our own workspaces:** list the owners' emails in `BILLING_FREE_OWNER_EMAILS` on the API service. Being a platform admin alone doesn't do it: that role lives only in the Clerk sign-in, and the meter runs in the background with no sign-in to read.
 
 ## Before and after 9 Nov
 
@@ -115,6 +117,7 @@ There is no setup page in the app. Stripe is connected with environment variable
 | `STRIPE_PRICE_BASIC`, `_PRO`, `_BUSINESS`, `_TOPUP`, `STRIPE_ACCOUNT_ID` | Printed by `python -m scripts.stripe_setup` |
 | `BILLING_OPEN` | `false` until 9 Nov |
 | `BILLING_WITHDRAWAL_CONSENT_TEXT` | Counsel's EU withdrawal wording (D-4); empty means no consent box |
+| `BILLING_FREE_OWNER_EMAILS` | Comma-separated owner emails whose workspaces are never charged (ours) |
 
 **Test and live** use the same variables with different values. Do test mode first; switch to live after the entity decision (D-2). The [runbook](../runbooks/stripe-billing.md) has every step and the test cards.
 

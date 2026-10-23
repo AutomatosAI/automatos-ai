@@ -41,7 +41,7 @@ Migrations: `prd265_credit_ledger` (W1), `prd265_billing` (W2, already applied i
    - Overhead purposes (routing, memory, retrieval, checks) are absorbed (decision D-3).
    - Anything else is customer work. An unknown purpose is treated as customer work, and `tests/test_prd265_call_site_classes.py` fails on an unclassified call site.
 2. **The gate** (`credits/gate.py`, called by `LLMManager` before every model call):
-   - Waved through: own-key calls (`is_byok`), the local edition, overhead, and allowance plans (enterprise).
+   - Waved through: own-key calls (`is_byok`), the local edition, overhead, allowance plans (enterprise), and free owners' workspaces.
    - Otherwise the workspace needs spendable credits, or the call raises `CreditsExhaustedError` (`error_code = "credits_exhausted"`, which the chat renders as the paused banner).
    - Inside an **ask** (`credits/asks.py`: a chat turn, or a run of a mission, Task, heartbeat or playbook), the balance read at the first call is the ask's budget. Once the ask's running cost reaches it, the next call stops.
 3. **Recording:** `LLMManager._record_usage` writes the `llm_usage` row under `usage_scope(charge_class=…)`, and the listener stamps `charge_class` and `ask_id`.
@@ -54,6 +54,7 @@ Migrations: `prd265_credit_ledger` (W1), `prd265_billing` (W2, already applied i
    - Monthly and top-up credits pay only on a plan with `platform_ai` (Pro, Business), never on Own keys.
    - Background work never spends the trial.
    - The spend order is trial → monthly → top-up.
+   - **Free owners:** a workspace whose owner's email (`workspaces.owner_id` → `users.email`, compared lower-case) is in `BILLING_FREE_OWNER_EMAILS` gets `funding_for(..., free=True)`, an allowance on any plan. `workspace_funding` (the gate, the agent factory, `background_allowed`), the meter (one `free_workspace_ids` query per batch), the alerts and the summary all pass it. The list is keyed by email because `system_role` lives only in Clerk claims, and the meter has no request token. With the list empty, nothing is queried.
 6. **Alerts** (`credits/alerts.py`): "running low" at `CREDITS_ALERT_LOW_SHARE` (20%) of the allowance, and "run out" at zero. Each fires once per crossing, through `NotificationDispatcher`.
 7. **The trial** (`credits/trial.py`): 500 credits once per person (keyed on the owner), behind the `TRIAL_ENABLED` kill switch and the `TRIAL_GLOBAL_DAILY_CREDITS` cap.
 8. **Overhead** (`meter.record_overhead`) is rolled up nightly at 03:15 UTC, for margin review.
@@ -135,20 +136,20 @@ Events handled (`stripe_events.WEBHOOK_EVENTS`): `checkout.session.completed` / 
 | `POST /api/admin/workspaces/{id}/credits` | Platform admin: grant or take back credits |
 | `POST /api/admin/workspaces/{id}/business-invite` | Platform admin: offer Business |
 
-All billing routes answer 404 in the local edition.
+All billing routes answer 404 in the local edition, the two admin routes included. The frontend adds Stripe's CSP sources only to a hosted build (`stripeCspFor(NEXT_PUBLIC_AUTH_EDITION)` in `frontend/csp-sources.js`).
 
 ## Configuration
 
 Everything is set in `orchestrator/config.py` and overridable by environment variable:
 
 - **Stripe:** `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_VERSION`, `STRIPE_PRICE_BASIC/PRO/BUSINESS/TOPUP`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_TOLERANCE_SECONDS`, `STRIPE_TIMEOUT_SECONDS`.
-- **Billing:** `BILLING_OPEN`, `BILLING_WITHDRAWAL_CONSENT_TEXT`, `BILLING_MONTHLY_EXPIRY_GRACE_HOURS`, `BUSINESS_OFFER_DAYS`.
+- **Billing:** `BILLING_OPEN`, `BILLING_WITHDRAWAL_CONSENT_TEXT`, `BILLING_MONTHLY_EXPIRY_GRACE_HOURS`, `BUSINESS_OFFER_DAYS`, `BILLING_FREE_OWNER_EMAILS`.
 - **Credits and the trial:** `CREDITS_MARKUP`, `CREDITS_METER_INTERVAL_SECONDS`, `CREDITS_ALERT_LOW_SHARE`, `TOPUP_CREDITS` / `TOPUP_PRICE_USD` / `TOPUP_VALID_DAYS`, `TRIAL_ENABLED`, `TRIAL_CREDITS`, `TRIAL_GLOBAL_DAILY_CREDITS`.
 - **Plans:** `AUTOMATOS_PLAN_TIERS_JSON` overrides the tier numbers. Each name must also be listed in `orchestrator/reports/config-surface.json`.
 
 ## Tests
 
-- **Real Postgres:** `test_prd265_credit_ledger_realdb.py`, `test_prd265_asks_realdb.py`, and `test_prd265_w2_billing_realdb.py`. The last drives whole Stripe events through to the ledger: renewals, upgrades, top-ups, refunds, disputes, ended plans, retries and the sweep.
+- **Real Postgres:** `test_prd265_credit_ledger_realdb.py`, `test_prd265_asks_realdb.py`, `test_prd265_free_owners_realdb.py` (a free owner with no credits is never charged or paused), and `test_prd265_w2_billing_realdb.py`. The last drives whole Stripe events through to the ledger: renewals, upgrades, top-ups, refunds, disputes, ended plans, retries and the sweep.
 - **Unit and route:** `test_prd265_*.py` and `test_prd265_w2_*.py`. They cover the client, signatures, the translator in both API shapes, checkout params, management calls, service rules, every route's auth and edition, the setup script against a fake Stripe, and the proration share.
 - **Frontend:** `frontend/components/settings/billing/__tests__/`, `frontend/hooks/__tests__/use-billing-*.test.tsx`, `frontend/lib/__tests__/{stripe,stripe-csp,stripe-appearance,api-client-blob}.test.ts`. Stripe.js is mocked in `stripe-mocks.tsx`.
 

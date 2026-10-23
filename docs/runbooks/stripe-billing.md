@@ -33,6 +33,7 @@ Stripe's Dashboard moves its menus around. If a setting isn't where this page sa
    - Copy the **secret key** (`sk_test_…`) into the API service's (`automatos-ai-api`) Variables as `STRIPE_SECRET_KEY`.
    - Copy the **publishable key** (`pk_test_…`) into the same service as `STRIPE_PUBLISHABLE_KEY`. It is safe to show in a browser; the card form needs it.
    - Check that `BILLING_OPEN` is `false` or unset.
+   - Set `BILLING_FREE_OWNER_EMAILS` to our own sign-in emails, comma-separated. Workspaces owned by those people are never charged or paused.
    - Railway redeploys. Never paste the secret key into chat, a file or a ticket.
 7. **Dry run.** Open a shell on the API service and preview:
    ```
