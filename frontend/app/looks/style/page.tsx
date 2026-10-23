@@ -1,7 +1,7 @@
 'use client'
 
 // One line, the component first: app/__tests__/page-frames.test.ts follows it to the note's PageHeader.
-import { NoLookEditorNote, STYLE_SHEET_NOTE, STYLE_SHEET_TITLE, THEME_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/components/theme-host/no-look-editor-note'
+import { NoLookEditorNote, STYLE_SHEET_NOTE, STYLE_SHEET_NO_THEME_NOTE, STYLE_SHEET_TITLE, THEME_HEADING_SELECTOR, WIDER_SCREEN_NOTE } from '@/components/theme-host/no-look-editor-note'
 import { ThemeSlotPage } from '@/components/theme-host/theme-slot-page'
 
 /**
@@ -17,7 +17,7 @@ export default function LookStylePage() {
   return (
     <ThemeSlotPage
       slot="styleSheet@1"
-      note={<NoLookEditorNote title={STYLE_SHEET_TITLE} note={STYLE_SHEET_NOTE} />}
+      note={<NoLookEditorNote title={STYLE_SHEET_TITLE} note={STYLE_SHEET_NOTE} noThemeNote={STYLE_SHEET_NO_THEME_NOTE} />}
       narrowNote={<NoLookEditorNote title={STYLE_SHEET_TITLE} note={WIDER_SCREEN_NOTE} />}
       headingSelector={THEME_HEADING_SELECTOR}
     />
