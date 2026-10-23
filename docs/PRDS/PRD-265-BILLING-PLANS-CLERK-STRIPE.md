@@ -7,6 +7,15 @@
 - **P2, pricing unit — REVISED 20 Oct 2026 (Gerard): metered, like OpenRouter.** Every platform-funded model call costs its real cost in cents × one markup (`CREDITS_MARKUP`, default 1.2×). The earlier fixed credits per *ask* by band (Rikki's proposal) is dropped: a fixed charge could not price a $0.50 report and a $10 app build alike.
 - **P3, timing:** the beta opens Tue 3 Nov on the trial plus customers' own keys, with nothing charged. **Paid plans open Mon 9 Nov 2026**, before Web Summit (10–12 Nov).
 - **P4, legal entity:** left open. It gates the Stripe account and the VAT registrations (§9).
+- **P1 re-confirmed 23 Oct 2026 (Gerard):** "we go it alone with Stripe." Clerk's billing docs, re-read that day, still say no 3-D Secure ("payments that require a 3DS challenge will fail"), no tax or VAT, USD only, no refunds.
+
+**W2 build choices (23 Oct 2026):**
+- **Stripe client:** a thin client on `httpx`, which is already a dependency (`services/billing/stripe_api.py`). No new package, so the hash-locked `requirements.lock` is unchanged. Every request pins `STRIPE_API_VERSION` (`2025-03-31.basil`), and the webhook readers also accept the older event shapes.
+- **Before `BILLING_OPEN`:** only platform admins can check out, so test mode and the live card tests (US-012) run before 9 Nov while customers still see the beta block.
+- **CSP:** unchanged. Checkout and the portal are full-page redirects, and no Stripe.js is loaded.
+- **Top-ups** are sold only on a live Pro or Business subscription. On Own keys, top-up credits can't pay for platform AI.
+- **Plan changes** for an existing subscriber go through the portal's confirm page (Stripe handles proration and 3-D Secure). A downgrade waits for the period end. An upgrade grants only the difference in monthly credits.
+- **A subscription that ends** (cancelled, or unpaid after Stripe's retries) puts the workspace back on `basic` (Own keys) and expires the month, so platform AI pauses.
 
 **Source:**
 - `<workspace>/reports/Automatos billing options.md`: billing research of 19 Oct, with vendor and code claims re-verified.
@@ -199,6 +208,8 @@ Every story: CI is the gate, tests go in with the story, and nothing runs locall
 - [ ] Verify in the browser on a CI preview or staging, not locally.
 
 ### W2: Stripe
+
+Built 23 Oct 2026 on `feat/prd-265-w2`. Code: `services/billing/` (provider interface, the Stripe adapter, the event translator, grants, checkout), `api/billing.py`, `api/billing_webhooks.py`, `services/credits/expiry.py` (an hourly sweep), and migration `prd265_billing`. The Billing tab is under `frontend/components/settings/billing/`. Setup: `scripts/stripe_setup.py` and the runbook `docs/runbooks/stripe-billing.md`.
 
 #### US-009: Stripe adapter and Checkout
 **Description:** As a workspace owner, I can buy a plan or a top-up with a card that needs 3-D Secure.
