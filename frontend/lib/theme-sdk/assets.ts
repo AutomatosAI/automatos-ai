@@ -10,9 +10,9 @@
  * (lib/theme-host/manifest.ts resolveUnderRoot): plain, relative, lowercase, no '..' and no
  * '//', and the URL must stay on this origin and under the package's folder.
  *
- * Null when the path is refused, when the style is not an installed theme (Classic, Studio, a
- * builtin theme, whose files are the app's own), when the digest is not known for that install,
- * and on the server, where no installed theme renders.
+ * Null when the path is refused, when the style is not an installed theme (Classic or Studio,
+ * whose files are the app's own), when the digest is not known for that install, and on the
+ * server, where no installed theme renders.
  */
 import { resolveUnderRoot, themeFilesRoot } from '@/lib/theme-host/manifest'
 import { isInstalledThemeStyle, themeRefOf } from '@/lib/theme-host/registry'
@@ -29,7 +29,7 @@ function cookieValue(cookies: string, name: string): string | undefined {
   return cookies.split(COOKIE_SEPARATOR).find((entry) => entry.startsWith(prefix))?.slice(prefix.length)
 }
 
-/** The install the style cookie names, or null for Classic, Studio, a builtin theme or no cookie. */
+/** The install the style cookie names, or null for Classic, Studio or no cookie. */
 function activeInstallId(cookies: string): string | null {
   const style = cookieValue(cookies, UI_STYLE_COOKIE)
   if (style === undefined || !isInstalledThemeStyle(style)) return null
