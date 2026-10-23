@@ -64,18 +64,23 @@ def test_the_hosted_edition_says_people_sign_in_and_the_plan_sets_the_helpers(ed
     facts = edition_facts()
     assert "hosted edition" in facts and "signs in with their own account" in facts
     assert "Settings has these tabs: Orchestrator, Webhooks," in facts and "Profile" not in facts
-    assert "There is no Billing, Plans or Team Management tab." in facts
+    # PRD-265 W2: hosted Settings has a Billing tab, so Auto sends the owner there, not nowhere.
+    assert "Widget SDK, Billing." in facts and "There is no Billing" not in facts
+    assert "There is no Plans or Team Management tab: the plan, the credits and payments are on the Billing tab." in facts
 
 
 def test_the_settings_tabs_are_the_pages_own():
-    from modules.context.sections.product_facts import LOCAL_SETTINGS_TABS, SETTINGS_TABS
+    from modules.context.sections.product_facts import HOSTED_SETTINGS_TABS, LOCAL_SETTINGS_TABS, SETTINGS_TABS
 
     page = SETTINGS_PANEL.read_text(encoding="utf-8")
     labels = set(re.findall(r"label: '([^']+)'", page))
     local_only = set(re.findall(r"isLocal \? \[\{ value: '[^']+', label: '([^']+)'", page))
-    assert labels - {"System Settings"} == {*LOCAL_SETTINGS_TABS, *SETTINGS_TABS}   # a platform admin's only
+    assert labels - {"System Settings"} == {*LOCAL_SETTINGS_TABS, *SETTINGS_TABS, *HOSTED_SETTINGS_TABS}
     assert local_only == set(LOCAL_SETTINGS_TABS)
-    assert not [label for label in labels if re.search(r"billing|plan|team", label, re.I)]
+    assert not [label for label in labels if re.search(r"plan|team", label, re.I)]
+    # Billing is the hosted edition's only (PRD-265 W2): the local edition's tab set leaves it out.
+    local_set = re.search(r"LOCAL_EDITION_SETTINGS_TABS[^=]*= new Set\(\[(.*?)\]\)", page, re.S).group(1)
+    assert "'billing'" not in local_set and "'profile'" in local_set
 
 
 def test_the_helpers_are_the_agents_page_and_nobody_else(shop):

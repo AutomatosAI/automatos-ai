@@ -8,6 +8,7 @@ reads the subscription's item id before asking Stripe to open the confirm page.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -20,7 +21,7 @@ from services.billing.stripe_provider import StripeProvider, checkout_params
 from services.billing.stripe_signature import SignatureError, expected_signature
 
 SECRET = "whsec_test"
-NOW = 1_700_000_000
+NOW = int(time.time())  # inside the 5-minute replay window parse_webhook enforces
 
 
 def _api(handler) -> StripeApi:

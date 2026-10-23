@@ -575,7 +575,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> Options:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """The command: parse the flags, read config, set Stripe up, print the env lines."""
+    from core.monitoring.request_log_guard import guard_request_logs
+
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    guard_request_logs()  # no Stripe request URL or body in this script's logs (#1178)
     return execute(parse_args(argv), settings_from_config(), out=sys.stdout)
 
 

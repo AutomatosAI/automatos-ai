@@ -44,7 +44,7 @@ class FakeProvider:
 
 
 def _workspace():
-    return SimpleNamespace(id=uuid4(), name="Barber & Co")
+    return SimpleNamespace(id=uuid4(), name="Barber & Co", plan="basic")
 
 
 def _ctx(system_role="user"):
@@ -173,6 +173,7 @@ def test_checkout_accepts_the_display_name_own_keys_as_basic(hosted, monkeypatch
 
 def test_checkout_409_for_a_topup_without_a_live_subscription(hosted, monkeypatch):
     monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
+    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
     app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
     db.query.return_value.filter.return_value.first.return_value = _workspace()
     res = _checkout(app, {"kind": "topup"})
