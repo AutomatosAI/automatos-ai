@@ -10,11 +10,13 @@ CI enforcement: `rg "image_url.*url|ContentPart" orchestrator/ | grep -v resolve
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any, Optional
 from uuid import UUID
 
+from core.image_read import shrunk_for_read
 from modules.attachments.store import (
     AttachmentNotFoundError,
     AttachmentStore,
@@ -31,8 +33,26 @@ DEFAULT_TEXT_BUDGET_CHARS = 80_000
 # Max images per request (prevent context overflow)
 MAX_IMAGES_PER_REQUEST = 20
 
-# Threshold for inline base64 vs signed URL (500KB)
-INLINE_BASE64_THRESHOLD = 500 * 1024
+# An image under this size, of a type every vision provider reads, goes as it is (500KB).
+SEND_AS_IS_BYTES = 500 * 1024
+
+# The image types every vision provider reads as they are.
+SENDABLE_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+
+# A larger image, or one of another type (bmp, tiff), is made a JPEG at most this many
+# pixels on its longer side: the high-resolution vision limit
+# (platform.claude.com/docs/en/build-with-claude/vision), well inside every provider's
+# size and pixel limits (Claude 10 MB and 8000 px a side, Bedrock 5 MB).
+READ_EDGE_PX = 2576
+
+
+def sendable_image(content: bytes, mime: str) -> Optional[tuple[bytes, str]]:
+    """``(bytes, media type)`` of an image as it goes to a model: a small jpeg, png, gif or
+    webp as it is; anything larger or of another type made a JPEG at most
+    ``READ_EDGE_PX`` on its longer side; None when it can't be read (an svg)."""
+    if len(content) < SEND_AS_IS_BYTES and mime in SENDABLE_IMAGE_TYPES:
+        return content, mime
+    return shrunk_for_read(content, mime, edge_px=READ_EDGE_PX, small_enough_bytes=SEND_AS_IS_BYTES)
 
 
 class VisionNotSupportedError(Exception):
@@ -256,24 +276,27 @@ class AttachmentResolver:
         self, ref: "AttachmentRef", workspace_id: UUID
     ) -> Optional[dict]:
         """
-        Resolve an image attachment to an image_url content part.
+        Resolve an image attachment to an inline ``image_url`` data-URL part.
 
-        Uses signed URL for large images, inline base64 for small ones.
+        The bytes always go inline (``sendable_image``: a large photo is made a JPEG of
+        at most ``READ_EDGE_PX`` first). A signed link failed every way a camera photo
+        goes (23 Oct 2026): the local edition's ``http://localhost`` store no provider
+        can fetch, a link expiring after 15 minutes of a tool loop, Bedrock and Gemini
+        leaving a linked image out, and a 48 MP photo or a bmp the provider refuses. An
+        image that can't be read is None, which the caller reports as a failure.
         """
         try:
-            # Check if we should use inline base64 (< 500KB)
-            if ref.size_bytes < INLINE_BASE64_THRESHOLD:
-                content = await self._store.open(ref.attachment_id, workspace_id)
-                b64 = base64.b64encode(content).decode("ascii")
-                data_url = f"data:{ref.mime};base64,{b64}"
-                return {"type": "image_url", "image_url": {"url": data_url}}
-            else:
-                # Use signed URL for larger images
-                url = await self._store.sign_url(ref.attachment_id, workspace_id)
-                return {"type": "image_url", "image_url": {"url": url}}
-        except Exception as e:
-            logger.error("Failed to resolve image %s: %s", ref.attachment_id, e)
+            content = await self._store.open(ref.attachment_id, workspace_id)
+            image = await asyncio.to_thread(sendable_image, content, ref.mime)
+        except Exception:
+            logger.exception("Failed to resolve image %s", ref.attachment_id)
             return None
+        if image is None:
+            logger.warning("Image %s (%s) could not be read to send to the model", ref.attachment_id, ref.mime)
+            return None
+        data, mime = image
+        b64 = base64.b64encode(data).decode("ascii")
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
 
     async def _resolve_document(
         self, ref: "AttachmentRef", workspace_id: UUID, budget_chars: int
@@ -346,6 +369,8 @@ def inject_parts_into_last_user_message(
     Inject content parts into the last user message.
 
     Converts `content: str` to `content: [{type: "text", text: ...}, *parts]`.
+    A blank string (a photo sent with no caption) adds no text part: the content
+    is the parts alone, as Anthropic answers 400 to an empty text block.
 
     Args:
         messages: List of message dicts (modified in place)
@@ -364,8 +389,9 @@ def inject_parts_into_last_user_message(
             content = msg.get("content")
 
             if isinstance(content, str):
-                # Convert string to parts list
-                msg["content"] = [{"type": "text", "text": content}] + parts
+                # Convert string to parts list; a blank caption adds no text part
+                caption = [{"type": "text", "text": content}] if content.strip() else []
+                msg["content"] = caption + parts
             elif isinstance(content, list):
                 # Append to existing parts list
                 msg["content"] = content + parts

@@ -74,7 +74,7 @@ MAGIC_BYTES = {
     b"\x89PNG\r\n\x1a\n": "image/png",
     b"GIF87a": "image/gif",
     b"GIF89a": "image/gif",
-    b"RIFF": "image/webp",  # WebP starts with RIFF
+    b"RIFF": "image/webp",  # WebP is RIFF....WEBP; a WAV or AVI is RIFF too (_magic_matches)
     b"%PDF": "application/pdf",
     b"PK\x03\x04": "application/zip",  # ZIP-based formats (docx, xlsx, pptx)
 }
@@ -235,6 +235,15 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
+def _magic_matches(content: bytes, magic: bytes, mime: str) -> bool:
+    """Whether ``content`` starts with ``magic``. A RIFF file is WebP only when it says
+    ``WEBP`` at bytes 8-12: a WAV or AVI labelled WebP went to the model as an image it
+    refused, failing the whole reply."""
+    if not content.startswith(magic):
+        return False
+    return mime != "image/webp" or content[8:12] == b"WEBP"
+
+
 def detect_mime(content: bytes, filename: str) -> str:
     """
     Detect MIME type from content magic bytes and filename.
@@ -247,7 +256,7 @@ def detect_mime(content: bytes, filename: str) -> str:
     """
     # Check magic bytes
     for magic, mime in MAGIC_BYTES.items():
-        if content.startswith(magic):
+        if _magic_matches(content, magic, mime):
             # Special case: ZIP-based formats need extension check
             if mime == "application/zip":
                 ext = os.path.splitext(filename)[1].lower()

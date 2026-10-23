@@ -4,9 +4,9 @@ Image content blocks, read one way for every provider that sends an image's byte
 A message's content can carry an image as an Anthropic-style base64 block
 (``{"type": "image", "source": {"type": "base64", "media_type", "data"}}``) or as an
 OpenAI-style data URL (``{"type": "image_url", "image_url": {"url": "data:…;base64,…"}}``,
-as ``modules/attachments/resolver.py`` builds for a small attachment). Bedrock's Converse
-(#1172) and Gemini (#1180) both take the bytes and a media type; each says which media
-types it accepts.
+as ``modules/attachments/resolver.py`` builds for an image attachment). Bedrock's Converse
+(#1172), Gemini (#1180) and the Anthropic client all take the bytes and a media type; each
+says which media types it accepts.
 """
 
 import base64
