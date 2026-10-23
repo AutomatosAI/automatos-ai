@@ -69,7 +69,8 @@ def _session_of(package: ThemePackage) -> Optional[Session]:
 def _vouched_for(package: ThemePackage) -> bool:
     """An active Automatos key nobody revoked verifies the stored signature (C-05c's check, QB-24's question).
 
-    Imported here, not at the top: ``signature_state`` imports ``signing``, which imports this module.
+    Imported here, not at the top: ``signature_state`` imports ``signature_verify``, which imports
+    ``signing``, which imports this module.
     A row with no session can't read the keys the hosted feed revoked, so it vouches for nothing.
     """
     if not getattr(package, "signature", None):

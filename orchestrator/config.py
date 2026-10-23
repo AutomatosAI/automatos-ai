@@ -1613,6 +1613,10 @@ class Config:
     # often (services/themes/revocation_pull.py, services/theme_revocation_scheduler.py). The hosted
     # edition serves the feed (api/themes_revocations_feed.py) with rows lifted in the last
     # THEME_REVOCATIONS_LIFTED_DAYS days, and neither side reads a feed over THEME_REVOCATIONS_FEED_MAX_KB.
+    # THEME_REVOCATIONS_URL is a deploy-time trust boundary: only the environment sets it, and https
+    # to any host passes revocation_pull.checked_url (no DNS or private-range check). Never let a
+    # lower-trust actor set it (an admin setting, a per-workspace override) without a host allowlist
+    # or a check of the resolved address.
     THEME_REVOCATIONS_URL: str = (
         os.getenv("THEME_REVOCATIONS_URL", "https://api.automatos.app/api/themes/revocations") or ""
     ).strip()
