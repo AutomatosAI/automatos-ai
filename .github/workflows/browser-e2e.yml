@@ -167,15 +167,16 @@ concurrency:
 permissions:
   contents: read
 
-# PRD-261 A-17a: the Design Kit commit the lane packs Play from. PRD-261 A-19d2 (PB-17): W-K4's
-# merge on the kit's main (AutomatosAI/automatos-play#11: Play packed as automatos/play 1.1.0, on
-# the SDK's storage area, with its clips committed, the tone rule and the generic motion and
-# heading marks the host's generic look runtime reads). Move it with the kit, in the same pull
-# request as the Play change it brings, and only forward in kit history (PB-17; Play's own rules
-# are in the kit's themes/play/README.md). npm is pinned to the kit's own version (its kit.yml).
+# PRD-261 A-17a: the Design Kit commit the lane packs Play from. PRD-261 A-19f4 (PB-17): W-K6's
+# merge on the kit's main (AutomatosAI/automatos-play#14: Play's tests moved from core onto the
+# kit's harness, every path core's test ledger names for them). Play's own files there are the
+# ones released as automatos/play 1.1.0 at the kit's tag play-v1.1.0. Move it with the kit, in the
+# same pull request as the Play change it brings, and only forward in kit history (PB-17; Play's
+# own rules are in the kit's themes/play/README.md). npm is pinned to the kit's own version (its
+# kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-play
-  KIT_REF: 2db7188df5c5a855a23c322fe2757273a1d3aa6d
+  KIT_REF: cd01beb3650223ad51e9c928c36d44b6f48b08ab
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
   PLAY_PACKAGE: automatos.play-1.1.0.autotheme
@@ -204,6 +205,42 @@ jobs:
           path: kit
           persist-credentials: false
 
+      # PRD-261 A-19f4: the core files the kit must agree with, read from this commit.
+      - name: Check out core's test ledger and signing files
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: core
+          persist-credentials: false
+          sparse-checkout: |
+            frontend/lib/__tests__/fixtures/a19-test-ledger.json
+            orchestrator/tests/fixtures/themes/signing-vector.json
+            orchestrator/services/themes/data/signing-keys.json
+          sparse-checkout-cone-mode: false
+
+      # PRD-261 A-19f4: every kitPath core's test ledger names (the tests W-A8 moved out of core)
+      # exists in the kit at KIT_REF, and the kit signs with the vector and keys core verifies
+      # against: its tests/fixtures/signing-vector.json and keys/theme-signing.json are core's
+      # files byte for byte.
+      - name: Check the kit holds core's moved tests and signing files
+        shell: python3 {0}
+        run: |
+          import json, pathlib, sys
+          core, kit = pathlib.Path("core"), pathlib.Path("kit")
+          rows = json.loads((core / "frontend/lib/__tests__/fixtures/a19-test-ledger.json").read_text())
+          kit_paths = [row["kitPath"] for row in rows if row["kitPath"]]
+          problems = [f"ledger kitPath missing in the kit: {path}" for path in kit_paths if not (kit / path).is_file()]
+          pairs = {
+              "orchestrator/tests/fixtures/themes/signing-vector.json": "tests/fixtures/signing-vector.json",
+              "orchestrator/services/themes/data/signing-keys.json": "keys/theme-signing.json",
+          }
+          for core_path, kit_path in pairs.items():
+              if (core / core_path).read_bytes() != (kit / kit_path).read_bytes():
+                  problems.append(f"{kit_path} in the kit differs from core's {core_path}")
+          print(f"{len(kit_paths)} ledger kitPaths, {len(pairs)} signing files checked")
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -231,7 +268,7 @@ jobs:
         working-directory: kit/${{ env.KIT_PLAY_WORKSPACE }}/out
         run: |
           {
-            echo "### Play from the Design Kit (${KIT_REPOSITORY}@${KIT_REF})"
+            echo "### Play 1.1.0 from the Design Kit (${KIT_REPOSITORY}@${KIT_REF})"
             echo
             echo '```'
             ls -l "$PLAY_PACKAGE"
