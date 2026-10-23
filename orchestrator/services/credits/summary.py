@@ -29,6 +29,13 @@ _SOURCE_LABELS = {
     "trial_grant": "Trial credits",
     "trial_reset": "Trial reset",
     "admin_adjust": "Adjustment by Automatos",
+    "stripe_invoice": "Monthly credits",
+    "stripe_topup": "Top-up",
+    "stripe_refund": "Refund",
+    "stripe_dispute": "Payment dispute",
+    "stripe_dispute_won": "Dispute won",
+    "monthly_expire": "Monthly credits expired",
+    "topup_expire": "Top-up expired",
 }
 _HIDDEN_SOURCES = ("overhead_day",)
 

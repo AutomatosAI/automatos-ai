@@ -7,6 +7,7 @@ platform's AI keys, and ask accounting.
 - ``asks`` — one ask per user turn or run: groups its calls; the gate stops it at the balance.
 - ``meter`` — every platform-funded call costs its real cost × ``CREDITS_MARKUP``.
 - ``alerts`` — running low, run out.
+- ``expiry`` — a month's credits at its period end, a top-up after its year.
 
 The local edition never meters: every entry point returns early there.
 """

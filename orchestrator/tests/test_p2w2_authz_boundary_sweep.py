@@ -92,6 +92,11 @@ OWN_AUTH_ROUTES = {
     # transport contract) authenticated by the minted call_id — WS routes never
     # appear in this HTTP manifest.
     ("POST", "/api/voice/retell/events"),
+    # PRD-265 US-010: Stripe's webhook (api/billing_webhooks.py) — its credential is
+    # the Stripe-Signature HMAC over the raw body (STRIPE_WEBHOOK_SECRET, 5-minute
+    # tolerance, fail-closed 400/503), NOT the shared hybrid dependency: Stripe is
+    # not a signed-in person.
+    ("POST", "/api/v1/billing/webhooks/stripe"),
     # Shopify machine lane — _verify_internal_key shared-secret auth
     # (api/verticals.py provisioning + GDPR forwarding rides the same key).
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),
@@ -196,6 +201,11 @@ ADMIN_GATED_IN_HANDLER = {
     # (api/billing.py) carry the credit read surface — both are GET-only, so
     # the mutating-routes sweep below does not classify them.
     ("POST", "/api/admin/workspaces/{workspace_id}/credits"),
+    # PRD-265 US-007 (W2): a Business checkout link for one workspace
+    # (api/admin_credits.py create_business_invite) — the same in-handler
+    # `_require_platform_admin(ctx)` gate. POST /api/v1/billing/checkout and /portal
+    # carry `require_workspace_admin` and classify as workspace-admin on their own.
+    ("POST", "/api/admin/workspaces/{workspace_id}/business-invite"),
 }
 
 # (g) Own explicit in-handler gate.
