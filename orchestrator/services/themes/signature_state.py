@@ -66,7 +66,7 @@ from services.themes.revocation_sync_state import revoked_key_ids
 logger = logging.getLogger(__name__)
 
 SIGNATURE_DISABLE_REASON = "This theme's signature doesn't check out."
-# How many (package, signature, key set) answers are kept; the oldest goes first.
+# How many answers each cache keeps (keyed by package, signed payload, signature and key set); the oldest goes first.
 SIGNATURE_CACHE_SIZE = 1024
 # The fingerprint part of a keys file that can't be read.
 UNREADABLE_KEYS = "unreadable"
