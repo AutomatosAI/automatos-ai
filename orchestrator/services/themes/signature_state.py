@@ -39,16 +39,21 @@ id) when the key that verified is one the hosted feed revoked. Every place that 
 signature without the on-load cache applies it: the upload check and the installed list
 (``signed_upload``), and the admin report and signature paste (``review``).
 
-Each answer is cached per (package id, digest, signature, key-set fingerprint), the fingerprint
-being the sha256 of the keys file's bytes and the sorted revoked key ids, so the files route, which
-asks on every file, verifies once per package per key set, and a changed keys file or revoked-key
-list recomputes. The keys file is still read on each check (as ``signature_verify`` reads it), so
-a test can point ``KEYS_PATH`` at its own file.
+Each answer is cached per (package id, digest, signature, payload fingerprint, key-set
+fingerprint). The payload fingerprint is the sha256 of the rest of what the signed payload is
+rebuilt from (the theme id, the version and the stored file list), so a file list edited after the
+answer was cached is checked again: the digest alone doesn't pin it, since a file list that no
+longer adds up keeps its stored digest. The key-set fingerprint is the sha256 of the keys file's
+bytes and the sorted revoked key ids. So the files route, which asks on every file, verifies once
+per package per key set, and a changed file list, keys file or revoked-key list recomputes. The
+keys file is still read on each check (as ``signature_verify`` reads it), so a test can point
+``KEYS_PATH`` at its own file.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 from pathlib import Path
@@ -61,11 +66,13 @@ from services.themes.revocation_sync_state import revoked_key_ids
 logger = logging.getLogger(__name__)
 
 SIGNATURE_DISABLE_REASON = "This theme's signature doesn't check out."
-# How many (package, signature, key set) answers are kept; the oldest goes first.
+# How many answers each cache keeps (keyed by package, signed payload, signature and key set); the oldest goes first.
 SIGNATURE_CACHE_SIZE = 1024
 # The fingerprint part of a keys file that can't be read.
 UNREADABLE_KEYS = "unreadable"
 KEYS_ENCODING = "utf-8"
+# How the payload fingerprint's JSON text is encoded before it is hashed.
+PAYLOAD_FINGERPRINT_ENCODING = "utf-8"
 
 
 class KeySet(NamedTuple):
@@ -127,6 +134,22 @@ def current_key_set(db: Any) -> KeySet:
     return KeySet(keys_bytes=_keys_bytes(), revoked=revoked_key_ids(db))
 
 
+def _payload_fingerprint(package: ThemePackage) -> str:
+    """sha256 of what the signed payload is rebuilt from besides the digest: theme id, version, file list.
+
+    ``signing.signing_payload`` reads the stored file list on every check; the digest column alone
+    doesn't change when that list is edited, so it can't stand in for it in a cache key.
+    """
+    rebuilt_from = [package.theme_id, package.version, getattr(package, "file_manifest", None)]
+    text = json.dumps(rebuilt_from, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode(PAYLOAD_FINGERPRINT_ENCODING)).hexdigest()
+
+
+def _answer_key(package: ThemePackage, signature: str, key_set: KeySet) -> Hashable:
+    """The cache key of one answer: the package, its signature, everything the payload reads, the key set."""
+    return package.id, package.digest, signature, _payload_fingerprint(package), key_set.fingerprint
+
+
 def _parsed_keys(package: ThemePackage, key_set: KeySet) -> Optional[Tuple[signature_verify.SigningKey, ...]]:
     """The keys of the key set, or None (logged) when its file can't be read or parsed."""
     if key_set.keys_bytes is None:
@@ -170,7 +193,7 @@ def signature_fails(db: Any, package: ThemePackage) -> bool:
     if not signature:
         return False
     key_set = current_key_set(db)
-    key = (package.id, package.digest, signature, key_set.fingerprint)
+    key = _answer_key(package, signature, key_set)
     cached = _answers.get(key)
     if cached is not None:
         return cached
@@ -208,7 +231,7 @@ def signature_vouches(db: Any, package: ThemePackage) -> bool:
     if not signature:
         return False
     key_set = current_key_set(db)
-    key = (package.id, package.digest, signature, key_set.fingerprint)
+    key = _answer_key(package, signature, key_set)
     cached = _vouches.get(key)
     if cached is not None:
         return cached

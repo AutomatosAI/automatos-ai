@@ -10,6 +10,8 @@ never counts. Pins:
   the verified one is private again;
 * a retired or revoked key, a key the hosted feed revoked (local edition), a signature no key
   verifies, a keys file that does not load and a row read outside any session all leave it private;
+* a file list edited after the upload was vouched for (it no longer adds up to the digest) makes it
+  private on the next read: the cached vouch is for the old file list, not the row;
 * a Marketplace package is still private exactly while it is unreviewed.
 
 Runs on the SQLite app and keys file of ``test_prd261_theme_import_signed.py`` (its fixture and
@@ -109,6 +111,20 @@ def test_a_stored_signature_no_key_verifies_never_counts(env):
     try:
         (row,) = session.query(ThemePackage).all()
         row.signature = signed._envelope(_hello(), case=OTHER)["signature"]
+        session.commit()
+    finally:
+        session.close()
+    assert _private_by_version(env) == {"1.0.0": True}
+
+
+def test_a_file_list_that_no_longer_adds_up_stops_vouching_though_the_vouch_was_cached(env):
+    _signed_upload(env)
+    assert _private_by_version(env) == {"1.0.0": False}  # vouched for, and that answer cached
+    session = env.sessions()
+    try:
+        (row,) = session.query(ThemePackage).all()
+        path = sorted(row.file_manifest)[0]
+        row.file_manifest = {**row.file_manifest, path: {**row.file_manifest[path], "sha256": "99" * 32}}
         session.commit()
     finally:
         session.close()

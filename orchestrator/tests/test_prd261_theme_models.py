@@ -534,7 +534,9 @@ def test_a_revocation_reads_local_unless_the_feed_wrote_it(session):
     assert raw == "local"
     session.commit()
     _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="unknown origin", origin="hosted"))
-    _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="no origin", origin=None))
+    # A NULL origin is refused (NOT NULL). sa.null(), not None: the ORM leaves a None attribute out of the
+    # INSERT on a column with a default, so None would store 'local' and never reach the constraint.
+    _refused(session, ThemeRevocation(digest=DIGEST, level="warn", reason="no origin", origin=sa.null()))
 
 
 def _live_local_twins(**target):
