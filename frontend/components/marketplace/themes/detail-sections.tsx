@@ -5,7 +5,12 @@
  * (PRD §7 item 5), what the theme changes (pages, routes, base, tone, minimum width, `uses`), the
  * versions map with which ones this host runs (PRD §4.2) and its README and CHANGELOG. Every URL
  * is the files route on the app's own origin (`themeFileUrl` drops anything else).
+ *
+ * C-05k: the facts include the shown version's Signature (listings.py `signature`, C-05b), in the
+ * words of theme-labels.ts: "Signed by Automatos" only for `verified`. The Official badge is not
+ * this: it comes only from `publisher.official` (listing-card.tsx ListingBadges, QB-21).
  */
+import { SIGNATURE_FACT, signatureWords } from '@/components/settings/themes/theme-labels'
 import { Badge } from '@/components/ui/badge'
 import type { ThemeListingDetail, ThemePresetPreviews } from '@/lib/api-client'
 
@@ -75,6 +80,7 @@ export function DetailFacts({ detail }: { detail: ThemeListingDetail }) {
     <dl className="space-y-1.5" aria-label="What this theme changes">
       <Fact label="Publisher" value={detail.publisher.name} />
       <Fact label="Theme id" value={detail.themeId} />
+      <Fact label={SIGNATURE_FACT} value={signatureWords(detail.signature)} />
       <Fact label="Pages" value={listOrNull(detail.pages)} />
       <Fact label="Its own pages" value={listOrNull(detail.routes)} />
       <Fact label="Built on" value={detail.base} />

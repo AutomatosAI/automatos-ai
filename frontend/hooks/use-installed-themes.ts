@@ -150,10 +150,19 @@ function useThemeWrite<Vars, Result>(run: (vars: Vars) => Promise<Result>, done:
   })
 }
 
-/** Upload a .autotheme (manage, who may install, the private-upload switch, step-up). */
+/** One upload: the package, and (C-05d) its detached .sig.json when the admin added one. */
+export interface ThemeImport {
+  readonly file: File
+  readonly signature?: File | null
+}
+
+/** Upload a .autotheme, with its signature file when given (manage, who may install, the private-upload switch, step-up). */
 export function useImportTheme() {
   const importTheme = useStepUp(apiClient.importTheme.bind(apiClient))
-  return useThemeWrite<File, ThemeUpload>((file) => importTheme(file), null)
+  return useThemeWrite<ThemeImport, ThemeUpload>(
+    ({ file, signature }) => (signature ? importTheme(file, signature) : importTheme(file)),
+    null,
+  )
 }
 
 /** Opt in to the exact package the dialog showed (step-up; 409 when it is no longer current). */

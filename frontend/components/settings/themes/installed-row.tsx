@@ -6,6 +6,11 @@
  * this theme" for every member, and the manage actions (default, update, rollback, uninstall)
  * only for `workspace:manage`. The server refuses what the caller may not do; this decides which
  * buttons to show.
+ *
+ * C-05k: a package whose signature an active Automatos key verifies (`signature.state`
+ * `verified`, signed_upload.signature_view) shows "Signed by Automatos" in place of "Private · not
+ * reviewed" (QB-24); `invalid` never does. Make default follows the server's own rule, the row's
+ * `private` (defaults.can_be_default), so a signed upload QB-24 counts as reviewed may be the default.
  */
 import { useState } from 'react'
 
@@ -20,10 +25,13 @@ import {
   NEEDS_UPDATE,
   NEEDS_UPDATE_HINT,
   PRIVATE_NOT_REVIEWED,
+  SIGNED_BY_AUTOMATOS,
   UNREVIEWED_NOT_DEFAULT,
   UPDATE_AVAILABLE,
+  canBeDefault,
   isDisabled,
   isPrivateNotReviewed,
+  isSignedByAutomatos,
   themeName,
 } from './theme-labels'
 
@@ -32,7 +40,11 @@ export const USE_THEME = 'Use this theme'
 function RowBadges({ install }: { install: InstalledTheme }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {isPrivateNotReviewed(install) && <Badge variant="secondary">{PRIVATE_NOT_REVIEWED}</Badge>}
+      {isSignedByAutomatos(install) ? (
+        <Badge variant="secondary" data-testid="theme-signed-by-automatos">{SIGNED_BY_AUTOMATOS}</Badge>
+      ) : (
+        isPrivateNotReviewed(install) && <Badge variant="secondary">{PRIVATE_NOT_REVIEWED}</Badge>
+      )}
       {install.isDefault && <Badge>{DEFAULT_BADGE}</Badge>}
       {install.pendingPackageId && (
         <Badge variant="outline">
@@ -67,8 +79,8 @@ function ManageActions({ install, onReviewUpdate }: { install: InstalledTheme; o
         <Button
           size="sm"
           variant="outline"
-          disabled={busy || !install.reviewed}
-          title={install.reviewed ? undefined : UNREVIEWED_NOT_DEFAULT}
+          disabled={busy || !canBeDefault(install)}
+          title={canBeDefault(install) ? undefined : UNREVIEWED_NOT_DEFAULT}
           onClick={() => setDefault.mutate(install.installId)}
         >
           Make default
