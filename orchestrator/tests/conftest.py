@@ -109,7 +109,9 @@ def _generation_guard_reads_clean(request, monkeypatch):
     (core/generation_guard.py) before it calls a provider, and the guard's read is a
     model call. Outside the tests that check the guard itself (marked
     ``real_generation_guard``), the read answers clean, so a test of a generation path
-    tests that path. A test that stubs packages in sys.modules so the guard can't be
+    tests that path. The read is switched on in every test (it ships off until after Web
+    Summit, GENERATION_GUARD_READ_ENABLED), so the guard as built stays proven; the tests of
+    the switch turn it off. A test that stubs packages in sys.modules so the guard can't be
     imported never reaches a generation path: it is left alone."""
     if request.node.get_closest_marker("real_generation_guard") is not None:
         yield
@@ -124,6 +126,7 @@ def _generation_guard_reads_clean(request, monkeypatch):
         return {"sexual": False, "minor": False, "real_person": False}
 
     monkeypatch.setattr(guard, "read_answers", clean)
+    monkeypatch.setattr(guard.config, "GENERATION_GUARD_READ_ENABLED", True, raising=False)
     yield
 
 

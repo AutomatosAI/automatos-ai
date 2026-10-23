@@ -738,7 +738,7 @@ async def _run_toolkit(executor: Any, store: MediaStore, session_factory: Callab
 async def _guarded(plan: FootagePlan, workspace_id: UUID) -> None:
     """PRD-264 ART5-1: every prompt and reference image a recipe may send, through the generation guard
     before anything is priced. A refusal, or a reference that can't be read, submits nothing."""
-    links = dict.fromkeys(link for shot, _ in plan.shots for link in shot.references)
+    links = dict.fromkeys(link for shot, _ in plan.shots for link in shot.references) if generation_guard.reads_enabled() else {}
     try:
         images = tuple([await _reference_image(link) for link in links])
     except FileOutputError:
