@@ -307,7 +307,7 @@ def test_empty_account_prints_every_env_line_and_where_to_reveal_the_signing_sec
     assert f"STRIPE_ACCOUNT_ID={ACCOUNT_ID}" in lines
     # Stripe returned the signing secret, but it never reaches the output.
     assert WEBHOOK_SECRET not in output and "STRIPE_WEBHOOK_SECRET=" not in output
-    assert f"# STRIPE_WEBHOOK_SECRET: {stripe_setup.SIGNING_SECRET_WHERE}" in lines
+    assert f"# STRIPE_WEBHOOK_SECRET: {stripe_setup.WHERE_TO_REVEAL_SIGNING}" in lines
     assert "set STRIPE_WEBHOOK_SECRET too" in output
 
 

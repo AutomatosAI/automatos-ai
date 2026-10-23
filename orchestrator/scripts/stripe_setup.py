@@ -86,7 +86,7 @@ TOPUP_ENV_NAME = "STRIPE_PRICE_TOPUP"
 PORTAL_ENV_NAME = "STRIPE_PORTAL_CONFIGURATION_ID"
 ACCOUNT_ENV_NAME = "STRIPE_ACCOUNT_ID"
 WEBHOOK_SIGNING_ENV_NAME = "STRIPE_WEBHOOK_SECRET"
-SIGNING_SECRET_WHERE = ("reveal it in the Stripe Dashboard: Developers → Webhooks → this endpoint → "
+WHERE_TO_REVEAL_SIGNING = ("reveal it in the Stripe Dashboard: Developers → Webhooks → this endpoint → "
                         "Signing secret → Reveal (it is never printed here).")
 
 
@@ -326,14 +326,14 @@ def ensure_price(run: SetupRun, spec: PriceSpec, existing: Optional[dict]) -> Op
     if existing is not None:
         run.say(f"Price {spec.lookup_key}: exists ({existing.get('id')}), matches config")
         return existing
-    billing = "a month" if spec.monthly else "one-off"
+    cadence = "a month" if spec.monthly else "one-off"
     if run.dry_run:
-        run.say(f"Price {spec.lookup_key}: missing, would create ({spec.unit_amount} cents {CURRENCY}, {billing})")
+        run.say(f"Price {spec.lookup_key}: missing, would create ({spec.unit_amount} cents {CURRENCY}, {cadence})")
         return None
     created = run.api.post(PRICES_PATH, create_price_params(spec),
                            idempotency_key=run.idempotency_key(f"price-{spec.lookup_key}"))
     run.say(f"Price {spec.lookup_key}: created ({_id_of(created, spec.lookup_key)}), "
-            f"{spec.unit_amount} cents {CURRENCY}, {billing}")
+            f"{spec.unit_amount} cents {CURRENCY}, {cadence}")
     return created
 
 
@@ -492,7 +492,7 @@ def env_lines(specs: Sequence[PriceSpec], prices: dict[str, Optional[dict]], por
     lines = [f"{name}={value}" if value else f"# {name}: known after a real run (this was a dry run)"
              for name, value in values]
     if webhook.created:
-        lines.append(f"# {WEBHOOK_SIGNING_ENV_NAME}: {SIGNING_SECRET_WHERE}")
+        lines.append(f"# {WEBHOOK_SIGNING_ENV_NAME}: {WHERE_TO_REVEAL_SIGNING}")
     return lines
 
 
@@ -500,7 +500,7 @@ def print_env_block(run: SetupRun, lines: Sequence[str], webhook: WebhookResult,
     """The closing block: the lines to set on the Railway API service."""
     run.say()
     if webhook.created:
-        run.say(f"IMPORTANT: set {WEBHOOK_SIGNING_ENV_NAME} too. {SIGNING_SECRET_WHERE}")
+        run.say(f"IMPORTANT: set {WEBHOOK_SIGNING_ENV_NAME} too. {WHERE_TO_REVEAL_SIGNING}")
     mode = "LIVE" if live else "test"
     run.say(f"Set these on the Railway API service ({mode} mode), next to STRIPE_SECRET_KEY (not printed):")
     for line in lines:
