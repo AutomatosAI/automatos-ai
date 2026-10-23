@@ -1608,6 +1608,17 @@ class Config:
     THEME_SUBMISSIONS_PER_DAY: int = int(os.getenv("THEME_SUBMISSIONS_PER_DAY", "10"))
     THEME_UPLOADS_PER_DAY: int = int(os.getenv("THEME_UPLOADS_PER_DAY", "20"))
     THEME_REVIEW_DAILY_TOKENS: int = int(os.getenv("THEME_REVIEW_DAILY_TOKENS", "2000000"))
+    # PRD-261 W-C3 theme revocations (QB-25: the local edition pulls the hosted feed by default).
+    # The feed the local edition pulls (https, or http to loopback only; empty = no pull) and how
+    # often (services/themes/revocation_pull.py, services/theme_revocation_scheduler.py). The hosted
+    # edition serves the feed (api/themes_revocations_feed.py) with rows lifted in the last
+    # THEME_REVOCATIONS_LIFTED_DAYS days, and neither side reads a feed over THEME_REVOCATIONS_FEED_MAX_KB.
+    THEME_REVOCATIONS_URL: str = (
+        os.getenv("THEME_REVOCATIONS_URL", "https://api.automatos.app/api/themes/revocations") or ""
+    ).strip()
+    THEME_REVOCATIONS_PULL_MINUTES: int = int(os.getenv("THEME_REVOCATIONS_PULL_MINUTES", "60"))
+    THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
+    THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
 
     # =============================================================================

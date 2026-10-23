@@ -51,7 +51,7 @@ class _FakeScheduler:
 
 def _start():
     fake = _FakeScheduler()
-    started = asyncio.run(scheduler_mod.ThemeRevocationScheduler().start(fake))
+    started = scheduler_mod.ThemeRevocationScheduler().start(fake)
     return started, fake.jobs
 
 

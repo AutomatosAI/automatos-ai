@@ -1,5 +1,5 @@
 {
-  "route_count": 963,
+  "route_count": 969,
   "routes": [
     {
       "method": "GET",
@@ -144,6 +144,26 @@
     {
       "method": "GET",
       "path": "/api/admin/themes/pending"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/sync/pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/{revocation_id}/lift"
     },
     {
       "method": "POST",
@@ -2720,6 +2740,10 @@
     {
       "method": "GET",
       "path": "/api/themes/mobile/{install_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/revocations"
     },
     {
       "method": "GET",
