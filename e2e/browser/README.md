@@ -53,20 +53,23 @@ change it carries (the mirror rule, `docs/frontend-architecture/play-theme.md`).
 Play 1.1.0 for its listing previews (PB-24, PB-26). For each preset the page's boot carries (Ember,
 Obsidian, Aurora, Workshop, Daylight), picked on Make it yours as a member picks it, it saves the frame
 on `/chat` as `<preset>.png`, and under the default preset also `/deliverables` and `/looks` as
-`ember-deliverables.png` and `ember-looks.png`, in `previews/`: 1280×800 at device scale 1, one image
+`ember-deliverables.png` and `ember-looks.png`, in `previews/`: 1440×900 at device scale 1, one image
 pixel per CSS pixel (`scale: 'css'`). A shot is taken under reduced motion (Auto is his still, never a
 clip frame), once his still and the fonts have loaded, Auto is at rest (the first open's hello is over)
 and the look's variables are on `<html>`, with animations off, and only when two shots in a row are
 equal. The conversations list and the shelf are answered with none, so the shots show only the lane's
 own member and workspace. The lane has no LLM key, so the host's local-edition key nudge
 (`components/local/first-run-nudge.tsx`) is dismissed before the first load, as a member dismisses it
-(its `localStorage` key), and a chat shot that shows it fails. The spec fails when a file is missing, is not a PNG of that size, is over
-512 KB (`package.py` `IMAGE_MAX_BYTES`), or has a name the manifest's `previews` pattern refuses or no
-preset claims by the listing's longest-match rule (`manifest.py` `PREVIEW_PATTERN`, `listings.py`
-`_owner_preset`). The step after it uploads `previews/` as the `play-previews` artifact, also when the
-specs failed; a run that saved none fails there. Nothing here commits a shot: the owner picks from a
-run's artifact and the kit commits the picks into `themes/play/assets/previews/` (C-06q2), so a
-package's bytes, and its signature, stay the same from build to build.
+(its `localStorage` key), and a chat shot that shows it fails. Play's empty chat scrolls on a short
+window (P260-FX-14; 800 px high, three presets pushed the message box below the fold), so a chat shot
+also fails unless the whole message box is inside the viewport. The spec fails when a file is missing,
+is not a PNG of that size, is over 512 KB (`package.py` `IMAGE_MAX_BYTES`), or has a name the
+manifest's `previews` pattern refuses or no preset claims by the listing's longest-match rule
+(`manifest.py` `PREVIEW_PATTERN`, `listings.py` `_owner_preset`). The step after it uploads
+`previews/` as the `play-previews` artifact, also when the specs failed; a run that saved none fails
+there. Nothing here commits a shot: the owner picks from a run's artifact and the kit commits the
+picks into `themes/play/assets/previews/` (C-06q2), so a package's bytes, and its signature, stay the
+same from build to build.
 
 ## Play parity (PRD-261 A-17b)
 

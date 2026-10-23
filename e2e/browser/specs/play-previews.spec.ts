@@ -16,7 +16,7 @@ import { watchPage } from '../support/watch'
 // e2e/browser/previews/. The workflow uploads that folder as `play-previews`; the owner picks from it
 // and the kit commits the picks (C-06q2). Nothing here is committed or changes Play's bytes.
 //
-// Each shot is 1280x800 at device scale 1, one image pixel per CSS pixel (scale: 'css'), and is held
+// Each shot is 1440x900 at device scale 1, one image pixel per CSS pixel (scale: 'css'), and is held
 // to what core's package reader and listing take: a PNG of at most 512 KB (package.py
 // IMAGE_MAX_BYTES), a name that fits the manifest's previews pattern (manifest.py PREVIEW_PATTERN)
 // and belongs to its preset by the listing's longest-match rule (listings.py _owner_preset).
@@ -26,7 +26,8 @@ import { watchPage } from '../support/watch'
 // the look's variables on <html>, animations off and two shots in a row equal. The conversations list and the shelf answer with none, so only
 // the lane's own member and workspace show. The lane has no LLM key, so the host's local-edition key
 // nudge is dismissed before the first load, as a member dismisses it, and every chat shot is held to
-// showing none.
+// showing none. Play's empty chat scrolls on a short window (the kit's chat/composer.module.css,
+// P260-FX-14), so every chat shot is also held to showing the whole message box.
 //
 // Chromium only. The specs store the member's choice and Play's looks on the lane's one backend, so
 // they run in the @package step, one test at a time; each starts and ends on Studio, with no install
@@ -35,7 +36,8 @@ import { watchPage } from '../support/watch'
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const ONLY_BROWSER = 'chromium'
 const PREVIEW_DIR = path.resolve(__dirname, '..', 'previews')
-const VIEWPORT = { width: 1280, height: 800 }
+/** 16:10, tall enough that every preset's empty chat fits with its message box (800 px high cut it off under three). */
+const VIEWPORT = { width: 1440, height: 900 }
 const DEVICE_SCALE = 1
 /** Play 1.1.0's presets (the kit's themes/play/src/lib/looks/presets.ts); the boot must carry exactly these. */
 const PRESET_IDS = ['ember', 'obsidian', 'aurora', 'workshop', 'daylight'] as const
@@ -93,6 +95,8 @@ const HERO = 'Say hello'
 const AT_REST = 'Ready when you are'
 /** Auto while the message box has focus (lib/mascot/media.ts CAPTIONS.listening; reducer.ts input-focus). */
 const LISTENING = 'Listening'
+/** The message box's form (the kit's chat/message-box.tsx): its field and Send, the box a member sees. */
+const COMPOSER_FORM = 'form'
 // The shelf (the kit's deliverables/play-shelf.tsx, shelf-body.tsx and lib/play/shelf.ts emptyMessage).
 const SHELF_TITLE = 'Your shelf'
 const EMPTY_SHELF = 'Nothing on your shelf yet. Ask Auto for a report or a document and it lands here.'
@@ -271,9 +275,19 @@ async function chatAtRest(page: Page): Promise<void> {
   await expect(hero.getByRole('img', { name: AT_REST, exact: true }), 'the box left, Auto rests').toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
-/** The chat as a listing shows it: Play alone, with no host nudge over it (openMakeItYours dismissed it). */
+/** The whole message box is inside the viewport: a preset whose empty chat runs past the fold fails here. */
+async function expectComposerInView(page: Page): Promise<void> {
+  const found = await page.locator(COMPOSER_FORM).filter({ has: messageBox(page) }).boundingBox()
+  expect(found, 'the message box is laid out').not.toBeNull()
+  const box = found as NonNullable<typeof found>
+  expect(box.y, 'the message box starts inside the viewport').toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height, `the message box ends inside the ${VIEWPORT.height} px viewport`).toBeLessThanOrEqual(VIEWPORT.height)
+}
+
+/** The chat as a listing shows it: Play alone, with no host nudge over it (openMakeItYours dismissed it), and the whole message box. */
 async function chatFramed(page: Page): Promise<void> {
   await expect(page.getByText(NUDGE_MESSAGE), "the host's key nudge stays dismissed").toHaveCount(0)
+  await expectComposerInView(page)
 }
 
 async function emptyShelf(page: Page): Promise<void> {
