@@ -9,8 +9,9 @@
  * scope that reads it, once (moveUnscopedOnce): never to a second account, and
  * the unscoped keys are never deleted.
  *
- * PRD-261 A-19a — the host's look runtime's, not Play's: it was lib/looks/scope.ts (which
- * re-exports it until builtin Play leaves core), so the host's look scope survives Play's deletion.
+ * PRD-261 A-19a — the host's look runtime's, not a theme's: it moved here from builtin Play's look
+ * folder before A-19f1 deleted that folder, and the generic look runtime (lib/theme-host/looks)
+ * and the account look scope (components/theme-host/account-look-scope.tsx) read it.
  */
 
 /** The user part of a scope when there is no user id: the local edition's single user. */

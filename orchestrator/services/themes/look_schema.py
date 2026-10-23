@@ -13,8 +13,9 @@ every look (a preset in the package, or one a member saves, A-09a) is checked ag
                         "integer": true, "default": 24}}}
 
 A look is ``{schema, interface (when the schema names one), id, name, sub, <every knob>}``:
-Play's ``lib/looks/types.ts`` look is exactly this shape with its six knobs. ``default`` is
-what a knob falls back to when a newer version drops or changes it (A-09a).
+Play's look (the theme kit's ``themes/play/src/lib/looks/types.ts``) is exactly this shape with
+its six knobs. ``default`` is what a knob falls back to when a newer version drops or changes it
+(A-09a).
 
 The TypeScript twin (``frontend/lib/theme-host/look-schema.ts``, A-06b) is held to the same
 corpus (``tests/fixtures/themes/cases.json``, ``lookSchemas`` and ``looks``).
@@ -50,7 +51,7 @@ SCHEMA_ID_PATTERN = re.compile(r"[a-z][a-z0-9.-]{0,47}/v[0-9]{1,3}")
 INTERFACE_PATTERN = re.compile(r"[a-z][a-z0-9-]{0,31}")
 KNOB_NAME_PATTERN = re.compile(r"[a-z][A-Za-z0-9]{0,31}")
 CHOICE_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
-# lib/looks/types.ts LOOK_ID_PATTERN: safe as a storage key, a React key and a file name.
+# frontend lib/look-kit/validate.ts LOOK_ID_PATTERN: safe as a storage key, a React key and a file name.
 LOOK_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 
 MAX_KNOBS = 32

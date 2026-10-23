@@ -9,7 +9,7 @@ const CORE_CHAT_PARAMS = ['repo', 'runtime', 'mode']
 
 /**
  * The chat page, with the bar a ticket's Discuss shows over it (PRD-252 R2). A theme that
- * registers a /chat page (builtin Play: its chat, PRD-260 K7) draws it instead of the page at its
+ * registers a /chat page (installed Play, for one: its chat) draws it instead of the page at its
  * width, through ThemeSlot (PRD-261 A-04b); a link with one of CORE_CHAT_PARAMS keeps the core page.
  * PRD-264 EUAI-11a: the gate draws the host's AI label after the page, outside ThemeSlot (the
  * theme's page slot), so the default chat (with Mission Mode), Play's chat and any theme's /chat

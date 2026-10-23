@@ -1,8 +1,8 @@
 /**
  * PRD-261 W-A6b (gap G1) — an installed theme's registry entry.
  *
- * The builtin themes' entries are compiled in (registry.ts). An installed theme's comes from what
- * the server already resolves for it: the backend's boot route answers a theme that runs with its
+ * No theme's entry is compiled into the app (registry.ts, A-19f1): an installed theme's comes from
+ * what the server already resolves for it: the backend's boot route answers a theme that runs with its
  * entry's data, read from the theme's checked theme.json (orchestrator serve.py theme_entry), and
  * the root layout's boot carries it (boot-server.ts). The layout makes it the entry here
  * (installedThemeEntry) and hands it to Providers, so the server render and the client's first

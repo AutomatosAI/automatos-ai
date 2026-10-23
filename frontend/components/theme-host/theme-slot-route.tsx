@@ -11,7 +11,7 @@ import { registeredComponent, useActiveThemeSlots } from './theme-slot-registrat
  * version: when the active theme registered none by this name, or there is no theme, the address
  * is the 404. While an installed theme loads (its routes are not known yet) nothing renders. A
  * route renders at any width: it is the theme's own page, and decides itself what to do on a
- * narrow screen (builtin Play's Conversations sends a phone to /chat).
+ * narrow screen (installed Play's Conversations, for one, sends a phone to /chat).
  */
 export function ThemeSlotRoute({ route }: { readonly route: string }) {
   const { layout, registrations } = useActiveThemeSlots()

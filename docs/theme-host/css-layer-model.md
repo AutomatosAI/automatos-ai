@@ -20,16 +20,17 @@ whatever their specificity. If theme CSS sat in `layer(automatos-theme)`, every 
 lose to every core rule that sets the same property on the same element.
 
 Play shows what that would break. Play's package sheet (`dist/theme.css`, built in the theme kit
-from `themes/play/src/app/`) recolours the page with
+from `themes/play/src/app/play-theme.css`) recolours the page with
 `:where(html.play) body { background: var(--pl-page-background) }`. Core's `globals.css:272` sets
 `body { @apply bg-background }`. Both selectors have the same specificity, (0,0,1). Unlayered, the
 cascade falls through to order of appearance; the host appends a theme's sheet to the end of
 `<head>` (`frontend/lib/theme-host/look.ts`, `applyLook`), after core's, so Play's body colour
 applies. Layered, Studio's `bg-background` would win on every page, whatever the order.
 
-`e2e/browser/specs/protected-surfaces.spec.ts` proves this in the browser. With Play active, it
-checks that `getComputedStyle(document.body).backgroundColor` follows `--pl-page-background`,
-including when a sentinel colour is put on that token. Core's body rule never reads that token.
+`e2e/browser/specs/protected-surfaces.spec.ts` proves this in the browser. Under installed Play
+(the package), it checks that `getComputedStyle(document.body).backgroundColor` follows
+`--pl-page-background`, including when a sentinel colour is put on that token. Core's body rule
+never reads that token.
 
 ## What the server's scope check refuses
 

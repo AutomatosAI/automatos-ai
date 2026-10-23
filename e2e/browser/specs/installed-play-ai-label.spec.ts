@@ -15,7 +15,7 @@ import { watchPage } from '../support/watch'
 // message box sits in the SDK's cards.AiLabelFence (the kit's themes/play/src/components/play/chat/
 // message-box.tsx), so the host's check of the label disables it while a style keeps the label from
 // being seen, and says why. This is the browser half of lib/theme-host/__tests__/ai-label.test.ts,
-// on the theme that leaves core as builtin Play goes (W-A8).
+// on installed Play, the only Play since W-A8 took builtin Play out of core.
 //
 // The specs store the member's choice on the lane's one backend, so they run in the @package step,
 // one test at a time; each starts and ends on Studio with no install of Play's package.

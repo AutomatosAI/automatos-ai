@@ -4,20 +4,21 @@ import { expect, type APIRequestContext, type Locator, type Page } from '@playwr
 import { lineOf, noStoredConversations, stubChatStream, type ChatScript, type Frame, type ServedTurn } from './chat-stream'
 import { openPlay, THEME_LOAD_TIMEOUT_MS, type AvailablePlay, type PlayVariant } from './play-parity'
 
-// PRD-261 A-17b: Play's chat with recorded turns (fixtures/play-parity/chat-turns.json), the same
-// way under builtin Play and the installed package. The page's POST /api/chat is answered in the
-// page (support/chat-stream.ts) and the conversations list is empty, so every test starts on a new
-// chat; nothing reaches a model.
+// PRD-261 A-17b: Play's chat with recorded turns (fixtures/play-parity/chat-turns.json), under
+// installed Play (the theme kit's package; since W-A8 the only Play). The page's POST /api/chat is
+// answered in the page (support/chat-stream.ts) and the conversations list is empty, so every test
+// starts on a new chat; nothing reaches a model.
+// The names below are the kit's, under themes/play/src/components/play/.
 
 const TURNS_FILE = path.resolve(__dirname, '..', 'fixtures', 'play-parity', 'chat-turns.json')
 const CHAT_PATH = '/chat'
 const CHAT_STREAM_PATH = '/api/chat'
 const POSTS_KEY = '__playParityChatPosts'
-/** Play's message box (components/play/chat/message-box.tsx PLACEHOLDER, its accessible name). */
+/** Play's message box (chat/message-box.tsx PLACEHOLDER, its accessible name). */
 export const MESSAGE_BOX = 'Message Auto'
-/** Each reply of Auto's (components/play/chat/auto-reply.tsx: `${SPEAKER} said`). */
+/** Each reply of Auto's (chat/auto-reply.tsx: `${SPEAKER} said`). */
 const REPLY_NAME = 'Auto said'
-/** Auto's column beside the conversation (components/play/shell/page-columns.tsx MascotColumn). */
+/** Auto's column beside the conversation (shell/page-columns.tsx MascotColumn). */
 const AUTO_COLUMN = 'Auto'
 
 export type PlayTurnName = 'answer' | 'partial' | 'approvals' | 'refused'
