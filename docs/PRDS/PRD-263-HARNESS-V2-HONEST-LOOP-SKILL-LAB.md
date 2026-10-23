@@ -2,7 +2,7 @@
 
 HARNESS is Automatos' own weekly org loop (PRD-121). It is not Harness2 (google-research/harness2), is not affiliated with Google, and does not use the `harness2` package.
 
-**Status:** Draft for build, 18 Oct 2026. §3 D1–D4 taken by Gerard on 18 Oct. D5 (the eval-rule amendment, "D7") and D6 (a per-workspace Lab later) are recorded at their defaults and stay open. Every §11 question stays open and is built at its default unless Gerard rejects it (§4). Owner's runs: US-026a, US-026b, US-027, US-032, US-044, US-045, US-059 (prod run), US-063, US-064, US-069, US-078a, US-081. · **Owner:** Gerard · **Written:** 18 Oct 2026, from the HARNESS design rev 2, grounded on `main @ 697ca7d6e`, with a 148-finding verification pass applied the same day. `origin/main` (`0d9f0ac59`) is two commits ahead (PRD-260 #1138, the PRD-261 spike #1143, a new `browser-e2e.yml` lane) and changes nothing under `orchestrator/`, `scripts/sync-skills.py`, AGENTS.md or CONTRIBUTING.md, so every anchor below holds on both.
+**Status:** Built, 23 Oct 2026. All of P1 and P3 and the skill and seed work are merged on main, and the P2 and P5 local tooling is built (§0). What remains are runs: the owner's checks, calibration, iteration 0 and the Skill Lab, over days up to the 6 Nov skill freeze, tracked in the HARNESS track of the nights test plan. §3 D1–D5 taken (D5 on 20 Oct); D6 stays open.
 **Source:** `<workspace>/.claude/HARNESS-V2-DESIGN.md` (rev 2, 18 Oct: 7 reader reports, 3 candidate designs, 3 judgements, one verification pass of 24 claims with 3 refuted and 25 gaps applied); Gerard's six decisions of 18 Oct; Harness2 (google-research/harness2, Apache-2.0, arXiv 2610.14224, assessed at commit `1cfe254e`); findings ledger rows named in Related. The eval set is described by structure, counts and field names only, never by row contents (PRD-256 D7, `docs/testing/AUTO-EVAL.md:5`).
 **Scope:** design phases P1–P5 in one PRD (Gerard, 18 Oct). Code that ships is in automatos-ai. Skill text is in automatos-skills, human-edited, merged by Gerard. The eval tooling and the Skill Lab live under `~/.automatos-analyst/` and `~/.automatos-sim/` and are never committed. P6 is later work (§7).
 **Type:** Refactor and consolidation, with extensions. It extends `services/harness_service.py` (and shrinks it), `actions_harness.py`/`handlers_harness.py`, `api/workspaces.py` (the HARNESS settings), the tool_call ApprovalGrant rail (`issue_tool_grant`, `api/approval_grants.py`, the GrantCard), `harness_task_ledger`, the Self-Learning tile, `telemetry.py`, `edge_builder_logs.py`, `click_memory.py` and `scripts/sync-skills.py`. New small modules: `core/stats/harness_verdicts.py`, `services/harness_metrics.py`, `services/harness_runs.py` (run rows, the advisory lock and the cron trigger; PR-1B-b), `services/harness_mode.py`, `services/harness_changes.py`, `services/harness_grants.py`, `services/harness_post_change.py`, and one extracted frontend component (`harness-settings-section.tsx`). It deletes auto-apply, `/approve` and `/reject`, `api/harness_commands.py`, `OWNERS_OWN_DECISION`, the JSON run files, the flat 10% rule, the in-memory run guard and the "Enable HARNESS" switch in the same PRs that replace them. One new table (`harness_runs`) and one ledger migration; no new dependency or vendor; settings in FR-34.
@@ -10,9 +10,50 @@ HARNESS is Automatos' own weekly org loop (PRD-121). It is not Harness2 (google-
 **Depends on:** PRD-256 merged (#1048); the PRD-193 approve → grant → resume rail; the maintainer issues US-001–US-007 before the PRs that need them; US-026a recorded before PR-1B and PR-1D merge; D5 merged (US-028) before every story tagged Needs D7.
 **Ralph config:** launch is human-only with `RALPH_MODEL` pinned. P1 and P3 ship as 15 small PRs (D3), each built by a session or by Ralph; a Ralph-built PR has its own kit, `scripts/ralph/prd-263-1a.json` to `prd-263-1g.json` and `prd-263-3a.json` to `prd-263-3i.json` (§4). Local stories are built by a named build session Gerard launches (D5), never by a Ralph loop.
 **Human-gated, excluded from the autonomous loop:** US-001–US-007 and US-070 (maintainer issues and decision records); US-024, US-060, US-065, US-071, US-082 (skill text, Gerard merges); US-025, US-061, US-066, US-072, US-083 (seed syncs and the persona lift, Gerard merges); US-026a, US-026b, US-064 (prod facts, migration applies and flags); US-027, US-063 (owner checks); US-028 (the eval-rule amendment); US-029 (a recorded finding; code only if Gerard picks that option); US-032, US-043, US-044, US-045, US-069, US-073, US-078a, US-081 (owner runs and data); the prod run in US-059; and every `→ OWNER` acceptance criterion in any story.
-**Decisions taken:** D1–D4 by Gerard on 18 Oct; D5 and D6 at their defaults, open (§3; §11-Q1, Q2).
+**Decisions taken:** D1–D4 by Gerard on 18 Oct; D5 on 20 Oct (US-028 merged as written, #1204); D6 open (§3; §11-Q2).
 
 Labels used below: **[T]** read in code or docs during the design revision or this session; **[R]** traced by a verifier, lines cited; **[I]** inferred; **[M]** modelled by simulation (the design session's `org_stats.py`, `consec_sim.py`, `frozen_sim.py` and `gate_sim3.py`: standard-library math with fixed seeds and no data input, copied into `docs/PRDS/prd263-spec/sims/` in the same commit as this PRD). Figures computed by exact binomial enumeration are marked "exact".
+
+## 0. Delivery record (23 Oct 2026)
+
+Every PR below merged with its `test` workflow green (the run id is that PR's green run on its head commit).
+
+| Group | PR | Merged | Test run |
+|---|---|---|---|
+| The PRD | #1146 | d47fdd26f | 39166544166 |
+| PR-1A statistics module (US-008) | #1153 | 39fa77ff4 | 39160067124 |
+| PR-1B-a `harness_runs` table (US-009) | #1160 | 5f0c98ff1 | 39167782905 |
+| PR-1B-b run record, lock, cron (US-010 – US-012) | #1162 | 35f529e97 | 39233917803 |
+| PR-1C read model (US-013) | #1154 | 5d9032ccd | 39160135603 |
+| PR-1D honest DIAGNOSE (US-014a, US-014b, US-015) | #1185 | 931e5a98f | 39267713712 |
+| PR-1E report-only (US-016, US-017) | #1186, #1189 | 44d071c44, 4edb433a0 | 39249289520, 39271795687 |
+| PR-1F telemetry, tool-failure input (US-018 – US-020) | #1191 | c3d989de5 | 39279485894 |
+| PR-1G endpoint, tile, tools, docs (US-021 – US-023a) | #1192, #1193 | 46fc5c37b, 63912834f | 39279519409, 39287386188 |
+| PR-3I production skill signal (US-062) | #1161, #1163 | aded1c9cc, bc960a9c6 | 39166464058, 39234781619 |
+| DOC-1 eval rule (US-028) | #1204 | a7980584b | 39328990027 |
+| PR-3A delete the /approve path (US-047) | #1205 | bd816c2dd | 39358823861 |
+| PR-3B delete the apply helpers (US-048) | #1206 | 238df3fcd | 39395666289 |
+| PR-3C change registry (US-049, US-050) | #1212 | 330439eef | 39397424882 |
+| PR-3D ledger migration (US-051, US-059) | #1213 | 38ae5588e | 39399547323 |
+| PR-3E apply action, reconciliation (US-052, US-053) | #1227, #1228 | bcc3f79e5, f3a37fdfb | 39402398130, 39405019470 |
+| PR-3F raise grants (US-054, US-055, US-058) | #1229 | e81203a3e | 39405915971 |
+| PR-3G post-change check, tool-removal gate (US-056, US-057) | #1230, #1231 | a5ea274e5, 9d23ddc47 | 39405932798, 39405950165 |
+| SYNC-1 + SYNC-2 seed v2.3.4 (US-025, US-061) | #1248 | 630fc1c85 | 39463551829 |
+| FIX-1 seed v2.3.5, persona lift (US-066) | #1251 | fc50ef23c | 39473521139 |
+| DOC-2 AUTO-EVAL.md (US-046) | #1252 | c033d8bc0 | 39479012206 |
+| Records: Q29, set v2, rescore | #1260 | 171e4ef37 | 39499219443 |
+
+Skill text (automatos-skills pin branches, Gerard's review): `skill/auto-v2.3.4-harness-report-only` (US-024, US-060), `skill/auto-v2.3.5-owner-lanes` (US-065), `skill/auto-v2.4.4-prd263-fixes` (the slim candidate for US-069). Local tooling, never committed: the eval runner and its tools (LOCAL-2 – LOCAL-5, LOCAL-9's gate), the night preflight (LOCAL-6), set v2 and the sealed split (US-043), and the Skill Lab (LOCAL-11 – LOCAL-13), with fixture tests.
+
+**Gerard's decisions, 23 Oct:**
+- No check reads the operator's own provider accounts. US-041's OpenRouter floor in the night preflight and LAB-0's (US-073, US-074) are removed, and the operator is not asked for them.
+- No model, provider or price is written into the eval tools or the Lab. A pass runs Auto as the platform has it configured, or on any model the platform's registry (`llm_models`) lists as active, resolved to the provider that serves it. Fixture agents get the platform's default for a new agent. The Lab's improver models come from `lab.local.toml`, or Claude Code's own default. The gate reports tokens per turn without a model's price tier.
+
+**Found and fixed while closing (23 Oct):**
+- c1 had HARNESS switched off by the retired toggle (`enabled: false` reads as Disabled, §11-Q28), so no sweep would have run there. Set to `report_only` through the Settings API, as §4's hold requires.
+- The night preflight refused every night: c1 holds a second, unlinked `platform-management` row (a git-source import), and the check counted both. It now checks the row Auto links to (local tester kit).
+- At 390 px the Command Center's tab body is 32 px tall (`.cc-body` takes the height left under the header and the stat cards), so every tab is unreadable on a phone. Not HARNESS: flagged to the Command Center's owner.
+- The chat keeps the first 2,000 tokens of a tool's answer (`consumers/chatbot/tool_cut.py`). The audit report listed agents by name, so on c1 the cut dropped one of the two REGRESSION agents. The report now leads with the flagged agents and the suggested changes (#1276).
 
 ## 1. Introduction
 
@@ -580,11 +621,11 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 **Files:** — · **Depends on:** US-014a, US-014b, US-016, US-017, US-021, US-022, US-023, US-025
 
 **Acceptance criteria:**
-- [ ] This PRD links the CI run id of each P1 PR (PR-1A, PR-1B, PR-1C, PR-1D, PR-1E, PR-1F, PR-1G).
-- [ ] On main after P1, `wc -l orchestrator/services/harness_service.py` is below 2,165.
-- [ ] → OWNER: on local c1, in a daytime window, a manual trigger creates one `harness_runs` row, 0 BoardTasks and 0 `approval_grants` rows (SQL counts before and after). "Converged" does not appear in the report, and while coverage is below 50% convergence reads `insufficient_data`. c1's mode reads `report_only`.
-- [ ] → OWNER (dev-browser, 1440 px and 390 px): on c1 the Self-Learning tile shows "—" for every absent value, never 0, and shows coverage as a percentage; Settings shows the one mode select.
-- [ ] → OWNER: one chat turn asking Auto "what did HARNESS do this week?" returns figures that match the `harness_runs` row (one turn, Gerard's OK).
+- [x] This PRD links the CI run id of each P1 PR (PR-1A, PR-1B, PR-1C, PR-1D, PR-1E, PR-1F, PR-1G). *(§0.)*
+- [x] On main after P1, `wc -l orchestrator/services/harness_service.py` is below 2,165. *(633 lines at 101a0bf33, 23 Oct.)*
+- [x] → OWNER: on local c1, in a daytime window, a manual trigger creates one `harness_runs` row, 0 BoardTasks and 0 `approval_grants` rows (SQL counts before and after). "Converged" does not appear in the report, and while coverage is below 50% convergence reads `insufficient_data`. c1's mode reads `report_only`. *(23 Oct 08:25 UTC, by the build session at Gerard's direction: run 1, week 2026-W42; Tasks 1,497 → 1,497, grants 2,285 → 2,285, `harness_runs` 0 → 1; coverage 27% (13 of 49), convergence `insufficient_data`, 11 steady, 2 REGRESSION, 36 not enough data; no "converged"; mode `report_only` after the fix in §0.)*
+- [ ] → OWNER (dev-browser, 1440 px and 390 px): on c1 the Self-Learning tile shows "—" for every absent value, never 0, and shows coverage as a percentage; Settings shows the one mode select. *(23 Oct, 1440 px: the tile shows coverage 27%, 0 Watch, 2 Regression, 4,825 signals, Approvals 0/0/0/0, "Iteration 1 · Mode Report only"; no value was absent, so every 0 is a real zero. 390 px: the tile's data is in the page, but the Command Center's tab body (`.cc-body`, `flex: 1; min-height: 0`) is 32 px tall on a phone, so no tab's content can be seen there. That is a Command Center shell bug, not HARNESS; flagged, and this box stays open until it is fixed and checked again.)*
+- [x] → OWNER: one chat turn asking Auto "what did HARNESS do this week?" returns figures that match the `harness_runs` row (one turn, Gerard's OK). *(23 Oct: every figure matched. Auto named one of the two REGRESSION agents; the other was past the chat's 2,000-token cut, fixed by #1276. It also called Monday 26 Oct "Sunday", a model slip: `next_scheduled_run` says Monday.)*
 - [ ] Gerard confirms or moves the HARNESS bars in §10 before P3 starts.
 
 ### Part 2 (P2): Eval truth
