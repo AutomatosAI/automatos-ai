@@ -108,8 +108,8 @@ export interface ThemeRevocationWarning {
 export interface ThemeLoadOk extends ThemeRegistrations {
   readonly ok: true
   readonly ref: ThemeRef
-  /** The installed theme's checked manifest; null for a builtin theme, which has a registry entry instead. */
-  readonly manifest: SpikeManifest | null
+  /** The installed theme's checked manifest. */
+  readonly manifest: SpikeManifest
   /** A `warn` revocation of this installed version, for the host's notice; absent or null for none. */
   readonly revoked?: ThemeRevocationWarning | null
   /** Removes the theme's class, stylesheet and variables, then runs its unregister; safe to call twice. */
@@ -163,7 +163,7 @@ export const THEME_DIGEST_COOKIE = 'automatos-theme-digest'
 /** Between the install id and the digest in THEME_DIGEST_COOKIE (neither contains it). */
 export const THEME_DIGEST_HINT_SEPARATOR = '.'
 
-/** Where a theme comes from: compiled into the app (`builtin:`) or installed in the workspace (`install:`). */
+/** Where a theme comes from: installed in the workspace (`install:`); no theme is compiled into the app (A-19f1). */
 export interface ThemeSource {
   readonly ref: ThemeRef
   load(deps: LoaderDeps): Promise<ThemeLoadResult>

@@ -17,7 +17,7 @@ import { watchPage } from '../support/watch'
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const STATUS_ATTR = 'data-theme-host'
 const PLAY_CLASS = /\bplay\b/
-/** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx, as core's). */
+/** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx). */
 const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
 /** The Studio desktop shell (components/layout/main-layout.tsx). */
 const STUDIO_SHELL = '.sh-shell'

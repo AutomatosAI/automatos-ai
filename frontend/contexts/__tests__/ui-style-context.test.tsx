@@ -1,6 +1,8 @@
 /**
  * PRD-244 W3 — the Style axis: html class + cookie + storage on switch; the legacy "studio" tone migrates once.
  * PRD-260 M87 — once per mount: a new setTheme from next-themes never re-applies the defaults.
+ * PRD-261 W-A8 — a browser whose storage cannot keep the defaults version is never moved to them: its stored
+ * choice (the style cookie the server painted from) stays, Classic or an installed theme alike.
  * PRD-261 A-02a — the context names the active theme (its registry entry) and has no isPlay.
  * PRD-261 W-A6b (gap G1) — under an installed theme's style it names the entry the root layout built from the
  * boot, from the first render, until the theme host releases it; Classic and Studio name none (A-19f1: no theme is
@@ -93,25 +95,66 @@ describe('UiStyleProvider', () => {
   })
 
   it('applies the defaults once per mount, even when next-themes hands it a new setTheme (PRD-260 M87)', () => {
-    // A browser whose storage can't be read never records the defaults version.
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new DOMException('The operation is insecure.', 'SecurityError')
-    })
     const mountSetTheme = tone.setTheme
     try {
-      const { rerender } = render(<UiStyleProvider initialStyle="studio"><Probe /></UiStyleProvider>)
+      const { rerender } = render(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
       expect(mountSetTheme).toHaveBeenCalledWith('dark')
+      expect(screen.getByTestId('style').textContent).toBe('studio')
       act(() => { screen.getByText('go classic').click() })
       // next-themes 0.2.1 rebuilds setTheme whenever forcedTheme changes, as a theme's look forcing its tone does.
       tone.setTheme = vi.fn()
-      rerender(<UiStyleProvider initialStyle="studio"><Probe /></UiStyleProvider>)
+      rerender(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
       expect(screen.getByTestId('style').textContent).toBe('classic')
       expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(false)
       expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
       expect(tone.setTheme).not.toHaveBeenCalled()
     } finally {
       tone.setTheme = mountSetTheme
-      getItem.mockRestore()
+    }
+  })
+})
+
+/** Storage that refuses: reading throws (blocked storage), or writing throws (Safari's old private mode). */
+type StorageMethod = 'getItem' | 'setItem'
+const REFUSING_STORAGE: ReadonlyArray<readonly [string, StorageMethod]> = [['reading', 'getItem'], ['writing', 'setItem']]
+
+function refuseStorage(method: StorageMethod): { mockRestore: () => void } {
+  const refuse = (): never => {
+    throw new DOMException('The operation is insecure.', 'SecurityError')
+  }
+  return method === 'getItem'
+    ? vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse)
+    : vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse)
+}
+
+describe('PRD-261 W-A8 — a browser whose storage cannot keep the defaults version keeps its stored choice', () => {
+  it.each(REFUSING_STORAGE)('%s storage throws: the installed theme the server painted from the cookie stays, cookie and all', (_, method) => {
+    document.cookie = `${UI_STYLE_COOKIE}=${INSTALLED_PLAY_STYLE}; Path=/`
+    const refused = refuseStorage(method)
+    try {
+      render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} installedTheme={INSTALLED_PLAY}><Probe /></UiStyleProvider>)
+      expect(screen.getByTestId('style').textContent).toBe(INSTALLED_PLAY_STYLE)
+      expect(screen.getByTestId('theme').textContent).toBe('Play')
+      expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${INSTALLED_PLAY_STYLE}`)
+      expect(tone.setTheme).not.toHaveBeenCalled()
+    } finally {
+      refused.mockRestore()
+    }
+  })
+
+  it.each(REFUSING_STORAGE)('%s storage throws: Classic stays Classic, and a switch still works', (_, method) => {
+    document.cookie = `${UI_STYLE_COOKIE}=classic; Path=/`
+    const refused = refuseStorage(method)
+    try {
+      render(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
+      expect(screen.getByTestId('style').textContent).toBe('classic')
+      expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(false)
+      expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
+      act(() => { screen.getByText('go studio').click() })
+      expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
+      expect(tone.setTheme).not.toHaveBeenCalled()
+    } finally {
+      refused.mockRestore()
     }
   })
 })

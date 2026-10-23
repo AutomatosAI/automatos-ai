@@ -13,8 +13,8 @@ import { useUser } from '@/lib/auth-hooks'
  * (./account-look-scope.tsx) and the theme-state scope's workspace key (./theme-state-scope.tsx),
  * which every installed theme's `storage` area reads. The retry used to ride on AccountLookScope,
  * so it ran only while a theme with looks was the style; it is the host's now: ThemeLookRuntime
- * (./theme-look-runtime.tsx) calls it once, whenever the host runs an installed theme or a builtin
- * theme with looks, so there is one subscriber and never a double refetch.
+ * (./theme-look-runtime.tsx) calls it once, whenever the host loads or runs an installed theme,
+ * so there is one subscriber and never a double refetch.
  */
 
 type WorkspaceState = ReturnType<typeof useWorkspaceOptional>

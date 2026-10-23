@@ -89,7 +89,7 @@ const FRAME_POLL_SLOT: SlotId = 'asleep@1'
  * GET /health through the one shared query (hooks/use-backend-health.ts, P260-FX-27 M88), so
  * a theme's connection and this tab share one cache and one request. Inside a theme's frame
  * whose asleep gate owns the poll (PRD-261 A-02b: the theme's layout renders and its entry has
- * the asleep slot — builtin Play's AsleepGate) the tab reads it; anywhere else (Classic, Studio,
+ * the asleep slot, as installed Play's does) the tab reads it; anywhere else (Classic, Studio,
  * a theme below its width) the tab polls it, as it always has.
  */
 function useSessionModeHealth() {

@@ -10,15 +10,27 @@
  * bleed inside MainLayout; below the theme's width the page says it opens on a wider screen; while
  * the host still loads the theme, neither shows.
  *
+ * W-A8: in a workspace, the note reads the workspace's installs. When none can be chosen (none
+ * installed, or only a withdrawn one: the Appearance menu lists Classic and Studio alone), it says
+ * how to get a theme (Marketplace › Themes) instead; with one to choose, and before the installs
+ * are known, it keeps the page's line. Outside a workspace it asks for nothing.
+ *
  * Replaces components/looks/__tests__/play-only-route.test.tsx in the core test ledger. The real
  * pages render under the real style provider and slot hooks, with the theme host's value as its
  * provider gives it; MainLayout (the frame) is stood in for.
  */
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import type { ComponentType, ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'dark', setTheme: () => undefined }) }))
+/** The workspace the page is in: none (an isolated mount) unless a test names one. */
+const ws = vi.hoisted(() => ({ id: null as string | null }))
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspaceOptional: () => (ws.id === null ? null : { workspace: { id: ws.id } }),
+  useWorkspace: () => ({ workspace: ws.id === null ? null : { id: ws.id } }),
+}))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) => (
     <div data-testid="main-layout" data-full-bleed={fullBleed ? 'true' : 'false'}>
@@ -30,6 +42,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 import LooksPage from '@/app/looks/page'
 import LookStylePage from '@/app/looks/style/page'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
+import { apiClient, type InstalledTheme } from '@/lib/api-client'
 import { PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
 import {
   FIXTURE_THEME_ENTRY,
@@ -42,8 +55,10 @@ import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } fr
 
 import {
   LOOKS_NOTE,
+  LOOKS_NO_THEME_NOTE,
   LOOKS_TITLE,
   STYLE_SHEET_NOTE,
+  STYLE_SHEET_NO_THEME_NOTE,
   STYLE_SHEET_TITLE,
   THEME_HEADING_ATTRIBUTE,
   THEME_HEADING_SELECTOR,
@@ -55,15 +70,23 @@ interface PageCase {
   readonly Page: ComponentType
   readonly title: string
   readonly note: string
+  /** The page's line while the workspace has no theme to choose. */
+  readonly noThemeNote: string
   /** The test id of the fixture theme's screen in the page's slot. */
   readonly screenTestId: string
 }
 
 const PAGES: ReadonlyArray<readonly [string, PageCase]> = [
-  ['/looks (lookEditor@1)', { Page: LooksPage, title: LOOKS_TITLE, note: LOOKS_NOTE, screenTestId: FIXTURE_THEME_TEST_IDS.lookEditor }],
+  [
+    '/looks (lookEditor@1)',
+    { Page: LooksPage, title: LOOKS_TITLE, note: LOOKS_NOTE, noThemeNote: LOOKS_NO_THEME_NOTE, screenTestId: FIXTURE_THEME_TEST_IDS.lookEditor },
+  ],
   [
     '/looks/style (styleSheet@1)',
-    { Page: LookStylePage, title: STYLE_SHEET_TITLE, note: STYLE_SHEET_NOTE, screenTestId: FIXTURE_THEME_TEST_IDS.styleSheet },
+    {
+      Page: LookStylePage, title: STYLE_SHEET_TITLE, note: STYLE_SHEET_NOTE, noThemeNote: STYLE_SHEET_NO_THEME_NOTE,
+      screenTestId: FIXTURE_THEME_TEST_IDS.styleSheet,
+    },
   ],
 ]
 
@@ -117,6 +140,8 @@ afterEach(() => {
   phone?.restore()
   phone = null
   window.localStorage.clear()
+  ws.id = null
+  vi.restoreAllMocks()
 })
 
 describe.each(PAGES)('%s', (_path, page) => {
@@ -154,5 +179,72 @@ describe.each(PAGES)('%s', (_path, page) => {
     renderPage(page, FIXTURE_THEME_STYLE, fixtureThemeHost('loading'))
     expect(screen.queryByRole('region', { name: page.title })).toBeNull()
     expect(screen.queryByTestId(page.screenTestId)).toBeNull()
+  })
+})
+
+/** An install of the workspace's, as GET /api/themes/installed lists it. */
+function installRow(overrides: Partial<InstalledTheme> = {}): InstalledTheme {
+  return {
+    installId: '11111111-1111-4111-8111-111111111111', themeId: 'acme/garden', name: 'Garden',
+    packageId: '22222222-2222-4222-8222-222222222222', version: '1.0.0', ownerType: 'workspace', reviewed: true,
+    private: false, isDefault: false, pinnedVersion: null, previousPackageId: null, pendingPackageId: null,
+    pendingVersion: null, installedAt: null, optIn: { required: false, wording: '', packageId: '' }, revoked: null,
+    needsUpdate: false, ...overrides,
+  }
+}
+
+/** Lets the installs' request answer and the render after it run. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+/** The page in workspace ws-1, under Studio, with `installs` as the workspace's installs. */
+function renderInWorkspace(page: PageCase, installs: readonly InstalledTheme[]) {
+  ws.id = 'ws-1'
+  const listed = vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [...installs] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <ThemeHostContext.Provider value={fixtureThemeHost('off')}>
+        <UiStyleProvider initialStyle="studio">
+          <page.Page />
+        </UiStyleProvider>
+      </ThemeHostContext.Provider>
+    </QueryClientProvider>,
+  )
+  return listed
+}
+
+describe.each(PAGES)('%s in a workspace (W-A8)', (_path, page) => {
+  it('with no theme installed says how to get one: Marketplace › Themes, then the Appearance menu', async () => {
+    const listed = renderInWorkspace(page, [])
+    expect(await screen.findByText(page.noThemeNote)).toBeInTheDocument()
+    expectNote(page, page.noThemeNote)
+    expect(page.noThemeNote).toContain('Marketplace › Themes')
+    expect(screen.queryByText(page.note)).toBeNull()
+    expect(listed).toHaveBeenCalledTimes(1)
+  })
+
+  it('with only a withdrawn install (the menu offers none) says how to get one', async () => {
+    renderInWorkspace(page, [installRow({ revoked: { level: 'disable', reason: 'withdrawn' } })])
+    expect(await screen.findByText(page.noThemeNote)).toBeInTheDocument()
+  })
+
+  it("with a theme to choose keeps the page's line, before and after the installs are known", async () => {
+    const listed = renderInWorkspace(page, [installRow()])
+    expectNote(page, page.note)
+    await vi.waitFor(() => expect(listed).toHaveBeenCalledTimes(1))
+    await settle()
+    expectNote(page, page.note)
+    expect(screen.queryByText(page.noThemeNote)).toBeNull()
+  })
+
+  it('outside a workspace asks for no installs and keeps the line', () => {
+    const listed = vi.spyOn(apiClient, 'getInstalledThemes')
+    renderPage(page, 'studio', fixtureThemeHost('off'))
+    expectNote(page, page.note)
+    expect(listed).not.toHaveBeenCalled()
   })
 })
