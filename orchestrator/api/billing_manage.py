@@ -40,6 +40,8 @@ class SetupDoneBody(BaseModel):
 
 class PlanBody(BaseModel):
     plan: str = Field(..., min_length=1, max_length=32)
+    # The preview's moment (``plan-change/preview``), so the charge is what was shown.
+    proration_date: Optional[int] = Field(None, ge=0)
 
 
 def _plan(body: PlanBody) -> str:
@@ -144,7 +146,8 @@ def change_plan(body: PlanBody, ctx: RequestContext = Depends(require_workspace_
     from services.billing.manage import change_plan as change
 
     workspace, plan = hosted_workspace(db, ctx), _plan(body)
-    return billing_call(lambda provider: change(db, provider, workspace, plan=plan))
+    return billing_call(lambda provider: change(db, provider, workspace, plan=plan,
+                                                proration_date=body.proration_date))
 
 
 @router.post("/plan-change/cancel")

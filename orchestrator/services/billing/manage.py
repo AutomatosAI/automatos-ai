@@ -16,12 +16,17 @@ Plan changes:
 """
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from typing import Any, Optional
 
 from services.billing.accounts import account_for_workspace, has_live_subscription
 from services.billing.catalog import price_for_plan
 from services.billing.checkout import BUSINESS_PLAN, BillingRefused, business_offered, publishable_key
+
+# A preview's price holds for this long: the change charges what was shown.
+PRORATION_DATE_MAX_AGE_SECONDS = 3600
+PRORATION_DATE_SKEW_SECONDS = 60
 
 
 def _account(db: Any, workspace: Any) -> Any:
@@ -134,15 +139,28 @@ def preview_change(db: Any, provider: Any, workspace: Any, *, plan: str) -> dict
     preview = provider.preview_plan_change(customer_id=account.customer_id,
                                            subscription_id=account.subscription_id, price_id=price_id)
     return {"plan": plan, "direction": direction, "amount_due_cents": preview.amount_due_cents,
-            "tax_cents": preview.tax_cents, "currency": preview.currency, "effective_at": "now"}
+            "tax_cents": preview.tax_cents, "currency": preview.currency, "effective_at": "now",
+            "proration_date": preview.proration_date}
 
 
-def change_plan(db: Any, provider: Any, workspace: Any, *, plan: str) -> dict:
+def fresh_proration_date(value: Optional[int], now: Optional[float] = None) -> Optional[int]:
+    """A preview's proration moment when it is recent enough to honour, else None
+    (Stripe then prorates as of now). Pure."""
+    current = time.time() if now is None else now
+    if value is None or not (current - PRORATION_DATE_MAX_AGE_SECONDS <= value <= current + PRORATION_DATE_SKEW_SECONDS):
+        return None
+    return int(value)
+
+
+def change_plan(db: Any, provider: Any, workspace: Any, *, plan: str, proration_date: Optional[int] = None) -> dict:
     account, price_id, direction = _target(db, workspace, plan)
     if direction == "upgrade":
-        result = provider.upgrade_now(subscription_id=account.subscription_id, price_id=price_id)
-        account.schedule_id = account.scheduled_plan = account.scheduled_at = None
+        # A waiting downgrade goes first, and the account says so at once: if the upgrade
+        # then fails, the tab never shows a schedule Stripe no longer has.
+        _drop_schedule(db, provider, account)
         db.commit()
+        result = provider.upgrade_now(subscription_id=account.subscription_id, price_id=price_id,
+                                      proration_date=fresh_proration_date(proration_date))
         if result.status == "requires_action":
             return {"status": result.status, "client_secret": result.client_secret,
                     "publishable_key": publishable_key()}

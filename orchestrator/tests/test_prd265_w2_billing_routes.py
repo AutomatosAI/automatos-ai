@@ -170,6 +170,21 @@ def test_checkout_502_when_stripe_refuses(hosted, monkeypatch):
     assert _checkout(app, {"kind": "plan", "plan": "basic"}).status_code == 502
 
 
+def test_checkout_502_in_plain_words_when_stripe_answers_something_unreadable(hosted, monkeypatch):
+    def _odd(**kwargs):
+        raise KeyError("client_secret")  # a Stripe answer without the field we read
+
+    provider = FakeProvider(ensure_customer=_odd)
+    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: provider)
+    monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, ws: None)
+    monkeypatch.setattr("services.billing.checkout.price_for_plan", lambda plan: "price_basic")
+    app, db = _app(ctx=_ctx("super_admin"), bypass_admin_gate=True)
+    db.query.return_value.filter.return_value.first.return_value = _workspace()
+    res = _checkout(app, {"kind": "plan", "plan": "basic"})
+    assert res.status_code == 502
+    assert res.json()["detail"] == "Stripe couldn't complete that. Try again in a minute."
+
+
 def test_checkout_accepts_the_display_name_own_keys_as_basic(hosted, monkeypatch):
     seen = {}
 

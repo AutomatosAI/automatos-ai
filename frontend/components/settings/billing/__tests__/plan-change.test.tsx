@@ -100,6 +100,16 @@ describe('switching plans inside the Billing tab (PRD-265 W2)', () => {
     expect(screen.queryByRole('button', { name: /^Choose / })).toBeNull()
   })
 
+  it('an upgrade charges as of the preview: its proration moment goes back with the change', async () => {
+    const preview = { ...UPGRADE, proration_date: 1_790_000_000 }
+    const dialog = await openSwitch(OPEN_BASIC_ACTIVE, 'Pro', { [PREVIEW_PATH]: preview, [CHANGE_PATH]: { status: 'done' } })
+    await within(dialog).findByTestId('plan-change-preview')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Pay $13.50 and switch' }))
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledWith(CHANGE_PATH, { plan: 'pro', proration_date: 1_790_000_000 }))
+  })
+
   it('an upgrade: previews the prorated charge, then switches and asks for the plans again', async () => {
     const dialog = await openSwitch(OPEN_BASIC_ACTIVE, 'Pro', { [PREVIEW_PATH]: UPGRADE, [CHANGE_PATH]: { status: 'done' } })
 

@@ -103,6 +103,9 @@ def billing_call(work: Callable[[Any], Any]) -> Any:
     except (StripeError, httpx.TransportError) as exc:
         logger.exception("[billing] Stripe refused or was unreachable")
         raise HTTPException(status_code=502, detail="Stripe couldn't be reached. Try again in a minute.") from exc
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        logger.exception("[billing] Stripe sent an answer billing couldn't read")
+        raise HTTPException(status_code=502, detail="Stripe couldn't complete that. Try again in a minute.") from exc
 
 
 def _require_open(ctx: RequestContext) -> None:

@@ -35,6 +35,14 @@ export interface PlanChangePreview {
   currency: string
   /** "now", or when a downgrade takes effect (the period end). */
   effective_at: string
+  /** The moment an upgrade's price was worked out at; sent back so the charge is what was shown. */
+  proration_date?: number | null
+}
+
+/** What making a change sends: the plan, and the preview's moment when there was one. */
+export interface PlanChangeRequest {
+  plan: string
+  prorationDate?: number | null
 }
 
 export type PlanChangeResult =
@@ -59,8 +67,9 @@ export function usePlanChangePreview(plan: string | null) {
 
 /** Make the change. The caller decides what each answer means for the buyer. */
 export function usePlanChange() {
-  return useMutation<PlanChangeResult, ApiHttpError, string>({
-    mutationFn: (plan) => apiClient.post<PlanChangeResult>(PLAN_CHANGE_PATH, { plan }),
+  return useMutation<PlanChangeResult, ApiHttpError, PlanChangeRequest>({
+    mutationFn: ({ plan, prorationDate }) =>
+      apiClient.post<PlanChangeResult>(PLAN_CHANGE_PATH, prorationDate ? { plan, proration_date: prorationDate } : { plan }),
   })
 }
 

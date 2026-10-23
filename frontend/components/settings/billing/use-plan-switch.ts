@@ -77,7 +77,7 @@ export function usePlanSwitch(onPaid: () => void) {
     const plan = target
     setBusy(true)
     try {
-      const result = await change.mutateAsync(plan.key)
+      const result = await change.mutateAsync({ plan: plan.key, prorationDate: preview.data?.proration_date })
       setTarget(null)
       await finishSwitch(result, plan, { onPaid, onScheduled: () => refreshBilling(queryClient) })
     } catch (error) {

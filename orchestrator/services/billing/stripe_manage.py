@@ -118,21 +118,24 @@ class StripeManagement:
 
     def preview_plan_change(self, *, customer_id: str, subscription_id: str, price_id: str) -> PlanChangePreview:
         item = first_item(self._subscription(subscription_id))
+        at = int(time.time())
         preview = self._api.post("/v1/invoices/create_preview", {
             "customer": checked("cus", customer_id), "subscription": subscription_id,
             "subscription_details": {"items": [{"id": item, "price": price_id}],
-                                     "proration_behavior": "always_invoice", "proration_date": int(time.time())},
+                                     "proration_behavior": "always_invoice", "proration_date": at},
         })
         tax = sum(int(t.get("amount") or 0) for t in preview.get("total_taxes") or [])
         return PlanChangePreview(amount_due_cents=int(preview.get("amount_due") or 0), tax_cents=tax,
-                                 currency=str(preview.get("currency") or "usd"))
+                                 currency=str(preview.get("currency") or "usd"), proration_date=at)
 
-    def upgrade_now(self, *, subscription_id: str, price_id: str) -> PlanChangeResult:
+    def upgrade_now(self, *, subscription_id: str, price_id: str,
+                    proration_date: Optional[int] = None) -> PlanChangeResult:
         sub = self._subscription(subscription_id)
         if sub.get("schedule"):
             self.cancel_scheduled_change(schedule_id=_id(sub["schedule"]))
         updated = self._api.post(f"/v1/subscriptions/{checked('sub', subscription_id)}", {
             "items": [{"id": first_item(sub), "price": price_id}], "proration_behavior": "always_invoice",
+            "proration_date": proration_date,  # None is left out: Stripe prorates as of now
             "payment_behavior": "pending_if_incomplete", "expand": ["latest_invoice.confirmation_secret"],
         })
         if not updated.get("pending_update"):

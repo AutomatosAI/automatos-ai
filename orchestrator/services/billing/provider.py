@@ -64,9 +64,13 @@ class InvoiceLine:
 
 @dataclass(frozen=True)
 class PlanChangePreview:
+    """``proration_date`` is the moment the price was worked out at: the change sends
+    it back, so the buyer is charged exactly what they were shown."""
+
     amount_due_cents: int
     tax_cents: int
     currency: str
+    proration_date: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -117,8 +121,9 @@ class BillingProvider(Protocol):
     def preview_plan_change(self, *, customer_id: str, subscription_id: str, price_id: str) -> PlanChangePreview:
         """What an upgrade to ``price_id`` charges now (prorated, with tax)."""
 
-    def upgrade_now(self, *, subscription_id: str, price_id: str) -> PlanChangeResult:
-        """Move to ``price_id`` now and charge the prorated difference."""
+    def upgrade_now(self, *, subscription_id: str, price_id: str,
+                    proration_date: Optional[int] = None) -> PlanChangeResult:
+        """Move to ``price_id`` now and charge the prorated difference (as of ``proration_date``)."""
 
     def downgrade_at_period_end(self, *, subscription_id: str, price_id: str) -> PlanChangeResult:
         """Move to ``price_id`` when the paid period ends; nothing charged now."""

@@ -326,3 +326,42 @@ def test_a_card_change_needs_a_billing_account_and_never_creates_a_customer(monk
         start_card_change(db, provider, _workspace(), email="owner@example.com")
     assert refused.value.status == 404
     assert provider.calls == []
+
+
+def test_a_failed_upgrade_still_leaves_no_stale_scheduled_downgrade(monkeypatch, db, provider):
+    # The waiting downgrade is released (and the account says so, committed) before the
+    # upgrade is tried: if the upgrade then fails, the tab never shows a schedule Stripe dropped.
+    account = _account(plan="basic", schedule_id="sub_sched_old", scheduled_plan="basic",
+                       scheduled_at=datetime.now(timezone.utc))
+    monkeypatch.setattr("services.billing.manage.account_for_workspace", lambda db, ws: account)
+    monkeypatch.setattr("services.billing.manage.price_for_plan", lambda plan: "price_pro")
+
+    def broken(**kwargs):
+        raise RuntimeError("Stripe hiccup")
+
+    monkeypatch.setattr(provider, "upgrade_now", broken)
+    with pytest.raises(RuntimeError):
+        change_plan(db, provider, _workspace(), plan="pro")
+    assert account.schedule_id is None and account.scheduled_plan is None
+    assert db.commit.called
+
+
+def test_the_previews_moment_is_honoured_only_while_recent():
+    from services.billing.manage import PRORATION_DATE_MAX_AGE_SECONDS, fresh_proration_date
+
+    now = 1_800_000_000
+    assert fresh_proration_date(now - 120, now=now) == now - 120
+    assert fresh_proration_date(now - PRORATION_DATE_MAX_AGE_SECONDS - 1, now=now) is None
+    assert fresh_proration_date(now + 3600, now=now) is None
+    assert fresh_proration_date(None, now=now) is None
+
+
+def test_the_upgrade_passes_a_fresh_preview_moment_to_the_provider(monkeypatch, db, provider):
+    import time as _time
+
+    monkeypatch.setattr("services.billing.manage.account_for_workspace", lambda db, ws: _account(plan="basic"))
+    monkeypatch.setattr("services.billing.manage.price_for_plan", lambda plan: "price_pro")
+    moment = int(_time.time()) - 30
+    change_plan(db, provider, _workspace(), plan="pro", proration_date=moment)
+    [(name, kwargs)] = [call for call in provider.calls if call[0] == "upgrade_now"]
+    assert kwargs["proration_date"] == moment

@@ -242,11 +242,14 @@ def test_set_cancel_at_period_end_posts_the_flag_and_returns_the_period_end():
 
 
 def test_preview_plan_change_sends_the_subscription_item_and_sums_tax():
+    sent = {}
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == f"/v1/subscriptions/{SUBSCRIPTION}":
             return httpx.Response(200, json={"id": SUBSCRIPTION, "items": {"data": [{"id": "si_1"}]}})
         assert request.url.path == "/v1/invoices/create_preview"
         form = _form(request)
+        sent.update(form)
         assert form["subscription_details[items][0][id]"] == "si_1"
         assert form["subscription_details[items][0][price]"] == "price_pro"
         assert form["subscription_details[proration_behavior]"] == "always_invoice"
@@ -256,7 +259,9 @@ def test_preview_plan_change_sends_the_subscription_item_and_sums_tax():
 
     preview = _provider(handler).preview_plan_change(customer_id=CUSTOMER, subscription_id=SUBSCRIPTION,
                                                       price_id="price_pro")
-    assert preview == PlanChangePreview(amount_due_cents=1350, tax_cents=150, currency="usd")
+    assert (preview.amount_due_cents, preview.tax_cents, preview.currency) == (1350, 150, "usd")
+    # The moment the price was worked out at comes back, for the change to charge the same.
+    assert preview.proration_date == int(sent["subscription_details[proration_date]"])
 
 
 # --------------------------------------------------------------------------- #
@@ -404,3 +409,19 @@ def test_a_malformed_id_raises_before_any_http_call():
 
     with pytest.raises(ValueError):
         _provider(handler).card_on_file(customer_id="not-a-stripe-id", subscription_id=None)
+
+
+def test_upgrade_now_charges_as_of_the_previews_moment_when_given():
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": SUBSCRIPTION, "items": {"data": [{"id": "si_1"}]}})
+        sent.append(_form(request))
+        return httpx.Response(200, json={"id": SUBSCRIPTION})
+
+    provider = _provider(handler)
+    provider.upgrade_now(subscription_id=SUBSCRIPTION, price_id="price_pro", proration_date=1_790_000_000)
+    provider.upgrade_now(subscription_id=SUBSCRIPTION, price_id="price_pro")
+    assert sent[0]["proration_date"] == "1790000000"
+    assert "proration_date" not in sent[1]  # Stripe prorates as of now
