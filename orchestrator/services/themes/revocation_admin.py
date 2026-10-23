@@ -55,9 +55,9 @@ from core.models.themes import (
 )
 from services.themes.choices import BAD_REQUEST, CONFLICT, MARKETPLACE_OWNER, NOT_FOUND, ThemeInstallError
 from services.themes.contract import plain_text_problem
-from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, SHA256_PATTERN, satisfies_range
+from services.themes.manifest import ID_PATTERN, RANGE_PATTERN, SHA256_PATTERN
 from services.themes.review import STATUS_DEACTIVATED
-from services.themes.revocations import REVOKE_DISABLE
+from services.themes.revocations import REVOKE_DISABLE, covers
 
 REASON_MAX = 2000
 REASON_FIELD = "reason"
@@ -198,16 +198,8 @@ def create_revocation(
 
 
 def _covers(row: ThemeRevocation, package: ThemePackage) -> bool:
-    """True when ``row`` covers ``package`` as ``revocations.py`` reads a row: by its digest, or by its
-    theme id with no range, a range this code can't read (every version) or one the version is in."""
-    if row.digest is not None:
-        return row.digest == package.digest
-    if row.theme_id != package.theme_id:
-        return False
-    version_range = row.version_range
-    if version_range is None or RANGE_PATTERN.fullmatch(version_range) is None:
-        return True
-    return satisfies_range(version_range, package.version)
+    """True when ``row`` covers ``package``, read as every revocation is (``revocations.covers``)."""
+    return covers(row, package.digest, package.theme_id, package.version)
 
 
 def _other_live_local_disable(db: Session, package: ThemePackage, row: ThemeRevocation) -> bool:

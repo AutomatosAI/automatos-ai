@@ -579,6 +579,23 @@ def test_a_revocation_covers_its_digest_or_its_theme_versions_until_lifted(world
     assert revocation_level(db, "e" * 64, "acme/other", "9.9.9") == "disable"  # an unreadable range fails closed
 
 
+def test_the_rule_and_the_admins_lift_check_read_a_revocation_target_one_way():
+    from services.themes import revocation_admin
+    from services.themes.revocations import covers
+
+    rows = {
+        "digest": ThemeRevocation(digest="c" * 64, level="disable", reason="r"),
+        "theme": ThemeRevocation(theme_id="acme/ink", level="disable", reason="r"),
+        "range": ThemeRevocation(theme_id="acme/ink", version_range="^1.2.0", level="disable", reason="r"),
+        "unreadable": ThemeRevocation(theme_id="acme/ink", version_range=">=1", level="disable", reason="r"),
+        "other theme": ThemeRevocation(theme_id="acme/other", level="disable", reason="r"),
+    }
+    package = ThemePackage(theme_id="acme/ink", version="1.1.0", digest="c" * 64)
+    expected = {"digest": True, "theme": True, "range": False, "unreadable": True, "other theme": False}
+    assert {name: covers(row, package.digest, package.theme_id, package.version) for name, row in rows.items()} == expected
+    assert {name: revocation_admin._covers(row, package) for name, row in rows.items()} == expected
+
+
 class _Objects:
     """An S3 client that serves one key, refuses one as missing, and fails for the rest."""
 

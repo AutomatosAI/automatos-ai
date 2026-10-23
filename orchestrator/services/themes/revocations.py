@@ -38,10 +38,16 @@ REVOKE_DISABLE = "disable"
 _STRENGTH = {REVOKE_WARN: 1, REVOKE_DISABLE: 2}
 
 
-def _applies(revocation: ThemeRevocation, digest: str, version: str) -> bool:
-    """True when one revocation row covers this digest and version."""
+def covers(revocation: ThemeRevocation, digest: str, theme_id: str, version: str) -> bool:
+    """True when one revocation row covers this package version: by its digest, or by its theme id
+    with no range, a range this code can't read (every version, logged) or a range the version is in.
+
+    The one reading of a row's target: the admin's lift and deactivate checks use it too.
+    """
     if revocation.digest is not None:
         return revocation.digest == digest
+    if revocation.theme_id != theme_id:
+        return False
     version_range = revocation.version_range
     if version_range is None:
         return True
@@ -69,7 +75,7 @@ def _matching(db: Any, digest: str, theme_id: str, version: str) -> List[ThemeRe
         .filter(or_(ThemeRevocation.digest == digest, ThemeRevocation.theme_id == theme_id))
         .all()
     )
-    return [row for row in rows if _applies(row, digest, version)]
+    return [row for row in rows if covers(row, digest, theme_id, version)]
 
 
 def _strongest(rows: List[ThemeRevocation]) -> Optional[ThemeRevocation]:
@@ -121,6 +127,6 @@ def revocation_body(revocation: Optional[ThemeRevocation]) -> Optional[Dict[str,
 
 
 __all__ = [
-    "REVOKE_DISABLE", "REVOKE_WARN", "disables", "effective_level", "is_disabled", "revocation_body",
+    "REVOKE_DISABLE", "REVOKE_WARN", "covers", "disables", "effective_level", "is_disabled", "revocation_body",
     "revocation_level", "revocation_of", "signature_disable",
 ]
