@@ -3,7 +3,8 @@
 The local edition's pull (``revocation_pull``, C-05h) stores the hosted feed's ``revokedKeys`` in
 ``theme_revocation_sync.revoked_key_ids`` (row ``THEME_REVOCATION_SYNC_ROW_ID``). Everything that
 asks which keys the feed revoked reads them here: the signature check on load
-(``signature_state``), the upload check and the installed list's signature view (``signed_upload``)
+(``signature_state``); through its ``feed_checked``, the upload check and the installed list's
+signature view (``signed_upload``) and the admin review's report and signature paste (``review``);
 and the admin's sync status (``revocation_pull.sync_status``).
 
 * **Local edition only.** The row is the local edition's own: the hosted edition publishes the

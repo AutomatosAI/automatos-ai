@@ -34,6 +34,11 @@ stored signature verify with an **active** key that neither the keys file nor th
 retired key's signature, a keys file that can't be read and an unsigned package vouch for nothing, so
 a private upload stays private (opt-in first) unless Automatos still stands behind its signature.
 
+``feed_checked`` is the same feed check for a verdict a caller already has: ``invalid`` (with its key
+id) when the key that verified is one the hosted feed revoked. Every place that shows or takes a
+signature without the on-load cache applies it: the upload check and the installed list
+(``signed_upload``), and the admin report and signature paste (``review``).
+
 Each answer is cached per (package id, digest, signature, key-set fingerprint), the fingerprint
 being the sha256 of the keys file's bytes and the sorted revoked key ids, so the files route, which
 asks on every file, verifies once per package per key set, and a changed keys file or revoked-key
@@ -177,6 +182,13 @@ def signature_fails(db: Any, package: ThemePackage) -> bool:
     return fails
 
 
+def feed_checked(db: Any, verdict: signature_verify.Verdict) -> signature_verify.Verdict:
+    """``verdict``, or ``invalid`` with its key id when the key that verified is one the hosted feed revoked."""
+    if verdict.verified and verdict.key_id in revoked_key_ids(db):
+        return signature_verify.Verdict(signature_verify.STATE_INVALID, verdict.key_id)
+    return verdict
+
+
 def _vouched(package: ThemePackage, key_set: KeySet) -> bool:
     """The uncached answer: an active key verifies the stored signature and the feed didn't revoke it."""
     keys = _parsed_keys(package, key_set)
@@ -206,6 +218,6 @@ def signature_vouches(db: Any, package: ThemePackage) -> bool:
 
 
 __all__ = [
-    "KeySet", "SIGNATURE_CACHE_SIZE", "SIGNATURE_DISABLE_REASON", "clear_cache", "current_key_set", "revoked_key_ids",
-    "signature_fails", "signature_vouches",
+    "KeySet", "SIGNATURE_CACHE_SIZE", "SIGNATURE_DISABLE_REASON", "clear_cache", "current_key_set", "feed_checked",
+    "revoked_key_ids", "signature_fails", "signature_vouches",
 ]

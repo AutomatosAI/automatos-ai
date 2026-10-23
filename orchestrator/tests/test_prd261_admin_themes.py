@@ -16,7 +16,9 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
   ``verified`` and the keyId from ``signature_verify``; a stored signature an active key still
   verifies refuses another (409), one that no longer does takes an active key's (QB-28); a keys
   file that does not load reads ``invalid`` in the report (200) and the paste is a 503 with its
-  plain message, nothing stored;
+  plain message, nothing stored; in the local edition a key the hosted feed revoked
+  (``theme_revocation_sync``) reads unverified in the report, never signs, and its stored
+  signature takes an active key's, as on load (the hosted edition never reads that row);
 * the reviewer's isolated-job note is stored and gates approval on the hosted edition;
 * reject needs a reason; deactivate writes a ``disable`` revocation of the digest, unless a live
   ``local`` one stands (a pulled ``feed`` one doesn't: the feed may lift it);
@@ -69,12 +71,17 @@ from core.auth import step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.themes import ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation  # noqa: E402
+from core.models.themes import (  # noqa: E402
+    THEME_REVOCATION_SYNC_ROW_ID, ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation,
+    ThemeRevocationSync,
+)
 from services.themes import revocations, signature_verify, signing  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 
 ADMIN_PK, MEMBER_PK = 7, 8
-TABLES = [m.__table__ for m in (ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation)]
+TABLES = [m.__table__ for m in (
+    ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation, ThemeRevocationSync,
+)]
 GOOD_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")
 NOTE_TAIL = "isolated job: build reproducible, digests equal, JS rules clean"
 FAILED_NOTE = {"summary": "Outcome: fail\ndigest differs after rebuild", "outcome": "fail"}
@@ -507,6 +514,53 @@ def test_a_keys_file_that_does_not_load_reads_invalid_in_the_report_and_the_past
     assert resp.status_code == 503 and resp.json()["detail"] == signature_verify.NOT_JSON, resp.text
     api.db.refresh(package)
     assert package.signature == good and len(_events(api.db, package, signing.EVENT_SIGNED)) == 1
+
+
+def _feed_revokes(db, *key_ids):
+    """The single sync row as the local edition's pull leaves it, with ``key_ids`` revoked by the hosted feed."""
+    db.merge(ThemeRevocationSync(id=THEME_REVOCATION_SYNC_ROW_ID, revoked_key_ids=list(key_ids)))
+    db.commit()
+
+
+def _signed_in_the_local_edition(api, monkeypatch, tmp_path):
+    """An approved version TEST 1's key signed, TEST 2's key active beside it, in the local edition."""
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    _key_file(monkeypatch, tmp_path, (RFC_KEY, "active"), (OTHER_RFC_KEY, "active"))
+    package = _package(api.db)
+    request = _approve(api, package, with_note=False).json()["signatureRequest"]
+    assert _signature(api, package, request["requestId"], _signed(request["canonical"])).status_code == 200
+    return package, request
+
+
+def test_the_report_reads_a_key_the_hosted_feed_revoked_as_unverified_in_the_local_edition_only(
+        api, monkeypatch, tmp_path):
+    package, _ = _signed_in_the_local_edition(api, monkeypatch, tmp_path)
+    _feed_revokes(api.db, OTHER_RFC_KEY["keyId"])
+    assert _report_check(api, package) == (True, RFC_KEY["keyId"])
+    _feed_revokes(api.db, RFC_KEY["keyId"])
+    assert revocations.is_disabled(api.db, package)  # disabled on load, everywhere a member sees it
+    assert _report_check(api, package) == (False, RFC_KEY["keyId"])  # and the admin's report agrees
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")  # the row is the local edition's own
+    assert _report_check(api, package) == (True, RFC_KEY["keyId"])
+
+
+def test_a_key_the_hosted_feed_revoked_never_signs_and_its_signature_takes_an_active_keys(
+        api, monkeypatch, tmp_path):
+    package, request = _signed_in_the_local_edition(api, monkeypatch, tmp_path)
+    request_id, canonical = request["requestId"], request["canonical"]
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # verifies
+    _feed_revokes(api.db, RFC_KEY["keyId"])
+    resp = _signature(api, package, request_id, _signed(canonical))  # the revoked key's again: 400, kept as it was
+    assert resp.status_code == 400 and resp.json()["detail"] == signing.NOT_VERIFIED, resp.text
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical)
+    resp = _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY))
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["signature"]["verified"], resp.json()["signature"]["keyId"]) == (True, OTHER_RFC_KEY["keyId"])
+    replaced = {row.detail["keyId"]: row.detail["replaces"] for row in _events(api.db, package, signing.EVENT_SIGNED)}
+    assert replaced == {RFC_KEY["keyId"]: None, OTHER_RFC_KEY["keyId"]: {"state": "invalid", "keyId": RFC_KEY["keyId"]}}
+    assert not revocations.is_disabled(api.db, package)  # a new signature lifts it on the next load
+    assert _report_check(api, package) == (True, OTHER_RFC_KEY["keyId"])
 
 
 # --- gates, shape and the no-key rule ----------------------------------------------------

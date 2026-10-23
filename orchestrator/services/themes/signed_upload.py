@@ -38,7 +38,7 @@ from services.themes import signature_verify
 from services.themes.contract import KB, ThemeError, parse_json, theme_error
 from services.themes.manifest import ID_PATTERN, VERSION_PATTERN
 from services.themes.package import ThemePackage as CheckedThemePackage
-from services.themes.revocation_sync_state import revoked_key_ids
+from services.themes.signature_state import feed_checked
 
 logger = logging.getLogger(__name__)
 
@@ -153,13 +153,6 @@ def _refusal_for(verdict: signature_verify.Verdict) -> str:
     return INACTIVE_KEY if verdict.key_id is not None else NOT_VERIFIED
 
 
-def _feed_checked(db: Any, verdict: signature_verify.Verdict) -> signature_verify.Verdict:
-    """``verdict``, or ``invalid`` with its key id when the key that verified is one the hosted feed revoked."""
-    if verdict.verified and verdict.key_id in revoked_key_ids(db):
-        return signature_verify.Verdict(signature_verify.STATE_INVALID, verdict.key_id)
-    return verdict
-
-
 def check_upload_signature(
     db: Any, checked: CheckedThemePackage, data: bytes, keys: Optional[Sequence[signature_verify.SigningKey]] = None,
 ) -> VerifiedSignature:
@@ -173,7 +166,7 @@ def check_upload_signature(
     _check_names_upload(envelope, checked)
     manifest = checked.manifest
     payload = signature_verify.payload_for(manifest["id"], manifest["version"], _file_hashes(checked))
-    verdict = _feed_checked(db, signature_verify.verify(payload, envelope["signature"], keys))
+    verdict = feed_checked(db, signature_verify.verify(payload, envelope["signature"], keys))
     if not verdict.verified:
         raise _bad(_refusal_for(verdict))
     if verdict.key_id != envelope["keyId"]:
@@ -192,7 +185,7 @@ def signature_view(db: Any, package: ThemePackage) -> Dict[str, Optional[str]]:
     except signature_verify.SigningKeysError as bad:
         logger.error("theme signing keys did not load; package %s reads as invalid: %s", package.id, bad)
         return signature_verify.Verdict(signature_verify.STATE_INVALID).view()
-    return _feed_checked(db, verdict).view()
+    return feed_checked(db, verdict).view()
 
 
 __all__ = [
