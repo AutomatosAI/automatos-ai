@@ -6,7 +6,14 @@ import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
-import type { ThemePendingVersion, ThemeReviewReport, ThemeSignatureRequest } from '@/lib/api-client'
+import type {
+  ThemePendingVersion,
+  ThemeReviewPackageLink,
+  ThemeReviewReport,
+  ThemeRevocationRow,
+  ThemeRevocationSyncStatus,
+  ThemeSignatureRequest,
+} from '@/lib/api-client'
 
 export const PACKAGE_ID = '44444444-4444-4444-8444-444444444444'
 export const REQUEST_ID = '55555555-5555-4555-8555-555555555555'
@@ -96,6 +103,57 @@ export function reportOf(overrides: Partial<ThemeReviewReport> = {}): ThemeRevie
     signatureRequest: null,
     signatureVerified: false,
     keyId: null,
+    ...overrides,
+  }
+}
+
+export const REVOCATION_ID = '77777777-7777-4777-8777-777777777777'
+export const FEED_REVOCATION_ID = '88888888-8888-4888-8888-888888888888'
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** An ISO time `days` days before now, with its offset (formatRelative's input). */
+export function daysAgo(days: number): string {
+  return new Date(Date.now() - days * DAY_MS).toISOString()
+}
+
+/** revocation_admin.py revocation_view: a live local disable of the fixture's digest. */
+export function revocationRow(overrides: Partial<ThemeRevocationRow> = {}): ThemeRevocationRow {
+  return {
+    id: REVOCATION_ID,
+    digest: DIGEST,
+    themeId: null,
+    versionRange: null,
+    level: 'disable',
+    reason: 'Sends chat text to another site.',
+    origin: 'local',
+    createdAt: daysAgo(1),
+    liftedAt: null,
+    ...overrides,
+  }
+}
+
+/** revocation_pull.py sync_status: sync on, a pull that worked an hour ago. */
+export function syncStatus(overrides: Partial<ThemeRevocationSyncStatus> = {}): ThemeRevocationSyncStatus {
+  const anHourAgo = new Date(Date.now() - DAY_MS / 24).toISOString()
+  return {
+    enabled: true,
+    lastAttemptAt: anHourAgo,
+    lastSuccessAt: anHourAgo,
+    lastError: null,
+    feedGeneratedAt: anHourAgo,
+    rows: 1,
+    revokedKeys: [],
+    stale: false,
+    ...overrides,
+  }
+}
+
+/** review_package.py review_link: the review job's two inputs and when the link stops working. */
+export function reviewLink(overrides: Partial<ThemeReviewPackageLink> = {}): ThemeReviewPackageLink {
+  return {
+    url: `https://storage.example/themes/_review/${DIGEST}.autotheme?expires=900`,
+    digest: DIGEST,
+    expiresAt: new Date(Date.now() + DAY_MS / 96).toISOString(),
     ...overrides,
   }
 }

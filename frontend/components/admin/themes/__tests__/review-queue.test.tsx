@@ -20,6 +20,13 @@ const api = vi.hoisted(() => ({
   rejectTheme: vi.fn(),
   deactivateTheme: vi.fn(),
   storeThemeSignature: vi.fn(),
+  // C-05j: the revocations panel under the queue, and the review job's inputs.
+  getThemeRevocations: vi.fn(),
+  createThemeRevocation: vi.fn(),
+  liftThemeRevocation: vi.fn(),
+  getThemeRevocationSync: vi.fn(),
+  pullThemeRevocations: vi.fn(),
+  getThemeReviewPackage: vi.fn(),
 }))
 const clerk = vi.hoisted(() => ({ openReverification: vi.fn() }))
 const role = vi.hoisted(() => ({
@@ -66,6 +73,7 @@ import {
   reportOf,
   signatureRequest,
   stepUpError,
+  syncStatus,
 } from './review-fixtures'
 
 const NOTE_MISSING = 'Run the isolated review job in the kit repo and paste its summary first.'
@@ -94,6 +102,8 @@ beforeEach(() => {
   role.current = { systemRole: 'super_admin', isAdmin: true, isLoading: false }
   api.getPendingThemes.mockResolvedValue({ pending: [pendingRow()] })
   api.getThemeReport.mockResolvedValue(reportOf())
+  api.getThemeRevocations.mockResolvedValue({ revocations: [] })
+  api.getThemeRevocationSync.mockResolvedValue(syncStatus())
 })
 
 describe('the pending list', () => {
@@ -284,7 +294,7 @@ describe('after approval', () => {
     )
     await openReport()
     const signed = screen.getByTestId('theme-signed')
-    expect(signed).toHaveTextContent(`Signed. Verified with the active Automatos key ${KEY_ID}.`)
+    expect(signed).toHaveTextContent(`Signed. Verified · ${KEY_ID}`)
     expect(signed).not.toHaveTextContent(/not verified|does not verify/)
   })
 

@@ -35,6 +35,8 @@ export const themeReviewKeys = {
   all: ['admin-themes'] as const,
   pending: ['admin-themes', 'pending'] as const,
   report: (packageId: string) => ['admin-themes', 'report', packageId] as const,
+  // Outside `all`: a decision refreshes the queue, and must not make a new review link by the way.
+  reviewPackage: (packageId: string) => ['admin-theme-review-package', packageId] as const,
 }
 
 export const APPROVED = 'Version approved. Its signature request is open below.'
@@ -67,6 +69,22 @@ export function useThemeReport(packageId: string | null) {
     queryFn: () => apiClient.getThemeReport(packageId ?? ''),
     enabled: packageId !== null,
     retry: false,
+  })
+}
+
+/**
+ * C-05j: the kit review job's inputs for a version (C-03c `GET …/review-package`): a 15-minute link
+ * to its package, rebuilt from the stored files, and its digest. Asked for only once `requested`
+ * (each answer stores a fresh copy), never again on its own: a refetch would only make a new link.
+ */
+export function useReviewPackage(packageId: string, requested: boolean) {
+  return useQuery({
+    queryKey: themeReviewKeys.reviewPackage(packageId),
+    queryFn: () => apiClient.getThemeReviewPackage(packageId),
+    enabled: requested,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   })
 }
 
