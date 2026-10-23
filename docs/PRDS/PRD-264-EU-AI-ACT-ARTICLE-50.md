@@ -405,6 +405,12 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 
 Built in #1250 (merged 20 Oct). The counsel check on scope was dropped by Gerard on 23 Oct. The hosted service runs the guard's read on `claude-haiku-5-5` (`GENERATION_GUARD_MODEL`, set 23 Oct); a local install uses its own model. Scope (Gerard, 23 Oct): an agent running a workspace's own connected generation app directly (`composio_execute` with the customer's fal.ai, Higgsfield or ElevenLabs connection) relies on that provider's own safeguards; Automatos adds no check there.
 
+**Model read switched off until after Web Summit (Gerard, 23 Oct 2026).** Automatos has no customers yet, and the read adds a model call to every Socials render and every image-tool image, and refuses the generation when that call fails: cost and failed demos for no customer benefit yet. So `GENERATION_GUARD_READ_ENABLED` ships `false`:
+- still on: the CSAM keyword block (no model call), and a provider's own refusal (Higgsfield `nsfw`) ending as a refusal that no other provider is asked;
+- off: the three-question model read, and fetching reference images for it.
+
+**To turn it back on** when PRD-264 is picked up again after the summit: set `GENERATION_GUARD_READ_ENABLED=true` on the hosted API service (`GENERATION_GUARD_MODEL=claude-haiku-5-5` is already set there) and deploy. The code and its tests are unchanged and stay proven in CI with the read on; nothing else needs building. Then change the default in `orchestrator/config.py` to `true`, and the test that pins it off (`tests/test_prd264_art5_generation_guard.py`).
+
 ## 6. Functional requirements
 
 - **FR-1:** Each of these surfaces tells a person they are dealing with an AI at first exposure, in words: the chat widget and its proactive and cart-idle popups; both website chats (through the widget); the in-app `/chat`, including Mission Mode, the Play chat and any theme-owned `/chat`; Play's other chat surfaces and every `/x/` theme route that uses the chat area; Auto Live voice; Telegram, Slack, Discord and WhatsApp bots; agent-sent email and messages; the Academy web tutor; the Academy app tutor.
