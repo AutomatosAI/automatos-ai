@@ -69,7 +69,7 @@ SOURCE_FALLBACK = "fallback"
 
 
 def can_be_default(package: ThemePackage) -> bool:
-    """Only reviewed Marketplace code may run for members who never opted in (Q6)."""
+    """Only code that isn't private (``choices.is_private``) may run for members who never opted in (Q6, QB-24)."""
     return not is_private(package)
 
 

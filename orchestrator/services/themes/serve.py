@@ -10,9 +10,9 @@ with that digest:
   workspace where the caller is a member or owner, and the package belongs to that install:
   a Marketplace package, or a private package of **that** workspace (a private package
   referenced from another workspace's install serves nothing). Private code (``choices.is_private``:
-  a workspace's own upload, or any package not reviewed yet, the same rule ``active`` reports
-  as ``optIn.required``) also needs the caller's opt-in to that version in that workspace
-  (``theme_opt_ins``, Q6).
+  a Marketplace package not reviewed yet, or a workspace's own upload no active Automatos key vouches
+  for (QB-24), the same rule ``active`` reports as ``optIn.required``) also needs the caller's opt-in
+  to that version in that workspace (``theme_opt_ins``, Q6).
 
 Two workspaces may hold the same digest, so the row is chosen by the digest and the caller's
 authorisation, never as "the one row with that digest". A row a live ``disable`` covers

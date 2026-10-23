@@ -29,7 +29,12 @@ Official, ``listings``); and a keys file that can't be read or parsed (logged as
 broken release file says nothing about one package, and the listings then show every signature
 ``invalid``).
 
-The answer is cached per (package id, digest, signature, key-set fingerprint), the fingerprint
+``signature_vouches`` is the stricter question QB-24 asks (``choices.is_private``, C-05d): does the
+stored signature verify with an **active** key that neither the keys file nor the feed revoked? A
+retired key's signature, a keys file that can't be read and an unsigned package vouch for nothing, so
+a private upload stays private (opt-in first) unless Automatos still stands behind its signature.
+
+Each answer is cached per (package id, digest, signature, key-set fingerprint), the fingerprint
 being the sha256 of the keys file's bytes and the sorted revoked key ids, so the files route, which
 asks on every file, verifies once per package per key set, and a changed keys file or revoked-key
 list recomputes. The keys file is still read on each check (as ``signature_verify`` reads it), so
@@ -95,11 +100,13 @@ class _AnswerCache:
 
 
 _answers = _AnswerCache(SIGNATURE_CACHE_SIZE)
+_vouches = _AnswerCache(SIGNATURE_CACHE_SIZE)
 
 
 def clear_cache() -> None:
     """Forget every cached answer (tests; a process restart does the same)."""
     _answers.clear()
+    _vouches.clear()
 
 
 def _keys_bytes() -> Optional[bytes]:
@@ -170,7 +177,35 @@ def signature_fails(db: Any, package: ThemePackage) -> bool:
     return fails
 
 
+def _vouched(package: ThemePackage, key_set: KeySet) -> bool:
+    """The uncached answer: an active key verifies the stored signature and the feed didn't revoke it."""
+    keys = _parsed_keys(package, key_set)
+    if keys is None:
+        return False
+    verdict = signature_verify.package_verdict(package, keys)
+    return verdict.verified and verdict.key_id not in key_set.revoked
+
+
+def signature_vouches(db: Any, package: ThemePackage) -> bool:
+    """True when an active Automatos key that nobody revoked verifies the stored signature (QB-24).
+
+    False when unsigned, when no key or only a retired or revoked key verifies it, when the hosted
+    feed revoked the key (local edition) and when the keys file can't be read (fail closed).
+    """
+    signature = getattr(package, "signature", None)
+    if not signature:
+        return False
+    key_set = current_key_set(db)
+    key = (package.id, package.digest, signature, key_set.fingerprint)
+    cached = _vouches.get(key)
+    if cached is not None:
+        return cached
+    vouched = _vouched(package, key_set)
+    _vouches.put(key, vouched)
+    return vouched
+
+
 __all__ = [
     "KeySet", "SIGNATURE_CACHE_SIZE", "SIGNATURE_DISABLE_REASON", "clear_cache", "current_key_set", "revoked_key_ids",
-    "signature_fails",
+    "signature_fails", "signature_vouches",
 ]
