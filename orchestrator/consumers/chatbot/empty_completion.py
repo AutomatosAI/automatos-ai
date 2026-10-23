@@ -15,6 +15,11 @@ EMPTY_COMPLETION_FALLBACK = (
     "I didn't get a response through that time — could you send that again?"
 )
 
+# F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
+# a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it
+# (StreamingChatService, nothing_said_fallback).
+NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
+
 
 def is_empty_completion(response: Any) -> bool:
     """True when the model produced neither text nor a tool call."""

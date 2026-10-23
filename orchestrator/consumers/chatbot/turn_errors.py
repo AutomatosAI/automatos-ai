@@ -27,6 +27,14 @@ CODE_CREDITS_EXHAUSTED = CREDITS_EXHAUSTED_CODE
 CODE_ACTIVATION_FAILED = "activation_failed"
 CODE_PROVIDER_FAILED = "provider_failed"
 CODE_TURN_FAILED = "turn_failed"
+# A turn the person stopped, and the session-agent lane's answer (api/chat.py).
+CODE_TURN_STOPPED = "turn_stopped"
+CODE_SESSION_AGENT_TERMINAL = "session_agent_terminal"
+
+# The ``source.origin`` of the note a failed turn leaves in the conversation
+# (consumers.chatbot.turn_notes). The client shows the note by it; the
+# model's history reads it as a marker, never as a reply (consumers.chatbot.model_history).
+TURN_ERROR_ORIGIN = "turn_error"
 
 RAW_MESSAGE_CHARS = 200
 
@@ -41,10 +49,41 @@ ASK_AGAIN = "Nothing needs changing on your side; ask again in a minute."
 CREDIT_REFUSED_STATUS = 402
 
 
+class FailedTurnSentence(str):
+    """``TurnError.message``: the sentence a failed turn is told by, carrying its code.
+
+    The tool loop hands it back in place of an answer when a later round fails
+    (``StreamingChatService._stream_tool_loop``); its type is how the turn tells it
+    from a reply (``consumers.chatbot.failed_loop``)."""
+
+    def __new__(cls, text: str, code: str = CODE_TURN_FAILED) -> "FailedTurnSentence":
+        sentence = super().__new__(cls, text)
+        sentence.code = code
+        return sentence
+
+
 @dataclass(frozen=True)
 class TurnError:
     code: str
     message: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "message", FailedTurnSentence(self.message, self.code))
+
+
+class TurnFailed(Exception):
+    """A turn failure already described (``error``): ``describe_turn_error`` hands its
+    description back as it is, never wrapped in a second sentence."""
+
+    def __init__(self, error: TurnError) -> None:
+        super().__init__(str(error.message))
+        self.error = error
+
+
+# The notes for a turn that ended with no reply and no note of its own (consumers.chatbot.turn_notes).
+STOPPED = TurnError(CODE_TURN_STOPPED, "This reply was stopped before it finished.")
+UNFINISHED = TurnError(CODE_TURN_FAILED, "This reply did not finish. Ask again; if it keeps happening, "
+                                         "the details are in the server log.")
 
 
 def _who(agent_name: Optional[str]) -> str:
@@ -101,6 +140,8 @@ def _provider_error(status: int, text: str, who: str) -> TurnError:
 
 def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None) -> TurnError:
     """One plain sentence + a code for an exception a chat turn raised."""
+    if isinstance(exc, TurnFailed):
+        return exc.error
     name = _class_name(exc)
     text = str(exc) or name
     who = _who(agent_name)

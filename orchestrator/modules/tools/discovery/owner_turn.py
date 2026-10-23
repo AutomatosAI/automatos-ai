@@ -139,7 +139,11 @@ def owners_recent_words(db: Session, workspace_id: Any, turn: OwnerTurn) -> Tupl
 
 def _chat_words(db: Session, workspace_id: Any, turn: OwnerTurn, role: str, count: int) -> Tuple[str, ...]:
     """The text of the last ``count`` messages by ``role`` in the turn's chat, newest
-    first. Read in a savepoint: a refused read must not abort the caller's transaction."""
+    first. Read in a savepoint: a refused read must not abort the caller's transaction.
+    A failed turn's note ("⚠️ Auto could not finish this reply…") is never Auto's words."""
+    from sqlalchemy import func
+
+    from consumers.chatbot.turn_errors import TURN_ERROR_ORIGIN
     from core.models.core import Message
     from modules.memory.thread_checkpoint import extract_message_text
 
@@ -149,7 +153,8 @@ def _chat_words(db: Session, workspace_id: Any, turn: OwnerTurn, role: str, coun
         with db.begin_nested():
             rows = (db.query(Message.parts)
                     .filter(Message.chat_id == turn.chat_id, Message.workspace_id == _as_uuid(workspace_id),
-                            Message.role == role)
+                            Message.role == role,
+                            func.coalesce(Message.source["origin"].astext, "") != TURN_ERROR_ORIGIN)
                     .order_by(Message.created_at.desc()).limit(count).all())
     except Exception:
         logger.exception("[owner_turn] could not read the %s messages in chat %s", role, turn.chat_id)
