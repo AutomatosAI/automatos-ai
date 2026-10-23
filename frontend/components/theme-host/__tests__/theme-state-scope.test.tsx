@@ -74,8 +74,8 @@ const FRONTEND = path.resolve(__dirname, '../../..')
 const SCOPE_FILE = 'components/theme-host/theme-state-scope.tsx'
 const LOOK_RUNTIME_FILE = 'components/theme-host/theme-look-runtime.tsx'
 const PROVIDERS_FILE = 'components/providers.tsx'
-/** Look code and the builtin theme's files: the scope is the host's, for every installed theme alike. */
-const FORBIDDEN_DIRS = ['lib/looks', 'lib/theme-host/builtin']
+/** The look runtime and the look kit: the scope is the host's, for every installed theme alike, with looks or without. */
+const FORBIDDEN_DIRS = ['lib/theme-host/looks', 'lib/look-kit']
 const RUNTIME_MODULE = '@/lib/theme-sdk/internal/theme-state-runtime'
 
 const USER = 'user_a'
@@ -93,8 +93,6 @@ const HELLO = entryOf(INSTALLED_HELLO_STYLE, HELLO_PACKAGE_ENTRY)
 const PLAY = entryOf(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)
 const HELLO_ID = HELLO_PACKAGE_ENTRY.themeId
 const PLAY_ID = PLAY_PACKAGE_ENTRY.themeId
-/** A builtin theme's entry (builtin Play's kind): the host never runs it, whatever it is called. */
-const BUILTIN: ThemeEntry = { ...HELLO, kind: 'builtin' }
 const NO_THEME_ID: ThemeEntry = { ...HELLO, themeId: undefined }
 
 const SIGNED_IN: UserStub = { isLoaded: true, isSignedIn: true, user: { id: USER } }
@@ -211,7 +209,6 @@ describe('PRD-261 E3c — the scope is published for an installed theme the host
 
   it.each<[string, ThemeEntry | null, ThemeHostStatus]>([
     ['Classic or Studio (no registry entry)', null, 'off'],
-    ['a builtin theme, even with the host running', BUILTIN, 'active'],
     ['an installed entry with no theme id', NO_THEME_ID, 'active'],
     ['an installed theme whose load failed', HELLO, 'failed'],
     ['an installed theme in safe mode', HELLO, 'safe-mode'],
@@ -375,7 +372,7 @@ describe('PRD-261 E3c — one tree shape (M69)', () => {
 })
 
 describe('PRD-261 E3c — where the scope lives', () => {
-  it('imports no look code and no builtin theme', () => {
+  it('imports no look code', () => {
     const specifiers = moduleSpecifiers(SCOPE_FILE, readFileSync(path.join(FRONTEND, SCOPE_FILE), 'utf8'))
     // Not vacuous: the scan reads the file's real imports.
     expect(specifiers).toContain(RUNTIME_MODULE)
@@ -394,7 +391,7 @@ describe('PRD-261 E3c — where the scope lives', () => {
     inOrder(readFileSync(path.join(FRONTEND, PROVIDERS_FILE), 'utf8'), [
       '<WorkspaceProvider>',
       '<ThemeHostProvider>',
-      '<ThemeLookRuntime onToneChange={setPlayTone}>',
+      '<ThemeLookRuntime onToneChange={setLookTone}>',
       '</ThemeLookRuntime>',
       '</ThemeHostProvider>',
       '</WorkspaceProvider>',

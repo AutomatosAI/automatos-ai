@@ -1,6 +1,6 @@
 /**
- * PRD-261 A-01, A-04a — the theme host provider, in every build (no build flag). Under Classic,
- * Studio and builtin Play it renders its children and does nothing else: no load, no global, no
+ * PRD-261 A-01, A-04a — the theme host provider, in every build (no build flag). Under Classic
+ * and Studio it renders its children and does nothing else: no load, no global, no
  * status on <html>. Under an installed theme's style it loads that theme, never in safe mode,
  * reports 'loading' from its first render, turns off with no notice when the server has no active
  * install, falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders

@@ -4,16 +4,17 @@
  * every page, which a theme's own CSS has to win over. Every theme the host runs today is drawn on
  * Studio, so <html> carries `studio` with the theme's class, and Tailwind 3.3.3 emits globals.css's
  * @layer blocks unlayered: between two rules on one element, specificity decides. A theme wins with a
- * rule that starts with its <html> class (docs/frontend-architecture/play-theme.md, "Play's rules beat
- * Studio's element rules"): `html.<class> .<own class>` on its own element, `html.<class> .<surface>
+ * rule that starts with its <html> class (the theme kit's themes/play/README.md, "The cascade (FX-01)",
+ * shows it for Play's package): `html.<class> .<own class>` on its own element, `html.<class> .<surface>
  * <element>` inside the SDK's MarkdownView. That holds only while the host keeps these rules where
  * they are, so this test pins them: the list of rules that reach those elements, each one's
  * specificity, and each one under the theme's rule.
  *
  * The plan's shorthand for the ceiling, (0,1,1), is the plain element rules' (`.studio h1`,
- * `.md-view a`); two rules it names sit higher and always have (prd260-play-guards.test.ts reads them
- * so): `.studio code:not(pre code)` at (0,1,3) and the Studio markdown rules (`.studio .md-view a` and
- * its headings) at (0,2,1). Each is pinned at its own value, still below the theme's rule.
+ * `.md-view a`); two rules it names sit higher and always have (prd260-play-guards.test.ts read them
+ * so before it left core): `.studio code:not(pre code)` at (0,1,3) and the Studio markdown rules
+ * (`.studio .md-view a` and its headings) at (0,2,1). Each is pinned at its own value, still below the
+ * theme's rule.
  *
  * Changing this list, or raising a rule in it, changes the theme contract: the kit's guides and its
  * copy of these rules (B-05g, test/fixtures/core/studio-element-rules.css) change with it.
