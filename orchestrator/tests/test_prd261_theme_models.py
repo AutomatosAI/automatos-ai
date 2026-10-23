@@ -85,8 +85,9 @@ FEED_MIGRATION = VERSIONS / "prd261_revocation_feed.py"
 MIGRATIONS = (MIGRATION, FEED_MIGRATION)  # in chain order
 # The single head on the base this wave was cut from (origin/main 0d9f0ac59).
 HEAD_BEFORE_WAVE = "prd258_voice_timings"
-# The single head on the base W-C3 was cut from (origin/main 7ae677b52).
-HEAD_BEFORE_C3 = "clerk_user_relinks_20261019"
+# The single head on main when W-C3 merged it (origin/main 82f9fd31b); W-C3 was cut from
+# 7ae677b52 (head clerk_user_relinks_20261019) and its migration re-chained onto this one.
+HEAD_BEFORE_C3 = "prd265_billing"
 MODELS = (
     ThemePackage, ThemePublisher, ThemeInstallation, ThemeChoice, ThemeLook,
     ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation, ThemeReviewEvent, ThemeRevocationSync,

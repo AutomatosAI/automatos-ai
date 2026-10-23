@@ -126,8 +126,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # concurrent partial index), and the dollar trials converted into credit grants.
 # 2026-10-23 (PRD-265 W2): prd265_billing chains onto prd266_merge_heads — billing_accounts
 # and billing_events (new tables only).
-# 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto
-# clerk_user_relinks_20261019 — theme_revocations.origin ('local' | 'feed') and the
+# 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto prd265_billing
+# (re-chained from clerk_user_relinks_20261019 when W-C3 merged main, 23 Oct) —
+# theme_revocations.origin ('local' | 'feed'), the live-local unique index and the
 # single-row theme_revocation_sync table the local edition's feed pull writes.
 EXPECTED_HEAD = "prd261_revocation_feed"
 
