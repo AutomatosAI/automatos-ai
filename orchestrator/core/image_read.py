@@ -19,9 +19,10 @@ JPEG_QUALITY = 80
 # 20000 × 20000), and Pillow only refuses past ~179 M pixels. Past this the read refuses
 # from the header alone, before decoding; a 48 MP camera photo still fits.
 MAX_READ_PIXELS = 50_000_000
-# What the read decodes; anything else (PSD, ICO, EPS…) is not opened at all. MPO is how
-# Pillow names an iPhone's multi-picture JPEG.
-READ_FORMATS = ("JPEG", "MPO", "PNG", "GIF", "WEBP", "BMP", "TIFF")
+# What the read decodes; anything else (PSD, ICO, EPS…) is not opened at all. An iPhone's
+# multi-picture JPEG opens through JPEG (Pillow names it MPO once open, but registers no
+# MPO opener, so "MPO" here would be a KeyError).
+READ_FORMATS = ("JPEG", "PNG", "GIF", "WEBP", "BMP", "TIFF")
 
 
 def _opened(image_module, data: bytes, edge_px: int):
