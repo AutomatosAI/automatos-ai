@@ -21,7 +21,6 @@ from services.billing.stripe_provider import StripeProvider, checkout_params
 from services.billing.stripe_signature import SignatureError, expected_signature
 
 SECRET = "whsec_test"
-NOW = int(time.time())  # inside the 5-minute replay window parse_webhook enforces
 
 
 def _api(handler) -> StripeApi:
@@ -36,8 +35,9 @@ def _provider(handler=None, **kwargs) -> StripeProvider:
 
 def _signed(body: dict) -> tuple[bytes, str]:
     payload = json.dumps(body).encode()
-    sig = expected_signature(payload, NOW, SECRET)
-    return payload, f"t={NOW},v1={sig}"
+    now = int(time.time())  # signed when the test runs: parse_webhook refuses anything 5 minutes old
+    sig = expected_signature(payload, now, SECRET)
+    return payload, f"t={now},v1={sig}"
 
 
 # --------------------------------------------------------------------------- #
