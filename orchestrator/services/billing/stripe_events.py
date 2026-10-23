@@ -109,7 +109,7 @@ def invoice_paid(invoice: dict) -> Any:
         customer_id=_id(invoice.get("customer")), invoice_id=invoice["id"], subscription_id=subscription_id,
         price_ids=tuple(_line_price(line) for line in lines), period_end=_at(max(int(e) for e in ends)),
         payment_ref=_invoice_payment_ref(invoice), amount_cents=invoice.get("amount_paid"),
-        workspace_ref=_invoice_workspace(invoice),
+        workspace_ref=_invoice_workspace(invoice), period_start=_at(_dig(lines[0], "period", "start")),
     )
 
 

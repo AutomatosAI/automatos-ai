@@ -7,7 +7,10 @@ is faked. Pinned:
 - a paid Pro invoice puts the workspace on Pro and grants the month (2,000),
   expiring at the period end; the same event again changes nothing;
 - a renewal expires what is left of the month, then grants a fresh one;
-- an upgrade mid-period grants only the difference; a downgrade grants nothing;
+- an upgrade mid-period grants only the difference, prorated by the share of the
+  period left (an upgrade half-way through gets half); a downgrade grants nothing;
+- a renewal paid days late (after the sweep expired the old month) still grants the
+  new month in full;
 - a top-up grants 1,000 credits for a year; refunds take back the refunded share
   (the running total), to a negative bucket once spent; a dispute takes back and
   a dispute won gives back;
@@ -138,10 +141,11 @@ def _event(kind: str, obj: dict, ref: str) -> dict:
 
 def _invoice(inv: str, customer: str, lines: list, *, sub: str = "sub_1", pi=None) -> dict:
     return {
-        "id": inv, "object": "invoice", "customer": customer, "amount_paid": sum(max(0, a) for a, _, _ in lines),
+        "id": inv, "object": "invoice", "customer": customer, "amount_paid": sum(max(0, line[0]) for line in lines),
         "parent": {"type": "subscription_details", "subscription_details": {"subscription": sub, "metadata": {}}},
-        "lines": {"data": [{"amount": amount, "pricing": {"price_details": {"price": price}},
-                            "period": {"start": end - 30 * DAY, "end": end}} for amount, price, end in lines]},
+        "lines": {"data": [{"amount": line[0], "pricing": {"price_details": {"price": line[1]}},
+                            "period": {"start": line[3] if len(line) > 3 else line[2] - 30 * DAY, "end": line[2]}}
+                           for line in lines]},
         "payments": {"data": [{"payment": {"type": "payment_intent", "payment_intent": pi}}] if pi else []},
     }
 
@@ -237,6 +241,37 @@ def test_an_upgrade_mid_period_grants_only_the_difference(billing, new_session):
     s = new_session()
     assert read_balance(s, b["ws"]).monthly == 8000  # a downgrade never mints, never takes
     assert _plan(s, b["ws"]) == "pro" and _account(s, b["ws"])[3] == 8000
+
+
+def test_an_upgrade_half_way_through_the_period_gets_half_the_difference(billing, new_session):
+    b = billing()
+    end = int(time.time()) + 15 * DAY
+    start = end - 30 * DAY
+    _send(new_session, _event("invoice.paid", _invoice("in_o" + b["tag"], b["customer"],
+                                                      [(900, "price_basic", end, start)]), b["tag"] + "o"))
+    half = end - 15 * DAY  # Stripe's prorated line runs from the upgrade to the period end
+    up = _invoice("in_p" + b["tag"], b["customer"], [(1000, "price_pro", end, half), (-450, "price_basic", end, half)])
+    _send(new_session, _event("invoice.paid", up, b["tag"] + "p"))
+    s = new_session()
+    assert read_balance(s, b["ws"]).monthly == 1000 and _plan(s, b["ws"]) == "pro"
+    renewal = _invoice("in_r" + b["tag"], b["customer"], [(2900, "price_pro", end + 30 * DAY, end)])
+    _send(new_session, _event("invoice.paid", renewal, b["tag"] + "r"))
+    assert read_balance(new_session(), b["ws"]).monthly == 2000  # the next month is whole
+
+
+def test_a_renewal_paid_after_the_sweep_still_grants_the_new_month(billing, new_session):
+    b = billing()
+    now = datetime.now(timezone.utc)
+    old_end = int((now - timedelta(days=3)).timestamp())
+    _send(new_session, _event("invoice.paid", _invoice("in_a" + b["tag"], b["customer"],
+                                                      [(2900, "price_pro", old_end)]), b["tag"] + "a"))
+    expire_due(new_session(), now=now)  # the card failed; three days on, the old month is swept
+    assert read_balance(new_session(), b["ws"]).monthly == 0
+    late = _invoice("in_b" + b["tag"], b["customer"], [(2900, "price_pro", old_end + 30 * DAY, old_end)])
+    _send(new_session, _event("invoice.paid", late, b["tag"] + "b"))  # Stripe's retry succeeds
+    s = new_session()
+    assert read_balance(s, b["ws"]).monthly == 2000
+    assert _rows(s, b["ws"], "monthly_expire") == [("expire", "monthly", -2000)]
 
 
 def test_a_topup_then_refunds_take_back_the_refunded_share(billing, new_session):

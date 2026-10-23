@@ -2,9 +2,11 @@
 
 - **A paid period** (a subscription invoice): a new period first expires what is
   left of the last month, then grants the plan's monthly credits, expiring at the
-  period end. A second invoice in the same period (an upgrade, prorated) grants
-  only the difference up to the new plan's month, so toggling plans never mints
-  credits. ``billing_accounts.credited_period_end`` + ``period_credits`` remember
+  period end. A second invoice in the same period (an upgrade) grants the
+  difference up to the new plan's month, prorated by the share of the period left,
+  as Stripe prorates the price: an upgrade on the period's last day pays a day's
+  difference and gets a day's credits. Toggling plans never mints credits.
+  ``billing_accounts.credited_period_start``/``_end`` + ``period_credits`` remember
   what the period was given, whatever order the events arrive in.
 - **A top-up** grants ``TOPUP_CREDITS`` per pack, valid ``TOPUP_VALID_DAYS``.
 - **A refund or a dispute** takes back the paid-for share of the credits that
@@ -18,6 +20,7 @@ the ledger together.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -54,7 +57,19 @@ def _same_period(a: Optional[datetime], b: datetime) -> bool:
     return a is not None and int(a.timestamp()) == int(b.timestamp())
 
 
-def grant_period(db: Any, account: Any, *, plan: str, invoice_id: str, period_end: datetime) -> int:
+def share_left(period_start: Optional[datetime], changed_at: Optional[datetime], period_end: datetime) -> float:
+    """The share of a paid period still to run at ``changed_at`` (0–1). Pure.
+    Unknown bounds count as the whole period."""
+    if period_start is None or changed_at is None:
+        return 1.0
+    length = (period_end - period_start).total_seconds()
+    if length <= 0:
+        return 1.0
+    return min(1.0, max(0.0, (period_end - changed_at).total_seconds() / length))
+
+
+def grant_period(db: Any, account: Any, *, plan: str, invoice_id: str, period_end: datetime,
+                 period_start: Optional[datetime] = None) -> int:
     """Credit one paid subscription invoice. Returns the credits granted."""
     from services.plan_tiers import monthly_credits
 
@@ -62,11 +77,13 @@ def grant_period(db: Any, account: Any, *, plan: str, invoice_id: str, period_en
     target = monthly_credits(plan)
     balance = lock_balance(db, workspace_id)
     if _same_period(account.credited_period_end, period_end):
-        grant = max(0, target - int(account.period_credits or 0))
+        extra = max(0, target - int(account.period_credits or 0))
+        grant = math.ceil(extra * share_left(account.credited_period_start, period_start, period_end))
         period_credits = max(target, int(account.period_credits or 0))
     else:
         expire_monthly(db, workspace_id, balance.period_end or account.credited_period_end)
         grant, period_credits = target, target
+        account.credited_period_start = period_start
     if grant > 0:
         record(db, workspace_id, Entry(
             kind=KIND_GRANT, source_type=SOURCE_INVOICE, source_ref=invoice_id, credits=grant,

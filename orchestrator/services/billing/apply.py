@@ -110,7 +110,8 @@ def on_period_paid(db: Any, fact: f.PeriodPaid, provider: str) -> Outcome:
     plan = plan_for_prices(fact.price_ids)
     if plan is None:
         return _review(f"invoice {fact.invoice_id} pays for no plan we sell ({', '.join(fact.price_ids)})")
-    credits = grant_period(db, account, plan=plan, invoice_id=fact.invoice_id, period_end=fact.period_end)
+    credits = grant_period(db, account, plan=plan, invoice_id=fact.invoice_id, period_end=fact.period_end,
+                           period_start=fact.period_start)
     _move_plan(db, account.workspace_id, plan)
     account.plan = plan
     account.subscription_id = fact.subscription_id or account.subscription_id

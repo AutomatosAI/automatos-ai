@@ -50,7 +50,9 @@ class TopupPaid:
 @dataclass(frozen=True)
 class PeriodPaid:
     """A subscription invoice was paid: the plan it pays for and the period it
-    covers. ``price_ids`` are the invoice's subscription lines, largest first."""
+    covers. ``price_ids`` are the invoice's subscription lines, largest first;
+    ``period_start`` is when the largest line starts (a period's start, or the
+    moment of an upgrade, whose prorated line runs from then to the period end)."""
 
     customer_id: str
     invoice_id: str
@@ -60,6 +62,7 @@ class PeriodPaid:
     payment_ref: Optional[str]
     amount_cents: Optional[int]
     workspace_ref: Optional[str] = None
+    period_start: Optional[datetime] = None
 
 
 @dataclass(frozen=True)

@@ -55,6 +55,7 @@ class BillingAccount(Base):
     current_period_end = Column(DateTime(timezone=True), nullable=True)
     cancel_at_period_end = Column(Boolean, nullable=False, default=False, server_default="false")
     # The paid period whose monthly credits were granted, and how many.
+    credited_period_start = Column(DateTime(timezone=True), nullable=True)
     credited_period_end = Column(DateTime(timezone=True), nullable=True)
     period_credits = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

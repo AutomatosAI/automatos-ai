@@ -14,7 +14,7 @@
 - **Before `BILLING_OPEN`:** only platform admins can check out, so test mode and the live card tests (US-012) run before 9 Nov while customers still see the beta block.
 - **CSP:** unchanged. Checkout and the portal are full-page redirects, and no Stripe.js is loaded.
 - **Top-ups** are sold only on a live Pro or Business subscription. On Own keys, top-up credits can't pay for platform AI.
-- **Plan changes** for an existing subscriber go through the portal's confirm page (Stripe handles proration and 3-D Secure). A downgrade waits for the period end. An upgrade grants only the difference in monthly credits.
+- **Plan changes** for an existing subscriber go through the portal's confirm page (Stripe handles proration and 3-D Secure). A downgrade waits for the period end. An upgrade grants the difference in monthly credits, prorated by the share of the period left, just as Stripe prorates the price, so an upgrade on the last day can't buy a whole month of credits for a day's difference.
 - **A subscription that ends** (cancelled, or unpaid after Stripe's retries) puts the workspace back on `basic` (Own keys) and expires the month, so platform AI pauses.
 
 **Source:**
