@@ -4,8 +4,8 @@
  * reply kept: as it was when Stop was pressed while useChat still holds it, put
  * back after the message it followed once useChat drops it (its catch on the
  * abort), and gone with that message when Try again takes it. The chat itself
- * is a plain object here; play-chat-approvals-stream.test.tsx runs Stop through
- * the core's real useChat.
+ * is a plain object here; lib/chat-controller's tests run Stop through the
+ * core's real useChat (Play's own chat tests moved to the theme kit, W-K6).
  */
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'

@@ -1,9 +1,10 @@
 /**
  * PRD-244 W3 — the Style axis: html class + cookie + storage on switch; the legacy "studio" tone migrates once.
  * PRD-260 M87 — once per mount: a new setTheme from next-themes never re-applies the defaults.
- * PRD-261 A-02a — the context names the active theme (its registry entry) and has no isPlay; Play is builtin Play.
+ * PRD-261 A-02a — the context names the active theme (its registry entry) and has no isPlay.
  * PRD-261 W-A6b (gap G1) — under an installed theme's style it names the entry the root layout built from the
- * boot, from the first render, until the theme host releases it.
+ * boot, from the first render, until the theme host releases it; Classic and Studio name none (A-19f1: no theme is
+ * compiled in).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, act } from '@testing-library/react'
@@ -13,7 +14,6 @@ const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn() }))
 vi.mock('next-themes', () => ({ useTheme: () => tone }))
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
-import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS, UI_STYLE_COOKIE, UI_STYLE_STORAGE_KEY } from '@/lib/ui-style'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import {
@@ -37,7 +37,7 @@ function Probe() {
       <span data-testid="ref">{activeTheme?.ref ?? 'none'}</span>
       <button onClick={() => setStyle('studio')}>go studio</button>
       <button onClick={() => setStyle('classic')}>go classic</button>
-      <button onClick={() => setStyle(BUILTIN_PLAY_STYLE)}>go play</button>
+      <button onClick={() => setStyle(INSTALLED_PLAY_STYLE)}>go installed</button>
       <button onClick={() => releaseInstalledTheme(style)}>release</button>
       <button onClick={() => releaseInstalledTheme(null)}>runs again</button>
     </div>
@@ -47,7 +47,7 @@ function Probe() {
 const INSTALLED_PLAY = installedThemeEntry(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)
 
 beforeEach(() => {
-  document.documentElement.classList.remove(STUDIO_HTML_CLASS, PLAY_HTML_CLASS)
+  document.documentElement.classList.remove(STUDIO_HTML_CLASS)
   document.cookie = `${UI_STYLE_COOKIE}=; Max-Age=0; Path=/`
   window.localStorage.clear()
   tone.theme = 'dark'
@@ -62,14 +62,6 @@ describe('UiStyleProvider', () => {
     expect(screen.getByTestId('style').textContent).toBe('studio')
     expect(screen.getByTestId('studio').textContent).toBe('true')
     expect(screen.getByTestId('theme').textContent).toBe('none')
-  })
-
-  it('names builtin Play as the active theme under it, Studio still rendering beneath (PRD-260 D2)', () => {
-    seenDefaults()
-    render(<UiStyleProvider initialStyle={BUILTIN_PLAY_STYLE}><Probe /></UiStyleProvider>)
-    expect(screen.getByTestId('style').textContent).toBe(BUILTIN_PLAY_STYLE)
-    expect(screen.getByTestId('studio').textContent).toBe('true')
-    expect(screen.getByTestId('theme').textContent).toBe('Play')
   })
 
   it('switching writes the html class, the cookie and storage — and never the tone', () => {
@@ -109,13 +101,13 @@ describe('UiStyleProvider', () => {
     try {
       const { rerender } = render(<UiStyleProvider initialStyle="studio"><Probe /></UiStyleProvider>)
       expect(mountSetTheme).toHaveBeenCalledWith('dark')
-      act(() => { screen.getByText('go play').click() })
-      // next-themes 0.2.1 rebuilds setTheme whenever forcedTheme changes, as Play's look forcing its tone does.
+      act(() => { screen.getByText('go classic').click() })
+      // next-themes 0.2.1 rebuilds setTheme whenever forcedTheme changes, as a theme's look forcing its tone does.
       tone.setTheme = vi.fn()
       rerender(<UiStyleProvider initialStyle="studio"><Probe /></UiStyleProvider>)
-      expect(screen.getByTestId('style').textContent).toBe(BUILTIN_PLAY_STYLE)
-      expect(document.documentElement.classList.contains(PLAY_HTML_CLASS)).toBe(true)
-      expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`)
+      expect(screen.getByTestId('style').textContent).toBe('classic')
+      expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(false)
+      expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
       expect(tone.setTheme).not.toHaveBeenCalled()
     } finally {
       tone.setTheme = mountSetTheme
@@ -178,11 +170,19 @@ describe('PRD-261 W-A6b — an installed theme as the active theme (gap G1)', ()
     expect(seen.filter((entry) => entry !== INSTALLED_PLAY)).toEqual([])
   })
 
-  it('leaves builtin themes to the registry: Play in place is builtin Play, whatever installed entry came with the page', () => {
+  it('names none under Classic or Studio, whatever installed entry came with the page; a switch to the install reloads', () => {
     seenDefaults()
-    render(<UiStyleProvider initialStyle="studio" installedTheme={INSTALLED_PLAY}><Probe /></UiStyleProvider>)
+    const reloadPage = vi.fn()
+    render(
+      <UiStyleProvider initialStyle="studio" installedTheme={INSTALLED_PLAY} reloadPage={reloadPage}><Probe /></UiStyleProvider>,
+    )
     expect(screen.getByTestId('theme').textContent).toBe('none')
-    act(() => { screen.getByText('go play').click() })
-    expect(screen.getByTestId('ref').textContent).toBe('builtin:play')
+    act(() => { screen.getByText('go classic').click() })
+    expect(screen.getByTestId('theme').textContent).toBe('none')
+    act(() => { screen.getByText('go installed').click() })
+    expect(reloadPage).toHaveBeenCalledTimes(1)
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${INSTALLED_PLAY_STYLE}`)
+    expect(screen.getByTestId('style').textContent).toBe('classic')
+    expect(screen.getByTestId('ref').textContent).toBe('none')
   })
 })

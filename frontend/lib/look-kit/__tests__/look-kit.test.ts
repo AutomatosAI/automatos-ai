@@ -4,7 +4,8 @@
  * from that theme's own catalogue and spec, under that theme's own prefix, and keeps PRD-260's
  * rules for every theme: Studio's consequence tokens are the error colour, never the accent (F9,
  * P260-FX-17), and the page glow never takes text under AA (M50, P260-FX-18). A made-up theme,
- * "acme", proves it: nothing here is Play's.
+ * "acme", proves it: nothing here is Play's. Every theme sets the same Studio tokens: the 24 the
+ * phone draws (M-01's MOBILE_TOKEN_NAMES) and the eight aliases globals.css writes pre-wrapped (PB-38).
  */
 import { describe, expect, it } from 'vitest'
 
@@ -14,8 +15,8 @@ import { hexToTriplet } from '@/lib/look-kit/hsl'
 import { lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
 import type { LookCatalogue, LookPicks } from '@/lib/look-kit/types'
 import { validateLook, type LookKnobSpec, type LookSpec } from '@/lib/look-kit/validate'
-import { STUDIO_TOKEN_NAMES } from '@/lib/looks/engine'
 import { validateLookSchema } from '@/lib/theme-host/look-schema'
+import { MOBILE_TOKEN_NAMES } from '@/lib/theme-host/mobile-manifest'
 
 const ACME: LookCatalogue = {
   prefix: 'acme',
@@ -44,6 +45,14 @@ const ACME: LookCatalogue = {
 
 const PICKS: LookPicks = { ground: 'night', accent: 'teal', font: 'plain', shell: 'steel', light: 'warm', glow: 30 }
 const ACME_VAR = /^--acme-[a-z0-9-]+$/
+
+/**
+ * The eight Studio tokens lookToStudioTokens writes pre-wrapped (hsl(…), --accent-2 with an alpha), as
+ * globals.css writes them (studio-tokens.ts aliasTokens and consequenceTokens); the phone draws none of them.
+ */
+const STUDIO_ALIAS_TOKEN_NAMES: readonly string[] = ['--paper', '--bg-1', '--bg-2', '--fg', '--fg-2', '--fg-3', '--border-2', '--accent-2']
+/** Every Studio token a theme's look sets: the phone's triplet tokens and the aliases, each once. */
+const STUDIO_TOKEN_NAMES: readonly string[] = [...MOBILE_TOKEN_NAMES, ...STUDIO_ALIAS_TOKEN_NAMES]
 
 const SPEC: LookSpec = {
   lookSchema: 'acme-look/v2',
@@ -91,9 +100,13 @@ describe("the look runtime paints any theme's catalogue", () => {
     }
   })
 
-  it("sets the same Studio tokens for any theme as for Play's looks", () => {
-    const names = Object.keys(lookToStudioTokens(ACME, { ground: 'day', accent: 'teal' }))
-    expect([...names].sort()).toEqual([...STUDIO_TOKEN_NAMES].sort())
+  it("sets the same Studio tokens for any theme and look: the phone's triplet tokens and the eight aliases (PB-38)", () => {
+    for (const ground of Object.keys(ACME.grounds)) {
+      for (const accent of Object.keys(ACME.accents)) {
+        const names = Object.keys(lookToStudioTokens(ACME, { ground, accent }))
+        expect([...names].sort()).toEqual([...STUDIO_TOKEN_NAMES].sort())
+      }
+    }
   })
 
   it('throws, naming the section, for a key the catalogue lacks or only inherits', () => {
@@ -113,7 +126,7 @@ describe("the look runtime checks a look against the theme's own spec", () => {
   })
 
   it("refuses an interface the spec doesn't name, and another theme's schema", () => {
-    expect(errorsFor(SPEC, { ...LOOK, interface: 'play' })).toEqual([`"interface" isn't part of a Look. Remove it.`])
+    expect(errorsFor(SPEC, { ...LOOK, interface: 'other' })).toEqual([`"interface" isn't part of a Look. Remove it.`])
     expect(errorsFor(SPEC, { ...LOOK, schema: 'automatos-interface-look/v1' })).toEqual([
       `This isn't a v2 Look: "schema" must be "acme-look/v2".`,
     ])

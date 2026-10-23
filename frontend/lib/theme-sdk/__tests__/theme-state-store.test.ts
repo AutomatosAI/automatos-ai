@@ -26,7 +26,7 @@ import {
 const NOW = 1760000000000
 const UUID = '3f2b8c1e-9a4d-4c2b-8e6f-1a2b3c4d5e6f'
 const KEY = 'automatos-theme-state:v1:b:automatos.play:u:user_1'
-/** The installed-looks and theme-choice prefixes (play-look-storage.ts, choice-sync.ts), named as the plan names them. */
+/** The installed-looks and theme-choice prefixes (lib/theme-host/looks/storage.ts, choice-sync.ts), named as the plan names them. */
 const LOOKS_PREFIX = 'automatos-theme.'
 const CHOICE_PREFIX = 'automatos-theme-choice:'
 
