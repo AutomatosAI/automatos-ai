@@ -1,10 +1,14 @@
-"""PRD-265 W2 — the Business invite link (``POST /api/admin/workspaces/{id}/business-invite``).
+"""PRD-265 W2 v2 — the Business offer (``POST /api/admin/workspaces/{id}/business-invite``).
 
-Platform admin only (403 otherwise); 404 for a missing workspace; 200 with a
-Business checkout link and its expiry for a platform admin.
+No link, no portal: a platform admin offers Business to one workspace, and its
+owner buys it on their own in-page Billing tab for ``BUSINESS_OFFER_DAYS``.
+Platform admin only (403 otherwise); 404 for a missing or deleted workspace;
+409 with a live subscription; 503 when Stripe isn't configured for a Business
+price; 200 with the offer's expiry, and the owner is told by a notice.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -16,7 +20,6 @@ from api.admin_credits import router
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from services.billing.provider import CheckoutLink
 
 
 class FakeProvider:
@@ -25,11 +28,8 @@ class FakeProvider:
     def ensure_customer(self, **kwargs):
         return "cus_new"
 
-    def create_checkout(self, request):
-        return CheckoutLink(url="https://checkout.stripe.com/pay/biz-1", session_id="cs_biz")
-
-    def portal_link(self, **kwargs):  # pragma: no cover - not used by this route
-        raise AssertionError("business-invite never opens the portal")
+    def create_checkout(self, request):  # pragma: no cover - the offer never checks out itself
+        raise AssertionError("offering Business never opens a checkout")
 
 
 def _workspace():
@@ -70,21 +70,26 @@ def test_a_soft_deleted_workspace_is_404(monkeypatch):
     assert _post(app, ws.id).status_code == 404
 
 
-def test_a_platform_admin_gets_a_business_checkout_link(monkeypatch):
+def test_a_platform_admin_offers_business_and_returns_its_expiry(monkeypatch):
+    from config import config
+
     ws = _workspace()
+    monkeypatch.setattr(config, "BUSINESS_OFFER_DAYS", 14)
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
     monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, workspace_id: None)
     monkeypatch.setattr("services.billing.checkout.price_for_plan", lambda plan: "price_business")
     app, _ = _app(system_role="super_admin", workspace=ws)
+    before = datetime.now(timezone.utc) + timedelta(days=14)
     res = _post(app, ws.id)
+    after = datetime.now(timezone.utc) + timedelta(days=14)
     assert res.status_code == 200
     body = res.json()
-    assert body["url"] == "https://checkout.stripe.com/pay/biz-1"
     assert body["workspace_id"] == str(ws.id)
-    assert "expires_at" in body
+    offered_until = datetime.fromisoformat(body["business_offer_until"])
+    assert before - timedelta(seconds=5) <= offered_until <= after + timedelta(seconds=5)
 
 
-def test_a_platform_admin_with_an_existing_subscription_gets_409(monkeypatch):
+def test_a_workspace_with_a_live_subscription_gets_409(monkeypatch):
     ws = _workspace()
     live_account = SimpleNamespace(subscription_id="sub_1", subscription_status="active")
     monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
@@ -93,10 +98,30 @@ def test_a_platform_admin_with_an_existing_subscription_gets_409(monkeypatch):
     assert _post(app, ws.id).status_code == 409
 
 
-def test_503_when_stripe_isnt_configured(monkeypatch):
+def test_503_when_stripe_isnt_configured_for_a_business_price(monkeypatch):
     from config import config
 
     ws = _workspace()
-    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "")
+    monkeypatch.setattr(config, "STRIPE_PRICE_BUSINESS", "")
+    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
+    monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, workspace_id: None)
     app, _ = _app(system_role="admin", workspace=ws)
     assert _post(app, ws.id).status_code == 503
+
+
+def test_the_owner_is_sent_a_business_offered_notice(monkeypatch):
+    from services.billing import notices
+
+    ws = _workspace()
+    sent = []
+    monkeypatch.setattr("services.billing.stripe_provider.stripe_provider", lambda: FakeProvider())
+    monkeypatch.setattr("services.billing.checkout.account_for_workspace", lambda db, workspace_id: None)
+    monkeypatch.setattr("services.billing.checkout.price_for_plan", lambda plan: "price_business")
+    monkeypatch.setattr(notices, "send_notice", lambda db, workspace_id, notice: sent.append((workspace_id, notice)))
+    app, _ = _app(system_role="super_admin", workspace=ws)
+    res = _post(app, ws.id)
+    assert res.status_code == 200
+    (sent_workspace_id, notice) = sent[0]
+    assert str(sent_workspace_id) == str(ws.id)
+    assert notice.event_type == notices.NOTICE_BUSINESS_OFFERED
+    assert notice.status == "info"
