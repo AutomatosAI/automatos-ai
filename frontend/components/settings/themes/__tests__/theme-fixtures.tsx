@@ -50,6 +50,7 @@ export function installRow(overrides: Partial<InstalledTheme> = {}): InstalledTh
     optIn: { required: true, wording: OPT_IN_WORDING, packageId: PACKAGE_ID },
     revoked: null,
     needsUpdate: false,
+    signature: { state: 'unsigned', keyId: null },
     ...overrides,
   }
 }
