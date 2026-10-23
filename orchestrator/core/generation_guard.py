@@ -23,6 +23,11 @@ How it decides:
    answers refuses the request as unchecked, and so does a reference image the caller
    could not read (:func:`unchecked`). Nothing is generated that was not checked.
 
+The model read (2, 3) is OFF until after Web Summit (``GENERATION_GUARD_READ_ENABLED``,
+default false; Gerard, 23 Oct 2026), to keep cost and demo failures down: with it off, only
+the keyword block (1) and the providers' own refusals run, and callers fetch no reference
+images for it (:func:`reads_enabled`). PRD-264 ART5-1 says when it comes back on.
+
 A provider's own refusal (Higgsfield's ``nsfw`` status) is a refusal too:
 :func:`provider_refusal` logs it and words it, and the caller never sends the request
 to another provider.
@@ -136,6 +141,11 @@ def provider_refusal(workspace_id: Any, path: str, provider: str) -> str:
     return PROVIDER_MESSAGE.format(provider=provider)
 
 
+def reads_enabled() -> bool:
+    """Whether the model read runs: when it doesn't, callers don't fetch reference images for it."""
+    return bool(config.GENERATION_GUARD_READ_ENABLED)
+
+
 def blocked(texts: Sequence[str]) -> bool:
     """Whether a text names child sexual abuse material outright."""
     return any(BLOCKED_TERMS.search(text or "") for text in texts)
@@ -194,6 +204,8 @@ async def check(request: GenerationRequest, *, workspace_id: UUID) -> Verdict:
     """Whether ``request`` may go to a provider: :data:`ALLOWED`, or a logged refusal."""
     if blocked(request.texts):
         return refused(workspace_id, request.path, SEXUAL_MINOR)
+    if not reads_enabled():
+        return ALLOWED
     try:
         answers = await read_answers(request, workspace_id)
     except Exception:  # noqa: BLE001 — fail closed: whatever stopped the read, nothing is made unchecked

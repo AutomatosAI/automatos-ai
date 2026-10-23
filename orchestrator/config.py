@@ -2263,6 +2263,9 @@ class Config:
     # workspace's own), and how long it may take. A read that fails refuses the request.
     GENERATION_GUARD_MODEL: str = os.getenv("GENERATION_GUARD_MODEL", "")
     GENERATION_GUARD_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_GUARD_TIMEOUT_SECONDS", "30"))
+    # Off until after Web Summit (Gerard, 23 Oct 2026): no model read, so no cost and no refused
+    # demo when the read fails. Only the CSAM keyword block and the providers' own refusals run.
+    GENERATION_GUARD_READ_ENABLED: bool = os.getenv("GENERATION_GUARD_READ_ENABLED", "false").lower() in ("true", "1", "yes")
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation
