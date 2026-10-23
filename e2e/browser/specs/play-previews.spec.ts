@@ -24,7 +24,9 @@ import { watchPage } from '../support/watch'
 // Deterministic: reduced motion (Auto is his still, never a clip frame), his still loaded and him at
 // rest (the first open's hello is over and the message box Play focuses is left), the fonts loaded,
 // the look's variables on <html>, animations off and two shots in a row equal. The conversations list and the shelf answer with none, so only
-// the lane's own member and workspace show.
+// the lane's own member and workspace show. The lane has no LLM key, so the host's local-edition key
+// nudge is dismissed before the first load, as a member dismisses it, and every chat shot is held to
+// showing none.
 //
 // Chromium only. The specs store the member's choice and Play's looks on the lane's one backend, so
 // they run in the @package step, one test at a time; each starts and ends on Studio, with no install
@@ -100,6 +102,12 @@ const DELIVERABLES_LIST_PATH = '/api/deliverables'
 const SHELF_PAGE_SIZE = 24
 const EMPTY_SHELF_PAGE = { success: true, deliverables: [], total: 0, limit: SHELF_PAGE_SIZE, offset: 0 }
 const OK = 200
+// The host's local-edition key nudge over the chat (core's components/local/first-run-nudge.tsx): it
+// stays hidden once dismissed, which it remembers in localStorage under FIRST_RUN_NUDGE_STORAGE_KEY
+// as '1' and reads after mount. The e2e package does not import the frontend, so the key is copied.
+const NUDGE_DISMISSED = { key: 'automatos:local-first-run-nudge:dismissed', value: '1' }
+/** first-run-nudge.tsx FIRST_RUN_NUDGE_MESSAGE: the nudge's words, never in a chat shot. */
+const NUDGE_MESSAGE = 'Add an LLM key to bring Auto to life'
 
 type Vars = Readonly<Record<string, string>>
 type VarTable = Readonly<Record<string, Readonly<Record<string, Vars>>>>
@@ -135,10 +143,12 @@ interface Screen {
   readonly path: string
   /** Waits until the screen shows what its shot is of, under `look`. */
   ready(page: Page, look: BootLook): Promise<void>
+  /** Holds the settled frame to what a listing may show, right before it is shot. */
+  framed?(page: Page): Promise<void>
 }
 
 const SCREENS: Readonly<Record<ScreenId, Screen>> = {
-  chat: { path: '/chat', ready: chatAtRest },
+  chat: { path: '/chat', ready: chatAtRest, framed: chatFramed },
   deliverables: { path: '/deliverables', ready: emptyShelf },
   looks: { path: '/looks', ready: looksChosen },
 }
@@ -261,6 +271,11 @@ async function chatAtRest(page: Page): Promise<void> {
   await expect(hero.getByRole('img', { name: AT_REST, exact: true }), 'the box left, Auto rests').toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
+/** The chat as a listing shows it: Play alone, with no host nudge over it (openMakeItYours dismissed it). */
+async function chatFramed(page: Page): Promise<void> {
+  await expect(page.getByText(NUDGE_MESSAGE), "the host's key nudge stays dismissed").toHaveCount(0)
+}
+
 async function emptyShelf(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: SHELF_TITLE, level: 1, exact: true })).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
   await expect(page.getByText(EMPTY_SHELF, { exact: true })).toBeVisible()
@@ -314,14 +329,19 @@ async function shoot(page: Page, boot: PageBoot, look: BootLook, shot: Shot): Pr
   await screen.ready(page, look)
   await expectPainted(page, boot, look)
   await expectSettled(page)
+  await screen.framed?.(page)
   fs.writeFileSync(file, await stableShot(page))
   checkPreview(shot, boot.looks.presets.map((preset) => preset.id))
 }
 
-/** Installs and chooses Play's package and opens Make it yours; the conversations and the shelf answer with none. */
+/**
+ * Installs and chooses Play's package and opens Make it yours; the conversations and the shelf answer
+ * with none, and the host's key nudge is dismissed before the first load.
+ */
 async function openMakeItYours(page: Page, request: APIRequestContext): Promise<PageBoot> {
   const install = await installKitPackage(request)
   await chooseKitPackage(page, install, APP_URL)
+  await page.addInitScript(({ key, value }) => window.localStorage.setItem(key, value), NUDGE_DISMISSED)
   await noStoredConversations(page)
   await page.route((url) => url.pathname === DELIVERABLES_LIST_PATH, (route) => fulfillBackendJson(route, OK, EMPTY_SHELF_PAGE))
   await page.goto(SCREENS.looks.path)

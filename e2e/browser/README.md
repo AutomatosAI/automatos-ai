@@ -58,7 +58,9 @@ pixel per CSS pixel (`scale: 'css'`). A shot is taken under reduced motion (Auto
 clip frame), once his still and the fonts have loaded, Auto is at rest (the first open's hello is over)
 and the look's variables are on `<html>`, with animations off, and only when two shots in a row are
 equal. The conversations list and the shelf are answered with none, so the shots show only the lane's
-own member and workspace. The spec fails when a file is missing, is not a PNG of that size, is over
+own member and workspace. The lane has no LLM key, so the host's local-edition key nudge
+(`components/local/first-run-nudge.tsx`) is dismissed before the first load, as a member dismisses it
+(its `localStorage` key), and a chat shot that shows it fails. The spec fails when a file is missing, is not a PNG of that size, is over
 512 KB (`package.py` `IMAGE_MAX_BYTES`), or has a name the manifest's `previews` pattern refuses or no
 preset claims by the listing's longest-match rule (`manifest.py` `PREVIEW_PATTERN`, `listings.py`
 `_owner_preset`). The step after it uploads `previews/` as the `play-previews` artifact, also when the
