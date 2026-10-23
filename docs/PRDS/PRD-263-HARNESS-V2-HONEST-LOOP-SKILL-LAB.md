@@ -45,6 +45,10 @@ Every PR below merged with its `test` workflow green (the run id is that PR's gr
 
 Skill text (automatos-skills pin branches, Gerard's review): `skill/auto-v2.3.4-harness-report-only` (US-024, US-060), `skill/auto-v2.3.5-owner-lanes` (US-065), `skill/auto-v2.4.4-prd263-fixes` (the slim candidate for US-069). Local tooling, never committed: the eval runner and its tools (LOCAL-2 – LOCAL-5, LOCAL-9's gate), the night preflight (LOCAL-6), set v2 and the sealed split (US-043), and the Skill Lab (LOCAL-11 – LOCAL-13), with fixture tests.
 
+**Gerard's decisions, 23 Oct:**
+- No check reads the operator's own provider accounts. US-041's OpenRouter floor in the night preflight and LAB-0's (US-073, US-074) are removed, and the operator is not asked for them.
+- No model, provider or price is written into the eval tools or the Lab. A pass runs Auto as the platform has it configured, or on any model the platform's registry (`llm_models`) lists as active, resolved to the provider that serves it. Fixture agents get the platform's default for a new agent. The Lab's improver models come from `lab.local.toml`, or Claude Code's own default. The gate reports tokens per turn without a model's price tier.
+
 **Found and fixed while closing (23 Oct):**
 - c1 had HARNESS switched off by the retired toggle (`enabled: false` reads as Disabled, §11-Q28), so no sweep would have run there. Set to `report_only` through the Settings API, as §4's hold requires.
 - The night preflight refused every night: c1 holds a second, unlinked `platform-management` row (a git-source import), and the check counted both. It now checks the row Auto links to (local tester kit).

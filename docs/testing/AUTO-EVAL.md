@@ -162,8 +162,10 @@ The night chain's `next-cycle.sh prep` refuses to start in any of these cases:
 - a dirty platform-management row;
 - an arm marker or an orphan snapshot;
 - a changed skill set for c1's Auto;
-- a persona that is not the shipped text for its mode (read from the running build);
-- an OpenRouter balance below the operator's floor.
+- a persona that is not the shipped text for its mode (read from the running build), or, for a persona the owner wrote
+  (`personality_mode` custom), one that differs from its text as first recorded.
+
+No check reads the operator's own provider accounts.
 
 A chain stops on a refusal (`next-cycle.sh prep || exit 1`).
 
