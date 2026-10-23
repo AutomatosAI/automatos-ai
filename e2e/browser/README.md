@@ -57,8 +57,11 @@ on `/chat` as `<preset>.png`, and under the default preset also `/deliverables` 
 pixel per CSS pixel (`scale: 'css'`). A shot is taken under reduced motion (Auto is his still, never a
 clip frame), once his still and the fonts have loaded, Auto is at rest (the first open's hello is over)
 and the look's variables are on `<html>`, with animations off, and only when two shots in a row are
-equal. The conversations list and the shelf are answered with none, so the shots show only the lane's
-own member and workspace. The lane has no LLM key, so the host's local-edition key nudge
+equal. The conversations list is answered with none, so the shots show only the lane's own member and
+workspace; the shelf is answered with one page of five made-up Deliverables (a report, a document, a
+spreadsheet, slides and an image, named after the chat's example chips, none with a picture to fetch),
+so `ember-deliverables.png` shows cards; the spec waits for every card. The lane has no LLM key, so
+the host's local-edition key nudge
 (`components/local/first-run-nudge.tsx`) is dismissed before the first load, as a member dismisses it
 (its `localStorage` key), and a chat shot that shows it fails. Play's empty chat scrolls on a short
 window (P260-FX-14; 800 px high, three presets pushed the message box below the fold), so a chat shot
