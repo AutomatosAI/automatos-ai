@@ -28,6 +28,7 @@ import {
   HIDDEN_AI_BLOCKED,
   HIDDEN_AI_REVIEW,
   LEVEL_LABELS,
+  PRIVATE_INSTALLS_ANYWAY,
   STATUS_LABELS,
   VERDICT_LABELS,
 } from '../theme-labels'
@@ -226,6 +227,11 @@ describe("the review stage's report (v2): each check by its level", () => {
     expect(stale).toHaveTextContent('/legacy copies frontend/app/legacy/page.tsx, which this release no longer ships.')
   })
 
+  it('lists the areas theme.json declares but the code never touches, which the server reports and never warns of', () => {
+    const uses = { level: 'pass', status: 'checked', problems: [], usedAreas: ['chat'], declaredUnused: ['pages-agents'] }
+    expect(checkOf(memberView('pass', { uses }), 'uses').detail).toBe('Areas used: chat · Declared, not used: pages-agents')
+  })
+
   it("keeps the server's reason for an unmeasured check, and says when a level-carrying cssScope found no style sheet", () => {
     renderReport(memberView('pass', { cssScope: { status: 'absent', path: 'dist/theme.css', level: 'pass' } }), 'pass')
     expect(within(screen.getByTestId('theme-scan-check-contrast')).getByText(CONTRAST_NOT_RUN)).toBeInTheDocument()
@@ -263,17 +269,17 @@ describe('the AI code read member_view leaves out', () => {
     expect(screen.getByTestId('theme-scan-hidden-check')).toHaveTextContent(HIDDEN_AI_REVIEW)
   })
 
-  it('says nothing when a check shown has the warning that explains it', () => {
+  it('says a private upload installs anyway when a check shown has the warning that explains the verdict', () => {
     const report = memberView('review_required', { clonedFrom: CLONES_STALE })
-    expect(hiddenCheckNote('review_required', scanChecksOf(report))).toBeNull()
+    expect(hiddenCheckNote('review_required', scanChecksOf(report))).toBe(PRIVATE_INSTALLS_ANYWAY)
     renderReport(report, 'review_required')
-    expect(screen.queryByTestId('theme-scan-hidden-check')).toBeNull()
+    expect(screen.getByTestId('theme-scan-hidden-check')).toHaveTextContent(PRIVATE_INSTALLS_ANYWAY)
   })
 
   it('says it decided a blocked verdict when no check shown has an error', () => {
     const shownWarning = scanChecksOf(memberView('blocked', { clonedFrom: CLONES_STALE }))
     expect(hiddenCheckNote('blocked', shownWarning)).toBe(HIDDEN_AI_BLOCKED)
-    expect(hiddenCheckNote('blocked', scanChecksOf(memberView('blocked', { uses: USES_ERROR })))).toBeNull()
+    expect(hiddenCheckNote('blocked', scanChecksOf(memberView('blocked', { uses: USES_ERROR })))).toBe(PRIVATE_INSTALLS_ANYWAY)
   })
 
   it('says nothing for a pass, a not_run verdict or a report with no checks', () => {

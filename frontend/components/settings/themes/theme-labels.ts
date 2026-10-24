@@ -97,6 +97,14 @@ export const HIDDEN_AI_REVIEW =
 export const HIDDEN_AI_BLOCKED =
   'No check shown here found an error. The verdict comes from the AI code read, which this report leaves out: it rated this code high risk. A private upload installs here whatever the verdict.'
 
+/**
+ * Under a Needs a reviewer or Blocked verdict that a check shown explains: this screen is a private upload's
+ * (install-theme.tsx), which nobody at Automatos reviews (review.py queues Marketplace submissions only) and which
+ * is stored and installed whatever the verdict (records.save_private_upload).
+ */
+export const PRIVATE_INSTALLS_ANYWAY =
+  'A private upload is not reviewed by Automatos: it installs here whatever the verdict. The checks above say what to look at before you use it.'
+
 /** A cloned page whose core file this release changed or no longer ships (drift.stale_clones). */
 export function staleCloneWords(route: string | null, path: string | null, stillShipped: boolean): string {
   const page = `${route ?? 'A page'} copies ${path ?? 'a core file'}`

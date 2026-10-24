@@ -21,6 +21,7 @@ import {
   HIDDEN_AI_REVIEW,
   LEVEL_LABELS,
   NO_RESULT,
+  PRIVATE_INSTALLS_ANYWAY,
   STATUS_LABELS,
   VERDICT_LABELS,
   staleCloneWords,
@@ -119,8 +120,10 @@ function subjectsDetail(check: Record<string, unknown>): string | null {
 }
 
 /** sdk_uses.uses_check: the SDK areas the code uses. */
+/** The SDK areas the code uses, and the ones theme.json declares that it never touches (sdk_uses.py: reported, not warned). */
 function usesDetail(check: Record<string, unknown>): string | null {
-  return listed('Areas used', strings(check.usedAreas))
+  const lines = [listed('Areas used', strings(check.usedAreas)), listed('Declared, not used', strings(check.declaredUnused))]
+  return lines.filter((line): line is string => line !== null).join(' · ') || null
 }
 
 /** review_stage.clone_check: the routes the theme copies a core page for. */
@@ -177,11 +180,14 @@ export function verdictLabel(verdict: string | null): string {
   return VERDICT_LABELS[value] ?? value
 }
 
-/** The line saying the AI code read decided the verdict, when no check shown explains it; else null. */
+/**
+ * The line under a Needs a reviewer or Blocked verdict: that the AI code read decided it, when no check shown
+ * explains it; else that a private upload installs whatever the verdict. Null for any other verdict.
+ */
 export function hiddenCheckNote(verdict: string | null, checks: readonly ScanCheck[]): string | null {
   const cause = verdict ? VERDICT_CAUSES[verdict] : undefined
   if (!cause || checks.length === 0) return null
-  return checks.some((check) => check.result === cause.level) ? null : cause.note
+  return checks.some((check) => check.result === cause.level) ? PRIVATE_INSTALLS_ANYWAY : cause.note
 }
 
 function CheckRow({ check }: { check: ScanCheck }) {
