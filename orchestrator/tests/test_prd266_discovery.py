@@ -303,6 +303,15 @@ def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, mon
     assert "push" not in capabilities  # K14: no Expo sender in this build
 
 
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_mobile_theme_is_listed_on_the_mobile_theme_route(client, saas, monkeypatch, edition):
+    """PRD-261 M-04: the app offers installed themes on the phone only when this build lists them."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+
+    assert "mobile_theme" in _document(client)["capabilities"]
+    assert discovery.CAPABILITY_ROUTES["mobile_theme"] == ("GET", "/api/themes/mobile/{install_id}")
+
+
 _PROBE = """
 import json
 from fastapi.routing import APIRoute, iter_route_contexts
