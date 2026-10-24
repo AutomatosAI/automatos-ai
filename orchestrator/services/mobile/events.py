@@ -17,6 +17,8 @@ ENROLLED = "enrolled"
 ROTATED = "rotated"
 # The device was cut off; its token now answers 401 device_revoked.
 REVOKED = "revoked"
+# Expo said the phone no longer holds its push token (PRD-266 K15): push is off, the token kept.
+PUSH_FAILED = "push_failed"
 
 
 def with_event(events: Optional[Sequence[Dict[str, str]]], event: str, at: datetime) -> List[Dict[str, str]]:

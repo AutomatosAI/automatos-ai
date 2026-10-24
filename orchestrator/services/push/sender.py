@@ -21,6 +21,9 @@ from typing import Any, Literal, Mapping, Optional, Protocol, Sequence, runtime_
 TICKET_OK = "ok"
 TICKET_ERROR = "error"
 TicketStatus = Literal["ok", "error"]
+# Expo's error code for a token the phone no longer holds (the app was deleted, or push was
+# turned off in the OS): the fan-out and the receipts job turn that device's push off (K15).
+DEVICE_NOT_REGISTERED = "DeviceNotRegistered"
 
 # Expo's own values: a question wakes the phone at once, with the system sound; anything
 # else goes at the platform's default priority.
