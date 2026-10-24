@@ -2202,6 +2202,12 @@ class Config:
     # The receipts job (services/push/receipts.py) reads Expo's receipts this often on the
     # leader's scheduler, at least a minute apart.
     PUSH_RECEIPTS_INTERVAL_SECONDS: int = max(60, int(os.getenv("PUSH_RECEIPTS_INTERVAL_SECONDS", "900")))
+    # The daily digest (services/mobile/digest.py, US-013) is checked this often on the leader's
+    # scheduler, at least a minute apart; a person is due for 90 minutes after their digest time.
+    DIGEST_JOB_INTERVAL_SECONDS: int = max(60, int(os.getenv("DIGEST_JOB_INTERVAL_SECONDS", "900")))
+    # The digest time of a phone that names none, 'HH:MM' in the phone's timezone; a value that
+    # is not HH:MM reads as 08:00 (services.mobile.digest.default_digest_time).
+    DIGEST_DEFAULT_TIME: str = (os.getenv("DIGEST_DEFAULT_TIME") or "08:00").strip()
 
     # =============================================================================
     # PRD-251 Socials
