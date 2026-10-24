@@ -6,9 +6,9 @@
  *
  * Pair a phone mints a one-time code (POST /api/v1/mobile/pairing-codes) and shows the code, its
  * ten-minute countdown and its pairing link, the universal link
- * `<web address>/go/pair?api=<API address>&code=<code>`, as text with a copy button. The QR image
- * of that link is US-019 (K9: the repo has no QR encoder). The same code pairs another browser:
- * Pair a browser says how.
+ * `<web address>/go/pair?api=<API address>&code=<code>`, as text with a copy button. US-019c (K17):
+ * the QR image of that link sits beside them (pair-phone-qr.tsx). The same code pairs another
+ * browser: Pair a browser says how.
  *
  * US-019a: the code is shown exactly as the server returns it, XXXX-XXXX with its hyphen, and its
  * copy button copies that form (POST /pair canonicalises a code typed with or without it). Before
@@ -25,6 +25,8 @@ import { Check, Copy, Loader2, Monitor, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PairingCode } from '@/hooks/use-mobile-devices'
 import { copyToClipboard } from '@/lib/utils'
+
+import { PairPhoneQr } from './pair-phone-qr'
 
 const SECONDS_PER_MINUTE = 60
 const COPIED_FOR_MS = 1500
@@ -96,13 +98,18 @@ function PairingLink({ link }: { link: string }) {
 function LiveCode({ pairing, secondsLeft }: { pairing: PairingCode; secondsLeft: number }) {
   if (secondsLeft <= 0) return <p className="text-sm text-muted-foreground">{CODE_EXPIRED}</p>
   return (
-    <div className="space-y-3 text-sm">
-      <p className="text-muted-foreground">Enter this code in Automatos Go on the phone. It works once.</p>
-      <PairingCodeLine code={pairing.code} />
-      <p className="text-xs text-muted-foreground" data-testid="pairing-countdown">
-        Expires in {formatCountdown(secondsLeft)}
-      </p>
-      <PairingLink link={pairing.qr_payload} />
+    <div className="flex flex-wrap items-start gap-4 text-sm">
+      <PairPhoneQr payload={pairing.qr_payload} />
+      <div className="min-w-0 flex-1 basis-64 space-y-3">
+        <p className="text-muted-foreground">
+          Scan the QR code with the phone, or enter this code in Automatos Go on it. It works once.
+        </p>
+        <PairingCodeLine code={pairing.code} />
+        <p className="text-xs text-muted-foreground" data-testid="pairing-countdown">
+          Expires in {formatCountdown(secondsLeft)}
+        </p>
+        <PairingLink link={pairing.qr_payload} />
+      </div>
     </div>
   )
 }
