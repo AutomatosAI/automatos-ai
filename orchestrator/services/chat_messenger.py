@@ -21,6 +21,9 @@ Rules enforced here, once:
 - After a successful post, a ``chat_changed`` NOTIFY rides the existing
   ``board_events`` LISTEN/NOTIFY lane so an open chat receives the
   message live (PRD-205 S7).
+- After a successful post, Auto's own initiative (a watcher, a scheduled
+  task, a Mission's narration, the daily digest) tells the chat's owner
+  (``auto_message``, PRD-266 US-012b), on a session of its own.
 """
 
 from __future__ import annotations
@@ -226,12 +229,25 @@ def post_background_message(
     return message
 
 
+def _announce(message: object, source: Optional[Dict[str, Any]]) -> None:
+    """PRD-266 US-012b: tell the chat's owner Auto wrote (``auto_message``). Never raises."""
+    try:
+        from services.notification_events.auto_message import announce
+
+        announce(message, source)
+    except Exception:
+        logger.exception("[ChatMessenger] the auto_message notice failed")
+
+
 def deliver_background_message(db: Session, **kwargs) -> Optional[object]:
     """Fail-soft wrapper — what producers call. A raising messenger must
     never propagate into a watcher tick or a scheduled task (the
-    knowledge_flywheel pattern)."""
+    knowledge_flywheel pattern).
+
+    PRD-266 US-012b: a delivered message is announced (``auto_message``,
+    for Auto's own initiative only); the notice never changes what returns."""
     try:
-        return post_background_message(db, **kwargs)
+        message = post_background_message(db, **kwargs)
     except Exception:  # noqa: BLE001
         logger.warning(
             "[ChatMessenger] background delivery failed (source=%s)",
@@ -243,3 +259,6 @@ def deliver_background_message(db: Session, **kwargs) -> Optional[object]:
         except Exception:  # noqa: BLE001
             pass
         return None
+    if message is not None:
+        _announce(message, kwargs.get("source"))
+    return message

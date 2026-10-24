@@ -76,6 +76,9 @@ export function linkFor(row: NotificationRow): string | null {
     // (owners and admins: who receives the notice and who can open the tab).
     case 'content_report':
       return '/command-center?tab=governance'
+    // PRD-266 US-012b: Auto messaged you → that chat (the Command Center feed's chat link).
+    case 'chat':
+      return link_id ? `/chat?chatId=${link_id}` : '/chat'
     // PRD-225: an agent question → answering resumes the work. PRD-252 R1: the
     // board opens the ticket it was asked on, at the question.
     case 'question':
