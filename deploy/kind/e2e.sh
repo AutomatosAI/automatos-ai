@@ -92,7 +92,17 @@ prepare_images() {
     for image in "$FRONTEND_IMAGE" "$WORKER_IMAGE"; do
         docker pull -q "$image"
     done
+    # An image pinned by digest (name:tag@sha256:…) is left to the node's kubelet, which
+    # pulls it by that digest. Saved with `docker save`, its archive carries no name the
+    # digest resolves to: containerd records it as `import-<date>@sha256:…`, and every
+    # container create then fails "failed to check if this is a checkpoint image … not
+    # found" (containerd 2.x). PRD-262 pinned the datastores by digest on 20 Oct.
+    local preload=() image
+    for image in "$API_IMAGE" "$FRONTEND_IMAGE" "$WORKER_IMAGE" "${DATASTORE_IMAGES[@]}"; do
+        case "$image" in *@sha256:*) ;; *) preload+=("$image") ;; esac
+    done
     for image in "${DATASTORE_IMAGES[@]}"; do
+        case "$image" in *@sha256:*) continue ;; esac
         docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image"
     done
     log "Loading images into the cluster"
@@ -102,7 +112,7 @@ prepare_images() {
     local arch archive
     arch="$(docker exec "$CLUSTER-control-plane" uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
     archive="$(mktemp "${TMPDIR:-/tmp}/automatos-e2e-image.XXXXXX")"
-    for image in "$API_IMAGE" "$FRONTEND_IMAGE" "$WORKER_IMAGE" "${DATASTORE_IMAGES[@]}"; do
+    for image in "${preload[@]}"; do
         docker save --platform "linux/$arch" "$image" -o "$archive"
         kind load image-archive "$archive" --name "$CLUSTER" >/dev/null
     done
