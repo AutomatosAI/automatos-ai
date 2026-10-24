@@ -18,6 +18,7 @@ import {
   installIdOf,
   loadThemeForStyle,
   rememberActiveDigest,
+  revocationDisableOf,
   sourceForStyle,
 } from '../sources'
 import { THEME_DIGEST_COOKIE } from '../types'
@@ -94,7 +95,6 @@ const REVOKED = { installId: INSTALL_ID, level: 'disable', reason: 'withdrawn' }
 describe('PRD-261 A-07b seam — a 200 answer that names no theme for this install', () => {
   it.each([
     ['no choice, or the install was removed', { choice: 'studio', theme: null }, 'no active install'],
-    ['a disable revocation', { choice: 'studio', theme: null, revoked: REVOKED }, 'revoked'],
     ['the workspace default, another install', { choice: OTHER_INSTALL_ID, theme: { installId: OTHER_INSTALL_ID } }, OTHER_INSTALL_ID],
   ])('loads nothing and reports no failure for %s', async (_case, answer, detail) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -102,9 +102,33 @@ describe('PRD-261 A-07b seam — a 200 answer that names no theme for this insta
     const deps = depsWith({ fetchActive: fetchActiveInstall })
     const result = await installedThemeSource(INSTALL_ID).load(deps)
     expect(result).toEqual({ ok: false, reason: null, detail: expect.stringContaining(detail) })
+    expect(result).not.toHaveProperty('revoked')
     expect(deps.fetchJson).not.toHaveBeenCalled()
     expect(deps.importModule).not.toHaveBeenCalled()
     expect(error).not.toHaveBeenCalled()
+  })
+
+  it('loads nothing and reports no failure for a disable revocation, and hands its reason on (C-05l)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    api.getActiveTheme.mockResolvedValue({ choice: 'studio', theme: null, revoked: REVOKED })
+    const deps = depsWith({ fetchActive: fetchActiveInstall })
+    const result = await installedThemeSource(INSTALL_ID).load(deps)
+    expect(result).toEqual({
+      ok: false, reason: null, detail: expect.stringContaining('revoked'), revoked: { level: 'disable', reason: 'withdrawn' },
+    })
+    expect(deps.fetchJson).not.toHaveBeenCalled()
+    expect(deps.importModule).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it("reads only this install's disable revocation from the answer", () => {
+    const answer = { choice: 'studio', theme: null, revoked: REVOKED }
+    expect(revocationDisableOf(answer, INSTALL_ID)).toEqual({ level: 'disable', reason: 'withdrawn' })
+    expect(revocationDisableOf(answer, OTHER_INSTALL_ID)).toBeNull()
+    expect(revocationDisableOf({ ...answer, revoked: { ...REVOKED, level: 'warn' } }, INSTALL_ID)).toBeNull()
+    expect(revocationDisableOf({ ...answer, theme: { installId: INSTALL_ID } }, INSTALL_ID)).toBeNull()
+    expect(revocationDisableOf({ choice: 'studio', theme: null }, INSTALL_ID)).toBeNull()
+    expect(revocationDisableOf({ ...answer, revoked: { level: 'disable' } }, INSTALL_ID)).toEqual({ level: 'disable', reason: '' })
   })
 })
 

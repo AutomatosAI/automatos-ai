@@ -964,6 +964,11 @@ export interface InstalledTheme {
   optIn: ThemeOptInState; revoked: ThemeRevocationState | null
   /** A cloned core page changed in this release (the clonedFrom drift check). */
   needsUpdate: boolean
+  /**
+   * The package's signature check (signed_upload.py signature_view, C-05d): `invalid` when the keys
+   * file does not load, or when the hosted feed revoked the key that verifies it (local edition).
+   */
+  signature: ThemeSignatureVerdict
 }
 
 /** POST /api/themes/import: the package, its scan and the install (api/themes_import.py upload_item). */
@@ -1221,6 +1226,75 @@ export interface ThemeSignatureResult extends ThemeReviewPackage {
     /** The active key that verified it, as the `signed` review event names it. */
     keyId: string
   }
+}
+
+// ===== PRD-261 W-C4: the answers of the W-C3 routes (admin_theme_revocations*.py, admin_themes.py) =====
+/** theme_revocations.level: `warn` keeps the theme running with a notice; `disable` shows its base. */
+export type ThemeRevocationLevel = 'warn' | 'disable'
+
+/** theme_revocations.origin: written in this install, or pulled from the hosted revocation feed (C-05h). */
+export type ThemeRevocationOrigin = 'local' | 'feed'
+
+/** services/themes/revocation_admin.py revocation_view: one row of the admin's revocations. */
+export interface ThemeRevocationRow {
+  id: string
+  /** A package digest, or null when the row names a theme id. */
+  digest: string | null
+  themeId: string | null
+  /** With a theme id: an exact version or a caret range; null for every version. */
+  versionRange: string | null
+  level: ThemeRevocationLevel; reason: string; origin: ThemeRevocationOrigin
+  createdAt: string | null
+  /** Null while the revocation is live. */
+  liftedAt: string | null
+}
+
+interface ThemeRevocationTerms { level: ThemeRevocationLevel; reason: string }
+
+/**
+ * POST /api/admin/themes/revocations (api/admin_theme_revocations.py RevocationBody): a digest, or
+ * a theme id with an optional version range, never both. The server refuses any other field.
+ */
+export type ThemeRevocationCreate =
+  | (ThemeRevocationTerms & { digest: string })
+  | (ThemeRevocationTerms & { themeId: string; versionRange?: string })
+
+/** POST …/revocations: 201 with the new row, or 200 with the live row that already says the same. */
+export interface ThemeRevocationCreateResult { revocation: ThemeRevocationRow; created: boolean }
+
+/** POST …/revocations/{revocationId}/lift: the row with its `liftedAt`. */
+export interface ThemeRevocationLiftResult { revocation: ThemeRevocationRow }
+
+/**
+ * services/themes/revocation_pull.py sync_status: the local edition's pull of the hosted revocation
+ * feed. GET /api/admin/themes/revocations/sync and its Check now (POST …/sync/pull) answer it;
+ * both are 404 in the hosted edition, which serves the feed and pulls nothing.
+ */
+export interface ThemeRevocationSyncStatus {
+  /** The local edition with a feed URL set (THEME_REVOCATIONS_URL). */
+  enabled: boolean
+  lastAttemptAt: string | null; lastSuccessAt: string | null
+  /** The last failed pull's plain error, or null. */
+  lastError: string | null
+  /** The `generatedAt` of the last feed applied. */
+  feedGeneratedAt: string | null
+  /** How many revocations pulled from the feed are held here. */
+  rows: number
+  /** The signing key ids the feed revoked. */
+  revokedKeys: string[]
+  /** No pull succeeded in the last 7 days (revocation_pull.STALE_AFTER), or none ever did. */
+  stale: boolean
+}
+
+/**
+ * GET /api/admin/themes/{packageId}/review-package (services/themes/review_package.py review_link,
+ * C-03c): the kit's Theme review job inputs, `package_url` and `expected_digest`.
+ */
+export interface ThemeReviewPackageLink {
+  /** A 15-minute presigned GET of the version's package, rebuilt from its stored files. */
+  url: string
+  digest: string
+  expiresAt: string
 }
 
 /** A theme id as path segments: `acme/hello` stays two segments, each one encoded. */
@@ -3767,10 +3841,14 @@ class ApiClient {
     return this.request<unknown>('/api/themes/choice', { method: 'PUT', body: JSON.stringify({ choice }) })
   }
 
-  /** POST /api/themes/import: upload a .autotheme into this workspace (manage + step-up). */
-  async importTheme(file: File): Promise<ThemeUpload> {
+  /**
+   * POST /api/themes/import: upload a .autotheme into this workspace (manage + step-up), with its
+   * detached .sig.json as the optional `signature` part (C-05d), checked before anything is stored.
+   */
+  async importTheme(file: File, signature?: File): Promise<ThemeUpload> {
     const form = new FormData()
     form.append('file', file)
+    if (signature !== undefined) form.append('signature', signature)
     return this.request<ThemeUpload>('/api/themes/import', { method: 'POST', body: form })
   }
 
@@ -3928,6 +4006,44 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ requestId, signature }),
     })
+  }
+
+  // ===== PRD-261 W-C4: revocations, their sync and the review job's inputs (W-C3 routes, plan §2.2.7) =====
+  /** GET /api/admin/themes/{packageId}/review-package: the kit review job's package link and digest (platform admin). */
+  async getThemeReviewPackage(packageId: string): Promise<ThemeReviewPackageLink> {
+    return this.request<ThemeReviewPackageLink>(`/api/admin/themes/${encodeURIComponent(packageId)}/review-package`)
+  }
+
+  /** GET /api/admin/themes/revocations: every revocation, live ones first, then the newest (platform admin). */
+  async getThemeRevocations(limit?: number): Promise<{ revocations: ThemeRevocationRow[] }> {
+    const query = limit === undefined ? '' : `?limit=${encodeURIComponent(String(limit))}`
+    return this.request<{ revocations: ThemeRevocationRow[] }>(`/api/admin/themes/revocations${query}`)
+  }
+
+  /** POST /api/admin/themes/revocations: revoke a digest, or a theme id with an optional range (admin + step-up). */
+  async createThemeRevocation(revocation: ThemeRevocationCreate): Promise<ThemeRevocationCreateResult> {
+    return this.request<ThemeRevocationCreateResult>('/api/admin/themes/revocations', {
+      method: 'POST',
+      body: JSON.stringify(revocation),
+    })
+  }
+
+  /** POST /api/admin/themes/revocations/{revocationId}/lift: a 409 for a feed row while sync works (admin + step-up). */
+  async liftThemeRevocation(revocationId: string): Promise<ThemeRevocationLiftResult> {
+    return this.request<ThemeRevocationLiftResult>(
+      `/api/admin/themes/revocations/${encodeURIComponent(revocationId)}/lift`,
+      { method: 'POST' },
+    )
+  }
+
+  /** GET /api/admin/themes/revocations/sync: the local edition's feed pull status (platform admin; 404 hosted). */
+  async getThemeRevocationSync(): Promise<ThemeRevocationSyncStatus> {
+    return this.request<ThemeRevocationSyncStatus>('/api/admin/themes/revocations/sync')
+  }
+
+  /** POST /api/admin/themes/revocations/sync/pull: Check now; 502 with the pull's error, 409 with no feed URL. */
+  async pullThemeRevocations(): Promise<ThemeRevocationSyncStatus> {
+    return this.request<ThemeRevocationSyncStatus>('/api/admin/themes/revocations/sync/pull', { method: 'POST' })
   }
 }
 

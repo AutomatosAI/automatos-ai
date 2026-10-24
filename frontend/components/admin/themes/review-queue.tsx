@@ -15,6 +15,9 @@
  *
  * The report is keyed by version: a cached report renders at once, so without the key a reject
  * reason, a pasted note or a refusal typed for one version would carry over to the next.
+ *
+ * C-05j: below the queue, the same admin sees the theme revocations (revocations-panel.tsx) and, in
+ * the local edition, the revocation sync; both behind the same admin check.
  */
 import { useState } from 'react'
 
@@ -25,6 +28,7 @@ import { themeErrorMessage } from '@/lib/theme-host/api'
 
 import { PendingList } from './pending-list'
 import { ReviewReport } from './review-report'
+import { RevocationsPanel } from './revocations-panel'
 import { ADMIN_ONLY, PICK_A_VERSION } from './review-words'
 import { usePendingThemes } from './use-theme-review'
 
@@ -68,5 +72,10 @@ export function ThemeReviewQueue({ hosted = isSaaS }: { hosted?: boolean }) {
       </p>
     )
   }
-  return <QueueBody hosted={hosted} />
+  return (
+    <div className="space-y-10">
+      <QueueBody hosted={hosted} />
+      <RevocationsPanel hosted={hosted} />
+    </div>
+  )
 }

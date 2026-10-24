@@ -27,13 +27,77 @@ export const SIGNATURE_INVALID = 'The signature does not verify against an activ
 
 /**
  * A stored signature in words, by the report's check on it (review.py report: `signatureVerified`
- * and `keyId`, from signature_verify.package_verdict, C-05b). Verified names the active key that
- * verifies it. Invalid says no active key does, and names the retired or revoked key that does
- * verify it when there is one (signature_verify.verify).
+ * and `keyId`, from signature_verify.package_verdict, C-05b, read through the hosted feed's revoked
+ * keys in the local edition). Verified names the active key that verifies it ("Verified · <keyId>",
+ * C-05j). Invalid says no active key does, and names the retired or revoked key that does verify it
+ * when there is one (signature_verify.verify).
  */
 export function storedSignatureWords(verified: boolean, keyId: string | null): string {
-  if (verified) return keyId ? `Verified with the active Automatos key ${keyId}.` : SIGNATURE_VERIFIED
+  if (verified) return keyId ? `Verified · ${keyId}` : SIGNATURE_VERIFIED
   return keyId ? `${SIGNATURE_INVALID} Only ${keyId}, a retired or revoked key, verifies it.` : SIGNATURE_INVALID
+}
+
+// ===== PRD-261 C-05j: the review job's inputs (C-03c) and the revocations panel (C-05e, C-05h) =====
+export const REVIEW_JOB_INPUTS = 'Review job inputs'
+export const GET_REVIEW_JOB_INPUTS = 'Get the review job inputs'
+/** review_package.py REVIEW_LINK_SECONDS: how long a review link works. */
+export const REVIEW_LINK_MINUTES = 15
+export const REVIEW_JOB_INPUTS_HINT =
+  `Give the kit's Theme review workflow these two inputs. The link is made fresh each time and works for ${REVIEW_LINK_MINUTES} minutes.`
+
+/** When a review link stops working, as a time of day in the reader's own clock. */
+export function linkExpiryWords(expiresAt: string): string {
+  const at = new Date(expiresAt)
+  if (Number.isNaN(at.getTime())) return `The link stops working ${REVIEW_LINK_MINUTES} minutes after it was made.`
+  return `The link stops working at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+}
+
+export const REVOCATIONS_TITLE = 'Theme revocations'
+export const REVOCATIONS_LEDE =
+  'A revocation names a package digest, or a theme id with an optional version range. Warn keeps the theme running with a notice; disable shows members its base instead, on their next load.'
+export const NO_REVOCATIONS = 'No theme has been revoked.'
+export const REVOKE = 'Revoke'
+export const LIFT = 'Lift'
+export const CONFIRM_LIFT = 'Confirm lift'
+export const KEEP_IT = 'Keep it'
+export const REVOCATION_CREATED = 'Revocation saved. Members see it on their next load.'
+export const REVOCATION_REPEATED = 'A live revocation already says this, so nothing new was written.'
+export const REVOCATION_LIFTED = 'Revocation lifted. Members get the theme back on their next load.'
+/** revocation_admin.py REASON_MAX: the longest reason the server takes. */
+export const REVOCATION_REASON_MAX = 2000
+
+export const LEVEL_WORDS: Readonly<Record<string, string>> = {
+  warn: 'Warn',
+  disable: 'Disable',
+}
+
+export const LEVEL_HINTS: Readonly<Record<string, string>> = {
+  warn: 'Warn: the theme keeps running, with a notice',
+  disable: 'Disable: members see its base instead',
+}
+
+/** theme_revocations.origin: written in this install, or pulled from the hosted feed (C-05h). */
+export const ORIGIN_WORDS: Readonly<Record<string, string>> = {
+  local: 'Set here',
+  feed: 'From the Automatos feed',
+}
+
+export const SYNC_TITLE = 'Revocation sync'
+export const CHECK_NOW = 'Check now'
+export const SYNC_OFF =
+  "Revocation sync is off: this install has no feed address (THEME_REVOCATIONS_URL), so it doesn't follow the Automatos revocation list."
+export const SYNC_STALE =
+  "No check of the Automatos revocation list has worked in the last 7 days. Until one does, this install may miss a revocation, and feed rows can be lifted here."
+export const SYNC_CHECKED = 'Revocation list checked.'
+
+/** A revocation's target in words: its digest, or its theme id with the range (every version without one). */
+export function revocationTargetWords(row: {
+  readonly digest: string | null
+  readonly themeId: string | null
+  readonly versionRange: string | null
+}): string {
+  if (row.digest) return `Package ${row.digest}`
+  return `${row.themeId ?? 'Unknown theme'} ${row.versionRange ?? 'every version'}`
 }
 
 /** The kit's summary line naming the version (`services/themes/review.py` NOTE_DIGEST_LINE). */

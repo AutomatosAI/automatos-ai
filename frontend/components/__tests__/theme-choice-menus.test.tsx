@@ -53,7 +53,7 @@ function installRow(overrides: Partial<InstalledTheme>): InstalledTheme {
     version: '1.0.0', ownerType: 'workspace', reviewed: false, private: true, isDefault: false,
     pinnedVersion: null, previousPackageId: null, pendingPackageId: null, pendingVersion: null,
     installedAt: null, optIn: { required: false, wording: '', packageId: '' }, revoked: null, needsUpdate: false,
-    ...overrides,
+    signature: { state: 'unsigned', keyId: null }, ...overrides,
   }
 }
 

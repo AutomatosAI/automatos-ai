@@ -83,7 +83,7 @@ describe('noteNamesDigest', () => {
 
 describe('storedSignatureWords (C-05b)', () => {
   it('a signature an active key verifies names that key', () => {
-    expect(storedSignatureWords(true, KEY_ID)).toBe(`Verified with the active Automatos key ${KEY_ID}.`)
+    expect(storedSignatureWords(true, KEY_ID)).toBe(`Verified · ${KEY_ID}`)
     expect(storedSignatureWords(true, null)).toBe(SIGNATURE_VERIFIED)
   })
 
