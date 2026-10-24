@@ -1236,34 +1236,3 @@ def get_skill_loader(db_session: Optional[Session] = None) -> SkillLoader:
         _skill_loader_instance = SkillLoader(db_session)
     
     return _skill_loader_instance
-
-
-# ============================================================================
-# Example Usage
-# ============================================================================
-
-if __name__ == "__main__":
-    # Example: Import Anthropic's skills
-    
-    from core.database.database import get_db
-    
-    db = next(get_db())
-    skill_loader = get_skill_loader(db)
-    
-    # Add Git repository
-    result = skill_loader.add_git_repository(
-        git_url="https://github.com/anthropics/skills.git",
-        source_name="anthropic-official",
-        branch="main",
-        auto_update=True
-    )
-    
-    print(f"Import result: {result}")
-    
-    if result["status"] == "success":
-        # Load a skill
-        metadata = skill_loader.load_skill_metadata("advanced-code-review")
-        print(f"\nMetadata: {metadata}")
-        
-        core_content = skill_loader.load_skill_core("advanced-code-review")
-        print(f"\nCore content length: {len(core_content)} chars")
