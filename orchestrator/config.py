@@ -2193,6 +2193,12 @@ class Config:
     MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
         0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
     )
+    # Push through Expo's push service (services/push/expo.py, AGENTS.md exception 2). Expo's
+    # optional access token: empty sends without one. A secret: never logged, never in
+    # discovery, never a key in Settings.
+    EXPO_PUSH_ACCESS_TOKEN: str = (os.getenv("EXPO_PUSH_ACCESS_TOKEN") or "").strip()
+    # Each request to Expo times out after this many seconds, at least one.
+    EXPO_PUSH_TIMEOUT_SECONDS: int = max(1, int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10")))
 
     # =============================================================================
     # PRD-251 Socials
