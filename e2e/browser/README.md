@@ -29,7 +29,7 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 
 ## Play from the Design Kit (PRD-261 A-17a)
 
-The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-play`, public, so
+The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-design-kit`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
 uploads `automatos.play-1.1.0.autotheme` as the `kit-theme-package` artifact (the job's summary shows

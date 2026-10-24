@@ -1,7 +1,7 @@
 """PRD-261 C-05d — the optional signature of a private upload: a detached ``.sig.json`` envelope.
 
 QB-27 (detached, the plan's planned answer): a signed ``.autotheme`` travels with a small JSON file
-made by the kit's sign workflow (automatos-play ``scripts/sign/envelope.ts``)::
+made by the kit's sign workflow (automatos-design-kit ``scripts/sign/envelope.ts``)::
 
     {form: "automatos-theme-signature/v1", algorithm: "ed25519", keyId, id, version, digest, signature}
 

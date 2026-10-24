@@ -51,8 +51,11 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34). push: the
 # phone registers its Expo token for push (W2 US-009). digest: Auto's Read is posted daily at
 # the phone's digest time (W2 US-013); its switch is the daily_digest push preference row.
+# mobile_theme: the member's installed theme as data for the phone (PRD-261 M-04: colours,
+# fonts and mascot files, never code), which the app offers under Studio only when this is listed.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "digest": ("GET", "/api/notification-preferences"),
+    "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "push": ("POST", "/api/v1/mobile/devices"),
     "spoken_mode": ("POST", "/api/chat"),
     "voice_live": ("POST", "/api/voice/web-call"),

@@ -80,7 +80,7 @@ NOTE_MISSING = (
 NOTE_FAILED = "The isolated review job's latest summary says it failed. Re-run it, or reject this version."
 NOT_APPROVED = "Only an approved version can be deactivated. Reject a pending one instead."
 NUL_IN_TEXT = "The text has a NUL character in it. Paste plain text."
-# The kit's summary lines (automatos-play scripts/review/summary.ts, ``header``): two spaces after
+# The kit's summary lines (automatos-design-kit scripts/review/summary.ts, ``header``): two spaces after
 # "Package digest:" so the digests line up.
 NOTE_DIGEST_LINE = "Package digest:  {digest}"
 NOTE_OUTCOME_PASS_LINE = "Outcome: pass"

@@ -1,6 +1,6 @@
 """PRD-261 C-03c — a short-lived link to a Marketplace version's package, for the kit's review job.
 
-The kit's isolated review (automatos-play ``.github/workflows/theme-review.yml``) downloads one
+The kit's isolated review (automatos-design-kit ``.github/workflows/theme-review.yml``) downloads one
 version from an ``https://`` ``package_url`` and checks it against ``expected_digest``. Play's
 release asset is such a URL; for any other submission ``review_link`` gives one: it rebuilds the
 version's ``.autotheme`` from its stored files, writes it to ``themes/_review/<digest>.autotheme``

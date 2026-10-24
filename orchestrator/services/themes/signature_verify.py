@@ -4,7 +4,7 @@ A signature vouches for one theme version. It is the Ed25519 signature, by an Au
 key, of the canonical text (``signing.canonical_text``) of the payload ``{id, version, digest,
 files}`` (``payload_for``): the theme id, the version, the package digest
 (``digest.package_digest``) and each file's sha256. The kit's sign workflow makes it
-(automatos-play ``scripts/sign/``, C-05m); the orchestrator never holds a signing key, it checks a
+(automatos-design-kit ``scripts/sign/``, C-05m); the orchestrator never holds a signing key, it checks a
 signature against the public keys it ships, and nothing here loads anything but a public key.
 
 The keys file, ``data/signing-keys.json`` (the same bytes as the kit's ``keys/theme-signing.json``)::

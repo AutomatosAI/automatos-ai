@@ -100,7 +100,7 @@ def _ctx(role="admin", clerk="clerk-7", fresh=True):
 
 
 def _passing_note(package):
-    """The kit's summary for this version (automatos-play scripts/review/summary.ts header lines)."""
+    """The kit's summary for this version (automatos-design-kit scripts/review/summary.ts header lines)."""
     summary = (f"Automatos theme review (automatos-theme-review/v1): {package.theme_id} {package.version}\n"
                f"Outcome: pass\nExpected digest: {package.digest}\nPackage digest:  {package.digest}\n\n{NOTE_TAIL}")
     return {"summary": summary, "outcome": "pass"}

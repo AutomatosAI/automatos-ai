@@ -158,13 +158,24 @@ describe('"Signed by Automatos" on an installed row (QB-24)', () => {
   it("Make default follows the server's private: a signed upload may be the default, private code may not", () => {
     const signed = renderRow(installRow({ signature: VERIFIED, private: false }))
     expect(within(signed).getByRole('button', { name: 'Make default' })).toBeEnabled()
+    expect(within(signed).queryByTestId('theme-default-reason')).toBeNull()
   })
 
-  it('private code keeps Make default off, with the reason', () => {
+  it('private code keeps Make default off, with the reason written beside it and as its title', () => {
     const row = renderRow(installRow({ signature: INVALID, private: true }))
     const makeDefault = within(row).getByRole('button', { name: 'Make default' })
     expect(makeDefault).toBeDisabled()
     expect(makeDefault).toHaveAttribute('title', UNREVIEWED_NOT_DEFAULT)
+    const reason = within(row).getByTestId('theme-default-reason')
+    expect(reason).toHaveTextContent(UNREVIEWED_NOT_DEFAULT)
+    expect(reason).toBeVisible()
+    expect(reason.previousElementSibling).toBe(makeDefault)
+  })
+
+  it('the workspace default shows Clear default and no reason', () => {
+    const row = renderRow(installRow({ private: false, isDefault: true }))
+    expect(within(row).getByRole('button', { name: 'Clear default' })).toBeEnabled()
+    expect(within(row).queryByTestId('theme-default-reason')).toBeNull()
   })
 
   it('the words: only verified is "Signed by Automatos"; a missing verdict reads as not signed', () => {

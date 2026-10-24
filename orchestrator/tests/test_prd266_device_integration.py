@@ -16,8 +16,21 @@ bypass), and every resolver on the way has to know ``device``:
   does not reach the phone.
 
 A viewer's phone is refused the chat and the answer (403), as a viewer is, and still reads the
-board. PRD-261 W-M1's ``GET /api/themes/mobile/{install_id}`` is not on this base (K12): it
-joins this test once it merges.
+board.
+
+PRD-261's theme routes, as the phone calls them, run on these fixtures in
+``test_prd266_device_theme_routes.py`` (M-04):
+
+* ``GET /api/themes/mobile/{install_id}`` (``api/themes_mobile.py``, membership as above): the
+  bound workspace's opted-in install as data, every file URL it names loading on the same bearer;
+  the same person's install in another workspace is the route's one 404;
+* ``GET /api/themes/active`` and ``PUT /api/themes/choice`` (``members:read``): the bound
+  workspace's answer, then the phone's own choice of the install;
+* ``GET /api/themes/looks/{theme_id}`` (``members:read``): the person's looks in the bound
+  workspace only.
+
+The theme is the hello-clip package with a ``mobile`` block (light tokens, a sans face, clips),
+so the phone's answer names a font, a clip and a still.
 """
 from __future__ import annotations
 
@@ -55,6 +68,10 @@ T0 = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc)
 TOKEN_BYTES = 32
 REPLY = '0:"Morning. Two tickets wait in Review."\n'
 ENTRY = "dist/entry.js"
+# theme.json's mobile block (M-01, the corpus's "light tokens only" with a font and clips added).
+MOBILE_FONT = "assets/fonts/mobile/inter.ttf"
+MOBILE_LIGHT = {"--background": "0 0% 100%", "--foreground": "#14181c"}
+MOBILE = {"tokens": {"light": MOBILE_LIGHT}, "fonts": {"sans": MOBILE_FONT}, "mascot": "clips"}
 
 
 class _BorrowedSession:
@@ -115,27 +132,39 @@ def ws(seed_workspace, db_session) -> uuid.UUID:
 
 @pytest.fixture
 def theme_files():
-    """The hello theme package, and the stored files the route's reader serves (in memory)."""
+    """The hello-clip package with ``MOBILE`` (one sfnt face as its sans), and its stored files (in memory)."""
     from services.themes.package import read_theme_package
     from tests.fixtures.themes import build
+    from tests.test_prd261_mobile_package import MOBILE_ENGINES, _face
 
-    return SimpleNamespace(package=read_theme_package(build.build_package()), stored={})
+    mascot = {"states": [build.CLIP_STATE]}
+    manifest = build.changed_manifest({"engines": MOBILE_ENGINES, "mascot": mascot, "mobile": MOBILE})
+    data = build.build_package("hello-clip", replace={build.MANIFEST: manifest, MOBILE_FONT: _face()})
+    return SimpleNamespace(package=read_theme_package(data), stored={})
 
 
 @pytest.fixture
-def phone(db_session, local, theme_files):
-    """A client on the four routers, with NO stand-in for the request context."""
+def phone(db_session, local, theme_files, monkeypatch):
+    """A client on the routers a phone calls, with NO stand-in for the request context.
+
+    Stored theme files are read from memory: the files and mobile routes' reader dependency,
+    and the looks store's reader (``services/themes/looks.py``).
+    """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from api import approval_grants, board_tasks, chat, themes_files
+    import services.themes.looks as looks_store
+    from api import approval_grants, board_tasks, chat, themes_files, themes_install, themes_looks, themes_mobile
+
+    def _stored(prefix, path):
+        return theme_files.stored.get((prefix, path))
 
     app = FastAPI()
-    for module in (chat, board_tasks, approval_grants, themes_files):
+    for module in (chat, board_tasks, approval_grants, themes_files, themes_mobile, themes_install, themes_looks):
         app.include_router(module.router)
     app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[themes_files.get_theme_file_reader] = \
-        lambda: (lambda prefix, path: theme_files.stored.get((prefix, path)))
+    app.dependency_overrides[themes_files.get_theme_file_reader] = lambda: _stored
+    monkeypatch.setattr(looks_store, "read_stored_file", _stored)
     return TestClient(app)
 
 
@@ -287,8 +316,8 @@ def test_a_paired_phone_answers_a_question(phone, db_session, ws, resumes):
 # --------------------------------------------------------------------------- theme files
 
 
-def _private_theme(db, theme_files, workspace_id, user_pk) -> None:
-    """The hello package uploaded to ``workspace_id``, installed there, and opted in to by ``user_pk``."""
+def _private_theme(db, theme_files, workspace_id, user_pk) -> uuid.UUID:
+    """The package uploaded to ``workspace_id``, installed there and opted in to by ``user_pk``: the install's id."""
     from core.models.themes import ThemeInstallation, ThemeOptIn, ThemePackage
 
     package = theme_files.package
@@ -298,10 +327,14 @@ def _private_theme(db, theme_files, workspace_id, user_pk) -> None:
                        file_manifest=package.file_manifest, storage_prefix=prefix, status="pending", reviewed=False)
     db.add(row)
     db.flush()
-    db.add(ThemeInstallation(workspace_id=workspace_id, theme_id=row.theme_id, package_id=row.id))
+    install = ThemeInstallation(workspace_id=workspace_id, theme_id=row.theme_id, package_id=row.id)
+    db.add(install)
     db.add(ThemeOptIn(workspace_id=workspace_id, user_id=user_pk, package_id=row.id))
+    db.flush()
+    install_id = install.id
     _settle(db)
     theme_files.stored.update({(prefix, path): item.data for path, item in package.files.items()})
+    return install_id
 
 
 def _theme_file(phone, theme_files, headers):
