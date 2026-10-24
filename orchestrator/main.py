@@ -106,6 +106,11 @@ from api.marketplace_themes_submit import router as marketplace_themes_submit_ro
 from api.marketplace_themes import router as marketplace_themes_router
 from api.admin_themes import router as admin_themes_router
 from services.themes.submissions import THEME_SUBMIT_ROUTE
+# PRD-261 W-C3: theme revocations (the hosted feed, the local edition's sync, the admin's list).
+# The local edition's pull job rides the shared scheduler (services/scheduler.py registers it).
+from api.themes_revocations_feed import router as theme_revocations_feed_router
+from api.admin_theme_revocation_sync import router as admin_theme_revocation_sync_router
+from api.admin_theme_revocations import router as admin_theme_revocations_router
 
 # PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
 # an ungoverned side-effecting ingress with zero product callers (grep-proven
@@ -1303,6 +1308,9 @@ app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme set
 app.include_router(marketplace_themes_submit_router)  # PRD-261 C-01a: POST /api/marketplace/themes/submit
 app.include_router(marketplace_themes_router)  # PRD-261 C-04a: the Themes tab listings + install by reference
 app.include_router(admin_themes_router)  # PRD-261 C-03a: admin review queue (caller_is_admin in each handler)
+app.include_router(theme_revocations_feed_router)  # PRD-261 C-05g: GET /api/themes/revocations (public, hosted only)
+app.include_router(admin_theme_revocation_sync_router)  # PRD-261 C-05h: the local edition's feed sync + Check now
+app.include_router(admin_theme_revocations_router)  # PRD-261 C-05e: list, create and lift revocations (admin)
 
 # PRD-155 S3: conditionally-mounted routers — previously a wall of silent
 # import guards that swallowed failures into `x_router = None` (two of which,

@@ -203,3 +203,15 @@ ONBOARDING_RESET_ENABLED=true
 # a finished ticket is scored and reported on the NEXT tick. Production keeps
 # the code default (300 s); a single operator's machine can afford 30 s.
 WATCHER_TICK_SECONDS=30
+
+# -----------------------------------------------------------------------------
+# Theme revocations [ACTIVE] — local edition only (PRD-261 C-05h, QB-25)
+# -----------------------------------------------------------------------------
+# The hosted revocation feed this install pulls, so a theme version Automatos
+# withdrew stops running here too. Public, unauthenticated, no credentials: the
+# pull sends no Authorization, cookie or workspace header. Empty = no pull (the
+# admin's sync status answers enabled: false): set THEME_REVOCATIONS_URL= in
+# envs/api.local to switch it off.
+THEME_REVOCATIONS_URL=https://api.automatos.app/api/themes/revocations
+# How often, in minutes (the first pull runs a minute after the backend starts).
+# THEME_REVOCATIONS_PULL_MINUTES=60

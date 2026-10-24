@@ -22,7 +22,9 @@ never in the queue and answers 404 here, exactly as a missing row does):
   request (``signing.py``); it never signs;
 * **sign**: stores the signature the kit's sign workflow returned for the open request, only
   when an active Automatos signing key verifies it (``signature_verify``, C-05b); the report's
-  ``signatureVerified`` and ``keyId`` are that check on the stored signature. A keys file that
+  ``signatureVerified`` and ``keyId`` are that check on the stored signature. In the local edition
+  a key the hosted feed revoked verifies nothing in either (``signature_state.feed_checked``, as on
+  load): its signature is never stored, and one it made may be replaced. A keys file that
   does not load reads ``invalid`` in the report (it still answers), and the paste raises
   ``SigningKeysError``, which the router answers as a 503 with its plain message;
 * **reject** with a reason, for a pending version;
@@ -45,11 +47,12 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from config import config
-from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
+from core.models.themes import THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signature_verify, signing
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
 from services.themes.listing_updates import offer_listed_update, withdraw_offers
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
+from services.themes.signature_state import feed_checked
 
 logger = logging.getLogger(__name__)
 
@@ -220,21 +223,23 @@ def _history(db: Session, package_id: UUID) -> List[Dict[str, Any]]:
     ]
 
 
-def _stored_verdict(package: ThemePackage) -> signature_verify.Verdict:
-    """The report's check on the stored signature. A keys file that does not load reads ``invalid``
-    (as ``listings._signature_verdict`` does), so the report still answers; the paste refuses."""
+def _stored_verdict(db: Session, package: ThemePackage) -> signature_verify.Verdict:
+    """The report's check on the stored signature; a key the hosted feed revoked reads ``invalid``
+    (``feed_checked``). A keys file that does not load reads ``invalid`` (as
+    ``listings._signature_verdict`` does), so the report still answers; the paste refuses."""
     try:
-        return signature_verify.package_verdict(package)
+        verdict = signature_verify.package_verdict(package)
     except signature_verify.SigningKeysError as bad:
         logger.error("Theme signing keys did not load; the report shows %s unverified: %s", package.id, bad)
         return signature_verify.Verdict(signature_verify.STATE_INVALID)
+    return feed_checked(db, verdict)
 
 
 def report(db: Session, package_id: UUID) -> Dict[str, Any]:
     """One version's report: summary, scan report, latest note, approval state, history, signing."""
     package = queued_package(db, package_id)
     note = latest_notes(db, [package.id]).get(package.id)
-    verdict = _stored_verdict(package)
+    verdict = _stored_verdict(db, package)
     return {
         **package_summary(package),
         "manifest": package.manifest, "scanReport": package.scan_report,
@@ -325,18 +330,24 @@ def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) 
 
 
 def _has_live_disable(db: Session, digest: str) -> bool:
+    """A live ``local`` disable of ``digest`` stands already. A pulled (``feed``) one doesn't count:
+    the feed may lift it, and the deactivation would go with it. The row is locked: a lift of it
+    in flight finishes first and this then finds it lifted, or waits and then refuses (409)."""
     row = (
         db.query(ThemeRevocation.id)
         .filter(ThemeRevocation.digest == digest, ThemeRevocation.level == REVOKE_DISABLE,
-                ThemeRevocation.lifted_at.is_(None))
+                ThemeRevocation.lifted_at.is_(None), ThemeRevocation.origin == THEME_REVOCATION_ORIGIN_LOCAL)
+        .with_for_update()
         .first()
     )
     return row is not None
 
 
 def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest and
-    withdraw the update offers its approval made (``withdraw_offers``)."""
+    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest (unless
+    a live ``local`` one stands) and withdraw the update offers its approval made (``withdraw_offers``).
+    ``revocation_admin.lift_revocation`` refuses to lift the last live ``local`` disable of a
+    deactivated version, so the deactivation can't be undone by lifting a revocation."""
     package = queued_package(db, package_id, lock=True)
     if package.status != STATUS_APPROVED:
         raise ThemeReviewError(CONFLICT, NOT_APPROVED)
@@ -351,11 +362,19 @@ def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[in
     return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE}
 
 
+def _signature_check(db: Session) -> signing.SignatureCheck:
+    """``signature_verify.verify``, with a key the hosted feed revoked reading ``invalid`` (``feed_checked``)."""
+    def check(payload: Mapping[str, Any], signature: str) -> signature_verify.Verdict:
+        return feed_checked(db, signature_verify.verify(payload, signature))
+    return check
+
+
 def sign(db: Session, package_id: UUID, request_id: UUID, signature: str, actor_pk: Optional[int]) -> Dict[str, Any]:
     """Store the signature the kit's sign workflow returned for this version's open request, once an
-    active Automatos signing key verifies it (``signature_verify.verify``); otherwise 400, nothing stored."""
+    active Automatos signing key the hosted feed didn't revoke verifies it (``_signature_check``);
+    otherwise 400, nothing stored."""
     package = queued_package(db, package_id, lock=True)
-    stored = signing.store_signature(db, package, request_id, signature, actor_pk, signature_verify.verify)
+    stored = signing.store_signature(db, package, request_id, signature, actor_pk, _signature_check(db))
     return {**package_summary(package), "signature": stored}
 
 

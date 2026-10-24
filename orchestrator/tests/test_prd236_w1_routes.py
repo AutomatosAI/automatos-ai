@@ -331,7 +331,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # four nullable billing_accounts columns, added by ALTER (prd265_billing had already run).
     in_studio = (versions / "prd265_billing_in_studio.py").read_text()
     assert 'down_revision = "prd265_billing"' in in_studio
-    assert 'EXPECTED_HEAD = "prd265_billing_in_studio"' in guard
+    # 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto
+    # prd265_billing_in_studio (re-chained from clerk_user_relinks_20261019, then from
+    # prd265_billing, as W-C3 merged main, 23 Oct) —
+    # theme_revocations.origin and the single-row theme_revocation_sync table; the guard
+    # follows it.
+    revocation_feed = (versions / "prd261_revocation_feed.py").read_text()
+    assert 'down_revision = "prd265_billing_in_studio"' in revocation_feed
+    assert 'EXPECTED_HEAD = "prd261_revocation_feed"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

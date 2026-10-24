@@ -19,17 +19,24 @@
 * ``theme_workspace_settings``: one row per workspace (the PRD §5 admin controls).
   ``private_uploads`` NULL means the edition default.
 * ``theme_revocations``: a digest, or a theme id with an optional version range,
-  marked ``warn`` or ``disable``.
+  marked ``warn`` or ``disable``. ``origin`` is ``local`` (written here) or ``feed``
+  (pulled from the hosted revocation feed under the hosted row's id). At most one live
+  ``local`` row per target and level: a partial unique index over the target with each
+  NULL read as '' (a unique index counts NULLs as distinct, so the bare columns would
+  never collide). A ``feed`` row, or a lifted one, may repeat a live ``local`` row.
+* ``theme_revocation_sync``: the one row (``id`` 1) the local edition's feed pull writes.
 * ``theme_review_events``: the review history of one package.
 
 JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns the
 portable ``Uuid``, so the tables also build under SQLite in the unit tests. The
-``prd261_themes`` migration creates them all, and ``tests/test_prd261_theme_models.py``
-holds the migration and the models together.
+``prd261_themes`` migration creates the first nine, ``prd261_revocation_feed`` adds
+``theme_revocations.origin``, its live-local unique index and ``theme_revocation_sync``, and
+``tests/test_prd261_theme_models.py`` holds the migrations and the models together.
 """
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -62,6 +69,7 @@ __all__ = [
     "ThemeOptIn",
     "ThemeWorkspaceSettings",
     "ThemeRevocation",
+    "ThemeRevocationSync",
     "ThemeReviewEvent",
     "THEME_OWNER_TYPES",
     "THEME_PACKAGE_STATUSES",
@@ -71,6 +79,10 @@ __all__ = [
     "THEME_PRIVATE_UPLOAD_VALUES",
     "THEME_INSTALL_ROLE_DEFAULT",
     "THEME_REVOCATION_LEVELS",
+    "THEME_REVOCATION_ORIGIN_FEED",
+    "THEME_REVOCATION_ORIGIN_LOCAL",
+    "THEME_REVOCATION_ORIGINS",
+    "THEME_REVOCATION_SYNC_ROW_ID",
     "THEME_REVIEW_EVENTS",
 ]
 
@@ -83,6 +95,12 @@ THEME_SCAN_VERDICT_DEFAULT = "not_run"
 THEME_PRIVATE_UPLOAD_VALUES = ("on", "off")
 THEME_INSTALL_ROLE_DEFAULT = "workspace:manage"
 THEME_REVOCATION_LEVELS = ("warn", "disable")
+# Where a revocation row came from: written in this install, or pulled from the hosted feed.
+THEME_REVOCATION_ORIGIN_LOCAL = "local"
+THEME_REVOCATION_ORIGIN_FEED = "feed"
+THEME_REVOCATION_ORIGINS = (THEME_REVOCATION_ORIGIN_LOCAL, THEME_REVOCATION_ORIGIN_FEED)
+# theme_revocation_sync holds exactly one row, this id.
+THEME_REVOCATION_SYNC_ROW_ID = 1
 # The events C-01..C-03 write. Not a CHECK: a later review stage adds one without a migration.
 THEME_REVIEW_EVENTS = ("submitted", "scanned", "approved", "rejected", "deactivated")
 
@@ -101,6 +119,9 @@ WORKSPACE_OWNED = "owner_type = 'workspace'"
 MARKETPLACE_OWNED = "owner_type = 'marketplace'"
 ACTIVE_INSTALLATION = "uninstalled_at IS NULL"
 ACTIVE_DEFAULT = "is_default AND uninstalled_at IS NULL"
+LIVE_LOCAL_REVOCATION = f"lifted_at IS NULL AND origin = '{THEME_REVOCATION_ORIGIN_LOCAL}'"
+# A revocation's target with each NULL read as '': NULLs are distinct in a unique index.
+REVOCATION_TARGET_TERMS = ("COALESCE(digest, '')", "COALESCE(theme_id, '')", "COALESCE(version_range, '')")
 
 OWNER_MATCHES_WORKSPACE = (
     "(owner_type = 'workspace' AND workspace_id IS NOT NULL) "
@@ -111,6 +132,7 @@ REVOCATION_TARGET = (
     "(digest IS NOT NULL AND theme_id IS NULL AND version_range IS NULL) "
     "OR (digest IS NULL AND theme_id IS NOT NULL)"
 )
+SYNC_SINGLE_ROW = f"id = {THEME_REVOCATION_SYNC_ROW_ID}"
 
 
 def _in_list(column: str, values: tuple) -> str:
@@ -122,7 +144,8 @@ def _json_type():
     return JSON().with_variant(JSONB(), "postgresql")
 
 
-def _partial_unique(name: str, predicate: str, *columns: str) -> Index:
+def _partial_unique(name: str, predicate: str, *columns: Any) -> Index:
+    """A unique index over ``columns`` (column names, or ``text()`` expressions) where ``predicate`` holds."""
     where = text(predicate)
     return Index(name, *columns, unique=True, postgresql_where=where, sqlite_where=where)
 
@@ -342,9 +365,14 @@ class ThemeRevocation(Base):
     __table_args__ = (
         CheckConstraint(_in_list("level", THEME_REVOCATION_LEVELS), name="ck_theme_revocations_level"),
         CheckConstraint(REVOCATION_TARGET, name="ck_theme_revocations_target"),
+        CheckConstraint(_in_list("origin", THEME_REVOCATION_ORIGINS), name="ck_theme_revocations_origin"),
         Index("ix_theme_revocations_digest", "digest"),
         Index("ix_theme_revocations_theme_id", "theme_id"),
         Index("ix_theme_revocations_created_by", "created_by"),
+        _partial_unique(
+            "uq_theme_revocations_live_local", LIVE_LOCAL_REVOCATION,
+            *(text(term) for term in REVOCATION_TARGET_TERMS), "level",
+        ),
         {"extend_existing": True},
     )
 
@@ -357,6 +385,28 @@ class ThemeRevocation(Base):
     created_by = _user_column("SET NULL")
     created_at = _created_at()
     lifted_at = Column(DateTime(timezone=True))
+    origin = Column(
+        String(THEME_STATUS_LENGTH), nullable=False,
+        default=THEME_REVOCATION_ORIGIN_LOCAL, server_default=THEME_REVOCATION_ORIGIN_LOCAL,
+    )
+
+
+class ThemeRevocationSync(Base):
+    """The local edition's feed pull: its last attempt and success, the feed's time and revoked keys."""
+
+    __tablename__ = "theme_revocation_sync"
+    __table_args__ = (
+        CheckConstraint(SYNC_SINGLE_ROW, name="ck_theme_revocation_sync_single_row"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=False, default=THEME_REVOCATION_SYNC_ROW_ID)
+    last_attempt_at = Column(DateTime(timezone=True))
+    last_success_at = Column(DateTime(timezone=True))
+    feed_generated_at = Column(DateTime(timezone=True))  # the feed's generatedAt
+    last_error = Column(Text)
+    revoked_key_ids = Column(_json_type(), nullable=False, default=list, server_default="[]")
+    updated_at = _updated_at()
 
 
 class ThemeReviewEvent(Base):
