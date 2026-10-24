@@ -35,7 +35,7 @@ ENTRYPOINT = WORKER / "entrypoint.sh"
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
 SYNTAX_LINE = "# syntax=docker/dockerfile:1"
 LOG_LINE = "[entrypoint] some files could not be re-owned"
-DROP = "setpriv --reuid=worker --regid=worker --init-groups env HOME=/home/worker python -m main"
+DROP = "setpriv --reuid=worker --regid=worker --init-groups --no-new-privs env HOME=/home/worker python -m main"
 OWNERSHIP_FIND = (
     "find \"$WORKSPACE_VOLUME_PATH\" -mindepth 1 -path '*/projects' -prune -o ! -user worker "
     "-exec chown -h worker:worker {} + || echo \"" + LOG_LINE + "\" >&2"

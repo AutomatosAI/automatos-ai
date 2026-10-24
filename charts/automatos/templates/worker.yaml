@@ -23,7 +23,8 @@ spec:
       serviceAccountName: {{ include "automatos.serviceAccountName" . }}
       automountServiceAccountToken: false
       # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
-      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv.
+      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv
+      # --no-new-privs. The container's securityContext keeps that root start narrow.
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
@@ -75,6 +76,20 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
+          # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
+          # (a setuid-root binary such as su or passwd runs without root), every capability
+          # is dropped but the four the root entrypoint needs, and the runtime's default
+          # seccomp profile applies (compose already runs the worker under Docker's).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # chown -h re-owns the volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't
+              # own), then setpriv drops to uid 1000 (SETUID, SETGID). Measured: without
+              # DAC_OVERRIDE the walk fails on a mode-700 folder; FOWNER isn't needed.
+              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
       volumes:
