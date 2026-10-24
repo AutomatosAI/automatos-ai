@@ -130,3 +130,4 @@ Related:
 
 - [Marketplace › Themes](../community-marketplace/themes-tab.md)
 - [The phone's theme: the `mobile` block](../theme-host/mobile.md) (technical)
+- [Theme host](../theme-host/_index.md) (technical: the architecture, the API, the security model and operations)
