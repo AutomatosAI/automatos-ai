@@ -303,6 +303,8 @@ install is reachable, then put TLS in front.
    docker compose exec backend python -m scripts.mint_pairing_code
    ```
    It prints the code (it works once, for ten minutes) and its pairing link.
+   For App Review, `--review --ttl-hours N` mints one code that lasts N hours (at most 336,
+   two weeks); it still works once, and minting it is written to the audit log.
 4. **Pair phones from Studio.** **Settings → Phones & devices → Get a pairing
    code** shows a code, its ten-minute countdown and the pairing link; enter the
    code in Automatos Go. Another browser opens the web address and enters a code

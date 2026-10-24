@@ -337,6 +337,8 @@ front (step 2).
    ```
    It prints a code (it works once, for ten minutes) and its pairing link. The person
    types the code into *Pair this browser*, with a name for that browser.
+   For App Review, `--review --ttl-hours N` mints one code that lasts N hours (at most 336,
+   two weeks); it still works once, and minting it is written to the audit log.
 
    *Check:* the app shows after the code.
 4. **Pair phones from Studio.** In the paired browser: **Settings → Phones & devices →

@@ -116,7 +116,7 @@ def pair_link(api: str, code: str) -> str:
 
 def create_pairing_code(
     db: Session, workspace_id: Any, user_pk: int, *, request_base_url: str,
-    name: Optional[str] = None,
+    name: Optional[str] = None, ttl_seconds: Optional[int] = None,
 ) -> PairingCode:
     """Add a PENDING paired row for this workspace and person and return its code once.
 
@@ -124,12 +124,16 @@ def create_pairing_code(
     it only when the install has no ``PUBLIC_API_HOST`` of its own (K15). The link is built
     before the row, so a misconfigured address (``MobileUrlError``) leaves nothing behind.
     ``name`` (the console's ``--name``) labels the device until it pairs with a name of its own.
+    ``ttl_seconds`` overrides ``PAIRING_CODE_TTL_SECONDS`` for the console's App Review code
+    (``--review --ttl-hours N``, D13) and nothing else: no route, request field or setting
+    passes it, so Studio's codes always last ten minutes.
     """
     _require_local_edition()
     code = new_pairing_code()
     qr_payload = pair_link(api_url(request_base_url), code)
     now = _now()
-    expires_at = now + timedelta(seconds=PAIRING_CODE_TTL_SECONDS)
+    lifetime = PAIRING_CODE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+    expires_at = now + timedelta(seconds=lifetime)
     _drop_expired_codes(db, _as_uuid(workspace_id), user_pk, now)
     db.add(MobileDevice(
         workspace_id=_as_uuid(workspace_id),
