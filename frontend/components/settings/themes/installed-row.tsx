@@ -11,6 +11,7 @@
  * `verified`, signed_upload.signature_view) shows "Signed by Automatos" in place of "Private · not
  * reviewed" (QB-24); `invalid` never does. Make default follows the server's own rule, the row's
  * `private` (defaults.can_be_default), so a signed upload QB-24 counts as reviewed may be the default.
+ * When it is off, its reason is written beside it, not only in its hover title.
  */
 import { useState } from 'react'
 
@@ -62,6 +63,29 @@ function RowBadges({ install }: { install: InstalledTheme }) {
   )
 }
 
+/** Make default, off for private code with the reason beside it (and as its title), so the owner sees why. */
+function MakeDefault({ install, busy, onMake }: { install: InstalledTheme; busy: boolean; onMake: () => void }) {
+  const allowed = canBeDefault(install)
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy || !allowed}
+        title={allowed ? undefined : UNREVIEWED_NOT_DEFAULT}
+        onClick={onMake}
+      >
+        Make default
+      </Button>
+      {!allowed && (
+        <span className="self-center text-xs text-muted-foreground" data-testid="theme-default-reason">
+          {UNREVIEWED_NOT_DEFAULT}
+        </span>
+      )}
+    </>
+  )
+}
+
 function ManageActions({ install, onReviewUpdate }: { install: InstalledTheme; onReviewUpdate: () => void }) {
   const setDefault = useSetDefaultTheme()
   const rollback = useRollbackTheme()
@@ -76,15 +100,7 @@ function ManageActions({ install, onReviewUpdate }: { install: InstalledTheme; o
           Clear default
         </Button>
       ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !canBeDefault(install)}
-          title={canBeDefault(install) ? undefined : UNREVIEWED_NOT_DEFAULT}
-          onClick={() => setDefault.mutate(install.installId)}
-        >
-          Make default
-        </Button>
+        <MakeDefault install={install} busy={busy} onMake={() => setDefault.mutate(install.installId)} />
       )}
       {install.pendingPackageId && (
         <Button size="sm" variant="outline" disabled={busy} onClick={onReviewUpdate}>

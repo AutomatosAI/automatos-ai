@@ -100,10 +100,15 @@ jobs:
           # adapter, which the backend step clusters with inside the image (US-027).
           PROD_IMAGE_PATHS: >-
             ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-(standalone-image|layer-reuse)\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore|image_scipy|image_app_bytecode)\.py$|^orchestrator/scripts/boot_modules\.py$|^orchestrator/tests/test_prd262_codegraph_(clone|languages)\.py$|^orchestrator/tests/fixtures/codegraph_languages/|^orchestrator/modules/codegraph/parsers/|^orchestrator/modules/knowledge/leiden_partition\.py$|^\.github/workflows/test\.yml$
-          # The frontend lane also reads the committed route manifest (route-contract), and
-          # PRD-261's theme corpus, host contract and the validators lib/theme-host's
-          # validator-parity.test.ts reads as text.
-          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(contract|manifest|look_schema|css_value)\.py$|^\.github/workflows/test\.yml$
+          # The frontend lane also reads server files, so a change to one of them alone runs it:
+          # the committed route manifest (route-contract) and page manifest, PRD-261's theme
+          # corpus, and what its tests read as text to catch drift: the theme modules (the
+          # validators, the review stage's and the scan's check keys, levels and verdicts, the
+          # opt-in wording, the signature, revocation and update dicts), the step-up codes, the
+          # CLI presets and the e2e theme fixtures. Keep it on one line:
+          # frontend/scripts/__tests__/frontend-ci-lane-paths.test.ts reads it, and fails when a
+          # frontend test names a theme module it leaves out.
+          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/contracts/page-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(contract|css_value|listings|look_schema|manifest|optin|review|review_package|review_stage|revocation_admin|revocation_pull|scan|signature_verify|signing|updates)\.py$|^orchestrator/core/(auth/step_up|cli_presets)\.py$|^e2e/browser/fixtures/hello-a(04d|09b)/|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$

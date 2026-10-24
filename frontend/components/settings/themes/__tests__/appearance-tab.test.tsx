@@ -45,7 +45,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import { AppearanceTab } from '../appearance-tab'
 import { OPT_IN_CONFIRM } from '../opt-in-dialog'
 import { USE_THEME } from '../installed-row'
-import { MEMBERS_SEE_ONLY, NEEDS_UPDATE, PRIVATE_NOT_REVIEWED } from '../theme-labels'
+import { MEMBERS_SEE_ONLY, NEEDS_UPDATE, PRIVATE_NOT_REVIEWED, UNREVIEWED_NOT_DEFAULT } from '../theme-labels'
 import { INSTALL_ID, OPT_IN_WORDING, PACKAGE_ID, installRow, renderWithQuery, themeSettings } from './theme-fixtures'
 import type { InstalledTheme } from '@/lib/api-client'
 
@@ -94,9 +94,10 @@ describe('role gating', () => {
     expect(screen.getByText(MEMBERS_SEE_ONLY)).toBeInTheDocument()
   })
 
-  it('an unreviewed theme cannot be made the workspace default', async () => {
+  it('an unreviewed theme cannot be made the workspace default, and the row says why', async () => {
     const row = await renderTab('owner')
     expect(within(row).getByRole('button', { name: 'Make default' })).toBeDisabled()
+    expect(within(row).getByText(UNREVIEWED_NOT_DEFAULT)).toBeVisible()
   })
 })
 
