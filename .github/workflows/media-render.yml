@@ -2,10 +2,18 @@
 # social template on every pull request (about 45 minutes, the critical path) for a
 # feature most changes never touch. Run them from the Actions tab (media-render →
 # Run workflow) when the Socials feature, the templates or services/media-render change.
+# PRD-262 US-050: tick `listening_test` (or `gh workflow run media-render.yml --ref <branch>
+# -f listening_test=true`) to also run media-render-listening-test, the fp16 voice samples
+# (locally: services/media-render/ci/listening_test.sh).
 name: media-render
 
 on:
   workflow_dispatch:
+    inputs:
+      listening_test:
+        description: "PRD-262 US-050: also speak the fixture script with fp32 and both fp16 Kokoro models, and keep the three WAVs"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -587,3 +595,46 @@ jobs:
           path: ${{ runner.temp }}/templates
           if-no-files-found: ignore
           retention-days: 7
+
+  # PRD-262 US-050 (D4): the fp16 voice listening test, only when dispatched with
+  # listening_test true. Gerard picks the renderer's fp16 Kokoro model by ear, and
+  # nothing in the image changes for it: the job builds the image as Railway does,
+  # fetches the two fp16 candidates (model-files-v1.1 and model-files-v1.0) onto the
+  # runner, and speaks the script-window step's script (`fixture-bundle script`)
+  # with today's fp32 and with each fp16, one fresh container per model, the
+  # helper and the files mounted read-only (services/media-render/ci/listening_test.sh
+  # and listening_test.py; ci/ is not in the image). The same script runs on a
+  # machine that builds locally. Every model file is sha256-checked before it loads.
+  # The v1.1 export is called with sentence_pause=0, clause_pause=0, which keeps
+  # today's line timing. The three WAVs are kept as one artifact, and each model's
+  # voice_seconds (load plus the four lines) goes to the job summary, report only.
+  # A model that fails to load or speaks silence fails the job, after the others
+  # have spoken: their samples are still kept.
+  media-render-listening-test:
+    name: media-render — the fp16 voice listening test (fp32 and both fp16 models)
+    if: ${{ inputs.listening_test }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: media-render:ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (default target, as Railway builds it)
+        run: docker build -t "$IMAGE" services/media-render/
+      # The run itself is ci/listening_test.sh, so a machine that builds locally runs
+      # the same thing (its header has the two commands).
+      - name: Speak the fixture script with each model (fetching the two fp16), sha256-checked, one fresh container each
+        run: bash services/media-render/ci/listening_test.sh "$RUNNER_TEMP"
+      - name: Keep the three voice samples
+        # Also when a model failed: the samples that were spoken are still worth a listen.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-render-listening-test
+          path: |
+            ${{ runner.temp }}/listening/fp32.wav
+            ${{ runner.temp }}/listening/fp16-v1.1.wav
+            ${{ runner.temp }}/listening/fp16-v1.0.wav
+          if-no-files-found: error
+          # Long enough for Gerard to listen and record the pick in PRD-262 (US-050).
+          retention-days: 30

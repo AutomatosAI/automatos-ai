@@ -688,7 +688,8 @@ def test_the_media_render_job_checks_and_previews_every_seeded_template():
     import yaml
 
     workflow = yaml.safe_load((_ROOT / ".github" / "workflows" / "media-render.yml").read_text())
-    assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
+    # Its one input, PRD-262 US-050's listening test, adds a job; it adds no trigger.
+    assert list(workflow.get("on", workflow.get(True))) == ["workflow_dispatch"]
     job = workflow["jobs"]["media-render-templates"]
     assert job["name"].startswith("media-render — ")
     assert "needs" not in job and "if" not in job
