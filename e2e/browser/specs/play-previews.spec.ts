@@ -257,9 +257,27 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** The page's boot, as THEME_BOOT_SCRIPT read it: the prepaint table and the presets. */
+/** The boot element's JSON as the page holds it now (null when it has none). */
+async function bootOf(page: Page): Promise<Partial<PageBoot> | null> {
+  return JSON.parse((await page.locator(BOOT_ELEMENT).textContent()) || 'null') as Partial<PageBoot> | null
+}
+
+/** True when the boot carries installed Play's prepaint table and presets. */
+function carriesPlay(boot: Partial<PageBoot> | null): boolean {
+  return Boolean(boot?.prepaint?.knobs) && (boot?.looks?.presets?.length ?? 0) > 0
+}
+
+/**
+ * The page's boot, as THEME_BOOT_SCRIPT read it: the prepaint table and the presets. The root layout renders the
+ * boot on the server from the member's choice; right after the install and the choice, one render in a while still
+ * carries the base style's boot, so the page is reloaded once before the boot is held to installed Play's.
+ */
 async function readBoot(page: Page): Promise<PageBoot> {
-  const boot = JSON.parse((await page.locator(BOOT_ELEMENT).textContent()) || 'null') as Partial<PageBoot> | null
+  if (!carriesPlay(await bootOf(page))) {
+    await page.reload()
+    await expectInstalledPlay(page)
+  }
+  const boot = await bootOf(page)
   expect(boot?.prepaint?.knobs, "the page's boot carries installed Play's prepaint table").toBeTruthy()
   expect(boot?.looks?.presets?.length, "the page's boot carries installed Play's presets").toBeGreaterThan(0)
   return boot as PageBoot
