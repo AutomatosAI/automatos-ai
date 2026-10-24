@@ -110,9 +110,10 @@ function TreeNode({ entry, depth, onFileSelect, onDirectoryToggle, selectedPath 
 
   return (
     <>
-      <div
+      <button
+        type="button"
         className={cn(
-          'flex items-center gap-1 px-2 py-[3px] cursor-pointer',
+          'flex w-full items-center gap-1 px-2 py-[3px] cursor-pointer text-left',
           'hover:bg-muted/50 transition-colors',
           isSelected && 'bg-primary/10 text-primary'
         )}
@@ -137,7 +138,7 @@ function TreeNode({ entry, depth, onFileSelect, onDirectoryToggle, selectedPath 
 
         {/* Name */}
         <span className="truncate">{entry.name}</span>
-      </div>
+      </button>
 
       {/* Children (expanded directories) */}
       {isDir && expanded && entry.children && (

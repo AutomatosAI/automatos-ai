@@ -94,6 +94,17 @@ function BoardCardFace({ task, provided, isDragging, onOpen, onDelete }: BoardCa
         borderLeftColor: isBlocked ? undefined : isFailed ? undefined : priorityConf.color,
       }}
       onClick={() => onOpen(task)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        // The card is its own drag handle: @hello-pangea/dnd takes Space (capture on window)
+        // to lift and drop it and owns the keyboard mid-drag, so a consumed key is not ours.
+        if (isDragging || e.defaultPrevented || e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen(task)
+        }
+      }}
     >
       <CardTopRow task={task} onDelete={onDelete} />
 

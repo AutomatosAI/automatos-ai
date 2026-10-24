@@ -67,6 +67,16 @@ export function ReportCard({ report, onView, onDownload }: ReportCardProps) {
         statusBorder
       )}
       onClick={() => onView(report)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        // Download and View are buttons of their own: their keys stay theirs.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onView(report)
+        }
+      }}
     >
       {/* Header row */}
       <div className="flex items-start justify-between gap-2">
