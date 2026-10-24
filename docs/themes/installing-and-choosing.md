@@ -35,11 +35,38 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/choices.py](../../orchestrator/services/themes/choices.py)
 - [orchestrator/services/themes/defaults.py](../../orchestrator/services/themes/defaults.py)
 - [orchestrator/services/themes/contract.py](../../orchestrator/services/themes/contract.py)
+- [orchestrator/services/themes/data/signing-keys.json](../../orchestrator/services/themes/data/signing-keys.json)
+- [orchestrator/core/auth/roles.py](../../orchestrator/core/auth/roles.py)
+- [orchestrator/core/auth/device.py](../../orchestrator/core/auth/device.py)
 
 </details>
 
 Owners and admins add themes to a workspace. Every member then chooses for themselves. This page covers both halves,
 in the order you meet them.
+
+---
+
+## Get Play or HUD
+
+Play and HUD are themes from the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit). Neither
+is built into the app, and nothing adds them for you: a workspace has them only once someone installs them.
+
+**On the local edition:**
+
+1. Download the newest `automatos.play-<version>.autotheme` or `automatos.hud-<version>.autotheme` from the Design
+   Kit's [releases](https://github.com/AutomatosAI/automatos-design-kit/releases). A `.sha256` file next to it holds
+   its checksum.
+2. Open **Settings › Appearance › Themes** and click **Install theme**, then pick the file. Leave **Add its
+   signature file** alone: no release carries one yet (see [The signature file](#the-signature-file)).
+3. The theme installs as a private upload. Its row shows **Private · not reviewed**.
+4. Click **Use this theme**, then **Opt in and use**. Each person opts in once per version.
+
+The local edition's operator counts as a platform admin, so the reserved `automatos/…` id is accepted. Marketplace ›
+Themes lists only themes approved on your own server, so on a new local install it is empty.
+
+**On the hosted edition:** add the theme from **Marketplace › Themes** when it is listed there. A workspace owner or
+admin who isn't a platform admin can't upload Play or HUD: the id is reserved and no signed release exists yet, so the
+upload is refused with "Only an Automatos admin can upload a theme under the "automatos" publisher."
 
 ---
 
@@ -65,7 +92,8 @@ Adding a theme from the Marketplace needs no upload switch: see
 
 ## Install a theme from a file
 
-A theme comes as one `.autotheme` file. A signed release also carries a small `.sig.json` signature file next to it.
+A theme comes as one `.autotheme` file. A signed release carries a small `.sig.json` signature file next to it. No
+release is signed yet: see [The signature file](#the-signature-file).
 
 1. Open **Settings › Appearance › Themes**.
 2. If you have the theme's signature file, click **Add its signature file** first and pick the `.sig.json`. The page
@@ -93,7 +121,7 @@ Nothing is stored when an upload is refused. The common sentences:
 | This theme can't be installed. (then a list of problems, each with its code) | The package failed a check: the file itself, a size limit, `theme.json`, the style sheet or the looks. Fix the theme and pack it again with the [Design Kit](https://github.com/AutomatosAI/automatos-design-kit). |
 | This workspace already has … with different files. Raise the version in theme.json and upload it again. | Two different files can't share one version number. |
 | This workspace has … installed. Upload a higher version to offer it as an update. | An upload must be newer than the installed version. To go back a version, use **Roll back** ([Managing themes](managing-themes.md#roll-back)). |
-| Only an Automatos admin can upload a theme under the "automatos" publisher. | `automatos/…` ids, such as Play's and HUD's, are reserved. Upload the theme with its signature file, or add it from **Marketplace › Themes**. |
+| Only an Automatos admin can upload a theme under the "automatos" publisher. | `automatos/…` ids, such as Play's and HUD's, are reserved for platform admins (the local edition's operator is one). Add the theme from **Marketplace › Themes** if it is listed there. See [Get Play or HUD](#get-play-or-hud). |
 | This workspace has uploaded 20 themes in the last 24 hours, the most allowed. Try again tomorrow. | 20 is the server's default; its administrator can change it. |
 | Theme reviews are busy right now. Try again in a minute. | Too many automated checks are running on the server at once. |
 | This theme is being uploaded already. Try again in a moment. | The same file is still going up, from another tab or a double click. |
@@ -112,10 +140,16 @@ The size limits, by default (the server's administrator can change them):
 
 A signature file tells the server that Automatos vouches for exactly these files.
 
+**No signature file works yet.** This release's signing keys file holds no Automatos key, and the Design Kit's
+releases carry no `.sig.json`. An upload with a signature file is always refused: a well-formed file made for this
+package gets "No Automatos signing key verifies this signature for these files, so nothing was installed." What
+follows applies once an Automatos key is in the keys file (for server operators:
+[Add the production signing key](../theme-host/operations.md#add-the-production-signing-key)).
+
 - It is at most 4 KB. The server checks it against the package's own files before it stores anything.
-- When it is taken, the theme shows **Signed by Automatos** in place of **Private · not reviewed**. A signed upload
-  counts as reviewed: members don't opt in to it, it can be the workspace default, and it may carry an `automatos/…`
-  id.
+- When it is taken, the theme shows **Signed by Automatos** in Settings in place of **Private · not reviewed** (the
+  Appearance menu and ⌘K still note **Private · not reviewed**). A signed upload counts as reviewed: members don't opt
+  in to it, it can be the workspace default, and it may carry an `automatos/…` id.
 - Uploading a package you already have, this time with its signature file, adds the signature to the copy you have.
 - If the signature later stops checking out (for example, its key is revoked), that version is turned off with the
   reason "This theme's signature doesn't check out."
@@ -153,7 +187,7 @@ run**. A check that did not run is never shown as passed: its row gives the serv
 | **Sizes** | The package, its code, its entry module and its largest mascot clip, against the limits. The row shows the package, code and entry sizes. A package over a limit is refused before any report. |
 | **Style sheet scope** | That the theme's style sheet only styles the app under the theme's own class. "No style sheet" when the package has none. |
 | **Looks** | That every preset fits the theme's look rules. The row lists the presets. |
-| **Contrast (AA)** | For a theme with a phone block: its colour pairs, text on its ground at 4.5:1 and the primary and focus-ring colours at 3:1. An Error names the pair under its minimum. A theme with no phone block is **Not measured**: it doesn't say which of its colours is text on which ground, so the server has nothing to measure. |
+| **Contrast (AA)** | For a theme with a phone block: each text colour on its own fill (eight pairs) at 4.5:1, and the primary and focus-ring colours on the ground at 3:1. An Error names the pair under its minimum. A theme with no phone block is **Not measured**: it doesn't say which of its colours is text on which ground, so the server has nothing to measure. |
 | **SDK areas** | The parts of the theme SDK the code uses, against the areas `theme.json` declares. An Error means the code asks for a name this Automatos doesn't have, so the theme can never load. A Warning means an area is used but not declared, a declared area doesn't exist, or the imports couldn't be checked one by one. |
 | **Cloned core pages** | Each page the theme copied from one of Automatos's own pages, against this release's version of that page. A Warning means the page changed since the copy was made, so the copy may miss fixes. |
 | **Automated review** | Only on uploads stored before the automated checks existed: **Not run**. |
@@ -224,7 +258,7 @@ confirm it's you first.
 | Where | How |
 |---|---|
 | **Settings › Appearance › Themes** | **Use this theme** on its row. The theme you are on shows **In use**. |
-| The **Appearance** menu at the top of the app | Under **Style**: Classic, Studio, then the workspace's installed themes. |
+| The **Appearance** menu (the sun, moon or screen button at the top of the app, next to the notifications bell) | Under **Style**: Classic, Studio, then the workspace's installed themes. |
 | ⌘K (Ctrl+K) | The **Themes** group. With nothing typed, or "theme", "style" or "appearance", it lists every style. |
 
 What happens when you choose:
@@ -234,7 +268,8 @@ What happens when you choose:
 - If the server refuses, the tab stays on the style it had (a Classic or Studio pick switches back) and you see the
   server's reason. From the menu or ⌘K it comes under "Your theme choice was not saved."
 - The choice is per workspace: another workspace can show another theme.
-- The Appearance menu and ⌘K note "Private · not reviewed" beside an uploaded theme. A withdrawn theme is not offered.
+- The Appearance menu and ⌘K note "Private · not reviewed" beside every uploaded theme, a signed one included
+  (Settings calls a signed upload **Signed by Automatos**). A withdrawn theme is not offered.
 - The menu's **Tone** (Light, Dark, System) is yours to set, unless the theme sets it. Then the tone items rest, with
   "Set by your look" (the look decides) or "Set by your theme" (the theme always uses one tone).
 - If the workspace has switched off **Members choose their own theme**, the server refuses a choice: "This
@@ -247,7 +282,8 @@ What happens when you choose:
 3. Otherwise Studio.
 
 A choice of a theme that was uninstalled falls through to the default. If your theme's version is withdrawn, you see
-the theme's base (Studio or Classic) and a notice. See
+the theme's base (Studio or Classic) and a notice. A theme built on Classic never starts in this release: you see
+Studio with "Its theme.json could not be read." (see [Styles and themes](_index.md#styles-and-themes)). See
 [Managing themes](managing-themes.md#withdrawn-themes).
 
 ---
@@ -261,7 +297,8 @@ you.
 Members see the default when they haven't chosen a theme, when the theme they chose was uninstalled, and always while
 members may not choose.
 
-**Only a theme that isn't private can be the default**: a Marketplace theme or a signed upload. A default runs for
+**Only a theme that isn't private can be the default**: a Marketplace theme or a signed upload (no upload can be
+signed yet, so today that means a Marketplace theme). A default runs for
 members who never said yes to its code. On a private upload, **Make default** is greyed, with this beside it: "A theme
 that was not reviewed can’t be the workspace default." The server holds the same rule: "An unreviewed theme can't be
 the workspace default: members would run its code without saying yes."

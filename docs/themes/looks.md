@@ -45,7 +45,8 @@ follows at once. Looks belong to a theme. Classic and Studio have none.
 
 ## Where you edit a look
 
-- **Appearance › Customise look…** opens **Make it yours** (`/looks`). The item shows only while a theme is your style
+- **Appearance › Customise look…** opens **Make it yours** (`/looks`). The Appearance menu is the sun, moon or
+  screen button at the top of the app, next to the notifications bell. The item shows only while a theme is your style
   and its layout is showing (a window 1024 pixels wide or more).
 - The theme draws this page itself. Under Classic, Studio or a theme without a look page, `/looks` shows a note: "This
   style has no look to edit. Choose a theme with looks in the Appearance menu to make it yours."
@@ -112,11 +113,10 @@ Reading never rewrites what is stored, so rolling back finds your looks as you s
 
 - **Tone.** A theme can let its look decide light or dark. The Appearance menu's tone items then rest, with "Set by
   your look". A theme that always uses one tone shows "Set by your theme". Otherwise the tone is yours.
-- **Reduced motion.** When your device or browser asks for reduced motion, Automatos marks the page for the theme
-  (`data-theme-motion="reduce"` on the page, and `--theme-motion: 0`), so the theme's styles can stop loops and
-  transitions. Otherwise it marks `full` and `1`. What a theme does with the mark is up to the theme.
+- **Reduced motion.** When your device or browser asks for reduced motion, Automatos tells the theme, so its styles can
+  stop loops and transitions. What a theme does with that is up to the theme.
 
-On a phone, see [On your phone](on-your-phone.md): Play's and HUD's looks are the same server records.
+Your looks are kept on the server, so a phone can read the same records: see [On your phone](on-your-phone.md).
 
 To design a theme's settings and presets, see the Design Kit's
 [looks guide](https://github.com/AutomatosAI/automatos-design-kit/blob/main/guides/looks.md).

@@ -16,6 +16,9 @@ The following files were used as context for generating this page:
 - [frontend/components/theme-host/theme-host-provider.tsx](../../frontend/components/theme-host/theme-host-provider.tsx)
 - [frontend/lib/theme-host/choice-sync.ts](../../frontend/lib/theme-host/choice-sync.ts)
 - [frontend/lib/theme-host/installed-entry.ts](../../frontend/lib/theme-host/installed-entry.ts)
+- [frontend/lib/theme-host/manifest.ts](../../frontend/lib/theme-host/manifest.ts)
+- [frontend/components/layout/studio-header.tsx](../../frontend/components/layout/studio-header.tsx)
+- [frontend/components/settings/themes/installed-row.tsx](../../frontend/components/settings/themes/installed-row.tsx)
 - [frontend/hooks/use-studio-theme.ts](../../frontend/hooks/use-studio-theme.ts)
 - [frontend/hooks/use-global-search.ts](../../frontend/hooks/use-global-search.ts)
 - [frontend/components/layout/main-layout.tsx](../../frontend/components/layout/main-layout.tsx)
@@ -36,6 +39,7 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/looks.py](../../orchestrator/services/themes/looks.py)
 - [orchestrator/services/themes/contract.py](../../orchestrator/services/themes/contract.py)
 - [orchestrator/services/themes/revocation_pull.py](../../orchestrator/services/themes/revocation_pull.py)
+- [orchestrator/services/themes/data/signing-keys.json](../../orchestrator/services/themes/data/signing-keys.json)
 - [orchestrator/core/auth/step_up.py](../../orchestrator/core/auth/step_up.py)
 - [orchestrator/config.py](../../orchestrator/config.py)
 
@@ -54,13 +58,14 @@ SDK, looks and the phone block.
 
 | Name | What it is |
 |---|---|
-| **Studio** | A style built into Automatos. It is the default: you see it until you, or your workspace, choose something else. |
+| **Studio** | A style built into Automatos. It is the default: you see it until you, or your workspace, choose something else. (Studio here is the name of a style, not Automatos Studio, the hosted app.) |
 | **Classic** | The other style built into Automatos. |
 | **An installed theme** | A theme package (a `.autotheme` file) added to the workspace, from the Marketplace or from a file. No theme is compiled into the app: every theme, Play and HUD included, is installed this way. |
-| **Play** and **HUD** | Two themes made in the Design Kit under the reserved `automatos` publisher (`automatos/play` and `automatos/hud`). The Design Kit's [README](https://github.com/AutomatosAI/automatos-design-kit#readme) says what each one is and how it is released. |
+| **Play** and **HUD** | Two themes made in the Design Kit under the reserved `automatos` publisher (`automatos/play` and `automatos/hud`). The Design Kit's [README](https://github.com/AutomatosAI/automatos-design-kit#readme) says what each one is. To add one, see [Get Play or HUD](installing-and-choosing.md#get-play-or-hud). |
 
-Each installed theme is built on Studio or Classic (its `base`). If a theme's version is withdrawn, you see its base in
-its place.
+Each installed theme names the style it is built on, Studio or Classic (its `base`). This release runs only
+Studio-based themes. A Classic-based theme installs and can be chosen, but it doesn't start: you see Studio, with the
+reason "Its theme.json could not be read." If a theme's version is withdrawn, you see its base in its place.
 
 ## Themes and looks
 
@@ -77,9 +82,16 @@ whether it can be the workspace default.
 | Kind | Where it comes from | Label you see | Each member opts in | Can be the workspace default |
 |---|---|---|---|---|
 | **Private upload** | An owner or admin uploads a `.autotheme` file with **Install theme**. Nobody at Automatos reviewed it. | **Private · not reviewed** | Yes, once per version | No |
-| **Signed upload** | An uploaded `.autotheme` with its signature file (`.sig.json`), verified by an active Automatos signing key. | **Signed by Automatos** | No | Yes |
+| **Signed upload** | An uploaded `.autotheme` with its signature file (`.sig.json`), verified by an active Automatos signing key. | **Signed by Automatos** in Settings. The Appearance menu and ⌘K still note **Private · not reviewed** beside it. | No | Yes |
 | **Marketplace theme** | Added from **Marketplace › Themes**. A person at Automatos reviewed every version listed there. | None, or **Signed by Automatos** when its version is signed | No | Yes |
 | **Official** | A Marketplace theme from the reserved `automatos` publisher whose listed version carries a signature an active Automatos key verifies. A reserved name alone is never Official. | **Official** on the Marketplace card, **Signed by Automatos** in Settings | No | Yes |
+
+**No theme is signed yet.** This release's signing keys file holds no Automatos key, so no signature file verifies:
+an upload with one is refused ("No Automatos signing key verifies this signature for these files, so nothing was
+installed."), nothing shows **Signed by Automatos**, and no theme is **Official**. Signed uploads and Official themes
+start working once an Automatos key is in that file (for server operators:
+[Add the production signing key](../theme-host/operations.md#add-the-production-signing-key)). Until then every theme
+you upload is a private upload, and every theme from **Marketplace › Themes** is a Marketplace theme.
 
 Why the opt-in: a theme's code runs in your browser with your session. The opt-in dialog says it in the server's own
 words: "This theme was not reviewed. Its code runs with your access to all your workspaces." See
@@ -87,9 +99,13 @@ words: "This theme was not reviewed. Its code runs with your access to all your 
 
 ## Where everything is
 
+The **Appearance** menu is the button with a sun, moon or screen icon (it shows your light or dark setting) at the
+top of the app, next to the notifications bell. A theme's own frame shows the same button among its header buttons.
+
 | To do this | Go here |
 |---|---|
-| Switch between Classic, Studio and the installed themes | The **Appearance** menu at the top of the app, under **Style** |
+| Get Play or HUD | [Get Play or HUD](installing-and-choosing.md#get-play-or-hud) |
+| Switch between Classic, Studio and the installed themes | The **Appearance** menu, under **Style** |
 | Switch by name | ⌘K (Ctrl+K), then the **Themes** group. Type "theme", "style" or "appearance" to list them all. |
 | See the installed themes, opt in and choose one | **Settings › Appearance › Themes** (`/settings?tab=appearance`) |
 | Install, update, roll back, uninstall, set the default, change theme settings | **Settings › Appearance › Themes**, as an owner or admin |
@@ -117,11 +133,11 @@ a theme and uninstalling one never ask.
 
 ## Pages in this topic
 
-- [Installing and choosing](installing-and-choosing.md): Install theme, the scan report, opting in, choosing, the
-  workspace default and the signature file.
+- [Installing and choosing](installing-and-choosing.md): getting Play or HUD, Install theme, the scan report, opting
+  in, choosing, the workspace default and the signature file.
 - [Looks](looks.md): presets, Make it yours, saving, resetting, deleting and sharing a look, where looks are kept,
   reduced motion.
-- [On your phone](on-your-phone.md): how Automatos Go draws your theme.
+- [On your phone](on-your-phone.md): what the server keeps for a phone. Automatos Go showing your theme is planned.
 - [Managing themes](managing-themes.md): updates, pins, roll back, uninstall, "Needs update", withdrawn themes, safe
   mode and the workspace's theme settings.
 - [FAQ](faq.md): the questions people ask first.

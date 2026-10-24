@@ -25,6 +25,8 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/submissions.py](../../orchestrator/services/themes/submissions.py)
 - [orchestrator/services/themes/review_limits.py](../../orchestrator/services/themes/review_limits.py)
 - [orchestrator/services/themes/optin.py](../../orchestrator/services/themes/optin.py)
+- [orchestrator/services/themes/data/signing-keys.json](../../orchestrator/services/themes/data/signing-keys.json)
+- [frontend/lib/theme-host/manifest.ts](../../frontend/lib/theme-host/manifest.ts)
 
 </details>
 
@@ -49,7 +51,7 @@ three of the SDK areas it uses, and these badges:
 
 | Badge | Meaning |
 |---|---|
-| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. |
+| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. No card shows it yet: this release's signing keys file holds no Automatos key. |
 | **In this workspace** | The workspace has this theme installed. |
 | **Update available** | The workspace runs an older Marketplace version of it. |
 | **Needs a newer Automatos** | No version of this theme runs on this Automatos yet. |
@@ -66,8 +68,9 @@ Opening a card shows:
 - **Add to my workspace**, or **Use this theme** once it is in the workspace;
 - its previews, grouped by preset, with the theme's default look marked "(default look)";
 - the facts: **Publisher**, **Theme id**, **Signature** ("Signed by Automatos", "Signed, but the signature doesn't
-  check out" or "Not signed"), **Pages** it replaces, **Its own pages**, **Built on** (Studio or Classic), **Light or
-  dark**, **Minimum width** and **Uses**;
+  check out" or "Not signed"), **Pages** it replaces, **Its own pages**, **Built on** (Studio or Classic; this release
+  runs only Studio-based themes, so a Classic-based one installs but shows Studio), **Light or dark**, **Minimum
+  width** and **Uses**;
 - **Versions**: every listed version, the one marked **Newest for this Automatos**, any marked **Needs a newer
   Automatos**, and any withdrawal reason;
 - **Read me** and **Changelog**, when the theme ships them.

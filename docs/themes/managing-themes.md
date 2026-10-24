@@ -11,6 +11,8 @@ The following files were used as context for generating this page:
 - [frontend/components/settings/themes/theme-pins.tsx](../../frontend/components/settings/themes/theme-pins.tsx)
 - [frontend/components/settings/themes/theme-labels.ts](../../frontend/components/settings/themes/theme-labels.ts)
 - [frontend/components/settings/themes/scan-report.tsx](../../frontend/components/settings/themes/scan-report.tsx)
+- [frontend/components/settings/themes/install-theme.tsx](../../frontend/components/settings/themes/install-theme.tsx)
+- [frontend/lib/theme-host/manifest.ts](../../frontend/lib/theme-host/manifest.ts)
 - [frontend/components/theme-host/theme-host-provider.tsx](../../frontend/components/theme-host/theme-host-provider.tsx)
 - [frontend/components/theme-host/page-boundary.tsx](../../frontend/components/theme-host/page-boundary.tsx)
 - [frontend/lib/theme-host/failure-ledger.ts](../../frontend/lib/theme-host/failure-ledger.ts)
@@ -29,6 +31,7 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/defaults.py](../../orchestrator/services/themes/defaults.py)
 - [orchestrator/services/themes/choices.py](../../orchestrator/services/themes/choices.py)
 - [orchestrator/services/themes/drift.py](../../orchestrator/services/themes/drift.py)
+- [orchestrator/services/themes/review_stage.py](../../orchestrator/services/themes/review_stage.py)
 - [orchestrator/services/themes/revocations.py](../../orchestrator/services/themes/revocations.py)
 - [orchestrator/services/themes/signature_state.py](../../orchestrator/services/themes/signature_state.py)
 - [orchestrator/services/themes/revocation_pull.py](../../orchestrator/services/themes/revocation_pull.py)
@@ -63,9 +66,13 @@ The theme's row then shows **Update available** and the new version. To apply it
 
 1. Click **Review update**. The dialog **Update** *name* says: "Members opt in again to a new private version before
    it runs for them."
-2. It compares the two versions: **Version** *old* → *new* (with "not reviewed" when the new one isn't), the files
-   **Added**, **Changed** and **Removed** (or "No file changed."), and the scan verdicts before and after with the
-   checks that changed.
+2. It compares the two versions:
+   - **Version** *old* → *new*, with "not reviewed" when nobody at Automatos reviewed the new version. Every uploaded
+     version shows it, a signed one included.
+   - The files **Added**, **Changed** and **Removed** (or "No file changed.").
+   - **Scan verdict:** *old* → *new*, in the server's own words (such as `pass` or `review_required`; "not run" when a
+     version has none), then "changed:" and the parts of the report that differ (such as "checks, verdict"). It
+     doesn't say which checks changed.
 3. Click **Apply update**. You see "Theme updated."
 
 After an update:
@@ -125,12 +132,16 @@ Click **Uninstall**, then **Confirm uninstall**. You see "Theme uninstalled."
 ## Needs update
 
 Some themes copy one of Automatos's own pages and change it (a cloned page). When a new release of Automatos changes
-that page, the copy is behind. The theme's row then shows **Needs update**, with this hint: "A core page this theme
-copies changed in this release. It may look out of date until its author updates it."
+that page, the copy is behind. The theme's row then shows **Needs update**. Hover over the badge for its hint: "A core
+page this theme copies changed in this release. It may look out of date until its author updates it."
 
-The theme still runs. The scan report's **Cloned core pages** check names each copy, for example "… copies …, which this
-release has changed since." or "…, which this release no longer ships." The fix is a new version from the theme's
-author.
+The theme still runs. The fix is a new version from the theme's author.
+
+The badge is checked against the Automatos release you run now, each time the list is read. The scan report is made
+once, at upload, and you see it only in the result shown right after the upload. So its **Cloned core pages** check
+warns only about a copy that was already behind then, for example "… copies …, which this release has changed
+since." or "…, which this release no longer ships." After you move to a newer Automatos release, the badge is the only
+sign.
 
 ## Withdrawn themes
 
@@ -144,7 +155,8 @@ A theme version, or a range of versions, can be withdrawn. Two levels:
 - A version whose stored signature no longer checks out is turned off the same way, with the reason "This theme's
   signature doesn't check out." It comes back once the version is signed again.
 - The server's administrators withdraw versions. A local edition also takes the versions Automatos withdraws: it reads
-  Automatos's public list every hour by default (`THEME_REVOCATIONS_URL`; empty turns it off).
+  Automatos's public list every hour by default. Its operator can change or turn off that pull: see
+  [The revocation feed and the local pull](../theme-host/operations.md#the-revocation-feed-and-the-local-pull).
 
 ## When a theme fails
 
@@ -163,6 +175,9 @@ instead." and one of these reasons:
 | This version of it was withdrawn. | No |
 | You have not opted in to its private code. | No |
 | Its files could not be reached just now. Reload to try again. | No |
+
+A theme built on Classic (its `base`) always fails with "Its theme.json could not be read.": this release runs only
+Studio-based themes.
 
 **Three failures in ten minutes, in one browser, send you back to Studio.** Your choice is set to Studio on the server,
 and the notice says "This theme failed three times in ten minutes, so you are back on Studio." and "You can choose it
@@ -183,7 +198,8 @@ Safe mode is the way back in when a theme stops the app from working.
 - It lasts until you close the tab. Other tabs are not changed.
 - The `/safe-mode` page draws none of the app around it and calls nothing on the server. Its **Back to the app**
   button opens chat, still in safe mode.
-- To leave a theme for good, choose Studio or Classic in the Appearance menu.
+- To leave a theme for good, choose Studio or Classic in the Appearance menu (the sun, moon or screen button at the
+  top of the app).
 
 ---
 
