@@ -47,8 +47,11 @@ PUSH_EXPO_ENABLED = False
 
 # Capability name -> (method, path) of the live route that implements it. Only what this build
 # implements. spoken_mode: ``spokenMode`` on the chat request (US-007a). voice_live: the Auto
-# Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34).
+# Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34). mobile_theme:
+# the member's installed theme as data for the phone (PRD-261 M-04: colours, fonts and mascot
+# files, never code), which the app offers under Studio only when this is listed.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "spoken_mode": ("POST", "/api/chat"),
     "voice_live": ("POST", "/api/voice/web-call"),
 })

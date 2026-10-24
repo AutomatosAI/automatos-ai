@@ -7,9 +7,9 @@ Authorised as ``GET /api/themes/boot/{install_id}`` (``api/themes_files.py``): t
 workspace comes from the install row, and the caller must belong to it (``membership.py``), so
 ``ctx.workspace_id`` is never read and an ``X-Workspace-ID`` naming another workspace changes
 nothing. An unknown, malformed or foreign install id is the boot route's one 404. Callers are a
-Clerk-signed-in person and the local edition's operator; any other caller (an API key, SaaS's
-anonymous fallback, a paired phone's ``device`` caller, which theme membership does not know yet)
-belongs to no workspace and gets the 404.
+Clerk-signed-in person, the local edition's operator and a paired phone (a ``device`` caller, a
+member of exactly the workspace its pairing is bound to: ``services/themes/membership.py``, PRD-266);
+any other caller (an API key, SaaS's anonymous fallback) belongs to no workspace and gets the 404.
 
 The file URLs are served by ``GET /api/themes/files/...`` under the same membership, read through
 the same reader dependency. ``Cache-Control: private, no-store``: the answer follows the member's
