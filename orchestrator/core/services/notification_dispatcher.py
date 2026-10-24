@@ -25,11 +25,16 @@ Design notes:
 * **External delivery** is delegated to
   ``core.services.notification_service.send_workspace_notification`` which
   already knows how to talk to Telegram / Slack / webhooks.
+* **Push** (PRD-266 US-010d, K7) is never a preference destination: a
+  ``push`` row is each person's switch, read by the fan-out. After the
+  destinations, the three push types go to ``services.push.fanout.hand_over``
+  with the in-app row's id; quiet hours hold them unless urgent or security.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 from uuid import UUID
 
@@ -110,6 +115,52 @@ _EXTERNAL_DESTINATIONS: frozenset[str] = frozenset({"telegram", "slack", "webhoo
 
 _MESSAGE_TRUNCATE = 200
 
+# PRD-266 K7: the push destination, never delivered as a row (the fan-out reads it).
+_PUSH = "push"
+# Severities quiet hours never hold.
+_THROUGH_QUIET_HOURS: frozenset[str] = frozenset({"urgent", "security"})
+
+
+@dataclass(frozen=True)
+class _Notice:
+    """One dispatch's event, as the caller raised it."""
+
+    event_type: str
+    title: str
+    message: Optional[str]
+    link_type: Optional[str]
+    link_id: Optional[str]
+    agent_id: Optional[int]
+    agent_name: Optional[str]
+    status: str
+    user_id: Optional[int]
+    severity: Optional[str]
+
+
+def _row(destination: str, user_id: Optional[int]) -> dict[str, Any]:
+    """A preference row the dispatcher makes itself (a route, the default, quiet hours)."""
+    return {
+        "destination": destination,
+        "enabled": True,
+        "channel_connection_id": None,
+        "user_id": user_id,
+    }
+
+
+def _live_destination(pref: dict[str, Any]) -> Optional[str]:
+    """The row's destination, or None when the row is off or silent."""
+    if not pref.get("enabled", True):
+        return None
+    destination = pref.get("destination") or "in_app"
+    return None if destination == "silent" else destination
+
+
+def _returned_id(result: Any) -> Optional[str]:
+    """The id an ``INSERT … RETURNING id`` gave back, as a string; None when it gave none."""
+    scalar = getattr(result, "scalar", None)
+    value = scalar() if callable(scalar) else None
+    return str(value) if value is not None else None
+
 
 # ------------------------------------------------------------------- class
 
@@ -145,150 +196,202 @@ class NotificationDispatcher:
         non-urgent traffic onto in_app. ``security`` and ``urgent`` severities
         always go through, even during quiet hours.
 
+        PRD-266 US-010d: after the destinations, an event in
+        ``services.push.payload.PUSH_EVENT_TYPES`` is handed to the push
+        fan-out (outside quiet hours, or when urgent or security), carrying the
+        in-app row's id.
+
         Returns a dict with a ``dispatched_to`` list naming every
         destination that was actually fired (``in_app``, ``telegram``,
-        ``slack``, ``webhook``, ``channel:<uuid>``). Silent and failed
+        ``slack``, ``webhook``, ``channel:<uuid>``, ``push``). Silent and failed
         destinations are not included.
         """
-        # F197: running out of model credit reaches the bell once per outage,
-        # in plain words (night 6: 17 raw 402 notices in 14 minutes).
+        notice = _Notice(
+            event_type=event_type,
+            title=title,
+            message=message,
+            link_type=link_type,
+            link_id=link_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            status=status,
+            user_id=user_id,
+            severity=severity,
+        )
+        held, notice = self._hold_for_credit(notice)
+        if held is not None:
+            return held
+        prefs, quiet = self._plan(notice)
+        dispatched, notification_id = await self._deliver(notice, prefs)
+        if self._push(notice, notification_id, quiet):
+            dispatched = [*dispatched, _PUSH]
+        return {"dispatched_to": dispatched}
+
+    # ------------------------------------------------------- dispatch steps
+
+    def _hold_for_credit(self, notice: _Notice) -> tuple[Optional[dict[str, Any]], _Notice]:
+        """F197: running out of model credit reaches the bell once per outage, in plain words.
+
+        Returns ``(held, notice)``: ``held`` is the dispatch's result when the bell already
+        says credit ran out (night 6: 17 raw 402 notices in 14 minutes), else None; the first
+        notice of an outage is reworded.
+        """
         from core.llm.credit import (
             CREDIT_EVENTS, OUT_OF_CREDIT, OUTAGE_NOTICE, OUTAGE_TITLE, first_notice_of_outage, is_out_of_credit,
         )
 
-        if event_type in CREDIT_EVENTS and is_out_of_credit(message):
-            if not first_notice_of_outage(self.workspace_id):
-                logger.info("[F197] %s held back: the bell already says credit ran out", event_type)
-                return {"dispatched_to": [], "held_back": OUT_OF_CREDIT}
-            title, message = OUTAGE_TITLE, OUTAGE_NOTICE
+        if notice.event_type not in CREDIT_EVENTS or not is_out_of_credit(notice.message):
+            return None, notice
+        if not first_notice_of_outage(self.workspace_id):
+            logger.info("[F197] %s held back: the bell already says credit ran out", notice.event_type)
+            return {"dispatched_to": [], "held_back": OUT_OF_CREDIT}, notice
+        return None, replace(notice, title=OUTAGE_TITLE, message=OUTAGE_NOTICE)
 
-        # Wave 2 — auto_reporting overrides.
-        # If settings load fails, _load_auto_reporting returns {}; treat that
-        # as disabled rather than enabled, otherwise a transient load error
-        # would silently engage routing logic with empty state.
+    def _plan(self, notice: _Notice) -> tuple[list[dict[str, Any]], bool]:
+        """The rows to deliver, and whether quiet hours hold this event.
+
+        Wave 2 order: auto_reporting loads first (a failed load is ``{}``, read as
+        disabled, so a transient error never engages routing with empty state), then the
+        preferences (the dispatch's first ``db.execute``). A route overrides them; no rows
+        at all → one in_app row; quiet hours funnel non-urgent traffic to in_app. K7: a
+        ``push`` row is never a delivery destination (dropped before the default, so it
+        never costs the bell row); a route to ``push`` delivers the bell row.
+        """
         ar_settings = self._load_auto_reporting()
         ar_enabled = bool(ar_settings) and bool(ar_settings.get("enabled", False))
-
-        override_destination: Optional[str] = None
+        override: Optional[str] = None
         if ar_enabled:
-            override_destination = self._auto_reporting_destination(
-                ar_settings, event_type, severity
-            )
-
-        prefs = self._get_preferences(event_type, user_id)
-
-        if override_destination:
-            prefs = [
-                {
-                    "destination": override_destination,
-                    "enabled": True,
-                    "channel_connection_id": None,
-                    "user_id": user_id,
-                }
-            ]
-        elif not prefs:
-            # No preferences configured at all → default to a single in_app row.
-            prefs = [
-                {
-                    "destination": "in_app",
-                    "enabled": True,
-                    "channel_connection_id": None,
-                    "user_id": user_id,
-                }
-            ]
-
-        # Quiet hours — funnel non-urgent traffic to in_app
-        if (
+            override = self._auto_reporting_destination(ar_settings, notice.event_type, notice.severity)
+        prefs = [
+            pref for pref in self._get_preferences(notice.event_type, notice.user_id)
+            if (pref.get("destination") or "in_app") != _PUSH
+        ]
+        quiet = (
             ar_enabled
-            and severity not in {"urgent", "security"}
+            and notice.severity not in _THROUGH_QUIET_HOURS
             and self._is_quiet_hours(ar_settings)
-        ):
-            prefs = [
-                {
-                    "destination": "in_app",
-                    "enabled": True,
-                    "channel_connection_id": None,
-                    "user_id": user_id,
-                }
-            ]
+        )
+        if quiet:
+            return [_row("in_app", notice.user_id)], True
+        if override:
+            return [_row("in_app" if override == _PUSH else override, notice.user_id)], False
+        return prefs or [_row("in_app", notice.user_id)], False
 
+    async def _deliver(
+        self, notice: _Notice, prefs: list[dict[str, Any]]
+    ) -> tuple[list[str], Optional[str]]:
+        """Fire every enabled, non-silent row; a row's failure is logged, never raised.
+
+        Returns the destinations fired and the in-app row's id (the first written, or None).
+        """
         dispatched: list[str] = []
-
+        notification_id: Optional[str] = None
         for pref in prefs:
-            if not pref.get("enabled", True):
+            destination = _live_destination(pref)
+            if destination is None:
                 continue
-
-            destination = pref.get("destination") or "in_app"
-
-            if destination == "silent":
-                continue
-
             try:
-                if destination == "in_app":
-                    self._insert_in_app(
-                        user_id=pref.get("user_id", user_id),
-                        event_type=event_type,
-                        title=title,
-                        message=message,
-                        link_type=link_type,
-                        link_id=link_id,
-                        agent_id=agent_id,
-                        agent_name=agent_name,
-                        status=status,
-                    )
-                    dispatched.append("in_app")
-
-                elif destination in _EXTERNAL_DESTINATIONS:
-                    formatted = self._format_external_message(
-                        title=title,
-                        status=status,
-                        agent_name=agent_name,
-                        message=message,
-                    )
-                    sent = await send_workspace_notification(
-                        self.workspace_id, formatted, channel=destination
-                    )
-                    if sent:
-                        dispatched.append(destination)
-
-                elif destination == "channel":
-                    connection_id = pref.get("channel_connection_id")
-                    if not connection_id:
-                        logger.warning(
-                            "[Dispatcher] 'channel' destination missing "
-                            "channel_connection_id (ws=%s event=%s)",
-                            self.workspace_id,
-                            event_type,
-                        )
-                        continue
-                    formatted = self._format_external_message(
-                        title=title,
-                        status=status,
-                        agent_name=agent_name,
-                        message=message,
-                    )
-                    if await self._send_to_channel_connection(
-                        str(connection_id), formatted
-                    ):
-                        dispatched.append(f"channel:{connection_id}")
-
-                else:
-                    logger.debug(
-                        "[Dispatcher] Unknown destination '%s' (ws=%s event=%s) — skipping",
-                        destination,
-                        self.workspace_id,
-                        event_type,
-                    )
-            except Exception:  # noqa: BLE001 — dispatcher must never raise
-                logger.error(
+                fired, row_id = await self._fire(notice, pref, destination)
+            except Exception:  # the dispatcher never raises
+                logger.exception(
                     "[Dispatcher] Failed to deliver event_type=%s destination=%s ws=%s",
-                    event_type,
+                    notice.event_type,
                     destination,
                     self.workspace_id,
-                    exc_info=True,
                 )
+                continue
+            if fired:
+                dispatched.append(fired)
+            notification_id = notification_id or row_id
+        return dispatched, notification_id
 
-        return {"dispatched_to": dispatched}
+    async def _fire(
+        self, notice: _Notice, pref: dict[str, Any], destination: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Deliver one row: ``(what fired or None, the in-app row's id or None)``."""
+        if destination == "in_app":
+            row_id = self._insert_in_app(
+                user_id=pref.get("user_id", notice.user_id),
+                event_type=notice.event_type,
+                title=notice.title,
+                message=notice.message,
+                link_type=notice.link_type,
+                link_id=notice.link_id,
+                agent_id=notice.agent_id,
+                agent_name=notice.agent_name,
+                status=notice.status,
+            )
+            return "in_app", row_id
+        if destination in _EXTERNAL_DESTINATIONS:
+            sent = await send_workspace_notification(
+                self.workspace_id, self._external_body(notice), channel=destination
+            )
+            return (destination if sent else None), None
+        if destination == "channel":
+            return await self._fire_channel(notice, pref), None
+        logger.debug(
+            "[Dispatcher] Unknown destination '%s' (ws=%s event=%s) — skipping",
+            destination,
+            self.workspace_id,
+            notice.event_type,
+        )
+        return None, None
+
+    async def _fire_channel(self, notice: _Notice, pref: dict[str, Any]) -> Optional[str]:
+        """Deliver a 'channel' row through its channel_connection; ``channel:<id>`` when sent."""
+        connection_id = pref.get("channel_connection_id")
+        if not connection_id:
+            logger.warning(
+                "[Dispatcher] 'channel' destination missing "
+                "channel_connection_id (ws=%s event=%s)",
+                self.workspace_id,
+                notice.event_type,
+            )
+            return None
+        if await self._send_to_channel_connection(str(connection_id), self._external_body(notice)):
+            return f"channel:{connection_id}"
+        return None
+
+    def _external_body(self, notice: _Notice) -> str:
+        """The Telegram / Slack / webhook / channel text for this notice."""
+        return self._format_external_message(
+            title=notice.title,
+            status=notice.status,
+            agent_name=notice.agent_name,
+            message=notice.message,
+        )
+
+    def _push(self, notice: _Notice, notification_id: Optional[str], quiet: bool) -> bool:
+        """PRD-266 US-010d: hand a push event to the fan-out (K6); never raises.
+
+        Only ``PUSH_EVENT_TYPES`` reach ``hand_over`` (FR-7), and none while quiet hours
+        hold the event (``quiet`` already lets urgent and security through). True when
+        the fan-out took it.
+        """
+        try:
+            from services.push.payload import PUSH_EVENT_TYPES
+
+            if quiet or notice.event_type not in PUSH_EVENT_TYPES:
+                return False
+            from services.push.fanout import PushEvent, hand_over
+
+            return bool(hand_over(self.db, PushEvent(
+                workspace_id=self.workspace_id,
+                event_type=notice.event_type,
+                notification_id=notification_id,
+                link_type=notice.link_type,
+                link_id=str(notice.link_id) if notice.link_id is not None else None,
+                user_id=notice.user_id,
+                agent_name=notice.agent_name,
+                severity=notice.severity,
+            )))
+        except Exception:  # the dispatcher never raises
+            logger.exception(
+                "[Dispatcher] Push hand-over failed for event_type=%s ws=%s",
+                notice.event_type,
+                self.workspace_id,
+            )
+            return False
 
     # -------------------------------------------------------- auto_reporting
 
@@ -385,20 +488,23 @@ class NotificationDispatcher:
         agent_id: Optional[int],
         agent_name: Optional[str],
         status: str,
-    ) -> None:
-        """Insert an in-app notification row. Does NOT commit.
+    ) -> Optional[str]:
+        """Insert an in-app notification row and return its id (None when none came back).
+
+        Does NOT commit. PRD-266 US-010d: the id rides in the push payload.
 
         F209: its time is when it is written (clock_timestamp()). The column's
         default, now(), is the transaction's START: a run's task_complete,
         written minutes into a long transaction, sorted before things that
         happened earlier and read "N min ago" from when the run began."""
-        self.db.execute(
+        result = self.db.execute(
             text(
                 "INSERT INTO notifications "
                 "(workspace_id, user_id, event_type, title, message, "
                 " link_type, link_id, agent_id, agent_name, status, created_at) "
                 "VALUES (:ws_id, :user_id, :event_type, :title, :message, "
-                " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp())"
+                " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp()) "
+                "RETURNING id"
             ),
             {
                 "ws_id": self.workspace_id,
@@ -413,6 +519,7 @@ class NotificationDispatcher:
                 "status": status,
             },
         )
+        return _returned_id(result)
 
     # ------------------------------------------------- external formatting
 

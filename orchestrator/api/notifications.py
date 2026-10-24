@@ -49,8 +49,9 @@ preferences_router = APIRouter(
     prefix="/api/notification-preferences", tags=["notification-preferences"]
 )
 
+# PRD-266 K7: a 'push' row is a person's (or the workspace's) push switch for the event.
 _VALID_DESTINATIONS: frozenset[str] = frozenset(
-    {"in_app", "telegram", "slack", "webhook", "channel", "silent"}
+    {"in_app", "telegram", "slack", "webhook", "channel", "silent", "push"}
 )
 
 
