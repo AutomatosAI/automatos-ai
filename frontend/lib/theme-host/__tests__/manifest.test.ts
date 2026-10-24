@@ -18,7 +18,7 @@ import {
   resolveUnderRoot,
   themeFilesRoot,
 } from '../manifest'
-import { HTML_CLASS_OWNERS, RESERVED_HTML_CLASSES } from '../package-manifest'
+import * as packageManifest from '../package-manifest'
 import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 
 /** The hello theme's manifest, as the browser lane serves it. */
@@ -34,6 +34,10 @@ const DIGEST = '0123456789abcdef'.repeat(4)
 const OTHER_DIGEST = 'fedcba9876543210'.repeat(4)
 const ROOT = `/api/themes/files/${DIGEST}/`
 const INSTALL_ID = '00000000-0000-4000-8000-00000000e2e1'
+const { RESERVED_HTML_CLASSES } = packageManifest
+/** A-20: the class the host gave back to every theme, and ids that may take it (Play's package's among them). */
+const FREED_HTML_CLASS = 'play'
+const ANY_THEME_IDS: readonly string[] = ['automatos/play', 'automatos-e2e/hello', 'acme/ink']
 
 function withField(field: string, value: unknown): Record<string, unknown> {
   return { ...HELLO_MANIFEST, [field]: value }
@@ -72,10 +76,14 @@ describe('PRD-261 A-04a — parseSpikeManifest', () => {
     }
   })
 
-  it('PA-8: lets only the owning package keep its reserved class', () => {
-    for (const [htmlClass, ownerId] of HTML_CLASS_OWNERS) {
-      expect(detailOf({ ...HELLO_MANIFEST, id: ownerId, htmlClass }), htmlClass).toBeNull()
-      expect(detailOf({ ...HELLO_MANIFEST, id: `${ownerId}-fork`, htmlClass }), htmlClass).not.toBeNull()
+  it("A-20 (QB-11): 'play' is any theme's class, and no id keeps a reserved one", () => {
+    expect(RESERVED_HTML_CLASSES).not.toContain(FREED_HTML_CLASS)
+    expect('HTML_CLASS_OWNERS' in packageManifest).toBe(false)
+    for (const id of ANY_THEME_IDS) {
+      expect(detailOf({ ...HELLO_MANIFEST, id, htmlClass: FREED_HTML_CLASS }), id).toBeNull()
+      for (const reserved of RESERVED_HTML_CLASSES) {
+        expect(detailOf({ ...HELLO_MANIFEST, id, htmlClass: reserved }), `${id} ${reserved}`).not.toBeNull()
+      }
     }
   })
 

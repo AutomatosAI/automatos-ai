@@ -2,8 +2,8 @@
 
 Required: ``schema``, ``id`` (``publisher/slug``), ``name``, ``version`` (``MAJOR.MINOR.PATCH``),
 ``engines`` (``{automatos, sdk}``, each exact or caret, ``*`` refused, and met by this host),
-``base``, ``htmlClass`` (the pattern, and no reserved name: ``play`` only for ``automatos/play``,
-PA-8), ``minWidth``, ``tone`` and ``slots`` (known, versioned slots that include
+``base``, ``htmlClass`` (the pattern, and none of the host's reserved names, whatever the id:
+A-20), ``minWidth``, ``tone`` and ``slots`` (known, versioned slots that include
 ``lookEditor@1`` and ``styleSheet@1``, PA-14).
 
 Optional: ``description``; ``pages`` (only the Q3 routes, each ``{mode: own|clone,
@@ -25,7 +25,7 @@ import re
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from services.themes.contract import (
-    HOST_OWNED_ROUTES, HTML_CLASS_OWNERS, HTML_CLASS_PATTERN, KNOWN_SLOTS, MANIFEST_SCHEMA, PAGE_MODES,
+    HOST_OWNED_ROUTES, HTML_CLASS_PATTERN, KNOWN_SLOTS, MANIFEST_SCHEMA, PAGE_MODES,
     PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS, RESERVED_HTML_CLASSES, SDK_VERSION, THEME_BASES,
     THEME_HOST_VERSION, THEME_TONES, ThemeError, echo, is_whole_number, plain_text_problem, theme_error,
 )
@@ -163,8 +163,7 @@ def _html_class_errors(document: Mapping[str, Any]) -> List[ThemeError]:
         return _error("BAD_HTML_CLASS", "htmlClass", (
             '"htmlClass" must be 3 to 32 lower-case letters, digits or dashes, starting with a letter.'
         ))
-    owner = HTML_CLASS_OWNERS.get(html_class)
-    if html_class in RESERVED_HTML_CLASSES and (owner is None or owner != document.get("id")):
+    if html_class in RESERVED_HTML_CLASSES:
         return _error("RESERVED_HTML_CLASS", "htmlClass", f'"htmlClass" "{html_class}" is reserved by the host.')
     return []
 

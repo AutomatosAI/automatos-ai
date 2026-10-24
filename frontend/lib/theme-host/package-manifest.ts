@@ -25,10 +25,11 @@ import { SDK_VERSION } from './sdk'
 export { THEME_HOST_VERSION }
 export const MANIFEST_SCHEMA = 'automatos-theme/v1'
 
-/** Classes the core owns on <html>: the Style axis, Classic and the tones (and next-themes' "system"). */
-export const RESERVED_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'play', 'dark', 'light', 'system']
-/** PA-8: Play's package keeps html.play until A-20; no other id may take it. */
-export const HTML_CLASS_OWNERS: ReadonlyMap<string, string> = new Map([['play', 'automatos/play']])
+/**
+ * Classes the core owns on <html>: the Style axis, Classic and the tones (and next-themes' "system").
+ * No theme's id keeps one (A-20, QB-11): any other class that fits the pattern is any theme's.
+ */
+export const RESERVED_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'dark', 'light', 'system']
 export const KNOWN_SLOTS: readonly string[] = [
   'frame@1', 'lookEditor@1', 'styleSheet@1', 'notFound@1', 'asleep@1', 'page-header.mascot@1', 'page-header.art@1',
   'empty-state.mascot@1',
@@ -212,8 +213,7 @@ function htmlClassErrors(document: JsonRecord): ThemeError[] {
       '"htmlClass" must be 3 to 32 lower-case letters, digits or dashes, starting with a letter.'
     ))
   }
-  const owner = HTML_CLASS_OWNERS.get(htmlClass)
-  const reserved = RESERVED_HTML_CLASSES.includes(htmlClass) && (owner === undefined || owner !== own(document, 'id'))
+  const reserved = RESERVED_HTML_CLASSES.includes(htmlClass)
   return errorIf(reserved, 'RESERVED_HTML_CLASS', 'htmlClass', `"htmlClass" "${htmlClass}" is reserved by the host.`)
 }
 

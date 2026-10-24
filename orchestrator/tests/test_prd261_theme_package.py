@@ -45,6 +45,11 @@ EOCD = b"PK\x05\x06"
 # PA-2: the browser's copy of the host and SDK versions. This path, named here literally, is what
 # makes the backend planner (scripts/ci/backend_test_plan.py) select this file on a frontend change.
 SHARED_MODULES = ORCH_ROOT.parent / "frontend/lib/theme-host/shared-modules.json"
+# A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
+HOST_HTML_CLASSES = ("studio", "classic", "dark", "light", "system")
+FREED_HTML_CLASS = "play"
+RESERVED_CODE = "RESERVED_HTML_CLASS"
+FREED_CLASS_IDS_MIN = 3
 
 
 def _patched(base: Mapping[str, Any], case: Mapping[str, Any]) -> Any:
@@ -106,6 +111,20 @@ def test_every_corpus_code_is_a_known_code():
     sections = ("manifests", "lookSchemas", "looks", "prepaint", "cssScope", "packages")
     codes = {case["code"] for name in sections for case in CASES[name]["cases"]} - {None}
     assert codes <= KNOWN_CODES
+
+
+def _html_class_cases(section: str, field: str, html_class: str) -> List[Mapping[str, Any]]:
+    return [case for case in CASES[section]["cases"] if case.get(field, {}).get("htmlClass") == html_class]
+
+
+def test_the_corpus_gives_play_to_any_theme_and_refuses_each_host_class():
+    # A-20: htmlClass 'play' is valid for any id, in theme.json and in a package; each class the host keeps is refused.
+    freed = _html_class_cases("manifests", "set", FREED_HTML_CLASS)
+    ids = {case["set"].get("id", CASES["manifests"]["base"]["id"]) for case in freed}
+    assert len(ids) >= FREED_CLASS_IDS_MIN and [case["code"] for case in freed] == [None] * len(freed)
+    assert [case["code"] for case in _html_class_cases("packages", "manifestSet", FREED_HTML_CLASS)] == [None]
+    for html_class in HOST_HTML_CLASSES:
+        assert {case["code"] for case in _html_class_cases("manifests", "set", html_class)} == {RESERVED_CODE}, html_class
 
 
 @pytest.mark.parametrize("case", CASES["manifests"]["cases"], ids=_ids(CASES["manifests"]))
@@ -367,8 +386,8 @@ def test_the_contract_pins_the_versions_and_the_reserved_names():
     assert contract.THEME_HOST_VERSION == "1.1.0"
     assert contract.SDK_VERSION == "1.1.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
-    assert {"studio", "classic", "play", "dark", "light"} <= set(contract.RESERVED_HTML_CLASSES)
-    assert contract.HTML_CLASS_OWNERS == {"play": "automatos/play"}
+    assert contract.RESERVED_HTML_CLASSES == HOST_HTML_CLASSES
+    assert not hasattr(contract, "HTML_CLASS_OWNERS")  # A-20: no theme's id keeps a reserved class
     assert set(contract.REQUIRED_SLOTS) == {"lookEditor@1", "styleSheet@1"} <= set(contract.KNOWN_SLOTS)
 
 

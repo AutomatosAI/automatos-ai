@@ -18,11 +18,11 @@
  * - No text, comments included, holds a name builtin Play left: its variable prefix, Auto's old
  *   public folder as a URL path, the kit's repository name, its look interface (the constant and the
  *   'play' value), its <html> class, a builtin theme's style or its ref. The names are built by
- *   parts here, so this file's own text never reads as one. Two exceptions, each one block, each
- *   held to still need it: the old-values case of lib/__tests__/ui-style.test.ts (the values builtin
- *   Play left in browsers and on the server read as nothing) and, until W-A20 (A-20) lifts PA-8,
- *   the reservation of Play's package's <html> class in lib/theme-host/package-manifest.ts. W-A20
- *   empties RUNTIME_EXCEPTIONS.
+ *   parts here, so this file's own text never reads as one. One exception, one block, held to still
+ *   need it: the old-values case of lib/__tests__/ui-style.test.ts (the values builtin Play left in
+ *   browsers and on the server read as nothing). No runtime file is excepted: A-20 lifted PA-8.
+ * - No runtime file (every file that is not a test's) names Play's package id either (A-20): core
+ *   holds only Classic, Studio and the theme host, and Play is an installed package like any other.
  * - The seams A-19a made for the core's own code stay (lib/__tests__/prd261-a19-seams.test.ts,
  *   which this replaces in the core ledger, with PRD-260's guards (a) and (e)).
  * - The docs case: docs/ outside docs/PRDS names no builtin Play, its host folder, Auto's old
@@ -95,12 +95,6 @@ function describeBlocks(source: ts.SourceFile, title: string): ts.Node[] {
   return found
 }
 
-/** The top-level statements that declare `name`. */
-function statementsDeclaring(source: ts.SourceFile, name: string): ts.Node[] {
-  return source.statements.filter((statement) => ts.isVariableStatement(statement) &&
-    statement.declarationList.declarations.some((declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name))
-}
-
 const OLD_VALUES_CASE = 'the values builtin Play left behind name nothing'
 /** Test files: the old-cookie case, the one place allowed to spell the values builtin Play left behind. */
 const TEST_EXCEPTIONS: readonly TextException[] = [
@@ -110,15 +104,22 @@ const TEST_EXCEPTIONS: readonly TextException[] = [
     nodes: (source) => describeBlocks(source, OLD_VALUES_CASE),
   },
 ]
-/** Runtime files: W-A20 (A-20) lifts PA-8's reservation and empties this list. */
-const RUNTIME_EXCEPTIONS: readonly TextException[] = [
-  {
-    file: 'lib/theme-host/package-manifest.ts',
-    why: "PA-8 keeps Play's <html> class for Play's package until A-20 (W-A20 owns the file)",
-    nodes: (source) => statementsDeclaring(source, 'HTML_CLASS_OWNERS'),
-  },
-]
+/** Runtime files: none (A-20 lifted PA-8, so no runtime file needs to name what builtin Play left). */
+const RUNTIME_EXCEPTIONS: readonly TextException[] = []
 const EXCEPTIONS: readonly TextException[] = [...TEST_EXCEPTIONS, ...RUNTIME_EXCEPTIONS]
+
+/** A test's file: under __tests__ or __mocks__, or named *.test.* or *.spec.*. Every other file is runtime code. */
+const TEST_FILE = /(^|\/)__(tests|mocks)__\/|\.(test|spec)\.[cm]?[jt]sx?$/
+/** Play's package id. Built by parts (see the header). */
+const PLAY_PACKAGE_ID = ['automatos', PLAY].join('/')
+/** What runtime code alone may not name (A-20): Play owns nothing in core. Tests may, to install Play's package. */
+const RUNTIME_BANNED_TEXT: ReadonlyArray<readonly [string, RegExp]> = [
+  ["Play's package id", new RegExp(`\\b${PLAY_PACKAGE_ID}(?![\\w-])`)],
+]
+
+function isTestFile(file: string): boolean {
+  return TEST_FILE.test(file)
+}
 
 /** Files the scan must read: one in each area the story names, and the seam A-19f1 edited. */
 const MUST_FIND: readonly string[] = [
@@ -247,6 +248,20 @@ describe('PRD-261 A-19f2 — the scan reads the whole frontend', () => {
     const lookalikes = ['reports/auto/pricing.md', 'display: flex', `video.${PLAY}()`, `'${PLAY}'`, `html.${PLAY}books`, 'builtin:x']
     expect(lookalikes.flatMap((sample) => bannedIn('x', sample, BANNED_TEXT))).toEqual([])
   })
+
+  it("refuses Play's package id in runtime code, and tells a test's file from a runtime one (A-20)", () => {
+    const samples = [`themeId: '${PLAY_PACKAGE_ID}'`, `/api/themes/looks/${PLAY_PACKAGE_ID}`, `(\`${PLAY_PACKAGE_ID}\`)`]
+    expect(samples.map((sample) => bannedIn('x', sample, RUNTIME_BANNED_TEXT).length)).toEqual(samples.map(() => 1))
+    const lookalikes = [`${PLAY_PACKAGE_ID}books`, `${PLAY_PACKAGE_ID}-lite`, 'automatos-e2e/hello', `x${PLAY_PACKAGE_ID}`]
+    expect(lookalikes.flatMap((sample) => bannedIn('x', sample, RUNTIME_BANNED_TEXT))).toEqual([])
+    const tests = [
+      'lib/__tests__/ui-style.test.ts', 'lib/theme-host/__tests__/installed-entry-fixture.ts',
+      'components/widgets/CodingCanvasWidget/DiffCard.test.tsx', 'lib/__mocks__/x.ts', 'x.spec.mjs',
+    ]
+    const runtime = ['lib/theme-host/package-manifest.ts', 'lib/api-client.ts', 'lib/testing.ts', 'app/tests/page.tsx', 'lib/x.test-utils.ts']
+    expect(tests.filter((file) => !isTestFile(file))).toEqual([])
+    expect(runtime.filter(isTestFile)).toEqual([])
+  })
 })
 
 describe('PRD-261 A-19f2 — builtin Play is gone from the frontend', () => {
@@ -259,9 +274,17 @@ describe('PRD-261 A-19f2 — builtin Play is gone from the frontend', () => {
     expect(refusedReferences()).toEqual([])
   }, SCAN_TIMEOUT_MS)
 
-  it('names nothing builtin Play left, in code, strings or comments, outside the two exceptions', () => {
+  it('names nothing builtin Play left, in code, strings or comments, outside the one exception', () => {
     const found = FILES.flatMap((file) => bannedIn(file, withoutExceptions(file, TEXTS.get(file) ?? ''), BANNED_TEXT))
     expect(found).toEqual([])
+  }, SCAN_TIMEOUT_MS)
+
+  it("names Play's package id in no runtime file, and excepts no runtime file (A-20)", () => {
+    const runtime = FILES.filter((file) => !isTestFile(file))
+    expect(runtime).toContain('lib/theme-host/package-manifest.ts')
+    expect(runtime.flatMap((file) => bannedIn(file, TEXTS.get(file) ?? '', RUNTIME_BANNED_TEXT))).toEqual([])
+    expect(RUNTIME_EXCEPTIONS).toEqual([])
+    expect(EXCEPTIONS.filter(({ file }) => !isTestFile(file)).map(({ file }) => file)).toEqual([])
   }, SCAN_TIMEOUT_MS)
 
   it('keeps each exception to one block that still needs it', () => {
