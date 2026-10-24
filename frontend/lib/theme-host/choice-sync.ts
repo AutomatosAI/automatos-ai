@@ -30,13 +30,22 @@
  *   them (`wantInstalledThemes` / `useWantInstalledThemes`), never in safe mode; until then the
  *   menu shows what Settings › Appearance already fetched, if anything.
  * - The menu's entries (`themeChoiceEntries`): the workspace's installs as `theme:install:<id>`,
- *   "Private · not reviewed" when unreviewed. No theme is compiled into the app (A-19f1).
+ *   "Signed by Automatos" when an active Automatos key verifies its signature, else "Private · not
+ *   reviewed" when unreviewed: the same rule as its row in Settings › Appearance (C-05k). No theme is
+ *   compiled into the app (A-19f1).
  */
 import { createElement, useCallback, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import { defaultContext } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { PRIVATE_NOT_REVIEWED, isDisabled, themeName } from '@/components/settings/themes/theme-labels'
+import {
+  PRIVATE_NOT_REVIEWED,
+  SIGNED_BY_AUTOMATOS,
+  isDisabled,
+  isPrivateNotReviewed,
+  isSignedByAutomatos,
+  themeName,
+} from '@/components/settings/themes/theme-labels'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { persistUiStyle, useUiStyleOptional, type StyleSwitchOptions, type UiStyleContextValue } from '@/contexts/ui-style-context'
 import { choiceOf, choiceSourceOf, themeQueryKeys, useInstalledThemes } from '@/hooks/use-installed-themes'
@@ -103,7 +112,7 @@ export interface ThemeChoiceEntry {
   readonly style: UiStyle
   readonly name: string
   readonly kind: 'core' | 'installed'
-  /** 'Private · not reviewed' for an unreviewed install; else null. */
+  /** 'Signed by Automatos' for a verified signature, else 'Private · not reviewed' for an unreviewed install; else null. */
   readonly note: string | null
 }
 
@@ -113,10 +122,16 @@ export const CORE_STYLE_CHOICES: readonly ThemeChoiceEntry[] = [
   { style: 'studio', name: 'Studio', kind: 'core', note: null },
 ]
 
+/** The install's trust note, as its Settings row badges it: a verified signature stands in place of not reviewed. */
+function installNote(install: InstalledTheme): string | null {
+  if (isSignedByAutomatos(install)) return SIGNED_BY_AUTOMATOS
+  return isPrivateNotReviewed(install) ? PRIVATE_NOT_REVIEWED : null
+}
+
 function installedEntry(install: InstalledTheme): ThemeChoiceEntry | null {
   const style = themeStyleOf(`${INSTALL_REF_PREFIX}${install.installId}`)
   if (!isInstalledThemeStyle(style)) return null
-  return { style, name: themeName(install), kind: 'installed', note: install.reviewed ? null : PRIVATE_NOT_REVIEWED }
+  return { style, name: themeName(install), kind: 'installed', note: installNote(install) }
 }
 
 /**

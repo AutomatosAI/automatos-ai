@@ -55,6 +55,7 @@ const OTHER_INSTALL_ID = '44444444-4444-4444-8444-444444444444'
 const INSTALLED_STYLE = `theme:install:${INSTALL_ID}` as UiStyle
 const OTHER_INSTALLED_STYLE = `theme:install:${OTHER_INSTALL_ID}` as UiStyle
 const PRIVATE_NOT_REVIEWED = 'Private · not reviewed'
+const SIGNED_BY_AUTOMATOS = 'Signed by Automatos'
 /** A server choice this build does not know: no theme is compiled into the app (A-19f1). */
 const UNKNOWN_CHOICE = 'builtin:nope'
 
@@ -173,6 +174,15 @@ describe('the entries the menu and ⌘K offer', () => {
     expect(entries.map((entry) => [entry.style, entry.name, entry.kind, entry.note])).toEqual([
       [INSTALLED_STYLE, 'Garden', 'installed', PRIVATE_NOT_REVIEWED],
       [OTHER_INSTALLED_STYLE, 'Dune', 'installed', null],
+    ])
+  })
+
+  it('notes a signature an Automatos key verifies as "Signed by Automatos", as the Settings row does; never an invalid one', () => {
+    const signed = installRow({ signature: { state: 'verified', keyId: 'automatos-2026' } })
+    const invalid = installRow({ installId: OTHER_INSTALL_ID, name: 'Dune', signature: { state: 'invalid', keyId: 'automatos-2026' } })
+    expect(themeChoiceEntries([signed, invalid]).map((entry) => [entry.name, entry.note])).toEqual([
+      ['Garden', SIGNED_BY_AUTOMATOS],
+      ['Dune', PRIVATE_NOT_REVIEWED],
     ])
   })
 
