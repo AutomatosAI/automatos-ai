@@ -83,7 +83,7 @@ from consumers.chatbot.named_template_note import fills_the_named_template  # F3
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
 from consumers.chatbot.waiting_asks_turn import reads_the_waiting_asks  # F439 (nights 16-17)
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
-    about_a_document, full_path_for_documents, with_document_actions,
+    about_a_document, full_path_for_documents, message_text, with_document_actions,
 )
 from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD-264 EUAI-09
 
@@ -744,8 +744,11 @@ class StreamingChatService:
         return self.workspace_id
 
     def _extract_user_text(self, llm_messages: List[Dict[str, Any]]) -> str:
-        """The latest message the person wrote (F295: never a nudge of the tool loop's)."""
-        return next((m.get("content") or "" for m in reversed(llm_messages)
+        """The words of the latest message the person wrote (F295: never a nudge of the tool
+        loop's). A message sent with a photo carries its content as parts (text plus image), so
+        only its text parts are read: the answer checks after the loop (F187 invented_ids,
+        F205 internal_names) run regexes over this and crashed on a list (24 Oct, the app)."""
+        return next((message_text(m) for m in reversed(llm_messages)
                      if m.get("role") == "user" and not is_nudge(m)), "")
 
     async def _load_agent_context(self, agent_runtime) -> dict:
