@@ -2193,6 +2193,21 @@ class Config:
     MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
         0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
     )
+    # Push through Expo's push service (services/push/expo.py, AGENTS.md exception 2). Expo's
+    # optional access token: empty sends without one. A secret: never logged, never in
+    # discovery, never a key in Settings.
+    EXPO_PUSH_ACCESS_TOKEN: str = (os.getenv("EXPO_PUSH_ACCESS_TOKEN") or "").strip()
+    # Each request to Expo times out after this many seconds, at least one.
+    EXPO_PUSH_TIMEOUT_SECONDS: int = max(1, int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10")))
+    # The receipts job (services/push/receipts.py) reads Expo's receipts this often on the
+    # leader's scheduler, at least a minute apart.
+    PUSH_RECEIPTS_INTERVAL_SECONDS: int = max(60, int(os.getenv("PUSH_RECEIPTS_INTERVAL_SECONDS", "900")))
+    # The daily digest (services/mobile/digest.py, US-013) is checked this often on the leader's
+    # scheduler, at least a minute apart; a person is due for 90 minutes after their digest time.
+    DIGEST_JOB_INTERVAL_SECONDS: int = max(60, int(os.getenv("DIGEST_JOB_INTERVAL_SECONDS", "900")))
+    # The digest time of a phone that names none, 'HH:MM' in the phone's timezone; a value that
+    # is not HH:MM reads as 08:00 (services.mobile.digest.default_digest_time).
+    DIGEST_DEFAULT_TIME: str = (os.getenv("DIGEST_DEFAULT_TIME") or "08:00").strip()
 
     # =============================================================================
     # PRD-251 Socials

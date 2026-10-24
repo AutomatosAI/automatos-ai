@@ -157,9 +157,11 @@ def route_for_event(
 # ----------------------------------------------------------------- internals
 
 
-# Concrete destinations the dispatcher knows how to deliver.
+# Concrete destinations the dispatcher knows how to deliver. PRD-266 K7: a route to
+# 'push' delivers the bell row, and the phone for the three push types; push is never
+# a primary or fallback channel.
 _VALID_DESTINATIONS: frozenset[str] = frozenset(
-    {"in_app", "telegram", "slack", "webhook", "silent"}
+    {"in_app", "telegram", "slack", "webhook", "silent", "push"}
 )
 _VALID_CHANNELS: frozenset[str] = frozenset({"telegram", "slack", "in_app", "webhook"})
 

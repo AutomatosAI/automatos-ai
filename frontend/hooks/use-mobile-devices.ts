@@ -20,6 +20,11 @@
  * Revoke (DELETE /devices/{id}), a one-time code for a phone or another browser (POST
  * /pairing-codes, local edition only) and whether this install is in paired mode, from the same
  * discovery document.
+ *
+ * US-019b (K15): each device's push state and why it is off (push_disabled_reason), the push
+ * switch on the caller's own phones (PATCH /devices/{id} {push_enabled}; 409 push_token_missing
+ * when the phone never registered an Expo token) and, for an owner or admin, whose each phone is:
+ * owner_label is on every row that is not the caller's own, so a row without it is theirs.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -47,6 +52,8 @@ export const MOBILE_DEVICES_QUERY_KEY = ['mobile-devices'] as const
 const DISCOVERY_QUERY_KEY = ['mobile-discovery'] as const
 const LOCAL_EDITION = 'local'
 const INVALID_PAIRING_CODE = 'invalid_pairing_code'
+/** PATCH push on for a phone that registered no Expo token (services/mobile/devices.py). */
+const PUSH_TOKEN_MISSING = 'push_token_missing'
 const NOT_FOUND = 404
 const TOO_MANY_ATTEMPTS = 429
 
@@ -72,6 +79,10 @@ export interface MobileDevice {
   readonly platform: string | null
   readonly status: string
   readonly push_enabled: boolean
+  /** Why push is off: DeviceNotRegistered, token_moved, device_revoked; null when on or never set. */
+  readonly push_disabled_reason?: string | null
+  /** Whose device it is (name, else email): only on a row that is not the caller's own. */
+  readonly owner_label?: string
   readonly last_seen_at: string | null
 }
 
@@ -203,6 +214,22 @@ export function useRevokeDevice() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (deviceId: string) => apiClient.delete<MobileDevice>(`${DEVICES_PATH}/${encodeURIComponent(deviceId)}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MOBILE_DEVICES_QUERY_KEY }),
+  })
+}
+
+/** Did PATCH refuse push on because the phone never registered an Expo token? */
+export function isPushTokenMissing(failure: unknown): boolean {
+  const detail = ((failure as ApiHttpError | null)?.body as { detail?: { code?: unknown } } | undefined)?.detail
+  return typeof detail === 'object' && detail?.code === PUSH_TOKEN_MISSING
+}
+
+/** Switch push on or off for one of the caller's own phones, then read the list again. */
+export function useSetDevicePush() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ deviceId, pushEnabled }: { deviceId: string; pushEnabled: boolean }) =>
+      apiClient.patch<MobileDevice>(`${DEVICES_PATH}/${encodeURIComponent(deviceId)}`, { push_enabled: pushEnabled }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: MOBILE_DEVICES_QUERY_KEY }),
   })
 }

@@ -7,6 +7,10 @@
  * and whether push is on. Revoke asks first, then calls DELETE /devices/{id}; a revoked device
  * stays listed as revoked. Revoking this browser's own pairing sends it back to "Pair this
  * browser" on its next call (device_revoked).
+ *
+ * US-019b (K15): an owner or admin sees whose each phone is (owner_label, beside its name: a hosted
+ * phone's name is the model the app registers); each row's push state, why it is off, and the push
+ * switch on the caller's own phones are device-push-state.tsx.
  */
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -22,6 +26,8 @@ import {
 } from '@/components/ui/dialog'
 import { useRevokeDevice, type MobileDevice } from '@/hooks/use-mobile-devices'
 import { formatTimestamp } from '@/lib/utils'
+
+import { DevicePushState } from './device-push-state'
 
 const ACTIVE = 'active'
 const PLATFORM_LABELS: Readonly<Record<string, string>> = { ios: 'iOS', android: 'Android', web: 'Browser' }
@@ -51,8 +57,12 @@ function DeviceRow({ device, onRevoke }: { device: MobileDevice; onRevoke: (devi
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-border/40 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 space-y-0.5">
-        <p className="truncate font-medium text-foreground">{deviceName(device)}</p>
+        <div className="flex min-w-0 items-baseline gap-2">
+          <p className="truncate font-medium text-foreground">{deviceName(device)}</p>
+          {device.owner_label && <span className="truncate text-xs text-muted-foreground">{device.owner_label}</span>}
+        </div>
         <p className="text-xs text-muted-foreground">{deviceFacts(device)}</p>
+        <DevicePushState device={device} name={deviceName(device)} />
       </div>
       {device.status === ACTIVE ? (
         <Button type="button" variant="outline" size="sm" onClick={() => onRevoke(device)} aria-label={`Revoke ${deviceName(device)}`}>

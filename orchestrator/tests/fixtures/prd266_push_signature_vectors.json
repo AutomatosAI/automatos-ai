@@ -1,0 +1,192 @@
+{
+  "schema": "automatos-push-signature-vectors/v2",
+  "key": "prd266-test-vector-push-key",
+  "window": {
+    "max_age_seconds": 604800,
+    "max_future_seconds": 300
+  },
+  "cases": [
+    {
+      "name": "question-with-options",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1001",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "42",
+        "ticket_number": "0419",
+        "question": "Ship the Lisbon deck?",
+        "options": [
+          "Yes",
+          "No",
+          "Later"
+        ],
+        "iat": 1792540800,
+        "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+      },
+      "message": "[\"v2\",\"needs_answer\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1001\",\"42\",\"question\",\"42\",\"0419\",\"Ship the Lisbon deck?\",[\"Yes\",\"No\",\"Later\"],1792540800]",
+      "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+    },
+    {
+      "name": "redacted-question",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1002",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "42",
+        "ticket_number": "0419",
+        "iat": 1792540800,
+        "sig": "800c8568838c16721faf7e738b7d715f0730c3c7d5cefb9941ab76ba69e293d3"
+      },
+      "message": "[\"v2\",\"needs_answer\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1002\",\"42\",\"question\",\"42\",\"0419\",\"\",[],1792540800]",
+      "sig": "800c8568838c16721faf7e738b7d715f0730c3c7d5cefb9941ab76ba69e293d3"
+    },
+    {
+      "name": "review",
+      "payload": {
+        "v": 2,
+        "type": "review",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1003",
+        "link_type": "task",
+        "link_id": "8812",
+        "ticket_number": "0419",
+        "iat": 1792540800,
+        "sig": "5f11674af935f0ab0a912494ca6502750354541c774c667934922177df07dc88"
+      },
+      "message": "[\"v2\",\"review\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1003\",\"\",\"task\",\"8812\",\"0419\",\"\",[],1792540800]",
+      "sig": "5f11674af935f0ab0a912494ca6502750354541c774c667934922177df07dc88"
+    },
+    {
+      "name": "auto-message",
+      "payload": {
+        "v": 2,
+        "type": "auto_message",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1004",
+        "link_type": "chat",
+        "link_id": "0d9f2c51-7a43-4b8e-9c61-2e5f7a1b3c4d",
+        "iat": 1792540800,
+        "sig": "3e947349177d6ee98138bb05cc14112069522d3ba2c042d8f67ac18b22b02aa5"
+      },
+      "message": "[\"v2\",\"auto_message\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1004\",\"\",\"chat\",\"0d9f2c51-7a43-4b8e-9c61-2e5f7a1b3c4d\",\"\",\"\",[],1792540800]",
+      "sig": "3e947349177d6ee98138bb05cc14112069522d3ba2c042d8f67ac18b22b02aa5"
+    },
+    {
+      "name": "unicode-question",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1005",
+        "grant_id": "7",
+        "link_type": "question",
+        "link_id": "7",
+        "question": "Publicar às 09:00 — café ☕?\nLinha \"dois\"",
+        "options": [
+          "Sim",
+          "Não"
+        ],
+        "iat": 1792540800,
+        "sig": "e0e3a50468bb5e8de2a97706037d82110e07d92d8f8dbb0cdca0de8e01442136"
+      },
+      "message": "[\"v2\",\"needs_answer\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1005\",\"7\",\"question\",\"7\",\"\",\"Publicar às 09:00 — café ☕?\\nLinha \\\"dois\\\"\",[\"Sim\",\"Não\"],1792540800]",
+      "sig": "e0e3a50468bb5e8de2a97706037d82110e07d92d8f8dbb0cdca0de8e01442136"
+    }
+  ],
+  "tampered": [
+    {
+      "name": "question-with-options, link_id 43",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1001",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "43",
+        "ticket_number": "0419",
+        "question": "Ship the Lisbon deck?",
+        "options": [
+          "Yes",
+          "No",
+          "Later"
+        ],
+        "iat": 1792540800,
+        "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+      },
+      "valid": false
+    },
+    {
+      "name": "question-with-options, another workspace",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f",
+        "notification_id": "1001",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "42",
+        "ticket_number": "0419",
+        "question": "Ship the Lisbon deck?",
+        "options": [
+          "Yes",
+          "No",
+          "Later"
+        ],
+        "iat": 1792540800,
+        "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+      },
+      "valid": false
+    },
+    {
+      "name": "question-with-options, iat + 1",
+      "payload": {
+        "v": 2,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1001",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "42",
+        "ticket_number": "0419",
+        "question": "Ship the Lisbon deck?",
+        "options": [
+          "Yes",
+          "No",
+          "Later"
+        ],
+        "iat": 1792540801,
+        "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+      },
+      "valid": false
+    },
+    {
+      "name": "question-with-options, v 1",
+      "payload": {
+        "v": 1,
+        "type": "needs_answer",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1001",
+        "grant_id": "42",
+        "link_type": "question",
+        "link_id": "42",
+        "ticket_number": "0419",
+        "question": "Ship the Lisbon deck?",
+        "options": [
+          "Yes",
+          "No",
+          "Later"
+        ],
+        "iat": 1792540800,
+        "sig": "ebbf977c0e83aefa57f52a0559c6907b31be5ebb44112450b8b88c248f4080fa"
+      },
+      "valid": false
+    }
+  ]
+}

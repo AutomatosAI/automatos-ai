@@ -337,6 +337,8 @@ front (step 2).
    ```
    It prints a code (it works once, for ten minutes) and its pairing link. The person
    types the code into *Pair this browser*, with a name for that browser.
+   For App Review, `--review --ttl-hours N` mints one code that lasts N hours (at most 336,
+   two weeks); it still works once, and minting it is written to the audit log.
 
    *Check:* the app shows after the code.
 4. **Pair phones from Studio.** In the paired browser: **Settings → Phones & devices →
@@ -346,6 +348,20 @@ front (step 2).
 
    *Check:* the phone is listed under **Settings → Phones & devices**, where Revoke
    cuts it off.
+
+**Notifications.** Automatos Go's notifications go through Expo's push service: each
+one leaves the install for Expo, which hands it to the phone. Nothing leaves until the
+operator agrees, and that answer is the person's to give, never yours: Studio asks once,
+the first time they open *Pair a phone*, and the app asks when it pairs; they change it
+later under **Settings → Phones & devices**. Tell them what it means: a question's text
+and its options travel in its notification unless the workspace redacts questions (they
+are then sent as a generic line, with Open only); every other notification is a generic
+line. Self-hosted notifications rely on Expo's "enhanced push security" staying off on
+the Automatos EAS project: with it on, Expo refuses every send that does not carry the
+project's own access token.
+
+*Check:* `curl -s http://localhost:8000/.well-known/automatos.json` shows
+`"push":{"expo":true}` once they agreed, and `"push":{"expo":false}` until then.
 
 **An install that already set `BIND_ADDRESS=0.0.0.0`** publishes the API and the web
 app beyond this machine, so while `LOCAL_REMOTE_ACCESS` is unset (`off`) the backend

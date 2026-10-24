@@ -7,13 +7,19 @@
  * and the list shows the member's own phones (an owner or admin sees the workspace's). Every call
  * goes through hooks/use-mobile-devices.ts. While a code is live the list is read again every few
  * seconds, so the phone or browser that pairs with it appears.
+ *
+ * US-019a: a local install also shows the operator's Expo answer as a switch, and Pair a phone
+ * asks it once, before the first code, while it was never answered (hooks/use-push-consent.ts).
  */
 import { useCountdown } from '@/hooks/use-countdown'
 import { useMintPairingCode, useMobileDevices, usePairingMode } from '@/hooks/use-mobile-devices'
+import { useAskOnceBeforePairing } from '@/hooks/use-push-consent'
 import { isLocal } from '@/lib/auth-edition'
 
 import { DeviceList } from './device-list'
 import { PairBrowserNote, PairPhonePanel } from './pair-phone-panel'
+import { PushConsentQuestion } from './push-consent-question'
+import { PushConsentSwitch } from './push-consent-switch'
 
 /** How often the list is read while a pairing code is live. */
 export const LIVE_CODE_REFRESH_MS = 5000
@@ -31,6 +37,7 @@ function mintError(error: unknown): string | null {
 export function PhonesDevicesTab() {
   const { paired, webUrl } = usePairingMode()
   const mint = useMintPairingCode()
+  const question = useAskOnceBeforePairing(() => mint.mutate())
   const secondsLeft = useCountdown(mint.data?.expires_at)
   const codeLive = secondsLeft !== null && secondsLeft > 0
   const devices = useMobileDevices(codeLive ? LIVE_CODE_REFRESH_MS : undefined)
@@ -42,14 +49,19 @@ export function PhonesDevicesTab() {
         <p className="text-sm text-muted-foreground">{TAB_LEDE}</p>
       </div>
       <DeviceList devices={devices.data} loading={devices.isLoading} failed={devices.isError} />
+      {isLocal && <PushConsentSwitch />}
       {paired && (
         <PairPhonePanel
           pairing={mint.data}
           secondsLeft={secondsLeft}
-          minting={mint.isLoading}
+          minting={mint.isLoading || question.waiting || question.saving}
           error={mintError(mint.error)}
-          onMint={() => mint.mutate()}
-        />
+          onMint={question.start}
+        >
+          {question.asking && (
+            <PushConsentQuestion saving={question.saving} failed={question.failed} onAnswer={question.reply} />
+          )}
+        </PairPhonePanel>
       )}
       {paired && <PairBrowserNote webUrl={webUrl} />}
     </div>

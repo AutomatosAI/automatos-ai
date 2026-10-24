@@ -1,5 +1,5 @@
 {
-  "route_count": 978,
+  "route_count": 981,
   "routes": [
     {
       "method": "GET",
@@ -3064,6 +3064,18 @@
     {
       "method": "POST",
       "path": "/api/v1/mobile/pairing-codes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mobile/push-consent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/mobile/push-consent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/mobile/push-settings"
     },
     {
       "method": "POST",

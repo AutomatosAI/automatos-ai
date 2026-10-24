@@ -498,6 +498,8 @@ def test_another_workspaces_device_is_404_to_everyone_here(db_session, ws, seed_
 
 def test_patch_changes_the_three_fields(db_session, ws, lane):
     row, token = _paired(db_session, ws, _person(db_session)[0])
+    row.expo_push_token = f"ExponentPushToken[{row.install_id}]"  # push on needs one (W2 US-009)
+    _settle(db_session)
     changes = {"push_enabled": True, "digest_time": "18:45", "timezone": "America/New_York"}
 
     response = lane.patch(_one(row.id), json=changes, headers=_bearer(token))

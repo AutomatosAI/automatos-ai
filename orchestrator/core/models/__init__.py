@@ -18,6 +18,7 @@ from .tool_routing import *  # PRD-139: Tool Routing Graph (edges, affinities, i
 from .approval_grants import ApprovalGrant, GrantStatus  # noqa: F401  # PRD-181 S2 (F060)
 from .cli_hosts import CliHost, CliHostStatus  # noqa: F401  # PRD-234 S1a (session mode)
 from .mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus  # noqa: F401  # PRD-266 §4.2
+from .mobile_push import PUSH_TYPES, MobileDigestPost, MobilePushTicket  # noqa: F401  # PRD-266 §4.4, §4.5
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
@@ -110,6 +111,7 @@ from .socials import (  # noqa: F401
 from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger; PRD-263 run table
 from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
+from . import review_entries  # noqa: F401  # PRD-266 US-012a: a ticket entering Review is announced after its commit
 from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
 from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
