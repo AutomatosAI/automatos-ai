@@ -462,7 +462,9 @@ async def _dispatch_approval_pending(
 
     Owns its session: by the time the loop runs this, the creating caller's
     transaction is finished (and its session may be closed). The grant id rides
-    ``link_id`` so the P2-15 approvals queue has a deep-link target.
+    ``link_id`` so the P2-15 approvals queue has a deep-link target. The
+    dispatcher never commits, so this commits its bell row (closing the session
+    alone would roll it back).
     """
     from core.database.database import SessionLocal
     from core.services.notification_dispatcher import NotificationDispatcher
@@ -480,11 +482,13 @@ async def _dispatch_approval_pending(
             link_id=str(grant_id) if grant_id is not None else None,
             status="action_required",
         )
+        db.commit()
     except Exception:
         logger.warning(
             "[tool_grants] approval_pending dispatch failed for grant %s",
             grant_id, exc_info=True,
         )
+        db.rollback()
     finally:
         try:
             db.close()

@@ -8,13 +8,14 @@ runs no loop). CI's test DB has no ``notifications`` table (scripts/init_test_db
 models), so the fixture makes it as alembic/versions/prd128_notifications.py does and drops it
 after. Time passes by moving the workspace's bell rows back. Proven here:
 
-* A watcher post tells the chat's owner only, linked to the chat, the excerpt as its message; a
-  post without a person (an agent's scheduled task) tells the owner of the chat it landed in; on
-  a running loop the notice runs when the loop does.
-* A question's answer, a click's result, and a post without an origin tell nobody.
-* Three Mission narration lines in ten minutes tell once; a daily digest right after tells once
-  more (it is never held back); a scheduled-task post eleven minutes later tells once more. The
-  window is per chat; two digests in a row both tell.
+* A scheduled task's post tells the chat's owner only, linked to the chat, the excerpt as its
+  message; a post without a person (an agent's scheduled task) tells the owner of the chat it
+  landed in; on a running loop the notice runs when the loop does.
+* A question's answer, a click's result, a post without an origin, and a watcher's or a Mission's
+  post tell nobody: those two raise their own bell event already (one row per event).
+* Three scheduled-task posts in ten minutes tell once; a daily digest right after tells once more
+  (it is never held back); a scheduled-task post eleven minutes later tells once more. The window
+  is per chat; two digests in a row both tell.
 * None, a mock (with or without Message's spec), and an unsaved Message tell nobody.
 * An ``announce`` or a dispatcher that raises never reaches ``deliver_background_message``'s
   caller, which still gets the saved message; a message expired by its commit still tells.
@@ -156,18 +157,18 @@ def _user_chat(new_session, ws, person):
 # --------------------------------------------------------------------------- who is told
 
 
-def test_a_watcher_post_tells_the_chats_owner_only(people, told, new_session):
+def test_a_scheduled_task_post_tells_the_chats_owner_only(people, told, new_session):
     ws, owner, other = people
 
-    message = _post(new_session, ws, owner, "watcher", words="Watch verdict\n\n8.4/10, passed.")
+    message = _post(new_session, ws, owner, "scheduled_task", words="Weekly numbers\n\nRevenue: £4,210")
 
     assert told == [{
         "workspace_id": ws, "event_type": "auto_message", "title": "Auto messaged you",
-        "message": "Watch verdict 8.4/10, passed.", "link_type": "chat", "link_id": str(message.chat_id),
+        "message": "Weekly numbers Revenue: £4,210", "link_type": "chat", "link_id": str(message.chat_id),
         "agent_name": "Auto", "user_id": owner[1],
     }]
     assert _bell(new_session, ws, owner[1]) == [(
-        "auto_message", "Auto messaged you", "Watch verdict 8.4/10, passed.", "chat",
+        "auto_message", "Auto messaged you", "Weekly numbers Revenue: £4,210", "chat",
         str(message.chat_id), "Auto")]
     assert _bell(new_session, ws, other[1]) == []
 
@@ -185,7 +186,7 @@ def test_a_post_on_a_running_loop_tells_when_the_loop_runs_the_notice(people, to
     ws, owner, _ = people
 
     async def on_a_loop():
-        message = _post(new_session, ws, owner, "watcher")
+        message = _post(new_session, ws, owner, "scheduled_task")
         before = len(told)
         for _ in range(3):
             await asyncio.sleep(0)
@@ -196,12 +197,12 @@ def test_a_post_on_a_running_loop_tells_when_the_loop_runs_the_notice(people, to
     assert before == 0 and [c["link_id"] for c in told] == [str(message.chat_id)]
 
 
-def test_a_question_answer_and_a_click_result_tell_nobody(people, told, new_session):
+def test_a_question_answer_a_click_result_a_watcher_and_a_mission_tell_nobody(people, told, new_session):
     from services.click_results import ORIGIN as CLICK_RESULT
 
     ws, owner, _ = people
 
-    for origin in ("question_answer", CLICK_RESULT, None):
+    for origin in ("question_answer", CLICK_RESULT, None, "watcher", "mission"):
         assert _post(new_session, ws, owner, origin) is not None   # posted, never announced
 
     assert told == []
@@ -210,23 +211,23 @@ def test_a_question_answer_and_a_click_result_tell_nobody(people, told, new_sess
 # --------------------------------------------------------------------------- the window
 
 
-def test_narration_is_told_once_in_ten_minutes_the_digest_always_and_a_later_post_again(
+def test_scheduled_posts_are_told_once_in_ten_minutes_the_digest_always_and_a_later_post_again(
         people, told, new_session):
     ws, owner, _ = people
 
-    _post(new_session, ws, owner, "mission", words="Mission started: Lisbon deck")
+    _post(new_session, ws, owner, "scheduled_task", words="Lisbon deck: drafted")
     _pass_minutes(new_session, ws, 4)
-    _post(new_session, ws, owner, "mission", words="Step 1 of 3 done")
+    _post(new_session, ws, owner, "scheduled_task", words="Lisbon deck: reviewed")
     _pass_minutes(new_session, ws, 5)
-    _post(new_session, ws, owner, "mission", words="Step 2 of 3 done")
-    assert [c["message"] for c in told] == ["Mission started: Lisbon deck"]
+    _post(new_session, ws, owner, "scheduled_task", words="Lisbon deck: sent")
+    assert [c["message"] for c in told] == ["Lisbon deck: drafted"]
 
     _post(new_session, ws, owner, "daily_digest", words="Your Read for Friday")
     _pass_minutes(new_session, ws, 11)
     _post(new_session, ws, owner, "scheduled_task", words="Weekly numbers: £4,210")
 
     assert [c["message"] for c in told] == [
-        "Mission started: Lisbon deck", "Your Read for Friday", "Weekly numbers: £4,210"]
+        "Lisbon deck: drafted", "Your Read for Friday", "Weekly numbers: £4,210"]
     assert len({c["link_id"] for c in told}) == 1           # one Auto thread throughout
 
 
@@ -243,8 +244,8 @@ def test_the_window_is_per_chat(people, told, new_session):
     ws, owner, _ = people
     deck_chat = _user_chat(new_session, ws, owner)
 
-    auto_thread = _post(new_session, ws, owner, "watcher").chat_id
-    _post(new_session, ws, owner, "mission", words="Mission started", chat_id=deck_chat)
+    auto_thread = _post(new_session, ws, owner, "scheduled_task").chat_id
+    _post(new_session, ws, owner, "scheduled_task", words="Lisbon deck: drafted", chat_id=deck_chat)
 
     assert [c["link_id"] for c in told] == [str(auto_thread), deck_chat]
 
@@ -263,7 +264,7 @@ def test_a_mock_none_or_unsaved_message_tells_nobody(people, monkeypatch):
                       parts=[{"type": "text", "text": "never written"}])
 
     for message in (None, MagicMock(), MagicMock(spec=Message), unsaved):
-        auto_message.announce(message, {"origin": "watcher"})
+        auto_message.announce(message, {"origin": "scheduled_task"})
 
     assert scheduled == []
 
@@ -271,7 +272,7 @@ def test_a_mock_none_or_unsaved_message_tells_nobody(people, monkeypatch):
 def test_a_message_expired_by_its_commit_still_tells(people, told, new_session):
     ws, owner, _ = people
 
-    message = _post(new_session, ws, owner, "watcher", expire_on_commit=True)
+    message = _post(new_session, ws, owner, "scheduled_task", expire_on_commit=True)
 
     assert [(c["link_id"], c["message"]) for c in told] == [
         (str(message.chat_id), "Watched it. 8.4/10, passed.")]
@@ -293,7 +294,7 @@ def test_a_chat_outside_the_messages_workspace_tells_nobody(people, told, new_se
     chat_id = _user_chat(new_session, ws, owner)
 
     asyncio.run(dispatch_auto_message(AutoMessage(
-        workspace_id=str(uuid.uuid4()), chat_id=chat_id, excerpt="elsewhere", origin="watcher")))
+        workspace_id=str(uuid.uuid4()), chat_id=chat_id, excerpt="elsewhere", origin="scheduled_task")))
 
     assert told == []
 
@@ -312,7 +313,7 @@ def test_an_announce_that_raises_never_reaches_the_caller(people, monkeypatch, n
 
     monkeypatch.setattr(auto_message, "announce", boom)
 
-    message = _post(new_session, ws, owner, "watcher")
+    message = _post(new_session, ws, owner, "scheduled_task")
 
     assert isinstance(message, Message)
     assert new_session().query(Message).filter(Message.id == message.id).count() == 1
@@ -331,7 +332,7 @@ def test_a_dispatcher_that_raises_never_reaches_the_caller(people, monkeypatch, 
     monkeypatch.setattr(NotificationDispatcher, "dispatch", boom)
     monkeypatch.setattr(auto_message, "_open_session", new_session)
 
-    message = _post(new_session, ws, owner, "mission")
+    message = _post(new_session, ws, owner, "scheduled_task")
 
     assert isinstance(message, Message) and message.parts == [
         {"type": "text", "text": "Watched it. 8.4/10, passed."}]
@@ -350,7 +351,7 @@ def test_deliver_background_message_still_returns_the_saved_message(people, told
 
     monkeypatch.setattr(chat_messenger, "post_background_message", post)
 
-    message = _post(new_session, ws, owner, "watcher")
+    message = _post(new_session, ws, owner, "scheduled_task")
 
     assert message is returned[0] and len(told) == 1
 
@@ -364,5 +365,5 @@ def test_auto_message_is_a_valid_event_and_a_push_type_with_k11s_origins_and_win
     from services.push.payload import PUSH_TYPE_EVENTS
 
     assert "auto_message" in VALID_EVENT_TYPES and PUSH_TYPE_EVENTS["auto_message"] == ("auto_message",)
-    assert ANNOUNCED_ORIGINS == {"watcher", "scheduled_task", "mission", "daily_digest"}
+    assert ANNOUNCED_ORIGINS == {"scheduled_task", "daily_digest"}
     assert AUTO_MESSAGE_COALESCE_SECONDS == 600

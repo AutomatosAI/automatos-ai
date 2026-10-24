@@ -3,8 +3,10 @@
 The notification dispatcher calls ``hand_over(db, event)`` for an event in
 ``payload.PUSH_EVENT_TYPES`` (US-010d). ``hand_over`` asks one cheap question on the caller's
 session — does this workspace have any phone push could reach? — and only then hands
-``deliver`` to ``core.best_effort.off_loop``: inline where no event loop runs, on the
-best-effort threads where one does, so a request never waits on Expo (K6).
+``deliver`` off the event loop: inline where no event loop runs, on push's own
+``PUSH_DELIVERY_THREADS`` threads where one does, so a request never waits on Expo (K6). They
+are not ``core.best_effort``'s threads: a slow Expo never holds up the usage and billing rows
+those write.
 
 ``deliver`` does the real work on a session of its own, when the push is sent:
 
@@ -24,21 +26,26 @@ best-effort threads where one does, so a request never waits on Expo (K6).
    unless the phone registered a new token meanwhile.
 
 It commits once (the writes after the send), never raises, and logs ids and counts only:
-never a push token, a push key, a question, an option or a body.
+never a push token, a push key, a question, an option or a body. A database error is logged by
+its class only (``_log_database_failure``): its text carries the statement's bound parameters,
+and ``_turn_off`` binds a push token.
 """
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import config
-from core.best_effort import off_loop
 from core.models.approval_grants import ApprovalGrant, GrantStatus
 from core.models.core import BoardTask
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
@@ -75,6 +82,16 @@ _PUSH_SWITCHES_SQL = text(
 
 COUNT_KEYS = ("recipients", "devices", "sent", "refused", "disabled")
 
+# Push delivery's own threads (each holds one event's Expo requests while Expo answers),
+# never core.best_effort's, which write usage and billing rows.
+PUSH_DELIVERY_THREADS = 2
+PUSH_THREAD_PREFIX = "push-delivery"
+_push_executor = ThreadPoolExecutor(max_workers=PUSH_DELIVERY_THREADS, thread_name_prefix=PUSH_THREAD_PREFIX)
+
+FANOUT_FAILED = "Push fan-out failed for workspace %s (%s)"
+NOT_CLOSED = "Push fan-out: the session did not close cleanly"
+HAND_OVER_FAILED = "Push hand-over failed for workspace %s (%s)"
+
 SessionFactory = Callable[[], Session]
 
 
@@ -107,6 +124,14 @@ class _Context:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _log_database_failure(message: str, *args: Any, failure: SQLAlchemyError) -> None:
+    """Log a database error by its class only, never its text or traceback.
+
+    The text carries the statement's bound parameters, a push token among them.
+    """
+    logger.error(message + " (%s)", *args, type(failure).__name__)
 
 
 def _workspace_uuid(workspace_id: Any) -> uuid.UUID:
@@ -325,14 +350,22 @@ def deliver(
         db = (session_factory or _open_session)()
         counts = _push(db, event, sender or _default_sender())
         db.commit()
+    except SQLAlchemyError as failure:
+        _log_database_failure(FANOUT_FAILED, event.workspace_id, event.event_type, failure=failure)
+        return _failed(db)
     except Exception:
-        logger.exception("Push fan-out failed for workspace %s (%s)", event.workspace_id, event.event_type)
-        _end(db, rollback=True)
-        return dict.fromkeys(COUNT_KEYS, 0)
+        logger.exception(FANOUT_FAILED, event.workspace_id, event.event_type)
+        return _failed(db)
     _end(db, rollback=False)
     logger.info("Push fan-out: workspace %s %s notification %s: %s", event.workspace_id,
                 event.event_type, event.notification_id, counts)
     return counts
+
+
+def _failed(db: Optional[Session]) -> Dict[str, int]:
+    """After a failure: roll back, close, and count nothing."""
+    _end(db, rollback=True)
+    return dict.fromkeys(COUNT_KEYS, 0)
 
 
 def _end(db: Optional[Session], *, rollback: bool) -> None:
@@ -343,17 +376,30 @@ def _end(db: Optional[Session], *, rollback: bool) -> None:
         if rollback:
             db.rollback()
         db.close()
+    except SQLAlchemyError as failure:
+        _log_database_failure(NOT_CLOSED, failure=failure)
     except Exception:
-        logger.exception("Push fan-out: the session did not close cleanly")
+        logger.exception(NOT_CLOSED)
 
 
-@off_loop
+def _loop_running() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
 def _deliver_off_loop(event: PushEvent) -> None:
-    """``deliver`` on the best-effort threads when an event loop runs; inline when none does.
+    """``deliver`` on the push threads when an event loop runs, with the caller's context; inline
+    when none does.
 
     The dispatcher's ``dispatch`` is a coroutine, so its hand-over always finds a loop.
     """
-    deliver(event)
+    if not _loop_running():
+        deliver(event)
+        return
+    _push_executor.submit(contextvars.copy_context().run, deliver, event)
 
 
 def has_eligible_device(db: Session, workspace_id: Any) -> bool:
@@ -384,8 +430,11 @@ def hand_over(db: Session, event: PushEvent) -> bool:
         if not _worth_handing_over(db, event):
             return False
         _deliver_off_loop(event)
+    except SQLAlchemyError as failure:
+        _log_database_failure(HAND_OVER_FAILED, event.workspace_id, event.event_type, failure=failure)
+        return False
     except Exception:
-        logger.exception("Push hand-over failed for workspace %s (%s)", event.workspace_id, event.event_type)
+        logger.exception(HAND_OVER_FAILED, event.workspace_id, event.event_type)
         return False
     return True
 

@@ -101,9 +101,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # PRD-266 US-012a: a ticket entered Review (core/models/review_entries.py, the
         # sweeper); in-app by default, a push type (Ready for review), linked to the ticket.
         "review_pending",
-        # PRD-266 US-012b: Auto posted in a person's chat unprompted (a watcher, a scheduled
-        # task, a Mission's narration, the daily digest; services/notification_events/
-        # auto_message.py); in-app by default, a push type (Auto messaged you), linked to the chat.
+        # PRD-266 US-012b: Auto posted in a person's chat unprompted (a scheduled task, the
+        # daily digest; services/notification_events/auto_message.py); in-app by default, a
+        # push type (Auto messaged you), linked to the chat.
         "auto_message",
         # PRD-266 US-014a (K12): the per-person daily-digest switch, a 'push' row only
         # (services/push/preferences.py); the digest itself is posted as Auto's message and
