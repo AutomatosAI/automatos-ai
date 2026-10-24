@@ -193,7 +193,7 @@ permissions:
   contents: read
 
 # PRD-261 A-17a: the Design Kit commit the lane packs Play from. PRD-261 A-20b (PB-17): W-K7's
-# merge on the kit's main (AutomatosAI/automatos-play#18: the kit vendored at core after A-19 and
+# merge on the kit's main (AutomatosAI/automatos-design-kit#18: the kit vendored at core after A-19 and
 # A-20), which holds W-K8's merge (#15: the kit CLI's `automatos-theme install`, which the lane
 # installs the theme with) and W-K6's (#14: Play's tests on the kit's harness, every path core's
 # test ledger names for them).
@@ -202,7 +202,7 @@ permissions:
 # forward in kit history (PB-17; Play's own rules are in the kit's themes/play/README.md). npm is
 # pinned to the kit's own version (its kit.yml).
 env:
-  KIT_REPOSITORY: AutomatosAI/automatos-play
+  KIT_REPOSITORY: AutomatosAI/automatos-design-kit
   KIT_REF: 6054ac77f0419dc6dbe3ebdd7e0e2300693ed12a
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
