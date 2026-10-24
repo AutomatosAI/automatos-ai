@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { chooseStyle, THEME_E2E_PATH } from '../support/hello-theme'
-import { CLI_TIMEOUT_MS, installWithKitCli, type ThemeManifest } from '../support/kit-cli'
-import { resetKitPackage } from '../support/kit-package'
+import { CLI_TIMEOUT_MS, installIdsBefore, installWithKitCli, resetCliInstall, type ThemeManifest } from '../support/kit-cli'
 import { watchPage, type PageWatch } from '../support/watch'
 
 // PRD-261 B-03h (@installed): any Design Kit theme, installed by the kit's own CLI and held to what
@@ -18,7 +17,8 @@ import { watchPage, type PageWatch } from '../support/watch'
 //   route the theme declares but never registered ends up), and no uncaught error.
 //
 // It stores the member's choice on the lane's one backend, so the workflow runs @installed in its own
-// step, one test at a time; the test removes the install and puts the choice back on Studio.
+// step, one test at a time. Pass or fail, once it has read the workspace's installs, the test puts the
+// choice back on Studio and removes every install the CLI added.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const INSTALLED_TAG = '@installed'
@@ -88,8 +88,9 @@ test.describe('PRD-261 B-03h — a Design Kit theme installed by the kit CLI', (
   test('installed with automatos-theme install --to the web app, it runs on every page and route it declares', { tag: INSTALLED_TAG }, async ({ page, request }) => {
     test.setTimeout(CLI_TIMEOUT_MS + ADDRESS_TIMEOUT_MS)
     const watch = watchPage(page)
-    const install = await installWithKitCli(request, APP_URL)
+    const before = await installIdsBefore(request)
     try {
+      const install = await installWithKitCli(request, APP_URL)
       const addresses = addressesOf(install.manifest)
       test.setTimeout(CLI_TIMEOUT_MS + addresses.length * ADDRESS_TIMEOUT_MS)
       const htmlClass = htmlClassOf(install.manifest)
@@ -98,7 +99,7 @@ test.describe('PRD-261 B-03h — a Design Kit theme installed by the kit CLI', (
         await test.step(address, () => expectThemeRuns(page, watch, address, htmlClass))
       }
     } finally {
-      await resetKitPackage(request, install.themeId)
+      await resetCliInstall(request, before)
     }
   })
 })

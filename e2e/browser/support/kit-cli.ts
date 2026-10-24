@@ -2,6 +2,7 @@ import { execFile, type ExecFileException } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { expect, type APIRequestContext } from '@playwright/test'
+import { installedRows, resetInstalls } from './kit-package'
 
 // PRD-261 B-03h: a Design Kit theme installed in the local edition by the kit's own CLI, the way a
 // theme author installs one (PRD §8 item 7):
@@ -43,7 +44,6 @@ interface ActiveAnswer {
   readonly choice?: unknown
   readonly theme?: {
     readonly installId?: unknown
-    readonly themeId?: unknown
     readonly manifest?: ThemeManifest
     readonly optIn?: { readonly required?: unknown } | null
   } | null
@@ -52,7 +52,6 @@ interface ActiveAnswer {
 /** The run's theme, as the CLI installed and chose it. */
 export interface CliInstall {
   readonly installId: string
-  readonly themeId: string
   readonly manifest: ThemeManifest
   /** `theme:install:<installId>`, the style cookie the choice writes. */
   readonly style: string
@@ -114,8 +113,20 @@ export async function installWithKitCli(request: APIRequestContext, appUrl: stri
   expect(active.theme?.optIn?.required, 'the CLI opted the member in to the private package').toBe(false)
   return {
     installId,
-    themeId: String(active.theme?.themeId ?? ''),
     manifest: active.theme?.manifest ?? {},
     style: `${INSTALLED_STYLE_PREFIX}${installId}`,
   }
+}
+
+/** The ids of the workspace's installs before the CLI runs, so the reset can tell the ones it added. */
+export async function installIdsBefore(request: APIRequestContext): Promise<ReadonlySet<string>> {
+  return new Set((await installedRows(request)).map((row) => row.installId))
+}
+
+/**
+ * Puts the member's choice back on Studio and removes every install that is not in `before`: the
+ * CLI's, whether or not its install and the checks after it passed, so no later spec starts on it.
+ */
+export async function resetCliInstall(request: APIRequestContext, before: ReadonlySet<string>): Promise<void> {
+  await resetInstalls(request, (row) => !before.has(row.installId))
 }

@@ -77,8 +77,9 @@ The spec knows nothing of the theme beyond what the server's active answer carri
 route (`/x/<route>`) the theme declares, it holds the theme to the host's contract: the host is
 `active` with the theme's `htmlClass` on `<html>`, there is no fallback notice, and the page drew
 with no error boundary (the page's own inside the frame, or Next's not-found one, where a route
-the theme declares but never registered ends up) and no uncaught error. It then removes the
-install and puts the choice back on Studio.
+the theme declares but never registered ends up) and no uncaught error. Pass or fail, it then puts
+the choice back on Studio and removes every install the CLI added (each install not there when the
+test began), so a failed check never leaves the theme installed for the steps after it.
 
 A manual run (`workflow_dispatch`, once the workflow is on `main`) takes two inputs: `kit_ref`, a
 kit commit, branch or tag (empty: `KIT_REF`), and `kit_theme`, the theme's folder in the kit
