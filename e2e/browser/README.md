@@ -19,10 +19,12 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
    `node .next/standalone/server.js` on `http://localhost:3000`, the backend's CORS default.
 3. Installs this package (`npm ci`), the browsers (`npx playwright install --with-deps`),
    type-checks the specs (`npx tsc`) and runs them.
-4. Runs the `@package` and `@parity` specs in a step of their own (below), after the others.
+4. Runs the `@installed` spec in a step of its own (below): the run's kit theme installed by the
+   kit's own CLI.
+5. Runs the `@package` and `@parity` specs in a step of their own (below), after the others.
    Since W-A8 (PRD-261 A-19f4) these are core's only proof that Play still runs: builtin Play left
    core, and Play lives only in the Design Kit.
-5. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
+6. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
    frontend server logs as `browser-e2e-report` (kept 7 days).
 
 ## Play from the Design Kit (PRD-261 A-17a)
@@ -30,18 +32,19 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-play`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
-uploads `automatos.play-1.1.0.autotheme` as the `play-package` artifact (the job's summary shows its
-size and sha256). The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with
-the rest of Play. Before it builds, the job fails when a `kitPath` of core's test ledger
+uploads `automatos.play-1.1.0.autotheme` as the `kit-theme-package` artifact (the job's summary shows
+its size, sha256 and the kit commit). A dispatch can name another kit commit and theme (below).
+The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with the rest of
+Play. Before it builds, the job fails when a `kitPath` of core's test ledger
 (`frontend/lib/__tests__/fixtures/a19-test-ledger.json`, the tests W-A8 moved out of core) is
 missing from the kit at `KIT_REF`, or when the kit's `tests/fixtures/signing-vector.json` and
 `keys/theme-signing.json` differ from core's signing vector and keys (PRD-261 A-19f4). The two jobs
 run side by side (no
 `needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
 downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
-`PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
-or did not finish in time, the browser job still runs every other spec, and the `@package` specs
-fail on the missing file.
+`KIT_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
+or did not finish in time, the browser job still runs every other spec, and the `@installed` and
+`@package` specs fail on the missing file.
 
 `support/kit-package.ts` installs it the way Settings › Appearance › Themes does (A-07d): `POST
 /api/themes/import`, `POST /api/themes/installs/{id}/opt-in`, `PUT /api/themes/choice` with the
@@ -50,9 +53,43 @@ which every other spec's tab reads, so they run in their own step, one test at a
 (`--workers=1`), with their own report and output folders (`playwright-report-package`,
 `test-results-package`). Each test puts the choice back on Studio and removes the install.
 
-To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the Play
-change it carries, and only forward in the kit's history (Play's own rules are in the kit's
+To move the kit commit, change `KIT_REF` in the workflow, in the pull request that brings the kit
+change it carries, and only forward in the kit's history: the new commit contains the old one
+(`git -C <kit> merge-base --is-ancestor <old> <new>`, PB-17; Play's own rules are in the kit's
 `themes/play/README.md`).
+
+## Any kit theme, installed by the kit's CLI (PRD-261 B-03h)
+
+`specs/installed-theme.spec.ts` (`@installed`, Chromium and WebKit, in a step of its own, one test
+at a time) installs the run's package the way a theme author does, with the kit's own command:
+`automatos-theme install <file> --to http://localhost:3000 --choose` (`support/kit-cli.ts`). `--to`
+is the web app's URL: the CLI reads its `/automatos-host.json` (B-03j) to find the API, then
+imports the package, opts in to it and chooses it, with no token (the local edition needs none).
+The spec fails unless the CLI exits 0 and says it found the API through that host file. For the
+CLI, the browser job checks the kit out at the package job's ref and installs it the same way (npm
+at the kit's version, `npm ci --ignore-scripts`; nothing is built), then names the command in
+`E2E_KIT_CLI` and the downloaded package's folder in `E2E_KIT_PACKAGE_DIR`. It does both after the
+main run's specs: when either fails, the job fails on that step, the `@installed` spec is skipped
+and the `@package` and `@parity` specs still run.
+
+The spec knows nothing of the theme beyond what the server's active answer carries of its
+`theme.json`. On `/agents` and on every page (a `[param]` segment as an id no workspace has) and
+route (`/x/<route>`) the theme declares, it holds the theme to the host's contract: the host is
+`active` with the theme's `htmlClass` on `<html>`, there is no fallback notice, and the page drew
+with no error boundary (the page's own inside the frame, or Next's not-found one, where a route
+the theme declares but never registered ends up) and no uncaught error. Pass or fail, it then puts
+the choice back on Studio and removes every install the CLI added (each install not there when the
+test began), so a failed check never leaves the theme installed for the steps after it.
+
+A manual run (`workflow_dispatch`, once the workflow is on `main`) takes two inputs: `kit_ref`, a
+kit commit, branch or tag (empty: `KIT_REF`), and `kit_theme`, the theme's folder in the kit
+(default `themes/play`), for example `gh workflow run browser-e2e.yml -f kit_ref=<kit sha> -f
+kit_theme=themes/<name>`. The package job packs that theme from that commit, and the `@installed`
+spec runs on it. A run for a theme other than Play packs no Play, so the `@package` and `@parity`
+step and the preview shots' upload are skipped; every other spec runs as on a pull request. The
+inputs reach a shell only through a step's `env:`, never as an expression inside `run:`
+(`orchestrator/tests/test_prd261_browser_lane_inputs.py` reads the workflow and holds it to that,
+and to the kit installs without scripts, no secret and read-only permissions).
 
 ## Play's preview shots (PRD-261 C-06q1)
 
@@ -163,6 +200,8 @@ Every test carries one tag through the `tag` option, for example
   `/deliverables` was not captured then, so its check has not been seen to fail without it.
 - `@host` — the theme host loads an installed theme, falls back on the theme's own failures, keeps
   the theme when the page inside its frame fails, and stays off where it should.
+- `@installed` — the run's kit theme installed by the kit's CLI (above). Selected only by the
+  workflow's own step for it, never by the main run's `--grep`.
 - `@package` — Play installed from the Design Kit's package (above). Selected only by the
   workflow's own step for it, never by the main run's `--grep`.
 - `@parity` — the Play parity specs (above), run against the installed package.
@@ -180,10 +219,11 @@ On a pull request (any base branch) or a push to `main` that changes one of the 
 workflow's `paths:` list: the root layout, the pages and components PRD-261 Phase A touches (PA-6:
 the Q3 pages, the theme host, the looks pages, the Style axis files, the theme routes and services
 on the backend; since A-17b also the chat code the Play specs read through the SDK, `lib/chat/` and
-`components/widgets/`), `next.config.js`, the middleware, the frontend's package files, the compose
-boot files and this folder. Builtin Play's folders left the list when W-A8 deleted them (A-19f4):
-Play is the kit's now, and the lane installs it from `KIT_REF`. It does not watch the rest of the
-backend or the other pages, so a change there can break the lane without running it.
+`components/widgets/`; since B-03h the web app's host file the kit's CLI reads,
+`app/automatos-host.json/`), `next.config.js`, the middleware, the frontend's package files, the
+compose boot files and this folder. Builtin Play's folders left the list when W-A8 deleted them
+(A-19f4): Play is the kit's now, and the lane installs it from `KIT_REF`. It does not watch the
+rest of the backend or the other pages, so a change there can break the lane without running it.
 
 Until the workflow is on `main`, it runs only on a `pull_request` whose HEAD commit has no
 `[skip ci]`: GitHub dispatches (`workflow_dispatch`) only workflows that exist on the default

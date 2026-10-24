@@ -10,7 +10,8 @@ with the REAL workspace-permission gate (only the caller's workspace role is stu
 * only approved, reviewed Marketplace versions are listed: never pending, rejected,
   deactivated, unreviewed, a workspace's private upload, or a ``disable``-revoked version;
 * the detail carries previews per preset, publisher, version, ``uses`` and the versions map,
-  and install takes the newest version this host can run;
+  and install takes the newest version this host can run; previews keep theme.json's order, and
+  the cover is the first preview it lists, not the first by name;
 * install answers the same install again (200), refuses another version or a private upload
   of the theme (409), and is gated by manage, "who may install", the switch and step-up;
 * (C-05b, QB-21) ``publisher.official`` is true only for a reserved publisher whose shown
@@ -397,17 +398,30 @@ def test_the_detail_shows_previews_per_preset_publisher_uses_and_versions(api):
     assert detail["uses"] == ["chat", "looks"] and detail["pricing"] == "Pro" and detail["compatible"] is True
     url = lambda path: module_url(newer.digest, path)  # noqa: E731
     assert detail["presets"] == [
-        {"id": "ember", "default": True, "previews": [{"screen": "chat", "url": url(PREVIEWS[1])},
-                                                     {"screen": None, "url": url(PREVIEWS[0])}]},
+        {"id": "ember", "default": True, "previews": [{"screen": None, "url": url(PREVIEWS[0])},
+                                                     {"screen": "chat", "url": url(PREVIEWS[1])}]},
         {"id": "ember-dark", "default": False, "previews": [{"screen": "chat", "url": url(PREVIEWS[2])}]},
     ]
     assert detail["otherPreviews"] == [url(PREVIEWS[3])]
     assert detail["readme"] == url("README.md") and detail["changelog"] is None
-    assert detail["cover"] == url(PREVIEWS[1])
+    assert detail["cover"] == url(PREVIEWS[0])
     assert set(detail["versions"]) == {"1.0.0", "1.1.0"}
     assert detail["versions"]["1.0.0"]["packageId"] == str(play.id)
     assert detail["versions"]["1.0.0"]["engines"] == ENGINES and detail["versions"]["1.0.0"]["compatible"] is True
     assert detail["installed"] is None
+
+
+def test_the_cover_is_the_first_preview_theme_json_lists_not_the_first_by_name(api):
+    # As Play lists ember.png first though aurora.png sorts before it: the cover is the theme's pick.
+    order = [PREVIEWS[3], PREVIEWS[1], PREVIEWS[0]]
+    play = _package(api.db, previews=order)
+    url = lambda path: module_url(play.digest, path)  # noqa: E731
+    assert _listings(api)[PLAY_LISTING]["cover"] == url(PREVIEWS[3])
+    detail = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}").json()
+    assert detail["cover"] == url(PREVIEWS[3])
+    assert detail["presets"][0]["previews"] == [{"screen": "chat", "url": url(PREVIEWS[1])},
+                                                {"screen": None, "url": url(PREVIEWS[0])}]
+    assert detail["otherPreviews"] == [url(PREVIEWS[3])]
 
 
 def test_an_unclaimed_publisher_is_not_official_and_the_price_label_defaults_to_free(api):

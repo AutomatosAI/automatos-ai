@@ -15,7 +15,8 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   newest version it can run (``latest``).
 * **Previews per preset** (PRD §7 item 5): a preview ``assets/previews/<preset>.png`` or
   ``assets/previews/<preset>-<screen>.png`` belongs to that preset (the longest preset id that
-  matches wins); any other preview is in ``otherPreviews``. Every URL is the files route
+  matches wins); any other preview is in ``otherPreviews``. Previews keep theme.json's order, and
+  the card's ``cover`` is the first one it lists. Every URL is the files route
   (``serve.module_url``), which serves an approved listing's files to any caller (A-08a).
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
 * **Official** (QB-21): ``publisher.official`` is true only for a reserved publisher
@@ -182,8 +183,13 @@ def _file_url(package: ThemePackage, path: str) -> Optional[str]:
 
 
 def _preview_paths(package: ThemePackage) -> List[str]:
+    """The previews theme.json lists that the package holds, in theme.json's order: the first is the cover.
+
+    The theme picks its order (Play lists ``ember.png`` first, its default look's chat), so it is
+    never re-sorted by name. ``manifest.validate_manifest`` refuses a list that names a file twice.
+    """
     named = (package.manifest or {}).get("previews") or []
-    return sorted(path for path in named if isinstance(path, str) and _file_url(package, path) is not None)
+    return [path for path in named if isinstance(path, str) and _file_url(package, path) is not None]
 
 
 def _owner_preset(stem: str, presets: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:

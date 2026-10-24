@@ -3,7 +3,7 @@
 #
 # Usage: wait-for-job.sh <job name> <seconds>
 #
-# The browser lane runs beside the job that packs Play from the Design Kit instead of after it
+# The browser lane runs beside the job that packs a theme (Play) from the Design Kit instead of after it
 # (no `needs:`), so the kit's install and build overlap the lane's docker and frontend builds; the
 # lane waits here, just before it downloads the package. Reads GITHUB_REPOSITORY and GITHUB_RUN_ID;
 # GH_TOKEN needs actions: read. Polls the run's jobs (the API lists the latest attempt of each, so a

@@ -31,7 +31,8 @@ interface UploadAnswer {
   readonly install: { readonly id: string } | null
 }
 
-interface InstalledRow {
+/** A row of GET /api/themes/installed. */
+export interface InstalledRow {
   readonly installId: string
   readonly themeId: string
 }
@@ -94,18 +95,24 @@ export async function chooseKitPackage(page: Page, install: KitInstall, appUrl: 
   await chooseStyle(page, install.style, appUrl)
 }
 
-async function installedRows(request: APIRequestContext): Promise<InstalledRow[]> {
+/** The workspace's theme installs. */
+export async function installedRows(request: APIRequestContext): Promise<InstalledRow[]> {
   const response = await request.get(`${BACKEND_URL}/api/themes/installed`)
   expect(response.status()).toBe(OK)
   return ((await response.json()) as { installs: InstalledRow[] }).installs
 }
 
-/** Puts the member's choice back on Studio and removes every install of Play's package, so no other run starts on it. */
-export async function resetKitPackage(request: APIRequestContext): Promise<void> {
+/** Puts the member's choice back on Studio and removes every install `remove` picks, so no other run starts on one. */
+export async function resetInstalls(request: APIRequestContext, remove: (row: InstalledRow) => boolean): Promise<void> {
   expect((await request.put(`${BACKEND_URL}/api/themes/choice`, { data: { choice: STUDIO } })).status()).toBe(OK)
   for (const row of await installedRows(request)) {
-    if (row.themeId === PLAY_THEME_ID) {
+    if (remove(row)) {
       expect((await request.delete(`${BACKEND_URL}/api/themes/installs/${row.installId}`)).status()).toBe(OK)
     }
   }
+}
+
+/** Puts the member's choice back on Studio and removes every install of Play's package, so no other run starts on it. */
+export async function resetKitPackage(request: APIRequestContext): Promise<void> {
+  await resetInstalls(request, (row) => row.themeId === PLAY_THEME_ID)
 }
