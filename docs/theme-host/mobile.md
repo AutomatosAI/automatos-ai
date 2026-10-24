@@ -131,13 +131,11 @@ unknown, malformed or foreign install id gets one and the same 404.
   member or the owner. A phone signed in this way works today; its token must also pass core's
   `azp` rule.
 - **The local edition's operator** (`AUTH_EDITION=local`): every workspace on the instance.
+- **A phone paired to the local edition** (`auth_type` `device`, `Authorization: Bearer amd_…`):
+  exactly the one workspace its pairing is bound to, never every workspace, the operator's own phone
+  included (`PERSON_AUTH_TYPES = {"clerk", "device"}` in `services/themes/membership.py`). The file
+  URLs load through `/api/themes/files/...` on the same bearer, under the same rule.
 - **Anyone else gets the 404**, an API key included.
-
-**Paired phones do not work yet.** A phone paired to an account calls as a `device` caller, and
-theme membership counts only `clerk` callers (`PERSON_AUTH_TYPES = {"clerk"}` in
-`services/themes/membership.py`). Until the mobile PRD adds the `device` auth type there, a paired
-phone gets 404 from this route and from `/api/themes/files/...`. That change belongs to the mobile
-PRD, not to PRD-261.
 
 The phone sees the look the member last saved on the server, not one still being edited in a
 browser tab.
