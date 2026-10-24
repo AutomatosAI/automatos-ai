@@ -62,6 +62,13 @@ DEFAULT_SAMPLER_RATIO = 1.0
 # All an exception event keeps on a span (#1107): its type, never its text, nor any
 # attribute a caller passed to record_exception.
 EXCEPTION_KEPT = ("exception.type", "exception.escaped")
+# FastAPI 0.142+ traces requests itself, on by default whenever a global tracer provider
+# exists (which start_tracing sets up): a server span with ``url.query`` in clear, a span
+# each for dependencies, endpoint and serialization, and exception messages for a logger
+# provider. Built with this, the app leaves all of it to instrument_app, whose spans
+# redact query values (Principle 5) and keep only an error's type (#1107) (#1306).
+FASTAPI_TELEMETRY = {"tracing": False, "metrics": False, "logs": False, "operation_spans": False,
+                     "auto_configure": False}
 
 
 class _State:
@@ -452,7 +459,8 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 
 __all__ = [
-    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
+    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "FASTAPI_TELEMETRY", "REDACTED", "annotate_request",
+    "build_provider",
     "error_type_only", "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
     "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "type_only_exporter",
     "with_tracing",
