@@ -1605,7 +1605,7 @@ This works, but nothing between the phone and the server is encrypted.
   confirm card warns "Unencrypted home network … Pair only on a network you trust",
   and a one-line banner, "Unencrypted home network · <address>", stays over every
   screen.
-- The web app's pairing link names the API address your browser uses
+- The web app's pairing link, and its QR image, name the API address your browser uses
   (`http://localhost:8000` by default), which a phone cannot use. The console's
   hint about `PUBLIC_API_HOST` is there for the same reason. Type the address in
   the app instead.
@@ -1625,31 +1625,48 @@ curl -s https://api.example.com/.well-known/automatos.json
 The API answers this without a credential, in paired mode too:
 
 ```json
-{"schema":"automatos-discovery/v1","name":"Automatos","edition":"local","api_url":"https://api.example.com","web_url":"https://studio.example.com","auth":{"modes":["device"],"clerk":null},"pairing":{"enabled":true},"push":{"expo":false},"capabilities":["mobile_theme","spoken_mode","voice_live"]}
+{"schema":"automatos-discovery/v1","name":"Automatos","edition":"local","api_url":"https://api.example.com","web_url":"https://studio.example.com","auth":{"modes":["device"],"clerk":null},"pairing":{"enabled":true},"push":{"expo":false},"capabilities":["digest","mobile_theme","push","spoken_mode","voice_live"]}
 ```
 
 Check four things:
 
 - `"edition":"local"` and `"pairing":{"enabled":true}`. `false` means the mode is
   not `paired`.
-- `api_url` is the https address the phone uses (`PUBLIC_API_HOST`).
+- `api_url` is the address the server names for itself: `https://<PUBLIC_API_HOST>`,
+  or, while that is unset, the address the request came in on. It is also the API
+  address in the pairing links Studio shows (the console script's link names
+  `BACKEND_URL` while `PUBLIC_API_HOST` is unset). The phone sends every call to
+  the Server address you typed (or the pairing link's), the one that answered, and
+  never switches to `api_url`. When `api_url` names another address, the confirm card shows it as
+  "Address the server lists".
 - `web_url` is the web app's address (`FRONTEND_URL`), not `localhost` (with
   https; the home-network setup leaves it at `localhost`).
-- `capabilities` lists what this server offers the phone. The app turns a feature
-  on only when its name is listed:
+- `capabilities` lists what this version of the server can do. A listed feature can
+  still need setting up: Auto Live also needs Retell's credentials and its switch
+  (`voice.live_enabled`), which the local stack does not configure (§9), and a theme
+  shows only once one with a phone block is installed. The app turns a feature on
+  only when its name is listed:
 
   | Capability | What it turns on in the app |
   |---|---|
-  | `mobile_theme` | The workspace's installed theme on the phone: colours, fonts and Auto's animations, as data, never code. See Themes: [the phone's side of a theme](../theme-host/mobile.md). |
+  | `digest` | The daily digest time in the phone's notification settings. |
+  | `mobile_theme` | Installed workspace themes on the phone, as data only, never code: colours (the member's own look, for themes that paint from looks), fonts (`.ttf` or `.otf`, up to 400 KB each) and Auto's clips and stills (`.mp4` up to `THEME_MAX_CLIP_KB`, 1024 KB by default; `.png` up to 512 KB; the phone loads none over 2 MB). Each theme the member may use that has a phone block is listed under Studio in the phone's style picker. A theme that is not reviewed (an upload to this workspace without Automatos's signature, or a Marketplace theme still in review) shows only after the member opts in to it in the web app, and a theme revoked with `disable` is not shown. Play and HUD are the phone's own styles. A paired phone gets the themes of the one workspace it paired to. See Themes: [On your phone](../themes/on-your-phone.md) for members, and [the phone's side of a theme](../theme-host/mobile.md) for the answer and who may call. |
+  | `push` | Notifications, but only while `push.expo` is `true` (below). |
   | `spoken_mode` | Spoken replies when you talk to Auto by voice. |
   | `voice_live` | Auto Live, a live voice conversation with Auto. |
 
-  Today's Automatos Go uses none of the three yet. The styles update (themes) and
-  the voice update are being built.
+  Today's Automatos Go uses none of them yet. The notifications, styles (themes)
+  and voice updates are being built.
 
-`"push":{"expo":false}`: this build sends no notifications to phones.
-Notifications through Expo's push service, and a QR image of the pairing link in
-the web app, come with a later Automatos update.
+`push.expo` says whether this install sends notifications to phones through Expo's
+push service. It is `false` until the operator agrees and `true` after. The web app
+asks once, *Send notifications to phones through Expo's push service?* (Yes / Not
+now), the first time an owner or admin gets a pairing code there (below), and
+**Settings → Phones & devices** has a switch to change the answer. The answer is
+install-wide and kept in the database (system setting
+`notifications.push_via_expo`), not in `.env`.
+Until it is `true`, nothing is sent to Expo. Once it is, the install needs outbound
+https to `exp.host`.
 
 A `500` with "Discovery is not set up on this server: …" names the setting to fix,
 for example `FRONTEND_URL must be an http(s) URL with a host`.
@@ -1664,7 +1681,9 @@ for example `FRONTEND_URL must be an http(s) URL with a host`.
    ```
    It prints the code (`XXXX-XXXX`, which works once, for ten minutes), when it
    expires, and its pairing link. `--name "Office laptop"` labels the device until
-   it pairs with a name of its own. The code belongs to the operator
+   it pairs with a name of its own. `--review --ttl-hours N` mints App Review's
+   code, which lasts N hours (at most 336), still works once, and is written to the
+   audit log. The code belongs to the operator
    (`LOCAL_OPERATOR_EMAIL`) in the local workspace (`DEFAULT_WORKSPACE_ID`). Type
    it into *Pair this browser*, or pair a phone with it (step 3).
 
@@ -1674,18 +1693,19 @@ for example `FRONTEND_URL must be an http(s) URL with a host`.
    then run it again.
 2. **Then from the web app.** In a paired browser: **Settings → Phones & devices →
    Pair a phone → Get a pairing code**. It shows the code, "Expires in m:ss", and
-   the pairing link, which carries the API's address and the code. Only a
-   workspace owner or admin gets codes; the operator always can. A code pairs the
-   phone to the person who got it, in this workspace.
+   the pairing link, which carries the API's address and the code, as text and as a
+   QR image. Only a workspace owner or admin gets codes; the operator always can. A
+   code pairs the phone to the person who got it, in this workspace. The first time,
+   before the code, it asks the notifications question (`push.expo`, above).
 3. **On the phone.** Open Automatos Go and tap **Connect to your own server**. Type
    the Server address (the API's) and the code, then tap **Continue**. Check the
    card, *Pair with this server?*, and tap **Pair**. Nothing pairs before that
    tap. The phone then shows in **Settings → Phones & devices** as "Automatos Go on
    iPhone".
 
-The app's **Scan the code in Studio** reads a QR image of the pairing link. In this
-build the web app shows the link as text only, so type the address and the code.
-Always scan from inside Automatos Go: the iPhone's Camera app opens the link's web
+The app's **Scan the code in Studio** reads the QR image, which the web app shows
+only while the code is live. The web app's line says "Scan the QR code with the
+phone"; scan it from inside Automatos Go: the iPhone's Camera app opens the link's web
 page (`/go/pair`), which shows the server and the code but never pairs, because a
 self-hosted address is not one of the app's linked domains.
 
