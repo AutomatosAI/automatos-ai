@@ -47,7 +47,7 @@ from services.themes import signature_verify as sv  # noqa: E402
 from services.themes import signing  # noqa: E402
 
 VECTOR_PATH = _ORCH / "tests" / "fixtures" / "themes" / "signing-vector.json"
-# The kit's tests/fixtures/signing-vector.json at automatos-play #9 (C-05m) has this sha256 too:
+# The kit's tests/fixtures/signing-vector.json at automatos-design-kit #9 (C-05m) has this sha256 too:
 # the two files are the same bytes (seam check; from W-A8 on, A-19f4's lane step compares them in CI).
 VECTOR_SHA256 = "62474a90ac82819304d605d418fc1e9b6d29c71def94854807efe116280277f3"
 VECTOR = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))

@@ -3,7 +3,7 @@ import path from 'path'
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
 import { chooseStyle } from './hello-theme'
 
-// PRD-261 A-17a: Play as the Design Kit packs it (AutomatosAI/automatos-play at the commit
+// PRD-261 A-17a: Play as the Design Kit packs it (AutomatosAI/automatos-design-kit at the commit
 // .github/workflows/browser-e2e.yml pins in KIT_REF), installed in the local edition through the
 // routes and bodies the Install theme UI sends (A-07d, components/settings/themes and
 // lib/api-client.ts):
