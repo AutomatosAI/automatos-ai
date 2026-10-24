@@ -27,7 +27,7 @@ from typing import Any, Optional
 from sqlalchemy import text
 
 from services.credits.ledger import read_balance
-from services.credits.routing import FUNDED_BY_CREDITS, funding_for
+from services.credits.routing import FUNDED_BY_CREDITS, funding_for, is_free_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,8 @@ def check_alerts(db: Any, workspace_id: str) -> Optional[int]:
     if row is None:
         return None
     plan, stored = row[0], int(row[1] or 0)
-    funding = funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION)
+    funding = funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION,
+                          free=is_free_workspace(db, workspace_id))
     if funding.funded_by != FUNDED_BY_CREDITS:
         return None
     level = level_for(funding.spendable, plan)

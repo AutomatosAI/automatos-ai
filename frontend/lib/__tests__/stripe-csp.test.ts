@@ -11,8 +11,10 @@ import { createRequire } from 'module'
 import { describe, expect, it } from 'vitest'
 
 const load = createRequire(import.meta.url)
-const { STRIPE_CSP } = load('../../csp-sources.js') as {
-  STRIPE_CSP: { script: string; frame: string; connect: string; img: string }
+type StripeSources = { script: string; frame: string; connect: string; img: string }
+const { STRIPE_CSP, stripeCspFor } = load('../../csp-sources.js') as {
+  STRIPE_CSP: StripeSources
+  stripeCspFor: (edition: string | undefined) => StripeSources
 }
 
 async function directives(): Promise<Record<string, string[]>> {
@@ -59,5 +61,17 @@ describe("the Content-Security-Policy for Stripe's in-page payment forms", () =>
     }
     expect(policy['frame-ancestors']).toEqual(["'none'"])
     expect(policy['form-action']).toEqual(["'self'"])
+  })
+})
+
+describe("Stripe's sources follow the build's edition", () => {
+  it('the local edition, which has no billing, names no Stripe host', () => {
+    expect(stripeCspFor('local')).toEqual({ script: '', frame: '', connect: '', img: '' })
+    expect(stripeCspFor(' LOCAL ')).toEqual({ script: '', frame: '', connect: '', img: '' })
+  })
+
+  it('the hosted edition (or an unset edition, which is hosted) gets the full set', () => {
+    expect(stripeCspFor('saas')).toBe(STRIPE_CSP)
+    expect(stripeCspFor(undefined)).toBe(STRIPE_CSP)
   })
 })

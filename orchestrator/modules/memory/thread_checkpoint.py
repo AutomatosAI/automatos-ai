@@ -268,6 +268,9 @@ def _load_chat(db, workspace_id: str, chat_id: str):
 
 
 def _load_messages(db, chat_id: str) -> List[Dict[str, Any]]:
+    """The thread's last ``MAX_MESSAGES`` as the distiller reads them: a failed turn's note is
+    the turn's marker, never Auto's reply (``consumers.chatbot.model_history``)."""
+    from consumers.chatbot.model_history import history_for_model
     from core.models.core import Message
 
     rows = (
@@ -277,7 +280,7 @@ def _load_messages(db, chat_id: str) -> List[Dict[str, Any]]:
         .limit(MAX_MESSAGES)
         .all()
     )
-    return [{"role": r.role, "parts": r.parts} for r in reversed(rows)]
+    return history_for_model(reversed(rows))
 
 
 async def _distill_checkpoint(

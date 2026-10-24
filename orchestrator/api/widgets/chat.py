@@ -303,7 +303,10 @@ def _ground_with_preamble(history: List[dict], turn: _WidgetTurn, log_extra: str
 
 def _history_for_turn(chat_service: Any, chat_id: str, turn: _WidgetTurn,
                       workspace_id: str, log_extra: str) -> List[dict]:
-    """Persist the visitor's message, then build the LLM's message history."""
+    """Persist the visitor's message, then build the LLM's message history (a failed
+    turn's note reaches the model as a marker, consumers.chatbot.model_history)."""
+    from consumers.chatbot import history_for_model
+
     t_save = time.perf_counter()
     chat_service.save_message(
         chat_id=chat_id,
@@ -316,7 +319,7 @@ def _history_for_turn(chat_service: Any, chat_id: str, turn: _WidgetTurn,
         log_extra, chat_id, (time.perf_counter() - t_save) * 1000,
     )
     messages = chat_service.get_messages_by_chat_id(chat_id)
-    history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
+    history = history_for_model(messages)
     logger.debug("%s HISTORY_LOADED: %d messages", log_extra, len(history))
     return _ground_with_preamble(history, turn, log_extra)
 

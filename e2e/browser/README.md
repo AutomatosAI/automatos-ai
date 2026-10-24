@@ -32,7 +32,11 @@ no secret) at the commit the workflow's `KIT_REF` pins, installs it from its com
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
 uploads `automatos.play-1.1.0.autotheme` as the `play-package` artifact (the job's summary shows its
 size and sha256). The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with
-the rest of Play. The two jobs run side by side (no
+the rest of Play. Before it builds, the job fails when a `kitPath` of core's test ledger
+(`frontend/lib/__tests__/fixtures/a19-test-ledger.json`, the tests W-A8 moved out of core) is
+missing from the kit at `KIT_REF`, or when the kit's `tests/fixtures/signing-vector.json` and
+`keys/theme-signing.json` differ from core's signing vector and keys (PRD-261 A-19f4). The two jobs
+run side by side (no
 `needs:`), so the kit's build overlaps the browser job's docker and frontend builds. Just before it
 downloads the package, the browser job waits for the package job (`scripts/wait-for-job.sh`, at most
 `PLAY_PACKAGE_WAIT_SECONDS`), then names the file in `E2E_KIT_PACKAGE`. When the package job failed,
