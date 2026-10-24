@@ -33,7 +33,7 @@ from sqlalchemy import text
 
 from services.credits.asks import is_background_lane
 from services.credits.ledger import BUCKET_OVERHEAD, KIND_DEBIT, Balance, Entry, record
-from services.credits.routing import FUNDED_BY_CREDITS, credits_for, funding_for
+from services.credits.routing import FUNDED_BY_CREDITS, credits_for, free_workspace_ids, funding_for
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +101,13 @@ def _plans(db: Any, workspace_ids: set) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-def meter_call(db: Any, call: PendingCall, plan: Optional[str]) -> bool:
+def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = False) -> bool:
     """Debit one call (if the platform paid for it) and mark it charged. Commits.
-    Returns True when credits were debited."""
+    Returns True when credits were debited. A free owner's call is recorded, never debited."""
     from config import config
 
     funding = funding_for(plan, Balance(), edition=config.AUTH_EDITION,
-                          background=is_background_lane(call.request_type))
+                          background=is_background_lane(call.request_type), free=free)
     cost = billable_cost(call) if funding.funded_by == FUNDED_BY_CREDITS else 0.0
     credits = credits_for(cost)
     if credits:
@@ -124,10 +124,11 @@ def meter_call(db: Any, call: PendingCall, plan: Optional[str]) -> bool:
 
 def _meter_batch(db: Any, calls: list[PendingCall]) -> tuple[int, set]:
     plans = _plans(db, {c.workspace_id for c in calls})
+    free = free_workspace_ids(db, plans)
     debited, touched = 0, set()
     for call in calls:
         try:
-            if meter_call(db, call, plans.get(call.workspace_id)):
+            if meter_call(db, call, plans.get(call.workspace_id), free=call.workspace_id in free):
                 debited += 1
                 touched.add(call.workspace_id)
         except Exception:  # noqa: BLE001 — one bad row never blocks the rest; it stays pending

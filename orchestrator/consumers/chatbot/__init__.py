@@ -23,6 +23,7 @@ Usage:
 """
 
 from consumers.chatbot.service import ChatService, StreamingChatService
+from consumers.chatbot.model_history import history_for_model
 from consumers.chatbot.prompt_analyzer import PromptAnalyzer, get_prompt_analyzer
 from consumers.chatbot.streaming import StreamingHandler, get_streaming_handler
 from consumers.chatbot.tool_router import (
@@ -35,6 +36,7 @@ __all__ = [
     # Main services
     'ChatService',
     'StreamingChatService',
+    'history_for_model',
     # Components
     'PromptAnalyzer',
     'get_prompt_analyzer',

@@ -1608,6 +1608,21 @@ class Config:
     THEME_SUBMISSIONS_PER_DAY: int = int(os.getenv("THEME_SUBMISSIONS_PER_DAY", "10"))
     THEME_UPLOADS_PER_DAY: int = int(os.getenv("THEME_UPLOADS_PER_DAY", "20"))
     THEME_REVIEW_DAILY_TOKENS: int = int(os.getenv("THEME_REVIEW_DAILY_TOKENS", "2000000"))
+    # PRD-261 W-C3 theme revocations (QB-25: the local edition pulls the hosted feed by default).
+    # The feed the local edition pulls (https, or http to loopback only; empty = no pull) and how
+    # often (services/themes/revocation_pull.py, services/theme_revocation_scheduler.py). The hosted
+    # edition serves the feed (api/themes_revocations_feed.py) with rows lifted in the last
+    # THEME_REVOCATIONS_LIFTED_DAYS days, and neither side reads a feed over THEME_REVOCATIONS_FEED_MAX_KB.
+    # THEME_REVOCATIONS_URL is a deploy-time trust boundary: only the environment sets it, and https
+    # to any host passes revocation_pull.checked_url (no DNS or private-range check). Never let a
+    # lower-trust actor set it (an admin setting, a per-workspace override) without a host allowlist
+    # or a check of the resolved address.
+    THEME_REVOCATIONS_URL: str = (
+        os.getenv("THEME_REVOCATIONS_URL", "https://api.automatos.app/api/themes/revocations") or ""
+    ).strip()
+    THEME_REVOCATIONS_PULL_MINUTES: int = int(os.getenv("THEME_REVOCATIONS_PULL_MINUTES", "60"))
+    THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
+    THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
 
     # =============================================================================
@@ -1962,6 +1977,15 @@ class Config:
     # The share of a workspace's allowance (the trial, or the plan's monthly credits)
     # left when the "running low" alert fires; the second alert fires at zero.
     CREDITS_ALERT_LOW_SHARE: float = float(os.getenv("CREDITS_ALERT_LOW_SHARE", "0.20"))
+    # The people who never pay (Gerard, 23 Oct 2026: "Super Admin doesn't have to pay"):
+    # a workspace whose OWNER's email is in this comma-separated list runs on an
+    # allowance, like Enterprise: its calls on the platform's AI keys are recorded
+    # (for the margin numbers) but never charged and never paused. An email, not the
+    # super-admin role, because that role lives only in Clerk's sign-in token, and the
+    # meter and the scheduled work run with nobody signed in. Empty = nobody is free.
+    BILLING_FREE_OWNER_EMAILS: frozenset = frozenset(
+        email.strip().lower() for email in os.getenv("BILLING_FREE_OWNER_EMAILS", "").split(",") if email.strip()
+    )
     # A month's credits stay spendable this long past their period end when the
     # renewal hasn't been paid yet (Stripe retries a failed card for days); then
     # the hourly sweep expires them (services/credits/expiry.py).

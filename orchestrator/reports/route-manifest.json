@@ -1,5 +1,5 @@
 {
-  "route_count": 971,
+  "route_count": 978,
   "routes": [
     {
       "method": "GET",
@@ -146,6 +146,26 @@
       "path": "/api/admin/themes/pending"
     },
     {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/sync/pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/{revocation_id}/lift"
+    },
+    {
       "method": "POST",
       "path": "/api/admin/themes/{package_id}/approve"
     },
@@ -164,6 +184,10 @@
     {
       "method": "POST",
       "path": "/api/admin/themes/{package_id}/report-note"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/{package_id}/review-package"
     },
     {
       "method": "POST",
@@ -2716,6 +2740,10 @@
     {
       "method": "GET",
       "path": "/api/themes/mobile/{install_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/revocations"
     },
     {
       "method": "GET",

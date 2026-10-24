@@ -7,6 +7,7 @@ Routes (plan §2.2; C1-wire registers the router, lists the routes in
 =========================================================  ===========================
 ``GET  /api/admin/themes/pending``                          the queue, oldest first
 ``GET  /api/admin/themes/{packageId}/report``               scan report, note, history
+``GET  /api/admin/themes/{packageId}/review-package``       ``{url, digest, expiresAt}`` (C-03c)
 ``POST /api/admin/themes/{packageId}/report-note``          ``{summary, outcome}``
 ``POST /api/admin/themes/{packageId}/approve``              records a signature request
 ``POST /api/admin/themes/{packageId}/reject``               ``{reason}``
@@ -45,7 +46,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.database.database import get_db
-from services.themes import review
+from services.themes import review, review_package
 from services.themes.choices import CONFLICT, ThemeInstallError
 from services.themes.signature_verify import SigningKeysError
 from services.themes.signing import SIGNATURE_TEXT_MAX
@@ -144,6 +145,16 @@ def get_theme_report(
     """One version's scan report, the isolated-job note, its history and its signature request."""
     _require_admin(ctx)
     return _run(db, lambda: review.report(db, package_id), commit=False)
+
+
+@router.get("/{package_id}/review-package")
+def get_theme_review_package(
+    package_id: UUID, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """A 15-minute link to the version's package, rebuilt from its stored files, for the kit's
+    isolated review job (``package_url`` and ``expected_digest`` of theme-review.yml, C-03c)."""
+    _require_admin(ctx)
+    return _run(db, lambda: review_package.review_link(db, package_id), commit=False)
 
 
 @router.post("/{package_id}/report-note", dependencies=ADMIN_STEP_UP)

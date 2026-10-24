@@ -140,7 +140,7 @@ def _admin(monkeypatch, workspace, system_role):
     return TestClient(app), written, db
 
 
-def test_an_admin_grants_credits_with_a_reason(monkeypatch):
+def test_an_admin_grants_credits_with_a_reason(hosted, monkeypatch):
     ws = _workspace()
     client, written, db = _admin(monkeypatch, ws, "super_admin")
     res = client.post(f"/api/admin/workspaces/{ws.id}/credits", json={"credits": 1000, "reason": "Web Summit demo"})
@@ -151,7 +151,7 @@ def test_an_admin_grants_credits_with_a_reason(monkeypatch):
     db.commit.assert_called()
 
 
-def test_a_retried_request_with_its_id_changes_nothing_the_second_time(monkeypatch):
+def test_a_retried_request_with_its_id_changes_nothing_the_second_time(hosted, monkeypatch):
     ws = _workspace()
     client, written, _ = _admin(monkeypatch, ws, "super_admin")
     seen = set()
@@ -170,7 +170,7 @@ def test_a_retried_request_with_its_id_changes_nothing_the_second_time(monkeypat
     assert written[0][1].source_ref == written[1][1].source_ref == f"{ws.id}:grant-0001"
 
 
-def test_a_non_admin_gets_403_and_nothing_is_written(monkeypatch):
+def test_a_non_admin_gets_403_and_nothing_is_written(hosted, monkeypatch):
     ws = _workspace()
     client, written, _ = _admin(monkeypatch, ws, "user")
     res = client.post(f"/api/admin/workspaces/{ws.id}/credits", json={"credits": 1000, "reason": "please"})
@@ -183,8 +183,17 @@ def test_a_non_admin_gets_403_and_nothing_is_written(monkeypatch):
     {"credits": 10, "reason": "ok", "bucket": "overhead"},
     {"credits": 10, "reason": "ok", "request_id": "bad id with spaces"},
 ])
-def test_a_zero_reasonless_or_odd_adjustment_is_refused(monkeypatch, body):
+def test_a_zero_reasonless_or_odd_adjustment_is_refused(hosted, monkeypatch, body):
     ws = _workspace()
     client, written, _ = _admin(monkeypatch, ws, "super_admin")
     assert client.post(f"/api/admin/workspaces/{ws.id}/credits", json=body).status_code == 422
+    assert written == []
+
+
+def test_the_local_edition_has_no_credits_to_adjust(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    ws = _workspace()
+    client, written, _ = _admin(monkeypatch, ws, "super_admin")
+    res = client.post(f"/api/admin/workspaces/{ws.id}/credits", json={"credits": 1000, "reason": "a test"})
+    assert res.status_code == 404
     assert written == []
