@@ -100,11 +100,14 @@ async function installedRows(request: APIRequestContext): Promise<InstalledRow[]
   return ((await response.json()) as { installs: InstalledRow[] }).installs
 }
 
-/** Puts the member's choice back on Studio and removes every install of Play's package, so no other run starts on it. */
-export async function resetKitPackage(request: APIRequestContext): Promise<void> {
+/**
+ * Puts the member's choice back on Studio and removes every install of the theme (Play's package unless
+ * `themeId` names another: support/kit-cli.ts's), so no other run starts on it.
+ */
+export async function resetKitPackage(request: APIRequestContext, themeId: string = PLAY_THEME_ID): Promise<void> {
   expect((await request.put(`${BACKEND_URL}/api/themes/choice`, { data: { choice: STUDIO } })).status()).toBe(OK)
   for (const row of await installedRows(request)) {
-    if (row.themeId === PLAY_THEME_ID) {
+    if (row.themeId === themeId) {
       expect((await request.delete(`${BACKEND_URL}/api/themes/installs/${row.installId}`)).status()).toBe(OK)
     }
   }
