@@ -22,8 +22,10 @@ TICKET_OK = "ok"
 TICKET_ERROR = "error"
 TicketStatus = Literal["ok", "error"]
 
-# Expo's own values: a question wakes the phone at once, with the system sound.
+# Expo's own values: a question wakes the phone at once, with the system sound; anything
+# else goes at the platform's default priority.
 PRIORITY_HIGH = "high"
+PRIORITY_DEFAULT = "default"
 SOUND_DEFAULT = "default"
 
 

@@ -35,12 +35,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from types import MappingProxyType
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
+
+from core.models.mobile_devices import SECRET_COLUMNS as MOBILE_DEVICE_SECRET_COLUMNS
 
 logger = logging.getLogger(__name__)
 
 EXPORT_FORMAT = "automatos.gdpr.export/v1"
+
+# PRD-266 K16: columns an export never carries, by table — secrets the server keeps for itself.
+# A phone's hashes and push key (W1's SECRET_COLUMNS) and its Expo token (anyone holding it can
+# push to that phone). A later table adds a line here.
+EXPORT_REDACTED_COLUMNS: Mapping[str, tuple[str, ...]] = MappingProxyType({
+    "mobile_devices": (*MOBILE_DEVICE_SECRET_COLUMNS, "expo_push_token"),
+})
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +77,12 @@ def _run_async(coro) -> Any:
 # Store adapters (module-level so tests can monkeypatch each independently).
 # ---------------------------------------------------------------------------
 
+def _exported_row(table: str, row: Mapping[str, Any]) -> dict:
+    """One row as the export carries it: without the columns ``EXPORT_REDACTED_COLUMNS`` names for its table."""
+    redacted = EXPORT_REDACTED_COLUMNS.get(table, ())
+    return {column: value for column, value in row.items() if column not in redacted}
+
+
 def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict]]:
     """Read every ``workspace_id``-scoped SQL table into plain rows (portable)."""
     from sqlalchemy import text
@@ -84,7 +100,7 @@ def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict
                 text(f'SELECT * FROM "{tbl}" WHERE workspace_id::text = :ws'),
                 {"ws": str(workspace_id)},
             ).mappings().all()
-            out[tbl] = [dict(r) for r in rows]
+            out[tbl] = [_exported_row(tbl, r) for r in rows]
         except Exception:
             logger.warning("[gdpr] export read failed for table %s", tbl, exc_info=True)
     return out
