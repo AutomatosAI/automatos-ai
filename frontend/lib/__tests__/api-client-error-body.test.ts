@@ -120,6 +120,9 @@ describe('apiClient error body', () => {
 })
 
 describe('apiClient theme methods (plan §2.2)', () => {
+  /** The server's name for an installed theme in a choice: its install id. */
+  const CHOSEN_INSTALL_ID = '5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d'
+
   function spyRequest() {
     return vi.spyOn(apiClient, 'request').mockResolvedValue({} as never)
   }
@@ -134,11 +137,11 @@ describe('apiClient theme methods (plan §2.2)', () => {
 
   it('PUTs the choice, the default and the settings as JSON', async () => {
     const spy = spyRequest()
-    await apiClient.putThemeChoice('builtin:play')
+    await apiClient.putThemeChoice(CHOSEN_INSTALL_ID)
     await apiClient.setDefaultTheme('install-1')
     await apiClient.putThemeSettings({ privateUploads: 'off', pins: [{ installId: 'install-1', version: null }] })
     expect(spy.mock.calls).toEqual([
-      ['/api/themes/choice', { method: 'PUT', body: JSON.stringify({ choice: 'builtin:play' }) }],
+      ['/api/themes/choice', { method: 'PUT', body: JSON.stringify({ choice: CHOSEN_INSTALL_ID }) }],
       ['/api/themes/default', { method: 'PUT', body: JSON.stringify({ installId: 'install-1' }) }],
       [
         '/api/themes/settings',

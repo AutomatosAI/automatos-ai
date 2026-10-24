@@ -203,7 +203,7 @@ For deep technical details on specific frontend subsystems, refer to the followi
 *   [UI Component Patterns & Design System](#19.4) — Shared components (StatsBar, page-header, item-card, empty-state), Shadcn/ui primitives, Tailwind theme, premium icons and icon registry, glossary tooltips, DESIGN_SYSTEM.md.
 *   [Navigation & Layout](#19.5) — Sidebar navigation, role-based filtering, and page context tracking.
 *   [Settings UI](#19.6) — SettingsPanel and its tabs: System, LLM models, system LLM, credentials, channels, webhooks, notifications, API keys, session mode, widget SDK, icons.
-*   [Play Theme](play-theme.md) — PRD-260: Play on the Style axis (`studio play`, `useIsStudio`/`useIsPlay`), the pages with a Play design and the route switch, the look format and catalogue, how a look becomes `--pl-*` variables and Studio's HSL tokens, the pre-paint script, the tone following the ground, the fonts, and Auto. Local test: [PRD-260 RUN checklist](../testing/PRD-260-PLAY-RUN-CHECKLIST.md).
+*   Play — not part of core since PRD-261 A-19. Play is an installed theme like any other (`automatos/play`): the theme kit builds and releases its package, and the kit's `themes/play/README.md` describes its pages, looks, fonts and Auto. How core hosts any theme: [CSS layer model](../theme-host/css-layer-model.md), [placement slots](../theme-host/placement-reach.md), [SDK surface map](../theme-host/sdk-surface-map.md) and [the mobile block](../theme-host/mobile.md).
 
 **Sources:** [frontend/components/providers.tsx:1-114]()
 

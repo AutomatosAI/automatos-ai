@@ -1,12 +1,13 @@
 /**
  * PRD-261 A-19b — a neutral theme for the core's tests of the host: an installed theme's registry
- * entry and what its code registered, for the tests that used to borrow builtin Play as "a theme".
- * Builtin Play leaves core in W-A8, so a host test written on this fixture keeps its assertions.
+ * entry and what its code registered, for every host test that needs "a theme". No theme is
+ * compiled into the app (A-19f1), so a host test drives the host through an installed theme.
  *
  * The entry is what installedThemeEntry (lib/theme-host/installed-entry.ts) makes of a boot's entry
- * data: kind 'installed', the host's frame width as its minWidth. It lists every slot Play's did
- * (frame, lookEditor, styleSheet, notFound, asleep), owns the pages /chat and /deliverables, and
- * has one route of its own, `fixture-route`, at /x/fixture-route. Its <html> class is `fixture`.
+ * data: kind 'installed', the host's frame width as its minWidth. It lists every slot the host
+ * draws a theme's screen in (frame, lookEditor, styleSheet, notFound, asleep), owns the pages /chat
+ * and /deliverables, and has one route of its own, `fixture-route`, at /x/fixture-route. Its <html>
+ * class is `fixture`.
  *
  * An installed theme's registrations reach the slots through the theme host's context, never from
  * the entry, so a test under this entry also provides the host's value (fixtureThemeHost). Each

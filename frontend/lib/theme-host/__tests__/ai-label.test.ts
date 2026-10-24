@@ -3,13 +3,13 @@
  * theme can remove it.
  *
  * app/chat/layout.tsx is rendered for real, with the default chat (its input, the one Mission
- * Mode uses too: chat.tsx draws FencedMultimodalInput), with builtin Play's chat (its message box,
- * through the lazy slot builtin Play registers for /chat, lib/theme-host/builtin/play-slots.tsx),
- * and with an installed fixture theme that registers /chat through the theme host (ThemeSlot draws
- * its page, the host's chat screen inside the theme's own markup and stylesheet, in MainLayout).
- * PRD-261 A-19e1: and under the neutral fixture theme of A-19b (fixture-theme-entry.ts) as the active
- * installed theme, its /chat page a theme's own composer inside the SDK's cards.AiLabelFence: the case
- * that stays when builtin Play's two leave core (W-A8).
+ * Mode uses too: chat.tsx draws FencedMultimodalInput), with an installed theme whose boot carried
+ * no entry that registers /chat through the theme host (ThemeSlot draws its page in MainLayout: the
+ * theme's own markup and stylesheet around a reply's card and its own composer inside the SDK's
+ * cards.AiLabelFence, as Play's package draws its message box), and (PRD-261 A-19e1) under the
+ * neutral fixture theme of A-19b (fixture-theme-entry.ts) as the active installed theme, its /chat
+ * page a theme's own composer inside cards.AiLabelFence. No theme is compiled into the app (A-19f1),
+ * so every theme's chat reaches the page through the theme host.
  * The label renders once, after ThemeSlot, outside the theme's page, with role="note" and the
  * same words. Then hostile fixture themes set `display:none`,
  * `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label (and a fade
@@ -33,8 +33,6 @@ import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 const state = vi.hoisted(() => ({
   entry: null as ThemeEntry | null,
   layout: 'fallback' as 'fallback' | 'theme' | 'pending',
-  /** What builtin Play's /chat slot draws: Play's chat. */
-  slot: null as null | (() => ReactElement),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -46,9 +44,6 @@ vi.mock('@/hooks/use-studio-theme', () => ({
   useIsStudio: () => state.layout === 'theme',
   useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
-}))
-vi.mock('@/lib/theme-host/builtin/play-chat-lazy', () => ({
-  PlayChat: () => (state.slot ? state.slot() : null),
 }))
 /** The theme's frame around an installed theme's page: its content alone here. */
 vi.mock('@/components/layout/main-layout', () => ({
@@ -65,24 +60,25 @@ import ChatLayout from '@/app/chat/layout'
 import { AI_LABEL_ATTR, AiLabelGate } from '@/components/ai-label/ai-label'
 import { AI_LABEL_FENCE_ATTR } from '@/components/ai-label/ai-label-fence'
 import { FencedMultimodalInput } from '@/components/ai-label/fenced-multimodal-input'
-import { MessageBox, PLACEHOLDER as PLAY_PLACEHOLDER } from '@/components/play/chat/message-box'
 import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
 import { AI_LABEL_PAUSED_TEXT, aiLabelText } from '@/lib/ai-label/copy'
 import { useAiLabelStore, usePublishAnsweringAgent } from '@/lib/ai-label/store'
 import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
 import { AiLabelFence as ThemeAiLabelFence } from '@/lib/theme-sdk/host-cards/ai-label-fence'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
 import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from './fixture-theme-entry'
 
-type Page = 'default' | 'play' | 'theme' | 'fixture'
+type Page = 'default' | 'theme' | 'fixture'
 
-const PAGES: readonly Page[] = ['default', 'play', 'theme', 'fixture']
+const PAGES: readonly Page[] = ['default', 'theme', 'fixture']
 const AUTO_LABEL = 'Auto is an AI'
 const THEME_CLASS = 'hello-chat'
 const HOSTILE_CLASS = 'hostile-theme'
 const CARD_BUTTON = 'Approve & run'
+/** The entry-less installed theme's own composer: its box and its Send. */
+const THEME_COMPOSER = 'Message Auto in the hello theme'
+const THEME_SEND = 'Send to the hello theme'
 /** The fixture theme's own composer: its box and its Send. */
 const FIXTURE_COMPOSER = 'Message the fixture theme'
 const FIXTURE_SEND = 'Send to the fixture theme'
@@ -124,14 +120,15 @@ function card(): ReactElement {
   return h('section', { 'data-testid': 'card' }, h('button', { type: 'button' }, CARD_BUTTON))
 }
 
-/** Builtin Play's chat, as the play slot draws it: a reply's card and Play's own message box. */
-function playChat(): ReactElement {
-  return h('main', { 'data-testid': 'play-chat' }, card(), h(MessageBox, { streaming: false, onSend: () => true, onStop: () => undefined }))
+/** A theme's own composer, its box and its Send, inside the SDK's cards.AiLabelFence (its composer only). */
+function themeComposer(box: string, send: string): ReactElement {
+  const composer = h('form', null, h('textarea', { 'aria-label': box }), h('button', { type: 'submit' }, send))
+  return h(ThemeAiLabelFence, null, composer)
 }
 
-/** A fixture theme that registers /chat: the host's chat screen inside the theme's own page markup. */
+/** An installed theme that registers /chat: its own page markup around a reply's card and its own composer. */
 function themeChat(): ReactElement {
-  return h('div', { 'data-testid': 'theme-page', 'data-theme-page': '' }, h('header', null, 'Hello theme'), playChat())
+  return h('div', { 'data-testid': 'theme-page', 'data-theme-page': '' }, h('header', null, 'Hello theme'), card(), themeComposer(THEME_COMPOSER, THEME_SEND))
 }
 
 /**
@@ -139,15 +136,14 @@ function themeChat(): ReactElement {
  * markup, a reply's card, and its own composer inside cards.AiLabelFence.
  */
 function fixtureChat(): ReactElement {
-  const composer = h('form', null, h('textarea', { 'aria-label': FIXTURE_COMPOSER }), h('button', { type: 'submit' }, FIXTURE_SEND))
-  return h('div', { 'data-testid': FIXTURE_THEME_TEST_IDS.chat }, h('header', null, 'Fixture theme'), card(), h(ThemeAiLabelFence, null, composer))
+  return h('div', { 'data-testid': FIXTURE_THEME_TEST_IDS.chat }, h('header', null, 'Fixture theme'), card(), themeComposer(FIXTURE_COMPOSER, FIXTURE_SEND))
 }
 
 function FixtureFrame({ children }: { readonly children?: ReactNode }): ReactElement {
   return h('div', { 'data-testid': 'theme-frame' }, children)
 }
 
-/** The theme host with an installed fixture theme active, its /chat page registered (registerPage). */
+/** The theme host with an installed theme active (its boot carried no entry), its /chat page registered (registerPage). */
 const FIXTURE_THEME_HOST: ThemeHostContextValue = {
   status: 'active',
   reason: null,
@@ -158,12 +154,14 @@ const FIXTURE_THEME_HOST: ThemeHostContextValue = {
   reportRenderFailure: () => undefined,
 }
 
-/** The active theme's entry under each page: builtin Play's, the A-19b fixture theme's, or none. */
-const ENTRY_OF: Readonly<Record<Page, ThemeEntry | null>> = { default: null, play: BUILTIN_PLAY_ENTRY, theme: null, fixture: FIXTURE_THEME_ENTRY }
+/** The active theme's entry under each page: the A-19b fixture theme's, or none. */
+const ENTRY_OF: Readonly<Record<Page, ThemeEntry | null>> = { default: null, theme: null, fixture: FIXTURE_THEME_ENTRY }
 /** The element each page's chat is drawn in. */
-const PAGE_ROOT: Readonly<Record<Page, string>> = { default: 'core-chat', play: 'play-chat', theme: 'theme-page', fixture: FIXTURE_THEME_TEST_IDS.chat }
+const PAGE_ROOT: Readonly<Record<Page, string>> = { default: 'core-chat', theme: 'theme-page', fixture: FIXTURE_THEME_TEST_IDS.chat }
+/** The name of each page's chat input. */
+const COMPOSER_OF: Readonly<Record<Exclude<Page, 'default'>, string>> = { theme: THEME_COMPOSER, fixture: FIXTURE_COMPOSER }
 
-/** The theme host's value for a page an installed theme draws; null for the default chat and builtin Play. */
+/** The theme host's value for a page an installed theme draws; null for the default chat. */
 function hostOf(page: Page): ThemeHostContextValue | null {
   if (page === 'theme') return FIXTURE_THEME_HOST
   if (page === 'fixture') return fixtureThemeHost('active', { pages: new Map<string, unknown>([[CHAT_HREF, fixtureChat]]) })
@@ -173,7 +171,6 @@ function hostOf(page: Page): ThemeHostContextValue | null {
 function renderChat(page: Page) {
   state.entry = ENTRY_OF[page]
   state.layout = page === 'default' ? 'fallback' : 'theme'
-  state.slot = page === 'play' ? playChat : null
   const chat = h(ChatLayout, null, h('div', { 'data-testid': 'core-chat' }, card(), defaultChat()))
   const host = hostOf(page)
   return render(host ? h(ThemeHostContext.Provider, { value: host }, chat) : chat)
@@ -181,7 +178,7 @@ function renderChat(page: Page) {
 
 function inputOf(page: Page): HTMLElement {
   if (page === 'default') return screen.getByRole('textbox')
-  return screen.getByRole('textbox', { name: page === 'fixture' ? FIXTURE_COMPOSER : PLAY_PLACEHOLDER })
+  return screen.getByRole('textbox', { name: COMPOSER_OF[page] })
 }
 
 function cardButton(): HTMLElement {
@@ -208,7 +205,6 @@ afterEach(() => {
   useAiLabelStore.setState({ agentId: null, hiddenLabels: [], shownLabels: [] })
   state.entry = null
   state.layout = 'fallback'
-  state.slot = null
 })
 
 describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
@@ -233,7 +229,7 @@ describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it.each(['default', 'play'] as const)('on the %s chat no input renders a second copy of the label', (page) => {
+  it.each(PAGES)('on the %s chat no input renders a second copy of the label', (page) => {
     renderChat(page)
     expect(document.querySelectorAll(LABEL)).toHaveLength(1)
     expect(screen.getAllByRole('note')).toHaveLength(1)
@@ -292,7 +288,7 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
   it('takes its pause with it when the chat route goes', async () => {
     document.documentElement.classList.add(HOSTILE_CLASS)
     addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { opacity: 0; }`)
-    const view = renderChat('play')
+    const view = renderChat('fixture')
     await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual(['page']))
     view.unmount()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])

@@ -12,6 +12,10 @@ import { fulfillBackendJson } from './backend-route'
 //
 // PA-17: read-only after A-04a. A later story adds its own folder under fixtures/
 // (fixtures/hello-<story>/) and calls serveInstalledTheme with it.
+//
+// PRD-261 A-19f4 (W-A8) adds the two core styles the first-paint, default-build and smoke specs
+// run under (CORE_STYLES, chooseCoreStyle), and the mount counter the route specs share
+// (countMounts), beside the serving above, which it leaves as it was.
 
 /** The page the theme-host specs open: it renders inside MainLayout's Studio chrome. */
 export const THEME_E2E_PATH = '/agents'
@@ -158,4 +162,84 @@ export async function chooseStyle(page: Page, style: string, appUrl: string): Pr
     window.localStorage.setItem(key, value)
   }, APPEARANCE_DEFAULTS)
   await page.context().addCookies([{ name: STYLE_COOKIE, value: style, url: appUrl }])
+}
+
+/** The two core styles (lib/ui-style.ts): Classic and Studio. */
+export type CoreStyleName = 'classic' | 'studio'
+
+/** A core style, and what only its desktop chrome draws (components/layout/main-layout.tsx). */
+export interface CoreStyle {
+  readonly style: CoreStyleName
+  /** Whether <html> carries `studio`: Studio does; Classic carries no style class. */
+  readonly studio: boolean
+  /** A selector only this style's desktop chrome matches. */
+  readonly shell: string
+  /** The start of that chrome's tag, as the server writes it in the page's HTML. */
+  readonly shellInHtml: string
+}
+
+/** Classic's desktop chrome: its Header (components/layout/header.tsx), the only <header> with glass-card. */
+export const CLASSIC_STYLE: CoreStyle = {
+  style: 'classic',
+  studio: false,
+  shell: 'header.glass-card',
+  shellInHtml: '<header class="sticky top-0 z-30 glass-card',
+}
+
+/** Studio's desktop chrome: the Studio shell (MainLayout's StudioDesktopShell). */
+export const STUDIO_STYLE: CoreStyle = { style: 'studio', studio: true, shell: '.sh-shell', shellInHtml: 'class="sh-shell' }
+
+/** PRD-261 A-19f4: the styles the first-paint, default-build and smoke specs each run under. */
+export const CORE_STYLES: readonly CoreStyle[] = [CLASSIC_STYLE, STUDIO_STYLE]
+
+/** Answers GET /api/themes/active with `style` as the member's choice and no theme (A-07b). */
+export async function answerCoreChoice(page: Page, style: CoreStyleName): Promise<void> {
+  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, { choice: style, theme: null }))
+}
+
+/**
+ * Puts this browser on a core style before the first navigation (the cookie and the defaults
+ * marker), with a server that agrees: the lane's projects share one backend user, whose stored
+ * choice another spec may change, and ThemeChoiceSync moves a tab the server disagrees with (A-02c).
+ */
+export async function chooseCoreStyle(page: Page, core: CoreStyle, appUrl: string): Promise<void> {
+  await answerCoreChoice(page, core.style)
+  await chooseStyle(page, core.style, appUrl)
+}
+
+/** The window property countMounts keeps its tally on. */
+const MOUNTS_KEY = '__e2eMounts'
+
+/**
+ * Counts, from before the first byte, every distinct element matching each of `selectors` that the
+ * page ever inserts, parsed or rendered; the selectors match distinct elements (an element is
+ * counted once, for the first that matches it). Register it before the first navigation; mountsOf
+ * reads it.
+ */
+export async function countMounts(page: Page, selectors: readonly string[]): Promise<void> {
+  await page.addInitScript(({ key, wanted }) => {
+    const seen = new WeakSet<Element>()
+    const counts: Record<string, number> = {}
+    Object.defineProperty(window, key, { value: counts, configurable: true })
+    const tally = (node: Node): void => {
+      if (!(node instanceof Element)) return
+      for (const selector of wanted) {
+        const hits = Array.from(node.querySelectorAll(selector))
+        if (node.matches(selector)) hits.push(node)
+        for (const hit of hits.filter((element) => !seen.has(element))) {
+          seen.add(hit)
+          counts[selector] = (counts[selector] ?? 0) + 1
+        }
+      }
+    }
+    new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach(tally))).observe(document, {
+      childList: true,
+      subtree: true,
+    })
+  }, { key: MOUNTS_KEY, wanted: selectors })
+}
+
+/** What countMounts has counted so far: selector → elements inserted (a selector never seen is absent). */
+export function mountsOf(page: Page): Promise<Record<string, number>> {
+  return page.evaluate((key) => ({ ...((window as unknown as Record<string, Record<string, number> | undefined>)[key] ?? {}) }), MOUNTS_KEY)
 }

@@ -5,11 +5,10 @@
  * may not run, or the boot failed) and every other style hand none.
  *
  * Gap G2: an installed theme whose look sets the tone starts on the tone its look last wrote to the
- * tone cookie, as builtin Play does, so Providers forces that tone from the server render on.
- * PRD-261 A-19d2: the generic look runtime's cookie (`automatos-theme-tone`), for a theme whose
- * boot carries its looks and a tone rule; builtin Play's own cookie is not read for it. The value
- * names its theme (lib/theme-host/looks/tone-cookie.ts), so another installed theme's tone, left
- * by a switch from it, or the old bare tone is not read either.
+ * tone cookie, so Providers forces that tone from the server render on. PRD-261 A-19d2: the generic
+ * look runtime's cookie (`automatos-theme-tone`), for a theme whose boot carries its looks and a
+ * tone rule. The value names its theme (lib/theme-host/looks/tone-cookie.ts), so another installed
+ * theme's tone, left by a switch from it, or the old bare tone is not read.
  *
  * The installed resolver (lib/theme-host/boot-server.ts, which fetches the backend's boot route) is
  * stood in for here by one that answers the boot the test gives; its own tests are boot-server.test.ts.
@@ -34,7 +33,6 @@ vi.mock('next/headers', () => ({
 vi.mock('next/font/local', () => ({
   default: ({ variable }: { readonly variable: string }) => ({ variable: `font${variable}`, className: 'font-face', style: {} }),
 }))
-vi.mock('@/app/play-fonts', () => ({ PLAY_FONT_VARIABLE_CLASSES: [] }))
 vi.mock('@/components/providers', () => ({ Providers: ({ children }: { children: ReactNode }) => children }))
 vi.mock('@/lib/theme-host/boot-server', async () => {
   const { baseThemeBoot } = await import('@/lib/theme-host/boot')
@@ -43,8 +41,6 @@ vi.mock('@/lib/theme-host/boot-server', async () => {
 
 import RootLayout from '../layout'
 import { baseThemeBoot } from '@/lib/theme-host/boot'
-import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { HELLO_ENTRY, helloThemeBoot } from '@/lib/theme-host/looks/__tests__/hello-looks'
 import { THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
@@ -59,6 +55,9 @@ interface ElementProps {
   readonly initialTone?: string
 }
 type LayoutElement = ReactElement<ElementProps>
+
+/** A style that names no theme this build knows: it reads as the default style, Studio. */
+const NO_THEME_STYLE = 'theme:install:not-a-uuid'
 
 function childElements(element: LayoutElement): LayoutElement[] {
   return Children.toArray(element.props.children).filter((child): child is LayoutElement => isValidElement(child))
@@ -91,7 +90,7 @@ describe("PRD-261 W-A6b — the root layout hands Providers the installed theme'
     expect((await providersProps(INSTALLED_PLAY_STYLE))?.initialTheme).toBeNull()
   })
 
-  it.each(['classic', 'studio', BUILTIN_PLAY_STYLE])('hands none under %s', async (style) => {
+  it.each(['classic', 'studio', NO_THEME_STYLE])('hands none under %s', async (style) => {
     installedBoot.current = { ...baseThemeBoot(INSTALLED_PLAY_STYLE), entry: PLAY_PACKAGE_ENTRY }
     expect((await providersProps(style))?.initialTheme).toBeNull()
   })
@@ -104,7 +103,6 @@ describe("PRD-261 W-A6b (gap G2) — an installed theme's look tone from the fir
     const lightFor = (themeId: string) => themeToneCookieValue(themeId, 'light')
     expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: lightFor(PLAY_PACKAGE_ENTRY.themeId) }))?.initialTone).toBe('light')
     expect((await providersProps(INSTALLED_PLAY_STYLE))?.initialTone).toBeUndefined()
-    expect((await providersProps(INSTALLED_PLAY_STYLE, { [PLAY_TONE_COOKIE]: 'light' }))?.initialTone).toBeUndefined()
     // Another installed theme's tone (a switch from it reloads into this one) and the old bare tone: none.
     expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: lightFor(HELLO_ENTRY.themeId) }))?.initialTone).toBeUndefined()
     expect((await providersProps(INSTALLED_PLAY_STYLE, { [THEME_TONE_COOKIE]: 'light' }))?.initialTone).toBeUndefined()

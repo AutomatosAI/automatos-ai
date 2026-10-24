@@ -3,14 +3,17 @@
  * never the tone. It is stable across SSR (the provider is seeded from the
  * cookie) and Classic outside the provider.
  *
- * PRD-260 P260-FX-25 (M69) — the one width source for Play:
+ * PRD-260 P260-FX-25 (M69) — the one width source for a theme:
  * 'pending' on the server, where no width is known, and on a browser mount's
- * very first render already Play's ('theme', >= 1024 px) or 'fallback' (below
- * it, or not Play), never a guess the next render takes back; it follows the
- * window across 1024 px and reads the band useIsTabletOrBelow reads.
+ * very first render already the theme's ('theme', >= 1024 px) or 'fallback'
+ * (below it, or no theme), never a guess the next render takes back; it follows
+ * the window across 1024 px and reads the band useIsTabletOrBelow reads.
  *
- * PRD-261 A-02a — that source is now useThemeLayout, driven by the active
- * theme's minWidth; Play is builtin Play (`theme:builtin:play`, minWidth 1024).
+ * PRD-261 A-02a — that source is useThemeLayout, driven by the active theme's
+ * minWidth. The theme here is an installed one (the neutral fixture theme,
+ * lib/theme-host/__tests__/fixture-theme-entry.ts), named by the entry the root
+ * layout built from its boot: the host draws an installed theme from 1024 px
+ * (INSTALLED_FRAME_MIN_WIDTH_PX).
  */
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react'
@@ -22,14 +25,18 @@ vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'dark', resolvedTheme:
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import * as hook from '@/hooks/use-studio-theme'
-import { BUILTIN_PLAY_MIN_WIDTH_PX, BUILTIN_PLAY_STYLE as PLAY } from '@/lib/theme-host/builtin/play-entry'
-import type { ThemeLayout } from '@/lib/theme-host/registry-types'
+import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_REF, FIXTURE_THEME_STYLE as THEME } from '@/lib/theme-host/__tests__/fixture-theme-entry'
+import { INSTALLED_FRAME_MIN_WIDTH_PX as THEME_MIN_WIDTH_PX } from '@/lib/theme-host/installed-entry'
+import type { ThemeEntry, ThemeLayout } from '@/lib/theme-host/registry-types'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 
 import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from './window-width'
 
+/** The entry the root layout builds from the boot: the fixture's under its style, none under Classic and Studio. */
+const entryOf = (style: UiStyle): ThemeEntry | null => (style === THEME ? FIXTURE_THEME_ENTRY : null)
+
 const wrap = (style: UiStyle) => ({ children }: { children: ReactNode }) => (
-  <UiStyleProvider initialStyle={style}>{children}</UiStyleProvider>
+  <UiStyleProvider initialStyle={style} installedTheme={entryOf(style)}>{children}</UiStyleProvider>
 )
 
 describe('useIsStudio', () => {
@@ -58,12 +65,12 @@ describe('useIsStudio', () => {
     expect(Object.keys(hook)).toEqual(expect.arrayContaining(['useIsStudio', 'useActiveTheme', 'useThemeLayout']))
   })
 
-  it('is true under builtin Play, drawn on Studio (PRD-260 D2)', () => {
-    // A browser already moved to the current defaults, so the provider keeps builtin Play.
+  it('is true under an installed theme drawn on Studio, which useActiveTheme names (PRD-260 D2)', () => {
+    // A browser already moved to the current defaults, so the provider keeps the theme's style.
     window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
     try {
-      const { result } = renderHook(() => ({ studio: hook.useIsStudio(), theme: hook.useActiveTheme()?.ref }), { wrapper: wrap(PLAY) })
-      expect(result.current).toEqual({ studio: true, theme: 'builtin:play' })
+      const { result } = renderHook(() => ({ studio: hook.useIsStudio(), theme: hook.useActiveTheme()?.ref }), { wrapper: wrap(THEME) })
+      expect(result.current).toEqual({ studio: true, theme: FIXTURE_THEME_REF })
     } finally {
       window.localStorage.clear()
     }
@@ -77,16 +84,16 @@ function LayoutProbe({ seen }: { readonly seen: ThemeLayout[] }) {
   return <p data-testid="layout">{layout}</p>
 }
 
-/** Play's layout beside useIsTabletOrBelow's answer, under the same window. */
+/** The theme's layout beside useIsTabletOrBelow's answer, under the same window. */
 function BandProbe() {
   const layout = hook.useThemeLayout()
   const tabletOrBelow = useIsTabletOrBelow()
   return <p data-testid="band">{`${layout} · ${tabletOrBelow ? 'tablet or below' : 'wider'}`}</p>
 }
 
-/** The distinct media queries asked while mounting, at Play's narrowest fallback width. */
+/** The distinct media queries asked while mounting, at the theme's narrowest fallback width. */
 function queriesAsked(mount: () => unknown): ReadonlySet<string> {
-  const width = stubWindowWidth(BUILTIN_PLAY_MIN_WIDTH_PX - 1)
+  const width = stubWindowWidth(THEME_MIN_WIDTH_PX - 1)
   try {
     mount()
     return new Set(width.asked)
@@ -98,13 +105,13 @@ function queriesAsked(mount: () => unknown): ReadonlySet<string> {
 
 function layoutTree(style: UiStyle, seen: ThemeLayout[]) {
   return (
-    <UiStyleProvider initialStyle={style}>
+    <UiStyleProvider initialStyle={style} installedTheme={entryOf(style)}>
       <LayoutProbe seen={seen} />
     </UiStyleProvider>
   )
 }
 
-describe('useThemeLayout under builtin Play (P260-FX-25, M69)', () => {
+describe('useThemeLayout under an installed theme (P260-FX-25, M69)', () => {
   let window_: WindowWidth | null = null
 
   beforeEach(() => {
@@ -118,16 +125,16 @@ describe('useThemeLayout under builtin Play (P260-FX-25, M69)', () => {
     window.localStorage.clear()
   })
 
-  it("is 'pending' on the server under Play: no width is known there", () => {
+  it("is 'pending' on the server under the theme: no width is known there", () => {
     const seen: ThemeLayout[] = []
-    expect(renderToString(layoutTree(PLAY, seen))).toContain('pending')
+    expect(renderToString(layoutTree(THEME, seen))).toContain('pending')
     expect(seen).toEqual(['pending'])
   })
 
   it("is 'fallback' on a phone from the very first render, never 'theme' for a render", () => {
     window_ = stubWindowWidth(PHONE_WIDTH_PX)
     const seen: ThemeLayout[] = []
-    render(layoutTree(PLAY, seen))
+    render(layoutTree(THEME, seen))
     expect(screen.getByTestId('layout')).toHaveTextContent('fallback')
     expect(seen.length).toBeGreaterThan(0)
     expect(new Set(seen)).toEqual(new Set(['fallback']))
@@ -136,7 +143,7 @@ describe('useThemeLayout under builtin Play (P260-FX-25, M69)', () => {
   it("is 'theme' on a laptop from the very first render", () => {
     window_ = stubWindowWidth(LAPTOP_WIDTH_PX)
     const seen: ThemeLayout[] = []
-    render(layoutTree(PLAY, seen))
+    render(layoutTree(THEME, seen))
     expect(screen.getByTestId('layout')).toHaveTextContent('theme')
     expect(new Set(seen)).toEqual(new Set(['theme']))
   })
@@ -151,7 +158,7 @@ describe('useThemeLayout under builtin Play (P260-FX-25, M69)', () => {
 
   it('follows the window across 1024 px', () => {
     window_ = stubWindowWidth(LAPTOP_WIDTH_PX)
-    render(layoutTree(PLAY, []))
+    render(layoutTree(THEME, []))
     expect(screen.getByTestId('layout')).toHaveTextContent('theme')
     act(() => window_?.resize(PHONE_WIDTH_PX))
     expect(screen.getByTestId('layout')).toHaveTextContent('fallback')
@@ -161,24 +168,24 @@ describe('useThemeLayout under builtin Play (P260-FX-25, M69)', () => {
 
   it('asks the query useIsTabletOrBelow asks, and they agree on each side of 1024 px', () => {
     const tabletQueries = queriesAsked(() => renderHook(() => useIsTabletOrBelow()))
-    const playQueries = queriesAsked(() => render(layoutTree(PLAY, [])))
-    expect(playQueries).toEqual(tabletQueries)
+    const themeQueries = queriesAsked(() => render(layoutTree(THEME, [])))
+    expect(themeQueries).toEqual(tabletQueries)
 
-    window_ = stubWindowWidth(BUILTIN_PLAY_MIN_WIDTH_PX - 1)
+    window_ = stubWindowWidth(THEME_MIN_WIDTH_PX - 1)
     render(
-      <UiStyleProvider initialStyle={PLAY}>
+      <UiStyleProvider initialStyle={THEME} installedTheme={FIXTURE_THEME_ENTRY}>
         <BandProbe />
       </UiStyleProvider>,
     )
     expect(screen.getByTestId('band')).toHaveTextContent('fallback · tablet or below')
-    act(() => window_?.resize(BUILTIN_PLAY_MIN_WIDTH_PX))
+    act(() => window_?.resize(THEME_MIN_WIDTH_PX))
     expect(screen.getByTestId('band')).toHaveTextContent('theme · wider')
   })
 
   it('treats a browser without matchMedia as a wide one', () => {
     window_ = stubWindowWidth(LAPTOP_WIDTH_PX)
     Reflect.deleteProperty(window, 'matchMedia')
-    render(layoutTree(PLAY, []))
+    render(layoutTree(THEME, []))
     expect(screen.getByTestId('layout')).toHaveTextContent('theme')
   })
 })

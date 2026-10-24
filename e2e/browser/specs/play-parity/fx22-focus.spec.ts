@@ -11,7 +11,7 @@ import {
 } from '../../support/play-parity'
 
 // PRD-261 A-17b (@parity), P260-FX-22 (M20, M21): keyboard focus survives what Play unmounts and
-// swaps, under builtin Play and the installed package.
+// swaps, under the installed package (A-19f4: since W-A8 the only Play).
 //
 // 1. M20: Try again on a turn that failed before Auto's reply began hands focus to the message box.
 // 2. M21: when the backend stops answering, "Automatos is asleep" takes the focus the frame swap
@@ -19,10 +19,12 @@ import {
 //    GET /health is answered 503 here until Check again.
 // 3. M20: in Make it yours, This look's toolbar keeps focus through Rename, Save name, Delete,
 //    Keep it and Delete look.
-// 4. M21: Switch to Play on Studio's /looks note hands focus to the screen's heading. Onto the
-//    package the switch reloads the page (PA-13); the note leaves word for the next load in
-//    sessionStorage (lib/theme-host/switch-focus.ts, G3), and the heading takes focus once the
-//    host has loaded the package, so the wait is the package's cold load.
+// 4. A-19f4: until W-A8, Studio's /looks note offered builtin Play's "Switch to Play", which left
+//    word for the reload onto the package so the screen's heading took focus (M21, G3). W-A8 took
+//    that switch off the note with builtin Play: Studio's /looks is now the generic note
+//    (components/theme-host/no-look-editor-note.tsx, its heading marked [data-theme-heading]) and
+//    names no Play. With the package chosen, Make it yours draws again, its h1 carrying the same
+//    mark, the one ThemeSlotPage gives focus to when a switch asks for it.
 
 const ASK = 'Find me a laptop under 1,000 euros'
 const ANSWER = 'Here is your laptop shortlist.'
@@ -41,10 +43,13 @@ const STUDIO = 'studio'
 const MANAGE = 'This look'
 const RENAMED = 'Focus look'
 const LOOKS_HEADING = 'Make it yours.'
-const LOOKS_NOTE_REGION = 'Make it yours'
+/** The name builtin Play's switch had: no button on Studio's note carries it any more. */
 const SWITCH_TO_PLAY = 'Switch to Play'
-const INSTALLED_PATH = '/api/themes/installed'
-/** Play's frame puts its page in a <main tabIndex={-1}> (components/play/shell/play-frame.tsx), which takes focus after a nap. */
+/** The mark a screen's heading carries for the host: on the generic note's heading, and on Play's h1. */
+const THEME_HEADING_ATTR = 'data-theme-heading'
+const THEME_HEADING = `[${THEME_HEADING_ATTR}]`
+const PLAY_CLASS = /\bplay\b/
+/** Play's frame puts its page in a <main tabIndex={-1}> (the kit's themes/play/src/components/play/shell/play-frame.tsx), which takes focus after a nap. */
 const FRAME_MAIN_TAG = 'MAIN'
 
 /** The tag and tabindex of the focused element. */
@@ -110,17 +115,22 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
     await expect(inThisLook(page, 'Duplicate')).toBeFocused()
   })
 
-  test("Switch to Play on Studio's note hands focus to the screen's heading", { tag: PARITY_TAG }, async ({ page, request }) => {
-    await variant.makeAvailable(request)
+  test("Studio's /looks note names no Play switch; chosen, Play's Make it yours heading carries the host's mark", { tag: PARITY_TAG }, async ({ page, request }) => {
+    const play = await variant.makeAvailable(request)
     await chooseStyle(page, STUDIO, APP_URL)
-    const installs = page.waitForResponse((response) => new URL(response.url()).pathname === INSTALLED_PATH && response.request().method() === 'GET')
     await page.goto(LOOKS_PATH)
-    const note = page.getByRole('region', { name: LOOKS_NOTE_REGION, exact: true })
-    await expect(note.getByRole('button', { name: SWITCH_TO_PLAY })).toBeVisible()
-    await installs
+    await expect(page.locator(THEME_HEADING).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: SWITCH_TO_PLAY })).toHaveCount(0)
+    await expect(page.locator('html')).not.toHaveClass(PLAY_CLASS)
 
-    await note.getByRole('button', { name: SWITCH_TO_PLAY }).click()
-    await expect(page.getByRole('heading', { name: LOOKS_HEADING, level: 1 })).toBeFocused({ timeout: THEME_LOAD_TIMEOUT_MS })
-    await expect(page.locator('html')).toHaveClass(/\bplay\b/)
+    // Leave the app before choosing: an open page sees the new server choice and reloads itself, and
+    // a reload of ours racing that one aborts (net::ERR_ABORTED). Open the page fresh instead.
+    await page.goto('about:blank')
+    await play.choose(page)
+    await page.goto(LOOKS_PATH)
+    await play.ready(page)
+    const heading = page.getByRole('heading', { name: LOOKS_HEADING, level: 1 })
+    await expect(heading).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
+    await expect(heading).toHaveAttribute(THEME_HEADING_ATTR)
   })
 })

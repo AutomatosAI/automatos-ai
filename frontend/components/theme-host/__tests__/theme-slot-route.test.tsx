@@ -1,13 +1,13 @@
 /**
  * PRD-261 A-04b — a theme's own routes at /x/<route> (registerRoute). The server page answers the
- * 404 for an address no theme of the style can serve (a bad route, Classic, Studio, a builtin
- * theme without the route) and otherwise renders ThemeSlotRoute full bleed inside MainLayout,
- * which sits inside the host's AI label gate (PRD-264 EUAI-11a).
+ * 404 for an address no theme of the style can serve (a route outside the pattern, Classic, Studio,
+ * a style cookie that names no theme this build knows, which reads as the default style) and
+ * otherwise, under an installed theme, renders ThemeSlotRoute full bleed inside MainLayout, which
+ * sits inside the host's AI label gate (PRD-264 EUAI-11a). So /x/conversations is a 404 under
+ * Classic and Studio: no theme is compiled into the app (A-19f1).
  * ThemeSlotRoute renders the active theme's route from the theme host (the fixture theme's
  * `fixture-route`, PRD-261 A-19b, and an installed theme's), at any width, nothing while an
  * installed theme loads, and calls notFound() when nothing is registered by that name.
- * The server page's rows for builtin Play's style cookies test builtin Play's own branch of
- * themeMayServe (its entry lists its routes); they go with builtin Play in W-A8 (A-19f2).
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -41,6 +41,7 @@ import { MainLayout } from '@/components/layout/main-layout'
 import {
   FIXTURE_THEME_ENTRY,
   FIXTURE_THEME_ROUTE,
+  FIXTURE_THEME_STYLE,
   FIXTURE_THEME_TEST_IDS,
   fixtureThemeHost,
 } from '@/lib/theme-host/__tests__/fixture-theme-entry'
@@ -51,6 +52,8 @@ import { OuterBoundary } from './next-router-errors'
 
 const INSTALLED_STYLE = 'theme:install:00000000-0000-4000-8000-0000000a04b1'
 const NOT_FOUND_DIGEST = /^NEXT_HTTP_ERROR_FALLBACK;404/
+/** A style that names no theme this build knows: it reads as the default style, Studio. */
+const NO_THEME_STYLE = 'theme:install:not-a-uuid'
 
 function HelloFrame({ children }: { children?: React.ReactNode }) {
   return <>{children}</>
@@ -134,9 +137,8 @@ describe('ThemeSlotRoute', () => {
 
 describe('app/x/[...path]/page.tsx', () => {
   it.each([
-    ['the style builtin Play is', 'theme:builtin:play', ['conversations']],
-    ['a legacy play cookie', 'play', ['conversations']],
     ["an installed theme's style (its routes are known in the browser)", INSTALLED_STYLE, ['hello']],
+    ["the fixture theme's style, its own route", FIXTURE_THEME_STYLE, [FIXTURE_THEME_ROUTE]],
     ['an installed theme, a nested route', INSTALLED_STYLE, ['hello', 'there']],
   ])('renders the route full bleed in MainLayout, inside the host AI label gate, under %s', async (_label, style, path) => {
     state.style = style
@@ -154,7 +156,8 @@ describe('app/x/[...path]/page.tsx', () => {
     ['Studio', 'studio', ['conversations']],
     ['Classic', 'classic', ['conversations']],
     ['no cookie (the default style)', undefined, ['conversations']],
-    ['builtin Play, a route it does not serve', 'theme:builtin:play', ['hello']],
+    ['a style that names no theme this build knows', NO_THEME_STYLE, [FIXTURE_THEME_ROUTE]],
+    ['another style that names no theme', 'theme:other', ['conversations']],
     ['an installed theme, a route outside the pattern', INSTALLED_STYLE, ['Hello']],
     ['an installed theme, five segments', INSTALLED_STYLE, ['a', 'b', 'c', 'd', 'e']],
   ])('answers the 404 on the server under %s', async (_label, style, path) => {

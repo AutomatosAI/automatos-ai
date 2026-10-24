@@ -53,9 +53,9 @@ const KNOB_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
 const OPTION_KEY_MAX_LENGTH = 64
 const RGB_LIST = /^\d{1,3},\d{1,3},\d{1,3}$/
 /**
- * A look storage key: builtin Play's `automatos-play.look.current`, and an installed theme's
- * `automatos-theme.<publisher>/<name>.look.current` (play-look-storage.ts installedLookKeys, W-A6b
- * gap G2), whose theme id holds a '/' and may be 102 characters long.
+ * A look storage key: an installed theme's `automatos-theme.<publisher>/<name>.look.current`
+ * (lib/theme-host/looks/storage.ts themeLookKeys, W-A6b gap G2), whose theme id holds a '/' and
+ * may be 102 characters long.
  */
 const STORAGE_KEY = /^[A-Za-z0-9._:/-]{1,160}$/
 const GUARD_MAX_LENGTH = 128

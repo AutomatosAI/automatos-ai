@@ -165,7 +165,7 @@ function tokenProblem(groups: TokenGroups): string | null {
 /** var() must start with a custom property name. */
 function varProblem(value: string, at: number): string | null {
   const name = VAR_NAME.exec(value.slice(at))
-  if (name === null || !CUSTOM_PROPERTY_PATTERN.test(name[1])) return 'var() must name a custom property such as --pl-accent'
+  if (name === null || !CUSTOM_PROPERTY_PATTERN.test(name[1])) return 'var() must name a custom property such as --theme-accent'
   return null
 }
 

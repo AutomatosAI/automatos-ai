@@ -2,7 +2,8 @@
 
 Resolution order (plan §2.6 A-07b): the member's own choice (when the workspace lets members
 choose, A-07e), then the workspace default, then Studio. A choice naming an install that is
-gone (uninstalled, or another workspace's) falls through to the default.
+gone (uninstalled, or another workspace's) falls through to the default, and so does a stored
+value that is no choice any more (Play's, from when it was compiled into the app, PRD-261 A-19).
 
 Q6: a private (unreviewed) theme is never a workspace default, because a default runs for
 members who never said yes to its code. ``PUT /api/themes/default`` refuses one with 409,
@@ -11,7 +12,7 @@ and resolution skips a default row that somehow points at one.
 The answer's shape is the one the host reads (``frontend/lib/theme-host/manifest.ts``
 ``parseActiveInstall``: ``theme.installId``, ``theme.digest``, ``theme.manifest``)::
 
-    {"choice": "classic" | "studio" | "builtin:play" | "<installId>",
+    {"choice": "classic" | "studio" | "<installId>",
      "source": "choice" | "default" | "fallback",
      "theme": null | {installId, themeId, packageId, version, digest, manifest, defaultLook,
                       reviewed, optIn: {required, wording, packageId}, revoked: null | {level, reason},
@@ -38,7 +39,6 @@ from sqlalchemy.orm import Session
 
 from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.choices import (
-    BUILTIN_CHOICES,
     CONFLICT,
     FALLBACK_CHOICE,
     PLAIN_CHOICES,
@@ -122,8 +122,8 @@ def default_install(db: Session, workspace_id: UUID) -> Optional[ThemeInstallati
 def _pick(
     db: Session, workspace_id: UUID, choice: Optional[str],
 ) -> Tuple[str, Optional[ThemeInstallation], str]:
-    """The choice, its install (None for a plain or builtin one) and where it came from."""
-    if choice in PLAIN_CHOICES or choice in BUILTIN_CHOICES:
+    """The choice, its install (None for a plain one) and where it came from."""
+    if choice in PLAIN_CHOICES:
         return choice, None, SOURCE_CHOICE
     install_id = install_id_of(choice)
     install = None if install_id is None else find_active_install(db, workspace_id, install_id)

@@ -39,8 +39,8 @@ import { DUSK, HELLO, HELLO_ENTRY, HELLO_RULES, HELLO_THEME_ID, helloThemeBoot, 
 const RULE = HELLO_RULES.table.tone
 const SCOPE = lookScope('7d3c2a10-1b2c-4d5e-8f90-123456789abc', 'user_a')
 const INSTALL_STYLE: UiStyle = 'theme:install:5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d'
-/** Builtin Play's own tone cookie (lib/theme-host/builtin/play-boot.ts names it), never read for an installed theme. */
-const BUILTIN_TONE_COOKIE = 'automatos-play-tone'
+/** A tone cookie under another name: the boot never reads it, and the runtime never writes it. */
+const OTHER_TONE_COOKIE = 'automatos-other-tone'
 /** Another installed theme, the one a switch to hello-a09b reloads from. */
 const OTHER_THEME_ID = 'acme/other'
 /** The cookie's value for hello-a09b's look tone. */
@@ -50,8 +50,13 @@ function toneCookie(name: string = THEME_TONE_COOKIE): string | undefined {
   return document.cookie.split('; ').find((entry) => entry.startsWith(`${name}=`))?.split('=')[1]
 }
 
+/** The name a `document.cookie = ...` write sets. */
+function cookieName(written: unknown): string {
+  return String(written).split('=')[0]
+}
+
 function dropCookies(): void {
-  for (const name of [THEME_TONE_COOKIE, BUILTIN_TONE_COOKIE]) document.cookie = `${name}=; Max-Age=0; Path=/`
+  for (const name of [THEME_TONE_COOKIE, OTHER_TONE_COOKIE]) document.cookie = `${name}=; Max-Age=0; Path=/`
 }
 
 /** What the SDK's useLook() last handed a theme below the provider. */
@@ -156,6 +161,7 @@ describe('the tone cookie', () => {
 describe("the generic look runtime's provider", () => {
   it("writes the look's tone to the cookie and hands it to forcedTheme, follows the look, and clears it when switched off", async () => {
     removeBoot = putPageBoot(helloThemeBoot())
+    const writes = vi.spyOn(Document.prototype, 'cookie', 'set')
     const onToneChange = vi.fn()
     const { rerender } = renderProvider(onToneChange, memoryStorage({ [lookKeys(SCOPE, HELLO.keys).active]: JSON.stringify(INK) }))
     await waitFor(() => expect(toneCookie()).toBe(hello('dark')))
@@ -170,7 +176,9 @@ describe("the generic look runtime's provider", () => {
     await waitFor(() => expect(toneCookie()).toBeUndefined())
     // Switched off it hands up no tone: the host gives the tone back when no runtime runs (ThemeLookRuntime).
     expect(onToneChange).not.toHaveBeenCalledWith(undefined)
-    expect(toneCookie(BUILTIN_TONE_COOKIE)).toBeUndefined()
+    // The only cookie it wrote, or deleted, is its own: no other tone cookie name.
+    expect(writes).toHaveBeenCalled()
+    expect(Array.from(new Set(writes.mock.calls.map(([value]) => cookieName(value))))).toEqual([THEME_TONE_COOKIE])
   })
 
   it("forces no tone and keeps no cookie under a theme whose tone doesn't follow its look", async () => {
@@ -210,8 +218,16 @@ describe('the boot reads it for an installed from-look theme', () => {
     expect((await resolve(written, other)).tone).toEqual({ policy: 'from-look', value: null })
   })
 
-  it("never reads builtin Play's tone cookie for an installed theme", async () => {
-    expect((await resolve({ [BUILTIN_TONE_COOKIE]: hello('dark') }, helloThemeBoot())).tone).toEqual({ policy: 'from-look', value: null })
+  it('reads no cookie but THEME_TONE_COOKIE: a tone under any other name is no tone', async () => {
+    const read: string[] = []
+    const cookies = cookieReader({ [OTHER_TONE_COOKIE]: hello('dark') })
+    const recording = (name: string) => {
+      read.push(name)
+      return cookies(name)
+    }
+    const boot = await createThemeBootResolver(recording, async () => helloThemeBoot())(INSTALL_STYLE)
+    expect(boot.tone).toEqual({ policy: 'from-look', value: null })
+    expect(read).toEqual([THEME_TONE_COOKIE])
   })
 
   it('leaves it unread when nothing would keep it: no tone rule, no looks, no entry, no look keys, or not from-look', async () => {

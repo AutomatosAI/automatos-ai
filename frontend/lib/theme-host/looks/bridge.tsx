@@ -9,8 +9,8 @@
  * what the SDK hands out is a frozen copy, so a theme can't change the runtime's.
  *
  * While no installed theme with looks runs here (`source` null) the bridge hands its children the
- * runtime above it, unchanged, and registers nothing: the host keeps one tree shape (M69), and
- * builtin Play's own runtime, mounted above this one until W-A8, still reaches the SDK.
+ * runtime above it, unchanged, and registers nothing: the host keeps one tree shape (M69). Since
+ * W-A8 no runtime is mounted above it (builtin Play's own left core), so they get none.
  */
 import { useContext, useEffect, useMemo, type ReactNode } from 'react'
 

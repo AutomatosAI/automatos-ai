@@ -1,10 +1,12 @@
 /**
- * PRD-261 G3 (P260-FX-22, M21) — 'Switch to Play' hands focus to the screen's heading, also when
- * the switch lands on an installed theme. A switch to an installed theme is never made in place:
- * the page reloads into it (PA-13, contexts/ui-style-context.tsx setStyle), which drops what
- * ThemeSlotPage remembered about the note that offered the switch. So the note leaves word in this
- * tab's sessionStorage just before the reload (one key, holding the page's path), and the next
- * load's ThemeSlotPage takes it once: read and cleared together, so it never outlives that load.
+ * PRD-261 G3 (P260-FX-22, M21) — a switch onto an installed theme can hand focus to the screen's
+ * heading. A switch to an installed theme is never made in place: the page reloads into it (PA-13,
+ * contexts/ui-style-context.tsx setStyle), which drops what ThemeSlotPage remembered about the note
+ * the switch replaced. So the switch leaves word in this tab's sessionStorage just before the
+ * reload (one key, holding the page's path: rememberHeadingFocusAfterReload as its `beforeReload`),
+ * and the next load's ThemeSlotPage takes it once: read and cleared together, so it never outlives
+ * that load. Since A-19f1 no core note offers a switch (components/theme-host/no-look-editor-note.tsx,
+ * where builtin Play's note had 'Switch to Play'), so no core control passes it today.
  *
  * Storage errors (blocked site data, a full store) mean "no word left", never a throw: the switch
  * still happens, only the focus stays where the browser puts it.

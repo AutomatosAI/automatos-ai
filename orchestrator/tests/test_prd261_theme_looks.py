@@ -8,7 +8,8 @@ with the real workspace-permission gate and the real ``resolve_user_pk``. Pinned
 * an invalid look is 400 naming the field (``looks[0].weight``, ``active.name``);
 * a newer version that drops a knob, or a choice, carries the look over with the default;
   a look that can't be carried is left out and the active one falls back to ``defaultLook``;
-* builtin Play (``automatos/play``) is checked against the committed schema with no install;
+* A-19f3: Play (``automatos/play``) is 404 until its package is installed here, like any theme;
+  then it answers the looks saved under that id earlier, held to the package's schema;
 * an install pointing at another workspace's private package is 404; a stored schema whose
   bytes don't match the file manifest is 503 with a plain message.
 """
@@ -47,7 +48,6 @@ from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.auth.workspace_permission import PERMISSION_MARKER_ATTR  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.themes import ThemeInstallation, ThemeLook, ThemePackage  # noqa: E402
-from services.themes.contract import HTML_CLASS_OWNERS  # noqa: E402
 from services.themes.digest import sha256_hex  # noqa: E402
 
 WS_A = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
@@ -56,7 +56,8 @@ WS_B = uuid.UUID("00000000-0000-0000-0000-0000000000b2")
 ANN, BEN, CAT = (1, "user_ann", WS_A), (2, "user_ben", WS_A), (3, "user_cat", WS_B)
 INK = "acme/ink"
 URL = f"/api/themes/looks/{INK}"
-PLAY_URL = "/api/themes/looks/automatos/play"
+PLAY = "automatos/play"
+PLAY_URL = f"/api/themes/looks/{PLAY}"
 
 INK_V1 = {
     "schema": "automatos-look-schema/v1",
@@ -80,6 +81,21 @@ NIGHT = {**MINE, "id": "night", "name": "Night", "paper": "white", "weight": 2}
 EMBER = {
     "schema": "automatos-interface-look/v1", "interface": "play", "id": "my-ember", "name": "My Ember", "sub": "",
     "ground": "graphite", "accent": "molten", "font": "serif", "shell": "bronze", "light": "mint", "glow": 24,
+}
+# Play's looks/schema.json as its package ships it (the kit's compile-looks builds it, held to
+# the schema core kept before A-19 by the kit's tests/compile-looks.test.ts): the knobs EMBER sets.
+PLAY_SCHEMA = {
+    "schema": "automatos-look-schema/v1",
+    "look": {"schema": "automatos-interface-look/v1", "interface": "play"},
+    "knobs": {
+        "ground": {"kind": "choice", "choices": ["graphite", "obsidian", "indigo", "paper"], "default": "graphite"},
+        "accent": {"kind": "choice", "choices": ["molten", "cream", "mint", "gold", "periwinkle", "rose"],
+                   "default": "molten"},
+        "font": {"kind": "choice", "choices": ["serif", "clean", "bric", "round"], "default": "serif"},
+        "shell": {"kind": "choice", "choices": ["bronze", "gold", "silver", "cobalt"], "default": "bronze"},
+        "light": {"kind": "choice", "choices": ["mint", "amber", "ice", "rose"], "default": "mint"},
+        "glow": {"kind": "number", "min": 0, "max": 40, "integer": True, "default": 24},
+    },
 }
 
 
@@ -116,12 +132,12 @@ def storage(monkeypatch):
     return files
 
 
-def _package(db, storage, schema, version="1.0.0", owner=WS_A, stored_bytes=None) -> ThemePackage:
+def _package(db, storage, schema, version="1.0.0", owner=WS_A, stored_bytes=None, theme_id=INK) -> ThemePackage:
     raw = json.dumps(schema).encode("utf-8")
-    prefix = f"themes/_workspace/{owner}/{INK}/{version}/"
+    prefix = f"themes/_workspace/{owner}/{theme_id}/{version}/"
     package = ThemePackage(
-        theme_id=INK, version=version, owner_type="workspace", workspace_id=owner, digest=sha256_hex(raw + version.encode()),
-        manifest={"id": INK, "look": "plain"}, storage_prefix=prefix,
+        theme_id=theme_id, version=version, owner_type="workspace", workspace_id=owner,
+        digest=sha256_hex(raw + version.encode()), manifest={"id": theme_id, "look": "plain"}, storage_prefix=prefix,
         file_manifest={"looks/schema.json": {"type": "application/json", "size": len(raw), "sha256": sha256_hex(raw)}},
     )
     storage[(prefix, "looks/schema.json")] = raw if stored_bytes is None else stored_bytes
@@ -131,7 +147,7 @@ def _package(db, storage, schema, version="1.0.0", owner=WS_A, stored_bytes=None
 
 
 def _install(db, package, workspace=WS_A) -> ThemeInstallation:
-    install = ThemeInstallation(workspace_id=workspace, theme_id=INK, package_id=package.id)
+    install = ThemeInstallation(workspace_id=workspace, theme_id=package.theme_id, package_id=package.id)
     db.add(install)
     db.commit()
     return install
@@ -283,16 +299,27 @@ def test_a_stored_schema_that_doesnt_match_its_manifest_is_503(db, storage):
     assert response.json() == {"detail": looks_service.SCHEMA_UNAVAILABLE}
 
 
-def test_builtin_play_uses_the_committed_schema_without_an_install(db, storage):
-    assert looks_service.BUILTIN_PLAY_THEME_ID == HTML_CLASS_OWNERS["play"]
-    assert list(looks_service.builtin_play_schema().knobs) == ["ground", "accent", "font", "shell", "light", "glow"]
-    empty = _client(db, _saas(ANN)).get(PLAY_URL).json()
-    assert empty == {"themeId": "automatos/play", "looks": [], "active": None, "defaultLook": "ember", "dropped": 0}
-    assert _put(db, _saas(ANN), [EMBER], EMBER, url=PLAY_URL).status_code == 200
-    assert _client(db, _saas(ANN)).get(PLAY_URL).json()["active"] == EMBER
+def test_play_is_404_until_its_package_is_installed(db, storage):
+    client = _client(db, _saas(ANN))
+    for response in (client.get(PLAY_URL), client.put(PLAY_URL, json={"looks": [EMBER], "active": EMBER})):
+        assert response.status_code == 404
+        assert response.json() == {"detail": looks_service.NOT_INSTALLED}
+    assert db.query(ThemeLook).count() == 0
+
+
+def test_installed_play_answers_the_looks_saved_under_its_id_earlier(db, storage):
+    # Saved while Play was compiled into the app: PA-8 kept them under its package id.
+    db.add(ThemeLook(workspace_id=WS_A, user_id=ANN[0], theme_id=PLAY, looks=[EMBER], active=EMBER))
+    db.commit()
+    client = _client(db, _saas(ANN))
+    assert client.get(PLAY_URL).status_code == 404
+    _install(db, _package(db, storage, PLAY_SCHEMA, theme_id=PLAY))
+    body = client.get(PLAY_URL).json()
+    assert body == {"themeId": PLAY, "looks": [EMBER], "active": EMBER, "defaultLook": "plain", "dropped": 0}
     refused = _put(db, _saas(ANN), [{**EMBER, "ground": "neon"}], None, url=PLAY_URL)
     assert refused.status_code == 400
     assert refused.json()["errors"][0]["path"] == "looks[0].ground"
+    assert db.query(ThemeLook).one().looks == [EMBER]
 
 
 def test_a_caller_with_no_person_is_refused_plainly(db, ink):

@@ -96,8 +96,8 @@ function clearHeldPaint(root: HTMLElement, held: HeldTable): void {
 /**
  * Switched off, the motion marks come off and, unless the host still loads or runs an installed theme
  * (keepFirstPaint), the variables of the last table this runtime held. A theme left in place (for
- * Studio, Classic or a builtin theme: only a switch TO an installed theme reloads) hands in no table, as
- * its rules go with its id, and the host's status can trail the style by a commit; so the table is
+ * Studio or Classic: only a switch TO an installed theme reloads) hands in no table, as its rules go
+ * with its id, and the host's status can trail the style by a commit; so the table is
  * held, not replaced by none, into the commit where keepFirstPaint turns false.
  */
 function useLookOnDocument({ table, look, active, reducedMotion, keepFirstPaint }: DocumentLook): void {

@@ -2,7 +2,7 @@
  * PRD-261 A-13c — SDK area `assets` (lib/theme-sdk/assets.ts): assetUrl names a file in the active installed
  * theme's package, under the same-origin files route and the digest the host loaded for that install. It
  * refuses a path that could leave the package's folder, and answers null where there is no installed theme
- * (Classic, Studio, builtin Play) or the host has not named the package's digest for this install.
+ * (Classic, Studio, a style that names no install) or the host has not named the package's digest for this install.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -57,7 +57,7 @@ describe('PRD-261 A-13c — assetUrl under an installed theme', () => {
 })
 
 describe('PRD-261 A-13c — assetUrl with no package to name', () => {
-  it.each(['classic', 'studio', 'theme:builtin:play'])('is null under %s', (style) => {
+  it.each(['classic', 'studio', 'theme:install:not-a-uuid'])('is null under %s', (style) => {
     setCookie(UI_STYLE_COOKIE, style)
     setCookie(THEME_DIGEST_COOKIE, `${INSTALL}${THEME_DIGEST_HINT_SEPARATOR}${DIGEST}`)
     expect(assetUrl('assets/mascot/wave.mp4')).toBeNull()

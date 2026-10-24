@@ -6,7 +6,7 @@
  * the credit balance (hosted edition, PRD-265), Help and the docs, notifications, the theme menu
  * and the profile control by edition. Every frame must render it (PRD §4.4), so the way back to
  * the theme menu, safe mode's entry and the account are always on screen;
- * lib/theme-sdk/__tests__/header-utilities.test.tsx checks builtin Play's frame does. The banner
+ * lib/theme-sdk/__tests__/header-utilities.test.tsx checks an installed theme's frame does. The banner
  * and the nudge are the host's own: the paused state once the workspace's credits are used up
  * (PRD-265; the card keeps its SDK name) with its power-up card, and the local edition's "add an
  * LLM key" nudge.

@@ -1,13 +1,15 @@
 /**
  * PRD-261 A-02a — the types of the Style axis and the theme registry.
  *
- * The axis is Classic, Studio or a theme: `theme:<ref>`, where the ref names a theme compiled
- * into the app (`builtin:<id>`) or one installed in the workspace (`install:<uuid>`). Each theme
- * is one registry entry (lib/theme-host/registry.ts); nothing else in the core names a theme.
+ * The axis is Classic, Studio or a theme: `theme:<ref>`, where the ref names a theme installed in
+ * the workspace (`install:<uuid>`). Each theme is one registry entry (lib/theme-host/registry.ts);
+ * nothing else in the core names a theme. No theme is compiled into the app since A-19f1, so a ref
+ * is an install's only: the axis reads a style that names anything else (the compiled-in form
+ * builtin Play's choice left in cookies) as the default (lib/ui-style.ts parseUiStyle).
  */
 
 /** A theme's name on the axis. An install id is a lowercase uuid. */
-export type ThemeRef = `builtin:${string}` | `install:${string}`
+export type ThemeRef = `install:${string}`
 
 export type UiStyle = 'classic' | 'studio' | `theme:${ThemeRef}`
 
@@ -26,12 +28,12 @@ export interface ThemeNavItem { readonly id: string; readonly label: string; rea
 
 export interface ThemeEntry {
   readonly ref: ThemeRef; readonly name: string; readonly base: ThemeBase; readonly htmlClass: string
-  readonly minWidth: number; readonly tone: ThemeTonePolicy; readonly kind: 'builtin' | 'installed'
+  readonly minWidth: number; readonly tone: ThemeTonePolicy; readonly kind: 'installed'
   readonly reviewed: boolean; readonly ownsPages: readonly string[]; readonly routes: readonly string[]
   readonly nav: readonly ThemeNavItem[]; readonly slots: readonly SlotId[]
   /**
-   * PRD-261 W-A6b (gap G2): an installed theme's id (theme.json `id`), which the host's look store keeps
-   * its looks under (installedLookTheme). Builtin entries have none: builtin Play's looks keep their PRD-260 keys.
+   * PRD-261 W-A6b (gap G2): the installed theme's id (theme.json `id`), which the host's look runtime
+   * keeps its looks under (lib/theme-host/looks/storage.ts themeLookKeys).
    */
   readonly themeId?: string
 }

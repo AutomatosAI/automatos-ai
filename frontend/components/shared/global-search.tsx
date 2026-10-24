@@ -92,12 +92,10 @@ function ThemeGroup({ results, onSelect }: { results: ThemeSearchResult[]; onSel
   )
 }
 
-/** Classic, Studio and the themes (D1-c applied), or none outside the style provider. */
+/** Classic, Studio and the workspace's installed themes, or none outside the style provider. */
 function useStyleChoices() {
-  const ui = useUiStyleOptional()
-  const installed = ui?.installedThemes
-  const style = ui?.style ?? null
-  return useMemo(() => (installed === undefined ? undefined : styleChoices(installed, style)), [installed, style])
+  const installed = useUiStyleOptional()?.installedThemes
+  return useMemo(() => (installed === undefined ? undefined : styleChoices(installed)), [installed])
 }
 
 /**

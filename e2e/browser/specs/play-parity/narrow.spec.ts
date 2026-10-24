@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { describeParity, openPlay, PARITY_TAG } from '../../support/play-parity'
 
-// PRD-261 A-17b (@parity): Play below 1024 px (PRD-260 D7, K4), under builtin Play and the
-// installed package. Play's frame and pages step aside and the core's own chrome draws, recoloured
+// PRD-261 A-17b (@parity): Play below 1024 px (PRD-260 D7, K4), under the installed package
+// (A-19f4: since W-A8 the only Play). Play's frame and pages step aside and the core's own chrome draws, recoloured
 // by the look; the look's tone is forced there too, over the user's own; and a look the user chose
 // before paints from the first frame. The look's values are read from the page's own boot data
 // (the JSON element THEME_BOOT_SCRIPT reads, lib/theme-host/boot.ts): its prepaint table holds every
@@ -12,12 +12,12 @@ const NARROW = { width: 900, height: 900 }
 const DESKTOP = { width: 1440, height: 900 }
 const FRAME_PATH = '/agents'
 const LOOKS_PATH = '/looks'
-/** Play's frame: its sidebar (components/play/shell/play-sidebar.tsx). */
+/** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx). */
 const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
 /** The core chrome's header below 1024 px (components/layout/header.tsx). */
 const CORE_BRAND = 'Automatos ship mark'
 const BOOT_ELEMENT = '#automatos-theme-boot'
-/** Ember's ground (the default look) and Daylight's (lib/looks/presets.ts). */
+/** Ember's ground (the default look) and Daylight's (the kit's themes/play/src/lib/looks/presets.ts). */
 const DEFAULT_GROUND_KNOB = 'ground'
 const DAYLIGHT = /^Daylight\b/
 const DAYLIGHT_GROUND = 'paper'

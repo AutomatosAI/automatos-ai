@@ -3,7 +3,8 @@ import { fulfillBackendJson } from '../../support/backend-route'
 import { ask, autoColumn, autoReplies, openPlayChat } from '../../support/play-chat'
 import { describeParity, PARITY_TAG } from '../../support/play-parity'
 
-// PRD-261 A-17b (@parity): approvals in Play's chat, under builtin Play and the installed package.
+// PRD-261 A-17b (@parity): approvals in Play's chat, under the installed package (A-19f4: since W-A8
+// the only Play).
 // One recorded reply (fixtures/play-parity/chat-turns.json, 'approvals') raises a tool approval
 // (a grant, PRD-193) and a Mission plan (PRD-163). Both show inside Auto's reply as the core's own
 // cards (the SDK's cards.ToolApproval and cards.MissionApproval, protected surfaces), Auto listens
@@ -32,7 +33,7 @@ const REJECT = 'Reject'
 /** components/widgets/ToolApprovalWidget: the outcome lines. */
 const APPROVED = 'Approved.'
 const DENIED = 'Denied — the action will not run.'
-/** components/play/chat/caption.ts AWAITING_ANSWER: Auto listens while a card waits. */
+/** The kit's themes/play/src/components/play/chat/caption.ts AWAITING_ANSWER: Auto listens while a card waits. */
 const AWAITING_ANSWER = 'Waiting for your answer on the card.'
 const OK = 200
 

@@ -21,7 +21,7 @@ export interface SearchResult {
   keywords?: string
 }
 
-/** PRD-261 A-02c: a style ⌘K switches to (Classic, Studio, a builtin or installed theme). */
+/** PRD-261 A-02c: a style ⌘K switches to (Classic, Studio or an installed theme). */
 export interface ThemeSearchResult {
   id: string
   label: string

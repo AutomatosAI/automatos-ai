@@ -1,9 +1,10 @@
 /**
- * PRD-261 A-02a — the Style axis takes theme refs: Classic | Studio | `theme:<ref>`, with builtin
- * Play as one registry entry. The legacy `play` cookie still means builtin Play; an installed
- * theme's style is accepted only in its exact shape; Studio's layout renders wherever the entry's
- * base is Studio; the theme layout follows the entry's minWidth; and a switch to an installed
- * theme writes the cookie and reloads instead of switching in place (PA-13).
+ * PRD-261 A-02a — the Style axis takes theme refs: Classic | Studio | `theme:<ref>`. No theme is
+ * compiled into the app (A-19f1), so the axis lists Classic and Studio only and the registry finds
+ * only the installed entries it is given; an installed theme's style is accepted only in its exact
+ * shape; Studio's layout renders under a theme (drawn on Studio, the default base); the theme
+ * layout follows the active entry's minWidth; and a switch to an installed theme writes the cookie
+ * and reloads instead of switching in place (PA-13), while Classic and Studio switch in place.
  */
 import { createElement, type ReactNode } from 'react'
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react'
@@ -15,22 +16,8 @@ vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'dark', resolvedTheme:
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import { stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
-import {
-  BUILTIN_PLAY_ENTRY,
-  BUILTIN_PLAY_HTML_CLASS,
-  BUILTIN_PLAY_MIN_WIDTH_PX,
-  BUILTIN_PLAY_STYLE,
-  LEGACY_STYLE_ALIASES,
-} from '@/lib/theme-host/builtin/play-entry'
-import {
-  BUILTIN_THEMES,
-  findThemeEntry,
-  isInstalledThemeStyle,
-  resolveStyleAlias,
-  themeRefOf,
-  themeStyleOf,
-} from '@/lib/theme-host/registry'
-import type { ThemeEntry, ThemeLayout } from '@/lib/theme-host/registry-types'
+import { findThemeEntry, isInstalledThemeStyle, themeRefOf, themeStyleOf } from '@/lib/theme-host/registry'
+import type { ThemeEntry, ThemeLayout, ThemeRef } from '@/lib/theme-host/registry-types'
 import {
   APPEARANCE_DEFAULTS_KEY,
   APPEARANCE_DEFAULTS_VERSION,
@@ -47,74 +34,59 @@ import {
   type UiStyle,
 } from '@/lib/ui-style'
 
+import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_HTML_CLASS, FIXTURE_THEME_STYLE } from './fixture-theme-entry'
+
 const INSTALL_ID = '0f8c2b6e-4d1a-4c3b-9e7f-1a2b3c4d5e6f'
+const INSTALL_REF: ThemeRef = `install:${INSTALL_ID}`
 const INSTALL_STYLE: UiStyle = `theme:install:${INSTALL_ID}`
-/** The widths the plan names: a laptop above Play's 1024 px, a small window below it. */
+const OTHER_INSTALL_STYLE: UiStyle = 'theme:install:5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d'
+/** A theme style in no installed theme's exact shape: it names no theme this build knows. */
+const UNKNOWN_THEME_STYLE: UiStyle = 'theme:install:not-a-uuid'
+/** The widths the plan names: a laptop above an installed theme's 1024 px, a small window below it. */
 const WIDE_PX = 1440
 const NARROW_PX = 800
+/** An entry's own minWidth, other than the installed frame's 1024 px, between NARROW_PX and WIDE_PX. */
+const OWN_MIN_WIDTH_PX = 1200
 
 /** An installed theme as A-02c will hand its entry to the registry. */
 const INSTALLED_CLASSIC: ThemeEntry = {
-  ...BUILTIN_PLAY_ENTRY,
-  ref: `install:${INSTALL_ID}`,
+  ...FIXTURE_THEME_ENTRY,
+  ref: INSTALL_REF,
   name: 'Installed',
   base: 'classic',
   htmlClass: 'installed-theme',
-  kind: 'installed',
-  reviewed: false,
 }
 
-describe('PRD-261 A-02a — builtin Play is one registry entry', () => {
-  it('lists builtin Play with the entry the plan fixes', () => {
-    expect(BUILTIN_THEMES).toEqual([BUILTIN_PLAY_ENTRY])
-    expect(BUILTIN_PLAY_ENTRY).toMatchObject({
-      ref: 'builtin:play',
-      base: 'studio',
-      htmlClass: 'play',
-      minWidth: 1024,
-      tone: 'from-look',
-      kind: 'builtin',
-      ownsPages: ['/chat', '/deliverables'],
-      routes: ['conversations'],
-    })
-    expect(BUILTIN_PLAY_ENTRY.nav.map((item) => item.path)).toEqual(['/x/conversations', '/looks', '/looks/style'])
-    expect(BUILTIN_PLAY_ENTRY.slots).toEqual(expect.arrayContaining(['frame@1', 'lookEditor@1', 'styleSheet@1']))
-  })
-
-  it("names Play on the axis as theme:builtin:play, and maps a ref to its style and back", () => {
-    expect(BUILTIN_PLAY_STYLE).toBe('theme:builtin:play')
-    expect(themeStyleOf(BUILTIN_PLAY_ENTRY.ref)).toBe(BUILTIN_PLAY_STYLE)
-    expect(themeRefOf(BUILTIN_PLAY_STYLE)).toBe('builtin:play')
+describe('PRD-261 A-02a — the registry holds no compiled-in theme', () => {
+  it('names an installed theme on the axis as theme:install:<id>, and maps a ref to its style and back', () => {
+    expect(themeStyleOf(INSTALL_REF)).toBe(INSTALL_STYLE)
+    expect(themeRefOf(INSTALL_STYLE)).toBe(INSTALL_REF)
     expect(themeRefOf('studio')).toBeNull()
     expect(themeRefOf('classic')).toBeNull()
   })
 
-  it('lists Classic, Studio, then each builtin theme', () => {
-    expect(UI_STYLES).toEqual(['classic', 'studio', BUILTIN_PLAY_STYLE])
+  it('lists Classic and Studio only: every theme is installed', () => {
+    expect(UI_STYLES).toEqual(['classic', 'studio'])
   })
 
-  it("puts Studio's class and each builtin theme's own class on the axis's class list (PA-8)", () => {
-    expect(BUILTIN_PLAY_HTML_CLASS).toBe('play')
-    expect(STYLE_HTML_CLASS_NAMES).toEqual([STUDIO_HTML_CLASS, BUILTIN_PLAY_HTML_CLASS])
+  it("puts only Studio's class on the axis's class list (PA-8): an installed theme's own comes with its boot", () => {
+    expect(STYLE_HTML_CLASS_NAMES).toEqual([STUDIO_HTML_CLASS])
+    expect(STYLE_HTML_CLASS_NAMES).not.toContain(FIXTURE_THEME_HTML_CLASS)
   })
 
-  it('finds an entry for builtin Play, for an installed theme it is given, and none otherwise', () => {
-    expect(findThemeEntry(BUILTIN_PLAY_STYLE)).toBe(BUILTIN_PLAY_ENTRY)
+  it('finds an installed theme it is given, and none otherwise', () => {
     expect(findThemeEntry('studio')).toBeNull()
     expect(findThemeEntry('classic')).toBeNull()
-    expect(findThemeEntry('theme:builtin:unknown')).toBeNull()
+    expect(findThemeEntry(UNKNOWN_THEME_STYLE)).toBeNull()
     expect(findThemeEntry(INSTALL_STYLE)).toBeNull()
     expect(findThemeEntry(INSTALL_STYLE, [INSTALLED_CLASSIC])).toBe(INSTALLED_CLASSIC)
+    expect(findThemeEntry(OTHER_INSTALL_STYLE, [INSTALLED_CLASSIC])).toBeNull()
+    expect(findThemeEntry('studio', [INSTALLED_CLASSIC])).toBeNull()
+    expect(findThemeEntry(FIXTURE_THEME_STYLE, [INSTALLED_CLASSIC, FIXTURE_THEME_ENTRY])).toBe(FIXTURE_THEME_ENTRY)
   })
 })
 
 describe('PRD-261 A-02a — parseUiStyle', () => {
-  it('reads the legacy play cookie and theme:builtin:play both as builtin Play', () => {
-    expect(LEGACY_STYLE_ALIASES).toEqual({ play: BUILTIN_PLAY_STYLE })
-    expect(parseUiStyle('play')).toBe(BUILTIN_PLAY_STYLE)
-    expect(parseUiStyle('theme:builtin:play')).toBe(BUILTIN_PLAY_STYLE)
-  })
-
   it('leaves classic and studio as they were', () => {
     expect(parseUiStyle('classic')).toBe('classic')
     expect(parseUiStyle('studio')).toBe('studio')
@@ -133,13 +105,13 @@ describe('PRD-261 A-02a — parseUiStyle', () => {
       `theme:install:${INSTALL_ID}x`,
       ` ${INSTALL_STYLE}`,
       'theme:install:../../../../api/admin/x',
-      'theme:builtin:unknown',
-      'theme:play',
-      'builtin:play',
-      'PLAY',
+      UNKNOWN_THEME_STYLE,
+      'theme:other',
+      'STUDIO',
       'toString',
       '__proto__',
       'constructor',
+      'hasOwnProperty',
       '',
     ]
     for (const raw of tampered) expect(parseUiStyle(raw), JSON.stringify(raw)).toBe(DEFAULT_UI_STYLE)
@@ -147,21 +119,12 @@ describe('PRD-261 A-02a — parseUiStyle', () => {
     expect(parseUiStyle(undefined)).toBe(DEFAULT_UI_STYLE)
     expect(DEFAULT_UI_STYLE).toBe('studio')
   })
-
-  it('never takes an inherited property for an alias', () => {
-    for (const raw of ['toString', '__proto__', 'hasOwnProperty']) expect(resolveStyleAlias(raw)).toBe(raw)
-    expect(resolveStyleAlias('play')).toBe(BUILTIN_PLAY_STYLE)
-  })
-
-  it('does not count the legacy value itself as a style: it is only read from old cookies', () => {
-    expect(isUiStyle('play')).toBe(false)
-  })
 })
 
-describe('PRD-261 A-02a — rendersStudio and the <html> classes follow the entry', () => {
-  it("renders Studio for Studio and builtin Play (base studio), never for Classic", () => {
+describe('PRD-261 A-02a — rendersStudio and the <html> classes follow the base', () => {
+  it('renders Studio for Studio and a theme drawn on Studio, never for Classic', () => {
     expect(rendersStudio('studio')).toBe(true)
-    expect(rendersStudio(BUILTIN_PLAY_STYLE)).toBe(true)
+    expect(rendersStudio(FIXTURE_THEME_STYLE)).toBe(true)
     expect(rendersStudio('classic')).toBe(false)
   })
 
@@ -170,16 +133,15 @@ describe('PRD-261 A-02a — rendersStudio and the <html> classes follow the entr
     expect(styleHtmlClasses(INSTALL_STYLE)).toEqual([STUDIO_HTML_CLASS])
   })
 
-  it("gives builtin Play the same <html> classes as before: studio, then play", () => {
+  it('gives Classic no class and Studio its own', () => {
     expect(styleHtmlClasses('classic')).toEqual([])
     expect(styleHtmlClasses('studio')).toEqual([STUDIO_HTML_CLASS])
-    expect(styleHtmlClasses(BUILTIN_PLAY_STYLE)).toEqual([STUDIO_HTML_CLASS, BUILTIN_PLAY_HTML_CLASS])
   })
 })
 
-const wrapper = (style: UiStyle, reloadPage?: () => void) =>
+const wrapper = (style: UiStyle, reloadPage?: () => void, installedTheme: ThemeEntry | null = null) =>
   function Wrapper({ children }: { readonly children: ReactNode }) {
-    return createElement(UiStyleProvider, { initialStyle: style, reloadPage, children })
+    return createElement(UiStyleProvider, { initialStyle: style, installedTheme, reloadPage, children })
   }
 
 function LayoutProbe({ seen }: { readonly seen: ThemeLayout[] }) {
@@ -188,8 +150,9 @@ function LayoutProbe({ seen }: { readonly seen: ThemeLayout[] }) {
   return createElement('p', { 'data-testid': 'layout' }, layout)
 }
 
-function layoutTree(style: UiStyle, seen: ThemeLayout[]) {
-  return createElement(UiStyleProvider, { initialStyle: style, children: createElement(LayoutProbe, { seen }) })
+/** The layout probe under `style`; an installed style runs `entry`, the entry its boot carried. */
+function layoutTree(style: UiStyle, seen: ThemeLayout[], entry: ThemeEntry | null = null) {
+  return createElement(UiStyleProvider, { initialStyle: style, installedTheme: entry, children: createElement(LayoutProbe, { seen }) })
 }
 
 describe('PRD-261 A-02a — useActiveTheme and useThemeLayout', () => {
@@ -207,16 +170,20 @@ describe('PRD-261 A-02a — useActiveTheme and useThemeLayout', () => {
     window.localStorage.clear()
   })
 
-  it("is builtin Play's entry under builtin Play, and null under Classic, Studio and outside the provider", () => {
-    expect(renderHook(() => useActiveTheme(), { wrapper: wrapper(BUILTIN_PLAY_STYLE) }).result.current).toBe(BUILTIN_PLAY_ENTRY)
-    expect(renderHook(() => useActiveTheme(), { wrapper: wrapper('studio') }).result.current).toBeNull()
-    expect(renderHook(() => useActiveTheme(), { wrapper: wrapper('classic') }).result.current).toBeNull()
+  it("is the installed theme's entry under its style, and null under Classic, Studio and outside the provider", () => {
+    const active = (style: UiStyle, entry: ThemeEntry | null = null) =>
+      renderHook(() => useActiveTheme(), { wrapper: wrapper(style, undefined, entry) }).result.current
+    expect(active(FIXTURE_THEME_STYLE, FIXTURE_THEME_ENTRY)).toBe(FIXTURE_THEME_ENTRY)
+    expect(active(FIXTURE_THEME_STYLE)).toBeNull()
+    expect(active('studio', FIXTURE_THEME_ENTRY)).toBeNull()
+    expect(active('studio')).toBeNull()
+    expect(active('classic')).toBeNull()
     expect(renderHook(() => useActiveTheme()).result.current).toBeNull()
   })
 
   it("is 'pending' on the server under a theme: no width is known there", () => {
     const seen: ThemeLayout[] = []
-    expect(renderToString(layoutTree(BUILTIN_PLAY_STYLE, seen))).toContain('pending')
+    expect(renderToString(layoutTree(FIXTURE_THEME_STYLE, seen, FIXTURE_THEME_ENTRY))).toContain('pending')
     expect(seen).toEqual(['pending'])
   })
 
@@ -224,7 +191,7 @@ describe('PRD-261 A-02a — useActiveTheme and useThemeLayout', () => {
     const wideWindow = stubWindowWidth(WIDE_PX)
     const wide: ThemeLayout[] = []
     try {
-      render(layoutTree(BUILTIN_PLAY_STYLE, wide))
+      render(layoutTree(FIXTURE_THEME_STYLE, wide, FIXTURE_THEME_ENTRY))
     } finally {
       cleanup()
       wideWindow.restore()
@@ -233,15 +200,16 @@ describe('PRD-261 A-02a — useActiveTheme and useThemeLayout', () => {
 
     window_ = stubWindowWidth(NARROW_PX)
     const narrow: ThemeLayout[] = []
-    render(layoutTree(BUILTIN_PLAY_STYLE, narrow))
+    render(layoutTree(FIXTURE_THEME_STYLE, narrow, FIXTURE_THEME_ENTRY))
     expect(new Set(narrow)).toEqual(new Set(['fallback']))
   })
 
-  it("reads the entry's minWidth: the switch is at builtin Play's 1024 px", () => {
-    window_ = stubWindowWidth(BUILTIN_PLAY_MIN_WIDTH_PX)
-    render(layoutTree(BUILTIN_PLAY_STYLE, []))
+  it(`reads the entry's minWidth: an entry of ${OWN_MIN_WIDTH_PX} px switches at ${OWN_MIN_WIDTH_PX} px`, () => {
+    const entry: ThemeEntry = { ...FIXTURE_THEME_ENTRY, minWidth: OWN_MIN_WIDTH_PX }
+    window_ = stubWindowWidth(OWN_MIN_WIDTH_PX)
+    render(layoutTree(FIXTURE_THEME_STYLE, [], entry))
     expect(screen.getByTestId('layout')).toHaveTextContent('theme')
-    act(() => window_?.resize(BUILTIN_PLAY_MIN_WIDTH_PX - 1))
+    act(() => window_?.resize(OWN_MIN_WIDTH_PX - 1))
     expect(screen.getByTestId('layout')).toHaveTextContent('fallback')
   })
 
@@ -269,6 +237,8 @@ function mountStyle(style: UiStyle, reloadPage: () => void): MountedStyle {
 }
 
 describe('PRD-261 A-02a — a switch to an installed theme reloads (PA-13)', () => {
+  const studioOnHtml = () => document.documentElement.classList.contains(STUDIO_HTML_CLASS)
+
   beforeEach(() => {
     window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
     document.cookie = `${UI_STYLE_COOKIE}=; Max-Age=0; Path=/`
@@ -289,17 +259,22 @@ describe('PRD-261 A-02a — a switch to an installed theme reloads (PA-13)', () 
     expect(mounted.current()).toBe('studio')
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${INSTALL_STYLE}`)
     expect(window.localStorage.getItem(UI_STYLE_STORAGE_KEY)).toBe(INSTALL_STYLE)
-    expect(document.documentElement.classList.contains(BUILTIN_PLAY_HTML_CLASS)).toBe(false)
+    // In place, the installed style (drawn on Studio) would have put Studio's class on <html>.
+    expect(studioOnHtml()).toBe(false)
   })
 
-  it('switches to builtin Play in place, with no reload', () => {
+  it('switches to Classic and to Studio in place, with no reload', () => {
     const reloadPage = vi.fn()
     const mounted = mountStyle('studio', reloadPage)
-    mounted.setStyle(BUILTIN_PLAY_STYLE)
+    mounted.setStyle('classic')
+    expect(mounted.current()).toBe('classic')
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
+    expect(studioOnHtml()).toBe(false)
+    mounted.setStyle('studio')
+    expect(mounted.current()).toBe('studio')
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
+    expect(window.localStorage.getItem(UI_STYLE_STORAGE_KEY)).toBe('studio')
+    expect(studioOnHtml()).toBe(true)
     expect(reloadPage).not.toHaveBeenCalled()
-    expect(mounted.current()).toBe(BUILTIN_PLAY_STYLE)
-    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`)
-    expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(true)
-    expect(document.documentElement.classList.contains(BUILTIN_PLAY_HTML_CLASS)).toBe(true)
   })
 })
