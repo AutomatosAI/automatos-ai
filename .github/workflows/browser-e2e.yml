@@ -43,7 +43,8 @@ name: browser-e2e
 # (the @package specs). The kit is public since D2 (PA-10), so its checkout needs no secret.
 # PRD-261 B-03h: the browser job also checks the kit out at the same ref and installs it (its
 # lockfile, no install scripts) for the kit's CLI, which installs the package in the @installed
-# spec as a theme author would.
+# spec as a theme author would. It does both after the main specs, so a kit problem there skips
+# only the @installed spec.
 #
 # NON-REQUIRED at introduction; making it a required check is the repo admin's call.
 
@@ -331,7 +332,9 @@ jobs:
     # No `needs: package`: the lane starts at once and waits for the package job only before it
     # downloads the package (scripts/wait-for-job.sh), so a slow kit build delays only that step.
     # When the package job failed or the wait timed out, every other spec still reports, and the
-    # @package specs fail on the missing package (specs/installed-play.spec.ts).
+    # @installed and @package specs fail on the missing package (specs/installed-play.spec.ts).
+    # When the kit's checkout or install for its CLI fails, the job fails on that step, the
+    # @installed spec is skipped and the @package specs still run.
     # actions: read is for that wait (the run's jobs); the job needs nothing else.
     permissions:
       actions: read
@@ -367,16 +370,6 @@ jobs:
       - name: Wait for the backend to be ready
         run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:8000/health/ready 300
 
-      # PRD-261 B-03h: the kit, for its CLI, at the ref the package job packs from. Before Set up
-      # Node, so its lockfile keys the npm cache; after the docker build, whose contexts never hold it.
-      - name: Check out the Design Kit for its CLI
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ env.KIT_REPOSITORY }}
-          ref: ${{ inputs.kit_ref || env.KIT_REF }}
-          path: kit
-          persist-credentials: false
-
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -385,7 +378,6 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             e2e/browser/package-lock.json
-            kit/package-lock.json
 
       # The same install as test.yml's frontend-ci (the lockfile is reconciled, not enforced).
       - name: Install frontend dependencies
@@ -459,15 +451,6 @@ jobs:
           done
           echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
 
-      # PRD-261 B-03h: the kit as the package job installs it (npm at the kit's version, its
-      # lockfile, no install scripts), for its CLI; nothing is built here. Last of the npm installs,
-      # since it moves npm to the kit's version. It overlaps the package job's build.
-      - name: Install the Design Kit for its CLI (its lockfile, no install scripts)
-        working-directory: kit
-        run: |
-          npm install -g "npm@${KIT_NPM_VERSION}"
-          npm ci --ignore-scripts --no-audit --no-fund
-
       # PRD-261 A-17a: the package job's package (Play's, unless a dispatch named another kit
       # theme), once that job has finished. When it failed, or did not finish in time, there is
       # nothing to download, and the @installed and @package specs fail on the missing file. The
@@ -497,13 +480,37 @@ jobs:
           RECORD_DIR: records
         run: npx playwright test --grep "@smoke|@off|@host|@record" --project=chromium --project=webkit --project=firefox
 
+      # PRD-261 B-03h: the kit, for its CLI, at the ref the package job packs from, installed as the
+      # package job installs it (npm at the kit's version, its lockfile, no install scripts); nothing
+      # is built here. After the specs above, so a kit checkout or install that fails (a registry
+      # hiccup, a dispatch's kit_ref) fails the job on its own step and skips only the @installed
+      # spec; the @package specs still run. The install moves npm to the kit's version for the steps
+      # after it.
+      - name: Check out the Design Kit for its CLI
+        id: kit_checkout
+        if: ${{ !cancelled() && steps.specs.outcome != 'skipped' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.KIT_REPOSITORY }}
+          ref: ${{ inputs.kit_ref || env.KIT_REF }}
+          path: kit
+          persist-credentials: false
+
+      - name: Install the Design Kit for its CLI (its lockfile, no install scripts)
+        id: kit_cli
+        if: ${{ !cancelled() && steps.kit_checkout.outcome == 'success' }}
+        working-directory: kit
+        run: |
+          npm install -g "npm@${KIT_NPM_VERSION}"
+          npm ci --ignore-scripts --no-audit --no-fund
+
       # PRD-261 B-03h: the run's package installed by the kit's own CLI, `automatos-theme install
       # <file> --to http://localhost:3000 --choose` (the web app's URL, resolved through its
       # /automatos-host.json), then every page and route its theme.json declares
       # (specs/installed-theme.spec.ts). It stores the member's choice on the lane's one backend, so
       # it runs one test at a time, after the specs above, with its own output folders.
       - name: Run the installed kit theme spec (installed by the kit's CLI)
-        if: ${{ !cancelled() && steps.specs.outcome != 'skipped' }}
+        if: ${{ !cancelled() && steps.kit_cli.outcome == 'success' }}
         working-directory: e2e/browser
         env:
           E2E_APP_URL: http://localhost:3000

@@ -68,7 +68,9 @@ imports the package, opts in to it and chooses it, with no token (the local edit
 The spec fails unless the CLI exits 0 and says it found the API through that host file. For the
 CLI, the browser job checks the kit out at the package job's ref and installs it the same way (npm
 at the kit's version, `npm ci --ignore-scripts`; nothing is built), then names the command in
-`E2E_KIT_CLI` and the downloaded package's folder in `E2E_KIT_PACKAGE_DIR`.
+`E2E_KIT_CLI` and the downloaded package's folder in `E2E_KIT_PACKAGE_DIR`. It does both after the
+main run's specs: when either fails, the job fails on that step, the `@installed` spec is skipped
+and the `@package` and `@parity` specs still run.
 
 The spec knows nothing of the theme beyond what the server's active answer carries of its
 `theme.json`. On `/agents` and on every page (a `[param]` segment as an id no workspace has) and
