@@ -87,9 +87,15 @@ def _sender(recorder: Handler, sleeps: List[float] | None = None) -> ExpoPushSen
     )
 
 
+def _ticket_id(to: str) -> str:
+    """A ticket id in Expo's shape (a UUID), one per push token: the sender refuses an id with a
+    push token's brackets in it (``_TICKET_ID_PATTERN``), as it would refuse it from Expo."""
+    return f"ticket-{uuid.uuid5(uuid.NAMESPACE_URL, to)}"
+
+
 def _all_ok(request: httpx.Request, _attempt: int) -> httpx.Response:
     sent = json.loads(request.content)
-    return httpx.Response(200, json={"data": [{"status": "ok", "id": f"ticket-{m['to']}"} for m in sent]})
+    return httpx.Response(200, json={"data": [{"status": "ok", "id": _ticket_id(m["to"])} for m in sent]})
 
 
 def _receipts_ok(request: httpx.Request, _attempt: int) -> httpx.Response:
@@ -146,7 +152,7 @@ def test_250_messages_are_three_requests_and_250_tickets_in_order():
     assert [request.method for request in recorder.requests] == ["POST"] * 3
     assert len(tickets) == 250
     assert [ticket.to for ticket in tickets] == [message.to for message in messages]
-    assert all(ticket.status == "ok" and ticket.ticket_id == f"ticket-{ticket.to}" for ticket in tickets)
+    assert all(ticket.status == "ok" and ticket.ticket_id == _ticket_id(ticket.to) for ticket in tickets)
 
 
 def test_no_messages_make_no_request():
