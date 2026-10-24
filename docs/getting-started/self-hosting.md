@@ -1151,6 +1151,9 @@ You flipped the edition without the identity provider. The local edition is
 `AUTH_EDITION=local` (`envs/api.defaults`); leave it unless you are running
 your own Clerk instance.
 
+**A phone won't pair, or a paired phone is refused.** See
+[Connect a phone → When it goes wrong](#when-it-goes-wrong).
+
 ## 13. How the editions relate
 
 There is **one codebase**. The edition is a runtime flag:
@@ -1461,3 +1464,331 @@ commands on this machine, so while either reaches beyond it the backend refuses 
 `LOCAL_REMOTE_ACCESS=paired` (every phone and browser pairs with a one-time code; the first comes from
 `docker compose exec backend python -m scripts.mint_pairing_code`) or `open` (whoever reaches it is the operator;
 a warning at every boot). A tunnel or reverse proxy on this machine is invisible to that check: run paired.
+To reach the install from a phone, see [Connect a phone (Automatos Go)](#connect-a-phone-automatos-go).
+
+## Connect a phone (Automatos Go)
+
+Automatos Go is the iPhone app. On the local edition a phone does not sign in.
+It **pairs** once, with a one-time code from this install, and then uses a device
+token that it keeps in the iPhone's Keychain. The server keeps only a SHA-256 hash
+of each code and each token. A phone needs two things from the install:
+
+- **Paired mode:** `LOCAL_REMOTE_ACCESS=paired`. No other mode lets a phone pair.
+- **An address the phone can reach:** https, or plain http on a home network only.
+
+[QUICKSTART.md](../../QUICKSTART.md#reach-your-install-from-your-phone-optional)
+and [SETUP.md](../../SETUP.md#reach-your-install-from-your-phone-optional) have the
+short steps. This section is the reference: what each setting does, the two setups
+we recommend, how to check the result, and how to remove a phone. The phone calls
+the web app *Studio*, so its messages say "Studio → Settings → Phones & devices".
+
+### Reach your install from your phone
+
+**The three modes.** `LOCAL_REMOTE_ACCESS` goes in `.env`. Any other value stops
+the backend from starting.
+
+| Mode | A request with no credential | Phones |
+|---|---|---|
+| `off` (the default) | is the operator. The backend refuses to start while `API_PUBLISH_ADDRESS` or `WEB_PUBLISH_ADDRESS` reaches beyond this machine. | cannot pair |
+| `paired` | is refused: `401 device_pairing_required`. Every phone **and every browser**, the one on this machine included, pairs once with a code. | pair with a code |
+| `open` | is the operator, whoever sends it. A warning at every boot while the API or the web app is published beyond this machine. | cannot pair |
+
+**The settings.** `.env` reaches only the variables compose names; `envs/api.local`
+reaches every backend setting (§3, *Where configuration lives*). `.env.example`
+lists only `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`: change those two lines,
+and add the others yourself.
+
+| Setting | File | What it does for a phone |
+|---|---|---|
+| `LOCAL_REMOTE_ACCESS=paired` | `.env` | Turns pairing on (`POST /api/v1/mobile/pair`) and refuses requests with no credential. |
+| `PUBLIC_API_HOST` | `envs/api.local` | The API's host name, with its port when that is not 443, and no scheme. The phone is handed `https://<PUBLIC_API_HOST>` in every pairing link and as `api_url` in discovery (below). It always means https. Left unset, the API names the address each request arrived on. The same setting is also the host of channel webhooks and of Auto Live's Retell callbacks: with a tailnet-only name, Slack, Telegram and Retell cannot reach them. |
+| `FRONTEND_URL` | `envs/api.local` | The web app's address: the host of every pairing link, and `web_url` in discovery. The default is `http://localhost:3000`. |
+| `CORS_ALLOW_ORIGINS` | `envs/api.local` | Add the web app's address, for browsers on other machines. The phone does not need it. |
+| `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL` | `.env` | The API address the web app uses in a browser. `make up` builds the web app here when they change (§1b). The phone does not read them. |
+| `API_PUBLISH_ADDRESS`, `WEB_PUBLISH_ADDRESS` | `.env` | Publish only the API and the web app beyond `127.0.0.1`. You need them only when the proxy runs on another machine, or on a plain home network (below). Leave `BIND_ADDRESS` unset, so the datastores stay on `127.0.0.1`. |
+
+**The address the phone types.** The phone's **Server address** is the API's
+address, not the web app's. The phone reads `/.well-known/automatos.json` there and
+sends every call to it. The app accepts:
+
+- `https://` to any host;
+- `http://` only to 10.x, 172.16–31.x, 192.168.x, and names that end in `.local`;
+- never `localhost` or `127.x`: on a phone, that is the phone itself.
+
+Tailscale's `100.x` addresses do not count as a home network. Use the https
+`*.ts.net` name instead.
+
+#### Recommended: Tailscale, with nothing on the internet
+
+The install stays on your tailnet. Only your own devices that run Tailscale reach
+it, and nothing is published.
+
+1. Install Tailscale on this machine and on the phone, signed in to the same
+   tailnet. `tailscale serve` needs MagicDNS and HTTPS certificates turned on for
+   the tailnet.
+2. Serve the web app and the API from this machine (use your `FRONTEND_PORT` and
+   `API_PORT` if you changed them):
+   ```bash
+   tailscale serve --bg 3000                # the web app: https://<machine>.<tailnet>.ts.net
+   tailscale serve --bg --https=8443 8000   # the API:     https://<machine>.<tailnet>.ts.net:8443
+   ```
+3. In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://<machine>.<tailnet>.ts.net:8443
+   NEXT_PUBLIC_WS_URL=wss://<machine>.<tailnet>.ts.net:8443/ws
+   ```
+   and in `envs/api.local`:
+   ```bash
+   PUBLIC_API_HOST=<machine>.<tailnet>.ts.net:8443
+   FRONTEND_URL=https://<machine>.<tailnet>.ts.net
+   CORS_ALLOW_ORIGINS=https://<machine>.<tailnet>.ts.net,http://localhost:3000
+   ```
+   Then `make up`.
+4. Publish nothing. `tailscale serve` reaches the ports on `127.0.0.1`.
+
+The phone's Server address is `https://<machine>.<tailnet>.ts.net:8443`. Use
+`tailscale serve`, not `tailscale funnel`: Funnel puts the address on the internet.
+
+#### Recommended: a domain of your own, on 443 behind Caddy
+
+For phones that are not on a tailnet. The web app and the API are then on the
+internet, and paired mode is what refuses everyone without a paired device.
+
+1. Make two names under your domain, both pointing at this machine: one for the
+   web app (`studio.example.com` below) and one for the API (`api.example.com`).
+   Ports 80 and 443 must reach Caddy, which uses them to get its certificates and
+   serve them. Give the API a name of its own: the web app has its own
+   `/api/chat` and `/api/themes/files` routes, so one name split by path sends some
+   of the phone's calls to the wrong server.
+2. Caddy on this machine fetches the certificates itself:
+   ```
+   studio.example.com {
+       reverse_proxy 127.0.0.1:3000
+   }
+   api.example.com {
+       reverse_proxy 127.0.0.1:8000
+   }
+   ```
+3. In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://api.example.com
+   NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+   ```
+   and in `envs/api.local`:
+   ```bash
+   PUBLIC_API_HOST=api.example.com
+   FRONTEND_URL=https://studio.example.com
+   CORS_ALLOW_ORIGINS=https://studio.example.com,http://localhost:3000
+   ```
+   Then `make up`.
+4. With Caddy on this machine, publish nothing: it reaches the ports on
+   `127.0.0.1`. With Caddy on another machine, set `API_PUBLISH_ADDRESS` and
+   `WEB_PUBLISH_ADDRESS` to this machine's address on the network between them,
+   and let only the proxy reach those ports (*What not to do*, below).
+
+The phone's Server address is `https://api.example.com`.
+
+#### On a home network only, without TLS
+
+This works, but nothing between the phone and the server is encrypted.
+
+- In `.env`: `LOCAL_REMOTE_ACCESS=paired` and `API_PUBLISH_ADDRESS` set to this
+  machine's address on the home network, such as `192.168.1.20`. `0.0.0.0` also
+  works, but it publishes the API on every network this machine joins, a café's
+  Wi-Fi included. Leave `PUBLIC_API_HOST` unset: it always means https.
+- With no proxy in front, any client that reaches the API can write its own
+  `X-Forwarded-For` and get round the pairing limit (*What not to do*). Pair only
+  on a network you trust.
+- On the phone, type `http://192.168.1.20:8000` (your `API_PORT`) and the code. The
+  confirm card warns "Unencrypted home network … Pair only on a network you trust",
+  and a one-line banner, "Unencrypted home network · <address>", stays over every
+  screen.
+- The web app's pairing link names the API address your browser uses
+  (`http://localhost:8000` by default), which a phone cannot use. The console's
+  hint about `PUBLIC_API_HOST` is there for the same reason. Type the address in
+  the app instead.
+- Links from the phone into the web app (such as *Open in Studio*) open
+  `FRONTEND_URL`, which stays `http://localhost:3000` here, and the phone cannot
+  load that. Use the web app on this computer instead.
+
+### Check what the phone will see
+
+From a machine on the phone's network (or open the same address in the phone's
+browser):
+
+```bash
+curl -s https://api.example.com/.well-known/automatos.json
+```
+
+The API answers this without a credential, in paired mode too:
+
+```json
+{"schema":"automatos-discovery/v1","name":"Automatos","edition":"local","api_url":"https://api.example.com","web_url":"https://studio.example.com","auth":{"modes":["device"],"clerk":null},"pairing":{"enabled":true},"push":{"expo":false},"capabilities":["mobile_theme","spoken_mode","voice_live"]}
+```
+
+Check four things:
+
+- `"edition":"local"` and `"pairing":{"enabled":true}`. `false` means the mode is
+  not `paired`.
+- `api_url` is the https address the phone uses (`PUBLIC_API_HOST`).
+- `web_url` is the web app's address (`FRONTEND_URL`), not `localhost` (with
+  https; the home-network setup leaves it at `localhost`).
+- `capabilities` lists what this server offers the phone. The app turns a feature
+  on only when its name is listed:
+
+  | Capability | What it turns on in the app |
+  |---|---|
+  | `mobile_theme` | The workspace's installed theme on the phone: colours, fonts and Auto's animations, as data, never code. See Themes: [the phone's side of a theme](../theme-host/mobile.md). |
+  | `spoken_mode` | Spoken replies when you talk to Auto by voice. |
+  | `voice_live` | Auto Live, a live voice conversation with Auto. |
+
+  Today's Automatos Go uses none of the three yet. The styles update (themes) and
+  the voice update are being built.
+
+`"push":{"expo":false}`: this build sends no notifications to phones.
+Notifications through Expo's push service, and a QR image of the pairing link in
+the web app, come with a later Automatos update.
+
+A `500` with "Discovery is not set up on this server: …" names the setting to fix,
+for example `FRONTEND_URL must be an http(s) URL with a host`.
+
+### Pair the first browser, then phones
+
+1. **The first code comes from the server console.** In paired mode the browser on
+   this machine pairs too: every unpaired browser shows *Pair this browser* in
+   place of the app. Mint a code:
+   ```bash
+   docker compose exec backend python -m scripts.mint_pairing_code
+   ```
+   It prints the code (`XXXX-XXXX`, which works once, for ten minutes), when it
+   expires, and its pairing link. `--name "Office laptop"` labels the device until
+   it pairs with a name of its own. The code belongs to the operator
+   (`LOCAL_OPERATOR_EMAIL`) in the local workspace (`DEFAULT_WORKSPACE_ID`). Type
+   it into *Pair this browser*, or pair a phone with it (step 3).
+
+   The script refuses (exit 2) unless the install runs `paired`, and says how to
+   turn it on. Exit 1 means it could not mint, and the message says why. Most
+   often the operator's user row is missing: start the stack once (`make up`),
+   then run it again.
+2. **Then from the web app.** In a paired browser: **Settings → Phones & devices →
+   Pair a phone → Get a pairing code**. It shows the code, "Expires in m:ss", and
+   the pairing link, which carries the API's address and the code. Only a
+   workspace owner or admin gets codes; the operator always can. A code pairs the
+   phone to the person who got it, in this workspace.
+3. **On the phone.** Open Automatos Go and tap **Connect to your own server**. Type
+   the Server address (the API's) and the code, then tap **Continue**. Check the
+   card, *Pair with this server?*, and tap **Pair**. Nothing pairs before that
+   tap. The phone then shows in **Settings → Phones & devices** as "Automatos Go on
+   iPhone".
+
+The app's **Scan the code in Studio** reads a QR image of the pairing link. In this
+build the web app shows the link as text only, so type the address and the code.
+Always scan from inside Automatos Go: the iPhone's Camera app opens the link's web
+page (`/go/pair`), which shows the server and the code but never pairs, because a
+self-hosted address is not one of the app's linked domains.
+
+A wrong guess never uses up a code. A phone that pairs again (the same phone and
+the same person) keeps its one row in the list, and its new token replaces the old
+ones.
+
+### What a paired phone can do
+
+- It acts as the person whose code paired it, with that person's role, on the same
+  routes the web app uses. A phone paired with the operator's code (from the
+  console, or from the operator's own browser) has the operator's full rights.
+- It is bound to its workspace. A request that names another workspace is `403`.
+- When its person is removed from the workspace or deactivated, its next call is a
+  plain `401`, and the phone asks to pair again. The operator is exempt.
+- It swaps its token for a new one every 30 days (`MOBILE_TOKEN_ROTATE_DAYS`), and
+  the old token keeps working for 600 seconds
+  (`MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS`). Both go in `envs/api.local`. The app
+  does this by itself.
+- The token stays in the Keychain on that iPhone. It does not move to another
+  phone with a backup.
+
+### Remove a phone
+
+- **From the web app:** **Settings → Phones & devices → Revoke**, which asks first.
+  A person revokes their own devices; a workspace owner or admin, and the
+  operator, sees and revokes everyone's. The phone's next call is
+  `401 device_revoked`, and the phone says "This phone was removed from <server>.
+  Pair it again from Studio → Settings → Phones & devices." The row stays in the
+  list, marked revoked.
+- **From the phone:** in the app's **Settings**, **Remove this phone and forget this
+  server**, which asks first. The phone revokes itself on the server, then forgets
+  it. If the server can't be reached, the phone still forgets it, and the web app
+  lists it until you revoke it there.
+- **A lost phone:** revoke it in the web app.
+- **No phones at all any more:** stop Caddy or `tailscale serve` first
+  (`tailscale serve reset`), then remove `API_PUBLISH_ADDRESS` and
+  `WEB_PUBLISH_ADDRESS` from `.env` (or set them to `127.0.0.1`), set
+  `LOCAL_REMOTE_ACCESS=off` and `make up`. Keep that order: in `off`, a request
+  with no credential is the operator again, and a proxy still running on this
+  machine would hand that to whoever reaches it.
+
+### What not to do
+
+- **`open` on an install the internet can reach.** In `open`, a request with no
+  credential is the operator, and session mode runs commands on this machine.
+  Whoever reaches the address owns the install. Phones cannot pair in `open`
+  anyway.
+- **`off` behind a proxy or a tunnel on this machine.** Caddy, `tailscale serve`
+  or any tunnel reaches the ports on `127.0.0.1`, so the boot check cannot see it.
+  In `off`, the proxy then makes anyone who reaches it the operator. Run `paired`.
+- **Plain http over the internet.** The app refuses `http://` to any address
+  outside a home network, and a browser on plain http sends its device token
+  unencrypted. Use one of the two https setups.
+- **`BIND_ADDRESS=0.0.0.0` for a phone.** It publishes Postgres, Redis, MinIO and
+  every other port too. A phone needs only the API. Publish only the API and the
+  web app, and only when the proxy is on another machine, or on a plain home
+  network (above).
+- **An API port that clients can reach around the proxy.**
+  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. It
+  reads that address from the first `X-Forwarded-For` hop, so a client that reaches
+  the API directly can write the header itself. Caddy replaces the header by default.
+  Let only the proxy reach the published ports. The limit changes with
+  `RATE_LIMIT_MOBILE_PAIR_IP_MAX` and `RATE_LIMIT_MOBILE_PAIR_IP_WINDOW_SECONDS` in
+  `envs/api.local`.
+
+### When it goes wrong
+
+**"This server isn't taking phones yet…"** on the phone. Discovery says
+`"pairing":{"enabled":false}`, or `POST /api/v1/mobile/pair` answered `404`: the
+install is not in paired mode. Set `LOCAL_REMOTE_ACCESS=paired` in `.env`, then
+`make up`.
+
+**"This address doesn't answer like an Automatos server that pairs phones."**
+Nothing answered `/.well-known/automatos.json` at that address. Most often it is
+the web app's address: type the API's.
+
+**"That code didn't work. Codes last 10 minutes and work once."**
+`401 invalid_pairing_code`: the code is wrong, expired or used. Get a new one.
+
+**"Too many pairing tries from this network."** `429` with `Retry-After`: that
+address has used its 10 tries for the 10 minutes (*What not to do*). Wait, or
+raise the limit.
+
+**"Can't reach <server>"** on a paired phone. The phone got no answer, or the proxy
+answered `502` or `504`. The stack may be stopped (`make status`), or the phone is
+not on the network. With Tailscale, check that the Tailscale app on the phone is
+connected.
+
+**`401 {"code":"device_pairing_required", …}`** in a browser or a log. A request
+with no credential reached an install in paired mode. Pair that browser or phone.
+
+**`401 {"code":"device_revoked"}`.** The device was revoked. Pair it again with a
+new code.
+
+**`500` "Pairing is not set up on this install: …"** from *Get a pairing code*,
+or "Discovery is not set up on this server: …". `FRONTEND_URL` or
+`PUBLIC_API_HOST` is not a usable address, and the message names which. Fix it in
+`envs/api.local`, then `make up`.
+
+**The backend does not start, and `docker compose logs backend` says
+"LOCAL_REMOTE_ACCESS=off, but API_PUBLISH_ADDRESS=… publishes this install beyond
+this machine".** Set `paired` (this section), or publish on `127.0.0.1` again.
+
+**The console says "This install runs LOCAL_REMOTE_ACCESS=off…"** (exit 2). The
+script mints codes only in paired mode. Its message says how to turn it on.
