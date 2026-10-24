@@ -29,6 +29,7 @@ For detailed instructions, see the child pages:
 - **[Configuration Guide](configuration-guide.md)** — Configuring LLM providers, Redis, PostgreSQL, MinIO/S3, and core service parameters via `orchestrator/config.py` and environment seeds [infrastructure/.env.example:1-174](../../infrastructure/.env.example#L1-L174).
 - **[Quick Start Tutorial](quick-start-tutorial.md)** — Step-by-step workflows for creating agents, connecting tools, executing chats, and running Playbooks.
 - **[Business Intake Wizard](business-intake-wizard.md)** — Auto-led onboarding entry point and workspace setup through chat.
+- **[Themes](../themes/_index.md)** — change how Automatos looks for you: get Play or HUD, install, choose and manage themes, and edit your looks.
 
 ---
 

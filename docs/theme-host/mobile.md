@@ -1,8 +1,9 @@
 # The phone's theme: the `mobile` block and its answer
 
-PRD-261 M-01..M-04 (host contract 1.1.0). The phone app draws a member's theme from data alone. It
-never loads a theme's `dist/entry.js` or `dist/theme.css`: an app may not download and run code
-(App Store guideline 2.5.2). A theme says how it looks on a phone in an optional `mobile` block in
+PRD-261 M-01..M-04 (host contract 1.1.0). A phone app draws a member's theme from data alone
+(Automatos Go doesn't read this answer yet; that is planned). It never loads a theme's
+`dist/entry.js` or `dist/theme.css`: an app may not download and run code (App Store guideline
+2.5.2). A theme says how it looks on a phone in an optional `mobile` block in
 `theme.json`, and the phone reads the result from one route.
 
 ## The block in `theme.json`
@@ -131,13 +132,29 @@ unknown, malformed or foreign install id gets one and the same 404.
   member or the owner. A phone signed in this way works today; its token must also pass core's
   `azp` rule.
 - **The local edition's operator** (`AUTH_EDITION=local`): every workspace on the instance.
+- **A phone paired to the local edition** (`auth_type` `device`, `Authorization: Bearer amd_…`):
+  exactly the one workspace its pairing is bound to, never every workspace, the operator's own phone
+  included (`PERSON_AUTH_TYPES = {"clerk", "device"}` in `services/themes/membership.py`). The file
+  URLs load through `/api/themes/files/...` on the same bearer, under the same rule.
 - **Anyone else gets the 404**, an API key included.
-
-**Paired phones do not work yet.** A phone paired to an account calls as a `device` caller, and
-theme membership counts only `clerk` callers (`PERSON_AUTH_TYPES = {"clerk"}` in
-`services/themes/membership.py`). Until the mobile PRD adds the `device` auth type there, a paired
-phone gets 404 from this route and from `/api/themes/files/...`. That change belongs to the mobile
-PRD, not to PRD-261.
 
 The phone sees the look the member last saved on the server, not one still being edited in a
 browser tab.
+
+## Routes a phone may call
+
+The server lists `mobile_theme` among the `capabilities` of its discovery document
+(`GET /.well-known/automatos.json`, `services/mobile/discovery.py`). The capability stands for
+`GET /api/themes/mobile/{install_id}` (`CAPABILITY_ROUTES`). A phone reads the member's theme and
+looks through the same routes the web app uses, under the membership rule above:
+
+| Route | What it answers |
+|---|---|
+| `GET /api/themes/active` | The member's theme in the workspace: their choice, the workspace default or Studio |
+| `PUT /api/themes/choice` | Saves the member's choice in the workspace |
+| `GET` / `PUT /api/themes/looks/{theme_id}` | The member's looks for one theme in the workspace |
+| `GET /api/themes/mobile/{install_id}` | The installed theme's phone answer, above |
+| `GET /api/themes/files/{digest}/{path}` | The font and mascot files the answer names |
+
+`orchestrator/tests/test_prd266_device_theme_routes.py` runs a paired phone through the mobile,
+active, choice and looks routes end to end.
