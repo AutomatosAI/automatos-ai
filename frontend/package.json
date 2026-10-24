@@ -121,7 +121,7 @@
     "use-local-storage-state": "19.1.0",
     "vaul": "0.8.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.25.0",
+    "zod": "^4.6.7",
     "zustand": "4.4.1"
   },
   "browserslist": [
