@@ -42,12 +42,14 @@ logger = logging.getLogger(__name__)
 
 VOICE_LABEL_ASSISTANT = "Auto · voice"
 VOICE_LABEL_USER = "Voice"
+# A live-voice turn's own rows (the caller's words, Auto's reply): read by consumers.chatbot.model_history.
+VOICE_ORIGIN = "voice"
 
 
 def voice_source(role: str) -> Dict[str, Any]:
     """The persisted ``messages.source`` doc for a live-voice message."""
     return {
-        "origin": "voice",
+        "origin": VOICE_ORIGIN,
         "label": VOICE_LABEL_ASSISTANT if role == "assistant" else VOICE_LABEL_USER,
     }
 
@@ -304,7 +306,7 @@ def upsert_voice_user_message(db: Session, *, chat_id: str, workspace_id: str, t
         .order_by(Message.created_at.desc())
         .first()
     )
-    if last is not None and last.role == "user" and (last.source or {}).get("origin") == "voice":
+    if last is not None and last.role == "user" and (last.source or {}).get("origin") == VOICE_ORIGIN:
         old = ""
         for part in last.parts or []:
             if isinstance(part, dict) and part.get("type") == "text":

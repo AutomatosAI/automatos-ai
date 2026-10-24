@@ -7,7 +7,7 @@ and OpenRouter integration (credits, key info, activity sync).
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,6 +25,7 @@ from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
 from core.llm.providers import describe_usage_provider
+from api.llm_marketplace import route_capabilities
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -626,69 +627,76 @@ async def get_model_comparison(
         raise HTTPException(400, "At least one model_id required")
 
     since = _period_start(period)
-    results: List[ModelComparisonItem] = []
+    return [_comparison_item(db, ctx.workspace_id, since, raw) for raw in ids]
 
-    for raw in ids:
-        # A route key (``model@provider``) pins the serving provider; a bare
-        # model id compares the route that served most of its usage.
-        mid, _, wanted_provider = raw.partition(ROUTE_KEY_SEPARATOR)
-        served = (
-            _calls(db, ctx.workspace_id, since)
-            .filter(LLMUsage.model_id == mid)
-            .with_entities(LLMUsage.provider, func.count(LLMUsage.id).label("cnt"))
-            .group_by(LLMUsage.provider)
-            .order_by(desc("cnt"))
+
+def _compared_route(db: Session, workspace_id: Any, since: datetime, raw: str) -> Tuple[str, Optional[str], Any]:
+    """(model id, serving provider, catalogue row or None) for one comparison entry.
+
+    A route key (``model@provider``) pins the serving provider; a bare model id
+    compares the route that served most of its usage.
+    """
+    mid, _, wanted_provider = raw.partition(ROUTE_KEY_SEPARATOR)
+    served = (
+        _calls(db, workspace_id, since)
+        .filter(LLMUsage.model_id == mid)
+        .with_entities(LLMUsage.provider, func.count(LLMUsage.id).label("cnt"))
+        .group_by(LLMUsage.provider)
+        .order_by(desc("cnt"))
+        .first()
+    )
+    provider_slug = wanted_provider or (served.provider if served else None)
+
+    registry = None
+    if provider_slug:
+        registry = (
+            db.query(LLMModel)
+            .filter(LLMModel.model_id == mid, LLMModel.serving_provider == provider_slug)
             .first()
         )
-        provider_slug = wanted_provider or (served.provider if served else None)
+    if registry is None:
+        registry = db.query(LLMModel).filter(LLMModel.model_id == mid).first()
+    return mid, provider_slug or (registry.serving_provider if registry else None), registry
 
-        registry = None
-        if provider_slug:
-            registry = (
-                db.query(LLMModel)
-                .filter(LLMModel.model_id == mid, LLMModel.serving_provider == provider_slug)
-                .first()
-            )
-        if registry is None:
-            registry = db.query(LLMModel).filter(LLMModel.model_id == mid).first()
-        provider_slug = provider_slug or (registry.serving_provider if registry else None)
-        facts = describe_usage_provider(provider_slug)
 
-        usage_q = _calls(db, ctx.workspace_id, since).filter(LLMUsage.model_id == mid)
-        if provider_slug:
-            usage_q = usage_q.filter(LLMUsage.provider == provider_slug)
-        usage = usage_q.with_entities(
-            func.count(LLMUsage.id).label("total_requests"),
-            func.sum(LLMUsage.total_tokens).label("total_tokens"),
-            func.sum(LLMUsage.total_cost).label("total_cost"),
-            func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
-            func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("errors"),
-        ).first()
+def _comparison_item(db: Session, workspace_id: Any, since: datetime, raw: str) -> ModelComparisonItem:
+    """One model's side of the comparison: its catalogue facts and its usage in the period."""
+    mid, provider_slug, registry = _compared_route(db, workspace_id, since, raw)
+    facts = describe_usage_provider(provider_slug)
 
-        total_requests = usage.total_requests or 0 if usage else 0
-        error_count = int(usage.errors or 0) if usage else 0
-        error_rate = error_count / total_requests if total_requests > 0 else 0.0
-        success_rate = 1.0 - error_rate
+    usage_q = _calls(db, workspace_id, since).filter(LLMUsage.model_id == mid)
+    if provider_slug:
+        usage_q = usage_q.filter(LLMUsage.provider == provider_slug)
+    usage = usage_q.with_entities(
+        func.count(LLMUsage.id).label("total_requests"),
+        func.sum(LLMUsage.total_tokens).label("total_tokens"),
+        func.sum(LLMUsage.total_cost).label("total_cost"),
+        func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
+        func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("errors"),
+    ).first()
 
-        results.append(ModelComparisonItem(
-            model_id=mid,
-            display_name=registry.display_name if registry else mid,
-            provider=facts["slug"],
-            provider_label=facts["label"],
-            billing=facts["billing"],
-            input_cost_per_1k=registry.input_cost_per_1k_tokens if registry else None,
-            output_cost_per_1k=registry.output_cost_per_1k_tokens if registry else None,
-            context_window=registry.context_window if registry else None,
-            capabilities=registry.capabilities or {} if registry else {},
-            total_requests=total_requests,
-            total_tokens=int(usage.total_tokens or 0) if usage else 0,
-            total_cost=float(usage.total_cost or 0) if usage else 0.0,
-            avg_latency_ms=float(usage.avg_latency_ms) if usage and usage.avg_latency_ms else None,
-            error_rate=round(error_rate, 4),
-            success_rate=round(success_rate, 4),
-        ))
+    total_requests = usage.total_requests or 0 if usage else 0
+    error_count = int(usage.errors or 0) if usage else 0
+    error_rate = error_count / total_requests if total_requests > 0 else 0.0
+    success_rate = 1.0 - error_rate
 
-    return results
+    return ModelComparisonItem(
+        model_id=mid,
+        display_name=registry.display_name if registry else mid,
+        provider=facts["slug"],
+        provider_label=facts["label"],
+        billing=facts["billing"],
+        input_cost_per_1k=registry.input_cost_per_1k_tokens if registry else None,
+        output_cost_per_1k=registry.output_cost_per_1k_tokens if registry else None,
+        context_window=registry.context_window if registry else None,
+        capabilities=route_capabilities(registry) if registry else {},
+        total_requests=total_requests,
+        total_tokens=int(usage.total_tokens or 0) if usage else 0,
+        total_cost=float(usage.total_cost or 0) if usage else 0.0,
+        avg_latency_ms=float(usage.avg_latency_ms) if usage and usage.avg_latency_ms else None,
+        error_rate=round(error_rate, 4),
+        success_rate=round(success_rate, 4),
+    )
 
 
 # ── Cost Projections ─────────────────────────────────────────────────

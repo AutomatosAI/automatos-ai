@@ -11,6 +11,8 @@ one workspace for ``BUSINESS_OFFER_DAYS``: its owner then buys it on their own
 Billing tab, inside Studio, and is told so by a notification. Business is by invite,
 never self-serve, so this offer is the only way to buy it (PRD-265 US-007).
 
+Both are hosted-only: the local edition answers 404, as every billing route does.
+
 It sits beside the operator console's other workspace routes
 (``api/admin_workspaces.py``, same prefix) and has the same gate: platform admins
 only, 403 for everyone else.
@@ -57,8 +59,11 @@ class CreditAdjustBody(BaseModel):
 
 
 def _require_platform_admin(ctx: RequestContext) -> None:
+    from config import config
     from core.auth.roles import caller_is_admin
 
+    if config.AUTH_EDITION == "local":  # the local edition has no billing, so no credits to adjust
+        raise HTTPException(status_code=404, detail="Not found")
     if not ctx.user or not caller_is_admin(ctx.user):
         raise HTTPException(status_code=403, detail="Admin access required")
 

@@ -23,9 +23,11 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, ThemeWorkspaceSettings
+from services.themes.records import SIGNED_UPLOAD_COUNTS_AS_REVIEWED
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +58,43 @@ class ThemeInstallError(Exception):
         self.message = message
 
 
+def _session_of(package: ThemePackage) -> Optional[Session]:
+    """The session the row was loaded through (None for a detached row or a stand-in object)."""
+    try:
+        return object_session(package)
+    except UnmappedInstanceError:
+        return None
+
+
+def _vouched_for(package: ThemePackage) -> bool:
+    """An active Automatos key nobody revoked verifies the stored signature (C-05c's check, QB-24's question).
+
+    Imported here, not at the top: ``signature_state`` imports ``signature_verify``, which imports
+    ``signing``, which imports this module.
+    A row with no session can't read the keys the hosted feed revoked, so it vouches for nothing.
+    """
+    if not getattr(package, "signature", None):
+        return False
+    db = _session_of(package)
+    if db is None:
+        return False
+    from services.themes.signature_state import signature_vouches
+
+    return signature_vouches(db, package)
+
+
 def is_private(package: ThemePackage) -> bool:
-    """Unreviewed code (Q6): a workspace's own upload, or any package not reviewed yet."""
-    return package.owner_type == WORKSPACE_OWNER or not package.reviewed
+    """Code a member runs only after opting in to it (Q6).
+
+    A Marketplace package is private until it is reviewed. A workspace's own upload is private
+    unless Automatos vouched for it: QB-24 (``records.SIGNED_UPLOAD_COUNTS_AS_REVIEWED``, C-05d)
+    counts a private upload as reviewed while its stored signature verifies with an active key
+    that neither the keys file nor the hosted feed revoked (``signature_state.signature_vouches``,
+    C-05c), never because a signature is merely stored.
+    """
+    if package.owner_type == WORKSPACE_OWNER:
+        return not (SIGNED_UPLOAD_COUNTS_AS_REVIEWED and _vouched_for(package))
+    return not package.reviewed
 
 
 def package_is_visible(package: Optional[ThemePackage], workspace_id: UUID) -> bool:

@@ -42,6 +42,7 @@ from services.themes.review_stage import member_view
 from services.themes.optin import opt_in_state
 from services.themes.records import version_key
 from services.themes.revocations import disables, revocation_body, revocation_of
+from services.themes.signed_upload import signature_view
 
 APPROVED = "approved"
 CLOSED_STATUSES = ("rejected", "deactivated")
@@ -64,7 +65,7 @@ def _version_of(db: Session, workspace_id: UUID, package_id: Optional[UUID]) -> 
 
 
 def install_row(db: Session, workspace_id: UUID, user_pk: Optional[int], install: ThemeInstallation) -> Dict[str, Any]:
-    """One row of ``GET /api/themes/installed``."""
+    """One row of ``GET /api/themes/installed``; ``signature`` is the package's ``{state, keyId}`` (C-05d)."""
     package = db.get(ThemePackage, install.package_id)
     manifest = package.manifest or {}
     return {
@@ -85,6 +86,7 @@ def install_row(db: Session, workspace_id: UUID, user_pk: Optional[int], install
         "optIn": opt_in_state(db, workspace_id, user_pk, package),
         "revoked": revocation_body(revocation_of(db, package)),
         "needsUpdate": needs_update(manifest),
+        "signature": signature_view(db, package),
     }
 
 

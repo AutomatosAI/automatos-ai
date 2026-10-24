@@ -194,6 +194,14 @@ ADMIN_GATED_IN_HANDLER = {
     ("POST", "/api/admin/themes/{package_id}/reject"),
     ("POST", "/api/admin/themes/{package_id}/report-note"),
     ("POST", "/api/admin/themes/{package_id}/signature"),
+    # PRD-261 C-05e/C-05h (C3-wire): theme revocations, platform-wide. Create and lift
+    # (api/admin_theme_revocations.py) call `_require_admin(ctx)` (`caller_is_admin`) first in
+    # the handler, behind the same admin check run as a dependency before a fresh step-up
+    # (`require_revocation_admin`); the local edition's Check now
+    # (api/admin_theme_revocation_sync.py) calls `_require_admin(ctx)` first, no step-up.
+    ("POST", "/api/admin/themes/revocations"),
+    ("POST", "/api/admin/themes/revocations/{revocation_id}/lift"),
+    ("POST", "/api/admin/themes/revocations/sync/pull"),
     # PRD-265 US-007: grant/take-back a workspace's credits
     # (api/admin_credits.py adjust_workspace_credits) — platform-admin gate in
     # the handler body (`_require_platform_admin(ctx)` -> `caller_is_admin`,

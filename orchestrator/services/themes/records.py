@@ -20,6 +20,12 @@ An upload of a version this workspace already holds with other files is refused,
 not newer than the installed version. A newer version is stored as its own package and set as the
 install's ``pending_package_id`` ("update available"); the install never switches by itself.
 
+A signed upload (C-05d): the route stores only a signature an active Automatos key verified over
+the upload's own files (``services/themes/signed_upload.py``), so a workspace row with a
+``signature`` is one Automatos vouched for. It may carry a reserved publisher's id without a
+platform admin, and the same bytes uploaded again with a signature gain it.
+``SIGNED_UPLOAD_COUNTS_AS_REVIEWED`` holds QB-24's answer for ``choices.is_private``.
+
 Synchronous (a plain SQLAlchemy session): called from plain-``def`` routes only.
 """
 
@@ -51,6 +57,10 @@ SETTING_ON, SETTING_OFF = "on", "off"
 SINGLE_PERSON = 1
 OWNER_WORKSPACE = "workspace"
 PUBLISHER_SEPARATOR = "/"
+# QB-24 (D10; open on 21 Oct, so the plan's recommended answer, yes): a private upload whose
+# signature an active Automatos key verified counts as reviewed: no per-version opt-in, it may be
+# the workspace default, and it reads "Signed by Automatos", not "Private · not reviewed".
+SIGNED_UPLOAD_COUNTS_AS_REVIEWED = True
 
 PLATFORM_OFF = "Private theme uploads are turned off on this platform."
 ADMINS_ONLY = "On this platform only an Automatos admin can upload a private theme."
@@ -150,10 +160,13 @@ def publisher_of(theme_id: str) -> str:
     return theme_id.split(PUBLISHER_SEPARATOR, 1)[0]
 
 
-def reserved_publisher_refusal(theme_id: str, user: Any) -> Optional[str]:
-    """Why ``user`` may not upload under this id's publisher (a reserved one), or None."""
+def reserved_publisher_refusal(theme_id: str, user: Any, signed: bool = False) -> Optional[str]:
+    """Why ``user`` may not upload under this id's publisher (a reserved one), or None.
+
+    ``signed``: an active Automatos key verified the upload's signature, which vouches for this id.
+    """
     publisher = publisher_of(theme_id)
-    if publisher in RESERVED_PUBLISHERS and not caller_is_admin(user):
+    if publisher in RESERVED_PUBLISHERS and not signed and not caller_is_admin(user):
         return f'Only an Automatos admin can upload a theme under the "{echo(publisher)}" publisher.'
     return None
 
@@ -235,12 +248,13 @@ def upload_conflict(db: Session, workspace_id: Any, manifest: Dict[str, Any]) ->
 
 
 def _new_package(ws: UUID, user_pk: Optional[int], checked: CheckedThemePackage, prefix: str,
-                 scan_report: Dict[str, Any]) -> ThemePackage:
+                 scan_report: Dict[str, Any], signature: Optional[str]) -> ThemePackage:
     manifest = checked.manifest
     return ThemePackage(
         theme_id=manifest["id"], version=manifest["version"], owner_type=OWNER_WORKSPACE, workspace_id=ws,
         digest=checked.digest, manifest=manifest, file_manifest=checked.file_manifest, storage_prefix=prefix,
         reviewed=False, scan_report=scan_report, scan_verdict=scan_report["verdict"], submitted_by=user_pk,
+        signature=signature,
     )
 
 
@@ -268,11 +282,25 @@ def _commit_after_store(db: Session, store: Callable[[], None]) -> None:
     db.commit()
 
 
-def _reuse_existing(db: Session, ws: UUID, user_pk: Optional[int], existing: ThemePackage) -> SavedUpload:
-    """The same bytes again: the existing package, installed again when nothing installs its theme."""
+def _gains_signature(existing: ThemePackage, signature: Optional[str]) -> bool:
+    """Give the row of the same bytes the upload's verified signature; True when that changed it."""
+    if signature is None or existing.signature == signature:
+        return False
+    existing.signature = signature
+    return True
+
+
+def _reuse_existing(
+    db: Session, ws: UUID, user_pk: Optional[int], existing: ThemePackage, signature: Optional[str],
+) -> SavedUpload:
+    """The same bytes again: the existing package, installed again when nothing installs its theme,
+    and signed when this upload carried a verified signature (C-05d)."""
     install = active_installation(db, ws, existing.theme_id, lock=True)
+    changed = _gains_signature(existing, signature)
     if install is None:
         install = _install(db, ws, user_pk, existing)
+        changed = True
+    if changed:
         db.commit()
         db.refresh(install)
     return SavedUpload(existing, install, created=False)
@@ -280,21 +308,22 @@ def _reuse_existing(db: Session, ws: UUID, user_pk: Optional[int], existing: The
 
 def save_private_upload(
     db: Session, workspace_id: Any, user_pk: Optional[int], checked: CheckedThemePackage, prefix: str,
-    scan_report: Dict[str, Any], store: Callable[[], None],
+    scan_report: Dict[str, Any], store: Callable[[], None], signature: Optional[str] = None,
 ) -> SavedUpload:
     """Store a checked upload as this workspace's package and install it, or offer it as an update.
 
     ``store`` writes the files: it runs once the rows are flushed (so a concurrent duplicate is
     already refused by the unique indexes) and before the commit, so a refused upload writes no
     files and a failed write leaves no row. Raises :class:`UploadConflict` for a clash.
+    ``signature``: one an active Automatos key verified over these files (C-05d), stored on the row.
     """
     ws = _workspace(workspace_id)
     existing = package_by_digest(db, ws, checked.digest)
     if existing is not None:
-        return _reuse_existing(db, ws, user_pk, existing)
+        return _reuse_existing(db, ws, user_pk, existing, signature)
     install = active_installation(db, ws, checked.manifest["id"], lock=True)
     _check_new_version(db, ws, checked.manifest, install)
-    row = _new_package(ws, user_pk, checked, prefix, scan_report)
+    row = _new_package(ws, user_pk, checked, prefix, scan_report, signature)
     db.add(row)
     db.flush()
     if install is None:
