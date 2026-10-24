@@ -48,8 +48,10 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 
 # Capability name -> (method, path) of the live route that implements it. Only what this build
 # implements. spoken_mode: ``spokenMode`` on the chat request (US-007a). voice_live: the Auto
-# Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34).
+# Live mint with Retell's transport fields (US-008a; Business-only on SaaS, D34). push: the
+# phone registers its Expo token for push (W2 US-009).
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "push": ("POST", "/api/v1/mobile/devices"),
     "spoken_mode": ("POST", "/api/chat"),
     "voice_live": ("POST", "/api/voice/web-call"),
 })

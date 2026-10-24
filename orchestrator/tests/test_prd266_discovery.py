@@ -305,7 +305,7 @@ def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, mon
 
     assert capabilities == sorted(discovery.CAPABILITY_ROUTES)
     assert set(capabilities) <= KNOWN_CAPABILITIES
-    assert "push" not in capabilities  # K14: no Expo sender in this build
+    assert "push" in capabilities  # W2 US-009: phones register for push through the Expo sender
 
 
 _PROBE = """

@@ -118,7 +118,7 @@ DIGEST_TIME_PATTERN = r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
 EXPO_PUSH_TOKEN_PATTERN = r"^ExponentPushToken\[[^\[\]\s]+\]$"
 # The unique index on expo_push_token (core/models/mobile_devices.py): another row holds it.
 PUSH_TOKEN_INDEX = "uq_mobile_devices_expo_push_token"
-PUSH_TOKEN_IN_USE = "push_token_in_use"
+PUSH_TOKEN_IN_USE = devices.PUSH_TOKEN_IN_USE
 
 # Module-level so a test can hand it a fake Redis (RateLimitStore's redis_factory seam).
 _rate_store = RateLimitStore()
@@ -173,6 +173,7 @@ class RegisterDeviceRequest(BaseModel):
     expo_push_token: Optional[str] = Field(default=None, max_length=EXPO_PUSH_TOKEN_LENGTH,
                                            pattern=EXPO_PUSH_TOKEN_PATTERN)
     digest_time: Optional[DigestTime] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=NAME_LENGTH)
 
 
 class UpdateDeviceRequest(BaseModel):

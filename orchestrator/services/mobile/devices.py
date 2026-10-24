@@ -14,11 +14,22 @@ from an id that does not exist.
   a new one) or when a clerk row its own person revoked (signing out) registers again, and
   only then is it returned (K14). A clerk row someone else revoked (an admin) stays revoked:
   its person's next sign-in does not undo it (``device_revoked``).
+
+  Push (W2 US-009): a registration that carries an Expo token turns push on and clears the
+  reason it was off (the person granted the OS permission); one without a token leaves push
+  as it was. A token another row holds moves here only from a row of the same install or the
+  same person, in any workspace (a phone that changed workspace or was reinstalled, W2 K14):
+  that row loses it (``token_moved``, a ``push_token_moved`` event). From anyone else's row
+  it is ``push_token_in_use`` and nothing changes, so one account never takes another's
+  phone; that is decided here, before any write, and the unique index only backs it up
+  against a race. The phone's name (its model, from the app) replaces the stored one; a
+  blank name is not written.
 * ``list_devices``: the caller's own devices; a workspace owner/admin (or the local
   operator) sees the workspace's. A pending row is a code waiting for a phone, not a
   device: it is never listed or acted on here.
 * ``update_device``: the device's person only, an active device only, and only
-  ``push_enabled``, ``digest_time`` and ``timezone``.
+  ``push_enabled``, ``digest_time`` and ``timezone``. Push on needs a registered Expo token
+  (``push_token_missing``); push off keeps the token.
 * ``revoke_device``: the device's person, or a workspace owner/admin. The token hash is
   KEPT, so the device lane answers the next call ``401 device_revoked``; its push state is
   cleared (switch off, Expo token and push key gone), so nothing is pushed to it and the
@@ -47,20 +58,27 @@ from config import config
 from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
 from core.auth.pairing import mint_token, secrets_match
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
-from services.mobile.events import ENROLLED, REVOKED, ROTATED, with_event
+from services.mobile.events import ENROLLED, PUSH_TOKEN_MOVED, REVOKED, ROTATED, with_event
 from services.mobile.pairing import DEVICE_TOKEN_BYTES
 
 PUSH_KEY_BYTES = 32
 # The columns POST /devices writes from its body (install_id names the row, never changes it).
-REGISTER_COLUMNS = ("platform", "app_version", "locale", "timezone", "expo_push_token", "digest_time")
+REGISTER_COLUMNS = (
+    "platform", "app_version", "locale", "timezone", "expo_push_token", "digest_time", "name",
+)
 UPDATE_COLUMNS = ("push_enabled", "digest_time", "timezone")
 # DeviceConflict codes, answered as 409 {"code": …}.
 INSTALL_MISMATCH = "install_id_mismatch"
 INSTALL_PAIRED = "install_id_paired"
 DEVICE_REVOKED = "device_revoked"
 TOKEN_SUPERSEDED = "token_superseded"
-# What push_disabled_reason says once a device is revoked.
+# Another person's phone holds this Expo token (K14).
+PUSH_TOKEN_IN_USE = "push_token_in_use"
+# Push on asked of a device that registered no Expo token.
+PUSH_TOKEN_MISSING = "push_token_missing"
+# What push_disabled_reason says once a device is revoked, or its token moved to a newer row.
 PUSH_OFF_REVOKED = "device_revoked"
+PUSH_OFF_TOKEN_MOVED = "token_moved"
 
 
 class DeviceConflict(RuntimeError):
@@ -140,6 +158,49 @@ def _owned(db: Session, caller: DeviceCaller, device_id: Optional[UUID]) -> Opti
     )
 
 
+def _description(body: Mapping[str, Any]) -> Dict[str, Any]:
+    """The columns ``body`` carries; the name stripped, and not written at all when blank."""
+    name = str(body.get("name") or "").strip()
+    described = {column: body[column] for column in REGISTER_COLUMNS if column in body and column != "name"}
+    return {**described, **({"name": name} if name else {})}
+
+
+def _push_on(described: Mapping[str, Any]) -> Dict[str, Any]:
+    """A registration carrying an Expo token turns push on (the OS permission was granted)."""
+    if not described.get("expo_push_token"):
+        return {}
+    return {"push_enabled": True, "push_disabled_reason": None}
+
+
+def _token_holder(db: Session, token: str, device: Optional[MobileDevice]) -> Optional[MobileDevice]:
+    """The OTHER row holding this Expo token, in any workspace, locked; ``None`` when there is none."""
+    query = db.query(MobileDevice).filter(MobileDevice.expo_push_token == token)
+    if device is not None and device.id is not None:
+        query = query.filter(MobileDevice.id != device.id)
+    return query.with_for_update().first()
+
+
+def _take_token(db: Session, caller: DeviceCaller, install_id: str, token: Optional[str],
+                device: Optional[MobileDevice], now: datetime) -> None:
+    """K14: move the Expo token here from a row of the same install or person, before any write.
+
+    Any other holder is ``DeviceConflict(push_token_in_use)``. The holder is flushed before the
+    registering row takes the token, so the unique index never sees it twice.
+    """
+    holder = _token_holder(db, token, device) if token else None
+    if holder is None:
+        return
+    if holder.install_id != install_id and holder.user_id != caller.user_pk:
+        raise DeviceConflict(PUSH_TOKEN_IN_USE)
+    _assign(holder, {
+        "expo_push_token": None,
+        "push_enabled": False,
+        "push_disabled_reason": PUSH_OFF_TOKEN_MOVED,
+        "events": with_event(holder.events, PUSH_TOKEN_MOVED, now),
+    })
+    db.flush()
+
+
 def _register_own(db: Session, caller: DeviceCaller, install_id: str,
                   described: Mapping[str, Any]) -> Optional[Registration]:
     """A device-lane caller: its own row takes the description; a push key once."""
@@ -148,8 +209,9 @@ def _register_own(db: Session, caller: DeviceCaller, install_id: str,
         return None
     if device.install_id != install_id:
         raise DeviceConflict(INSTALL_MISMATCH)
+    _take_token(db, caller, install_id, described.get("expo_push_token"), device, _now())
     minted = {"push_key": _new_push_key()} if device.push_key is None else {}
-    _assign(device, {**described, **minted})
+    _assign(device, {**described, **_push_on(described), **minted})
     db.flush()
     return Registration(device_id=device.id, push_key=minted.get("push_key"))
 
@@ -195,13 +257,15 @@ def _register_clerk(db: Session, caller: DeviceCaller, install_id: str,
     """A Clerk caller: upsert its clerk row. No token or code hash is ever written (§8)."""
     now = _now()
     device = _clerk_row(db, caller, install_id)
+    _take_token(db, caller, install_id, described.get("expo_push_token"), device, now)
     if device is None:
         device = MobileDevice(workspace_id=caller.workspace_id, user_id=caller.user_pk,
                               kind=MobileDeviceKind.CLERK.value, install_id=install_id, events=[])
         db.add(device)
     # A new row has no status until it is flushed; a revoked one registers afresh.
     enrolling = device.status != MobileDeviceStatus.ACTIVE.value
-    fields = {**described, "last_seen_at": now, **(_enrolment(device, now) if enrolling else {})}
+    fields = {**described, **_push_on(described), "last_seen_at": now,
+              **(_enrolment(device, now) if enrolling else {})}
     _assign(device, fields)
     db.flush()
     return Registration(device_id=device.id, push_key=fields.get("push_key"))
@@ -212,10 +276,10 @@ def register_device(db: Session, caller: DeviceCaller, install_id: str,
     """Register or update the calling phone from ``body`` (only the keys it carries are written).
 
     ``None`` when a device-lane caller's row is gone or revoked; ``DeviceConflict`` when its
-    token belongs to another install, or a Clerk caller's install is paired here or was
-    revoked by someone else.
+    token belongs to another install, a Clerk caller's install is paired here or was
+    revoked by someone else, or another person's phone holds the Expo token.
     """
-    described = {column: body[column] for column in REGISTER_COLUMNS if column in body}
+    described = _description(body)
     if caller.device_id is not None:
         return _register_own(db, caller, install_id, described)
     return _register_clerk(db, caller, install_id, described)
@@ -231,10 +295,15 @@ def list_devices(db: Session, caller: DeviceCaller) -> List[MobileDevice]:
 
 def update_device(db: Session, caller: DeviceCaller, device_id: UUID,
                   changes: Mapping[str, Any]) -> Optional[MobileDevice]:
-    """Change the push switch, digest time or time zone of one of the caller's person's active devices."""
+    """Change the push switch, digest time or time zone of one of the caller's person's active devices.
+
+    ``DeviceConflict(push_token_missing)`` for push on when the device registered no Expo token.
+    """
     device = _owned(db, caller, device_id)
     if device is None:
         return None
+    if changes.get("push_enabled") is True and not device.expo_push_token:
+        raise DeviceConflict(PUSH_TOKEN_MISSING)
     _assign(device, {column: changes[column] for column in UPDATE_COLUMNS if column in changes})
     db.flush()
     return device
