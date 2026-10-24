@@ -9,13 +9,21 @@
   carries ``# syntax=docker/dockerfile:1`` on line 1, without which a build on Engine
   24's built-in frontend rejects ``--start-interval``;
 - test.yml's prod-image-parity runs the real block as root in throwaway containers:
-  a symlink to a root-owned file, and a read-only volume.
+  a symlink to a root-owned file, a read-only volume, and a deliverables folder uid 1000
+  cannot write.
 
-The entrypoint itself runs here under bash with stand-in stat, find, chown and setpriv,
-so its control flow is proved in the required suite. setpriv replaced gosu (PRD-262,
-row 47 of the 19 Oct size breakdown): it is in the base image's util-linux, and the
-exec sets HOME to the worker's, which setpriv, unlike gosu, leaves as root's. The
-smoke's 20 s bar and /metrics 200 are in test_prd262_smoke_worker_health.py.
+setpriv replaced gosu (PRD-262, row 47 of the 19 Oct size breakdown): it is in the base
+image's util-linux, and the exec sets HOME to the worker's, which setpriv, unlike gosu,
+leaves as root's.
+
+US-040: compose names your deliverables folder, LOCAL_WORKSPACE_ROOT. The walk never
+enters it, and when uid 1000 cannot write it (a Linux host whose user is uid 1001, say)
+the worker takes the folder owner's uid and gid instead of re-owning anything; a folder
+root owns keeps uid 1000 and the log says why.
+
+The entrypoint itself runs here under bash with stand-in stat, find, chown, setpriv, id,
+groupmod and usermod, so its control flow is proved in the required suite. The smoke's
+20 s bar and /metrics 200 are in test_prd262_smoke_worker_health.py.
 """
 from __future__ import annotations
 
@@ -37,9 +45,18 @@ SYNTAX_LINE = "# syntax=docker/dockerfile:1"
 LOG_LINE = "[entrypoint] some files could not be re-owned"
 DROP = "setpriv --reuid=worker --regid=worker --init-groups env HOME=/home/worker python -m main"
 OWNERSHIP_FIND = (
-    "find \"$WORKSPACE_VOLUME_PATH\" -mindepth 1 -path '*/projects' -prune -o ! -user worker "
-    "-exec chown -h worker:worker {} + || echo \"" + LOG_LINE + "\" >&2"
+    "find \"$WORKSPACE_VOLUME_PATH\" -mindepth 1 \\( -path '*/projects' -o -path \"${LOCAL_WORKSPACE_ROOT:-}\" \\) "
+    "-prune -o ! -user worker -exec chown -h worker:worker {} + || echo \"" + LOG_LINE + "\" >&2"
 )
+# find's arguments as the stand-in logs them; the pattern is empty when compose names no folder.
+WALK = ("find {volume} -mindepth 1 ( -path */projects -o -path {local} ) -prune -o ! -user worker "
+        "-exec chown -h worker:worker {{}} +")
+# The local workspace, whose root compose mounts from your deliverables folder.
+DEFAULT_ID = "00000000-0000-0000-0000-0000000000c1"
+# Whether uid 1000 can write your deliverables folder, asked as the worker.
+PROBE = "setpriv --reuid=worker --regid=worker --init-groups test -w {local}"
+START = "gosu worker python -m main --flag"
+ROOT_OWNS = "[entrypoint] root owns your deliverables folder (AUTOMATOS_WORKSPACE_DIR)"
 
 
 def _instructions(text: str) -> list[str]:
@@ -70,16 +87,31 @@ def test_the_ownership_walk_skips_owned_files_never_follows_a_link_and_logs_a_fa
     assert not [line for line in lines if "gosu" in line and not line.startswith("#")]
 
 
+_LOGGED = '#!/bin/sh\necho "$(basename "$0") $*" >> "$CALL_LOG"\n'
 _STANDINS = {
-    "stat": '#!/bin/sh\necho "$FAKE_UID"\n',
+    # stat -c FORMAT PATH: the deliverables folder's owner (FOLDER_UID:FOLDER_GID), else the volume's.
+    "stat": '#!/bin/sh\nif [ "$3" != "$LOCAL_WORKSPACE_ROOT" ]; then echo "$FAKE_UID"\n'
+            'elif [ "$2" = "%u" ]; then echo "$FOLDER_UID"; else echo "$FOLDER_GID"; fi\n',
     "find": '#!/bin/sh\necho "find $*" >> "$CALL_LOG"\nexit "$FIND_EXIT"\n',
-    "chown": '#!/bin/sh\necho "chown $*" >> "$CALL_LOG"\n',
-    "setpriv": '#!/bin/sh\necho "setpriv $*"\n',
+    "chown": _LOGGED,
+    # setpriv is the drop for both: the folder-writable probe (``test -w``, logged, exits
+    # on FOLDER_UNWRITABLE) and the final exec (echoed, as it was before the probe existed).
+    "setpriv": '#!/bin/sh\ncase "$*" in *" test -w "*) echo "setpriv $*" >> "$CALL_LOG"\n'
+               '  exit "${FOLDER_UNWRITABLE:-0}";; esac\necho "setpriv $*"\n',
+    "groupmod": _LOGGED,
+    # usermod -o -u UID worker: id -u worker answers UID from then on, 1000 before.
+    "usermod": _LOGGED + 'echo "$3" > "$WORKER_UID_FILE"\n',
+    "id": '#!/bin/sh\ncat "$WORKER_UID_FILE" 2>/dev/null || echo 1000\n',
 }
 
 
-def _boot(tmp_path: Path, uid: str, find_exit: int) -> tuple[subprocess.CompletedProcess, list[str], Path]:
-    """Run entrypoint.sh with the stand-ins first on PATH; (result, stand-in calls, volume)."""
+def _boot(tmp_path: Path, uid: str, find_exit: int,
+          folder: tuple[str, str, bool] | None = None) -> tuple[subprocess.CompletedProcess, list[str], Path]:
+    """Run entrypoint.sh with the stand-ins first on PATH; (result, stand-in calls, volume).
+
+    ``folder`` is the deliverables folder compose names, as (uid, gid, writable by uid 1000);
+    without it LOCAL_WORKSPACE_ROOT is unset, as on Railway.
+    """
     bin_dir, volume, log = tmp_path / "bin", tmp_path / "volume", tmp_path / "calls.log"
     bin_dir.mkdir()
     volume.mkdir()
@@ -88,7 +120,13 @@ def _boot(tmp_path: Path, uid: str, find_exit: int) -> tuple[subprocess.Complete
         (bin_dir / name).write_text(body, encoding="utf-8")
         (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
     env = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "CALL_LOG": str(log),
-           "FAKE_UID": uid, "FIND_EXIT": str(find_exit), "WORKSPACE_VOLUME_PATH": str(volume)}
+           "FAKE_UID": uid, "FIND_EXIT": str(find_exit), "WORKSPACE_VOLUME_PATH": str(volume),
+           "WORKER_UID_FILE": str(tmp_path / "worker-uid")}
+    if folder:
+        local = volume / DEFAULT_ID
+        local.mkdir()
+        env.update(LOCAL_WORKSPACE_ROOT=str(local), FOLDER_UID=folder[0], FOLDER_GID=folder[1],
+                   FOLDER_UNWRITABLE="0" if folder[2] else "1")
     proc = subprocess.run(["bash", str(ENTRYPOINT), "--flag"], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, timeout=30)
     return proc, log.read_text(encoding="utf-8").splitlines(), volume
@@ -100,8 +138,7 @@ def test_a_failed_chown_is_logged_and_the_worker_still_starts(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert LOG_LINE in proc.stderr.splitlines()
     assert proc.stdout.splitlines()[-1] == f"{DROP} --flag"
-    assert calls[0] == (f"find {volume} -mindepth 1 -path */projects -prune -o ! -user worker "
-                        "-exec chown -h worker:worker {} +")
+    assert calls[0] == WALK.format(volume=volume, local="")
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -119,6 +156,56 @@ def test_a_volume_the_worker_already_owns_is_not_walked(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert calls == []
     assert proc.stdout.splitlines() == [f"{DROP} --flag"]
+
+
+# US-040: your deliverables folder.
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_a_deliverables_folder_uid_1000_can_write_changes_nothing(tmp_path):
+    """A Linux user who is uid 1000, or Docker Desktop's file sharing (it shows root, lets anyone write)."""
+    proc, calls, volume = _boot(tmp_path, uid="1000", find_exit=0, folder=("0", "0", True))
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [PROBE.format(local=volume / DEFAULT_ID)]
+    assert proc.stdout.splitlines() == [f"{DROP} --flag"]
+    assert ROOT_OWNS not in proc.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_a_folder_another_user_owns_makes_the_worker_that_user_and_is_never_walked(tmp_path):
+    proc, calls, volume = _boot(tmp_path, uid="1000", find_exit=0, folder=("1001", "1002", False))
+    local = volume / DEFAULT_ID
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [
+        PROBE.format(local=local),
+        "groupmod -o -g 1002 worker",
+        "usermod -o -u 1001 worker",
+        # The volume, still uid 1000's, is walked for the worker's new uid, without your folder.
+        WALK.format(volume=volume, local=local),
+        f"chown worker:worker {volume}",
+    ]
+    out = proc.stdout.splitlines()
+    assert out[0] == f"[entrypoint] uid 1000 cannot write {local}: the worker runs as its owner, 1001:1002"
+    assert out[-1] == f"{DROP} --flag"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_a_folder_root_owns_keeps_the_worker_at_1000_and_says_why(tmp_path):
+    proc, calls, volume = _boot(tmp_path, uid="1000", find_exit=0, folder=("0", "0", False))
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [PROBE.format(local=volume / DEFAULT_ID)]
+    assert [line for line in proc.stderr.splitlines() if line.startswith(ROOT_OWNS)]
+    assert proc.stdout.splitlines() == [f"{DROP} --flag"]
+
+
+def test_compose_names_the_folder_it_mounts_and_the_hosted_edition_names_none():
+    """The worker's LOCAL_WORKSPACE_ROOT is the target of its deliverables bind mount."""
+    worker = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]["workspace-worker"]
+    local_root = f"/workspaces/${{DEFAULT_WORKSPACE_ID:-{DEFAULT_ID}}}"
+    assert worker["environment"]["LOCAL_WORKSPACE_ROOT"] == local_root
+    assert f"${{AUTOMATOS_WORKSPACE_DIR:-./workspaces}}:{local_root}" in worker["volumes"]
+    chart = "\n".join(path.read_text() for path in (ROOT / "charts").rglob("*.yaml"))
+    assert "LOCAL_WORKSPACE_ROOT" not in chart, "no bind mount in the hosted edition: the volume walk as before"
 
 
 # --------------------------------------------------------------------------- the Dockerfile
@@ -165,6 +252,9 @@ def test_the_parity_job_runs_the_ownership_block_in_throwaway_containers():
         "some files could not be re-owned$",
         '"started as uid 1000"',
         'check "the worker\'s HOME" "$(grep -o \'HOME=[^ ]*\' <<< "$out")" "HOME=/home/worker"',
+        'out=$(LOCAL_WORKSPACE_ROOT="$mine" boot /tmp/volume2); code=$?',
+        'check "the worker with that folder" "$(grep -o \'started as uid [0-9]*\' <<< "$out")" "started as uid 1001"',
+        'check "a uid 1000 file in that folder" "$(stat -c %u "$mine/older")" 1000',
     ):
         assert needle in script, needle
     assert script.rstrip().endswith('exit "$bad"\nSH')

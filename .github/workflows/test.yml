@@ -1532,6 +1532,22 @@ jobs:
           check "the log line" "$(grep -c '^\[entrypoint\] some files could not be re-owned$' <<< "$out")" 1
           check "the worker after the failed chown" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the read-only file" "$(owner /srv/readonly/ws/file)" root
+
+          # PRD-262 US-040: a deliverables folder uid 1000 cannot write, as on a Linux host whose
+          # user is uid 1001. The worker runs as the folder's owner, and the walk leaves the folder
+          # alone. Last: it changes the worker's uid in this container.
+          mine=/tmp/volume2/local
+          mkdir -p "$mine/projects"
+          touch "$mine/file" "$mine/older"
+          chown -R 1001:1001 "$mine"
+          chown 1000:1000 "$mine/older"
+          out=$(LOCAL_WORKSPACE_ROOT="$mine" boot /tmp/volume2); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder uid 1000 cannot write" "$code" 0
+          check "the worker with that folder" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1001"
+          check "a file in that folder" "$(stat -c %u "$mine/file")" 1001
+          check "a uid 1000 file in that folder" "$(stat -c %u "$mine/older")" 1000
+          check "the volume root with that folder" "$(stat -c %u /tmp/volume2)" 1001
           exit "$bad"
           SH
 

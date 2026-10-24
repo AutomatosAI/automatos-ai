@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -38,6 +39,7 @@ _MAKEFILE = _REPO / "Makefile"
 _REVISION_LABEL = "org.opencontainers.image.revision"
 _LOCAL_REVISION = "${AUTOMATOS_REVISION:-unknown}"
 _SECRETS = {"POSTGRES_PASSWORD": "test", "REDIS_PASSWORD": "test", "API_KEY": "test"}
+_GHCR = "ghcr.io"
 
 # Service in docker-compose.yml -> image name the images workflow publishes.
 _PUBLISHED = {
@@ -208,10 +210,15 @@ def _compose_config(*files: str, **env: str) -> dict:
     return json.loads(proc.stdout)["services"]
 
 
+def _registry(image: str) -> str:
+    """The registry an image reference names: its host, the part before the first slash."""
+    return urlparse(f"//{image}").netloc
+
+
 def test_make_devs_stack_names_no_published_image():
     services = _compose_config("docker-compose.yml", "docker-compose.dev.yml")
     assert {name: spec.get("image") for name, spec in services.items()
-            if str(spec.get("image", "")).startswith("ghcr.io/")} == {}
+            if _registry(str(spec.get("image", ""))) == _GHCR} == {}
 
 
 def test_a_local_tag_names_the_three_app_images_and_keeps_their_builds():

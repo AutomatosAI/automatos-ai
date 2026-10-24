@@ -16,10 +16,11 @@
 #      workspaces volume mounted writable (docker-compose.core.yml); five containers
 #      run; /health/ready answers 200; a workspace endpoint answers 503 "Workspace worker not running"
 #      (orchestrator/core/workspace_client.py). Then the worker starts, the endpoint lists
-#      the deliverables folder, and a file planted there before the stack started keeps its
-#      host owner: the backend, mounting the fresh volume first, gave it its image's uid
-#      1000 /workspaces (orchestrator/Dockerfile), so the worker's entrypoint re-owns
-#      nothing.
+#      the deliverables folder, a file planted there before the stack started keeps its
+#      host owner, and the folders the worker makes there are the folder owner's. When uid
+#      1000 cannot write the folder (this runner's user is another uid), the worker runs as
+#      its owner, and its walk of the volume never enters it
+#      (services/workspace-worker/entrypoint.sh).
 #
 # Built for a throwaway Docker host, such as a CI runner: its teardown removes the stack
 # with its volumes, so it refuses to start on a host that has Automatos containers or
@@ -61,6 +62,9 @@ UNUSED_SECRETS=(POSTGRES_PASSWORD=unused REDIS_PASSWORD=unused API_KEY=unused)
 # could not show a re-own, so it is handed to another uid first.
 WORKER_UID=1000
 PROBE_OWNER="4242:4242"
+# A folder the worker makes in the local workspace's root on first use
+# (services/workspace-worker/workspace_manager.py DEFAULT_SUBDIRS).
+WORKER_MADE="reports"
 
 outcome="fail"
 
@@ -178,7 +182,8 @@ plant_owner_probe() {
       || fail "the probe is owned by uid ${WORKER_UID}, the worker's user, so a re-own would not show: run this as another user, or with passwordless sudo"
   fi
   probe_owner="$(stat -c '%u:%g' "$PROBE")"
-  echo "planted ${PROBE} (owner ${probe_owner})"
+  folder_owner="$(stat -c '%u:%g' "$WORKSPACE_DIR")"
+  echo "planted ${PROBE} (owner ${probe_owner}) in a folder owned by ${folder_owner}"
 }
 
 # docker compose itself says the override does what it should: five services and the
@@ -221,8 +226,12 @@ check_a_fresh_core_stack() {
   local owner
   owner="$(stat -c '%u:%g' "$PROBE")"
   [ "$owner" = "$probe_owner" ] \
-    || fail "the worker re-owned ${PROBE} from ${probe_owner} to ${owner}: the workspaces volume was not uid 1000 when the backend mounted it first"
+    || fail "the worker re-owned ${PROBE} from ${probe_owner} to ${owner}: its entrypoint's walk entered the deliverables folder"
   echo "${PROBE} kept its owner, ${owner}"
+  owner="$(stat -c '%u:%g' "${WORKSPACE_DIR}/${WORKER_MADE}")" || fail "the worker made no ${WORKER_MADE}/ in ${WORKSPACE_DIR}"
+  [ "$owner" = "$folder_owner" ] \
+    || fail "the worker made ${WORKSPACE_DIR}/${WORKER_MADE} as ${owner}, not as the folder's owner ${folder_owner}"
+  echo "the worker made ${WORKER_MADE}/ there as the folder's owner, ${owner}"
 }
 
 main() {
@@ -243,7 +252,7 @@ main() {
   outcome="pass"
   echo "OK: an .env from before W5 started six containers; make up CORE=1 stopped the worker and ran five;" \
     "a fresh core stack answered /health/ready 200 and 'Workspace worker not running', and the worker" \
-    "started later left the deliverables folder's owners alone"
+    "started later left the deliverables folder's owners alone and wrote there as its owner"
 }
 
 main "$@"

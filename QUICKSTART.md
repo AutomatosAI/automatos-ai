@@ -208,8 +208,9 @@ and channels) runs in the background, and 200 once the instance is fully up.
   billed to an API key) needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
   in `.env` — it reads env only, not Settings → API Keys. The **Runtime
   Canvas** for session agents (below) needs no key at all: it is your own
-  Claude Code, launched by the host on your machine. On a Linux host the files
-  under `./workspaces` end up owned by uid 1000, the worker's user.
+  Claude Code, launched by the host on your machine. On a Linux host the worker
+  writes under `./workspaces` as that folder's owner, your user; it cannot write
+  a folder root owns (the self-hosting guide's Linux ownership note).
   `docker compose --profile all up` adds Adminer, a database GUI (8080).
 
 ## Optional: your own Claude Code as an agent (session mode)
