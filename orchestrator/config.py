@@ -2199,6 +2199,9 @@ class Config:
     EXPO_PUSH_ACCESS_TOKEN: str = (os.getenv("EXPO_PUSH_ACCESS_TOKEN") or "").strip()
     # Each request to Expo times out after this many seconds, at least one.
     EXPO_PUSH_TIMEOUT_SECONDS: int = max(1, int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10")))
+    # The receipts job (services/push/receipts.py) reads Expo's receipts this often on the
+    # leader's scheduler, at least a minute apart.
+    PUSH_RECEIPTS_INTERVAL_SECONDS: int = max(60, int(os.getenv("PUSH_RECEIPTS_INTERVAL_SECONDS", "900")))
 
     # =============================================================================
     # PRD-251 Socials

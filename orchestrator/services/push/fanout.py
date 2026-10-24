@@ -223,6 +223,17 @@ class _Sent:
     token: str
 
 
+def turn_push_off(device: MobileDevice, now: datetime) -> None:
+    """K15: Expo says the phone left. Push off with Expo's reason and a ``push_failed`` event.
+
+    The token is kept, so the same phone registering again turns push back on. Shared with
+    the receipts job (``services/push/receipts.py``); the caller locked the row.
+    """
+    device.push_enabled = False
+    device.push_disabled_reason = DEVICE_NOT_REGISTERED
+    device.events = with_event(device.events, PUSH_FAILED, now)
+
+
 def _turn_off(db: Session, sent: _Sent, now: datetime) -> bool:
     """K15: the phone left; push is off with Expo's reason, the token is kept.
 
@@ -238,9 +249,7 @@ def _turn_off(db: Session, sent: _Sent, now: datetime) -> bool:
     )
     if device is None:
         return False
-    device.push_enabled = False
-    device.push_disabled_reason = DEVICE_NOT_REGISTERED
-    device.events = with_event(device.events, PUSH_FAILED, now)
+    turn_push_off(device, now)
     return True
 
 
@@ -381,4 +390,4 @@ def hand_over(db: Session, event: PushEvent) -> bool:
     return True
 
 
-__all__ = ["PushEvent", "deliver", "eligible_devices", "hand_over", "has_eligible_device"]
+__all__ = ["PushEvent", "deliver", "eligible_devices", "hand_over", "has_eligible_device", "turn_push_off"]
