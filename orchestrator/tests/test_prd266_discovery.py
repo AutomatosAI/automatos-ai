@@ -5,7 +5,9 @@
   it (``pk_test_`` / ``pk_live_`` + base64 of ``"<host>$"``); a key that is not Clerk's is a
   500 naming the setting, never the value. ``pairing.enabled`` is false.
 * local: ``auth.modes ["device"]``, ``clerk`` null, ``pairing.enabled`` only in paired mode.
-  No ``"oidc"`` mode in either edition (§4.11). ``push.expo`` is false (K14).
+  No ``"oidc"`` mode in either edition (§4.11).
+* ``push.expo`` (W2 US-010c, K13): true on saas; on a local install the operator's stored
+  answer, none here (``test_prd266_push_consent.py`` stores one).
 * K15: a local install still on the hosted ``PUBLIC_API_HOST`` answers with the request's own
   base URL, never ``api.automatos.app``; ``web_url`` is ``FRONTEND_URL``.
 * Reachable with no credential while paired mode has closed the anonymous lane; a bearer or a
@@ -18,7 +20,7 @@
 * The route is a plain ``def``, registered by ``RouterSpec``, listed in the route manifest, and
   its module names the public-route exception.
 
-DB-free: the route reads config only.
+DB-free: the route reads config, and the local Expo answer through a stand-in holding none.
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ from config import HOSTED_PUBLIC_API_HOST, config  # noqa: E402
 from core.auth import hybrid  # noqa: E402
 from core.auth.dependencies import RequestContext  # noqa: E402
 from services.mobile import discovery  # noqa: E402
+from services.push import consent  # noqa: E402
 
 DISCOVERY = "/.well-known/automatos.json"
 SCHEMA = "automatos-discovery/v1"
@@ -95,6 +98,8 @@ def local(monkeypatch):
     monkeypatch.setattr(config, "FRONTEND_URL", "http://localhost:3000")
     monkeypatch.setattr(config, "PUBLIC_API_HOST", HOSTED_PUBLIC_API_HOST)
     monkeypatch.setattr(config, "LOCAL_REMOTE_ACCESS", "off")
+    # The operator has not answered "Send notifications through Expo?" (no settings row).
+    monkeypatch.setattr(consent, "get_system_setting", lambda category, key, default=None: default)
     return config
 
 
@@ -117,7 +122,7 @@ def test_saas_is_schema_v1_and_signs_in_with_clerk(client, saas):
     assert body["auth"] == {"modes": ["clerk"],
                             "clerk": {"publishable_key": PUBLISHABLE_KEY, "frontend_api": CLERK_HOST}}
     assert body["pairing"] == {"enabled": False}
-    assert body["push"] == {"expo": False}
+    assert body["push"] == {"expo": True}
 
 
 def test_saas_never_offers_pairing_whatever_the_remote_access_mode(client, saas, monkeypatch):

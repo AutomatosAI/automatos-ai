@@ -106,6 +106,8 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-266 W1 Connect -- the Automatos Go backend: device discovery, pairing,
     # remote access (/api/v1/mobile/*).
     RouterSpec("api.mobile_devices"),
+    # PRD-266 W2 Push -- the operator's Expo answer (/api/v1/mobile/push-consent, local only).
+    RouterSpec("api.mobile_push"),
     # PRD-266 US-001 (§4.1) -- the discovery document (GET /.well-known/automatos.json).
     RouterSpec("api.well_known"),
 )

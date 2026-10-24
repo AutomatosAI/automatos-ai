@@ -308,6 +308,16 @@ install is reachable, then put TLS in front.
    code in Automatos Go. Another browser opens the web address and enters a code
    minted there. The same page lists every paired device, with Revoke.
 
+**Notifications.** Automatos Go's notifications go through Expo's push service:
+each one leaves this install for Expo, which hands it to the phone. Nothing leaves
+until you agree. Studio asks once, the first time you open *Pair a phone*, and
+the app asks when it pairs; change the answer later under **Settings → Phones &
+devices**. A question's text and its options travel in its notification unless
+the workspace redacts questions (they are then sent as a generic line, with Open
+only); every other notification is a generic line. Self-hosted notifications rely
+on Expo's "enhanced push security" staying off on the Automatos EAS project: with
+it on, Expo refuses every send that does not carry the project's own access token.
+
 **An install that already set `BIND_ADDRESS=0.0.0.0`** publishes the API and the
 web app beyond this machine, so while `LOCAL_REMOTE_ACCESS` is unset (`off`) the
 backend refuses to start, and `docker compose logs backend` says why and names the
