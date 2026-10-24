@@ -3,14 +3,22 @@ Anthropic Provider Implementation
 =================================
 
 Anthropic Claude models provider.
+
+Images in a message go as Anthropic image blocks: an OpenAI-style data URL (as
+``modules/attachments/resolver.py`` builds for an image attachment) as base64, read the
+way Bedrock and Gemini read it (:mod:`.image_blocks`), and an https link as a URL source
+Anthropic fetches. The Messages API answers 400 to an ``image_url`` block, and to a text
+block that is empty or only whitespace, so a blank text block is left out.
 """
 
+import base64
 import json
 import logging
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 
 from config import config
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
+from .image_blocks import decoded_image
 from core.llm.anthropic_workspace import workspace_for_key, workspace_headers
 
 try:
@@ -19,6 +27,174 @@ except ImportError:
     anthropic = None
 
 logger = logging.getLogger(__name__)
+
+# The image types the Messages API reads (platform.claude.com/docs/en/build-with-claude/vision).
+_ANTHROPIC_IMAGES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+# The content blocks that carry an image: OpenAI's ``image_url`` and Anthropic's own ``image``.
+_IMAGE_BLOCKS = frozenset({"image", "image_url"})
+# The only links sent as a URL source: Anthropic fetches the image from outside.
+_HTTPS = "https://"
+# What the model reads where an image couldn't be sent: it says so, never guesses (PRD-223 S0.3).
+_IMAGE_LEFT_OUT = ("[IMAGE UNAVAILABLE] An image was attached here, but it could not be shown to you ({why}). "
+                   "Do not guess what it shows; say you could not see it.")
+
+
+def _left_out(why: str) -> Dict[str, Any]:
+    """The text block that stands where an image couldn't be sent."""
+    return {"type": "text", "text": _IMAGE_LEFT_OUT.format(why=why)}
+
+
+def _base64_image(media_type: str, data: bytes) -> Dict[str, Any]:
+    """An image's bytes as an Anthropic base64 image block; a note, logged, for a type the
+    Messages API doesn't read (HEIC, SVG, BMP, TIFF…)."""
+    if media_type not in _ANTHROPIC_IMAGES:
+        logger.warning("[anthropic] an image of type %r has no Anthropic form; a note stands in for it", media_type)
+        return _left_out(f"its type, {media_type or 'unknown'}, is not supported")
+    encoded = base64.b64encode(data).decode("ascii")
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+
+
+def _is_https(url: str) -> bool:
+    return url.lower().startswith(_HTTPS)
+
+
+def _unfetchable() -> Dict[str, Any]:
+    """The note, logged, for an image given by a link Anthropic can't fetch (http, localhost)."""
+    logger.warning("[anthropic] an image that is neither inline data nor an https link can't be sent; "
+                   "a note stands in for it")
+    return _left_out("it is neither inline data nor an https link")
+
+
+def _linked_image(block: Dict[str, Any]) -> Dict[str, Any]:
+    """An OpenAI-style image whose bytes aren't in the message: an https link as a URL
+    source; a note, logged, for anything else."""
+    link = block.get("image_url")
+    url = str(link.get("url", "")) if isinstance(link, dict) else ""
+    return {"type": "image", "source": {"type": "url", "url": url}} if _is_https(url) else _unfetchable()
+
+
+def _referenced_image(block: Dict[str, Any]) -> Dict[str, Any]:
+    """An Anthropic image block whose bytes the API fetches itself: a Files API id, or an
+    https URL source, as it is; a note, logged, for any other source."""
+    source = block.get("source")
+    kind = source.get("type") if isinstance(source, dict) else None
+    if kind == "file" or (kind == "url" and _is_https(str(source.get("url", "")))):
+        return block
+    if kind == "url":
+        return _unfetchable()
+    logger.warning("[anthropic] an image block with no source the API reads; a note stands in for it")
+    return _left_out("it has no readable source")
+
+
+def _anthropic_block(block: Any) -> Any:
+    """One content block in the Messages API's shape: an image (OpenAI-style or Anthropic's
+    own) as an Anthropic image block, or a note where it can't be sent; any other block as it is."""
+    if not isinstance(block, dict) or block.get("type") not in _IMAGE_BLOCKS:
+        return block
+    try:
+        image = decoded_image(block)
+    except ValueError:
+        logger.warning("[anthropic] an image that isn't valid base64 can't be sent; a note stands in for it")
+        return _left_out("its data isn't valid base64")
+    if image is not None:
+        return _base64_image(*image)
+    return _linked_image(block) if block["type"] == "image_url" else _referenced_image(block)
+
+
+def _is_blank_text(block: Any) -> bool:
+    """A text block the Messages API refuses: empty, or only whitespace (a photo sent with
+    no caption)."""
+    return isinstance(block, dict) and block.get("type") == "text" and not str(block.get("text") or "").strip()
+
+
+def _anthropic_content(content: List[Any]) -> List[Any]:
+    """A content list with its images in the Messages API's shape, in the order they came,
+    and its blank text blocks left out."""
+    return [_anthropic_block(block) for block in content if not _is_blank_text(block)]
+
+
+def _text(content: Any) -> str:
+    return content if isinstance(content, str) else str(content)
+
+
+def _tool_results_in(text: str) -> Optional[List[Dict[str, Any]]]:
+    """The blocks of a string that is a JSON array of ``tool_result`` blocks (an older way
+    to send tool results); None for any other string, a JSON array a user typed included."""
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(parsed, list) and parsed and all(
+            isinstance(block, dict) and block.get("type") == "tool_result" for block in parsed):
+        return parsed
+    return None
+
+
+def _user_turn(content: Any) -> Optional[Dict[str, Any]]:
+    """A user message. A content list goes with its images as Anthropic image blocks and
+    its blank text left out (nothing when nothing is left); a string that is a JSON array
+    of ``tool_result`` blocks goes as those blocks; any other string as it came."""
+    if isinstance(content, list):
+        blocks = _anthropic_content(content)
+        return {"role": "user", "content": blocks} if blocks else None
+    if not isinstance(content, str):
+        return {"role": "user", "content": str(content)}
+    results = _tool_results_in(content)
+    return {"role": "user", "content": content if results is None else results}
+
+
+def _tool_use(call: Dict[str, Any]) -> Dict[str, Any]:
+    """An OpenAI-style tool call as a ``tool_use`` block; arguments that aren't a JSON object go as {}."""
+    function = call.get("function") or {}
+    arguments = function.get("arguments") or "{}"
+    try:
+        parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        parsed = {}
+    return {"type": "tool_use", "id": call.get("id"), "name": function.get("name"),
+            "input": parsed if isinstance(parsed, dict) else {}}
+
+
+def _assistant_turn(content: Any, tool_calls: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """An assistant message: its text and its tool calls as ``tool_use`` blocks. A content
+    of None (or a list with nothing left) and no tool calls sends nothing, never the text
+    "None" (F186)."""
+    if tool_calls:
+        blocks = _anthropic_content(content) if isinstance(content, list) else (
+            [{"type": "text", "text": content}] if isinstance(content, str) and content.strip() else [])
+        return {"role": "assistant", "content": [*blocks, *(_tool_use(call) for call in tool_calls)]}
+    if isinstance(content, list):
+        blocks = _anthropic_content(content)
+        return {"role": "assistant", "content": blocks} if blocks else None
+    if isinstance(content, str):
+        return {"role": "assistant", "content": content}
+    return None if content is None else {"role": "assistant", "content": str(content)}
+
+
+def _ends_on_tool_results(turns: List[Dict[str, Any]]) -> bool:
+    last = turns[-1] if turns else None
+    return bool(last and last["role"] == "user" and isinstance(last["content"], list)
+                and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in last["content"]))
+
+
+def _with_message(turns: List[Dict[str, Any]], msg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """``turns`` with one more message (not the system prompt) in the Messages API's shape.
+    A tool result joins the user turn of results right before it; a later system message
+    (a nudge, a forced synthesis) is a user turn; any other role is left out."""
+    role, content = msg.get("role"), msg.get("content", "")
+    if role == "tool":
+        block = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id"),
+                 "content": content if isinstance(content, str) else json.dumps(content)}
+        if _ends_on_tool_results(turns):
+            return [*turns[:-1], {"role": "user", "content": [*turns[-1]["content"], block]}]
+        return [*turns, {"role": "user", "content": [block]}]
+    if role == "system":
+        turn = {"role": "user", "content": _text(content)}
+    elif role == "user":
+        turn = _user_turn(content)
+    else:
+        turn = _assistant_turn(content, msg.get("tool_calls") or []) if role == "assistant" else None
+    return turns if turn is None else [*turns, turn]
 
 
 def _usage_dict(usage: Any) -> Dict[str, int]:
@@ -81,11 +257,19 @@ class AnthropicProvider(BaseLLMProvider):
         - User messages (can contain text or tool results)
         - Assistant messages: text, and their tool_calls as tool_use blocks
         - Tool results (role "tool"): tool_result blocks in the next user turn
+        - Images in a user or assistant content list: Anthropic image blocks
+          (base64 for a data URL, a URL source for an https link), or a text
+          note where one can't be sent; a blank text block (a photo sent with
+          no caption) left out; every other block as it came
 
         F186 (night 6): an assistant message's tool_calls and the tool results
         were dropped, a content of None went out as the text "None", and a later
         system message replaced the system prompt. A tool loop on this client
         never saw its own calls, their results, or what it said before them.
+
+        23 Oct 2026: a list content went out as it came, so a photo sent from the
+        app reached Anthropic as an OpenAI ``image_url`` block, which it answers
+        with a 400 ("Input tag 'image_url' found using 'type' does not match").
 
         Anthropic tool result format:
         {
@@ -95,71 +279,14 @@ class AnthropicProvider(BaseLLMProvider):
             ]
         }
         """
-        system_message = ""
-        seen_system = False
-        user_messages = []
-
+        system_message, seen_system = "", False
+        turns: List[Dict[str, Any]] = []
         for msg in messages:
-            role = msg.get("role")
-            content = msg.get("content", "")
-
-            if role == "system":
-                text = content if isinstance(content, str) else str(content)
-                if not seen_system:
-                    system_message, seen_system = text, True
-                else:
-                    user_messages.append({"role": "user", "content": text})
-            elif role == "tool":
-                block = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id"),
-                         "content": content if isinstance(content, str) else json.dumps(content)}
-                last = user_messages[-1] if user_messages else None
-                if (last and last["role"] == "user" and isinstance(last["content"], list)
-                        and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in last["content"])):
-                    user_messages[-1] = {"role": "user", "content": [*last["content"], block]}
-                else:
-                    user_messages.append({"role": "user", "content": [block]})
-            elif role == "user":
-                # Handle tool results (Anthropic expects array of content blocks)
-                if isinstance(content, str):
-                    try:
-                        # Try parsing as JSON (might be tool results array as JSON string)
-                        parsed = json.loads(content)
-                        if isinstance(parsed, list):
-                            # It's an array - likely tool results
-                            user_messages.append({"role": "user", "content": parsed})
-                        else:
-                            # Regular text content
-                            user_messages.append({"role": "user", "content": content})
-                    except (json.JSONDecodeError, TypeError):
-                        # Not JSON, regular text
-                        user_messages.append({"role": "user", "content": content})
-                elif isinstance(content, list):
-                    # Already formatted as content blocks
-                    user_messages.append({"role": "user", "content": content})
-                else:
-                    # Fallback: convert to string
-                    user_messages.append({"role": "user", "content": str(content)})
-            elif role == "assistant":
-                tool_calls = msg.get("tool_calls") or []
-                if tool_calls:
-                    blocks = list(content) if isinstance(content, list) else (
-                        [{"type": "text", "text": content}] if isinstance(content, str) and content.strip() else [])
-                    for tc in tool_calls:
-                        function = tc.get("function") or {}
-                        arguments = function.get("arguments") or "{}"
-                        try:
-                            parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
-                        except (json.JSONDecodeError, TypeError):
-                            parsed = {}
-                        blocks.append({"type": "tool_use", "id": tc.get("id"), "name": function.get("name"),
-                                       "input": parsed if isinstance(parsed, dict) else {}})
-                    user_messages.append({"role": "assistant", "content": blocks})
-                elif isinstance(content, (str, list)):
-                    user_messages.append({"role": "assistant", "content": content})
-                elif content is not None:
-                    user_messages.append({"role": "assistant", "content": str(content)})
-
-        return system_message, user_messages
+            if msg.get("role") == "system" and not seen_system:
+                system_message, seen_system = _text(msg.get("content", "")), True
+            else:
+                turns = _with_message(turns, msg)
+        return system_message, turns
 
     def _convert_tools_to_anthropic_format(self, tools: List[Dict]) -> List[Dict]:
         """
