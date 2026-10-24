@@ -338,7 +338,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # follows it.
     revocation_feed = (versions / "prd261_revocation_feed.py").read_text()
     assert 'down_revision = "prd265_billing_in_studio"' in revocation_feed
-    assert 'EXPECTED_HEAD = "prd261_revocation_feed"' in guard
+    # 2026-10-24 (PRD-266 W2 Push, US-010b): prd266_w2_push chains onto it —
+    # mobile_push_tickets and mobile_digest_posts, new tables only; the guard follows it.
+    w2_push = (versions / "prd266_w2_push.py").read_text()
+    assert 'down_revision = "prd261_revocation_feed"' in w2_push
+    assert 'EXPECTED_HEAD = "prd266_w2_push"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
