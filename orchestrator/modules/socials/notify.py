@@ -69,7 +69,10 @@ async def _dispatch(
     title: str,
     session_factory: Optional[Callable[[], Any]],
 ) -> None:
-    """Send one notification linked to the post, on its own session. Never raises."""
+    """Send one notification linked to the post, on its own session; one commit. Never raises.
+
+    The dispatcher never commits: closing the session without this commit would roll the
+    bell row back."""
     event_type, prefix, status = event
     try:
         db = (session_factory or _default_session_factory())()
@@ -80,8 +83,10 @@ async def _dispatch(
         await _dispatcher(db, str(workspace_id)).dispatch(
             event_type=event_type, title=f"{prefix}{title}", link_type=LINK_TYPE, link_id=str(post_id), status=status,
         )
+        db.commit()
     except Exception:
         logger.exception("[Socials] the %s notice of post %s was not sent", event_type, post_id)
+        db.rollback()
     finally:
         db.close()
 

@@ -9,6 +9,10 @@ the one retry costs no time):
 * A ``DeviceNotRegistered`` ticket or receipt is parsed to its code; an odd code is not kept.
 * A 503 (or a 429) then a 200 is one retry after ``EXPO_RETRY_DELAY_SECONDS``; a second 503 is
   not retried again; a 400 is never retried and every ticket of the batch is an error.
+* A 400 with request-level ``errors`` (a batch holding another Expo project's token:
+  ``PUSH_TOO_MANY_EXPERIENCE_IDS``) is sent again one message at a time: only the foreign
+  token's ticket is an error, the others are delivered, and a message refused on its own is not
+  split again. The log names Expo's code, never a token from its details.
 * A body that is not JSON, a request-level ``errors`` array, a short ticket list, data that is
   not JSON (a UUID, a NaN) and a transport error give error tickets (or no receipts) without
   raising; one ticket not in Expo's shape is an error for its message only, and one such receipt
@@ -305,13 +309,75 @@ def test_a_second_503_is_not_retried_again_and_fails_the_batch():
     assert [(ticket.status, ticket.error) for ticket in tickets] == [("error", REQUEST_FAILED)] * 2
 
 
-def test_a_400_is_not_retried_and_every_ticket_is_an_error():
-    recorder, sleeps = _Recorder(lambda _request, _attempt: httpx.Response(400, json={"errors": [{"code": "X"}]})), []
+@pytest.mark.parametrize("refusal, requests", [
+    pytest.param(lambda: httpx.Response(400), 1, id="plain-400"),
+    pytest.param(lambda: httpx.Response(400, json={"errors": [{"code": "X"}]}), 1 + 3, id="request-errors-each-alone"),
+])
+def test_a_400_is_not_retried_and_every_ticket_is_an_error(refusal, requests):
+    recorder, sleeps = _Recorder(lambda _request, _attempt: refusal()), []
     messages = _messages(3)
     tickets = _sender(recorder, sleeps).send(messages)
-    assert len(recorder.requests) == 1
+    assert len(recorder.requests) == requests
     assert sleeps == []
     assert tickets == [PushTicket(to=m.to, status="error", error=REQUEST_FAILED) for m in messages]
+
+
+FOREIGN = "ExponentPushToken[another-project-0001]"
+
+
+def _mixed_projects(request: httpx.Request, _attempt: int) -> httpx.Response:
+    """Expo's answer when a request mixes projects: the whole request is refused, its details
+    naming each project's tokens; one message alone is answered on its own."""
+    sent = json.loads(request.content)
+    tokens = [message["to"] for message in sent]
+    if FOREIGN in tokens and len(tokens) > 1:
+        return httpx.Response(400, json={"errors": [{
+            "code": "PUSH_TOO_MANY_EXPERIENCE_IDS",
+            "message": f"All push notification messages in the same request must be for the same project: {FOREIGN}",
+            "details": {"@acme/other-app": [FOREIGN], "@automatos/go": [t for t in tokens if t != FOREIGN]},
+        }]})
+    if tokens == [FOREIGN]:
+        return httpx.Response(400, json={"errors": [{"code": "PUSH_TOO_MANY_EXPERIENCE_IDS",
+                                                     "message": f"{FOREIGN} {EXPO_MESSAGE}"}]})
+    return _all_ok(request, _attempt)
+
+
+def test_a_batch_refused_for_another_projects_token_fails_that_token_only(caplog):
+    recorder, sleeps = _Recorder(_mixed_projects), []
+    ours = _messages(3)
+    foreign = PushMessage(to=FOREIGN, title=TITLE, body=BODY, data={"mark": DATA_MARK})
+    batch = [ours[0], foreign, *ours[1:]]
+
+    caplog.set_level(logging.DEBUG, logger=expo.__name__)
+    tickets = _sender(recorder, sleeps).send(batch)
+
+    assert [len(body) for body in recorder.bodies()] == [4, 1, 1, 1, 1]
+    assert [body[0]["to"] for body in recorder.bodies()[1:]] == [m.to for m in batch]
+    assert sleeps == []                                       # a refusal is never retried as such
+    assert tickets == [
+        PushTicket(to=ours[0].to, status="ok", ticket_id=_ticket_id(ours[0].to)),
+        PushTicket(to=FOREIGN, status="error", error=REQUEST_FAILED),
+        PushTicket(to=ours[1].to, status="ok", ticket_id=_ticket_id(ours[1].to)),
+        PushTicket(to=ours[2].to, status="ok", ticket_id=_ticket_id(ours[2].to)),
+    ]
+    assert "PUSH_TOO_MANY_EXPERIENCE_IDS" in caplog.text
+    for secret in ("ExponentPushToken", "another-project", "prd266-", "@acme", EXPO_MESSAGE, DATA_MARK):
+        assert secret not in caplog.text
+
+
+def test_a_refused_batch_still_retries_a_busy_answer_once_per_message():
+    def answer(request: httpx.Request, attempt: int) -> httpx.Response:
+        if attempt == 1:
+            return _mixed_projects(request, attempt)
+        return httpx.Response(503) if attempt == 2 else _mixed_projects(request, attempt)
+
+    recorder, sleeps = _Recorder(answer), []
+    batch = [*_messages(1), PushMessage(to=FOREIGN, title=TITLE, body=BODY)]
+
+    tickets = _sender(recorder, sleeps).send(batch)
+
+    assert len(recorder.requests) == 4 and sleeps == [EXPO_RETRY_DELAY_SECONDS]
+    assert [(ticket.to, ticket.status) for ticket in tickets] == [(batch[0].to, "ok"), (FOREIGN, "error")]
 
 
 def test_only_the_failed_batch_is_errors():

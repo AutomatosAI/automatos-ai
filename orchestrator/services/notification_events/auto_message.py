@@ -2,13 +2,15 @@
 
 ``services/chat_messenger.deliver_background_message`` calls :func:`announce` with the message it
 just saved and its producer's ``source``. Only Auto's own initiative is announced
-(``ANNOUNCED_ORIGINS``: a watcher, a scheduled task, a Mission's narration, the daily digest),
-never the echo of what the person did (a question's answer, a click's result). :func:`announce`
+(``ANNOUNCED_ORIGINS``: a scheduled task, the daily digest), never the echo of what the person
+did (a question's answer, a click's result). A watcher's and a Mission's posts are not announced:
+each already raises its own bell event (``watch_*``, ``mission_*``), so a second row would ring
+the same person twice for one event. :func:`announce`
 copies plain values and hands :func:`dispatch_auto_message` to ``send_soon``, which runs it on a
 session of its own: it finds the chat's owner in its workspace and raises ``auto_message`` for
 that person only (in-app by default; one of the three push types, FR-7), linked to the chat.
 
-A Mission narrates several lines, so one chat is told at most once every
+Scheduled tasks can post several lines, so one chat is told at most once every
 ``AUTO_MESSAGE_COALESCE_SECONDS``; the daily digest is never held back (its notice counts toward
 the window like any other). The window is read from the bell's own rows, so it holds across
 workers; a person whose preferences write no bell row for this event is not held back. Best
@@ -39,7 +41,9 @@ TITLE = AUTO_MESSAGE_LINE  # the bell says what the phone says
 AGENT_NAME = "Auto"
 DAILY_DIGEST = "daily_digest"
 # Auto's own initiative (K11). Never 'question_answer' or a click's result: the person's own action.
-ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"watcher", "scheduled_task", "mission", DAILY_DIGEST})
+# Never 'watcher' or 'mission': each raises its own bell event already (one row per event).
+# Whether watcher and Mission events push to a phone is the owner's decision (K11): not designed here.
+ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST})
 NEVER_COALESCED: frozenset[str] = frozenset({DAILY_DIGEST})
 AUTO_MESSAGE_COALESCE_SECONDS = 600
 EXCERPT_MAX_CHARS = 200
