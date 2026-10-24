@@ -21,10 +21,12 @@ through, as Retell is for voice (``modules/voice/retell_api.py``) and Stripe is 
   receipt is left out. A 429 or a 5xx is retried once after ``EXPO_RETRY_DELAY_SECONDS`` (Expo
   may already have queued a batch it answered 5xx to, so a retried 5xx can deliver twice); any
   other 4xx is not. A transport error never raises out of ``send`` or ``receipts``.
-* **A refused batch is sent again one message at a time.** A 400 carrying Expo's request-level
-  ``errors`` refuses the whole request for what one message holds: a token of another Expo
-  project (``PUSH_TOO_MANY_EXPERIENCE_IDS``) or one bad message. Each message of that batch is
-  then sent on its own, so the bad one fails only its own ticket and the others are delivered.
+* **A batch refused for one message is sent again one message at a time.** A 400 whose
+  request-level ``errors`` code is one that names a single message's fault
+  (``SPLITTABLE_REQUEST_ERRORS``: a token of another Expo project,
+  ``PUSH_TOO_MANY_EXPERIENCE_IDS``) is resent message by message, so the bad one fails only its
+  own ticket. Any other 400, coded or not, fails the batch once: a fault of the whole request
+  would only repeat, once per message, against Expo.
 * **Never logged:** a push token, the access token, a title, a body, data, or Expo's own error
   message (it can echo the token). Logs hold counts and Expo's error codes only.
 """
@@ -116,6 +118,11 @@ class _ReceiptsAnswer(BaseModel):
 
 class _BatchFailed(Exception):
     """A request that gave no usable answer; ``reason`` is the sender's own words, never Expo's."""
+
+
+# Request-level error codes that name one message's fault, so the batch's other messages may
+# go through alone. Anything else a 400 says is the whole request's and is not split.
+SPLITTABLE_REQUEST_ERRORS = frozenset({"PUSH_TOO_MANY_EXPERIENCE_IDS"})
 
 
 class _RequestRefused(_BatchFailed):
@@ -216,10 +223,13 @@ def _request_error_code(response: httpx.Response) -> Optional[str]:
 
 
 def _refusal(response: httpx.Response) -> _BatchFailed:
-    """What a non-2xx answer raises: ``_RequestRefused`` for a 400 carrying request-level errors."""
+    """What a non-2xx answer raises: ``_RequestRefused`` for a 400 whose request-level error
+    code is in ``SPLITTABLE_REQUEST_ERRORS``; ``_BatchFailed`` (the code named) for any other."""
     reason = f"status {response.status_code}"
     code = _request_error_code(response) if response.status_code == BAD_REQUEST else None
-    return _RequestRefused(f"{reason} {code}") if code else _BatchFailed(reason)
+    if code in SPLITTABLE_REQUEST_ERRORS:
+        return _RequestRefused(f"{reason} {code}")
+    return _BatchFailed(f"{reason} {code}" if code else reason)
 
 
 def _reason(failed: Exception) -> str:

@@ -311,7 +311,11 @@ def test_a_second_503_is_not_retried_again_and_fails_the_batch():
 
 @pytest.mark.parametrize("refusal, requests", [
     pytest.param(lambda: httpx.Response(400), 1, id="plain-400"),
-    pytest.param(lambda: httpx.Response(400, json={"errors": [{"code": "X"}]}), 1 + 3, id="request-errors-each-alone"),
+    # A code of the whole request (here an unknown one) fails the batch once: no resend per message.
+    pytest.param(lambda: httpx.Response(400, json={"errors": [{"code": "X"}]}), 1, id="request-error-not-splittable"),
+    # Another project's token is one message's fault: the batch goes again one message at a time.
+    pytest.param(lambda: httpx.Response(400, json={"errors": [{"code": "PUSH_TOO_MANY_EXPERIENCE_IDS"}]}), 1 + 3,
+                 id="foreign-project-each-alone"),
 ])
 def test_a_400_is_not_retried_and_every_ticket_is_an_error(refusal, requests):
     recorder, sleeps = _Recorder(lambda _request, _attempt: refusal()), []
