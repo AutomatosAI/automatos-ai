@@ -1,5 +1,5 @@
 {
-  "route_count": 980,
+  "route_count": 981,
   "routes": [
     {
       "method": "GET",
@@ -3072,6 +3072,10 @@
     {
       "method": "PUT",
       "path": "/api/v1/mobile/push-consent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/mobile/push-settings"
     },
     {
       "method": "POST",

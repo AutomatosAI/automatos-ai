@@ -8,7 +8,8 @@ number and the workspace's settings, and calls this module once per phone.
 * ``build_payload`` — K9's v2 payload: ids as strings, absent keys omitted (never null), the
   build time as ``iat`` and ``sig``. A question carries its text and up to three options so
   it can be answered from the lock screen; redaction (``redact_questions_enabled``) and every
-  other event carry a generic line instead.
+  other event carry a generic line instead. ``with_redact_questions`` is the switch's writer
+  (``PUT /api/v1/mobile/push-settings``, US-014b), so the settings shape lives here only.
 * ``sign`` / ``verify_signature`` — HMAC-SHA256 with the device's ``push_key`` over
   ``canonical_message``: anyone holding an Expo token can send a push, so the phone acts on a
   notification only when the signature holds and ``iat`` is fresh. automatos-go copies
@@ -125,6 +126,14 @@ def redact_questions_enabled(workspace_settings: Any) -> bool:
     """True when the workspace sends its questions generic: ``settings['push']['redact_questions']``."""
     push = workspace_settings.get(PUSH_SETTINGS_KEY) if isinstance(workspace_settings, Mapping) else None
     return isinstance(push, Mapping) and push.get(REDACT_QUESTIONS_KEY) is True
+
+
+def with_redact_questions(workspace_settings: Any, redact: bool) -> dict[str, Any]:
+    """NEW workspace settings with ``push.redact_questions`` set; every other key kept as it was."""
+    current = dict(workspace_settings) if isinstance(workspace_settings, Mapping) else {}
+    push = current.get(PUSH_SETTINGS_KEY)
+    merged = {**(push if isinstance(push, Mapping) else {}), REDACT_QUESTIONS_KEY: redact}
+    return {**current, PUSH_SETTINGS_KEY: merged}
 
 
 def plain_text(markdown: str) -> str:
