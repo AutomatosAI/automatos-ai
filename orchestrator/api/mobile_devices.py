@@ -348,7 +348,7 @@ def list_devices(
 ) -> Dict[str, List[Dict[str, Any]]]:
     """The caller's devices; a workspace owner/admin (and the local operator) sees the workspace's."""
     caller = _caller(db, ctx, workspace_view=True)
-    return {"devices": [device.to_dict() for device in devices.list_devices(db, caller)]}
+    return {"devices": devices.list_devices(db, caller)}
 
 
 @router.patch("/devices/{device_id}")

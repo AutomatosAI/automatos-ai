@@ -26,7 +26,10 @@ from an id that does not exist.
   blank name is not written.
 * ``list_devices``: the caller's own devices; a workspace owner/admin (or the local
   operator) sees the workspace's. A pending row is a code waiting for a phone, not a
-  device: it is never listed or acted on here.
+  device: it is never listed or acted on here. Each is its ``to_dict()``; a row that is
+  not the caller's own adds ``owner_label`` (its person's name, else their email: W2
+  US-019b), so Studio shows an owner or admin whose phone it is. The caller's own rows
+  carry none, and a member only ever sees their own.
 * ``update_device``: the device's person only, an active device only, and only
   ``push_enabled``, ``digest_time`` and ``timezone``. Push on needs a registered Expo token
   (``push_token_missing``); push off keeps the token.
@@ -57,6 +60,7 @@ from sqlalchemy.orm import Query, Session
 from config import config
 from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
 from core.auth.pairing import mint_token, secrets_match
+from core.models.core import User
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
 from services.mobile.events import ENROLLED, PUSH_TOKEN_MOVED, REVOKED, ROTATED, with_event
 from services.mobile.pairing import DEVICE_TOKEN_BYTES
@@ -285,12 +289,33 @@ def register_device(db: Session, caller: DeviceCaller, install_id: str,
     return _register_clerk(db, caller, install_id, described)
 
 
-def list_devices(db: Session, caller: DeviceCaller) -> List[MobileDevice]:
-    """The caller's own devices, or the workspace's for an owner/admin, oldest first."""
+def _owner_labels(db: Session, caller: DeviceCaller, rows: List[MobileDevice]) -> Dict[int, str]:
+    """``users.id`` → name (else email) of each person, other than the caller, whose device is listed."""
+    others = {row.user_id for row in rows if row.user_id != caller.user_pk}
+    if not others:
+        return {}
+    people = db.query(User.id, User.name, User.email).filter(User.id.in_(others)).all()
+    return {pk: (name or "").strip() or email for pk, name, email in people}
+
+
+def _view(device: MobileDevice, labels: Mapping[int, str]) -> Dict[str, Any]:
+    """The device as the API shows it, with ``owner_label`` when it is someone else's."""
+    shown = device.to_dict()
+    label = labels.get(device.user_id)
+    return {**shown, "owner_label": label} if label else shown
+
+
+def list_devices(db: Session, caller: DeviceCaller) -> List[Dict[str, Any]]:
+    """The caller's own devices, or the workspace's for an owner/admin, oldest first, as views.
+
+    Only the listed rows' people are read, so a label never names anyone outside this list.
+    """
     query = _devices(db, caller)
     if not caller.sees_workspace:
         query = query.filter(MobileDevice.user_id == caller.user_pk)
-    return query.order_by(MobileDevice.created_at, MobileDevice.id).all()
+    rows = query.order_by(MobileDevice.created_at, MobileDevice.id).all()
+    labels = _owner_labels(db, caller, rows)
+    return [_view(row, labels) for row in rows]
 
 
 def update_device(db: Session, caller: DeviceCaller, device_id: UUID,
