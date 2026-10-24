@@ -385,7 +385,7 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
 def _start_spoken_turn(db: Session, req: RetellLLMRequest, binding: Any) -> AsyncIterator[str]:
     """Save the caller's words and start Auto's agent stream for this turn (AI-SDK lines)."""
     from api.chat import get_default_agent_id
-    from consumers.chatbot import ChatService, StreamingChatService
+    from consumers.chatbot import ChatService, StreamingChatService, history_for_model
     from modules.voice.call_binding import upsert_voice_user_message
 
     # Grow-aware: a continued sentence UPDATES the message it grew from
@@ -423,7 +423,7 @@ def _start_spoken_turn(db: Session, req: RetellLLMRequest, binding: Any) -> Asyn
     recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
     return StreamingChatService(db, workspace_id=binding.workspace_id).stream_response_with_agent(
         chat_id=binding.chat_id,
-        messages=[{"role": m.role, "parts": m.parts} for m in recent],
+        messages=history_for_model(recent),
         agent_id=agent_id,
         user_id=binding.user_id,
         use_orchestrator_llm=True,

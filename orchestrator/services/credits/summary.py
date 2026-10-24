@@ -20,6 +20,7 @@ from services.credits.routing import (
     FUNDED_BY_CREDITS,
     funding_for,
     has_own_keys,
+    is_free_workspace,
 )
 
 USAGE_WINDOW_DAYS = 30
@@ -48,7 +49,7 @@ def billing_summary(db: Any, workspace: Any) -> dict:
 
     plan = getattr(workspace, "plan", None)
     balance = read_balance(db, workspace.id)
-    funding = funding_for(plan, balance, edition=config.AUTH_EDITION)
+    funding = funding_for(plan, balance, edition=config.AUTH_EDITION, free=is_free_workspace(db, workspace.id))
     metered = funding.funded_by == FUNDED_BY_CREDITS
     level = level_for(funding.spendable, plan) if metered else None
     paused = level == LEVEL_OUT
