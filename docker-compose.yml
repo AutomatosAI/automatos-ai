@@ -541,6 +541,17 @@ services:
         org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_workspace_worker
     restart: unless-stopped
+    # F452 (#1309): the worker runs agent code. Its entrypoint starts as root only to re-own
+    # the workspace volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't own) and drop to
+    # uid 1000 (SETUID, SETGID) with setpriv --no-new-privs; nothing after needs a capability.
+    # The chart's worker securityContext keeps the same four.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
     depends_on:
       redis:
         condition: service_healthy
