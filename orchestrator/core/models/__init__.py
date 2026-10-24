@@ -111,6 +111,7 @@ from .socials import (  # noqa: F401
 from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger; PRD-263 run table
 from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
+from . import review_entries  # noqa: F401  # PRD-266 US-012a: a ticket entering Review is announced after its commit
 from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
 from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events

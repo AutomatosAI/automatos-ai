@@ -98,6 +98,9 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # PRD-266 US-016a: a member reported an Auto message or a Deliverable; the
         # owner's notice opens Command Center -> Governance (link_type content_report).
         "content_reported",
+        # PRD-266 US-012a: a ticket entered Review (core/models/review_entries.py, the
+        # sweeper); in-app by default, a push type (Ready for review), linked to the ticket.
+        "review_pending",
         "agent_error",
     }
 )
