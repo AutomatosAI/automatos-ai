@@ -162,7 +162,9 @@ from api.dashboard_integration import (
 )
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
-from core.observability.otel import annotate_request, instrument_app, instrument_libraries, with_tracing
+from core.observability.otel import (
+    FASTAPI_TELEMETRY, annotate_request, instrument_app, instrument_libraries, with_tracing,
+)
 from core.route_tree import route_template  # PRD-262 US-008: API stats key by the full template
 from core.utils.logging_adapter import (
     install_request_context_logging,
@@ -947,6 +949,7 @@ app = FastAPI(
         }
     ],
     lifespan=with_tracing(lifespan),  # PRD-256 (#847): this process's OpenTelemetry provider, when on
+    telemetry=FASTAPI_TELEMETRY,  # FastAPI's own tracing off: instrument_app's spans are the only ones (#1306)
     docs_url="/docs" if config.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if config.ENVIRONMENT != "production" else None,
     openapi_url="/openapi.json" if config.ENVIRONMENT != "production" else None,
