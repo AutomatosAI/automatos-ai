@@ -2,9 +2,9 @@
 
 ``deploy/kind/datastores.yaml`` runs throwaway PostgreSQL (pgvector) and Redis for
 ``deploy/kind/e2e.sh``. Each image is ``name:tag@sha256:<digest>``, on the tag line
-``docker-compose.yml`` runs, so every run gets the same bytes. e2e.sh pulls and loads
-into the cluster exactly the references the manifests name (``DATASTORE_IMAGES``), so
-what it loads is what the pods run.
+``docker-compose.yml`` runs, so every run gets the same bytes. e2e.sh names exactly the
+references the manifests name (``DATASTORE_IMAGES``); it leaves those pinned by digest to
+the node's kubelet, which pulls them by that digest, so what runs is what is pinned.
 
 The digests are not held equal to compose's: Dependabot moves compose's every week,
 and an equality check would fail its pull requests. The tag line is held.
