@@ -14,6 +14,19 @@ tests:
       - equal:
           path: spec.strategy.type
           value: Recreate
+  - it: lets no worker process gain a privilege, with only the four capabilities its entrypoint needs (F452)
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
+            seccompProfile:
+              type: RuntimeDefault
   - it: renders nothing for a disabled worker
     template: templates/worker.yaml
     set:

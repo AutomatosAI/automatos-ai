@@ -42,4 +42,8 @@ fi
 # base image, replaced gosu (PRD-262, row 47 of the size breakdown: 2.9 MB). It sets
 # all three uids and gids and the worker's groups, but unlike gosu it leaves HOME as
 # root's, so HOME is set here: the canvas's Claude CLI and ~/.cache read it.
-exec setpriv --reuid=worker --regid=worker --init-groups env HOME=/home/worker python -m main "$@"
+# --no-new-privs (F452, #1309): the worker runs agent code, and the image carries
+# setuid-root binaries (su, mount, passwd, newgrp…). With no_new_privs set, exec never
+# grants a privilege again, so none of them can take the worker back to root. It holds
+# on Railway and in compose, where the chart's securityContext doesn't apply.
+exec setpriv --reuid=worker --regid=worker --init-groups --no-new-privs env HOME=/home/worker python -m main "$@"
