@@ -9,6 +9,7 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/data/signing-keys.json](../../orchestrator/services/themes/data/signing-keys.json)
 - [orchestrator/services/themes/signature_verify.py](../../orchestrator/services/themes/signature_verify.py)
 - [orchestrator/services/themes/signature_state.py](../../orchestrator/services/themes/signature_state.py)
+- [orchestrator/services/themes/defaults.py](../../orchestrator/services/themes/defaults.py)
 - [orchestrator/services/themes/signing.py](../../orchestrator/services/themes/signing.py)
 - [orchestrator/services/themes/review.py](../../orchestrator/services/themes/review.py)
 - [orchestrator/services/themes/review_package.py](../../orchestrator/services/themes/review_package.py)
@@ -117,7 +118,10 @@ signature is refused. The private key never goes near the orchestrator.
 
 4. **Put the same bytes in both repositories**: the kit's `keys/theme-signing.json` and this repository's
    `orchestrator/services/themes/data/signing-keys.json`. Merge both, and deploy the core release that carries it.
-   Until the kit's file holds the key, the kit's Theme release workflow attaches no signature.
+   Until the kit's file holds the key, the kit's Theme release workflow attaches no signature. In the same change,
+   update the docs that say no key ships yet: [Themes](../themes/_index.md#who-vouches-for-a-theme),
+   [the signature file](../themes/installing-and-choosing.md#the-signature-file), the FAQ, Marketplace › Themes and
+   [Signatures and revocations](_index.md#11-signatures-and-revocations).
 5. **Check it loads.** A keys file that breaks a rule doesn't load, and then a signature paste and a signed upload
    answer 503, and on the hosted edition `GET /api/themes/revocations` answers 503 too. A first pasted signature that
    stores (`signatureVerified: true` and the key id in the report) proves the key end to end.
@@ -130,7 +134,9 @@ open, and a paste no active key verifies stores nothing (400).
 Change the key's `status` in both files and deploy:
 
 - `retired`: versions it signed keep running, but are no longer Official, and a private upload it signed asks members
-  to opt in again.
+  to opt in again. If such an upload is a workspace default, the default stops applying (`defaults.default_install`
+  skips it and logs a warning), so members who relied on it see Studio until the upload carries a signature an active
+  key verifies or an admin sets another default.
 - `revoked`: versions it signed stop running (read as `disable`) until they are signed again. The hosted feed lists
   the key in `revokedKeys`, so each local edition distrusts it on its next pull, before its own keys file changes.
 

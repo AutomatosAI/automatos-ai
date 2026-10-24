@@ -28,6 +28,8 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/revocation_feed.py](../../orchestrator/services/themes/revocation_feed.py)
 - [orchestrator/services/themes/revocation_pull.py](../../orchestrator/services/themes/revocation_pull.py)
 - [orchestrator/services/themes/review.py](../../orchestrator/services/themes/review.py)
+- [orchestrator/services/themes/signature_verify.py](../../orchestrator/services/themes/signature_verify.py)
+- [orchestrator/services/themes/data/signing-keys.json](../../orchestrator/services/themes/data/signing-keys.json)
 - [orchestrator/core/models/themes.py](../../orchestrator/core/models/themes.py)
 - [orchestrator/api/themes_import.py](../../orchestrator/api/themes_import.py)
 - [orchestrator/api/themes_files.py](../../orchestrator/api/themes_files.py)
@@ -41,6 +43,8 @@ The following files were used as context for generating this page:
 - [frontend/lib/theme-host/shared-modules.json](../../frontend/lib/theme-host/shared-modules.json)
 - [frontend/lib/theme-host/sources.ts](../../frontend/lib/theme-host/sources.ts)
 - [frontend/lib/theme-host/loader.ts](../../frontend/lib/theme-host/loader.ts)
+- [frontend/lib/theme-host/manifest.ts](../../frontend/lib/theme-host/manifest.ts)
+- [frontend/lib/theme-host/looks/motion.ts](../../frontend/lib/theme-host/looks/motion.ts)
 - [frontend/lib/theme-host/look.ts](../../frontend/lib/theme-host/look.ts)
 - [frontend/lib/theme-host/constants.ts](../../frontend/lib/theme-host/constants.ts)
 - [frontend/lib/theme-host/installed-entry.ts](../../frontend/lib/theme-host/installed-entry.ts)
@@ -79,7 +83,8 @@ server. For what members and workspace admins see, read [Themes](../themes/_inde
 | [CSS layer model](css-layer-model.md) | Why theme CSS is unlayered, the scope check, how the approval cards and the AI label hold |
 | [Placement slots](placement-reach.md) | The three placement slots and which core pages reach them |
 | [SDK surface map](sdk-surface-map.md) | Every name of `@automatos/theme-sdk`, mapped to the core module it replaces |
-| [The phone's theme](mobile.md) | The `mobile` block in `theme.json` and `GET /api/themes/mobile/{installId}` |
+| [The phone's theme](mobile.md) | The `mobile` block in `theme.json`, `GET /api/themes/mobile/{installId}` and the routes a phone may call |
+| [Changing the theme host](changing-the-host.md) | For contributors: what else to update, and which guard fails, when you change a core page, the SDK, the contract, a route or the CI lane |
 
 ## From package to screen
 
@@ -154,7 +159,8 @@ paths, `..`, backslashes, repeated names, encryption, zip64, any compression but
 are refused. Each image, clip and font must be the format its path says.
 
 `theme.json` (schema `automatos-theme/v1`, `services/themes/manifest.py`) is checked field by field; every field the
-schema doesn't name is refused. The Design Kit's
+schema doesn't name is refused. The server accepts `base` `studio` or `classic` (`contract.THEME_BASES`); the browser
+host runs only `studio` for now (§7). The Design Kit's
 [contract guide](https://github.com/AutomatosAI/automatos-design-kit/blob/main/guides/contract.md) explains each field.
 `dist/theme.css` is held to the theme's own class (see [CSS layer model](css-layer-model.md)), and the `mobile`
 block to the rules in [The phone's theme](mobile.md).
@@ -173,7 +179,7 @@ Every accepted package then runs the automated review stage, inline, before the 
 | Check | What it reads |
 |---|---|
 | `sizes`, `cssScope`, `looks` | What the reader measured. A package that failed one never gets here, so each is a pass. |
-| `contrast` | The `mobile` block's colour pairs (AA: 4.5:1 for text, 3:1 for `--primary` and `--ring`), or `not_measured` without a block. |
+| `contrast` | The `mobile` block's colour pairs (`contract.MOBILE_CONTRAST_PAIRS`, AA): eight text pairs, each foreground on its own fill, at 4.5:1, and `--primary` and `--ring` on `--background` at 3:1. `not_measured` without a block. |
 | `uses` | The SDK names `dist/` imports from `@automatos/theme-sdk` against `theme.json`'s `uses`. A name the host's SDK doesn't export is an error. |
 | `clonedFrom` | Each cloned page's `clonedFrom.sha` against this release's core page files. A stale clone is a warning. |
 | `llm` | The AI code read: a model reads `dist/` (and `source/` for a Marketplace submission) in chunks and scores it 0 to 100. 70 or more is an error, 20 or more a warning. When it can't read all the code, it is at least a warning, "LLM stage did not run". |
@@ -271,13 +277,17 @@ is an installed theme. The load (`frontend/lib/theme-host/sources.ts`, `loader.t
 
 1. `GET /api/themes/active` must name this install with a digest. `optIn.required` stops the load before any file is
    asked for.
-2. The manifest's `engines.sdk` must accept the host's SDK version (1.1.0), or the entry is never requested.
-3. The browser's own `import()` loads `/api/themes/files/<digest>/dist/entry.js`. Its bare imports (`react`,
+2. The manifest must pass the browser's check (`manifest.ts`, `parseThemeManifest`), and its `base` must be `studio`
+   (`STUDIO_BASE_ONLY`): this host runs only Studio-based themes for now. The server accepts both bases, so a
+   `classic` package installs and can be chosen, then fails here with the `manifest` reason ("Its theme.json could
+   not be read."), which doesn't count toward the three failures.
+3. The manifest's `engines.sdk` must accept the host's SDK version (1.1.0), or the entry is never requested.
+4. The browser's own `import()` loads `/api/themes/files/<digest>/dist/entry.js`. Its bare imports (`react`,
    `react-dom`, `@automatos/theme-sdk`) resolve through the import map to the host's own instances under
    `/theme-sdk/v1/` (`shared-modules.json`).
-4. The entry's default export calls `register(host)`. It may register only known slots, the core pages a theme may
+5. The entry's default export calls `register(host)`. It may register only known slots, the core pages a theme may
    replace, and its own routes. A frame (`frame@1`) is required.
-5. The host adds the theme's class to `<html>`, appends its stylesheet and applies the default preset's variables
+6. The host adds the theme's class to `<html>`, appends its stylesheet and applies the default preset's variables
    (`look.ts`).
 
 Each request and import has 10 seconds (`THEME_LOAD_TIMEOUT_MS`). Any failure falls back to Studio with a notice.
@@ -308,6 +318,8 @@ A look is one set of a theme's knob values, held to its `looks/schema.json`. The
 (`frontend/lib/theme-host/looks/provider.tsx`, mounted by `theme-look-runtime.tsx`) runs for every installed theme
 with looks. It reads the theme's look rules from the boot, keeps the member's looks for this workspace, paints the
 active look on `<html>`, sets the tone the theme's tone rule gives, and hands the looks to the SDK's `looks` area.
+It also marks reduced motion on `<html>` for the theme's CSS (`looks/motion.ts`): `data-theme-motion` is `reduce` or
+`full`, and `--theme-motion` is `0` or `1`.
 
 The server is the truth for looks: `GET` and `PUT /api/themes/looks/{themeId}` (`services/themes/looks.py`). Looks
 are keyed by theme id, not version, so an update, a roll back or an uninstall keeps them. A look saved under an older
@@ -325,8 +337,8 @@ run that package, re-hashes it against the file manifest on every read, and answ
 
 ## 10. The phone
 
-The phone app never loads a theme's code. `GET /api/themes/mobile/{installId}` answers the theme's colours, font
-files and mascot files as data and URLs. See [The phone's theme](mobile.md).
+A phone never loads a theme's code. `GET /api/themes/mobile/{installId}` answers the theme's colours, font files and
+mascot files as data and URLs. Automatos Go doesn't call it yet; that is planned. See [The phone's theme](mobile.md).
 
 ## 11. Signatures and revocations
 
@@ -336,6 +348,11 @@ Two checks run on every serve, through one rule (`services/themes/revocations.py
   with a notice) or `disable` (members see the base, its files answer 404, nothing may install or move to it).
 - A version whose stored **signature** doesn't check out reads as `disable` too, until it is signed again
   (`services/themes/signature_state.py`).
+
+The keys come from `services/themes/data/signing-keys.json` (`signature_verify.py`). In this release it holds no key
+(`{"schema":1,"keys":[]}`), so no signature verifies: every signed upload and signature paste is refused, no private
+upload is vouched for, and nothing is Official. [Operations](operations.md#add-the-production-signing-key) says how
+the key is added.
 
 The hosted edition publishes its Marketplace revocations at `GET /api/themes/revocations`; each local edition pulls
 that feed every `THEME_REVOCATIONS_PULL_MINUTES` (60) while the server's scheduler runs. See [Security model](security-model.md#signatures) and
