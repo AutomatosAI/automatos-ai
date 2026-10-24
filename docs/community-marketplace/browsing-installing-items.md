@@ -99,7 +99,7 @@ graph TB
 
 ### Tab Organization
 
-The marketplace uses a six-tab layout. Backend queries distinguish items primarily via the `owner_type` and `type` fields.
+The marketplace uses a tabbed layout. Backend queries distinguish items primarily via the `owner_type` and `type` fields.
 
 | Tab | Label | Type Filter | Backend Source |
 |-----|-------|-------------|----------------|
@@ -109,8 +109,14 @@ The marketplace uses a six-tab layout. Backend queries distinguish items primari
 | LLMs | LLMs | `type=llm` | `OpenRouterModelCache` & `LLMModel` |
 | Capabilities | Plugins | `type=plugin` | `MarketplacePlugin` table |
 | Skills | Skills | `type=skill` | `Skill` table (`workspace_id IS NULL`) |
+| Themes | Themes | none: its own routes, `GET /api/marketplace/themes` | `theme_packages` rows with `owner_type='marketplace'`, approved and reviewed (`services/themes/listings.py`) |
 
 **Sources:** `[orchestrator/api/marketplace.py:158-158]()`, `[orchestrator/api/llm_marketplace.py:102-144]()`, `[orchestrator/api/marketplace_plugins.py:186-189]()`
+
+### Themes tab
+The Themes tab lists approved theme versions, adds one to the workspace by reference (`POST /api/marketplace/themes/{listingId}/install`), and takes submissions for review (`POST /api/marketplace/themes/submit`). It is described in plain words in [Marketplace › Themes](themes-tab.md).
+
+**Sources:** `[orchestrator/api/marketplace_themes.py]()`, `[frontend/components/marketplace/themes/tab.tsx]()`
 
 ### LLM Marketplace (PRD-54)
 The LLM tab bridges the `OpenRouterModelCache` (external models) and `LLMModel` (installed models). The `_get_or_create_from_cache` function `[orchestrator/api/llm_marketplace.py:102-144]()` ensures that if a user installs a model from the OpenRouter cache that doesn't yet exist in the local `llm_models` table, it is auto-created with relevant metadata like `context_window` and `input_cost_per_1k_tokens`.
