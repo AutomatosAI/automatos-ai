@@ -48,6 +48,12 @@ def test_another_wrapped_error_keeps_its_own_words():
 
 
 class _Db:
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
     def close(self):
         pass
 

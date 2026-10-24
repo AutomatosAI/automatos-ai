@@ -245,8 +245,10 @@ async def _tell_credit_back(workspace_id: str, reruns: int) -> None:
         await NotificationDispatcher(db, workspace_id).dispatch(
             event_type=CREDIT_BACK_EVENT, title=CREDIT_BACK_TITLE, message=credit_back_notice(reruns),
         )
+        db.commit()  # the dispatcher never commits: closing alone would roll the bell row back
     except Exception:
         logger.exception("[F197] could not say that credit is back for %s", workspace_id)
+        db.rollback()
     finally:
         db.close()
 

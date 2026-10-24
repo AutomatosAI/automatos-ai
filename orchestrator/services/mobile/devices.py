@@ -24,6 +24,12 @@ from an id that does not exist.
   phone; that is decided here, before any write, and the unique index only backs it up
   against a race. The phone's name (its model, from the app) replaces the stored one; a
   blank name is not written.
+
+  A person holds at most ``MAX_ACTIVE_DEVICES_PER_PERSON`` active devices in a workspace (the
+  W2 review: each one is a push target). A Clerk registration that would add one more (a new
+  install, or one its person signed out of) is ``DeviceConflict(device_limit_reached)``, with a
+  plain message; updating a device already active is never refused. Counted, not locked: two
+  registrations at the same instant may both pass.
 * ``list_devices``: the caller's own devices; a workspace owner/admin (or the local
   operator) sees the workspace's. A pending row is a code waiting for a phone, not a
   device: it is never listed or acted on here. Each is its ``to_dict()``; a row that is
@@ -80,17 +86,26 @@ TOKEN_SUPERSEDED = "token_superseded"
 PUSH_TOKEN_IN_USE = "push_token_in_use"
 # Push on asked of a device that registered no Expo token.
 PUSH_TOKEN_MISSING = "push_token_missing"
+# The most active devices one person may hold in one workspace; one more is refused.
+MAX_ACTIVE_DEVICES_PER_PERSON = 10
+DEVICE_LIMIT_REACHED = "device_limit_reached"
+DEVICE_LIMIT_MESSAGE = (
+    f"You already have {MAX_ACTIVE_DEVICES_PER_PERSON} devices registered in this workspace. "
+    "Remove one in Settings, under Phones & devices, then try again."
+)
 # What push_disabled_reason says once a device is revoked, or its token moved to a newer row.
 PUSH_OFF_REVOKED = "device_revoked"
 PUSH_OFF_TOKEN_MOVED = "token_moved"
 
 
 class DeviceConflict(RuntimeError):
-    """The call contradicts the device's row; ``code`` says how. Raised before anything changes."""
+    """The call contradicts the device's row; ``code`` says how, ``message`` (when set) in plain
+    words for the person. Raised before anything changes."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, message: Optional[str] = None) -> None:
         super().__init__(code)
         self.code = code
+        self.message = message
 
 
 @dataclass(frozen=True)
@@ -244,6 +259,17 @@ def _clerk_row(db: Session, caller: DeviceCaller, install_id: str) -> Optional[M
     return device
 
 
+def _check_room(db: Session, caller: DeviceCaller) -> None:
+    """``DeviceConflict(device_limit_reached)`` when the person already holds the most active devices here."""
+    active = db.query(MobileDevice.id).filter(
+        MobileDevice.workspace_id == caller.workspace_id,
+        MobileDevice.user_id == caller.user_pk,
+        MobileDevice.status == MobileDeviceStatus.ACTIVE.value,
+    ).count()
+    if active >= MAX_ACTIVE_DEVICES_PER_PERSON:
+        raise DeviceConflict(DEVICE_LIMIT_REACHED, DEVICE_LIMIT_MESSAGE)
+
+
 def _enrolment(device: MobileDevice, now: datetime) -> Dict[str, Any]:
     """What (re-)enrolling a clerk row writes: active, not revoked, a new push key, 'enrolled'."""
     return {
@@ -261,13 +287,15 @@ def _register_clerk(db: Session, caller: DeviceCaller, install_id: str,
     """A Clerk caller: upsert its clerk row. No token or code hash is ever written (§8)."""
     now = _now()
     device = _clerk_row(db, caller, install_id)
+    # A new row, or a revoked one registering afresh, adds an active device: room first.
+    enrolling = device is None or device.status != MobileDeviceStatus.ACTIVE.value
+    if enrolling:
+        _check_room(db, caller)
     _take_token(db, caller, install_id, described.get("expo_push_token"), device, now)
     if device is None:
         device = MobileDevice(workspace_id=caller.workspace_id, user_id=caller.user_pk,
                               kind=MobileDeviceKind.CLERK.value, install_id=install_id, events=[])
         db.add(device)
-    # A new row has no status until it is flushed; a revoked one registers afresh.
-    enrolling = device.status != MobileDeviceStatus.ACTIVE.value
     fields = {**described, **_push_on(described), "last_seen_at": now,
               **(_enrolment(device, now) if enrolling else {})}
     _assign(device, fields)

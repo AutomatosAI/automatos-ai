@@ -21,6 +21,12 @@ through, as Retell is for voice (``modules/voice/retell_api.py``) and Stripe is 
   receipt is left out. A 429 or a 5xx is retried once after ``EXPO_RETRY_DELAY_SECONDS`` (Expo
   may already have queued a batch it answered 5xx to, so a retried 5xx can deliver twice); any
   other 4xx is not. A transport error never raises out of ``send`` or ``receipts``.
+* **A batch refused for one message is sent again one message at a time.** A 400 whose
+  request-level ``errors`` code is one that names a single message's fault
+  (``SPLITTABLE_REQUEST_ERRORS``: a token of another Expo project,
+  ``PUSH_TOO_MANY_EXPERIENCE_IDS``) is resent message by message, so the bad one fails only its
+  own ticket. Any other 400, coded or not, fails the batch once: a fault of the whole request
+  would only repeat, once per message, against Expo.
 * **Never logged:** a push token, the access token, a title, a body, data, or Expo's own error
   message (it can echo the token). Logs hold counts and Expo's error codes only.
 """
@@ -49,6 +55,8 @@ EXPO_RECEIPTS_BATCH = 1000
 EXPO_RETRY_DELAY_SECONDS = 1.0
 TOO_MANY_REQUESTS = 429
 FIRST_SERVER_ERROR = 500
+# Expo refuses the whole request for what one of its messages holds (another project's token).
+BAD_REQUEST = 400
 
 REQUEST_FAILED = "expo_request_failed"
 MALFORMED_ANSWER = "expo_malformed_answer"
@@ -110,6 +118,16 @@ class _ReceiptsAnswer(BaseModel):
 
 class _BatchFailed(Exception):
     """A request that gave no usable answer; ``reason`` is the sender's own words, never Expo's."""
+
+
+# Request-level error codes that name one message's fault, so the batch's other messages may
+# go through alone. Anything else a 400 says is the whole request's and is not split.
+SPLITTABLE_REQUEST_ERRORS = frozenset({"PUSH_TOO_MANY_EXPERIENCE_IDS"})
+
+
+class _RequestRefused(_BatchFailed):
+    """Expo refused the whole request (a 400 with request-level ``errors``): its messages may each
+    be fine on their own."""
 
 
 def _default_client() -> httpx.Client:
@@ -183,6 +201,37 @@ def _failed_batch(batch: Sequence[PushMessage]) -> List[PushTicket]:
     return [PushTicket(to=message.to, status=TICKET_ERROR, error=REQUEST_FAILED) for message in batch]
 
 
+def _logged_failure(batch: Sequence[PushMessage], failed: Exception) -> List[PushTicket]:
+    """Every message of a failed batch an ``expo_request_failed`` ticket, logged once."""
+    logger.warning("Expo push send: a batch of %d messages failed (%s)", len(batch), _reason(failed))
+    return _failed_batch(batch)
+
+
+def _request_error_code(response: httpx.Response) -> Optional[str]:
+    """The first request-level error's code (a plain identifier, else ``UNKNOWN_ERROR``) of a
+    refusal, or None when it carries no ``errors``. Never Expo's message or details: they echo tokens.
+    """
+    try:
+        errors = _SendAnswer.model_validate(response.json()).errors
+    except (ValueError, RecursionError):  # not JSON, or not Expo's shape (ValidationError is a ValueError)
+        return None
+    if not errors:
+        return None
+    first = errors[0] if isinstance(errors[0], dict) else {}
+    code = first.get("code")
+    return code if isinstance(code, str) and _ERROR_CODE.fullmatch(code) else UNKNOWN_ERROR
+
+
+def _refusal(response: httpx.Response) -> _BatchFailed:
+    """What a non-2xx answer raises: ``_RequestRefused`` for a 400 whose request-level error
+    code is in ``SPLITTABLE_REQUEST_ERRORS``; ``_BatchFailed`` (the code named) for any other."""
+    reason = f"status {response.status_code}"
+    code = _request_error_code(response) if response.status_code == BAD_REQUEST else None
+    if code in SPLITTABLE_REQUEST_ERRORS:
+        return _RequestRefused(f"{reason} {code}")
+    return _BatchFailed(f"{reason} {code}" if code else reason)
+
+
 def _reason(failed: Exception) -> str:
     """What to log for a failed batch: our reason, never a validation error's echo of the input."""
     return str(failed) if isinstance(failed, _BatchFailed) else "the answer is not in Expo's shape"
@@ -238,16 +287,26 @@ class ExpoPushSender:
             }
 
     def _send_batch(self, client: httpx.Client, batch: Sequence[PushMessage]) -> List[PushTicket]:
+        """One request's tickets; a refused batch of several is sent again one message at a time."""
         try:
-            body = self._post_json(client, EXPO_SEND_URL, [_expo_message(message) for message in batch])
-            answer = _SendAnswer.model_validate(body)
-            if answer.errors:
-                raise _BatchFailed("Expo answered request errors")
-            if len(answer.data) != len(batch):
-                raise _BatchFailed(f"{len(answer.data)} tickets for {len(batch)} messages")
+            return self._tickets(client, batch)
+        except _RequestRefused as refused:
+            if len(batch) == 1:
+                return _logged_failure(batch, refused)
+            logger.warning("Expo push send: a batch of %d messages was refused (%s); sending each on its own",
+                           len(batch), _reason(refused))
+            return [ticket for message in batch for ticket in self._send_batch(client, [message])]
         except (_BatchFailed, ValidationError) as failed:
-            logger.warning("Expo push send: a batch of %d messages failed (%s)", len(batch), _reason(failed))
-            return _failed_batch(batch)
+            return _logged_failure(batch, failed)
+
+    def _tickets(self, client: httpx.Client, batch: Sequence[PushMessage]) -> List[PushTicket]:
+        """POST one batch and read its tickets, in order; ``_BatchFailed`` when the answer is unusable."""
+        body = self._post_json(client, EXPO_SEND_URL, [_expo_message(message) for message in batch])
+        answer = _SendAnswer.model_validate(body)
+        if answer.errors:
+            raise _BatchFailed("Expo answered request errors")
+        if len(answer.data) != len(batch):
+            raise _BatchFailed(f"{len(answer.data)} tickets for {len(batch)} messages")
         return [_ticket(message.to, raw) for message, raw in zip(batch, answer.data)]
 
     def _receipts_batch(self, client: httpx.Client, batch: Sequence[str]) -> Dict[str, PushReceipt]:
@@ -276,7 +335,7 @@ class ExpoPushSender:
             self._sleep(EXPO_RETRY_DELAY_SECONDS)
             response = self._post_once(client, url, content)
         if not response.is_success:
-            raise _BatchFailed(f"status {response.status_code}")
+            raise _refusal(response)
         try:
             return response.json()
         except (ValueError, RecursionError) as not_json:

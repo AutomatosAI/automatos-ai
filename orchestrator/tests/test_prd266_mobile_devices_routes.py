@@ -25,6 +25,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
@@ -127,14 +128,18 @@ def local(monkeypatch, db_session, clock):
 
 
 @pytest.fixture
-def make_client(db_session, local):
-    """A client on the router: ``ctx`` stands in for the request context, or (None) the real lane."""
+def make_client(db_session, local, monkeypatch):
+    """A client on the router: ``ctx`` stands in for the request context, or (None) the real lane.
+
+    The per-IP limit always lets these calls through (its own tests: test_prd266_device_limits)."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     from api import mobile_devices
     from core.auth.hybrid import get_request_context_hybrid
     from core.database.database import get_db
+
+    monkeypatch.setattr(mobile_devices, "_rate_store", SimpleNamespace(check=lambda *a, **k: (True, 30, 29, 600)))
 
     def _make(ctx=None):
         app = FastAPI()

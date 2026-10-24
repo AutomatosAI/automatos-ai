@@ -53,6 +53,9 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # counted off the event loop by api/mobile_devices.py through RateLimitStore (the provenance
     # pattern). Per IP only: an instance-wide bucket would let one caller block pairing for everyone.
     "mobile_pair_ip":  config.rate_limit_for("mobile_pair_ip", 10, 600),    # 10 pairing attempts per IP per 10 minutes
+    # PRD-266 W2 review: POST /api/v1/mobile/devices, one bucket per client IP (an IPv6 /64), the same
+    # way as mobile_pair_ip. Each registration can add a push target: a script cannot add thousands.
+    "mobile_devices_ip": config.rate_limit_for("mobile_devices_ip", 30, 600),  # 30 registrations per IP per 10 minutes
 }
 
 

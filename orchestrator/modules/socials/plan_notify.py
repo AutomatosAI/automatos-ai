@@ -68,8 +68,10 @@ async def _send(workspace_id: UUID | str, link_type: str, link_id: UUID | str, e
             event_type=event_type, title=f"{prefix}{title}", link_type=link_type, link_id=str(link_id), status=status,
             message=message,
         )
+        db.commit()  # the dispatcher never commits: closing alone would roll the bell row back
     except Exception:  # noqa: BLE001 — logged, never raised into the tick
         notify.logger.exception("[Socials] the %s notice of %s %s was not sent", event_type, link_type, link_id)
+        db.rollback()
     finally:
         db.close()
 

@@ -18,11 +18,13 @@
   message with no ticket counts as refused; DeviceNotRegistered turns that phone off with the
   reason and a ``push_failed`` event and keeps its token (K15), but never a phone that
   registered a new token during the send; a sender that raises never raises out of
-  ``deliver``; nothing logs a token, a push key, a question, an option or a body.
+  ``deliver``; nothing logs a token, a push key, a question, an option or a body, and a
+  database error is logged by its class, never its bound parameters (a push token).
 * ``hand_over``: False and nothing handed over when no phone in the workspace can be pushed,
   or when its check fails (logged; the caller's transaction stays usable); otherwise
-  ``deliver`` runs through ``core.best_effort`` — on its threads under an event loop — with
-  no recipient work on the caller's session.
+  ``deliver`` runs on push's own threads under an event loop (never ``core.best_effort``'s,
+  which write usage and billing rows), inline without one, with no recipient work on the
+  caller's session.
 
 CI's test database has no ``notification_preferences`` (no model; ``init_test_db`` does not
 build it), so the fixture runs the real ``prd128_notifications`` revision's DDL inside the
@@ -585,6 +587,27 @@ def test_a_sender_that_raises_never_raises_out_of_deliver(saas, ws, db_session, 
     assert phone.push_enabled is True
 
 
+def test_a_database_error_is_logged_by_its_class_never_its_bound_token(saas, ws, db_session, monkeypatch,
+                                                                       caplog):
+    from sqlalchemy.exc import OperationalError
+
+    token = _phone(db_session, ws, _owner(db_session, ws)).expo_push_token
+
+    def lost_connection(db, sent, now):
+        raise OperationalError("SELECT mobile_devices.id FROM mobile_devices "
+                               "WHERE mobile_devices.expo_push_token = %(token)s FOR UPDATE",
+                               {"token": sent.token}, Exception("server closed the connection unexpectedly"))
+
+    monkeypatch.setattr(fanout, "_turn_off", lost_connection)
+    with caplog.at_level(logging.DEBUG, logger=fanout.__name__):
+        _sender, counts = _deliver(db_session, _question_event(ws, "1"),
+                                   _FakeSender(errors={token: DEVICE_NOT_REGISTERED}))
+
+    assert counts == dict.fromkeys(fanout.COUNT_KEYS, 0)
+    assert "Push fan-out failed" in caplog.text and "OperationalError" in caplog.text
+    assert token not in caplog.text and "server closed" not in caplog.text
+
+
 def test_nothing_is_logged_but_ids_and_counts(saas, ws, db_session, caplog):
     person = _owner(db_session, ws)
     gone, kept = _phone(db_session, ws, person), _phone(db_session, ws, person)
@@ -608,9 +631,11 @@ def test_nothing_is_logged_but_ids_and_counts(saas, ws, db_session, caplog):
 class _Recorder:
     def __init__(self):
         self.calls = []
+        self.ran = threading.Event()
 
     def __call__(self, event, **kwargs):
         self.calls.append((event, threading.current_thread().name, kwargs))
+        self.ran.set()
         return dict.fromkeys(fanout.COUNT_KEYS, 0)
 
 
@@ -648,12 +673,14 @@ def test_a_hand_over_whose_check_fails_is_false_logged_and_leaves_the_caller_usa
     assert recorder.calls == []
 
 
-def test_hand_over_runs_deliver_off_the_event_loop_without_recipient_work(saas, ws, db_session, monkeypatch):
+def test_hand_over_runs_deliver_on_the_push_threads_without_recipient_work(saas, ws, db_session, monkeypatch):
     from core import best_effort
 
     recorder = _Recorder()
     monkeypatch.setattr(fanout, "deliver", recorder)
     monkeypatch.setattr(fanout, "recipients", lambda *a, **k: pytest.fail("hand_over reads no recipients"))
+    monkeypatch.setattr(best_effort, "_submit",
+                        lambda *a, **k: pytest.fail("push never takes the best-effort threads"))
     _phone(db_session, ws, _member(db_session, ws, "viewer"))
     event = _question_event(ws, "1")
 
@@ -661,11 +688,12 @@ def test_hand_over_runs_deliver_off_the_event_loop_without_recipient_work(saas, 
         return fanout.hand_over(db_session, event)
 
     assert asyncio.run(on_the_loop()) is True
-    assert best_effort.drain(timeout=5) is True
+    assert recorder.ran.wait(timeout=5) is True
     assert fanout.hand_over(db_session, event) is True  # no loop: inline
     (on_loop, thread_name, _kw), (inline, inline_thread, _kw2) = recorder.calls
-    assert on_loop is event and thread_name.startswith("best-effort-write")
+    assert on_loop is event and thread_name.startswith(f"{fanout.PUSH_THREAD_PREFIX}_")
     assert inline is event and inline_thread == threading.current_thread().name
+    assert fanout._push_executor._max_workers == fanout.PUSH_DELIVERY_THREADS == 2
 
 
 # --------------------------------------------------------------------------- the rules

@@ -13,7 +13,9 @@
 * ``POST /devices`` — a device-lane caller (``Bearer amd_…``) updates its own row; a Clerk
   caller upserts a ``clerk`` row by (workspace, person, ``install_id``) with no token hash
   (§8). ``{device_id, push_key}``: the key is in clear only on the first registration
-  (K14). Any other lane (the anonymous local operator, an API key) is 403.
+  (K14). Any other lane (the anonymous local operator, an API key) is 403. A person holds at
+  most ``devices.MAX_ACTIVE_DEVICES_PER_PERSON`` active devices in a workspace: one more is
+  ``409 {"code": "device_limit_reached", "message": …}``.
 * ``GET /devices`` — the caller's own devices; a workspace owner/admin (and the local
   operator) also sees the workspace's (``may_see_own_workspace_health``). ``to_dict()`` only.
 * ``PATCH /devices/{device_id}`` — the device's person only: ``push_enabled``,
@@ -38,7 +40,8 @@ alive for 600 s cannot be guessed at any rate the API serves, and a shared bucke
 one caller block pairing for everyone. The address is ``get_client_ip``'s (the first
 ``X-Forwarded-For`` hop), so the bucket is only as honest as the proxy in front: an install
 published for phones sits behind one that replaces that header. Redis unreachable lets the
-attempt through and logs an ERROR naming this limiter.
+attempt through and logs an ERROR naming this limiter. ``POST /devices`` is limited the same
+way, with ``mobile_devices_ip`` (the W2 review: each registration can add a push target).
 
 Every answer that carries a code or a token is ``Cache-Control: no-store``. Nothing here logs
 a code, a token or a hash: a database error is logged by its type only, because its text
@@ -49,6 +52,7 @@ through ``RouterSpec("api.mobile_devices")`` in ``router_manifest.py``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Annotated, Any, Callable, Dict, List, Optional, TypeVar
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -92,6 +96,9 @@ PAIR_RATE_LIMIT_OPERATION = "mobile_pair_ip"
 PAIR_RATE_BUCKET_PREFIX = "mobile_pair:ip"
 # What the shared limiter's fail-open ERROR line calls this limiter.
 RATE_LIMITER_LABEL = "mobile pairing rate limiter"
+DEVICES_RATE_LIMIT_OPERATION = "mobile_devices_ip"
+DEVICES_RATE_BUCKET_PREFIX = "mobile_devices:ip"
+DEVICES_RATE_LIMITER_LABEL = "mobile device registration rate limiter"
 INVALID_PAIRING_CODE = "invalid_pairing_code"
 # Room for the spaces a person may type; the kernel normalises what is hashed.
 PAIRING_CODE_MAX_LENGTH = 32
@@ -103,6 +110,7 @@ NOT_FOUND = "Not Found"
 NO_WORKSPACE = "Choose a workspace first."
 NO_PERSON = "A device is paired to a person, and this caller is not one."
 RATE_LIMITED_DETAIL = "Too many pairing attempts from this address. Try again later."
+DEVICES_RATE_LIMITED_DETAIL = "Too many device registrations from this address. Try again later."
 CONCURRENT_CHANGE = "This device changed at the same moment. Try again."
 UNAVAILABLE = "Pairing is unavailable right now. Try again in a minute."
 NOT_SET_UP = "Pairing is not set up on this install: {reason}."
@@ -207,16 +215,41 @@ def _require_paired_mode() -> None:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
 
 
-def limit_pair_attempts_per_ip(request: Request) -> None:
-    """429 once this client IP has spent its pairing attempts. Runs before the code is read."""
-    limit, window = DEFAULT_LIMITS[PAIR_RATE_LIMIT_OPERATION]
+@dataclass(frozen=True)
+class _IpLimit:
+    """One per-IP limit: its ``DEFAULT_LIMITS`` operation, Redis bucket, log label and 429 words."""
+
+    operation: str
+    bucket_prefix: str
+    label: str
+    detail: str
+
+
+_PAIR_LIMIT = _IpLimit(PAIR_RATE_LIMIT_OPERATION, PAIR_RATE_BUCKET_PREFIX, RATE_LIMITER_LABEL, RATE_LIMITED_DETAIL)
+_DEVICES_LIMIT = _IpLimit(DEVICES_RATE_LIMIT_OPERATION, DEVICES_RATE_BUCKET_PREFIX, DEVICES_RATE_LIMITER_LABEL,
+                          DEVICES_RATE_LIMITED_DETAIL)
+
+
+def _check_ip_limit(request: Request, ip_limit: _IpLimit) -> None:
+    """429 with ``Retry-After`` once this client IP has spent ``ip_limit`` in its window."""
+    limit, window = DEFAULT_LIMITS[ip_limit.operation]
     allowed, _limit, _remaining, reset_seconds = _rate_store.check(
-        ip_rate_bucket(get_client_ip(request), PAIR_RATE_BUCKET_PREFIX), limit, window,
-        label=RATE_LIMITER_LABEL,
+        ip_rate_bucket(get_client_ip(request), ip_limit.bucket_prefix), limit, window,
+        label=ip_limit.label,
     )
     if not allowed:
-        raise HTTPException(status_code=429, detail=RATE_LIMITED_DETAIL,
+        raise HTTPException(status_code=429, detail=ip_limit.detail,
                             headers={"Retry-After": str(reset_seconds)})
+
+
+def limit_pair_attempts_per_ip(request: Request) -> None:
+    """429 once this client IP has spent its pairing attempts. Runs before the code is read."""
+    _check_ip_limit(request, _PAIR_LIMIT)
+
+
+def limit_device_registrations_per_ip(request: Request) -> None:
+    """429 once this client IP has spent its device registrations. Runs before the body is read."""
+    _check_ip_limit(request, _DEVICES_LIMIT)
 
 
 def _clash_detail(clash: IntegrityError) -> Any:
@@ -228,7 +261,8 @@ def _clash_detail(clash: IntegrityError) -> Any:
 def _write(db: Session, work: Callable[[], T]) -> T:
     """Run one service call and commit it once.
 
-    A ``DeviceConflict`` is ``409 {"code": …}``. A unique index is 409 (``push_token_in_use``
+    A ``DeviceConflict`` is ``409 {"code": …}``, with its plain ``message`` when it carries one
+    (``device_limit_reached``). A unique index is 409 (``push_token_in_use``
     when another row holds the Expo token); any other database error is 503. Both are logged
     by type only: the error's text carries the bound parameters, a code or token hash among
     them, and the app's global handler would log that text.
@@ -239,7 +273,8 @@ def _write(db: Session, work: Callable[[], T]) -> T:
         return result
     except devices.DeviceConflict as conflict:
         db.rollback()
-        raise HTTPException(status_code=409, detail={"code": conflict.code}) from conflict
+        detail = {"code": conflict.code, **({"message": conflict.message} if conflict.message else {})}
+        raise HTTPException(status_code=409, detail=detail) from conflict
     except IntegrityError as clash:
         db.rollback()
         logger.warning("mobile device write lost a race on a unique index: %s", type(clash.orig).__name__)
@@ -324,7 +359,7 @@ def pair(body: PairRequest, response: Response, db: Session = Depends(get_db)) -
     }
 
 
-@router.post("/devices")
+@router.post("/devices", dependencies=[Depends(limit_device_registrations_per_ip)])
 def register_device(
     body: RegisterDeviceRequest,
     response: Response,

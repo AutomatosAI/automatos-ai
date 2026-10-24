@@ -183,7 +183,13 @@ def test_only_a_move_into_needs_approval_counts(before, after, entered):
 
 
 class _Session:
-    closed = False
+    closed = committed = rolled_back = False
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
 
     def close(self):
         self.closed = True
@@ -217,7 +223,7 @@ def test_the_notice_is_approval_pending_linked_to_the_post(monkeypatch):
         "link_id": str(post_id),
         "status": "action_required",
     }]
-    assert session.closed
+    assert (session.committed, session.rolled_back, session.closed) == (True, False, True)
 
 
 def test_a_failing_dispatch_never_raises(monkeypatch):
@@ -225,7 +231,7 @@ def test_a_failing_dispatch_never_raises(monkeypatch):
     monkeypatch.setattr(notify, "_dispatcher", _Dispatcher)
     session = _Session()
     asyncio.run(notify.dispatch_approval_pending(WS_A, uuid.uuid4(), "T", session_factory=lambda: session))
-    assert session.closed
+    assert (session.committed, session.rolled_back, session.closed) == (False, True, True)
 
     def no_session():
         raise RuntimeError("no database")
