@@ -15,7 +15,6 @@
 import { useMemo } from 'react'
 
 import { isLocal } from '@/lib/auth-edition'
-import { logger } from '@/lib/logger'
 import { QrCode } from '@/lib/vendor/qrcodegen/qrcodegen'
 import { QrSegment } from '@/lib/vendor/qrcodegen/qrsegment'
 
@@ -40,7 +39,9 @@ export function encodePairingQr(payload: string): QrCode | null {
     return QrCode.encodeSegments(segments, QrCode.Ecc.MEDIUM, QrCode.MIN_VERSION, QrCode.MAX_VERSION, AUTO_MASK, KEEP_ECC_LEVEL)
   } catch (error) {
     if (!(error instanceof RangeError)) throw error
-    logger.warn(`The pairing link was not drawn as a QR code: ${error.message}`)
+    // console, as the rest of components/settings does: '@/lib/logger' resolves to the legacy CommonJS
+    // lib/logger.js under vitest (.js before .ts) and has no named `logger` there.
+    console.warn(`The pairing link was not drawn as a QR code: ${error.message}`)
     return null
   }
 }
