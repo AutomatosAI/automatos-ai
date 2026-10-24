@@ -65,7 +65,9 @@ def message_text(message: Any) -> str:
     if isinstance(content, str):
         return content
     pieces = content if isinstance(content, list) else message.get("parts") or []
-    return " ".join(str(p.get("text") or "") for p in pieces if isinstance(p, dict))
+    # Only parts that carry words: an image part has none, and joining it left a stray space.
+    texts = (str(p.get("text") or "") for p in pieces if isinstance(p, dict))
+    return " ".join(text for text in texts if text)
 
 
 def about_a_document(messages: Optional[Iterable[Any]], query: object = "") -> bool:
