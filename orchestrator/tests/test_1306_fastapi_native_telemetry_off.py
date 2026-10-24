@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
@@ -56,10 +55,10 @@ def test_with_fastapi_telemetry_off_an_unwrapped_app_sends_no_span():
 
 def test_fastapis_own_tracing_is_what_the_setting_turns_off():
     """The control: FastAPI's defaults trace the request, query and all. If this starts
-    failing, FastAPI changed its defaults, and the setting may need checking too."""
+    failing, FastAPI changed its defaults or dropped its tracing: check the setting still
+    says what it should, rather than letting the test above pass for the wrong reason."""
     spans = _spans_of_a_request()
-    if not spans:
-        pytest.skip("this FastAPI has no built-in tracing")
+    assert spans, "FastAPI no longer traces by default: re-check otel.FASTAPI_TELEMETRY"
     assert {span.instrumentation_scope.name for span in spans} == {"fastapi"}
     assert any(MARKER in str(span.attributes.get("url.query", "")) for span in spans)
 
