@@ -310,7 +310,7 @@ What the theme draws:
 
 | Seam | Where |
 |---|---|
-| The frame (`frame@1`) | Around every page, from a window 1024 px wide (`theme-frame-slot.tsx`, `installed-entry.ts`). Below that width the core's layout draws. |
+| The frame (`frame@1`) | Around every page, from the `minWidth` the theme's `theme.json` names (`theme-frame-slot.tsx`, `installed-entry.ts`); below it the core's layout draws. A theme that names a phone's width brings its own phone frame; while the host has no entry for the theme yet, it draws from 1024 px. |
 | Pages (`registerPage`) | In place of a core page: `/chat`, `/deliverables`, `/assignments`, `/missions/[id]`, `/agents`, `/documents`, `/playbooks`, `/command-center`, `/` (`theme-slot.tsx`) |
 | Routes (`registerRoute`) | The theme's own pages at `/x/<route>`, up to four segments (`theme-slot-route.tsx`) |
 | Slots | `lookEditor@1` on `/looks`, `styleSheet@1` on `/looks/style`, `notFound@1` on the 404 page (`app/not-found.tsx`), `asleep@1` (the theme's own asleep screen), and the three placement slots ([Placement slots](placement-reach.md)) |

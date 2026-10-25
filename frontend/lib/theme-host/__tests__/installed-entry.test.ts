@@ -10,11 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import { baseThemeBoot } from '@/lib/theme-host/boot'
 import { sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
-import {
-  INSTALLED_FRAME_MIN_WIDTH_PX,
-  installedThemeEntry,
-  sanitizeInstalledEntry,
-} from '@/lib/theme-host/installed-entry'
+import { installedThemeEntry, sanitizeInstalledEntry } from '@/lib/theme-host/installed-entry'
 import { findThemeEntry } from '@/lib/theme-host/registry'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
 
@@ -89,9 +85,11 @@ describe("PRD-261 W-A6b — the installed theme's registry entry", () => {
     expect(findThemeEntry(INSTALLED_PLAY_STYLE, entry === null ? [] : [entry])).toBe(entry)
   })
 
-  it('draws from the desktop width up, whatever minWidth the theme names (Phase A)', () => {
-    expect(installedThemeEntry(INSTALLED_HELLO_STYLE, HELLO_PACKAGE_ENTRY)?.minWidth).toBe(INSTALLED_FRAME_MIN_WIDTH_PX)
-    expect(installedThemeEntry(INSTALLED_PLAY_STYLE, { ...PLAY_PACKAGE_ENTRY, minWidth: 1440 })?.minWidth).toBe(INSTALLED_FRAME_MIN_WIDTH_PX)
+  it('draws from the minWidth its theme.json names: a phone layout\'s, the desktop\'s, or wider', () => {
+    expect(installedThemeEntry(INSTALLED_HELLO_STYLE, HELLO_PACKAGE_ENTRY)?.minWidth).toBe(0)
+    expect(installedThemeEntry(INSTALLED_PLAY_STYLE, { ...PLAY_PACKAGE_ENTRY, minWidth: 360 })?.minWidth).toBe(360)
+    expect(installedThemeEntry(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)?.minWidth).toBe(1024)
+    expect(installedThemeEntry(INSTALLED_PLAY_STYLE, { ...PLAY_PACKAGE_ENTRY, minWidth: 1440 })?.minWidth).toBe(1440)
   })
 
   it('is null for every other style, and for an install whose boot carried no entry', () => {

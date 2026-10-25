@@ -112,7 +112,7 @@ export interface InstalledThemeEntryData {
   readonly name: string
   readonly base: ThemeBase
   readonly htmlClass: string
-  /** The theme's own; in Phase A the host draws an installed theme from INSTALLED_FRAME_MIN_WIDTH_PX up. */
+  /** The theme's own, from theme.json: the host draws the theme from this width up, the core's pages below it. */
   readonly minWidth: number
   readonly tone: ThemeTonePolicy
   readonly reviewed: boolean
