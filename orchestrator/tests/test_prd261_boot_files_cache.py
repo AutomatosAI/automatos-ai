@@ -17,6 +17,7 @@ kept by (digest, storage prefix). Object storage is stood in for at the S3 clien
   once the stored bytes match again the boot is kept;
 * a storage failure keeps nothing (503) and the next boot reads again;
 * the bound drops the least recently booted package; boots from many threads stay correct;
+* a cold boot reads its look files at once, and a read the checks never reach changes no answer;
 * with a warm cache, a non-member, a member who withdrew their opt-in, a disabled version and an
   uninstalled install are refused exactly as on a cold one.
 """
@@ -66,6 +67,8 @@ from services.themes.package import read_theme_package  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
 THREADS = 8
+# How long the read-ahead test waits for every look file's read to be in flight at once.
+READ_WAIT_SECONDS = 10
 PREPAINT_PATH, SCHEMA_PATH = "boot/prepaint.json", "looks/schema.json"
 PRESETS = ("looks/presets/default.look.json", "looks/presets/night.look.json")
 LOOK_FILES = (PREPAINT_PATH, SCHEMA_PATH, *PRESETS)
@@ -143,13 +146,14 @@ class _Storage:
     def __init__(self) -> None:
         self.objects: Dict[str, bytes] = {}
         self.down = False
+        self.failing: Set[str] = set()
         self._reads: List[str] = []
         self._lock = threading.Lock()
 
     def get_object(self, Bucket: str, Key: str) -> Dict[str, Any]:  # noqa: N803 — boto3's argument names
         with self._lock:
             self._reads.append(Key)
-        if self.down:
+        if self.down or Key in self.failing:
             raise _ClientError("InternalError")
         if Key not in self.objects:
             raise _ClientError("NoSuchKey")
@@ -267,6 +271,20 @@ def test_boots_from_many_threads_each_get_their_own_package(storage, monkeypatch
     with ThreadPoolExecutor(max_workers=THREADS) as pool:
         assert all(pool.map(boot, range(THREADS * 25)))
     assert len(serve._boot_files) <= 2
+
+
+def test_a_cold_boot_reads_its_look_files_at_once(storage):
+    built = _built()
+    storage.store(PREFIX_A, built)
+    together = threading.Barrier(len(LOOK_FILES), timeout=READ_WAIT_SECONDS)
+
+    def read(prefix: str, path: str):
+        together.wait()  # breaks, failing the boot, unless every look file's read is in flight at once
+        return serve.read_stored_file(prefix, path)
+
+    files = serve.boot_files(_row(built, PREFIX_A), read)
+    assert files.prepaint == _prepaint(WHITE) and _preset_ids(files.looks) == ["default", "night"]
+    assert storage.take_reads() == _keys(PREFIX_A)
 
 
 # --- the boot route ------------------------------------------------------------------------------
@@ -387,3 +405,14 @@ def test_with_a_warm_cache_a_boot_that_may_not_run_is_refused_as_before(world):
     world.db.commit()
     assert _boot(world, "alice").status_code == 404  # uninstalled
     assert len(serve._boot_files) == 1  # the package's files stayed kept throughout
+
+
+def test_a_read_the_checks_never_reach_changes_no_answer(world):
+    # The prepaint table is refused, so the boot never checks the presets: the failed read-ahead of
+    # one is no 503, the boot is the base boot it always was.
+    prepaint_key = f"{PREFIX_A}{PREPAINT_PATH}"
+    world.storage.objects[prepaint_key] = world.storage.objects[prepaint_key] + b" "
+    world.storage.failing.add(f"{PREFIX_A}{PRESETS[1]}")
+    resp = _boot(world, "alice")
+    assert (resp.status_code, resp.json()) == (200, BASE_BOOT)
+    assert len(serve._boot_files) == 0

@@ -61,13 +61,17 @@ only a boot that runs reads its look files (``boot_files``). A stored package's 
 memory by digest and storage prefix, for at most ``BOOT_FILES_KEPT`` packages, the least recently
 booted dropped first: a warm boot reads nothing from storage. Only a boot whose every listed look
 file passed its check is kept; one that refused a file reads and checks them all again next time.
+A cold boot reads its look files on threads at once (at most ``BOOT_READ_THREADS``), then checks
+them in order as before, so it waits about one storage round trip instead of one per file.
 """
 
 from __future__ import annotations
 
 import base64
+import contextvars
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from uuid import UUID
 
@@ -130,6 +134,10 @@ LOOK_BOOT_FIELDS = ("lookStorage", "lookGuard", "looks")
 # booted goes first. Each is one package's parsed prepaint table and looks (HUD 1.0.1's files:
 # about 20 KB of JSON).
 BOOT_FILES_KEPT = 32
+# A cold boot reads its look files on at most this many threads at once (prepaint table, schema and
+# up to BOOT_PRESETS_MAX presets): under the S3 client's default pool of 10 connections.
+BOOT_READ_THREADS = 8
+BOOT_READ_THREAD_NAME = "theme-boot-read"
 
 # (storage prefix, package path) -> the stored bytes, or None when the object is gone.
 FileReader = Callable[[str, str], Optional[bytes]]
@@ -420,11 +428,15 @@ def _checked_preset(schema: LookSchema, path: str, data: bytes) -> Tuple[Optiona
     return document, None
 
 
+def _listed_too_big(listed: Any) -> bool:
+    """A preset whose file-list row says it is over ``BOOT_PRESET_MAX_BYTES``: the boot leaves it out unread."""
+    size = listed.get("size") if isinstance(listed, dict) else None
+    return isinstance(size, int) and size > BOOT_PRESET_MAX_BYTES
+
+
 def _boot_preset(package: ThemePackage, schema: LookSchema, path: str, reader: FileReader) -> Optional[Dict[str, Any]]:
     """One preset as the boot carries it (the stored look document), or None, logged, when it can't ride."""
-    listed = (package.file_manifest or {}).get(path)
-    size = listed.get("size") if isinstance(listed, dict) else None
-    if isinstance(size, int) and size > BOOT_PRESET_MAX_BYTES:
+    if _listed_too_big((package.file_manifest or {}).get(path)):
         logger.error("Package %s's preset %s is over %d bytes: its boot leaves it out", package.id, path, BOOT_PRESET_MAX_BYTES)
         return None
     try:
@@ -494,12 +506,54 @@ def boot_files(package: ThemePackage, reader: FileReader) -> BootFiles:
     kept = _boot_files.get(key)
     if kept is not None:
         return kept
-    prepaint = theme_prepaint(package, reader)
-    looks, whole = _read_looks(package, reader)
-    files = BootFiles(prepaint=prepaint, looks=looks)
+    files, whole = _read_boot_files(package, reader)
     if whole:
         _boot_files.put(key, files)
     return files
+
+
+def _boot_read_paths(package: ThemePackage) -> List[str]:
+    """The look files a boot reads when each passes its check: the prepaint table, the schema, the presets that ride."""
+    listed = package.file_manifest or {}
+    head = [path for path in (PREPAINT_PATH, LOOK_SCHEMA_PATH) if path in listed]
+    if LOOK_SCHEMA_PATH not in listed:
+        return head
+    presets = [path for path in _boot_preset_order(package) if not _listed_too_big(listed.get(path))]
+    return head + presets[:BOOT_PRESETS_MAX]
+
+
+def _read_ahead(prefix: str, reads: Mapping[str, Future[Optional[bytes]]], reader: FileReader) -> FileReader:
+    """A reader answering a path read ahead from its read (raising what that read raised), any other from ``reader``."""
+
+    def read(storage_prefix: str, path: str) -> Optional[bytes]:
+        ahead = reads.get(path) if storage_prefix == prefix else None
+        return ahead.result() if ahead is not None else reader(storage_prefix, path)
+
+    return read
+
+
+def _checked_boot_files(package: ThemePackage, reader: FileReader) -> Tuple[BootFiles, bool]:
+    """The prepaint table and look fields read through ``reader``, and whether every listed look file passed."""
+    prepaint = theme_prepaint(package, reader)
+    looks, whole = _read_looks(package, reader)
+    return BootFiles(prepaint=prepaint, looks=looks), whole
+
+
+def _read_boot_files(package: ThemePackage, reader: FileReader) -> Tuple[BootFiles, bool]:
+    """The package's checked boot files, and whether every listed look file passed its check.
+
+    The look files are read ahead on threads at once, each read with the caller's context; the
+    checks then run on this thread in their order, so a read's error is raised where its file is
+    checked, and one the checks never reach (a preset after a refused prepaint table) changes no
+    answer (``read_stored_file`` has logged it).
+    """
+    paths = _boot_read_paths(package)
+    if not paths:
+        return _checked_boot_files(package, reader)
+    prefix = package.storage_prefix
+    with ThreadPoolExecutor(max_workers=min(len(paths), BOOT_READ_THREADS), thread_name_prefix=BOOT_READ_THREAD_NAME) as pool:
+        reads = {path: pool.submit(contextvars.copy_context().run, reader, prefix, path) for path in paths}
+        return _checked_boot_files(package, _read_ahead(prefix, reads, reader))
 
 
 def forget_boot_files() -> None:
