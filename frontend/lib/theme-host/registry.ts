@@ -9,6 +9,8 @@
 import type { ThemeBase, ThemeEntry, ThemeRef, UiStyle } from './registry-types'
 
 const THEME_STYLE_PREFIX = 'theme:'
+/** What an installed theme's style holds before its install id. */
+const INSTALL_STYLE_PREFIX = `${THEME_STYLE_PREFIX}install:`
 
 /** An installed theme's style: `theme:install:` and a lowercase uuid, nothing else. */
 export const INSTALLED_THEME_STYLE_PATTERN = /^theme:install:[0-9a-f-]{36}$/
@@ -31,6 +33,11 @@ export function themeRefOf(style: UiStyle): ThemeRef | null {
 
 export function isInstalledThemeStyle(value: string): value is `theme:install:${string}` {
   return INSTALLED_THEME_STYLE_PATTERN.test(value)
+}
+
+/** The install a style names (`theme:install:<uuid>`), or null for Classic, Studio and anything else. */
+export function installIdOfStyle(style: UiStyle): string | null {
+  return isInstalledThemeStyle(style) ? style.slice(INSTALL_STYLE_PREFIX.length) : null
 }
 
 /**

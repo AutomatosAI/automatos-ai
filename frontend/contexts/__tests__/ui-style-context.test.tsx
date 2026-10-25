@@ -7,17 +7,23 @@
  * PRD-261 W-A6b (gap G1) — under an installed theme's style it names the entry the root layout built from the
  * boot, from the first render, until the theme host releases it; Classic and Studio name none (A-19f1: no theme is
  * compiled in).
+ * PRD-261 A-08c — a page whose boot carried no entry (the server's boot fetch missed its budget or was refused) names
+ * the entry of the boot the browser fetched once it answers: the theme, with its slots.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, act } from '@testing-library/react'
+import { render, screen, cleanup, act, waitFor } from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
 
 const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn() }))
 vi.mock('next-themes', () => ({ useTheme: () => tone }))
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
+import { useActiveTheme } from '@/hooks/use-studio-theme'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS, UI_STYLE_COOKIE, UI_STYLE_STORAGE_KEY } from '@/lib/ui-style'
+import { baseThemeBoot, type ThemeBoot } from '@/lib/theme-host/boot'
+import type { InstalledBootSource } from '@/lib/theme-host/boot-client'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
+import { installIdOfStyle } from '@/lib/theme-host/registry'
 import {
   HELLO_PACKAGE_ENTRY,
   INSTALLED_HELLO_STYLE,
@@ -47,6 +53,17 @@ function Probe() {
 }
 
 const INSTALLED_PLAY = installedThemeEntry(INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY)
+
+/** What the browser's boot fetch answers: the install's boot with the theme's entry (or the base boot, with none). */
+function bootSourceAnswering(boot: ThemeBoot | null) {
+  return vi.fn<InstalledBootSource>(async () => boot)
+}
+
+/** useActiveTheme's view, as the theme's frame, pages and look runtime read it. */
+function ActiveThemeProbe() {
+  const theme = useActiveTheme()
+  return <span data-testid="slots">{theme === null ? 'none' : theme.slots.join(' ')}</span>
+}
 
 beforeEach(() => {
   document.documentElement.classList.remove(STUDIO_HTML_CLASS)
@@ -170,9 +187,43 @@ describe('PRD-261 W-A6b — an installed theme as the active theme (gap G1)', ()
     expect(screen.getByTestId('studio').textContent).toBe('true')
   })
 
-  it('names none when the boot carried no entry (the theme may not run, or the boot failed)', () => {
+  it("names none when neither the page's boot nor the browser's fetch of it carries an entry (the theme may not run)", async () => {
     seenDefaults()
-    render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE}><Probe /></UiStyleProvider>)
+    const bootSource = bootSourceAnswering(baseThemeBoot(INSTALLED_PLAY_STYLE))
+    render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} bootSource={bootSource}><Probe /></UiStyleProvider>)
+    await waitFor(() => expect(bootSource).toHaveBeenCalledTimes(1))
+    await act(async () => undefined)
+    expect(screen.getByTestId('theme').textContent).toBe('none')
+  })
+
+  it("a page whose boot carried no entry names the entry of the boot the browser fetched, with its slots", async () => {
+    seenDefaults()
+    const bootSource = bootSourceAnswering({ ...baseThemeBoot(INSTALLED_PLAY_STYLE), entry: PLAY_PACKAGE_ENTRY })
+    const tree = <UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} bootSource={bootSource}><Probe /><ActiveThemeProbe /></UiStyleProvider>
+    // The server render (and so the first client render) names none: the page carried the base boot.
+    expect(renderToString(tree)).toContain('>none<')
+    render(tree)
+    await waitFor(() => expect(screen.getByTestId('theme').textContent).toBe('Play'))
+    expect(screen.getByTestId('ref').textContent).toBe(INSTALLED_PLAY?.ref)
+    expect(screen.getByTestId('slots').textContent).toBe(PLAY_PACKAGE_ENTRY.slots.join(' '))
+    expect(bootSource.mock.calls).toEqual([[installIdOfStyle(INSTALLED_PLAY_STYLE)]])
+  })
+
+  it('a page whose boot carried the entry never asks for it again', async () => {
+    seenDefaults()
+    const bootSource = bootSourceAnswering(null)
+    render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} installedTheme={INSTALLED_PLAY} bootSource={bootSource}><Probe /></UiStyleProvider>)
+    await act(async () => undefined)
+    expect(screen.getByTestId('theme').textContent).toBe('Play')
+    expect(bootSource).not.toHaveBeenCalled()
+  })
+
+  it('the host still releases a theme whose entry the browser fetched', async () => {
+    seenDefaults()
+    const bootSource = bootSourceAnswering({ ...baseThemeBoot(INSTALLED_PLAY_STYLE), entry: PLAY_PACKAGE_ENTRY })
+    render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} bootSource={bootSource}><Probe /></UiStyleProvider>)
+    await waitFor(() => expect(screen.getByTestId('theme').textContent).toBe('Play'))
+    act(() => { screen.getByText('release').click() })
     expect(screen.getByTestId('theme').textContent).toBe('none')
   })
 

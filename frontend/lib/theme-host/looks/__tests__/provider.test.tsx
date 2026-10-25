@@ -8,15 +8,22 @@
  * host loads or runs an installed theme (keepFirstPaint) the boot's first paint stays. A look set
  * here repaints at once and is kept, also on blocked storage (on the default look); another tab's
  * change arrives, its tone with it, and is never written back (M25).
+ *
+ * PRD-261 A-08c: a page that got the base boot (the server's boot fetch missed its 300 ms, was
+ * refused or failed) runs the looks of the install's boot the browser fetched instead: the table's
+ * look is painted and the account's looks are read from the server. A page whose boot names the
+ * theme never fetches; when the browser's fetch fails too, nothing is painted and one warning says so.
  */
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { lookScope } from '@/lib/look-kit/scope'
-import { THEME_BOOT_ELEMENT_ID, type ThemeBoot } from '@/lib/theme-host/boot'
+import { baseThemeBoot, THEME_BOOT_ELEMENT_ID, type ThemeBoot } from '@/lib/theme-host/boot'
+import { createInstalledBootSource } from '@/lib/theme-host/boot-client'
 import { THEME_MOTION_ATTRIBUTE, THEME_MOTION_VAR } from '@/lib/theme-host/looks/motion'
 import { paint, paintNames } from '@/lib/theme-host/looks/paint'
 import { ThemeLookProvider, type ThemeLookProviderProps } from '@/lib/theme-host/looks/provider'
+import type { LookServer, LookServerBody } from '@/lib/theme-host/looks/server'
 import { lookKeys, type StorageSource } from '@/lib/theme-host/looks/storage'
 import { clearThemeToneCookie, THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
 import { importLook, saveLook, useLook, type HostLookState } from '@/lib/theme-sdk/looks'
@@ -36,6 +43,10 @@ const ANOTHER_RUNTIMES_VALUE = '#123456'
 const KEYS = lookKeys(SCOPE, HELLO.keys)
 /** A saved look another tab kept, under an id a fresh one must not take. */
 const THEIRS = myLook({ id: 'look-1', name: 'Theirs' })
+/** The install hello-a09b runs as, and its style. */
+const INSTALL_ID = '6e1f3b8f-2d5c-4fab-a4e7-9a2b3d4f5c6e'
+const INSTALLED_STYLE = `theme:install:${INSTALL_ID}` as const
+const BOOT_LOG_PREFIX = '[theme-boot]'
 
 function root(): HTMLElement {
   return document.documentElement
@@ -97,6 +108,24 @@ function stubReducedMotion(reduced: boolean): void {
     removeListener: noop,
     dispatchEvent: () => false,
   }))
+}
+
+interface FakeLookServer extends LookServer {
+  readonly read: Mock<(themeId: string) => Promise<unknown>>
+  readonly write: Mock<(themeId: string, body: LookServerBody) => Promise<unknown>>
+}
+
+/** The server's copy of the account's looks: none kept yet. */
+function emptyLookServer(): FakeLookServer {
+  return {
+    read: vi.fn((themeId: string): Promise<unknown> => Promise.resolve({ themeId, looks: [], active: null, defaultLook: PAPER, dropped: 0 })),
+    write: vi.fn((_themeId: string, body: LookServerBody): Promise<unknown> => Promise.resolve(body)),
+  }
+}
+
+/** The warnings the browser's boot fetch logged (boot-client.ts). */
+function bootWarnings(): unknown[][] {
+  return vi.mocked(console.warn).mock.calls.filter(([prefix]) => prefix === BOOT_LOG_PREFIX)
 }
 
 let removeBoot: () => void = () => undefined
@@ -266,7 +295,7 @@ describe('another tab (M25)', () => {
 describe('the looks it runs are its own theme boot', () => {
   it.each<[string, ThemeBoot | string | null]>([
     ["another theme's boot", helloThemeBoot({ entry: { ...HELLO_ENTRY, themeId: 'acme/other' } })],
-    ['a base boot with no entry', helloThemeBoot({ entry: null })],
+    ['a base boot and no install to fetch its boot for (installId null)', helloThemeBoot({ entry: null })],
     ['a boot with no presets', helloThemeBoot({ looks: null })],
     ['no boot element at all', null],
     ['a boot that is not JSON', '{not json'],
@@ -276,6 +305,48 @@ describe('the looks it runs are its own theme boot', () => {
     expect(await screen.findByText('Looks: none')).toBeInTheDocument()
     expect(painted()).toEqual({})
     expect(motion()).toEqual({ attribute: null, variable: '' })
+  })
+})
+
+describe('a page that got the base boot (the server missed its boot budget or was refused)', () => {
+  it("runs the looks of the install's boot the browser fetched: the table's default look painted, the account's looks read", async () => {
+    pageBoot(baseThemeBoot(INSTALLED_STYLE))
+    const bootSource = vi.fn(async () => helloThemeBoot())
+    const server = emptyLookServer()
+    render(providerFor(sourceOf().storage, { installId: INSTALL_ID, bootSource, server }))
+    expect(await screen.findByText(`Looks: ${PAPER.id}`)).toBeInTheDocument()
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    await waitFor(() => expect(server.read).toHaveBeenCalledWith(HELLO_THEME_ID))
+    expect(bootSource.mock.calls).toEqual([[INSTALL_ID]])
+    expect(motion()).toEqual({ attribute: 'full', variable: '1' })
+  })
+
+  it('a page whose boot names the theme never asks for it again', async () => {
+    pageBoot(helloThemeBoot())
+    const bootSource = vi.fn(async () => helloThemeBoot())
+    render(providerFor(sourceOf().storage, { installId: INSTALL_ID, bootSource }))
+    await waitFor(() => expect(painted()).toEqual(paint(TABLE, PAPER)))
+    expect(bootSource).not.toHaveBeenCalled()
+  })
+
+  it("when the browser's fetch fails too: no looks, nothing painted, one warning", async () => {
+    pageBoot(baseThemeBoot(INSTALLED_STYLE))
+    const fetchBoot = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
+    render(providerFor(sourceOf().storage, { installId: INSTALL_ID, bootSource: createInstalledBootSource(fetchBoot) }))
+    await waitFor(() => expect(bootWarnings()).toHaveLength(1))
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    expect(painted()).toEqual({})
+    expect(motion()).toEqual({ attribute: null, variable: '' })
+    expect(fetchBoot).toHaveBeenCalledTimes(1)
+  })
+
+  it('when the fetched boot names no theme either (a base boot): no looks, nothing painted', async () => {
+    pageBoot(baseThemeBoot(INSTALLED_STYLE))
+    const bootSource = vi.fn(async () => baseThemeBoot(INSTALLED_STYLE))
+    render(providerFor(sourceOf().storage, { installId: INSTALL_ID, bootSource }))
+    await waitFor(() => expect(bootSource).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('Looks: none')).toBeInTheDocument()
+    expect(painted()).toEqual({})
   })
 })
 

@@ -12,9 +12,10 @@ import { themeLookRulesOf, type ThemeLookRules } from './spec'
  * (boot-sanitize.ts): it is page text, so it is checked like anything else from outside the code.
  *
  * The looks are the theme's only when the boot's entry names that theme: a boot for another style
- * (a server re-render after the style changed in place) or a base boot (the backend's boot timed
- * out) has none. A switch to an installed theme always reloads the page (PA-13), so the boot the
- * page loaded with is the running theme's.
+ * (a server re-render after the style changed in place) has none. A switch to an installed theme
+ * always reloads the page (PA-13), so the boot the page loaded with is the running theme's. A base
+ * boot (the server's boot fetch timed out, was refused or failed) names no theme at all: the look
+ * runtime then reads the rules from the install's boot the browser fetches (../boot-client.ts).
  */
 
 const LOG_PREFIX = '[looks]'
@@ -34,9 +35,13 @@ export function readPageBoot(): ThemeBoot | null {
   }
 }
 
-/** The look rules of `themeId`'s boot on this page; null when the page's boot is another's or has none. */
-export function pageLookRules(themeId: string): ThemeLookRules | null {
-  const boot = readPageBoot()
+/** Whether a boot names a running theme (it carries the theme's entry); a base boot never does. */
+export function bootNamesTheme(boot: ThemeBoot | null): boolean {
+  return boot !== null && boot.entry !== null
+}
+
+/** The look rules of `themeId` in `boot`; null when the boot is another theme's, a base boot, or has no looks. */
+export function bootLookRules(boot: ThemeBoot | null, themeId: string): ThemeLookRules | null {
   if (boot === null || boot.entry === null || boot.entry.themeId !== themeId) return null
   return themeLookRulesOf(boot)
 }

@@ -3831,6 +3831,14 @@ class ApiClient {
     return this.request<unknown>('/api/themes/active')
   }
 
+  /**
+   * GET /api/themes/boot/{installId}: the install's first-paint data, asked by the browser when the
+   * page's boot carries none (lib/theme-host/boot-client.ts). parseInstalledBoot checks it, so it is unknown here.
+   */
+  async getThemeBoot(installId: string): Promise<unknown> {
+    return this.request<unknown>(`/api/themes/boot/${encodeURIComponent(installId)}`)
+  }
+
   /** GET /api/themes/installed: the workspace's installs, each with its opt-in, revocation and drift. */
   async getInstalledThemes(): Promise<{ installs: InstalledTheme[] }> {
     return this.request<{ installs: InstalledTheme[] }>('/api/themes/installed')

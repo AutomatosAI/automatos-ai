@@ -9,6 +9,11 @@
  * paints from the theme's table, <html> gets data-theme-motion and --theme-motion, and the look's tone
  * follows the table's tone rule into `automatos-theme-tone` and forcedTheme. Any installed theme with
  * looks gets it, whatever its class; here hello-a09b (lib/theme-host/looks/__tests__/hello-looks.ts).
+ *
+ * PRD-261 A-08c — a page that got the base boot (the server's boot fetch missed its 300 ms or was
+ * refused) asks GET /api/themes/boot itself, once for the style context and the look runtime both,
+ * and the look paints from the answer. Every other test here answers that request with the base boot
+ * (no theme to run), so none of them reaches the network.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,13 +26,16 @@ vi.mock('@/components/workspace-provider', () => ({
 }))
 
 import { useUiStyle } from '@/contexts/ui-style-context'
+import { apiClient } from '@/lib/api-client'
 import { runThemeBoot } from '@/lib/theme-host/__tests__/boot-harness'
+import { baseThemeBoot } from '@/lib/theme-host/boot'
 import { HELLO_PACKAGE_ENTRY, INSTALLED_HELLO_STYLE } from '@/lib/theme-host/__tests__/installed-entry-fixture'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { HELLO_ENTRY, HELLO_RULES, helloThemeBoot, PAPER, putPageBoot } from '@/lib/theme-host/looks/__tests__/hello-looks'
 import { clearRoot, cookieValue, dropCookies, htmlTone, lookNamesLeft, motionMarks, rootVars } from '@/lib/theme-host/looks/__tests__/look-test-helpers'
 import { paint } from '@/lib/theme-host/looks/paint'
 import { THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
+import { installIdOfStyle } from '@/lib/theme-host/registry'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 import { useLook } from '@/lib/theme-sdk/looks'
@@ -84,6 +92,8 @@ beforeEach(() => {
   dropCookies(COOKIES_SET_HERE)
   clearRoot()
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  // The browser's own boot fetch (lib/theme-host/boot-client.ts) answers the base boot: no theme to run.
+  vi.spyOn(apiClient, 'getThemeBoot').mockResolvedValue(baseThemeBoot(INSTALLED_STYLE))
 })
 
 afterEach(() => {
@@ -173,7 +183,7 @@ describe('PRD-261 A-19d2 — an installed theme with looks runs on the generic l
     expect(screen.getByText('Tone: not forced')).toBeInTheDocument()
   })
 
-  it('a theme with looks whose boot on the page carries none: no looks, the first paint kept, no tone forced', async () => {
+  it("a theme with looks whose boot on the page and fetched by the browser carries none: no looks, the first paint kept, no tone forced", async () => {
     // The boot script painted the first frame; no boot element of this theme is left on the page.
     runThemeBoot(helloThemeBoot())
     const entry = installedThemeEntry(INSTALLED_HELLO_STYLE, HELLO_PACKAGE_ENTRY)
@@ -182,5 +192,20 @@ describe('PRD-261 A-19d2 — an installed theme with looks runs on the generic l
     expect(rootVars()).toEqual(paint(TABLE, PAPER))
     expect(screen.getByText('Tone: not forced')).toBeInTheDocument()
     expect(cookieValue(THEME_TONE_COOKIE)).toBeUndefined()
+  })
+})
+
+// boot-client.ts's page source keeps one answer per install for the module's life (this file): no
+// other test here may send HELLO_LOOKS_STYLE's install through the browser's fetch, or this one reads
+// that test's answer. The tests above all carry a page boot that names the theme, so none fetches it.
+describe('PRD-261 A-08c — the server missed its boot budget: the browser fetches the boot and the look still paints', () => {
+  it("a page with the base boot: the theme's entry and look come from one GET /api/themes/boot, and the look's tone is forced", async () => {
+    removeBoot = putPageBoot(baseThemeBoot(HELLO_LOOKS_STYLE))
+    const boot = vi.spyOn(apiClient, 'getThemeBoot').mockResolvedValue(helloThemeBoot())
+    renderApp(HELLO_LOOKS_STYLE, 'active')
+    expect(await screen.findByText('Looks: available')).toBeInTheDocument()
+    await waitFor(() => expect(rootVars()).toEqual(paint(TABLE, PAPER)))
+    expect(await screen.findByText('Tone: light')).toBeInTheDocument()
+    expect(boot.mock.calls).toEqual([[installIdOfStyle(HELLO_LOOKS_STYLE)]])
   })
 })

@@ -6,7 +6,9 @@
  * (M69), and switches it on while the host loads or runs an installed theme that declares looks.
  *
  * Switched on, it reads the theme's look rules from the page's boot (./page-boot.ts: the same
- * prepaint table, guard and presets the boot script painted the first frame from), keeps the
+ * prepaint table, guard and presets the boot script painted the first frame from), or, when the
+ * page carries the base boot (the server's boot fetch failed), from the install's boot the browser
+ * fetches once per install (../boot-client.ts), painted through the same paint path; keeps the
  * signed-in user's looks in this workspace (./store.ts, the scope given), paints the active look on
  * <html> (./paint.ts) with the reduced-motion marks (./motion.ts), forces the tone the theme's tone
  * rule gives the look (./tone-cookie.ts: its cookie, and `onToneChange` for ThemeProvider's
@@ -25,11 +27,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 
+import { pageInstalledBoot, type InstalledBootSource } from '../boot-client'
 import type { PrepaintTable, ThemeTone } from '../boot-types'
 import type { ThemeTonePolicy } from '../registry-types'
 import { LookRuntimeBridge, type LookBridgeSource } from './bridge'
 import { applyThemeMotion, clearThemeMotion } from './motion'
-import { pageLookRules } from './page-boot'
+import { bootLookRules, bootNamesTheme, readPageBoot } from './page-boot'
 import { applyPaint, clearPaint } from './paint'
 import type { LookServer } from './server'
 import type { ThemeLook, ThemeLookRules } from './spec'
@@ -49,15 +52,27 @@ interface KeptRules {
 }
 
 /**
- * The look rules of `themeId`'s boot, read from the page after mount, once per theme id: one rules
- * object per boot, which the store compares by reference. Undefined until read.
+ * The look rules of `themeId`'s boot, read after mount, once per theme id: one rules object per
+ * boot, which the store compares by reference. The page's boot when it names a theme; a page whose
+ * boot names none (the base boot) takes the install's boot from `bootSource`. Undefined until read.
  */
-function useBootRules(themeId: string | null): BootRules {
+function useBootRules(themeId: string | null, installId: string | null, bootSource: InstalledBootSource): BootRules {
   const [kept, setKept] = useState<KeptRules | null>(null)
   useEffect(() => {
-    if (themeId === null || kept?.themeId === themeId) return
-    setKept({ themeId, rules: pageLookRules(themeId) })
-  }, [themeId, kept])
+    if (themeId === null || kept?.themeId === themeId) return undefined
+    const page = readPageBoot()
+    if (installId === null || bootNamesTheme(page)) {
+      setKept({ themeId, rules: bootLookRules(page, themeId) })
+      return undefined
+    }
+    let live = true
+    void bootSource(installId).then((boot) => {
+      if (live) setKept({ themeId, rules: bootLookRules(boot, themeId) })
+    })
+    return () => {
+      live = false
+    }
+  }, [themeId, installId, bootSource, kept])
   if (themeId === null) return null
   return kept?.themeId === themeId ? kept.rules : undefined
 }
@@ -158,6 +173,13 @@ export interface ThemeLookProviderProps {
   readonly children: ReactNode
   /** The installed theme with looks that is the style (its theme.json id); null for every other style. */
   readonly themeId: string | null
+  /**
+   * The install that theme runs as (its uuid): its boot is fetched when the page's boot names no
+   * theme. Null (the default) never fetches: the page's boot alone.
+   */
+  readonly installId?: string | null
+  /** Where that boot comes from; tests pass their own. Default: GET /api/themes/boot/{installId}, once per install. */
+  readonly bootSource?: InstalledBootSource
   /** The host loads or runs that theme: only then do its looks run. */
   readonly enabled: boolean
   /** The theme's tone policy: under 'from-look' its tone rule sets the tone. */
@@ -176,7 +198,7 @@ export interface ThemeLookProviderProps {
 
 export function ThemeLookProvider(props: ThemeLookProviderProps) {
   const { children, themeId, enabled, tonePolicy, scope, onToneChange, keepFirstPaint = false, storage = browserStorage } = props
-  const rules = useBootRules(themeId)
+  const rules = useBootRules(themeId, props.installId ?? null, props.bootSource ?? pageInstalledBoot)
   const active = enabled && themeId !== null && rules !== null && rules !== undefined
   const theme = useMemo(() => (active && themeId !== null && rules ? lookTheme(themeId, rules) : null), [active, themeId, rules])
   const store = useLookStore(storage, scope, theme, { server: props.server })

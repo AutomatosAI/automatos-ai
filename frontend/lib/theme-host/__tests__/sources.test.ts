@@ -15,12 +15,12 @@ import {
   defaultLoaderDeps,
   fetchActiveInstall,
   installedThemeSource,
-  installIdOf,
   loadThemeForStyle,
   rememberActiveDigest,
   revocationDisableOf,
   sourceForStyle,
 } from '../sources'
+import { installIdOfStyle } from '../registry'
 import { THEME_DIGEST_COOKIE } from '../types'
 import type { LoaderDeps, ThemeHostGlobal, ThemeLoadResult } from '../types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
@@ -160,12 +160,12 @@ describe('PRD-261 A-08c — the active digest left for the boot cache of the nex
 
 describe('PRD-261 A-04a — the source a style names', () => {
   it('names the install for an installed theme style', () => {
-    expect(installIdOf(INSTALLED_STYLE)).toBe(INSTALL_ID)
+    expect(installIdOfStyle(INSTALLED_STYLE)).toBe(INSTALL_ID)
     expect(sourceForStyle(INSTALLED_STYLE)?.ref).toBe(`install:${INSTALL_ID}`)
   })
 
   it.each(UI_STYLES)('names no source under %s', (style) => {
-    expect(installIdOf(style)).toBeNull()
+    expect(installIdOfStyle(style)).toBeNull()
     expect(sourceForStyle(style)).toBeNull()
   })
 

@@ -37,6 +37,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useActiveTheme } from '@/hooks/use-studio-theme'
 import type { ThemeTone } from '@/lib/theme-host/boot'
 import { ThemeLookProvider } from '@/lib/theme-host/looks/provider'
+import { installIdOfStyle, themeStyleOf } from '@/lib/theme-host/registry'
 import type { SlotId, ThemeEntry, ThemeTonePolicy } from '@/lib/theme-host/registry-types'
 import { THEME_HOST_RUNNING_STATUSES } from '@/lib/theme-host/types'
 
@@ -100,13 +101,17 @@ interface InstalledLooksProps {
   readonly onToneChange: (tone: ThemeTone | undefined) => void
 }
 
-/** The generic look runtime, below AccountLookScope: the looks are the signed-in user's in this workspace. */
+/**
+ * The generic look runtime, below AccountLookScope: the looks are the signed-in user's in this
+ * workspace. It is handed the theme's install, whose boot it fetches when the page's names no theme.
+ */
 function InstalledLooks(props: InstalledLooksProps) {
   const { theme, enabled, keepFirstPaint, onToneChange } = props
   const scope = useLookScope()
   return (
     <ThemeLookProvider
       themeId={theme?.themeId ?? null}
+      installId={theme === null ? null : installIdOfStyle(themeStyleOf(theme.ref))}
       enabled={enabled}
       tonePolicy={theme?.tone ?? USER_TONE}
       scope={scope}
