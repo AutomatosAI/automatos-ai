@@ -208,7 +208,9 @@ export function usePutThemeSettings() {
 
 /**
  * Use an installed theme: the choice is stored on the server first, then the style context writes
- * the cookie and reloads into it. No step-up: the opt-in already gates private code (A-07b).
+ * the cookie and reloads into it. No step-up: the opt-in already gates private code (A-07b). The
+ * store step of the one chooser (components/settings/themes/choose-install.tsx), which runs it only
+ * after the opt-in a private version needs; choose through that chooser, not this hook.
  */
 export function useChooseTheme() {
   const styleContext = useUiStyleOptional()

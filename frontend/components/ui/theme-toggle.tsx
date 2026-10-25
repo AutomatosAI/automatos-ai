@@ -73,7 +73,9 @@ function CustomiseLookItem() {
 
 /**
  * PRD-261 A-02b, A-02c: after Classic and Studio, the workspace's installed themes
- * (`theme:install:<id>`), each install that nobody reviewed noted as such.
+ * (`theme:install:<id>`), each install that nobody reviewed noted as such, and one whose version
+ * this member has not opted in to noted 'Private · opt in first': choosing it opens the opt-in
+ * dialog, and the radio stays on the current style until the choice is stored.
  */
 function ThemeStyleItems({ entries }: { entries: readonly ThemeChoiceEntry[] }) {
   return (
