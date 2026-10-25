@@ -36,15 +36,27 @@ describe('a discussion', () => {
 describe("the bar's hint (PRD-260 M67)", () => {
   it("names the ticket's agent: in Studio's chat through the message box, in Play's chat through Studio", () => {
     const discussion = discussionOf(ticket())
-    expect(discussionHint(discussion, false)).toBe('You are talking to Auto. To ask Words instead, pick them in the message box.')
-    expect(discussionHint(discussion, true)).toBe(
+    expect(discussionHint(discussion, null)).toBe('You are talking to Auto. To ask Words instead, pick them in the message box.')
+    expect(discussionHint(discussion, { themeName: 'Play' })).toBe(
       "You are talking to Auto in Play's chat. To ask Words, switch to Studio from the theme menu.",
     )
   })
 
+  it("names the active theme's chat, never Play's under another theme", () => {
+    const hint = discussionHint(discussionOf(ticket()), { themeName: 'HUD' })
+    expect(hint).toBe("You are talking to Auto in HUD's chat. To ask Words, switch to Studio from the theme menu.")
+    expect(hint).not.toContain('Play')
+  })
+
+  it.each([null, '', '   '])("says this theme's chat for a theme with no name to show (%j)", (themeName) => {
+    expect(discussionHint(discussionOf(ticket()), { themeName })).toBe(
+      "You are talking to Auto in this theme's chat. To ask Words, switch to Studio from the theme menu.",
+    )
+  })
+
   it("is null on a mission's ticket and on a ticket with no agent", () => {
-    expect(discussionHint(discussionOf(ticket({ type: 'mission', mission_id: 'run-9' })), true)).toBeNull()
-    expect(discussionHint(discussionOf(ticket({ assignee: undefined })), false)).toBeNull()
+    expect(discussionHint(discussionOf(ticket({ type: 'mission', mission_id: 'run-9' })), { themeName: 'Play' })).toBeNull()
+    expect(discussionHint(discussionOf(ticket({ assignee: undefined })), null)).toBeNull()
   })
 })
 

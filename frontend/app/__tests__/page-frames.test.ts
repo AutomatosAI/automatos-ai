@@ -23,7 +23,7 @@ const FRONTEND = path.resolve(__dirname, '..', '..')
 const NO_HEADER: Record<string, string> = {
   '/': 'redirects to the workspace entry point',
   '/chat': 'a conversation surface, not a document page',
-  '/x/[...path]': "a theme's own route (registerRoute): the theme draws the page and its head, or the server answers the 404",
+  '/x/[...path]': "a theme's own route (registerRoute): the theme draws the page and its head, or the member is sent to /chat (or the 404)",
   '/missions': 'redirects to the Assignments Missions tab',
   '/playbooks': 'redirects to the Assignments Playbooks tab',
   '/marketplace/widgets/[id]': 'item detail — the record’s own name is the title',
