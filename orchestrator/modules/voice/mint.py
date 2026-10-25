@@ -87,22 +87,31 @@ class MintTarget:
     agent_id: Optional[int] = None
 
 
-def require_voice_live_plan(db: Session, workspace_id: Any) -> None:
-    """D34: on SaaS, refuse (403, coded) a workspace whose plan has no voice family.
+def plan_allows_voice_live(plan: Optional[str]) -> bool:
+    """D34's rule without the refusal: whether a workspace on ``plan`` may use Auto Live.
 
     ``services.plan_tiers.family_enabled`` reads it by the exposure profile's rules: a known tier
     that declares no families (``enterprise`` today) is unrestricted, as the nav and tool
     layers treat it; a workspace without a plan is the entry tier. The local edition is
-    never plan-gated.
+    never plan-gated. The mint refuses on it; ``GET /api/voice/live-status`` reports it.
     """
+    if config.IS_LOCAL_EDITION:
+        return True
+    from services.plan_tiers import family_enabled
+
+    return family_enabled(plan, VOICE_FAMILY)
+
+
+def require_voice_live_plan(db: Session, workspace_id: Any) -> None:
+    """D34: on SaaS, refuse (403, coded) a workspace whose plan has no voice family
+    (``plan_allows_voice_live``)."""
     if config.IS_LOCAL_EDITION:
         return
     from core.models.workspaces import Workspace
-    from services.plan_tiers import family_enabled
 
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     plan = getattr(workspace, "plan", None)
-    if family_enabled(plan, VOICE_FAMILY):
+    if plan_allows_voice_live(plan):
         return
     logger.info("voice_live_mint_denied reason=plan workspace=%s plan=%s", workspace_id, plan)
     raise MintRefused(

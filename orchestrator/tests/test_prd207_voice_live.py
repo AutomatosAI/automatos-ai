@@ -1686,7 +1686,7 @@ def test_live_status_payload_never_leaks_credentials(monkeypatch):
     monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(12, 1, 10))
 
     ws = SimpleNamespace(settings={"voice_live": {"enabled": True, "monthly_cap_minutes": 100}})
-    out = asyncio.run(vr.voice_live_status(ctx=_mint_ctx(), db=_mint_db(workspace=ws)))
+    out = vr.voice_live_status(ctx=_mint_ctx(), db=_mint_db(workspace=ws))
 
     assert out["platform_enabled"] is True and out["armed"] is True
     assert out["used_minutes"] == 12 and out["cap_minutes"] == 100
