@@ -11,6 +11,7 @@ The following files were used as context for generating this page:
 - [frontend/components/settings/themes/installed-list.tsx](../../frontend/components/settings/themes/installed-list.tsx)
 - [frontend/components/settings/themes/installed-row.tsx](../../frontend/components/settings/themes/installed-row.tsx)
 - [frontend/components/settings/themes/opt-in-dialog.tsx](../../frontend/components/settings/themes/opt-in-dialog.tsx)
+- [frontend/components/settings/themes/choose-install.tsx](../../frontend/components/settings/themes/choose-install.tsx)
 - [frontend/components/settings/themes/theme-labels.ts](../../frontend/components/settings/themes/theme-labels.ts)
 - [frontend/components/ui/theme-toggle.tsx](../../frontend/components/ui/theme-toggle.tsx)
 - [frontend/components/shared/global-search.tsx](../../frontend/components/shared/global-search.tsx)
@@ -147,9 +148,9 @@ follows applies once an Automatos key is in the keys file (for server operators:
 [Add the production signing key](../theme-host/operations.md#add-the-production-signing-key)).
 
 - It is at most 4 KB. The server checks it against the package's own files before it stores anything.
-- When it is taken, the theme shows **Signed by Automatos** in Settings in place of **Private · not reviewed** (the
-  Appearance menu and ⌘K still note **Private · not reviewed**). A signed upload counts as reviewed: members don't opt
-  in to it, it can be the workspace default, and it may carry an `automatos/…` id.
+- When it is taken, the theme shows **Signed by Automatos** in place of **Private · not reviewed**, in Settings, the
+  Appearance menu and ⌘K. A signed upload counts as reviewed: members don't opt in to it, it can be the workspace
+  default, and it may carry an `automatos/…` id.
 - Uploading a package you already have, this time with its signature file, adds the signature to the copy you have.
 - If the signature later stops checking out (for example, its key is revoked), that version is turned off with the
   reason "This theme's signature doesn't check out."
@@ -233,7 +234,8 @@ See [Marketplace › Themes](../community-marketplace/themes-tab.md).
 
 ## Opting in to a private theme
 
-When you click **Use this theme** on a private version you haven't opted in to, a dialog asks first:
+When you choose a private version you haven't opted in to, with **Use this theme**, from the **Appearance** menu or
+from ⌘K, a dialog asks first:
 
 - Its title: "Run *name* *version*?"
 - The server's sentence: "This theme was not reviewed. Its code runs with your access to all your workspaces."
@@ -241,13 +243,13 @@ When you click **Use this theme** on a private version you haven't opted in to, 
 - Two buttons: **Cancel** and **Opt in and use**.
 
 **Opt in and use** records your opt-in and makes the theme your choice. On the hosted edition you may be asked to
-confirm it's you first.
+confirm it's you first. **Cancel** chooses nothing: you stay on the style you had.
 
 - The opt-in is yours, for one workspace and one version. An update to a new private version asks again.
 - Marketplace themes and signed uploads need no opt-in.
 - If the theme moved to another version while the dialog was open, the server refuses with "That version is no longer
-  this theme's current one. Reload to see the version installed now." The dialog closes and the list refreshes: click
-  **Use this theme** again to see the version installed now.
+  this theme's current one. Reload to see the version installed now." The dialog closes and the list refreshes: choose
+  the theme again to see the version installed now.
 - A theme you chose but haven't opted in to doesn't run. Studio shows instead, with the notice "The theme could not
   start, so Studio is showing instead." and the reason "You have not opted in to its private code."
 
@@ -268,8 +270,9 @@ What happens when you choose:
 - If the server refuses, the tab stays on the style it had (a Classic or Studio pick switches back) and you see the
   server's reason. From the menu or ⌘K it comes under "Your theme choice was not saved."
 - The choice is per workspace: another workspace can show another theme.
-- The Appearance menu and ⌘K note "Private · not reviewed" beside every uploaded theme, a signed one included
-  (Settings calls a signed upload **Signed by Automatos**). A withdrawn theme is not offered.
+- The Appearance menu and ⌘K note each uploaded theme: "Private · opt in first" for a private version you haven't
+  opted in to (choosing it opens the opt-in dialog, and nothing is saved until you opt in), "Signed by Automatos" for
+  a signed one, otherwise "Private · not reviewed". A withdrawn theme is not offered.
 - The menu's **Tone** (Light, Dark, System) is yours to set, unless the theme sets it. Then the tone items rest, with
   "Set by your look" (the look decides) or "Set by your theme" (the theme always uses one tone).
 - If the workspace has switched off **Members choose their own theme**, the server refuses a choice: "This

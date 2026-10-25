@@ -81,8 +81,8 @@ whether it can be the workspace default.
 
 | Kind | Where it comes from | Label you see | Each member opts in | Can be the workspace default |
 |---|---|---|---|---|
-| **Private upload** | An owner or admin uploads a `.autotheme` file with **Install theme**. Nobody at Automatos reviewed it. | **Private · not reviewed** | Yes, once per version | No |
-| **Signed upload** | An uploaded `.autotheme` with its signature file (`.sig.json`), verified by an active Automatos signing key. | **Signed by Automatos** in Settings. The Appearance menu and ⌘K still note **Private · not reviewed** beside it. | No | Yes |
+| **Private upload** | An owner or admin uploads a `.autotheme` file with **Install theme**. Nobody at Automatos reviewed it. | **Private · not reviewed**. The Appearance menu and ⌘K note **Private · opt in first** until you opt in. | Yes, once per version | No |
+| **Signed upload** | An uploaded `.autotheme` with its signature file (`.sig.json`), verified by an active Automatos signing key. | **Signed by Automatos**, in Settings, the Appearance menu and ⌘K | No | Yes |
 | **Marketplace theme** | Added from **Marketplace › Themes**. A person at Automatos reviewed every version listed there. | None, or **Signed by Automatos** when its version is signed | No | Yes |
 | **Official** | A Marketplace theme from the reserved `automatos` publisher whose listed version carries a signature an active Automatos key verifies. A reserved name alone is never Official. | **Official** on the Marketplace card, **Signed by Automatos** in Settings | No | Yes |
 
