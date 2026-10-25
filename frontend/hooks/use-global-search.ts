@@ -25,7 +25,7 @@ export interface SearchResult {
 export interface ThemeSearchResult {
   id: string
   label: string
-  /** 'Private · not reviewed' for an install nobody reviewed. */
+  /** The entry's note (choice-sync.ts themeChoiceEntries): 'Private · opt in first', 'Signed by Automatos' or 'Private · not reviewed'. */
   description?: string
   style: UiStyle
 }

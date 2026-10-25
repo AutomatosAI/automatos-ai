@@ -10,8 +10,12 @@
  * - A server Studio moves a tab only off an installed theme (off Classic it may mean "no
  *   choice"); safe mode asks nothing; a pick made while the check is in flight wins, and so does
  *   the host's revert to Studio (A-04c), so its answer never reloads back into the failing theme.
- * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed;
- *   Play's package is an install like any other, and a withdrawn install is not offered.
+ * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed,
+ *   'Private · opt in first' while this member has not opted in to the version; Play's package is
+ *   an install like any other, and a withdrawn install is not offered.
+ * - A pick of a version this member has not opted in to is never stored by useChooseStyle: it goes
+ *   to the opt-in dialog (components/__tests__/theme-choice-opt-in.test.tsx), and with none mounted
+ *   nothing is stored.
  * - M1: the installs are fetched only once the menu or ⌘K wants them, never in safe mode. M2: with
  *   no stored server choice (`source` default or fallback), a tab on its own style (not Studio)
  *   stores it instead of following the workspace default.
@@ -55,6 +59,7 @@ const OTHER_INSTALL_ID = '44444444-4444-4444-8444-444444444444'
 const INSTALLED_STYLE = `theme:install:${INSTALL_ID}` as UiStyle
 const OTHER_INSTALLED_STYLE = `theme:install:${OTHER_INSTALL_ID}` as UiStyle
 const PRIVATE_NOT_REVIEWED = 'Private · not reviewed'
+const PRIVATE_OPT_IN_FIRST = 'Private · opt in first'
 const SIGNED_BY_AUTOMATOS = 'Signed by Automatos'
 /** A server choice this build does not know: no theme is compiled into the app (A-19f1). */
 const UNKNOWN_CHOICE = 'builtin:nope'
@@ -68,6 +73,9 @@ function installRow(overrides: Partial<InstalledTheme> = {}): InstalledTheme {
     signature: { state: 'unsigned', keyId: null }, ...overrides,
   }
 }
+
+/** An install whose version this member has not opted in to (services/themes/optin.py opt_in_state). */
+const ASKS_FIRST = installRow({ optIn: { required: true, wording: 'Opt in?', packageId: '22222222-2222-4222-8222-222222222222' } })
 
 /** The Design Kit's Play package, installed in the workspace. */
 const INSTALLED_PLAY = installRow({ installId: OTHER_INSTALL_ID, themeId: 'automatos/play', name: 'Play', reviewed: true })
@@ -182,6 +190,14 @@ describe('the entries the menu and ⌘K offer', () => {
     const invalid = installRow({ installId: OTHER_INSTALL_ID, name: 'Dune', signature: { state: 'invalid', keyId: 'automatos-2026' } })
     expect(themeChoiceEntries([signed, invalid]).map((entry) => [entry.name, entry.note])).toEqual([
       ['Garden', SIGNED_BY_AUTOMATOS],
+      ['Dune', PRIVATE_NOT_REVIEWED],
+    ])
+  })
+
+  it('notes a version this member has not opted in to "Private · opt in first"; an opted-in one keeps its note', () => {
+    const optedIn = installRow({ installId: OTHER_INSTALL_ID, name: 'Dune' })
+    expect(themeChoiceEntries([ASKS_FIRST, optedIn]).map((entry) => [entry.name, entry.note])).toEqual([
+      ['Garden', PRIVATE_OPT_IN_FIRST],
       ['Dune', PRIVATE_NOT_REVIEWED],
     ])
   })
@@ -530,6 +546,28 @@ describe('choosing stores the choice on the server', () => {
     await settle()
     expect(styleShown()).toBe('studio')
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
+  })
+
+  it('never stores a version this member has not opted in to; with no opt-in dialog mounted, nothing at all', async () => {
+    seenDefaults()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
+    vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [ASKS_FIRST] })
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    const reload = vi.fn()
+    function Installed() {
+      return <span data-testid="installed">{useUiStyle().installedThemes.map((row) => row.name).join(',')}</span>
+    }
+    mount('studio', reload, <Installed />)
+    act(() => wantInstalledThemes())
+    await waitFor(() => expect(screen.getByTestId('installed').textContent).toBe('Garden'))
+    act(() => { screen.getByText('pick garden').click() })
+    await settle()
+    expect(put).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(styleShown()).toBe('studio')
+    expect(document.cookie).not.toContain(INSTALLED_STYLE)
+    expect(warn).toHaveBeenCalledWith('[theme-choice]', expect.stringContaining('opt-in'))
   })
 
   it('outside a workspace a pick only applies the style', async () => {

@@ -15,6 +15,7 @@ import type { ThemeTone } from '@/lib/theme-host/boot'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
+import { ChooseInstallProvider } from './settings/themes/choose-install'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
 import { isSaaS } from '@/lib/auth-edition'
@@ -118,18 +119,23 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
           <UiStyleProvider initialStyle={initialUiStyle} installedTheme={initialTheme}>
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
-              {/* PRD-222: a new workspace lands directly in the conversation
-                  where Auto opens (OnboardingOpener) — no first-login modal or
-                  guided tour (both retired in W2·S5). */}
-              <ThemeHostProvider>
-                {/* PRD-261 A-13c: the active theme's look runtime, at every width, switched on only
-                    while the theme declares looks (Classic and Studio get none); it stays mounted
-                    either way, so a style switched in place never remounts the page (M69).
-                    PRD-260 F5: looks are the signed-in user's in this workspace, so it sits inside
-                    the WorkspaceProvider. */}
-                <ThemeLookRuntime onToneChange={setLookTone}>{children}</ThemeLookRuntime>
-              </ThemeHostProvider>
-              <GlobalSearch />
+              {/* PRD-261 A-07d: one chooser for installed themes, around every page (Settings, the
+                  Marketplace, the header's theme menu) and ⌘K, so a private version's opt-in
+                  dialog opens from any of them before the choice is stored. */}
+              <ChooseInstallProvider>
+                {/* PRD-222: a new workspace lands directly in the conversation
+                    where Auto opens (OnboardingOpener) — no first-login modal or
+                    guided tour (both retired in W2·S5). */}
+                <ThemeHostProvider>
+                  {/* PRD-261 A-13c: the active theme's look runtime, at every width, switched on only
+                      while the theme declares looks (Classic and Studio get none); it stays mounted
+                      either way, so a style switched in place never remounts the page (M69).
+                      PRD-260 F5: looks are the signed-in user's in this workspace, so it sits inside
+                      the WorkspaceProvider. */}
+                  <ThemeLookRuntime onToneChange={setLookTone}>{children}</ThemeLookRuntime>
+                </ThemeHostProvider>
+                <GlobalSearch />
+              </ChooseInstallProvider>
               <Toaster position="top-right" richColors closeButton />
             </WorkspaceProvider>
           </QueryClientProvider>

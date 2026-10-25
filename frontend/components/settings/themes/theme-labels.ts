@@ -9,6 +9,11 @@ import type { InstalledTheme, ThemeSignatureState, ThemeSignatureVerdict } from 
 
 /** PRD §5: the label of a theme nobody at Automatos reviewed. */
 export const PRIVATE_NOT_REVIEWED = 'Private · not reviewed'
+/**
+ * The theme menu's and ⌘K's note on a private version this member has not opted in to: choosing it
+ * opens the opt-in dialog first (choose-install.tsx). Once opted in, it reads PRIVATE_NOT_REVIEWED.
+ */
+export const PRIVATE_OPT_IN_FIRST = 'Private · opt in first'
 export const NEEDS_UPDATE = 'Needs update'
 export const NEEDS_UPDATE_HINT =
   'A core page this theme copies changed in this release. It may look out of date until its author updates it.'
@@ -121,6 +126,14 @@ export function canManageThemes(role: Workspace['role'] | undefined): boolean {
 /** True for the label PRD §5 puts on private code: not reviewed. */
 export function isPrivateNotReviewed(install: Pick<InstalledTheme, 'reviewed'>): boolean {
   return !install.reviewed
+}
+
+/**
+ * True while this member must opt in to the install's current version before it runs for them: the
+ * server's own answer (`services/themes/optin.py` opt_in_state, private code not yet opted in to).
+ */
+export function needsOptIn(install: Pick<InstalledTheme, 'optIn'>): boolean {
+  return install.optIn.required
 }
 
 /** True only when an active Automatos key verifies the signature (`invalid` never reads as signed). */

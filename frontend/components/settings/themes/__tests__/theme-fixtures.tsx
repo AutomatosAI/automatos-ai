@@ -8,6 +8,8 @@ import type { ReactElement } from 'react'
 
 import type { InstalledTheme, ThemeSettings } from '@/lib/api-client'
 
+import { ChooseInstallProvider } from '../choose-install'
+
 // services/themes/optin.py OPT_IN_WORDING: the dialog shows the server's sentence.
 export const OPT_IN_WORDING = 'This theme was not reviewed. Its code runs with your access to all your workspaces.'
 
@@ -70,7 +72,15 @@ export function themeSettings(overrides: Partial<ThemeSettings> = {}): ThemeSett
   }
 }
 
+/**
+ * `ui` under a query client and the installed-theme chooser, as components/providers.tsx mounts them
+ * above every page: "Use this theme" chooses, and opens the opt-in dialog, through the chooser.
+ */
 export function renderWithQuery(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <ChooseInstallProvider>{ui}</ChooseInstallProvider>
+    </QueryClientProvider>,
+  )
 }
