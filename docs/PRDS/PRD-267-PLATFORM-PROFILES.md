@@ -8,7 +8,7 @@
 - **Part B** is the full Cloudflare profile. It is written out so the direction is clear, but no Part B story starts until Gerard decides on the spike's numbers and a partner commitment (§11-Q7).
 
 **Type:** Part A is refactor and consolidation, with tested behaviour changes listed in FR-2. The spike and Part B are extensions.
-**Scope:** automatos-ai, including a new `edge/` TypeScript project from the spike on. The Orderly partnership's own features (organisations, webhooks, the approvals API for server keys, cost export) are proposed for their own PRD (§4.12, §11-Q16).
+**Scope:** automatos-ai, including a new `edge/` TypeScript project from the spike on. The Orderly partnership's own features (organisations, webhooks, the approvals API for server keys, cost export) are proposed for their own PRD (§11, question 16). Throughout, "§11-Qn" means question n in §11.
 **Needs Gerard's approval before code (AGENTS.md "stop and ask first"), each with a tracking issue as PRD-266 did:**
 
 | Item | Where | Why it's on this list |
@@ -18,6 +18,7 @@
 | Shared API rate limits while the policy plane fails closed | §4.3, §11-Q3 | A guardrail: a Redis outage would become an API outage |
 | A sandbox per workspace (spike) and cells (Part B) | §5, §6.2 | Tenancy |
 | The trusted-proxy sign-in lane | §6.7 | Authentication |
+| The worker's model calls through an API proxy that adds the key | §4.4, §11-Q17 | Authentication of Claude Code sessions |
 | Re-embedding at 1024 dimensions; exporting and retiring Qdrant memory; a compliance-regime column | §6.3, §6.8 | Migrations that change user data |
 | New npm dependencies in `edge/` | §8.3 | New dependencies |
 
@@ -109,7 +110,15 @@ slowapi gets Redis storage, so limits hold across replicas. Today it fails close
 
 - **The Sandbox port** (`ports/sandbox.py`): start a task, follow its status, cancel. The containers adapter calls the worker over HTTP through `WorkspaceClient`, on a new route in the worker's existing HTTP layer (`worker_http.py`).
 - **A durable hand-off.** The API writes the task to `task_executions` (which exists; the worker already updates it) before sending it. A relay re-sends undelivered tasks, so a task sent while the worker is down, or while the API restarts, still runs. If `task_executions` lacks a delivery-state column, that's one additive migration.
+- **Retries never run a task twice.** Before running a task, the worker claims it through the API. The claim moves the row from pending to running in one conditional update on `task_id`, and succeeds once. A re-sent task that is already claimed is acknowledged without running. One that already finished gets its recorded result back. A worker that dies mid-task leaves the claim to expire after a lease, and only then can the task be claimed again.
 - **The worker reports through the API.** Status, results and events go over an authenticated callback instead of the worker's direct Postgres write (`task_executions_db.py`) and its Redis keys. The worker then needs neither `DATABASE_URL` nor `REDIS_URL`, and compose and the chart drop them from its environment.
+- **Model calls get their key outside the worker (US-A09, §11-Q17).** Today the worker also carries `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` [T]. The proposal:
+  - the worker's model clients, the Claude Code CLI included, point their base URL at an internal model proxy on the API;
+  - each task carries a short-lived token scoped to its workspace and run, and the worker presents it;
+  - the proxy checks the token, swaps in the right provider credential and forwards the call;
+  - the worker's environment then holds no provider key.
+
+  That a proxy can swap in a subscription OAuth token as well as an API key is inferred [I]. US-A09 proves it first, or keeps that credential as a named, temporary exception.
 - **Deleted:** the `RPOP` loop, `workspace:tasks:*`, `workspace:task:{id}:*`, the dead `taskrunner:queue:*` queues and the `kubernetes` backend name.
 
 ### 4.5 One resumable event transport
@@ -286,10 +295,20 @@ Every story: tests go in with it and fail without it; CI is the gate; route-mani
 **Acceptance Criteria:**
 - [ ] `ports/sandbox.py` with the containers adapter (§4.4); `api/workspace_github.py` uses it
 - [ ] The API records the task in `task_executions` before sending, and a relay re-sends undelivered tasks. A task sent while the worker is down runs when it returns; a task survives an API restart (tests). Any migration is additive and moves both Alembic head pins
+- [ ] The worker claims each task through the API with one conditional update on `task_id` (§4.4). A test fails the acknowledgement after a task ran, re-sends it, and proves it doesn't run again and the recorded result comes back. A test proves an expired claim lets a dead worker's task run once more
 - [ ] The worker reports status, results and events through an authenticated API callback. `task_executions_db.py`, its Redis keys and the `RPOP` loop are deleted
 - [ ] `DATABASE_URL`, `POSTGRES_*` and `REDIS_URL` are removed from the worker's environment in compose and the chart
 - [ ] The dead `taskrunner:queue:*` code and the `kubernetes` backend name are deleted
 - [ ] A compose smoke test runs a GitHub task end to end
+
+#### US-A09: The worker holds no model-provider key
+**Description:** As a workspace owner, I want my agents' code unable to read the platform's model credentials.
+
+**Acceptance Criteria:**
+- [ ] An internal model proxy on the API (§4.4) checks a per-task token scoped to the workspace and run, adds the provider credential, and forwards; it serves the providers the worker uses today
+- [ ] The worker's model clients and the Claude Code CLI use the proxy's base URL; a Claude Code session with tools runs end to end through it
+- [ ] `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are removed from the worker's environment in compose and the chart. If the OAuth token can't be proxied, the PR says so and keeps it as a named exception, with §11-Q17 reopened
+- [ ] A test reads the running worker's environment and finds no provider key; a token for one workspace is refused for another
 
 #### US-A06: One resumable event transport
 **Description:** As a user watching the board, the canvas or a run, I want updates that survive a reconnect, and never arrive before the change they describe.
@@ -363,12 +382,13 @@ Each Part B story gets its full acceptance criteria when Part B is approved; the
 - FR-2: Part A changes the container model only in these ways, each tested in its story:
   - US-A03: one scheduler across replicas, which stops when its lease is lost;
   - US-A04: rate limits shared across replicas;
-  - US-A05: the worker is handed tasks over HTTP, an undelivered task is re-sent, and the worker drops its database and Redis credentials;
+  - US-A05: the worker is handed tasks over HTTP, claims each one once, an undelivered task is re-sent, and the worker drops its database and Redis credentials;
+  - US-A09: the worker's model calls go through the API's model proxy, and the worker drops its provider keys;
   - US-A06: streams resume, and state events publish after commit through an outbox;
   - US-A07: Redis eviction policy.
 - FR-3: The spike changes the container model only by moving two frontend routes from the Edge runtime to Node (US-S01).
 - FR-4: Each port's contract tests pass for every adapter that exists.
-- FR-5: Agent code holds no database, Redis or model credentials (Part A for the worker's database and Redis access; the spike and Part B for sandboxes).
+- FR-5: Agent code holds no database, Redis or model-provider credentials: Part A for the worker (US-A05 and US-A09), the spike and Part B for sandboxes.
 - FR-6: Compose, the Helm chart and Railway deploy and pass their existing smoke tests at every story.
 - FR-7 (Part B): the cloudflare profile refuses a cell for a workspace whose required compliance regime isn't confirmed for every product the cell uses.
 
@@ -407,11 +427,12 @@ Each Part B story gets its full acceptance criteria when Part B is approved; the
 | A05 | Worker hand-off and credentials | A01 | 2–3 |
 | A06 | Event transport, outbox, frontend resume | A01 | 3 |
 | A07 | Redis durability | §11-Q4 | 1 |
+| A09 | The worker's model proxy | A05, §11-Q17 | 2 |
 | A08 | Ratchet and contract lane | A01 | 1 |
 | Spike | US-S01–S03 | A05 (the sandbox reports through the API), §11-Q6 | 3–4, over two weeks |
 | Part B | US-B01–B07 | §11-Q7 | Sized when approved |
 
-Part A is about 12–14 PRs, several of which can run in parallel after A01. Dates are Gerard's call; nothing is proposed before WebSummit (10–13 Nov).
+Part A is about 14–16 PRs, several of which can run in parallel after A01. Dates are Gerard's call; nothing is proposed before WebSummit (10–13 Nov).
 
 ## 10. Success metrics
 
@@ -457,6 +478,7 @@ Part A is about 12–14 PRs, several of which can run in parallel after A01. Dat
     - replacing Composio or the model providers.
 
     *Recommendation:* confirm.
+17. **The worker's model proxy (US-A09):** route the worker's model calls, the Claude Code CLI included, through an API proxy that adds the key, so the worker holds no provider credential? This changes how Claude Code sessions authenticate. *Recommendation:* yes. It's the container-model version of "the agent never holds a secret", and the spike's sandboxes need the same thing.
 
 ## Related
 
