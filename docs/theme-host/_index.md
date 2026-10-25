@@ -38,6 +38,7 @@ The following files were used as context for generating this page:
 - [frontend/app/api/themes/files/[...path]/route.ts](../../frontend/app/api/themes/files/[...path]/route.ts)
 - [frontend/lib/theme-host/boot.ts](../../frontend/lib/theme-host/boot.ts)
 - [frontend/lib/theme-host/boot-server.ts](../../frontend/lib/theme-host/boot-server.ts)
+- [frontend/lib/theme-host/boot-client.ts](../../frontend/lib/theme-host/boot-client.ts)
 - [frontend/lib/theme-host/boot-sanitize.ts](../../frontend/lib/theme-host/boot-sanitize.ts)
 - [frontend/lib/theme-host/import-map.ts](../../frontend/lib/theme-host/import-map.ts)
 - [frontend/lib/theme-host/shared-modules.json](../../frontend/lib/theme-host/shared-modules.json)
@@ -258,7 +259,19 @@ reloads the page into it.
 The root layout (`frontend/app/layout.tsx`) resolves the style's **boot** on the server before any page code runs.
 For an installed theme it asks `GET /api/themes/boot/{installId}` with the member's own session, within 300 ms, and
 keeps the answer for 60 seconds per user, install and digest (`frontend/lib/theme-host/boot-server.ts`). When the
-fetch fails or times out, the page paints the base boot.
+fetch fails, is refused or times out, the page paints the base boot. A local install in
+`LOCAL_REMOTE_ACCESS=paired` mode always gets the base boot here: the layout holds no device token, so the boot route
+answers it 401.
+
+A base boot under an installed theme's style carries no theme entry and no look table, so the browser asks the boot
+route itself (`frontend/lib/theme-host/boot-client.ts`): through `apiClient`, with the member's Clerk token or the
+paired browser's device token, with no 300 ms limit, and once per install for the page's life. The answer passes the
+same `sanitizeThemeBoot` gate. Its entry becomes the active theme (`frontend/contexts/ui-style-context.tsx`), and its
+look table and presets become the look runtime's rules (`frontend/lib/theme-host/looks/provider.tsx`), so the look
+paints through the runtime's normal paint path, later than first paint but complete. When this fetch fails too, the
+browser logs one warning and the theme runs with no look. In safe mode the browser asks for nothing: safe mode loads
+no theme code, and its base boot is all the page reads (`isSafeModeHere`, `frontend/lib/theme-host/safe-mode.ts`).
+The import map stays as the server wrote it: a page that got the base boot has no module integrity pins.
 
 The boot (`services/themes/serve.py`, `install_boot`) carries the theme's `<html>` classes, its tone, its
 `boot/prepaint.json` table, the browser keys of the member's stored look, its presets, the theme's registry entry and
@@ -287,8 +300,9 @@ is an installed theme. The load (`frontend/lib/theme-host/sources.ts`, `loader.t
    `/theme-sdk/v1/` (`shared-modules.json`).
 5. The entry's default export calls `register(host)`. It may register only known slots, the core pages a theme may
    replace, and its own routes. A frame (`frame@1`) is required.
-6. The host adds the theme's class to `<html>`, appends its stylesheet and applies the default preset's variables
-   (`look.ts`).
+6. The host adds the theme's class to `<html>` and appends its stylesheet (`look.ts`). A package's preset sets no
+   host variables (`manifest.ts`, `parseLookPreset`): the look's variables come from the boot's `prepaint.json`
+   table, painted by the boot script before first paint and then by the look runtime (section 8).
 
 Each request and import has 10 seconds (`THEME_LOAD_TIMEOUT_MS`). Any failure falls back to Studio with a notice.
 
@@ -316,7 +330,8 @@ listed in `frontend/lib/theme-sdk/surface/`: `assets`, `cards`, `chat`, `context
 
 A look is one set of a theme's knob values, held to its `looks/schema.json`. The generic look runtime
 (`frontend/lib/theme-host/looks/provider.tsx`, mounted by `theme-look-runtime.tsx`) runs for every installed theme
-with looks. It reads the theme's look rules from the boot, keeps the member's looks for this workspace, paints the
+with looks. It reads the theme's look rules from the boot (the page's, or the one the browser fetched when the page
+got the base boot, section 6), keeps the member's looks for this workspace, paints the
 active look on `<html>`, sets the tone the theme's tone rule gives, and hands the looks to the SDK's `looks` area.
 It also marks reduced motion on `<html>` for the theme's CSS (`looks/motion.ts`): `data-theme-motion` is `reduce` or
 `full`, and `--theme-motion` is `0` or `1`.

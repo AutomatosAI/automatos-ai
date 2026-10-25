@@ -49,3 +49,23 @@ export function safeSessionStorage(): SafeModeStorage | null {
     return null
   }
 }
+
+/** The page that turns safe mode on for this tab (app/safe-mode/page.tsx). */
+export const SAFE_MODE_PATH = '/safe-mode'
+/** The query that turns safe mode on, as a link writes it. */
+export const SAFE_MODE_QUERY = `?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`
+
+/** Turns safe mode on for this tab, as `?safe_mode=themes` does; the /safe-mode page calls it. */
+export function requestSafeModeForThisTab(): void {
+  isSafeModeRequested(SAFE_MODE_QUERY, safeSessionStorage())
+}
+
+/**
+ * Safe mode in this tab: asked for by the query, by being the /safe-mode page, or by an earlier page in this tab.
+ * Browser only: false where there is no window (a server render).
+ */
+export function isSafeModeHere(): boolean {
+  if (typeof window === 'undefined') return false
+  const { pathname, search } = window.location
+  return isSafeModeRequested(pathname === SAFE_MODE_PATH ? SAFE_MODE_QUERY : search, safeSessionStorage())
+}

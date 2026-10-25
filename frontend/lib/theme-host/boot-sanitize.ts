@@ -310,3 +310,14 @@ export function sanitizeThemeBoot(boot: ThemeBoot): ThemeBoot {
     looks: sanitizeBootLooks(boot.looks),
   }
 }
+
+/**
+ * The boot route's answer (GET /api/themes/boot/{installId}) as a boot the page may use, whoever
+ * asked: the root layout on the server (boot-server.ts) or the browser when the page's boot carries
+ * no entry (boot-client.ts). Throws when it is not an object.
+ */
+export function parseInstalledBoot(value: unknown): ThemeBoot {
+  if (!isRecord(value)) throw new Error('the boot route did not answer with an object')
+  // Every field is checked by sanitizeThemeBoot, which reads each one as unknown.
+  return sanitizeThemeBoot(value as unknown as ThemeBoot)
+}

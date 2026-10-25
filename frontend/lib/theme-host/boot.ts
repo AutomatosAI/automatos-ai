@@ -99,7 +99,8 @@ function withLookTone(boot: ThemeBoot, readCookie: CookieReader): ThemeBoot {
 /**
  * The resolver the root layout calls. Classic and Studio get their base boot; `installed` (A-08c)
  * answers for `theme:install:*`; its boot passes the same gate, and when it fails the page gets
- * the base boot (Studio's classes) and the client host takes over. A 'from-look' installed boot
+ * the base boot (Studio's classes) and the browser takes over: the client host loads the theme and
+ * boot-client.ts fetches its boot for the entry and the look rules. A 'from-look' installed boot
  * with looks and a tone rule takes its tone from the generic look runtime's tone cookie
  * (withLookTone).
  */

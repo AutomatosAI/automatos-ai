@@ -39,8 +39,6 @@ import { writeCookie } from '@/lib/cookies'
 import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
 import {
   HTML_CLASS_PATTERN,
-  SAFE_MODE_PARAM,
-  SAFE_MODE_VALUE,
   THEME_HOST_REASON_ATTR,
   THEME_HOST_STATUS_ATTR,
   THEME_NOTICE_ID,
@@ -53,7 +51,7 @@ import {
   shouldRevert,
 } from '@/lib/theme-host/failure-ledger'
 import { isInstalledThemeStyle } from '@/lib/theme-host/registry'
-import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
+import { isSafeModeHere } from '@/lib/theme-host/safe-mode'
 import {
   THEME_HOST_RUNNING_STATUSES,
   type ThemeFailureReason,
@@ -139,11 +137,6 @@ export const THEME_REVERTED_TEXT = 'You can choose it again in Settings once it 
 /** Where the revert sends the member: the style, and the server choice of the same name. */
 const REVERT_STYLE: UiStyle = 'studio'
 
-/** The page that turns safe mode on for its tab (app/safe-mode/page.tsx). */
-export const SAFE_MODE_PATH = '/safe-mode'
-/** The query that asks for safe mode (PRD-261 §6), as the /safe-mode page asks for it. */
-export const SAFE_MODE_QUERY = `?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`
-
 /**
  * Safe mode shows Studio, so it takes the installed theme's first paint off <html>: the root
  * layout's boot (THEME_BOOT_SCRIPT) has already put the theme's classes and its prepaint
@@ -196,17 +189,6 @@ export function unpaintThemeBoot(): void {
   SAFE_MODE_ADD_CLASSES.forEach((name) => root.classList.add(name))
   const custom = Array.from(root.style).filter((name) => name.startsWith('--'))
   custom.forEach((name) => root.style.removeProperty(name))
-}
-
-/** Turns safe mode on for this tab, as `?safe_mode=themes` does; the /safe-mode page calls it. */
-export function requestSafeModeForThisTab(): void {
-  isSafeModeRequested(SAFE_MODE_QUERY, safeSessionStorage())
-}
-
-/** Safe mode here: asked for by the query, by being the /safe-mode page, or by an earlier page in this tab. */
-function isSafeModeHere(): boolean {
-  const { pathname, search } = window.location
-  return isSafeModeRequested(pathname === SAFE_MODE_PATH ? SAFE_MODE_QUERY : search, safeSessionStorage())
 }
 
 function failedStart(reason: ThemeFailureReason, error: unknown): ThemeLoadResult {

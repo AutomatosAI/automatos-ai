@@ -43,7 +43,7 @@ import { exposeHostModules } from './host-modules'
 import { loadFromManifest, settleLoad, step, withTimeout } from './loader'
 import { parseActiveInstall, parseThemeManifest } from './manifest'
 import { importThemeModule } from './native-import'
-import { isInstalledThemeStyle, themeRefOf } from './registry'
+import { installIdOfStyle } from './registry'
 import type { ThemeRef } from './registry-types'
 import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 import type {
@@ -285,16 +285,9 @@ export function installedThemeSource(installId: string): ThemeSource {
   }
 }
 
-/** The install a style names, or null for Classic and Studio. */
-export function installIdOf(style: UiStyle): string | null {
-  if (!isInstalledThemeStyle(style)) return null
-  const ref = themeRefOf(style)
-  return ref === null ? null : ref.slice(INSTALL_REF_PREFIX.length)
-}
-
 /** The source the host loads for a style: an installed theme's; Classic and Studio have none. */
 export function sourceForStyle(style: UiStyle): ThemeSource | null {
-  const installId = installIdOf(style)
+  const installId = installIdOfStyle(style)
   return installId === null ? null : installedThemeSource(installId)
 }
 

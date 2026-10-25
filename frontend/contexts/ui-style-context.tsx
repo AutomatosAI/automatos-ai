@@ -22,12 +22,20 @@
  * same activeTheme. The theme host (components/theme-host/theme-host-provider.tsx), which sits
  * below, releases it when it cannot run the theme (a failed load, safe mode, no install to run):
  * activeTheme is then null, as for a theme the registry doesn't know.
+ *
+ * When the page's boot carried no entry under an installed theme's style (the server's boot fetch
+ * timed out, was refused or failed, so the page has the base boot), the browser asks the boot route
+ * itself, once per install (lib/theme-host/boot-client.ts), and the entry it answers becomes the
+ * active theme: later than the first render, but the theme's frame, pages and look runtime mount.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
 import { writeCookie } from '@/lib/cookies'
 import type { InstalledTheme } from '@/lib/api-client'
-import { findThemeEntry, isInstalledThemeStyle } from '@/lib/theme-host/registry'
+import { pageInstalledBoot, type InstalledBootSource } from '@/lib/theme-host/boot-client'
+import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
+import { findThemeEntry, installIdOfStyle, isInstalledThemeStyle } from '@/lib/theme-host/registry'
+import { isSafeModeHere } from '@/lib/theme-host/safe-mode'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import {
   APPEARANCE_DEFAULTS_KEY,
@@ -56,7 +64,8 @@ export interface UiStyleContextValue {
   isStudio: boolean
   /**
    * The active theme's registry entry: null for Classic and Studio, for a theme the registry doesn't
-   * know, and for an installed theme whose boot carried no entry or that the theme host released.
+   * know, for an installed theme the theme host released, and for one whose boot carried no entry
+   * until the browser's own fetch of it answers one (lib/theme-host/boot-client.ts).
    */
   activeTheme: ThemeEntry | null
   /**
@@ -126,16 +135,41 @@ function activeThemeOf(style: UiStyle, installed: ThemeEntry | null, released: U
 }
 
 /**
+ * The installed theme's entry from the boot the browser fetched (lib/theme-host/boot-client.ts),
+ * when the page's boot carried none for `style`; null until it answers, and when it answers none.
+ */
+function useFetchedEntry(style: UiStyle, installedAtLoad: ThemeEntry | null, bootSource: InstalledBootSource): ThemeEntry | null {
+  const [fetched, setFetched] = useState<ThemeEntry | null>(null)
+  const installId = installedAtLoad === null ? installIdOfStyle(style) : null
+  useEffect(() => {
+    // Safe mode loads no theme code, and asks for none of it: no boot for an install either.
+    if (installId === null || isSafeModeHere()) return undefined
+    let live = true
+    void bootSource(installId).then((boot) => {
+      const entry = installedThemeEntry(style, boot?.entry ?? null)
+      if (live && entry !== null) setFetched(entry)
+    })
+    return () => {
+      live = false
+    }
+  }, [style, installId, bootSource])
+  return fetched
+}
+
+/**
  * The active theme's entry, and the host's way to release an installed one it cannot run. The
  * installed entry is the one the page loaded with, held for the provider's life as `style` is: a
  * server re-render (router.refresh) builds the boot again and may hand in another entry or none
  * (a boot that timed out, another tab's style cookie), but this document still runs the theme it
- * loaded, and a switch to another installed theme always reloads (PA-13).
+ * loaded, and a switch to another installed theme always reloads (PA-13). A page that loaded with
+ * none takes the one the browser fetched (useFetchedEntry).
  */
-function useActiveThemeEntry(style: UiStyle, installed: ThemeEntry | null) {
+function useActiveThemeEntry(style: UiStyle, installed: ThemeEntry | null, bootSource: InstalledBootSource) {
   const [installedAtLoad] = useState(installed)
+  const fetched = useFetchedEntry(style, installedAtLoad, bootSource)
   const [released, releaseInstalledTheme] = useState<UiStyle | null>(null)
-  const activeTheme = useMemo(() => activeThemeOf(style, installedAtLoad, released), [style, installedAtLoad, released])
+  const entry = installedAtLoad ?? fetched
+  const activeTheme = useMemo(() => activeThemeOf(style, entry, released), [style, entry, released])
   return { activeTheme, releaseInstalledTheme }
 }
 
@@ -148,6 +182,11 @@ interface UiStyleProviderProps {
   installedTheme?: ThemeEntry | null
   /** How a switch to an installed theme reloads the page (PA-13); tests pass their own. */
   reloadPage?: () => void
+  /**
+   * Where the browser gets the installed theme's boot when the page's carried no entry; tests pass
+   * their own. Default: GET /api/themes/boot/{installId}, once per install (boot-client.ts).
+   */
+  bootSource?: InstalledBootSource
   children: ReactNode
 }
 
@@ -155,11 +194,12 @@ export function UiStyleProvider({
   initialStyle = DEFAULT_UI_STYLE,
   installedTheme = null,
   reloadPage = reloadDocument,
+  bootSource = pageInstalledBoot,
   children,
 }: UiStyleProviderProps) {
   const [style, setStyleState] = useState<UiStyle>(initialStyle)
   const [installedThemes, setInstalledThemes] = useState<readonly InstalledTheme[]>(NO_INSTALLED_THEMES)
-  const { activeTheme, releaseInstalledTheme } = useActiveThemeEntry(style, installedTheme)
+  const { activeTheme, releaseInstalledTheme } = useActiveThemeEntry(style, installedTheme, bootSource)
   const { setTheme } = useTheme()
 
   // PRD-261 PA-13: an installed theme's boot data and import map come with the page, so a
