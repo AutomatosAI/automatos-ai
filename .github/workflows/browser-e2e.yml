@@ -203,7 +203,7 @@ permissions:
 # pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-design-kit
-  KIT_REF: 6054ac77f0419dc6dbe3ebdd7e0e2300693ed12a
+  KIT_REF: f5db483253d9311f3ae1072f1682d693fd830148
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
   PLAY_PACKAGE: automatos.play-1.1.0.autotheme

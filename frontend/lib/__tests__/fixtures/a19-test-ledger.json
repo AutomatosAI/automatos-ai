@@ -246,12 +246,12 @@
   },
   {
     "corePath": "frontend/lib/looks/__tests__/contrast.test.ts",
-    "kitPath": "themes/play/test/lib/looks/contrast.test.ts",
+    "kitPath": "packages/look-kit/test/contrast.test.ts",
     "coreReplacement": null
   },
   {
     "corePath": "frontend/lib/looks/__tests__/css.test.ts",
-    "kitPath": "themes/play/test/lib/looks/css.test.ts",
+    "kitPath": "packages/look-kit/test/css.test.ts",
     "coreReplacement": null
   },
   {
@@ -291,7 +291,7 @@
   },
   {
     "corePath": "frontend/lib/looks/__tests__/studio-tokens.test.ts",
-    "kitPath": "themes/play/test/lib/looks/studio-tokens.test.ts",
+    "kitPath": "packages/look-kit/test/studio-tokens.test.ts",
     "coreReplacement": null
   },
   {
@@ -316,12 +316,12 @@
   },
   {
     "corePath": "frontend/lib/looks/__tests__/validate.test.ts",
-    "kitPath": "themes/play/test/lib/looks/validate.test.ts",
+    "kitPath": "packages/look-kit/test/validate.test.ts",
     "coreReplacement": null
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/events.test.ts",
-    "kitPath": "themes/play/test/mascot/events.test.ts",
+    "kitPath": "packages/mascot/test/events.test.ts",
     "coreReplacement": null
   },
   {
@@ -331,7 +331,7 @@
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/media.test.ts",
-    "kitPath": "themes/play/test/mascot/media.test.ts",
+    "kitPath": "packages/mascot/test/media.test.ts",
     "coreReplacement": null
   },
   {
@@ -341,17 +341,17 @@
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/player.test.ts",
-    "kitPath": "themes/play/test/mascot/player.test.ts",
+    "kitPath": "packages/mascot/test/player.test.ts",
     "coreReplacement": null
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/reducer.test.ts",
-    "kitPath": "themes/play/test/mascot/reducer.test.ts",
+    "kitPath": "packages/mascot/test/reducer.test.ts",
     "coreReplacement": null
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/ring.test.ts",
-    "kitPath": "themes/play/test/mascot/ring.test.ts",
+    "kitPath": "packages/mascot/test/ring.test.ts",
     "coreReplacement": null
   },
   {
@@ -361,7 +361,7 @@
   },
   {
     "corePath": "frontend/lib/mascot/__tests__/tools.test.ts",
-    "kitPath": "themes/play/test/mascot/tools.test.ts",
+    "kitPath": "packages/mascot/test/tools.test.ts",
     "coreReplacement": null
   },
   {

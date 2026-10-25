@@ -12,7 +12,8 @@
  *   repository; browser-e2e's package job checks it exists at KIT_REF, A-19f4), and/or
  *   `coreReplacement`, the core test that holds the assertion now. Paths are from the repository root.
  * - A row is for a gone path the list names, once; a named core replacement exists and is not gone
- *   itself; a kit path is a test file under the kit's themes/play/test or tests folders.
+ *   itself; a kit path is a test file under the kit's themes/play/test, packages/<name>/test or tests folders
+ *   (Play 1.1.1 moved its look and mascot tests into packages/look-kit and packages/mascot).
  */
 import { existsSync, readFileSync } from 'fs'
 import path from 'path'
@@ -38,7 +39,7 @@ const REPO = path.resolve(__dirname, '../../..')
 const PATHS_SHA = 'bcc3f79e525aeb3bf392dc3d65c608407fe80188'
 const ROW_KEYS: readonly string[] = ['corePath', 'kitPath', 'coreReplacement']
 /** Where the theme kit keeps tests: Play's own, and the kit's repository-wide ones. */
-const KIT_TEST_PATH = /^(themes\/play\/test|tests)\/[\w./-]+\.(test\.tsx?|tsx?|json|css)$/
+const KIT_TEST_PATH = /^(themes\/play\/test|packages\/[\w-]+\/test|tests)\/[\w./-]+\.(test\.tsx?|tsx?|json|css)$/
 /** The paths list must hold at least this many (60 under the deleted folders at bcc3f79e5, and the rest). */
 const PATHS_AT_LEAST = 80
 
