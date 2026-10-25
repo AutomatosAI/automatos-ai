@@ -110,11 +110,12 @@ slowapi gets Redis storage, so limits hold across replicas. Today it fails close
 
 - **The Sandbox port** (`ports/sandbox.py`): start a task, follow its status, cancel. The containers adapter calls the worker over HTTP through `WorkspaceClient`, on a new route in the worker's existing HTTP layer (`worker_http.py`).
 - **A durable hand-off.** The API writes the task to `task_executions` (which exists; the worker already updates it) before sending it. A relay re-sends undelivered tasks, so a task sent while the worker is down, or while the API restarts, still runs. If `task_executions` lacks a delivery-state column, that's one additive migration.
-- **Retries never run a task twice.** Before running a task, the worker claims it through the API. The claim moves the row from pending to running in one conditional update on `task_id`, and succeeds once. A re-sent task that is already claimed is acknowledged without running. One that already finished gets its recorded result back. A worker that dies mid-task leaves the claim to expire after a lease, and only then can the task be claimed again.
+- **Retries never run a task twice.** Before running a task, the worker claims it through the API. The claim moves the row from `queued` (the status the producer writes today) to `running` (the status the worker sets today), in one conditional update on `task_id`, and succeeds once. A re-sent task that is already claimed is acknowledged without running. One that already finished gets its recorded result back. A worker that dies mid-task leaves the claim to expire after a lease, and only then can the task be claimed again.
 - **A re-run after a crash doesn't repeat side effects.** The worker can die after an external effect but before the API records completion: a commit pushed, a file written, a call to Orderly's Hub API. So each side-effecting step carries an idempotency key made from the `task_id` and the step's name.
-  - The worker records the key and the step's result through the API as the step completes.
-  - A re-claimed task asks for its recorded steps first, and replays their results instead of acting again.
+  - The worker records the step as *started*, with its key, before the effect, and records its result as the step completes.
+  - A re-claimed task asks for its recorded steps first, and replays the results of completed steps instead of acting again.
   - Outbound calls that accept an idempotency header (Orderly's Hub API included) send the key.
+  - **A step recorded as started but not completed** means the worker died between the effect and the record, so there is no result to replay. If the effect took the idempotency key, the step runs again with the same key. Otherwise the step reconciles: it checks whether the effect already happened (the branch exists at the expected commit; the file has the expected hash) and records what it finds. A step that can't do either stops the task as `needs_attention`, for a person to resolve, instead of retrying automatically.
 
   Model calls can't be deduplicated, so a re-run may spend again. That cost is accepted, and capped by the per-task budget.
 - **The worker reports through the API.** Status, results and events go over an authenticated callback instead of the worker's direct Postgres write (`task_executions_db.py`) and its Redis keys. The worker then needs neither `DATABASE_URL` nor `REDIS_URL`, and compose and the chart drop them from its environment.
@@ -302,7 +303,10 @@ Every story: tests go in with it and fail without it; CI is the gate; route-mani
 - [ ] `ports/sandbox.py` with the containers adapter (§4.4); `api/workspace_github.py` uses it
 - [ ] The API records the task in `task_executions` before sending, and a relay re-sends undelivered tasks. A task sent while the worker is down runs when it returns; a task survives an API restart (tests). Any migration is additive and moves both Alembic head pins
 - [ ] The worker claims each task through the API with one conditional update on `task_id` (§4.4). A test fails the acknowledgement after a task ran, re-sends it, and proves it doesn't run again and the recorded result comes back. A test proves an expired claim lets a dead worker's task run once more
-- [ ] Each side-effecting step records its idempotency key and result through the API (§4.4). A test kills the worker after a step's external effect but before completion is recorded, lets the claim expire, and proves the re-run replays the recorded result instead of repeating the effect
+- [ ] Each side-effecting step records its idempotency key and result through the API (§4.4). Tests kill the worker at both points and let the claim expire:
+  - after the step's result is recorded: the re-run replays it instead of repeating the effect;
+  - after the effect but before the result is recorded: the step re-runs with the same key if the effect takes one, reconciles if it can check, and otherwise stops the task as `needs_attention` without repeating the effect
+- [ ] The claim uses today's statuses (`queued` → `running`); any new status (`needs_attention`) is added to both the producer and the worker in the same change
 - [ ] The worker reports status, results and events through an authenticated API callback. `task_executions_db.py`, its Redis keys and the `RPOP` loop are deleted
 - [ ] `DATABASE_URL`, `POSTGRES_*` and `REDIS_URL` are removed from the worker's environment in compose and the chart
 - [ ] The dead `taskrunner:queue:*` code and the `kubernetes` backend name are deleted
