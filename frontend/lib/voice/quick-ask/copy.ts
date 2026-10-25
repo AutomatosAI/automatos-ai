@@ -27,6 +27,8 @@ export const QUICK_ASK_ERRORS = Object.freeze({
   noSpeech: 'Nothing was heard. Hold to talk and try again.',
   noMicrophone: 'No microphone was found. Connect one, then hold to talk again.',
   unsupported: "This browser can't recognise speech, so voice isn't available here. You can type to Auto instead.",
+  serviceOff:
+    "Speech recognition is turned off for this browser. Turn on dictation in your device's settings, or type to Auto instead.",
   recognitionNetwork: "Speech recognition couldn't connect. Check your connection and try again.",
   recognizer: 'Speech recognition stopped. Hold to talk again.',
   chatNetwork: "Auto can't be reached. Check your connection and try again.",
