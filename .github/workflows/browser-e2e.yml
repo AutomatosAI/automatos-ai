@@ -197,16 +197,16 @@ permissions:
 # A-20), which holds W-K8's merge (#15: the kit CLI's `automatos-theme install`, which the lane
 # installs the theme with) and W-K6's (#14: Play's tests on the kit's harness, every path core's
 # test ledger names for them).
-# Play's own files there are the ones released as automatos/play 1.1.0 at the kit's tag
-# play-v1.1.0. Move it with the kit, in the same pull request as the kit change it brings, and only
+# Play's own files there are automatos/play 1.1.1 (released at the kit's tag play-v1.1.1 once it is
+# tagged; 1.1.0 is play-v1.1.0). Move it with the kit, in the same pull request as the kit change it brings, and only
 # forward in kit history (PB-17; Play's own rules are in the kit's themes/play/README.md). npm is
 # pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-design-kit
-  KIT_REF: 6054ac77f0419dc6dbe3ebdd7e0e2300693ed12a
+  KIT_REF: f5db483253d9311f3ae1072f1682d693fd830148
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
-  PLAY_PACKAGE: automatos.play-1.1.0.autotheme
+  PLAY_PACKAGE: automatos.play-1.1.1.autotheme
   KIT_PACKAGE_ARTIFACT: kit-theme-package
   # The package job's name (jobs.package.name, below), which the lane waits on, and how long it
   # waits: the package job's own 15-minute timeout and a few minutes to be picked up.
@@ -537,7 +537,7 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-package
         run: npx playwright test --grep "@package|@parity" --project=chromium --project=webkit --workers=1 --output=test-results-package
 
-      # PRD-261 C-06q1 (PB-24, PB-26): installed Play 1.1.0's preview shots, which
+      # PRD-261 C-06q1 (PB-24, PB-26): installed Play's preview shots, which
       # specs/play-previews.spec.ts saves in the step above (each preset's /chat frame, and the
       # default preset's /deliverables and /looks), for the owner to pick from. They are never
       # committed here: the kit commits the picked files into themes/play/assets/previews/ (C-06q2).

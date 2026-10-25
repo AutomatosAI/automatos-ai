@@ -17,13 +17,13 @@ import {
 // 2. M21: when the backend stops answering, "Automatos is asleep" takes the focus the frame swap
 //    dropped; when it answers again, the frame's <main> takes it, and a status line says so.
 //    GET /health is answered 503 here until Check again.
-// 3. M20: in Make it yours, This look's toolbar keeps focus through Rename, Save name, Delete,
+// 3. M20: on Play's Look page, This look's toolbar keeps focus through Rename, Save name, Delete,
 //    Keep it and Delete look.
 // 4. A-19f4: until W-A8, Studio's /looks note offered builtin Play's "Switch to Play", which left
 //    word for the reload onto the package so the screen's heading took focus (M21, G3). W-A8 took
 //    that switch off the note with builtin Play: Studio's /looks is now the generic note
 //    (components/theme-host/no-look-editor-note.tsx, its heading marked [data-theme-heading]) and
-//    names no Play. With the package chosen, Make it yours draws again, its h1 carrying the same
+//    names no Play. With the package chosen, Play's Look page draws again, its h1 carrying the same
 //    mark, the one ThemeSlotPage gives focus to when a switch asks for it.
 
 const ASK = 'Find me a laptop under 1,000 euros'
@@ -42,7 +42,8 @@ const LOOKS_PATH = '/looks'
 const STUDIO = 'studio'
 const MANAGE = 'This look'
 const RENAMED = 'Focus look'
-const LOOKS_HEADING = 'Make it yours.'
+/** Play's looks page heading (1.1.1 names the page Look; "Make it yours." is its tagline). */
+const LOOKS_HEADING = 'Look'
 /** The name builtin Play's switch had: no button on Studio's note carries it any more. */
 const SWITCH_TO_PLAY = 'Switch to Play'
 /** The mark a screen's heading carries for the host: on the generic note's heading, and on Play's h1. */
@@ -115,7 +116,7 @@ describeParity('keyboard focus survives what Play swaps (FX-22)', (variant) => {
     await expect(inThisLook(page, 'Duplicate')).toBeFocused()
   })
 
-  test("Studio's /looks note names no Play switch; chosen, Play's Make it yours heading carries the host's mark", { tag: PARITY_TAG }, async ({ page, request }) => {
+  test("Studio's /looks note names no Play switch; chosen, Play's Look heading carries the host's mark", { tag: PARITY_TAG }, async ({ page, request }) => {
     const play = await variant.makeAvailable(request)
     await chooseStyle(page, STUDIO, APP_URL)
     await page.goto(LOOKS_PATH)

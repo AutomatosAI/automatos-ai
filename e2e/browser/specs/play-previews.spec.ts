@@ -8,7 +8,7 @@ import { messageBox } from '../support/play-chat'
 import { resetPlayParity, THEME_LOAD_TIMEOUT_MS } from '../support/play-parity'
 import { watchPage } from '../support/watch'
 
-// PRD-261 C-06q1 (@package; PB-24, PB-26): Play 1.1.0's listing previews, shot in the lane. Play is
+// PRD-261 C-06q1 (@package; PB-24, PB-26): Play's listing previews, shot in the lane. Play is
 // the Design Kit's package, uploaded, opted in to and chosen as installed-play.spec.ts does
 // (support/kit-package.ts). For each preset the page's boot carries, picked on Make it yours as a
 // member picks it, the spec saves the frame on /chat as <preset>.png, and under the default preset
@@ -40,7 +40,7 @@ const PREVIEW_DIR = path.resolve(__dirname, '..', 'previews')
 /** 16:10, tall enough that every preset's empty chat fits with its message box (800 px high cut it off under three). */
 const VIEWPORT = { width: 1440, height: 900 }
 const DEVICE_SCALE = 1
-/** Play 1.1.0's presets (the kit's themes/play/src/lib/looks/presets.ts); the boot must carry exactly these. */
+/** Play's presets (the kit's themes/play/src/lib/looks/presets.ts); the boot must carry exactly these. */
 const PRESET_IDS = ['ember', 'obsidian', 'aurora', 'workshop', 'daylight'] as const
 const DEFAULT_PRESET = 'ember'
 
@@ -439,7 +439,7 @@ async function openMakeItYours(page: Page, request: APIRequestContext): Promise<
   await page.goto(SCREENS.looks.path)
   await expectInstalledPlay(page)
   const boot = await readBoot(page)
-  expect(boot.looks.presets.map((preset) => preset.id).sort(), "the boot carries Play 1.1.0's presets").toEqual([...PRESET_IDS].sort())
+  expect(boot.looks.presets.map((preset) => preset.id).sort(), "the boot carries Play's presets").toEqual([...PRESET_IDS].sort())
   expect(boot.looks.defaultLook).toBe(DEFAULT_PRESET)
   await expect(page.getByRole('complementary', { name: EDITOR, exact: true })).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
   return boot
@@ -466,7 +466,7 @@ async function pickLook(page: Page, look: BootLook): Promise<void> {
 test.use({ viewport: VIEWPORT, deviceScaleFactor: DEVICE_SCALE, contextOptions: { reducedMotion: 'reduce' } })
 test.skip(({ browserName }) => browserName !== ONLY_BROWSER, 'Chromium only: one set of previews, and the specs share one backend user')
 
-test.describe("PRD-261 C-06q1 — installed Play 1.1.0's preview shots", () => {
+test.describe("PRD-261 C-06q1 — installed Play's preview shots", () => {
   test.describe.configure({ timeout: SHOT_TEST_TIMEOUT_MS })
 
   test.beforeEach(async ({ request }) => {
