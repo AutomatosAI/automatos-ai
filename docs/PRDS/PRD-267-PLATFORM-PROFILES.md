@@ -479,6 +479,7 @@ Part A is about 14–16 PRs, several of which can run in parallel after A01. Dat
 
     *Recommendation:* confirm.
 17. **The worker's model proxy (US-A09):** route the worker's model calls, the Claude Code CLI included, through an API proxy that adds the key, so the worker holds no provider credential? This changes how Claude Code sessions authenticate. *Recommendation:* yes. It's the container-model version of "the agent never holds a secret", and the spike's sandboxes need the same thing.
+18. **KEDA in the Helm chart?** KEDA would scale the workspace worker and background consumers on their backlog, down to zero when idle, as an optional, off-by-default chart setting. Part A creates the backlog it needs: pending tasks in `task_executions` (US-A05) for KEDA's Postgres scaler, and the event streams (US-A06) for its Redis Streams scaler. Today's polling worker gives it nothing clean to scale on. On the reference workload in the hosting comparison (claude.ai/artifact/TLLxQmuFx9Fto7pXdoWmtU), it saves about $70 a month on GKE; the worker holds `/workspaces` on a volume, so scaling it past one replica needs the per-workspace sandbox work. It's a new chart dependency (the KEDA operator), so it needs approval. *Recommendation:* yes, as a follow-on story after US-A05 and US-A06, scaling to zero but capped at one worker replica until sandboxes are per workspace.
 
 ## Related
 
