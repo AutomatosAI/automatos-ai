@@ -144,6 +144,17 @@ What outbound handlers cover [C]:
 
 - **Identity comes from the caller, not the request.** The handler knows which container is calling. A workspace's sandbox can reach only its own cell, its own vector namespace and its own vault keys, whatever the request says.
 - **The API container** is a shared pool, so its calls carry the workspace in the path, and the bridge checks it against a short-lived token the router issued for that request [I].
+
+**The caller contract.** Before the bridge calls any binding:
+- **A sandbox** is identified by the container the handler intercepted, which is the cell's own container. It carries no token, and the bridge uses no workspace id from the request.
+- **An API container** presents the router's token. The token is signed by a key only the router and bridge hold, and binds:
+  - the workspace;
+  - the request id;
+  - the calling container's id;
+  - the audience (the bridge virtual host it may call);
+  - an expiry no longer than the request's own timeout, five minutes at most.
+- **Replay.** The token is reusable across the bridge calls of one request, because one request makes many. It is refused from any other container, for any other workspace or virtual host, and after it expires.
+- **Rejections.** A missing, invalid, expired, replayed or mismatched token is rejected with 401 or 403, and the bridge logs it, without the token.
 - **Latency is unmeasured.** W4's acceptance includes a measurement (§10).
 
 ### 4.6 Workspace cells (cloudflare profile)
@@ -340,7 +351,8 @@ Every story: tests go in with the story, and each one fails without the change; 
 **Description:** As an operator, I want containers to reach Cloudflare's services through one bridge, and every model call through AI Gateway.
 
 **Acceptance Criteria:**
-- [ ] `edge/bridge` serves the virtual hosts in §4.5 with caller identity checks; ports not yet implemented answer 501
+- [ ] `edge/bridge` serves the virtual hosts in §4.5 with the caller contract; ports not yet implemented answer 501
+- [ ] Bridge tests reject missing, invalid, expired, replayed (from another container) and cross-workspace or cross-host requests, for both API containers and sandboxes
 - [ ] The API image trusts Cloudflare's interception CA when it is present (§4.5), and `interceptHttps` is on for the bridge's hosts
 - [ ] The cloudflare Telemetry adapter writes metrics to Analytics Engine through `telemetry.cf`; traces still export over OTLP (§4.12)
 - [ ] The cloudflare contract-test lane runs under `wrangler dev`, and every cloudflare adapter that exists passes it
@@ -355,6 +367,7 @@ Every story: tests go in with the story, and each one fails without the change; 
 - [ ] `edge/cell` with the event stream, locks and quotas, the schedule table with one alarm, and the board claim; Cron Triggers for platform-wide jobs
 - [ ] The cloudflare adapters for Event stream, Locks, Schedules, Queue (Queues) and Cache (KV) pass the contract tests
 - [ ] Each cell is created in the jurisdiction set on its workspace (default from config)
+- [ ] A workspace that requires PCI DSS or FedRAMP High is refused a cell while §11-Q11 hasn't confirmed Containers and Queues, with a clear message (FR-7; test)
 
 #### US-015: A sandbox per workspace
 **Description:** As a workspace owner, I want my agents' code to run in a sandbox no other workspace can reach.
@@ -382,7 +395,10 @@ Every story: tests go in with the story, and each one fails without the change; 
 **Description:** As a user, I want a long mission to survive the container that runs it being moved.
 
 **Acceptance Criteria:**
+- [ ] The Workflows are TypeScript, in `edge/`. Each step calls the API through the router with the §4.5 caller contract, and the step's work runs in the API's Python code. Python Workflows are used only after Cloudflare confirms they're GA (§11-Q11)
 - [ ] The cloudflare Runs adapter starts a Workflow per run; each step is durable and retried
+- [ ] Every step carries an idempotency key derived from the run id and the step's name. A step's side effects use it: database writes upsert on it, outbound calls that support an idempotency header send it, and a step that finds its key already recorded returns the recorded result instead of acting again
+- [ ] A test fails a step after its side effect but before the Workflow records success, and proves the retry doesn't repeat the effect
 - [ ] A run survives a forced container restart mid-step (test on staging)
 
 ### Wave W7: The records gate
@@ -427,6 +443,7 @@ Every story: tests go in with the story, and each one fails without the change; 
 - FR-4: After each wave, the dependencies it wrapped are forbidden outside adapters by `.importlinter-platform`.
 - FR-5: On the cloudflare profile, a workspace's sandbox, vector namespace, vault keys and (on Path 2) records are reachable only by that workspace's own requests, enforced by the bridge.
 - FR-6: Compose, the Helm chart and Railway deploy and pass their existing smoke tests at every wave.
+- FR-7: The cloudflare profile refuses to create a cell for a workspace that needs a compliance regime not confirmed for every product the cell uses (§8.2). The workspace's required regime is a workspace setting.
 
 ## 7. Proposed non-goals (Gerard confirms or changes them in §11-Q13)
 
@@ -467,6 +484,8 @@ From Cloudflare's trust hub and data-localisation page (15 Oct 2026). "Not liste
 | Containers | not listed | not listed | not listed | placement only |
 
 Containers run the API and every sandbox, so their scope is §11-Q11. The lists favour Durable Objects over D1, which supports cells for Path 2.
+
+**Regulated workspaces stay on the containers profile until coverage is confirmed.** Containers and Queues aren't on the PCI DSS or FedRAMP High lists. A `fedramp` placement or jurisdiction is not the same thing as product coverage. So a workspace whose owner needs PCI DSS or FedRAMP High coverage can't be created on the cloudflare profile. That holds until Cloudflare confirms both products in writing (§11-Q11), or until compliant replacements are chosen for them (FR-7).
 
 ### 8.3 New dependencies
 
@@ -517,7 +536,7 @@ These bars are proposals; Gerard confirms or moves them.
 8. **Customer-held keys:** accept an outside KMS behind the Vault port for enterprise BYOK? *Recommendation:* yes; Cloudflare has no KMS.
 9. **Container traces on Cloudflare:** an OTLP backend the operator chooses, until Cloudflare takes OTLP metrics and traces? *Recommendation:* yes.
 10. **Voice:** keep Retell, or add an Agents SDK voice adapter (beta)? *Recommendation:* keep Retell; revisit when Agents voice leaves beta.
-11. **Ask Cloudflare's account team:** Containers' compliance scope; D1 residency (its docs disagree); autoscaling timing; whether Python Durable Objects and Python Workflows are GA; outbound-handler latency. *Recommendation:* before W3.
+11. **Ask Cloudflare's account team:** Containers' and Queues' compliance scope (PCI DSS, FedRAMP High; FR-7 holds regulated workspaces back until confirmed); D1 residency (its docs disagree); autoscaling timing; whether Python Durable Objects and Python Workflows are GA; outbound-handler latency. *Recommendation:* before W3.
 12. **Build contexts: repo-root contexts or a synced copy of the package (§4.2)?** It changes how compose, CI and Railway build the images. *Recommendation:* repo-root contexts with a `.dockerignore` per Dockerfile; the synced copy only if Railway can't build from the root.
 13. **The proposed non-goals in §7, and the boundary with the Orderly work (§4.11):** confirm, or move any of them into this PRD. *Recommendation:* confirm; the Orderly pieces build on these ports but are a separate decision.
 
