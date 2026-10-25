@@ -111,10 +111,16 @@ slowapi gets Redis storage, so limits hold across replicas. Today it fails close
 - **The Sandbox port** (`ports/sandbox.py`): start a task, follow its status, cancel. The containers adapter calls the worker over HTTP through `WorkspaceClient`, on a new route in the worker's existing HTTP layer (`worker_http.py`).
 - **A durable hand-off.** The API writes the task to `task_executions` (which exists; the worker already updates it) before sending it. A relay re-sends undelivered tasks, so a task sent while the worker is down, or while the API restarts, still runs. If `task_executions` lacks a delivery-state column, that's one additive migration.
 - **Retries never run a task twice.** Before running a task, the worker claims it through the API. The claim moves the row from pending to running in one conditional update on `task_id`, and succeeds once. A re-sent task that is already claimed is acknowledged without running. One that already finished gets its recorded result back. A worker that dies mid-task leaves the claim to expire after a lease, and only then can the task be claimed again.
+- **A re-run after a crash doesn't repeat side effects.** The worker can die after an external effect but before the API records completion: a commit pushed, a file written, a call to Orderly's Hub API. So each side-effecting step carries an idempotency key made from the `task_id` and the step's name.
+  - The worker records the key and the step's result through the API as the step completes.
+  - A re-claimed task asks for its recorded steps first, and replays their results instead of acting again.
+  - Outbound calls that accept an idempotency header (Orderly's Hub API included) send the key.
+
+  Model calls can't be deduplicated, so a re-run may spend again. That cost is accepted, and capped by the per-task budget.
 - **The worker reports through the API.** Status, results and events go over an authenticated callback instead of the worker's direct Postgres write (`task_executions_db.py`) and its Redis keys. The worker then needs neither `DATABASE_URL` nor `REDIS_URL`, and compose and the chart drop them from its environment.
 - **Model calls get their key outside the worker (US-A09, §11-Q17).** Today the worker also carries `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` [T]. The proposal:
   - the worker's model clients, the Claude Code CLI included, point their base URL at an internal model proxy on the API;
-  - each task carries a short-lived token scoped to its workspace and run, and the worker presents it;
+  - each task carries a short-lived token scoped to its workspace, run and `task_id`, and the worker presents it (a run can hold several tasks, so a sibling task's token is refused);
   - the proxy checks the token, swaps in the right provider credential and forwards the call;
   - the worker's environment then holds no provider key.
 
@@ -296,6 +302,7 @@ Every story: tests go in with it and fail without it; CI is the gate; route-mani
 - [ ] `ports/sandbox.py` with the containers adapter (§4.4); `api/workspace_github.py` uses it
 - [ ] The API records the task in `task_executions` before sending, and a relay re-sends undelivered tasks. A task sent while the worker is down runs when it returns; a task survives an API restart (tests). Any migration is additive and moves both Alembic head pins
 - [ ] The worker claims each task through the API with one conditional update on `task_id` (§4.4). A test fails the acknowledgement after a task ran, re-sends it, and proves it doesn't run again and the recorded result comes back. A test proves an expired claim lets a dead worker's task run once more
+- [ ] Each side-effecting step records its idempotency key and result through the API (§4.4). A test kills the worker after a step's external effect but before completion is recorded, lets the claim expire, and proves the re-run replays the recorded result instead of repeating the effect
 - [ ] The worker reports status, results and events through an authenticated API callback. `task_executions_db.py`, its Redis keys and the `RPOP` loop are deleted
 - [ ] `DATABASE_URL`, `POSTGRES_*` and `REDIS_URL` are removed from the worker's environment in compose and the chart
 - [ ] The dead `taskrunner:queue:*` code and the `kubernetes` backend name are deleted
@@ -305,10 +312,10 @@ Every story: tests go in with it and fail without it; CI is the gate; route-mani
 **Description:** As a workspace owner, I want my agents' code unable to read the platform's model credentials.
 
 **Acceptance Criteria:**
-- [ ] An internal model proxy on the API (§4.4) checks a per-task token scoped to the workspace and run, adds the provider credential, and forwards; it serves the providers the worker uses today
+- [ ] An internal model proxy on the API (§4.4) checks a per-task token scoped to the workspace, run and `task_id`, adds the provider credential, and forwards; it serves the providers the worker uses today
 - [ ] The worker's model clients and the Claude Code CLI use the proxy's base URL; a Claude Code session with tools runs end to end through it
 - [ ] `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are removed from the worker's environment in compose and the chart. If the OAuth token can't be proxied, the PR says so and keeps it as a named exception, with §11-Q17 reopened
-- [ ] A test reads the running worker's environment and finds no provider key; a token for one workspace is refused for another
+- [ ] A test reads the running worker's environment and finds no provider key. Negative tests: a token for one workspace is refused for another, and a token for one task is refused for a sibling task in the same run
 
 #### US-A06: One resumable event transport
 **Description:** As a user watching the board, the canvas or a run, I want updates that survive a reconnect, and never arrive before the change they describe.
