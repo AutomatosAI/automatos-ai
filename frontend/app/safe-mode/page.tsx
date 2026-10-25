@@ -18,15 +18,14 @@ import { useEffect } from 'react'
 
 import { PageHeader } from '@/components/shared/page-header'
 import {
-  requestSafeModeForThisTab,
   SAFE_MODE_ADD_CLASSES,
-  SAFE_MODE_QUERY,
   SAFE_MODE_REMOVE_CLASSES,
   SAFE_MODE_UNPAINT_ID,
   SAFE_MODE_UNPAINT_SCRIPT,
   unpaintThemeBoot,
 } from '@/components/theme-host/theme-host-provider'
 import { Button } from '@/components/ui/button'
+import { requestSafeModeForThisTab, SAFE_MODE_QUERY } from '@/lib/theme-host/safe-mode'
 
 /** Back into the app, still in safe mode. */
 const BACK_HREF = `/chat${SAFE_MODE_QUERY}`

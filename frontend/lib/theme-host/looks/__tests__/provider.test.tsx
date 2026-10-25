@@ -321,6 +321,21 @@ describe('a page that got the base boot (the server missed its boot budget or wa
     expect(motion()).toEqual({ attribute: 'full', variable: '1' })
   })
 
+  it('in safe mode a page with the base boot asks for nothing: no fetch, nothing painted (safe mode loads no theme code)', async () => {
+    pageBoot(baseThemeBoot(INSTALLED_STYLE))
+    window.history.replaceState(null, '', '/chat?safe_mode=themes')
+    try {
+      const bootSource = vi.fn(async () => helloThemeBoot())
+      render(providerFor(sourceOf().storage, { installId: INSTALL_ID, bootSource }))
+      await act(async () => undefined)
+      expect(bootSource).not.toHaveBeenCalled()
+      expect(painted()).toEqual({})
+    } finally {
+      window.history.replaceState(null, '', '/')
+      window.sessionStorage.clear()
+    }
+  })
+
   it('a page whose boot names the theme never asks for it again', async () => {
     pageBoot(helloThemeBoot())
     const bootSource = vi.fn(async () => helloThemeBoot())

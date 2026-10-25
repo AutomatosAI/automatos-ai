@@ -30,6 +30,7 @@ import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { pageInstalledBoot, type InstalledBootSource } from '../boot-client'
 import type { PrepaintTable, ThemeTone } from '../boot-types'
 import type { ThemeTonePolicy } from '../registry-types'
+import { isSafeModeHere } from '../safe-mode'
 import { LookRuntimeBridge, type LookBridgeSource } from './bridge'
 import { applyThemeMotion, clearThemeMotion } from './motion'
 import { bootLookRules, bootNamesTheme, readPageBoot } from './page-boot'
@@ -61,7 +62,8 @@ function useBootRules(themeId: string | null, installId: string | null, bootSour
   useEffect(() => {
     if (themeId === null || kept?.themeId === themeId) return undefined
     const page = readPageBoot()
-    if (installId === null || bootNamesTheme(page)) {
+    // Safe mode asks for no theme code: the page's own boot (a base boot there) is all it reads.
+    if (installId === null || bootNamesTheme(page) || isSafeModeHere()) {
       setKept({ themeId, rules: bootLookRules(page, themeId) })
       return undefined
     }

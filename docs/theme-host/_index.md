@@ -269,8 +269,9 @@ paired browser's device token, with no 300 ms limit, and once per install for th
 same `sanitizeThemeBoot` gate. Its entry becomes the active theme (`frontend/contexts/ui-style-context.tsx`), and its
 look table and presets become the look runtime's rules (`frontend/lib/theme-host/looks/provider.tsx`), so the look
 paints through the runtime's normal paint path, later than first paint but complete. When this fetch fails too, the
-browser logs one warning and the theme runs with no look. The import map stays as the server wrote it: a page that
-got the base boot has no module integrity pins.
+browser logs one warning and the theme runs with no look. In safe mode the browser asks for nothing: safe mode loads
+no theme code, and its base boot is all the page reads (`isSafeModeHere`, `frontend/lib/theme-host/safe-mode.ts`).
+The import map stays as the server wrote it: a page that got the base boot has no module integrity pins.
 
 The boot (`services/themes/serve.py`, `install_boot`) carries the theme's `<html>` classes, its tone, its
 `boot/prepaint.json` table, the browser keys of the member's stored look, its presets, the theme's registry entry and

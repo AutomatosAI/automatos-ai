@@ -35,6 +35,7 @@ import type { InstalledTheme } from '@/lib/api-client'
 import { pageInstalledBoot, type InstalledBootSource } from '@/lib/theme-host/boot-client'
 import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { findThemeEntry, installIdOfStyle, isInstalledThemeStyle } from '@/lib/theme-host/registry'
+import { isSafeModeHere } from '@/lib/theme-host/safe-mode'
 import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import {
   APPEARANCE_DEFAULTS_KEY,
@@ -141,7 +142,8 @@ function useFetchedEntry(style: UiStyle, installedAtLoad: ThemeEntry | null, boo
   const [fetched, setFetched] = useState<ThemeEntry | null>(null)
   const installId = installedAtLoad === null ? installIdOfStyle(style) : null
   useEffect(() => {
-    if (installId === null) return undefined
+    // Safe mode loads no theme code, and asks for none of it: no boot for an install either.
+    if (installId === null || isSafeModeHere()) return undefined
     let live = true
     void bootSource(installId).then((boot) => {
       const entry = installedThemeEntry(style, boot?.entry ?? null)

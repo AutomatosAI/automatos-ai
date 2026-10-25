@@ -209,6 +209,21 @@ describe('PRD-261 W-A6b — an installed theme as the active theme (gap G1)', ()
     expect(bootSource.mock.calls).toEqual([[installIdOfStyle(INSTALLED_PLAY_STYLE)]])
   })
 
+  it('in safe mode a page whose boot carried no entry asks for none (safe mode loads no theme code)', async () => {
+    seenDefaults()
+    window.history.replaceState(null, '', '/chat?safe_mode=themes')
+    try {
+      const bootSource = bootSourceAnswering({ ...baseThemeBoot(INSTALLED_PLAY_STYLE), entry: PLAY_PACKAGE_ENTRY })
+      render(<UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} bootSource={bootSource}><Probe /></UiStyleProvider>)
+      await act(async () => undefined)
+      expect(bootSource).not.toHaveBeenCalled()
+      expect(screen.getByTestId('theme').textContent).toBe('none')
+    } finally {
+      window.history.replaceState(null, '', '/')
+      window.sessionStorage.clear()
+    }
+  })
+
   it('a page whose boot carried the entry never asks for it again', async () => {
     seenDefaults()
     const bootSource = bootSourceAnswering(null)
