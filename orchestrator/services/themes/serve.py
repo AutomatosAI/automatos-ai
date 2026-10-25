@@ -54,13 +54,24 @@ against the theme's checked ``looks/schema.json``: the default look first, the r
 order, at most ``BOOT_PRESETS_MAX`` of at most ``BOOT_PRESET_MAX_BYTES`` each. A preset that is
 too big, unreadable or fails the schema is dropped and logged. ``prepaint`` may carry the tone
 rule (``css_value.tone_rule_errors``), checked again with the rest of the table on read.
+
+Every boot asks first whether the install may run (``may_run``, ``revocations.is_disabled``), and
+only a boot that runs reads its look files (``boot_files``). A stored package's files never change
+(each is hashed into its digest and re-hashed on read), so their checked contents are kept in
+memory by digest and storage prefix, for at most ``BOOT_FILES_KEPT`` packages, the least recently
+booted dropped first: a warm boot reads nothing from storage. Only a boot whose every listed look
+file passed its check is kept; one that refused a file reads and checks them all again next time.
+A cold boot reads its look files on threads at once (at most ``BOOT_READ_THREADS``), then checks
+them in order as before, so it waits about one storage round trip instead of one per file.
 """
 
 from __future__ import annotations
 
 import base64
+import contextvars
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from uuid import UUID
 
@@ -69,6 +80,7 @@ from sqlalchemy import or_
 from config import config
 from core.models.themes import ThemeInstallation, ThemePackage
 from core.storage import get_s3_client
+from services.themes.bounded_cache import BoundedCache
 from services.themes.choices import is_private
 from services.themes.contract import BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
@@ -118,6 +130,14 @@ LOOK_POINTER_SUFFIX = ".current"
 LOOK_SCOPE_SEPARATOR = ":"
 # The boot fields theme_looks answers (``looks``: A-19c, host 1.1.0).
 LOOK_BOOT_FIELDS = ("lookStorage", "lookGuard", "looks")
+# How many stored packages' checked boot files stay in memory (boot_files); the least recently
+# booted goes first. Each is one package's parsed prepaint table and looks (HUD 1.0.1's files:
+# about 20 KB of JSON).
+BOOT_FILES_KEPT = 32
+# A cold boot reads its look files on at most this many threads at once (prepaint table, schema and
+# up to BOOT_PRESETS_MAX presets): under the S3 client's default pool of 10 connections.
+BOOT_READ_THREADS = 8
+BOOT_READ_THREAD_NAME = "theme-boot-read"
 
 # (storage prefix, package path) -> the stored bytes, or None when the object is gone.
 FileReader = Callable[[str, str], Optional[bytes]]
@@ -136,6 +156,17 @@ class BootTarget(NamedTuple):
 
     install: ThemeInstallation
     package: ThemePackage
+
+
+class BootFiles(NamedTuple):
+    """What a running boot carries from a package's look files: the prepaint table and ``theme_looks``' answer."""
+
+    prepaint: Optional[Dict[str, Any]]
+    looks: Dict[str, Any]
+
+
+# (digest, storage prefix) -> BootFiles, kept only when every listed look file passed its check.
+_boot_files: BoundedCache[BootFiles] = BoundedCache(BOOT_FILES_KEPT)
 
 
 def file_cache_seconds() -> int:
@@ -397,11 +428,15 @@ def _checked_preset(schema: LookSchema, path: str, data: bytes) -> Tuple[Optiona
     return document, None
 
 
+def _listed_too_big(listed: Any) -> bool:
+    """A preset whose file-list row says it is over ``BOOT_PRESET_MAX_BYTES``: the boot leaves it out unread."""
+    size = listed.get("size") if isinstance(listed, dict) else None
+    return isinstance(size, int) and size > BOOT_PRESET_MAX_BYTES
+
+
 def _boot_preset(package: ThemePackage, schema: LookSchema, path: str, reader: FileReader) -> Optional[Dict[str, Any]]:
     """One preset as the boot carries it (the stored look document), or None, logged, when it can't ride."""
-    listed = (package.file_manifest or {}).get(path)
-    size = listed.get("size") if isinstance(listed, dict) else None
-    if isinstance(size, int) and size > BOOT_PRESET_MAX_BYTES:
+    if _listed_too_big((package.file_manifest or {}).get(path)):
         logger.error("Package %s's preset %s is over %d bytes: its boot leaves it out", package.id, path, BOOT_PRESET_MAX_BYTES)
         return None
     try:
@@ -415,24 +450,36 @@ def _boot_preset(package: ThemePackage, schema: LookSchema, path: str, reader: F
     return document
 
 
-def boot_looks(package: ThemePackage, schema: LookSchema, reader: FileReader) -> Optional[Dict[str, Any]]:
-    """The boot's ``looks``: ``{defaultLook, presets}``, or None when no preset survives its check.
+def boot_looks(package: ThemePackage, schema: LookSchema, reader: FileReader) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """The boot's ``looks`` (``{defaultLook, presets}``, None when no preset survives its check), and
+    whether every preset it tried survived (``boot_files`` keeps only a boot that dropped none).
 
     The default look is the manifest's ``look`` when its preset survives, else the first preset
     that does (``looks.package_default_look``'s rule: a theme without ``look`` starts on its first
     preset by file name). Presets past ``BOOT_PRESETS_MAX`` are left out and logged.
     """
     presets: List[Dict[str, Any]] = []
+    whole = True
     for path in _boot_preset_order(package):
         if len(presets) == BOOT_PRESETS_MAX:
             logger.error("Package %s has more than %d presets: its boot carries the first %d", package.id, BOOT_PRESETS_MAX, BOOT_PRESETS_MAX)
             break
         preset = _boot_preset(package, schema, path, reader)
+        whole = whole and preset is not None
         if preset is not None:
             presets.append(preset)
-    if not presets:
-        return None
-    return {"defaultLook": presets[0]["id"], "presets": presets}
+    looks = {"defaultLook": presets[0]["id"], "presets": presets} if presets else None
+    return looks, whole
+
+
+def _read_looks(package: ThemePackage, reader: FileReader) -> Tuple[Dict[str, Any], bool]:
+    """``theme_looks``' answer, and whether every look file it read passed its check."""
+    schema = theme_look_schema(package, reader)
+    if schema is None:
+        return dict.fromkeys(LOOK_BOOT_FIELDS), LOOK_SCHEMA_PATH not in (package.file_manifest or {})
+    looks, whole = boot_looks(package, schema, reader)
+    guard = {"schema": schema.look_schema, "iface": schema.interface} if schema.interface else None
+    return {"lookStorage": look_storage(_theme_id(package)), "lookGuard": guard, "looks": looks}, whole
 
 
 def theme_looks(package: ThemePackage, reader: FileReader) -> Dict[str, Any]:
@@ -440,13 +487,78 @@ def theme_looks(package: ThemePackage, reader: FileReader) -> Dict[str, Any]:
 
     The guard is the schema's look header; one with no interface has no guard (the boot script checks
     both), so any stored look that fits the prepaint table paints, as the keys are this theme's own.
-    ``looks`` is ``boot_looks``' answer (A-19c).
+    ``looks`` is ``boot_looks``' answer (A-19c). Read from storage on every call; a boot reads
+    them through ``boot_files``, which keeps them.
     """
-    schema = theme_look_schema(package, reader)
-    if schema is None:
-        return dict.fromkeys(LOOK_BOOT_FIELDS)
-    guard = {"schema": schema.look_schema, "iface": schema.interface} if schema.interface else None
-    return {"lookStorage": look_storage(_theme_id(package)), "lookGuard": guard, "looks": boot_looks(package, schema, reader)}
+    return _read_looks(package, reader)[0]
+
+
+def boot_files(package: ThemePackage, reader: FileReader) -> BootFiles:
+    """The package's checked prepaint table and look fields, from memory once a boot of it kept them.
+
+    Kept by digest and storage prefix (a stored package's files never change), and only when every
+    listed look file passed its check, so a refused file is read and checked again by the next
+    boot. Ask ``may_run`` and ``is_disabled`` first: this answers what a package draws, not who may
+    draw it. Raises :class:`ThemeFileMissing` for a refused prepaint table and
+    :class:`ThemeStorageUnavailable` when storage fails, keeping nothing.
+    """
+    key = (package.digest, package.storage_prefix)
+    kept = _boot_files.get(key)
+    if kept is not None:
+        return kept
+    files, whole = _read_boot_files(package, reader)
+    if whole:
+        _boot_files.put(key, files)
+    return files
+
+
+def _boot_read_paths(package: ThemePackage) -> List[str]:
+    """The look files a boot reads when each passes its check: the prepaint table, the schema, the presets that ride."""
+    listed = package.file_manifest or {}
+    head = [path for path in (PREPAINT_PATH, LOOK_SCHEMA_PATH) if path in listed]
+    if LOOK_SCHEMA_PATH not in listed:
+        return head
+    presets = [path for path in _boot_preset_order(package) if not _listed_too_big(listed.get(path))]
+    return head + presets[:BOOT_PRESETS_MAX]
+
+
+def _read_ahead(prefix: str, reads: Mapping[str, Future[Optional[bytes]]], reader: FileReader) -> FileReader:
+    """A reader answering a path read ahead from its read (raising what that read raised), any other from ``reader``."""
+
+    def read(storage_prefix: str, path: str) -> Optional[bytes]:
+        ahead = reads.get(path) if storage_prefix == prefix else None
+        return ahead.result() if ahead is not None else reader(storage_prefix, path)
+
+    return read
+
+
+def _checked_boot_files(package: ThemePackage, reader: FileReader) -> Tuple[BootFiles, bool]:
+    """The prepaint table and look fields read through ``reader``, and whether every listed look file passed."""
+    prepaint = theme_prepaint(package, reader)
+    looks, whole = _read_looks(package, reader)
+    return BootFiles(prepaint=prepaint, looks=looks), whole
+
+
+def _read_boot_files(package: ThemePackage, reader: FileReader) -> Tuple[BootFiles, bool]:
+    """The package's checked boot files, and whether every listed look file passed its check.
+
+    The look files are read ahead on threads at once, each read with the caller's context; the
+    checks then run on this thread in their order, so a read's error is raised where its file is
+    checked, and one the checks never reach (a preset after a refused prepaint table) changes no
+    answer (``read_stored_file`` has logged it).
+    """
+    paths = _boot_read_paths(package)
+    if not paths:
+        return _checked_boot_files(package, reader)
+    prefix = package.storage_prefix
+    with ThreadPoolExecutor(max_workers=min(len(paths), BOOT_READ_THREADS), thread_name_prefix=BOOT_READ_THREAD_NAME) as pool:
+        reads = {path: pool.submit(contextvars.copy_context().run, reader, prefix, path) for path in paths}
+        return _checked_boot_files(package, _read_ahead(prefix, reads, reader))
+
+
+def forget_boot_files() -> None:
+    """Drop every kept boot (tests; a process restart does the same)."""
+    _boot_files.clear()
 
 
 def theme_entry(package: ThemePackage) -> Dict[str, Any]:
@@ -491,21 +603,24 @@ def theme_boot(
 
 
 def install_boot(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Dict[str, Any]:
-    """The first-paint data of an install: the theme's own, or the base boot when it may not run."""
+    """The first-paint data of an install: the theme's own, or the base boot when it may not run.
+
+    Whether it may run is asked on every boot, before any look file is read or taken from memory.
+    """
     package = target.package
     manifest = package.manifest or {}
     if not may_run(db, membership, target.install, package) or is_disabled(db, package):
         return base_boot(manifest)
     try:
-        prepaint = theme_prepaint(package, reader)
+        files = boot_files(package, reader)
     except ThemeFileMissing:
         return base_boot(manifest)
-    return theme_boot(package, prepaint, theme_looks(package, reader))
+    return theme_boot(package, files.prepaint, files.looks)
 
 
 __all__ = [
-    "BootTarget", "FileReader", "ThemeFileMissing", "ThemeStorageUnavailable", "authorised_package", "base_boot",
-    "belongs_to_install", "boot_looks", "boot_target", "file_cache_seconds", "install_boot", "integrity_value", "is_private",
-    "look_storage", "may_run", "module_integrity", "module_url", "read_stored_file", "theme_boot", "theme_entry",
-    "theme_look_schema", "theme_looks", "theme_prepaint", "verified_file",
+    "BootFiles", "BootTarget", "FileReader", "ThemeFileMissing", "ThemeStorageUnavailable", "authorised_package", "base_boot",
+    "belongs_to_install", "boot_files", "boot_looks", "boot_target", "file_cache_seconds", "forget_boot_files", "install_boot",
+    "integrity_value", "is_private", "look_storage", "may_run", "module_integrity", "module_url", "read_stored_file",
+    "theme_boot", "theme_entry", "theme_look_schema", "theme_looks", "theme_prepaint", "verified_file",
 ]

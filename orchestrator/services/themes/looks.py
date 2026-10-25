@@ -24,7 +24,6 @@ package is installed.
 from __future__ import annotations
 
 import logging
-import threading
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from uuid import UUID
 
@@ -32,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.models.themes import ThemeInstallation, ThemeLook, ThemePackage
+from services.themes.bounded_cache import BoundedCache
 from services.themes.contract import ThemeError, echo, parse_json, theme_error
 from services.themes.digest import sha256_hex
 from services.themes.look_schema import (
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 MAX_SAVED_LOOKS = 100
 BODY_FIELDS = ("looks", "active")
 # Checked looks/schema.json documents, by the sha256 of the file (content-addressed, so safe
-# to share between packages and workspaces).
+# to share between packages and workspaces); the least recently used goes first.
 SCHEMA_CACHE_SIZE = 64
 MARKETPLACE_OWNER = "marketplace"
 
@@ -87,26 +87,7 @@ class StoredLooks(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-class _SchemaCache:
-    """A small bounded map of checked schemas by file sha256, safe across threadpool workers."""
-
-    def __init__(self, size: int) -> None:
-        self._size = size
-        self._items: Dict[str, LookSchema] = {}
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> Optional[LookSchema]:
-        with self._lock:
-            return self._items.get(key)
-
-    def put(self, key: str, schema: LookSchema) -> None:
-        with self._lock:
-            if key not in self._items and len(self._items) >= self._size:
-                self._items.pop(next(iter(self._items)))
-            self._items[key] = schema
-
-
-_schema_cache = _SchemaCache(SCHEMA_CACHE_SIZE)
+_schema_cache: BoundedCache[LookSchema] = BoundedCache(SCHEMA_CACHE_SIZE)
 
 
 def _stored_schema_bytes(package: ThemePackage, expected_sha: str) -> bytes:

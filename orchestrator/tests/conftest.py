@@ -104,6 +104,22 @@ def _reset_composio_lookup_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_theme_boot_files():
+    """A theme package's checked boot files are kept in memory by digest and storage
+    prefix (services/themes/serve.py boot_files), and many tests store different bytes
+    under one package's digest, so no test may boot from another test's kept files.
+    Like the caches above, only a module already imported."""
+    def _reset():
+        forget = getattr(sys.modules.get("services.themes.serve"), "forget_boot_files", None)
+        if callable(forget):
+            forget()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _generation_guard_reads_clean(request, monkeypatch):
     """PRD-264 ART5-1: every image, video and voice path asks the generation guard
     (core/generation_guard.py) before it calls a provider, and the guard's read is a

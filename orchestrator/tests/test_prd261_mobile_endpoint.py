@@ -124,7 +124,7 @@ def world(monkeypatch):
     db.commit()
     stored = {}
     monkeypatch.setattr(looks_service, "read_stored_file", lambda prefix, path: stored.get((prefix, path)))
-    monkeypatch.setattr(looks_service, "_schema_cache", looks_service._SchemaCache(8))
+    monkeypatch.setattr(looks_service, "_schema_cache", looks_service.BoundedCache(8))
     try:
         yield SimpleNamespace(db=db, stored=stored, reader=lambda prefix, path: stored.get((prefix, path)))
     finally:
