@@ -16,6 +16,9 @@ const api = vi.hoisted(() => ({
   setDefaultTheme: vi.fn(),
   rollbackTheme: vi.fn(),
   uninstallTheme: vi.fn(),
+  // renderWithQuery mounts the app's ChooseInstallProvider, whose opt-in dialog binds these when it mounts.
+  optInTheme: vi.fn(),
+  putThemeChoice: vi.fn(),
 }))
 
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
