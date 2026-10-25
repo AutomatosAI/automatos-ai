@@ -7,11 +7,12 @@ import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
-import { StudioSidebar } from './studio-sidebar'
+import { StudioSidebar, type StudioSidebarProps } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
+import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
 
@@ -62,6 +63,15 @@ function useStudioSidebarCollapsed(): [boolean, () => void] {
   return [collapsed, toggle]
 }
 
+/**
+ * Studio's rail, its workspace card naming the current workspace. With no workspace (none loaded
+ * yet, or no provider) or a blank name, the card keeps its default.
+ */
+function StudioRail(props: Omit<StudioSidebarProps, 'workspaceName'>) {
+  const workspaceName = useWorkspaceOptional()?.workspace?.name?.trim() || undefined
+  return <StudioSidebar {...props} workspaceName={workspaceName} />
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Studio shell — render the CD round-4 chrome (sidebar + header)
 // when .studio is active and we're on desktop. Mobile keeps the existing
@@ -75,7 +85,7 @@ function StudioDesktopShell({ children, fullBleed, autoWidget }: DesktopShellPro
   // so the inset comes out of its height.
   return (
     <div className="sh-shell safe-bottom">
-      <StudioSidebar collapsed={collapsed} onToggle={toggleCollapsed} />
+      <StudioRail collapsed={collapsed} onToggle={toggleCollapsed} />
       <div className="sh-main">
         <StudioHeader />
         {fullBleed ? (
@@ -191,7 +201,7 @@ function ClassicShell({ children, fullBleed, autoWidget, isMobileLayout, isStudi
             }
           >
             {isStudio ? (
-              <StudioSidebar />
+              <StudioRail />
             ) : (
               <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
             )}
