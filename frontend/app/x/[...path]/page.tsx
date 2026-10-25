@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { AiLabelGate, type AiLabelPlacement } from '@/components/ai-label/ai-label'
 import { MainLayout } from '@/components/layout/main-layout'
 import { ThemeSlotRoute } from '@/components/theme-host/theme-slot-route'
+import { VoiceProvider } from '@/components/voice/voice-provider'
 import { THEME_ROUTE_PATTERN } from '@/lib/theme-host/constants'
 import { isInstalledThemeStyle } from '@/lib/theme-host/registry'
 import { CHAT_HREF } from '@/lib/ticket-links'
@@ -29,6 +30,9 @@ interface ThemeRoutePageProps {
  * theme's frame and route (installed Play's Conversations is a chat surface). Every theme route gets
  * it: a manifest's `uses` is checked by lib/theme-host/package-manifest.ts but not handed to the
  * host, so the host can't yet tell which routes use the `chat` area, and labels them all.
+ *
+ * Theme voice: the host voice provider sits inside the gate, around the theme's frame, so a theme's chat route and
+ * its frame read the same voice session as the chat page does (app/chat/layout.tsx).
  */
 export default async function ThemeRoutePage({ params }: ThemeRoutePageProps) {
   const { path } = await params
@@ -38,9 +42,11 @@ export default async function ThemeRoutePage({ params }: ThemeRoutePageProps) {
   if (!isInstalledThemeStyle(parseUiStyle(store.get(UI_STYLE_COOKIE)?.value))) redirect(CHAT_HREF)
   return (
     <AiLabelGate placement={THEME_ROUTE_LABEL_PLACEMENT}>
-      <MainLayout fullBleed>
-        <ThemeSlotRoute route={route} />
-      </MainLayout>
+      <VoiceProvider>
+        <MainLayout fullBleed>
+          <ThemeSlotRoute route={route} />
+        </MainLayout>
+      </VoiceProvider>
     </AiLabelGate>
   )
 }

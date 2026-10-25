@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from 'react'
 import { AiLabelGate } from '@/components/ai-label/ai-label'
 import { DiscussionBar } from '@/components/chatbot/discussion-bar'
 import { ThemeSlot } from '@/components/theme-host/theme-slot'
+import { VoiceProvider } from '@/components/voice/voice-provider'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
 /** Links into a surface only the core chat has: the Code canvas (repo), a session's runtime, plan mode. */
@@ -14,13 +15,17 @@ const CORE_CHAT_PARAMS = ['repo', 'runtime', 'mode']
  * PRD-264 EUAI-11a: the gate draws the host's AI label after the page, outside ThemeSlot (the
  * theme's page slot), so the default chat (with Mission Mode), Play's chat and any theme's /chat
  * all show it, and none draws a second copy.
+ * Theme voice: the host voice provider sits inside the gate, around the page's slot, so the default chat and a
+ * theme's /chat read the same voice session (Studio's Live strip, a theme's voice controls).
  */
 export default function ChatLayout({ children }: { children: ReactNode }) {
   return (
     <AiLabelGate>
-      <ThemeSlot page={CHAT_HREF} keepCorePage={CORE_CHAT_PARAMS}>
-        {children}
-      </ThemeSlot>
+      <VoiceProvider>
+        <ThemeSlot page={CHAT_HREF} keepCorePage={CORE_CHAT_PARAMS}>
+          {children}
+        </ThemeSlot>
+      </VoiceProvider>
       <Suspense fallback={null}>
         <DiscussionBar />
       </Suspense>

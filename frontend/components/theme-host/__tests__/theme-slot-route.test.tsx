@@ -41,6 +41,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 import ThemeRoutePage from '@/app/x/[...path]/page'
 import { AiLabelGate } from '@/components/ai-label/ai-label'
 import { MainLayout } from '@/components/layout/main-layout'
+import { VoiceProvider } from '@/components/voice/voice-provider'
 import {
   FIXTURE_THEME_ENTRY,
   FIXTURE_THEME_ROUTE,
@@ -160,7 +161,10 @@ describe('app/x/[...path]/page.tsx', () => {
     // PRD-264 EUAI-11a: the gate wraps the theme's frame, so the label sits outside it, on the left
     expect(gate.type).toBe(AiLabelGate)
     expect(gate.props.placement).toBe('bottom-left')
-    const page = gate.props.children
+    // Theme voice: the host voice provider wraps the frame inside the gate, as on the chat page
+    const voice = gate.props.children
+    expect(voice.type).toBe(VoiceProvider)
+    const page = voice.props.children
     expect(page.type).toBe(MainLayout)
     expect(page.props.fullBleed).toBe(true)
     expect(page.props.children).toEqual(<ThemeSlotRoute route={path.join('/')} />)
