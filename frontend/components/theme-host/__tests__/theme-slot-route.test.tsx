@@ -1,13 +1,16 @@
 /**
  * PRD-261 A-04b — a theme's own routes at /x/<route> (registerRoute). The server page answers the
- * 404 for an address no theme of the style can serve (a route outside the pattern, Classic, Studio,
- * a style cookie that names no theme this build knows, which reads as the default style) and
- * otherwise, under an installed theme, renders ThemeSlotRoute full bleed inside MainLayout, which
- * sits inside the host's AI label gate (PRD-264 EUAI-11a). So /x/conversations is a 404 under
- * Classic and Studio: no theme is compiled into the app (A-19f1).
+ * 404 for an address no theme can declare (a route outside the pattern), sends the member to /chat
+ * under a style that serves no route (Classic, Studio, a style cookie that names no theme this build
+ * knows, which reads as the default style) and otherwise, under an installed theme, renders
+ * ThemeSlotRoute full bleed inside MainLayout, which sits inside the host's AI label gate (PRD-264
+ * EUAI-11a). So Play's /x/conversations, left open after a switch to Studio, opens the chat, not a
+ * 404: no theme is compiled into the app (A-19f1).
  * ThemeSlotRoute renders the active theme's route from the theme host (the fixture theme's
  * `fixture-route`, PRD-261 A-19b, and an installed theme's), at any width, nothing while an
- * installed theme loads, and calls notFound() when nothing is registered by that name.
+ * installed theme loads, sends the member to /chat for a route the active style doesn't serve (no
+ * theme, or a theme that neither declares nor registered it: Play's route under HUD), and calls
+ * notFound() only for a route the active theme declares but never registered (a defect of the theme).
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -52,6 +55,8 @@ import { OuterBoundary } from './next-router-errors'
 
 const INSTALLED_STYLE = 'theme:install:00000000-0000-4000-8000-0000000a04b1'
 const NOT_FOUND_DIGEST = /^NEXT_HTTP_ERROR_FALLBACK;404/
+/** next/navigation redirect('/chat'): `NEXT_REDIRECT;<replace|push>;/chat;307;`. */
+const TO_CHAT_DIGEST = /^NEXT_REDIRECT;(replace|push);\/chat;307;$/
 /** A style that names no theme this build knows: it reads as the default style, Studio. */
 const NO_THEME_STYLE = 'theme:install:not-a-uuid'
 
@@ -77,7 +82,7 @@ function installedHost(status: 'active' | 'loading'): HostValue {
   }
 }
 
-/** ThemeSlotRoute for `route`, under `host` when given, with a boundary standing in for Next's 404. */
+/** ThemeSlotRoute for `route`, under `host` when given, with a boundary standing in for Next's 404 and redirect. */
 function renderRoute(route: string, host: ThemeHostContextValue | null = null) {
   const onCaught = vi.fn()
   const tree = (
@@ -125,12 +130,21 @@ describe('ThemeSlotRoute', () => {
   })
 
   it.each([
-    ['a route the theme did not register', FIXTURE_THEME_ENTRY, true, 'hello'],
-    ['no theme (Classic or Studio)', null, false, 'conversations'],
-  ])('is the 404 for %s', (_label, entry, themed, route) => {
+    ['no theme (Classic or Studio): a switch from Play on /x/conversations', null, null, 'conversations'],
+    ["a theme that neither declares nor registered it (Play's route under HUD)", FIXTURE_THEME_ENTRY, fixtureThemeHost(), 'conversations'],
+    ['an installed theme with no entry that did not register it', null, installedHost('active'), 'conversations'],
+    ['a theme that failed or is in safe mode (no registrations)', FIXTURE_THEME_ENTRY, fixtureThemeHost('failed'), FIXTURE_THEME_ROUTE],
+  ])('sends the member to /chat, not the 404, for %s', (_label, entry, host, route) => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     state.entry = entry
-    const onCaught = renderRoute(route, themed ? fixtureThemeHost() : null)
+    const onCaught = renderRoute(route, host)
+    expect(onCaught).toHaveBeenCalledWith(expect.objectContaining({ digest: expect.stringMatching(TO_CHAT_DIGEST) }))
+  })
+
+  it('is the 404 for a route the active theme declares but its code never registered (a defect of the theme)', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    state.entry = FIXTURE_THEME_ENTRY
+    const onCaught = renderRoute(FIXTURE_THEME_ROUTE, fixtureThemeHost('active', { routes: new Map() }))
     expect(onCaught).toHaveBeenCalledWith(expect.objectContaining({ digest: expect.stringMatching(NOT_FOUND_DIGEST) }))
   })
 })
@@ -158,9 +172,18 @@ describe('app/x/[...path]/page.tsx', () => {
     ['no cookie (the default style)', undefined, ['conversations']],
     ['a style that names no theme this build knows', NO_THEME_STYLE, [FIXTURE_THEME_ROUTE]],
     ['another style that names no theme', 'theme:other', ['conversations']],
+    ['Studio, a nested route', 'studio', ['hello', 'there']],
+  ])('sends the member to /chat on the server, not the 404, under %s', async (_label, style, path) => {
+    state.style = style
+    await expect(ThemeRoutePage(params(...path))).rejects.toMatchObject({ digest: expect.stringMatching(TO_CHAT_DIGEST) })
+  })
+
+  it.each([
     ['an installed theme, a route outside the pattern', INSTALLED_STYLE, ['Hello']],
     ['an installed theme, five segments', INSTALLED_STYLE, ['a', 'b', 'c', 'd', 'e']],
-  ])('answers the 404 on the server under %s', async (_label, style, path) => {
+    ['Studio, a route outside the pattern', 'studio', ['Hello']],
+    ['no cookie, five segments', undefined, ['a', 'b', 'c', 'd', 'e']],
+  ])('answers the 404 on the server for an address no theme can declare: %s', async (_label, style, path) => {
     state.style = style
     await expect(ThemeRoutePage(params(...path))).rejects.toMatchObject({ digest: expect.stringMatching(NOT_FOUND_DIGEST) })
   })

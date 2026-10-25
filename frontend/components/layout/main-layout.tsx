@@ -121,7 +121,6 @@ const PAGE_BY_ROUTE: ReadonlyArray<readonly [string, string]> = [
   ['/settings', 'settings'],
   ['/team', 'team'],
   ['/chat', 'chat'],
-  ['/conversations', 'chat'],
   ['/x/conversations', 'chat'],
   ['/looks', 'looks'],
 ]
