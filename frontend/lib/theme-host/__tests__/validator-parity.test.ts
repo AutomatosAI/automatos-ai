@@ -44,8 +44,10 @@ import sharedModules from '../shared-modules.json'
 const REPO_ROOT = path.resolve(__dirname, '../../../..')
 const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
-// PB-3: the host and SDK version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
+// PB-3: the host contract's version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
 const CONTRACT_VERSION = '1.1.0'
+// Theme voice (C5): the SDK moved to 1.2.0 for its voice area; the host contract stayed at CONTRACT_VERSION.
+const SDK_CONTRACT_VERSION = '1.2.0'
 // PB-32: the mobile block joined host 1.1.0, so a theme with one admits no older host (a later bump keeps this).
 const MOBILE_BLOCK_HOST = '1.1.0'
 // A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
@@ -251,9 +253,9 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(sharedModules.sdkVersion).toBe(SDK_VERSION)
   })
 
-  it('is at 1.1.0: the storage area and the boot tone rule are new (PB-3, D7 QB-3)', () => {
+  it('is at host 1.1.0 (the boot tone rule, PB-3) and SDK 1.2.0 (the voice area, theme voice C5)', () => {
     expect(THEME_HOST_VERSION).toBe(CONTRACT_VERSION)
-    expect(SDK_VERSION).toBe(CONTRACT_VERSION)
+    expect(SDK_VERSION).toBe(SDK_CONTRACT_VERSION)
   })
 
   it('reserves the same <html> classes, and neither side gives one to a theme id (A-20)', () => {

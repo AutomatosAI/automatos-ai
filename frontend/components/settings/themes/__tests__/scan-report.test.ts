@@ -62,6 +62,9 @@ function storedCheckKeys(): string[] {
 const UNKNOWN_NAMES = "The theme imports names this host's SDK doesn't export, so its code can't load: useSecretThing."
 const STALE_CLONES =
   '1 cloned page(s) copied a core file this host has changed since, so the clone may miss fixes and features the core page has now.'
+// audio_capture.py PROBLEM, as the server formats it for a bundle that opens the microphone itself (theme voice).
+const AUDIO_PROBLEM =
+  "The code uses getUserMedia itself, which opens the microphone, in dist/entry.js. Use the SDK's voice area instead."
 const CONTRAST_NOT_RUN =
   'Not measured: the package declares no text and ground colour pairs for its looks, so the server has nothing to check AA contrast against.'
 
@@ -160,14 +163,25 @@ describe('the words match the server (review_stage.py, scan.py)', () => {
   it('names every check the review stage or the early scan can store', () => {
     const keys = storedCheckKeys()
     expect(keys).toEqual(
-      expect.arrayContaining(['sizes', 'cssScope', 'looks', 'contrast', 'uses', 'clonedFrom', 'llm', 'automated']),
+      expect.arrayContaining(['sizes', 'cssScope', 'looks', 'contrast', 'uses', 'audioCapture', 'clonedFrom', 'llm', 'automated']),
     )
     for (const key of keys) {
       expect(CHECK_LABELS[key], key).toBeTruthy()
       expect(CHECK_LABELS[key]).not.toBe(key)
     }
     expect(CHECK_LABELS.uses).toBe('SDK areas')
+    expect(CHECK_LABELS.audioCapture).toBe('Microphone and speech')
     expect(CHECK_LABELS.clonedFrom).toBe('Cloned core pages')
+  })
+
+  it("shows the audio capture check's error and its sentence, so the uploader sees why the theme is blocked", () => {
+    const audioCapture = { level: 'error', status: 'checked', apis: ['getUserMedia'], problems: [AUDIO_PROBLEM], findings: [] }
+    const report = memberView('blocked', { audioCapture })
+    expect(checkOf(report, 'audioCapture')).toMatchObject({ result: 'error', label: 'Microphone and speech', problems: [AUDIO_PROBLEM] })
+    expect(hiddenCheckNote('blocked', scanChecksOf(report))).toBe(PRIVATE_INSTALLS_ANYWAY)
+    expect(pySource('audio_capture.py')).toContain(
+      'PROBLEM = "The code uses {api} itself, which {does}, in {files}. Use the SDK\'s voice area instead."',
+    )
   })
 
   it('labels every level and verdict the review stage gives, and the not_run verdict of an older row', () => {

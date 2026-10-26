@@ -177,6 +177,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | `looks.useLook`, `looks.saveLook`, `looks.listLooks`, `looks.exportLook`, `looks.importLook` | The active look and the saved looks; Play's own `lib/looks` store is the look runtime the host mounts from A-13c (PA-9). |
 | `assets.assetUrl` | The URL of a file in the theme's package (Play's mascot clips are in Play's package since A-16b). |
 | `storage.readThemeState`, `storage.writeThemeState`, `storage.removeThemeState`, `storage.subscribeThemeState`, `storage.useThemeState`, `storage.THEME_STATE_LIMITS` | Small per-user state a theme keeps through the host instead of the browser's storage (E3b, SDK 1.1.0): JSON values by key, scoped per theme and per account (`within: 'workspace'`: per account in this workspace), in this browser or for the tab's session (`lifetime`), within the caps. Scoped, not isolated: every theme runs on the host's origin, so the kit's review rules and core's review stage are the controls. Play's mascot pause, seen record and celebrations port onto it (E3g). |
+| `voice.VoiceButton`, `voice.useVoice`, `voice.readVoiceLevels` | Talking to Auto by voice through the host's one session per tab (theme voice, TV-C5, SDK 1.2.0): Auto Live on the plans that have it, web quick-ask (hold to talk) everywhere. `VoiceButton` is drawn by the host (`components/voice/voice-button.tsx`): the press (a hold or a toggle, and its hotkey), the microphone prompt, the "AI voice assistant" caption and the stop control in the protected surface `voice-control`, mute and the device for a call, a failure with Try again; a theme places and styles it by its `data-voice-*` attributes and `--voice-button-*` custom properties. `useVoice` is the session as a frozen snapshot with `stop()`; `readVoiceLevels` the levels for an animation frame (a waveform, a mascot). A theme never captures audio itself: core's review blocks getUserMedia, SpeechRecognition and speechSynthesis in a theme's code (`services/themes/audio_capture.py`). |
 
 ## Host-owned AI label (PRD-264 EUAI-11a, EUAI-11b)
 
@@ -201,9 +202,12 @@ off, and no manifest field, SDK name or setting does either.
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
   seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
   (`frontend/lib/ai-label/visibility.ts`). While it isn't, every composer inside `AiLabelFence` is disabled
-  (the default chat's input through `FencedMultimodalInput`, Play's message box) and the chat says "This theme
-  hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps the composer only, never a
-  whole chat screen, so the approval cards in a reply stay clickable (they are protected surfaces).
+  (the default chat's input, `MultimodalInput`: its box and every control but the voice button; Play's message box)
+  and the chat says "This theme hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps
+  the composer only, never a whole chat screen, so the approval cards in a reply stay clickable (they are protected
+  surfaces). Voice is never fenced: the voice button (Studio's beside Send, `components/chatbot/composer-voice.tsx`,
+  and a theme's `voice.VoiceButton`) carries its own "AI voice assistant" caption, and Auto says it is an AI once
+  per session.
 - **A theme's composer** sits inside `cards.AiLabelFence`, the host's fence itself (W-A5: Play's message box
   imports it from the SDK), so a theme's chat pauses the same way the host's does.
 - **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:

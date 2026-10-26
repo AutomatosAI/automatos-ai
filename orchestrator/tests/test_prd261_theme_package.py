@@ -382,9 +382,10 @@ def test_an_encrypted_member_is_refused():
 
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
-    # PB-3 (D7, QB-3): 1.1.0 for the storage area (SDK) and the boot tone rule and looks presets (host).
+    # PB-3 (D7, QB-3): host 1.1.0 for the boot tone rule and looks presets. Theme voice (C5): SDK 1.2.0 for its
+    # voice area, with the host contract unchanged.
     assert contract.THEME_HOST_VERSION == "1.1.0"
-    assert contract.SDK_VERSION == "1.1.0"
+    assert contract.SDK_VERSION == "1.2.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
     assert contract.RESERVED_HTML_CLASSES == HOST_HTML_CLASSES
     assert not hasattr(contract, "HTML_CLASS_OWNERS")  # A-20: no theme's id keeps a reserved class

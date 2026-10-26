@@ -313,6 +313,43 @@
       }
     },
     {
+      "name": "SDK voice calls declared in uses",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, VoiceButton, readVoiceLevels, useVoice } from '@automatos/theme-sdk'\n\nexport const talk = () => [VoiceButton, useVoice, readVoiceLevels]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK voice calls without voice in uses",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, VoiceButton, readVoiceLevels, useVoice } from '@automatos/theme-sdk'\n\nexport const talk = () => [VoiceButton, useVoice, readVoiceLevels]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
       "name": "a host with no SDK name list",
       "manifestSet": {
         "uses": [

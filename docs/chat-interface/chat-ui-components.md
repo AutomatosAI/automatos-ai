@@ -52,7 +52,7 @@ The chat frontend is structured into modular components managing state transitio
 |-----------|------|---------|
 | `Chat` | [frontend/app/chat/page.tsx:9-9]() | Main container managing chat sessions, tabs, and layout integration. |
 | `Message` | [frontend/components/chatbot/message.tsx:41-53]() | Individual message renderer supporting Markdown, images, code blocks, and tool results. |
-| `MultimodalInput` | [frontend/components/chatbot/multimodal-input.tsx:27-38]() | Input area handling text input, ephemeral file/image attachments, and agent selection. |
+| `MultimodalInput` | [frontend/components/chatbot/multimodal-input.tsx]() | Input area handling text input, ephemeral file/image attachments, agent selection, and the hold-to-talk voice button. |
 | `ChatModeBar` | [frontend/components/chatbot/chat-mode-bar.tsx:40-53]() | Mode toolbar for switching Code, Plan, Mission, Live voice modes, and pinned agents. |
 | `StudioChatShell` | [frontend/components/chatbot/studio-chat-shell.tsx:58-68]() | Studio layout shell managing collapsible threads and mission rails. |
 | `AutoChatTab` | [frontend/components/chatbot/chat-widget.tsx:88-88]() | Persistent mini-chat widget mirroring main conversation sessions across platform pages. |
@@ -140,14 +140,19 @@ Sources: [frontend/components/chatbot/message.tsx:30-183](), [frontend/types/cha
 
 ## Multimodal Input and Attachments
 
-The `MultimodalInput` component [frontend/components/chatbot/multimodal-input.tsx:27-38]() provides an auto-resizing textarea [frontend/components/chatbot/multimodal-input.tsx:54-59](), a file upload queue for ephemeral attachments [frontend/components/chatbot/multimodal-input.tsx:40-47](), and integrated controls for agent selection.
+The `MultimodalInput` component [frontend/components/chatbot/multimodal-input.tsx]() provides an auto-resizing textarea, the attachments (the hidden picker, the uploads and the strip above the box: [frontend/components/chatbot/composer-attachments.tsx]()) and the action row inside the box ([frontend/components/chatbot/composer-actions.tsx]()): attach, the agent picker, the picked agent's tools, the voice button and Send or Stop.
 
 ### Attachment Upload Flow
-* Files selected via `fileInputRef` are uploaded through `apiClient.uploadAttachment(file)` [frontend/components/chatbot/multimodal-input.tsx:135-135]().
-* The resulting `attachment_id` tokens are included in the chat request payload instead of raw URLs [frontend/components/chatbot/multimodal-input.tsx:78-84]().
-* Uploaded files appear as removable badges in the input area prior to submission [frontend/components/chatbot/multimodal-input.tsx:160-193]().
+* Files picked in the hidden file input are uploaded through `apiClient.uploadAttachment(file)` (`useComposerAttachments`).
+* The resulting `attachment_id` tokens are included in the chat request payload instead of raw URLs (`composerMessage`).
+* Uploaded files appear as removable badges in the input area prior to submission (`AttachmentStrip`).
 
-Sources: [frontend/components/chatbot/multimodal-input.tsx:3-198](), [frontend/types/chat.ts:229-234]()
+### Voice (quick ask)
+* The voice button beside Send ([frontend/components/chatbot/composer-voice.tsx]()) is the host's `VoiceButton` in quick mode: hold to talk, on every plan and edition. The browser recognises the speech, the words go to Auto as a spoken turn on the conversation on screen, and the reply is spoken. A keyboard or screen-reader click toggles instead; there is no hotkey in Studio.
+* It needs the host voice provider, which `frontend/app/chat/layout.tsx` mounts around the chat; outside one it is drawn disabled. Auto Live (the call) stays the mode bar's Live chip.
+* PRD-264: the box and every other control sit in the AI label's fence; the voice button never does (its own caption and the spoken notice say Auto is an AI).
+
+Sources: [frontend/components/chatbot/multimodal-input.tsx](), [frontend/components/chatbot/composer-actions.tsx](), [frontend/components/chatbot/composer-attachments.tsx](), [frontend/components/chatbot/composer-voice.tsx](), [frontend/types/chat.ts:229-234]()
 
 ---
 

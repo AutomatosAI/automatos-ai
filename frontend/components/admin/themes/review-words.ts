@@ -145,6 +145,7 @@ export const CHECK_LABELS: Readonly<Record<string, string>> = {
   looks: 'Looks',
   contrast: 'Contrast (AA)',
   uses: 'SDK names used',
+  audioCapture: 'Microphone and speech',
   clonedFrom: 'Cloned pages',
   llm: 'LLM review',
   automated: 'Automated review',

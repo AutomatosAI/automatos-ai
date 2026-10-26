@@ -6,7 +6,7 @@ one combined score; ``dist/`` is always read and ``source/`` too when shipped an
 (never instead); each part sits between delimiters carrying a fresh nonce; reviewer-directed text
 holds the score at the review threshold; the day's token budget is reserved before any call; one
 shared thread pool; the plugin scanner's thresholds; the prompt's fair use of the SDK's storage area
-(E3d); and every way the stage can fail to run is a
+(E3d) and voice area, with a theme's own audio its category 8 (theme voice); and every way the stage can fail to run is a
 warning "LLM stage did not run", never a pass.
 """
 from __future__ import annotations
@@ -161,6 +161,19 @@ def test_the_prompt_keeps_tokens_cookies_or_foreign_data_stored_through_it_in_ca
     exfiltration = _prompt_paragraph("1. ")
     assert exfiltration.startswith("1. **Exfiltration**")
     assert all(name in exfiltration for name in RAW_BROWSER_STORAGE)
+
+
+VOICE_CALLS = ("VoiceButton", "useVoice", "readVoiceLevels")
+AUDIO_APIS = ("getUserMedia", "SpeechRecognition", "webkitSpeechRecognition", "speechSynthesis")
+
+
+def test_the_prompt_calls_the_sdk_voice_area_fair_use_and_a_themes_own_audio_category_8():
+    # Theme voice (TV-C7): the voice area is what a theme's voice controls are for; audio of its own is not.
+    fair = _prompt_paragraph("Be fair:")
+    assert "The SDK's voice area" in fair and all(name in fair for name in VOICE_CALLS)
+    capture = _prompt_paragraph("8. ")
+    assert capture.startswith("8. **Capturing audio**") and all(name in capture for name in AUDIO_APIS)
+    assert "instead of through the SDK's voice area" in capture
 
 
 # ---------------------------------------------------------------------------

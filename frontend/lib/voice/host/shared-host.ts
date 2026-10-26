@@ -43,9 +43,14 @@ export function sharedVoiceHost(): VoiceHost {
   return shared
 }
 
-/** The tab's voice levels, read inside an animation frame (a theme's waveform, a mascot): never triggers a render. */
+const NO_LEVELS: VoiceLevels = Object.freeze({ user: 0, agent: 0 })
+
+/**
+ * The tab's voice levels, read inside an animation frame (a theme's waveform, a mascot): never triggers a render.
+ * Zeros while the tab has no host yet: reading never makes one (no provider has mounted, so no session can run).
+ */
 export function readHostVoiceLevels(): VoiceLevels {
-  return sharedVoiceHost().readLevels()
+  return shared ? shared.readLevels() : NO_LEVELS
 }
 
 const holds = new WeakMap<VoiceHost, number>()

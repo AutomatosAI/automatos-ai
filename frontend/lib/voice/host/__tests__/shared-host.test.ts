@@ -34,6 +34,22 @@ function hostOver(quick = new FakeEngine()) {
   return { host: new VoiceHost({ ...appVoiceHostDeps(), liveEngine: () => live, quickEngine: () => quick }), live, quick }
 }
 
+describe('the app voice host — levels before the tab has one', () => {
+  it('reads zeros, and makes no host to read them (a theme can read levels on any page)', async () => {
+    vi.resetModules()
+    const listen = vi.spyOn(window, 'addEventListener')
+    try {
+      const fresh = await import('@/lib/voice/host/shared-host')
+      expect(fresh.readHostVoiceLevels()).toEqual({ user: 0, agent: 0 })
+      expect(listen).not.toHaveBeenCalledWith(CHAT_CHANGED_EVENT, expect.any(Function))
+      fresh.sharedVoiceHost()
+      expect(listen).toHaveBeenCalledWith(CHAT_CHANGED_EVENT, expect.any(Function))
+    } finally {
+      listen.mockRestore()
+    }
+  })
+})
+
 describe('the app voice host — its ties to the app', () => {
   it('reads the conversation on screen from the session store and adopts a new chat through it', async () => {
     const { host, live } = hostOver()

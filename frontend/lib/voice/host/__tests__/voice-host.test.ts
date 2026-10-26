@@ -75,6 +75,18 @@ describe('the voice host — one session, bound to the conversation on screen', 
     expect(live.stop).toHaveBeenCalled()
     expect(quick.start).toHaveBeenCalledWith({ chatId: 'chat-1' })
   })
+
+  it('binds a start to the conversation it names, a new chat (null) included, over the one on screen', async () => {
+    const { host, live, quick, deps } = setup('chat-1')
+    await host.start('live', 'chat-9')
+    expect(live.start).toHaveBeenCalledWith({ chatId: 'chat-9' })
+    live.emit({ phase: 'listening', chatId: 'chat-9' })
+    expect(deps.adoptChat).not.toHaveBeenCalled()
+    host.screenChanged('chat-9')
+    expect(live.stop).not.toHaveBeenCalled()
+    await host.start('quick', null)
+    expect(quick.start).toHaveBeenCalledWith({ chatId: null })
+  })
 })
 
 describe('the voice host — the words and the turns', () => {

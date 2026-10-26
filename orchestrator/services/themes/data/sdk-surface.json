@@ -154,6 +154,11 @@
     "theme": [
       "SDK_VERSION",
       "defineTheme"
+    ],
+    "voice": [
+      "VoiceButton",
+      "readVoiceLevels",
+      "useVoice"
     ]
   }
 }

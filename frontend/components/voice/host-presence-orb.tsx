@@ -6,7 +6,7 @@
  * read in its own animation frame (never a render), fading in when a session starts and out when it stops.
  *
  * components/chatbot/chat.tsx imports this in PresenceOrb's place: the chat is far over the code-shape limits, so
- * its own lines are not edited beyond that import (as it imports FencedMultimodalInput for MultimodalInput).
+ * its own lines are not edited beyond that import (as it imports useChatWithReceipts for useChat).
  */
 import { useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'

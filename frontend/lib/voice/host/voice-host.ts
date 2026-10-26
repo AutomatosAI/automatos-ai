@@ -3,8 +3,8 @@
  * the conversation on screen. The host voice provider (components/voice/voice-provider.tsx) is its React face; this
  * class holds the rules, so they are tested without React:
  *
- * - A start binds the session to the conversation on screen (null for a new chat) and runs the engine asked for; a
- *   start of the other engine stops the one running.
+ * - A start binds the session to the conversation on screen (null for a new chat), or to the one it names, and runs
+ *   the engine asked for; a start of the other engine stops the one running.
  * - A new chat takes the conversation the session names (the mint's chat_id, quick-ask's new chat): the host puts it
  *   on screen (the session store's chatIdAssigned), as a typed first message does.
  * - Voice belongs to the conversation on screen: moving to another one ends the session.
@@ -65,12 +65,15 @@ export class VoiceHost {
 
   constructor(private readonly deps: VoiceHostDeps) {}
 
-  /** Starts a session of `mode` on the conversation on screen. Call it from the member's gesture. */
-  readonly start = (mode: VoiceMode): Promise<void> => {
+  /**
+   * Starts a session of `mode` on `chatId` (null: a new chat), or on the conversation on screen when it is left out
+   * (a theme's voice button names the conversation it talks into). Call it from the member's gesture.
+   */
+  readonly start = (mode: VoiceMode, chatId?: string | null): Promise<void> => {
     const engine = mode === 'live' ? this.deps.liveEngine() : this.deps.quickEngine()
     if (this.engine && this.engine !== engine) this.engine.stop()
     this.attach(engine, mode)
-    this.boundChatId = this.deps.onScreenChatId()
+    this.boundChatId = chatId === undefined ? this.deps.onScreenChatId() : chatId
     this.deps.clearTurn()
     return engine.start({ chatId: this.boundChatId })
   }
