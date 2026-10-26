@@ -12,13 +12,14 @@
  * - Hold: pressing the pointer starts a session and letting go sends what was heard (Live ignores the release, so a
  *   held Live press starts a call and the next press ends it). A click that no pointer made (a focused button's Space
  *   or Enter, a screen reader's activation) counts as a toggle, so hold-to-talk never shuts anyone out; the hotkey
- *   (voice-hotkey.ts) holds from the keyboard.
+ *   (voice-hotkey.ts) holds from the keyboard. A hold also ends when the window loses focus (another app, another
+ *   window): no pointer event says so, and the microphone would stay open.
  *
  * The press reads the host through the HostVoice it is handed (useHostVoice or useOptionalHostVoice); without one,
  * every handler does nothing.
  */
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 import type { HostVoice } from '@/components/voice/voice-provider'
 import type { VoicePhase, VoiceSnapshot } from '@/lib/voice/engine'
@@ -124,13 +125,24 @@ function togglePress(voice: HostVoice, options: VoicePressOptions): VoicePress {
 
 const INERT: VoicePress = Object.freeze({ active: false, down: NO_OP, up: NO_OP, handlers: INERT_HANDLERS })
 
+/** While a hold can be under way, the window losing focus ends it (`up` does nothing when nothing is held). */
+function useReleaseOnBlur(up: (() => void) | null): void {
+  useEffect(() => {
+    if (up === null) return undefined
+    window.addEventListener('blur', up)
+    return () => window.removeEventListener('blur', up)
+  }, [up])
+}
+
 /** A voice control's press over the host's voice (null: no voice here, and the press does nothing). */
 export function useVoicePress(voice: HostVoice | null, options: VoicePressOptions): VoicePress {
   const holding = useRef(false)
   const { mode, press, chatId } = options
-  return useMemo(() => {
+  const pressed = useMemo(() => {
     if (voice === null) return INERT
     const current = { mode, press, chatId }
     return press === 'hold' ? holdPress(voice, current, holding) : togglePress(voice, current)
   }, [voice, mode, press, chatId])
+  useReleaseOnBlur(voice !== null && press === 'hold' ? pressed.up : null)
+  return pressed
 }

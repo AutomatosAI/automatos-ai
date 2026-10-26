@@ -124,6 +124,17 @@ describe('a hold', () => {
     expect(stub.start).toHaveBeenCalledTimes(1)
   })
 
+  it('ends when the window loses focus, as no pointer event says so; a blur with nothing held does nothing', () => {
+    const { stub, button } = pressButton({ snapshot: { mode: null, phase: 'idle' } }, HOLD_QUICK)
+    fireEvent.blur(window)
+    expect(stub.release).not.toHaveBeenCalled()
+    fireEvent.pointerDown(button)
+    fireEvent.blur(window)
+    expect(stub.release).toHaveBeenCalledTimes(1)
+    fireEvent.pointerUp(button)
+    expect(stub.release).toHaveBeenCalledTimes(1)
+  })
+
   it('a right-button press does nothing', () => {
     const { stub, button } = pressButton({ snapshot: { mode: null, phase: 'idle' } }, HOLD_QUICK)
     // jsdom has no PointerEvent, so the event's button is set on it as a browser would.
