@@ -1,8 +1,8 @@
 /**
  * Theme voice, web quick-ask — the engine's test harness: a fake recognition per hold, a fake speech synthesis whose
  * utterances the test plays, a fake chat turn the test streams and settles, a clock moved by hand, a memory
- * sessionStorage and a page the test hides. The test file mocks apiClient and lib/chat/api (the browser defaults
- * import them).
+ * sessionStorage and a page the test hides. Each test file mocks apiClient: the engine's browser defaults (deps.ts)
+ * import the chat's send and Stop, which import it.
  */
 import { vi, type Mock } from 'vitest'
 

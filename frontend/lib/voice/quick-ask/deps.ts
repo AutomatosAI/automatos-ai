@@ -68,10 +68,13 @@ function tabStorage(): NoticeStorage | null {
 }
 
 function announceTurn(chatId: string): void {
+  if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(CHAT_CHANGED_EVENT, { detail: { chat_id: chatId } }))
 }
 
+/** Hidden: the tab went to the background or was switched away from; pagehide: the page is unloading. */
 function onPageHidden(callback: () => void): () => void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return () => undefined
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') callback()
   }

@@ -8,7 +8,7 @@
  * unloading page stops the microphone and the speech; the turn, if one is streaming, finishes into the chat unheard.
  * Deps are injectable (tests); a missing one is the browser's own (deps.ts).
  */
-import type { VoiceEngine, VoiceLevels, VoiceSnapshot } from '../engine'
+import type { VoiceEngine, VoiceLevels, VoicePhase, VoiceSnapshot } from '../engine'
 import { QUICK_ASK_ERRORS } from './copy'
 import { browserDeps, type QuickAskDeps } from './deps'
 import { endHold, releaseHold, startHold } from './hold'
@@ -18,6 +18,8 @@ import { interruptReply, onSpeaker } from './turn'
 
 const LOG_PREFIX = '[voice]'
 const DONE: Promise<void> = Promise.resolve()
+/** A hold or a reply under way: what a hidden tab stops (an error stays on screen for the member to read). */
+const BUSY: ReadonlySet<VoicePhase> = new Set<VoicePhase>(['connecting', 'listening', 'thinking', 'speaking'])
 
 /** Runs an entry point; anything unexpected is logged and said as the recognizer stopping, never thrown. */
 function guard(core: Core, run: () => void): void {
@@ -37,10 +39,16 @@ function stop(core: Core): void {
   dispatch(core, { type: 'stopped' })
 }
 
-/** The tab went away: the microphone and the speech stop; a streaming turn finishes into the chat unheard. */
-function leave(core: Core): void {
+/** The microphone and the speech stop; a streaming turn finishes into the chat unheard. */
+function halt(core: Core): void {
   endHold(core)
   interruptReply(core, false)
+}
+
+/** The tab went away: what was under way stops (halt), and the voice is idle. */
+function leave(core: Core): void {
+  if (!BUSY.has(get(core).state.view.phase)) return
+  halt(core)
   dispatch(core, { type: 'stopped' })
 }
 
@@ -60,6 +68,7 @@ function levels(core: Core): VoiceLevels {
 function dispose(core: Core): void {
   if (get(core).disposed) return
   leave(core)
+  halt(core)
   core.listeners.clear()
   set(core, { disposed: true })
 }
@@ -70,7 +79,7 @@ export function createQuickAskEngine(deps: Partial<QuickAskDeps> = {}): VoiceEng
   const unwatch = core.deps.onPageHidden(() => guard(core, () => leave(core)))
   return Object.freeze({
     start: (options: { readonly chatId: string | null }) => {
-      guard(core, () => startHold(core, options.chatId))
+      guard(core, () => startHold(core, options?.chatId || null))
       return DONE
     },
     release: () => guard(core, () => releaseHold(core)),
@@ -78,9 +87,10 @@ export function createQuickAskEngine(deps: Partial<QuickAskDeps> = {}): VoiceEng
     snapshot: () => get(core).state.view,
     subscribe: (listener: (snapshot: VoiceSnapshot) => void) => subscribe(core, listener),
     levels: () => levels(core),
-    dispose: () => {
-      unwatch()
-      guard(core, () => dispose(core))
-    },
+    dispose: () =>
+      guard(core, () => {
+        unwatch()
+        dispose(core)
+      }),
   })
 }
