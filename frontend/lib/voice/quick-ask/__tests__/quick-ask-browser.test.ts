@@ -166,7 +166,7 @@ describe('quick-ask over the browser’s own objects', () => {
     const browser = await askAloud(engine, chat)
     expect(browser).toMatchObject({ continuous: true, interimResults: true, lang: navigator.language })
     const [url, init] = chat.fetchMock.mock.calls[0]
-    expect(url).toBe('https://api.automatos.test/api/chat')
+    expect(url).toBe('/api/chat')
     expect(JSON.parse(String(init.body))).toMatchObject({
       id: '', spokenMode: true, message: { role: 'user', parts: [{ type: 'text', text: "What's on today" }] },
     })
