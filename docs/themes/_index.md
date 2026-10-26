@@ -49,6 +49,17 @@ A theme changes how Automatos looks for you in a workspace. It can give the app 
 some pages, pages of its own, its own colours, fonts and mascot, and a set of looks you can tune. Your choice is yours
 alone: other members of the workspace pick their own.
 
+<table>
+  <tr>
+    <td><img src="../assets/showcase/play-1440-first-open-ember.png" width="400" alt="Play: a new chat, with Auto the mascot saying Hi, I'm Auto"></td>
+    <td><img src="../assets/showcase/hud-1440-chat-arc.png" width="400" alt="HUD: the chat inside a console of agents, the mission, today's numbers and what needs you"></td>
+  </tr>
+  <tr>
+    <td><strong>Play</strong>: warm, with Auto as a mascot.</td>
+    <td><strong>HUD</strong>: a mission-control console.</td>
+  </tr>
+</table>
+
 These pages are for people who use Automatos and for the owners and admins who manage a workspace's themes. To build a
 theme, use the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit): its
 [guides](https://github.com/AutomatosAI/automatos-design-kit/tree/main/guides) cover the package, `theme.json`, the
@@ -115,8 +126,10 @@ top of the app, next to the notifications bell. A theme's own frame shows the sa
 | Get back in when a theme breaks the app | `/safe-mode`, or add `?safe_mode=themes` to any address |
 | Pair a phone | **Settings › Phones & devices** |
 
-The app draws an installed theme's frame and pages in a window 1024 pixels wide or more. In a narrower window, a phone
-browser included, you get Studio's layout instead, and **Make it yours** says it needs a wider window.
+Each theme names the narrowest window it draws (its `minWidth`). From that width up the app draws the theme's frame
+and pages; in a narrower window you get Studio's layout instead, and **Make it yours** says it needs a wider window.
+Play (from 1.2.0) and HUD (from 1.0.1) draw from 360 pixels, so a phone's browser gets their phone layouts (see
+[On your phone](on-your-phone.md)).
 **Customise look…** shows in the Appearance menu only while a theme is your style and its layout is showing.
 
 ## The two editions
@@ -137,7 +150,7 @@ a theme and uninstalling one never ask.
   in, choosing, the workspace default and the signature file.
 - [Looks](looks.md): presets, Make it yours, saving, resetting, deleting and sharing a look, where looks are kept,
   reduced motion.
-- [On your phone](on-your-phone.md): what the server keeps for a phone. Automatos Go showing your theme is planned.
+- [On your phone](on-your-phone.md): a theme's phone layout in a phone's browser, and its phone skin in Automatos Go.
 - [Managing themes](managing-themes.md): updates, pins, roll back, uninstall, "Needs update", withdrawn themes, safe
   mode and the workspace's theme settings.
 - [FAQ](faq.md): the questions people ask first.

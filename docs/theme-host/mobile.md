@@ -1,7 +1,8 @@
 # The phone's theme: the `mobile` block and its answer
 
 PRD-261 M-01..M-04 (host contract 1.1.0). A phone app draws a member's theme from data alone
-(Automatos Go doesn't read this answer yet; that is planned). It never loads a theme's
+(Automatos Go reads this answer, and `GET /api/themes/active`, when it opens and each time it returns to the
+foreground; the discovery document lists it as the `mobile_theme` capability). It never loads a theme's
 `dist/entry.js` or `dist/theme.css`: an app may not download and run code (App Store guideline
 2.5.2). A theme says how it looks on a phone in an optional `mobile` block in
 `theme.json`, and the phone reads the result from one route.

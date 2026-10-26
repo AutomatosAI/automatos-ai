@@ -55,9 +55,52 @@ The edition is a runtime flag (`AUTH_EDITION=local|saas`). Product capability is
 
 <br>
 
+## One OS, any interface
+
+One workspace and one Auto, with the same agents, Knowledge and Deliverables, wherever you reach them: the web app, a theme you choose, your voice, or your phone.
+
+**Studio** is the web app in this repository (`frontend/`), where you set up and run your workforce: the screens further down this page.
+
+**Themes** redraw Studio. A theme is one `.autotheme` package with its own frame and pages, colours, fonts and mascot, *looks* you tune and save, and a layout for a phone's width. Install one in **Settings › Appearance › Themes**; each member chooses their own. Automatos makes two:
+
+<table>
+  <tr>
+    <td><img src="docs/assets/showcase/play-1440-chat-ember.png" width="560" alt="Play on a desktop: a chat with Auto, the mascot, beside the reply"></td>
+    <td><img src="docs/assets/showcase/play-390-chat-ember.png" width="162" alt="Play on a phone: the same chat in Play's phone layout"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>Play</strong>: warm, with Auto as a mascot (the Ember design).</td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/showcase/hud-1440-chat-arc.png" width="560" alt="HUD on a desktop: a mission-control console around the chat, with agents, the mission and what needs you"></td>
+    <td><img src="docs/assets/showcase/hud-390-chat-arc.png" width="162" alt="HUD on a phone: the console's phone layout with Hold to talk"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>HUD</strong>: a mission-control console (the Command design).</td>
+  </tr>
+</table>
+
+**Voice.** Hold the microphone button and ask: your browser hears you, the words go to Auto, and the reply is spoken. That works on every plan and in both editions. **Auto Live** is a real-time voice call with Auto, where the server has it set up. Auto says it is an AI: once per browser session for a quick ask, and at the start of each call. The voice button sits in Studio's chat box, and every theme can place it through the theme SDK (Play and HUD do).
+
+<p align="center">
+  <img src="docs/assets/showcase/hud-1440-voice-listening-arc.png" alt="HUD listening to a question by voice, with Mic live and the AI voice assistant caption" width="720">
+</p>
+
+**Automatos Go** is the phone app ([AutomatosAI/automatos-go](https://github.com/AutomatosAI/automatos-go), iOS first, in beta): chat with Auto, the Command Centre, push notifications for a question, an approval or a review that needs you, and hold-to-talk voice, in three styles: Studio, Play and HUD. By default the app follows the theme you choose in Studio and paints its phone skin: the theme's colours, fonts and mascot.
+
+<p align="center">
+  <img src="docs/assets/showcase/go-play-chat-thinking.jpg" alt="Automatos Go in Play: Auto thinking about a request" width="200">
+  &nbsp;
+  <img src="docs/assets/showcase/go-play-shelf.jpg" alt="Automatos Go in Play: the shelf of Deliverables" width="200">
+</p>
+
+**Make your own theme** with the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit) (Apache-2.0): the command line that packs and checks a theme, a browser harness, the guides, and Play and HUD as worked examples. A theme is built against the theme SDK, which Automatos serves at run time (1.2.0; its types install from `https://widgets.automatos.app/theme-sdk/v1/theme-sdk.tgz`), and a version Automatos reviews can carry a signature from the theme-signing key this server ships, checked before it installs. Guides: [themes](docs/themes/_index.md) · [voice](docs/voice/_index.md).
+
+<br>
+
 ## Talk to your agents
 
-One chat, routed to the right agent. The conversation stays where you left it across pages and reloads, opens several conversations as tabs, and a reply finishes even if the browser leaves mid-answer. Auto works in the open: its thinking streams into a collapsible block that gives way to the answer, every tool call stays visible as a line in the activity trail, and when it files a ticket for another agent it can wait, re-check, and report back in the same thread. Quick actions jump straight into coding, creating agents, managing knowledge, or building Playbooks.
+One chat, routed to the right agent. The conversation stays where you left it across pages and reloads, opens several conversations as tabs, and a reply finishes even if the browser leaves mid-answer. Auto works in the open: its thinking streams into a collapsible block that gives way to the answer, every tool call stays visible as a line in the activity trail, and when it files a ticket for another agent it can wait, re-check, and report back in the same thread. Quick actions jump straight into coding, creating agents, managing knowledge, or building Playbooks. Or hold the microphone beside Send and ask out loud: Auto's reply is spoken, and the exchange stays in the conversation like a typed one.
 
 <p align="center">
   <img src="docs/assets/01-Chat.png" alt="Chat Interface" width="800">
@@ -182,6 +225,8 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 | **Cost analytics** | Every call tagged with provider and billing; cost by provider, lane, agent and route |
 | **Multi-Tenancy** | Full workspace isolation in the hosted edition — each team gets their own agents, data, and configuration |
 | **Plugin System** | Extend agents with skills, plugins, and custom tools from the marketplace or your own repos |
+| **Installable themes** | `.autotheme` packages that redraw the web app, each member choosing their own, with looks and a phone skin; built with the [Design Kit](https://github.com/AutomatosAI/automatos-design-kit) |
+| **Voice** | Hold-to-talk quick ask in the browser on every plan and edition; Auto Live real-time calls where the server has them set up |
 
 ---
 
@@ -229,7 +274,7 @@ To run your own Claude Code as an agent: set `CLI_RUNTIME_ENABLED=true` and `LOC
 
 ## Documentation
 
-Platform documentation lives in [`/docs`](docs/README.md) — architecture, APIs, agents, Playbooks, deployment. Most pages are generated from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai); the self-hosting guide, the analytics cost-tracking note and the contributing guide are maintained by hand.
+Platform documentation lives in [`/docs`](docs/README.md) — architecture, APIs, agents, Playbooks, deployment. Most pages are generated from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai); the self-hosting guide, the [themes](docs/themes/_index.md) and [voice](docs/voice/_index.md) guides, the analytics cost-tracking note and the contributing guide are maintained by hand.
 
 ---
 
