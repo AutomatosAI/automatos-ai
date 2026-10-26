@@ -8,9 +8,16 @@ dispatched.
 
 Design notes:
 
-* **Never commits.** In-app rows are inserted via ``db.execute(...)`` but
-  the caller owns the transaction — notification writes roll back if the
-  main work fails.
+* **Never commits, never aborts the caller's work.** In-app rows are inserted
+  via ``db.execute(...)`` on the caller's session, and the caller owns the
+  transaction — notification writes roll back if the main work fails. Each
+  statement the dispatcher runs there after the preferences (the in-app
+  insert, a channel lookup) runs in a SAVEPOINT on the caller's connection
+  (``_savepoint``): one that fails rolls back only itself and is logged, and
+  the caller's transaction and its commit go on (26 Oct 2026: a too-long
+  title aborted a Mission's transaction and lost the step's result). Every
+  in-app row is cut to fit its columns first
+  (``core.services.notification_columns``).
 * **Multi-destination fan-out.** The preference table has no unique
   constraint on ``(workspace_id, user_id, event_type)`` so a single event
   may have multiple rows (e.g. one ``in_app`` row *and* one ``telegram``
@@ -40,6 +47,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from core.services.notification_columns import fit_columns
 from core.services.notification_service import send_workspace_notification
 
 logger = logging.getLogger(__name__)
@@ -130,6 +138,16 @@ _MESSAGE_TRUNCATE = 200
 _PUSH = "push"
 # Severities quiet hours never hold.
 _THROUGH_QUIET_HOURS: frozenset[str] = frozenset({"urgent", "security"})
+
+# The bell's row (``_insert_in_app``); bound parameters only, its values cut to fit first.
+_INSERT_IN_APP = text(
+    "INSERT INTO notifications "
+    "(workspace_id, user_id, event_type, title, message, "
+    " link_type, link_id, agent_id, agent_name, status, created_at) "
+    "VALUES (:ws_id, :user_id, :event_type, :title, :message, "
+    " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp()) "
+    "RETURNING id"
+)
 
 
 @dataclass(frozen=True)
@@ -293,7 +311,9 @@ class NotificationDispatcher:
     ) -> tuple[list[str], Optional[str]]:
         """Fire every enabled, non-silent row; a row's failure is logged, never raised.
 
-        Returns the destinations fired and the in-app row's id (the first written, or None).
+        A failed in-app row was written in a savepoint (``_insert_in_app``), so it is taken
+        back alone: the caller's transaction stays usable. Returns the destinations fired and
+        the in-app row's id (the first written, or None when none was).
         """
         dispatched: list[str] = []
         notification_id: Optional[str] = None
@@ -377,7 +397,9 @@ class NotificationDispatcher:
 
         Only ``PUSH_EVENT_TYPES`` reach ``hand_over`` (FR-7), and none while quiet hours
         hold the event (``quiet`` already lets urgent and security through). True when
-        the fan-out took it.
+        the fan-out took it. ``notification_id`` is None when no in-app row was written (none
+        was asked for, or its insert failed and was rolled back to its savepoint): the push
+        still goes, carrying its link but no id.
         """
         try:
             from services.push.payload import PUSH_EVENT_TYPES
@@ -488,6 +510,17 @@ class NotificationDispatcher:
 
     # ----------------------------------------------------------- in-app
 
+    def _savepoint(self) -> Any:
+        """A SAVEPOINT on the caller's connection: a statement that fails in it is rolled back
+        alone, and the caller's transaction stays usable.
+
+        Taken on the connection, not with ``Session.begin_nested()``: that flushes the caller's
+        pending ORM changes first (``SessionLocal`` runs with autoflush off), so a notice would
+        change when the caller's own work is written, and a failure in that flush would surface
+        here, logged as a failed notice.
+        """
+        return self.db.connection().begin_nested()
+
     def _insert_in_app(
         self,
         user_id: Optional[int],
@@ -504,33 +537,29 @@ class NotificationDispatcher:
 
         Does NOT commit. PRD-266 US-010d: the id rides in the push payload.
 
+        Every bounded column's value is cut to fit it (``fit_columns``: a long title ends in
+        '…'), and the insert runs in a SAVEPOINT (``_savepoint``): when it fails, only the row
+        is rolled back and the error is raised to ``_deliver``, which logs it; the caller's
+        transaction and its commit go on.
+
         F209: its time is when it is written (clock_timestamp()). The column's
         default, now(), is the transaction's START: a run's task_complete,
         written minutes into a long transaction, sorted before things that
         happened earlier and read "N min ago" from when the run began."""
-        result = self.db.execute(
-            text(
-                "INSERT INTO notifications "
-                "(workspace_id, user_id, event_type, title, message, "
-                " link_type, link_id, agent_id, agent_name, status, created_at) "
-                "VALUES (:ws_id, :user_id, :event_type, :title, :message, "
-                " :link_type, :link_id, :agent_id, :agent_name, :status, clock_timestamp()) "
-                "RETURNING id"
-            ),
-            {
-                "ws_id": self.workspace_id,
-                "user_id": user_id,
-                "event_type": event_type,
-                "title": title,
-                "message": message,
-                "link_type": link_type,
-                "link_id": str(link_id) if link_id is not None else None,
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "status": status,
-            },
-        )
-        return _returned_id(result)
+        params = fit_columns({
+            "ws_id": self.workspace_id,
+            "user_id": user_id,
+            "event_type": event_type,
+            "title": title,
+            "message": message,
+            "link_type": link_type,
+            "link_id": str(link_id) if link_id is not None else None,
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "status": status,
+        })
+        with self._savepoint():
+            return _returned_id(self.db.execute(_INSERT_IN_APP, params))
 
     # ------------------------------------------------- external formatting
 
@@ -568,14 +597,19 @@ class NotificationDispatcher:
     async def _send_to_channel_connection(
         self, connection_id: str, formatted: str
     ) -> bool:
-        """Look up a specific channel_connection row and deliver via its platform."""
-        row = self.db.execute(
-            text(
-                "SELECT platform FROM channel_connections "
-                "WHERE id = :id AND workspace_id = :ws_id"
-            ),
-            {"id": connection_id, "ws_id": self.workspace_id},
-        ).fetchone()
+        """Look up a specific channel_connection row and deliver via its platform.
+
+        The lookup runs in a savepoint (``_savepoint``: a failed read never aborts the caller's
+        transaction), and before the send: no savepoint is held across an await.
+        """
+        with self._savepoint():
+            row = self.db.execute(
+                text(
+                    "SELECT platform FROM channel_connections "
+                    "WHERE id = :id AND workspace_id = :ws_id"
+                ),
+                {"id": connection_id, "ws_id": self.workspace_id},
+            ).fetchone()
 
         if not row:
             logger.warning(
