@@ -4,11 +4,13 @@
  * Theme voice — the small controls every voice surface the host draws shares: Studio's Live strip (LiveVoiceMode.tsx)
  * and the voice button core draws for themes (voice-button.tsx). The microphone's state, mute, end or close, and a
  * failure in plain words with Try again. Theme tokens only. Every control is a plain button (`type="button"`), so none
- * submits a form it sits in (the voice button in Studio's composer, or in a theme's own form).
+ * submits a form it sits in (the voice button in Studio's composer, or in a theme's own form). Stop, End call and Close
+ * say their word beside their icon: a bare icon beside the caption read as a glitch, not a control.
  */
 
-import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
+import { Mic, MicOff, PhoneOff, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PAD = 2
@@ -17,6 +19,13 @@ export const MIC_LIVE = 'Mic live'
 export const MIC_MUTED = 'Mic muted'
 export const TRY_AGAIN = 'Try again'
 export const CLOSE = 'Close'
+export const STOP = 'Stop'
+export const END_CALL = 'End call'
+export const CLOSE_LIVE_VOICE = 'Close live voice'
+
+/** A small labelled control (its icon and its word), the height of the icon buttons beside it. */
+const LABELLED_CONTROL_CLASS = 'h-7 gap-1 rounded-full px-2 text-xs'
+const CONTROL_ICON_CLASS = 'h-3.5 w-3.5'
 
 /** A session's length as m:ss. */
 export function formatDuration(seconds: number): string {
@@ -68,22 +77,41 @@ export function LiveCallFailure({ message, onRetry, onClose }: { message: string
   )
 }
 
-/** End while the call runs (or connects); Close once it has ended. */
+/** Stop: the quick ask's way out while it hears or Auto speaks. */
+export function StopButton({ onStop }: { onStop: () => void }) {
+  return (
+    <Button type="button" variant="outline" size="sm" className={LABELLED_CONTROL_CLASS} onClick={onStop} aria-label={STOP}>
+      <Square aria-hidden className={CONTROL_ICON_CLASS} />
+      {STOP}
+    </Button>
+  )
+}
+
+/** End call while the call runs (or connects); Close once it has ended. */
 export function EndOrClose({ running, onStop }: { running: boolean; onStop: () => void }) {
   return running ? (
     <Button
       type="button"
-      variant="ghost"
-      size="icon"
-      className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
+      variant="outline"
+      size="sm"
+      className={cn(LABELLED_CONTROL_CLASS, 'text-destructive hover:text-destructive')}
       onClick={onStop}
-      aria-label="End call"
+      aria-label={END_CALL}
     >
-      <PhoneOff className="h-3.5 w-3.5" />
+      <PhoneOff aria-hidden className={CONTROL_ICON_CLASS} />
+      {END_CALL}
     </Button>
   ) : (
-    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={onStop} aria-label="Close live voice">
-      <X className="h-3.5 w-3.5" />
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={LABELLED_CONTROL_CLASS}
+      onClick={onStop}
+      aria-label={CLOSE_LIVE_VOICE}
+    >
+      <X aria-hidden className={CONTROL_ICON_CLASS} />
+      {CLOSE}
     </Button>
   )
 }

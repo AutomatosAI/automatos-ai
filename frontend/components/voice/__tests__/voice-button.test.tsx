@@ -16,7 +16,7 @@ import { AI_VOICE_LABEL } from '@/components/voice/AiVoiceLabel'
 import { PROTECTED_SURFACE_ATTR, PROTECTED_SURFACE_INNER_ATTR } from '@/components/theme-host/protected-surface'
 import { VoiceButton, type VoiceButtonProps } from '@/components/voice/voice-button'
 import { VOICE_BUTTON_CSS_VARS, VOICE_BUTTON_WORDS } from '@/components/voice/voice-button-view'
-import { MIC_LIVE } from '@/components/voice/voice-controls'
+import { CLOSE, CLOSE_LIVE_VOICE, END_CALL, MIC_LIVE } from '@/components/voice/voice-controls'
 import { PAGE_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
 import { QUICK_ASK_ERRORS } from '@/lib/voice/quick-ask/copy'
 
@@ -37,6 +37,13 @@ function draw(patch: HostVoiceStubPatch | null, props: VoiceButtonProps = {}) {
 
 function controlSurface(): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[${PROTECTED_SURFACE_ATTR}="${VOICE_CONTROL}"]`)
+}
+
+/** A labelled control: a plain button showing its word beside its icon, never the bare icon. */
+function expectLabelled(control: HTMLElement, word: string): void {
+  expect(control).toHaveAttribute('type', 'button')
+  expect(control.textContent).toBe(word)
+  expect(control.querySelector('svg')).not.toBeNull()
 }
 
 afterEach(() => {
@@ -134,8 +141,17 @@ describe('while the session is the button’s', () => {
     expect(caption).toHaveTextContent(AI_VOICE_LABEL)
     expect(caption.getAttribute('role')).toBe('note')
     const stop = within(surface as HTMLElement).getByRole('button', { name: VOICE_BUTTON_WORDS.stop })
+    expectLabelled(stop, VOICE_BUTTON_WORDS.stop)
     fireEvent.click(stop)
     expect(stub?.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the caption, Mic live and Stop wrap, so the row fits a phone under the button', () => {
+    draw({ snapshot: { mode: 'quick', phase: 'listening', micOpen: true, durationSec: 12 } })
+    const surface = controlSurface() as HTMLElement
+    const row = within(surface).getByTestId('ai-voice-label').parentElement as HTMLElement
+    expect(row.className).toContain('flex-wrap')
+    expect(row).toHaveTextContent(`${AI_VOICE_LABEL}${MIC_LIVE}0:12${VOICE_BUTTON_WORDS.stop}`)
   })
 
   it('guards the surface and its inner wrapper inline with !important', () => {
@@ -167,10 +183,20 @@ describe('while the session is the button’s', () => {
     const { stub } = draw({ snapshot: { mode: 'live', phase: 'listening', micOpen: true }, live: { micSilent: true } })
     const surface = controlSurface() as HTMLElement
     fireEvent.click(within(surface).getByRole('button', { name: 'Mute microphone' }))
-    fireEvent.click(within(surface).getByRole('button', { name: 'End call' }))
+    const end = within(surface).getByRole('button', { name: END_CALL })
+    expectLabelled(end, END_CALL)
+    fireEvent.click(end)
     expect(stub?.live.toggleMute).toHaveBeenCalledTimes(1)
     expect(stub?.stop).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('mic-silent-banner')).toBeInTheDocument()
+  })
+
+  it('an ended call has Close in the surface, its word on screen', () => {
+    const { stub } = draw({ snapshot: { mode: 'live', phase: 'ended', micOpen: false } })
+    const close = within(controlSurface() as HTMLElement).getByRole('button', { name: CLOSE_LIVE_VOICE })
+    expectLabelled(close, CLOSE)
+    fireEvent.click(close)
+    expect(stub?.stop).toHaveBeenCalledTimes(1)
   })
 })
 

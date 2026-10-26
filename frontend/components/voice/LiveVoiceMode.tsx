@@ -64,8 +64,8 @@ function LiveStrip({ voice }: { voice: HostVoice }) {
       data-voice-phase={snapshot.phase}
     >
       {/* Whisper strip — no card, no border: the room glows behind the whole chat, the words stream in the thread
-          like any typed reply; up here only the quiet facts and the buttons that matter. */}
-      <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
+          like any typed reply; up here only the quiet facts and the buttons that matter. It wraps on a phone. */}
+      <div className="mx-auto flex w-fit flex-wrap items-center justify-center gap-x-3 gap-y-1 px-2 py-0.5">
         <AiVoiceLabel />
         {!failure && <LiveCallControls voice={voice} />}
       </div>

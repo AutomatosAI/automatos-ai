@@ -154,8 +154,17 @@ describe('PRD-207 — LiveVoiceMode', () => {
     expect(screen.getByText('0:05')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Mute microphone' }))
     expect(stub.live.toggleMute).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'End call' }))
+    const end = screen.getByRole('button', { name: 'End call' })
+    expect(end.textContent).toBe('End call')
+    fireEvent.click(end)
     expect(stub.stop).toHaveBeenCalled()
+  })
+
+  it('the strip wraps, so its facts and End call fit a phone', () => {
+    onTheCall({ snapshot: { phase: 'listening', durationSec: 5 }, live: { inputDevices: TWO_MICS } })
+    const strip = screen.getByTestId('ai-voice-label').parentElement as HTMLElement
+    expect(strip.className).toContain('flex-wrap')
+    expect(strip).toContainElement(screen.getByRole('button', { name: 'End call' }))
   })
 
   it("a refused mint shows the member's sentence (never the plan refusal's JSON) and a way out", () => {
@@ -219,7 +228,9 @@ describe('PRD-207 — LiveVoiceMode', () => {
   it('a call Retell ended says so, with Close', () => {
     const stub = onTheCall({ snapshot: { phase: 'ended', micOpen: false } })
     expect(screen.getByText('Call ended')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Close live voice' }))
+    const close = screen.getByRole('button', { name: 'Close live voice' })
+    expect(close.textContent).toBe('Close')
+    fireEvent.click(close)
     expect(stub.stop).toHaveBeenCalled()
   })
 
