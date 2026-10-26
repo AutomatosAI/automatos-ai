@@ -234,7 +234,8 @@ def test_the_source_loads_each_client_only_package_only_on_demand_in_client_code
             assert USE_CLIENT.match(text), f"{name} is not a client module"
             loads.setdefault(match.group("package"), []).append(name)
     assert loads == {
-        "retell-client-js-sdk": ["hooks/use-retell-call.ts"],
+        # Theme voice: the Live engine's one Retell loader (hooks/use-retell-call.ts is deleted).
+        "retell-client-js-sdk": ["lib/voice/live/retell-call.ts"],
         "xlsx": ["components/widgets/FileWidget/FilePreview.tsx"],
     }
 

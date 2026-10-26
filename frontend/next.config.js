@@ -158,7 +158,7 @@ const STANDALONE_TRACE_EXCLUDES = [
 ]
 
 // PRD-262 #47: packages only the browser runs, loaded on demand inside a handler or an effect
-// (hooks/use-retell-call.ts's voice call, which brings LiveKit, and FilePreview's spreadsheet
+// (lib/voice/live/retell-call.ts's voice call, which brings LiveKit, and FilePreview's spreadsheet
 // preview), never during a server render. The server builds resolve them to an empty module, so
 // their code (0.96 MB of server chunks) stays out of the image; the browser bundle keeps them.
 // Not `externals`: the trace would then copy each package into node_modules.

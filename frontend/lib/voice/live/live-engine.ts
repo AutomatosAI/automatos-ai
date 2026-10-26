@@ -2,7 +2,7 @@
 
 /**
  * Auto Live as a VoiceEngine (PRD-207 S5; theme voice): the live call the host voice provider runs for Studio's chat
- * and a theme's, replacing the useRetellCall hook that lived inside Studio's call strip.
+ * and a theme's, replacing the useRetellCall hook (deleted) that lived inside Studio's call strip.
  *
  * A start mints a short-lived access token server-side (`POST /api/voice/web-call`: the Retell key never reaches the
  * browser; the answer names the conversation the call writes into), then Retell's WebRTC SDK carries the audio both
