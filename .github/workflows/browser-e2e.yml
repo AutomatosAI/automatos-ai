@@ -210,7 +210,7 @@ permissions:
 # Play 1.2.0 with the host's voice button in its message box and its own phone layout from 360 px,
 # HUD 1.1.0), which holds #18 and every kit commit between them; then kit #37's merge (Automatos's theme-signing
 # key in keys/theme-signing.json, the same bytes as orchestrator/services/themes/data/signing-keys.json); then
-# kit #40 (HUD 1.1.1 and Play 1.2.1 polish: Play's hello on an empty chat only, a made-up product in its look
+# kit #40's merge (HUD 1.1.1 and Play 1.2.1 polish: Play's hello on an empty chat only, a made-up product in its look
 # preview, HUD's transcript fade).
 # Play's own files there are automatos/play 1.2.1 (released at the kit's tag play-v1.2.1 once it is
 # tagged; 1.1.0 is play-v1.1.0). Move it with the kit, in the same pull request as the kit change it brings, and only
@@ -218,7 +218,7 @@ permissions:
 # pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-design-kit
-  KIT_REF: 2202500e7f6df5f45c0c6e1a1eef8c4095433a77
+  KIT_REF: a90e5bc7eb7db61747dba07fe93c36b6717eda12
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
   PLAY_PACKAGE: automatos.play-1.2.1.autotheme
