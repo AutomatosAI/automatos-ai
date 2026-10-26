@@ -32,6 +32,7 @@ const NO_ADJUST = 'none'
 const FORCED_OUTLINE = { style: 'solid', width: '2px' }
 /** 40 characters with no space (the M73 case, docs/PRDS/PRD-260-PLAY-RUN-CHECKLIST.md step 43). */
 const LONG_NAME = 'abcdefghijklmnopqrstuvwxyz0123456789abcd'
+/** The narrowest window Play draws its desktop layout in (the kit's lib/play/phone-layout.ts DESKTOP_MIN_WIDTH; below it, Play 1.2.0's phone layout). */
 const NARROW_DESKTOP = { width: 1024, height: 900 }
 /** .headerSide's max-width (the kit's themes/play/src/components/looks/looks.module.css): the status never takes more of the row. */
 const STATUS_SIDE_MAX = 0.4

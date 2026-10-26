@@ -96,7 +96,7 @@ const HERO = 'Say hello'
 const AT_REST = 'Ready when you are'
 /** Auto while the message box has focus (lib/mascot/media.ts CAPTIONS.listening; reducer.ts input-focus). */
 const LISTENING = 'Listening'
-/** The message box's form (the kit's chat/message-box.tsx): its field and Send, the box a member sees. */
+/** The message box's form (the kit's chat/message-box.tsx): its words, the host's voice button (Play 1.2.0) and Send, the box a member sees. */
 const COMPOSER_FORM = 'form'
 // The shelf (the kit's deliverables/play-shelf.tsx, shelf-body.tsx and shelf-card.tsx).
 const SHELF_TITLE = 'Your shelf'

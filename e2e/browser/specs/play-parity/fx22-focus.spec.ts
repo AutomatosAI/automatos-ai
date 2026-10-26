@@ -42,7 +42,7 @@ const LOOKS_PATH = '/looks'
 const STUDIO = 'studio'
 const MANAGE = 'This look'
 const RENAMED = 'Focus look'
-/** Play's looks page heading (1.1.1 names the page Look; "Make it yours." is its tagline). */
+/** Play's looks page heading (Look since Play 1.1.1, in 1.2.0 too; "Make it yours." is its tagline). */
 const LOOKS_HEADING = 'Look'
 /** The name builtin Play's switch had: no button on Studio's note carries it any more. */
 const SWITCH_TO_PLAY = 'Switch to Play'
