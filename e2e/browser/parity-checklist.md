@@ -19,7 +19,7 @@ Write down, in the results table's header:
 - the environment's URL, the edition (local or SaaS), the browser and its version, the device;
 - your name and the date.
 
-Get Play: download `automatos.play-1.1.1.autotheme` from the `kit-theme-package` artifact of a green
+Get Play: download `automatos.play-1.2.0.autotheme` from the `kit-theme-package` artifact of a green
 browser-e2e run (or build it in the kit at `KIT_REF`: `npm ci --ignore-scripts`, then `npm run build`
 and `npm run pack` in `themes/play`). Settings › Appearance › Themes › Install theme, upload it, opt
 in to its private code, choose it. The style cookie `automatos-style` reads `theme:install:<uuid>`
