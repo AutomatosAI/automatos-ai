@@ -52,7 +52,7 @@ listed there. See [Get Play or HUD](installing-and-choosing.md#get-play-or-hud).
 | "This theme was withdrawn, so it is turned off for now." | Its version was withdrawn. You see the theme's base, Studio or Classic. | Wait for a new version, or choose another theme. |
 | "Safe mode: themes are off in this tab." | This tab is in safe mode. | Close the tab and open a new one. |
 | No notice | The theme was uninstalled (you now see the workspace default), or the workspace no longer lets members choose. | Ask an owner or admin. |
-| Studio's layout in a narrow window, a phone browser included | The app draws a theme's frame and pages only in a window 1024 pixels wide or more. | Widen the window. |
+| Studio's layout in a narrow window | The app draws a theme's frame and pages only from the width its `theme.json` names (`minWidth`). Play 1.2.0 and HUD 1.0.1 and later draw from 360 pixels; earlier versions and other themes may need a wider window. | Widen the window, or update the theme. |
 
 See [When a theme fails](managing-themes.md#when-a-theme-fails) and [Safe mode](managing-themes.md#safe-mode).
 
@@ -111,7 +111,7 @@ Classic in the Appearance menu to leave the theme for good.
 ### Where is "Customise look…"?
 
 In the **Appearance** menu: the sun, moon or screen button at the top of the app, next to the notifications bell. It
-shows only while a theme is your style and its layout is showing (a window 1024 pixels wide or more). Classic and
+shows only while a theme is your style and its layout is showing (a window at least as wide as the theme's `minWidth`). Classic and
 Studio have no looks. See [Looks](looks.md).
 
 ### Will an update, a roll back or an uninstall lose my looks?
@@ -131,5 +131,6 @@ The Marketplace tab for themes is called **Themes**: **Marketplace › Themes**.
 
 ### Does my theme show on my phone?
 
-Not yet. Automatos Go doesn't draw the themes installed in a workspace yet; that is planned. The server already keeps
-your choice, your looks and each theme's phone skin for it. See [On your phone](on-your-phone.md).
+Yes, two ways. In a phone's browser, Play (1.2.0 and later) and HUD (1.0.1 and later) draw their own phone layouts. In Automatos Go, the phone app, the
+default style **Same as Studio** follows the theme you use on the web and paints its phone skin: its colours, fonts
+and mascot. See [On your phone](on-your-phone.md).

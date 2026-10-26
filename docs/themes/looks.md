@@ -30,6 +30,17 @@ The following files were used as context for generating this page:
 A look is one way a theme can look: a set of its settings, saved under a name. Change the look and the whole app
 follows at once. Looks belong to a theme. Classic and Studio have none.
 
+<table>
+  <tr>
+    <td><img src="../assets/showcase/play-1440-chat-ember.png" width="400" alt="Play's chat in the Ember look: a dark ground with an orange accent"></td>
+    <td><img src="../assets/showcase/play-1440-chat-daylight.png" width="400" alt="The same chat in Play's Daylight look: a light ground"></td>
+  </tr>
+  <tr>
+    <td>Play, in its Ember look.</td>
+    <td>The same page in Play's Daylight look.</td>
+  </tr>
+</table>
+
 ---
 
 ## Presets, the default look and your own looks
@@ -47,7 +58,7 @@ follows at once. Looks belong to a theme. Classic and Studio have none.
 
 - **Appearance › Customise look…** opens **Make it yours** (`/looks`). The Appearance menu is the sun, moon or
   screen button at the top of the app, next to the notifications bell. The item shows only while a theme is your style
-  and its layout is showing (a window 1024 pixels wide or more).
+  and its layout is showing (a window at least as wide as the theme's `minWidth`: 360 pixels for Play 1.2.0 and HUD 1.0.1 and later).
 - The theme draws this page itself. Under Classic, Studio or a theme without a look page, `/looks` shows a note: "This
   style has no look to edit. Choose a theme with looks in the Appearance menu to make it yours."
 - In a workspace with no theme to choose, the note says how to get one: "No theme is installed in this workspace yet. A
@@ -77,6 +88,16 @@ What Play and HUD show (their look pages are part of each theme, in the
 |---|---|
 | **Play** | **Make it yours** (`/looks`): an editor with **Save as new look** and **Reset** (back to the picked look's saved values); **This look**, with **Save**, **Rename**, **Duplicate** and **Delete** for one of your looks (a preset can only be duplicated), **Export** and **Copy JSON**; and **Import a look** (paste a look's JSON, or choose a `.json` file). |
 | **HUD** | **Look**, with the look drawer beside a live preview: the looks row (its presets and your looks), the settings, **Save as new look**, **Reset** and **Delete** (for one of your own looks; it asks first); and **Share**, with **Export** and **Import** (paste a look's JSON). |
+
+<table>
+  <tr>
+    <td><img src="../assets/showcase/hud-1440-look-editor-arc.png" width="560" alt="HUD's Look page: a live preview on the left; the looks row (Arc, Forge, Ghost, Nova, Signal), accent, background, type, grid and glow on the right"></td>
+    <td><img src="../assets/showcase/hud-390-look-editor-arc.png" width="162" alt="HUD's Look page on a phone: the preview, then Share"></td>
+  </tr>
+  <tr>
+    <td colspan="2">HUD's <strong>Look</strong> page on a desktop and on a phone, in the Arc preset.</td>
+  </tr>
+</table>
 
 ---
 

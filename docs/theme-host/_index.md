@@ -353,7 +353,7 @@ run that package, re-hashes it against the file manifest on every read, and answ
 ## 10. The phone
 
 A phone never loads a theme's code. `GET /api/themes/mobile/{installId}` answers the theme's colours, font files and
-mascot files as data and URLs. Automatos Go doesn't call it yet; that is planned. See [The phone's theme](mobile.md).
+mascot files as data and URLs. Automatos Go calls it to paint the theme it shows. See [The phone's theme](mobile.md).
 
 ## 11. Signatures and revocations
 

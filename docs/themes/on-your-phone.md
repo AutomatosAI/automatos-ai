@@ -18,15 +18,60 @@ The following files were used as context for generating this page:
 - [orchestrator/api/themes_install.py](../../orchestrator/api/themes_install.py)
 - [orchestrator/api/themes_looks.py](../../orchestrator/api/themes_looks.py)
 - [orchestrator/tests/test_prd266_device_theme_routes.py](../../orchestrator/tests/test_prd266_device_theme_routes.py)
+- [orchestrator/services/mobile/discovery.py](../../orchestrator/services/mobile/discovery.py)
+- [frontend/lib/theme-host/installed-entry.ts](../../frontend/lib/theme-host/installed-entry.ts)
 - [docs/theme-host/mobile.md](../theme-host/mobile.md)
 
 </details>
 
-**Automatos Go, the phone app, doesn't show the themes installed in your workspace yet. That is planned.** This page
-says what the server already keeps and serves for a phone, so the theme you choose and the looks you save on the web
-are ready for it.
+A theme reaches your phone in two ways:
 
-A theme never sends code to a phone: only colours, font files and mascot images.
+- **In the phone's browser.** A theme draws from the narrowest window its `theme.json` names (`minWidth`). Play (from
+  1.2.0) and HUD (from 1.0.1) name 360 pixels and bring layouts of their own for a phone's width, so Automatos in a
+  phone's browser shows them as below. A theme that names a wider window shows Studio's layout on a phone.
+- **In Automatos Go**, the phone app ([AutomatosAI/automatos-go](https://github.com/AutomatosAI/automatos-go)). The
+  app draws its own screens and paints a theme's **phone skin** onto them: colours, font files and mascot images. A
+  theme never sends code to a phone.
+
+<table>
+  <tr>
+    <td><img src="../assets/showcase/play-390-chat-ember.png" width="200" alt="Play in a phone's browser: a chat with Auto, and the Chats and Shelf links"></td>
+    <td><img src="../assets/showcase/play-390-menu-ember.png" width="200" alt="Play's phone menu: New chat, Search and the app's pages"></td>
+    <td><img src="../assets/showcase/hud-390-chat-arc.png" width="200" alt="HUD in a phone's browser: Auto in the console ring, the reply and Hold to talk"></td>
+  </tr>
+  <tr>
+    <td>Play's phone layout.</td>
+    <td>Play's phone menu.</td>
+    <td>HUD's phone layout.</td>
+  </tr>
+</table>
+
+---
+
+## In Automatos Go
+
+Automatos Go has three styles of its own: Studio, Play and HUD. In the app, **Settings › Style and look** chooses
+how it looks: one of those styles, a theme installed in your workspace, or **Same as Studio**, the default, which
+follows the theme you use on the web. The app reads your theme when it opens and each time it comes back to the
+front, and paints the theme's phone skin (below). If that theme is uninstalled, the app goes back to Studio and says
+so once.
+
+Your looks for Play and HUD stay in step with the web while the theme is installed in the workspace.
+
+<table>
+  <tr>
+    <td><img src="../assets/showcase/go-play-chat-thinking.jpg" width="220" alt="Automatos Go in Play: Auto thinking, with Needs you and the Command Centre above the chat"></td>
+    <td><img src="../assets/showcase/go-play-shelf.jpg" width="220" alt="Automatos Go in Play: the shelf of Deliverables"></td>
+  </tr>
+  <tr>
+    <td>Chat with Auto in Play.</td>
+    <td>The shelf of Deliverables.</td>
+  </tr>
+</table>
+
+The app reads two routes: `GET /api/themes/active` (your theme, as a browser gets it) and
+`GET /api/themes/mobile/{install_id}` (a theme's phone skin), which the server lists as the `mobile_theme`
+capability. See [The phone's theme: the `mobile` block](../theme-host/mobile.md) (technical).
 
 ---
 
