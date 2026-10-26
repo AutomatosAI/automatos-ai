@@ -1,11 +1,13 @@
 /**
  * Theme voice, web quick-ask: Auto's voice through the browser's speech synthesis, behind a port (the tests use a
  * fake). The logic is automatos-go's speaker-core.ts (PR #15) for a browser: each sentence is one utterance on the
- * browser's queue; the speaker says which sentence starts (snapshot.reply grows as spoken) and when the LAST queued
- * one has ended (done, cancelled or failed: the queue ran out either way). stop() starts a new generation, so the
- * late callbacks of a cancelled run are ignored and nothing waits on an utterance the browser dropped.
+ * browser's queue (a sentence over SPEECH_MAX_CHARS goes in pieces cut at a space); the speaker says which piece
+ * starts (snapshot.reply grows as spoken) and when the LAST queued one has ended (done, cancelled or failed: the queue
+ * ran out either way), each utterance's end counted once. stop() starts a new generation, so the late callbacks of a
+ * cancelled run are ignored and nothing waits on an utterance the browser dropped.
  */
 import type { QuickAskClock } from './clock'
+import { SPEECH_MAX_CHARS } from './config'
 import { agentLevel } from './levels'
 
 export interface UtteranceEvents {
@@ -46,11 +48,23 @@ const LOG_PREFIX = '[voice]'
 /** The browser's errors for an utterance cancelled on purpose (stop, barge-in): not worth a warning. */
 const CANCELLED: ReadonlySet<string> = new Set(['interrupted', 'canceled'])
 
+/** The text in pieces of at most `max` characters, cut at a space where there is one. */
+export function speechPieces(text: string, max: number = SPEECH_MAX_CHARS): readonly string[] {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+  if (!(max > 0) || trimmed.length <= max) return [trimmed]
+  const space = trimmed.lastIndexOf(' ', max)
+  const cut = space > 0 ? space : max
+  return [trimmed.slice(0, cut).trim(), ...speechPieces(trimmed.slice(cut), max)]
+}
+
 export function createSpeaker(port: SynthesisPort, clock: QuickAskClock, onEvent: (event: SpeakerEvent) => void): Speaker {
   let run: Run = { generation: 0, pending: 0, lastBoundaryAt: null }
 
   function utterance(text: string, generation: number): UtteranceEvents {
     const current = (): boolean => run.generation === generation
+    // A browser may report an utterance's end twice (an error, then its end): it counts once.
+    let ended = false
     return {
       onStart: () => {
         if (!current()) return
@@ -61,7 +75,8 @@ export function createSpeaker(port: SynthesisPort, clock: QuickAskClock, onEvent
         if (current()) run = { ...run, lastBoundaryAt: clock.now() }
       },
       onEnd: () => {
-        if (!current() || run.pending === 0) return
+        if (ended || !current() || run.pending === 0) return
+        ended = true
         run = { ...run, pending: run.pending - 1 }
         if (run.pending === 0) onEvent({ type: 'drained' })
       },
@@ -69,7 +84,7 @@ export function createSpeaker(port: SynthesisPort, clock: QuickAskClock, onEvent
   }
 
   function speak(sentences: readonly string[]): void {
-    sentences.forEach((text) => {
+    sentences.flatMap((sentence) => speechPieces(sentence)).forEach((text) => {
       run = { ...run, pending: run.pending + 1 }
       const events = utterance(text, run.generation)
       try {

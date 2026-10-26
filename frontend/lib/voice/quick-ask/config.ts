@@ -16,6 +16,13 @@ export const RELEASE_GRACE_MS = 2_000
 export const DURATION_TICK_MS = 1_000
 
 /**
+ * The longest piece of a sentence handed to speechSynthesis as one utterance; a longer sentence goes in pieces cut
+ * at a space. Chrome's network voices stop part way through a long utterance and never say it ended (automatos-go's
+ * speaker-core.ts fitToEngine does the same for Android's input limit).
+ */
+export const SPEECH_MAX_CHARS = 200
+
+/**
  * Said as the WHOLE utterance while holding, these stop Auto and send nothing (stop-phrase.ts drops a leading
  * 'auto' or 'hey auto' first). 'stop the deploy' is a request and goes to Auto as said.
  */

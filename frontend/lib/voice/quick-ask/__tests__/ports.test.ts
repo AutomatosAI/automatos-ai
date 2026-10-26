@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { LEVEL_DECAY_MS } from '@/lib/voice/quick-ask/config'
+import { LEVEL_DECAY_MS, SPEECH_MAX_CHARS } from '@/lib/voice/quick-ask/config'
 import { agentLevel, pulse, userLevel } from '@/lib/voice/quick-ask/levels'
 import {
   browserRecognitionConstructor,
@@ -16,7 +16,13 @@ import {
   type BrowserRecognition,
   type RecognitionEvents,
 } from '@/lib/voice/quick-ask/recognition'
-import { browserSynthesisPort, createSpeaker, type SynthesisPort, type UtteranceEvents } from '@/lib/voice/quick-ask/speaker'
+import {
+  browserSynthesisPort,
+  createSpeaker,
+  speechPieces,
+  type SynthesisPort,
+  type UtteranceEvents,
+} from '@/lib/voice/quick-ask/speaker'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -186,6 +192,34 @@ describe('createSpeaker', () => {
     expect(speaker.speaking()).toBe(false)
   })
 
+  it('counts an utterance the browser ends twice (an error, then its end) once', () => {
+    const { port, queued } = fakeSynthesis()
+    const onEvent = vi.fn()
+    const speaker = createSpeaker(port, clock({ now: 0 }), onEvent)
+    speaker.speak(['One.', 'Two.'])
+
+    queued[0].events.onEnd()
+    queued[0].events.onEnd()
+
+    expect(speaker.speaking()).toBe(true)
+    expect(onEvent).not.toHaveBeenCalled()
+    queued[1].events.onEnd()
+    expect(onEvent.mock.calls).toEqual([[{ type: 'drained' }]])
+  })
+
+  it('speaks a sentence longer than SPEECH_MAX_CHARS in pieces, each its own utterance', () => {
+    const { port, queued } = fakeSynthesis()
+    const speaker = createSpeaker(port, clock({ now: 0 }), vi.fn())
+    const long = `${'word '.repeat(60).trim()}.`
+
+    speaker.speak([long, 'Short.'])
+
+    expect(queued.length).toBeGreaterThan(2)
+    expect(queued.every((item) => item.text.length <= SPEECH_MAX_CHARS)).toBe(true)
+    expect(queued.slice(0, -1).map((item) => item.text).join(' ')).toBe(long)
+    expect(queued[queued.length - 1].text).toBe('Short.')
+  })
+
   it('lifts Auto’s level while speaking and rests at 0 when silent', () => {
     const at = { now: 1_000 }
     const { port, queued } = fakeSynthesis()
@@ -199,6 +233,18 @@ describe('createSpeaker', () => {
     expect(speaker.level()).toBeCloseTo(0.3)
     queued[0].events.onEnd()
     expect(speaker.level()).toBe(0)
+  })
+})
+
+describe('speechPieces', () => {
+  it('keeps a short sentence whole, trimmed, and drops an empty one', () => {
+    expect(speechPieces('  Hello there.  ')).toEqual(['Hello there.'])
+    expect(speechPieces('   ')).toEqual([])
+  })
+
+  it('cuts at the last space within the limit, or at the limit when a word is longer', () => {
+    expect(speechPieces('one two three four', 9)).toEqual(['one two', 'three', 'four'])
+    expect(speechPieces('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
   })
 })
 
