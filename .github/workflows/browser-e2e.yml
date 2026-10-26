@@ -208,14 +208,15 @@ permissions:
 # installs the theme with) and W-K6's (#14: Play's tests on the kit's harness, every path core's
 # test ledger names for them). Theme voice: since then, kit #36's merge (SDK 1.2.0's voice area,
 # Play 1.2.0 with the host's voice button in its message box and its own phone layout from 360 px,
-# HUD 1.1.0), which holds #18 and every kit commit between them.
+# HUD 1.1.0), which holds #18 and every kit commit between them; then kit #37's merge (Automatos's theme-signing
+# key in keys/theme-signing.json, the same bytes as orchestrator/services/themes/data/signing-keys.json).
 # Play's own files there are automatos/play 1.2.0 (released at the kit's tag play-v1.2.0 once it is
 # tagged; 1.1.0 is play-v1.1.0). Move it with the kit, in the same pull request as the kit change it brings, and only
 # forward in kit history (PB-17; Play's own rules are in the kit's themes/play/README.md). npm is
 # pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-design-kit
-  KIT_REF: 292daee1569267652534803c0715398f0adeabcc
+  KIT_REF: 25e4470025eb80231d2d44b936e3820896aa1f9c
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
   PLAY_PACKAGE: automatos.play-1.2.0.autotheme
