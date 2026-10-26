@@ -5,7 +5,7 @@
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
-FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
+FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS node
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
@@ -26,7 +26,7 @@ FROM node AS npm
 RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
 
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
-FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 
 # PRD-262 US-044: requirements.lock in three parts: claude-agent-sdk alone, psycopg2
 # alone (the psycopg2 stage below builds it from source, PRD-262 row 27) and everything
@@ -36,7 +36,7 @@ FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158
 # keeps or drops a whole entry: the pin line, and the indented hash and `# via` lines
 # under it. The build fails unless the SDK and psycopg2 parts each hold their one
 # package and nothing else, and the stable part holds neither.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS locks
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS locks
 WORKDIR /locks
 COPY requirements.lock .
 RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/; pg = /^psycopg2==/ } !sdk && !pg' requirements.lock > stable.lock \
@@ -60,7 +60,7 @@ RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/; pg = /^psycopg2==/ } !sdk
 # --require-hashes. The lock's psycopg2 entry is the hash-checked sdist, installed into
 # /install, which the production stage copies whole; its extension's debug info and
 # uv's lock file are left behind here.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS psycopg2
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS psycopg2
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements-build.lock /locks/
 COPY --from=locks /locks/psycopg2.lock /locks/
@@ -74,7 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev l
     && rm -f /install/.lock
 
 # Railway builds no target, so the last stage is what it ships: keep it last.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS production
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS production
 
 # Node.js 24's binary, stripped of its symbol tables and debug sections (PRD-262, row 21:
 # 20 MB). .dynsym stays, so native addons still resolve Node's N-API symbols

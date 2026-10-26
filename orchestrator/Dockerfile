@@ -17,7 +17,7 @@
 # tag@digest pin sits on a FROM line, where Dependabot reads it (FR-9). Only the
 # binary is copied, into pybuild, which never ships.
 # -----------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 
 # -----------------------------------------------------------------------------
 # Wheel-build stage — compilers live HERE and never reach the runtime image
@@ -26,7 +26,7 @@ FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158
 # in the shipped image cost ~250 MB in every install (PRD-233 slim pass).
 # Railway builds this file too (its last stage, production; default args), so the
 # slim pass applies to SaaS as well.
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce as pybuild
+FROM python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377 as pybuild
 
 WORKDIR /app
 
@@ -164,7 +164,7 @@ RUN for prefix in /install/stable /install/rest /install/development; do \
 # -----------------------------------------------------------------------------
 # Base — RUNTIME dependencies only
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce as base
+FROM python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377 as base
 
 WORKDIR /app
 

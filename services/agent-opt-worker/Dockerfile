@@ -7,7 +7,7 @@
 #
 # No BuildKit cache mount: Railway fails one that lacks a hard-coded
 # id=s/<service-id>-<path>, and this service's id is not known yet (PRD-262 §10).
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS runtime
+FROM python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377 AS runtime
 
 # The runtime user first, so the code below is copied in already owned by it
 # (no `chown -R` layer that copies every file again).
