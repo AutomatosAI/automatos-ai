@@ -10,11 +10,11 @@
  * off, failed or in safe mode: the core draws), 'pending' (the width is not known yet, the server
  * and hydration; or the host is still loading an installed theme, whose registrations are not
  * known yet), 'narrow' (below the theme's minWidth: the core draws inside the fallback chrome) and
- * 'theme'. An installed theme draws where MainLayout draws its frame (theme-frame-slot.tsx): from
- * the desktop width up (INSTALLED_FRAME_MIN_WIDTH_PX); below it, as any theme below its minWidth,
- * the core's pages, slots and notes ('narrow'), so a phone never gets a theme page cut for a frame
- * it does not have. Its registry entry (W-A6b, lib/theme-host/installed-entry.ts) names that width
- * as its minWidth; a theme with no entry (its boot carried none) reads the same width here.
+ * 'theme'. An installed theme draws from the minWidth its registry entry names (W-A6b,
+ * lib/theme-host/installed-entry.ts, the theme.json's own); below it, as any theme below its
+ * minWidth, the core's pages, slots and notes ('narrow'). A theme with no entry yet (its boot
+ * carried none) reads the desktop width here (INSTALLED_FRAME_MIN_WIDTH_PX), so a phone never
+ * gets a theme page cut for a frame it may not have.
  */
 import { useCallback, useSyncExternalStore, type ComponentType } from 'react'
 

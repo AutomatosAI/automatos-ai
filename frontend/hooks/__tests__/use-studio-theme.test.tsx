@@ -26,7 +26,8 @@ import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import * as hook from '@/hooks/use-studio-theme'
 import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_REF, FIXTURE_THEME_STYLE as THEME } from '@/lib/theme-host/__tests__/fixture-theme-entry'
-import { INSTALLED_FRAME_MIN_WIDTH_PX as THEME_MIN_WIDTH_PX } from '@/lib/theme-host/installed-entry'
+import { INSTALLED_PLAY_STYLE, PLAY_PACKAGE_ENTRY } from '@/lib/theme-host/__tests__/installed-entry-fixture'
+import { installedThemeEntry, INSTALLED_FRAME_MIN_WIDTH_PX as THEME_MIN_WIDTH_PX } from '@/lib/theme-host/installed-entry'
 import type { ThemeEntry, ThemeLayout } from '@/lib/theme-host/registry-types'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 
@@ -129,6 +130,23 @@ describe('useThemeLayout under an installed theme (P260-FX-25, M69)', () => {
     const seen: ThemeLayout[] = []
     expect(renderToString(layoutTree(THEME, seen))).toContain('pending')
     expect(seen).toEqual(['pending'])
+  })
+
+  it("draws a theme whose theme.json names a phone's width (360) on a phone from the first render, and falls back just below it", () => {
+    const phoneTheme = installedThemeEntry(INSTALLED_PLAY_STYLE, { ...PLAY_PACKAGE_ENTRY, minWidth: 360 })
+    const tree = (seen: ThemeLayout[]) => (
+      <UiStyleProvider initialStyle={INSTALLED_PLAY_STYLE} installedTheme={phoneTheme}><LayoutProbe seen={seen} /></UiStyleProvider>
+    )
+    window_ = stubWindowWidth(PHONE_WIDTH_PX)
+    const onPhone: ThemeLayout[] = []
+    render(tree(onPhone))
+    expect(new Set(onPhone)).toEqual(new Set(['theme']))
+    cleanup()
+    window_.restore()
+    window_ = stubWindowWidth(359)
+    const below: ThemeLayout[] = []
+    render(tree(below))
+    expect(new Set(below)).toEqual(new Set(['fallback']))
   })
 
   it("is 'fallback' on a phone from the very first render, never 'theme' for a render", () => {
