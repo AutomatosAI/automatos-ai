@@ -12,7 +12,7 @@
  */
 import { type ReactNode, createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
-import type { VoiceLevels, VoiceSnapshot } from '@/lib/voice/engine'
+import type { VoiceSnapshot, VoiceLevels } from '@/lib/voice/engine'
 import {
   LIVE_STATUS_CHECKING,
   type LiveStatusReading,
@@ -30,6 +30,7 @@ import { quickAskSupported } from '@/lib/voice/support'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
 export type { VoiceAvailability, VoiceStartMode } from '@/lib/voice/host/availability'
+export { readHostVoiceLevels } from '@/lib/voice/host/shared-host'
 
 export interface HostVoiceStartOptions {
   /** `auto` (the default): Live when it can start, else quick-ask. */
@@ -119,11 +120,25 @@ function hostVoiceOf(host: VoiceHost, state: VoiceHostState, available: VoiceAva
   })
 }
 
+const NO_HOST_SUBSCRIBE = () => () => undefined
+const NO_HOST_STATE = (): VoiceHostState | null => null
+
+/** The host's voice, or null outside a VoiceProvider (a page with no voice surface). */
+export function useOptionalHostVoice(): HostVoice | null {
+  const context = useContext(VoiceContext)
+  const host = context?.host ?? null
+  const state = useSyncExternalStore<VoiceHostState | null>(
+    host ? host.subscribe : NO_HOST_SUBSCRIBE,
+    host ? host.getState : NO_HOST_STATE,
+    host ? host.getState : NO_HOST_STATE,
+  )
+  const available = context?.available ?? null
+  return useMemo(() => (host && state && available ? hostVoiceOf(host, state, available) : null), [host, state, available])
+}
+
 /** The host's voice: a frozen view, remade only when the session or the availability changes. */
 export function useHostVoice(): HostVoice {
-  const context = useContext(VoiceContext)
-  if (!context) throw new Error(OUTSIDE_PROVIDER)
-  const { host, available } = context
-  const state = useSyncExternalStore(host.subscribe, host.getState, host.getState)
-  return useMemo(() => hostVoiceOf(host, state, available), [host, state, available])
+  const voice = useOptionalHostVoice()
+  if (!voice) throw new Error(OUTSIDE_PROVIDER)
+  return voice
 }

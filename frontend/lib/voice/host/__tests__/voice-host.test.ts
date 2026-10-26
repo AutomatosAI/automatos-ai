@@ -1,44 +1,12 @@
 // Theme voice — the host's one session (lib/voice/host/voice-host.ts) over stand-in engines: it binds to the
 // conversation on screen, a new chat takes the conversation the session names, moving to another conversation ends
-// it, the words in progress go where they belong, a quick-ask turn that ends announces its saved rows, and the
-// engines and controls are the ones attached.
+// it, the words in progress go where they belong (and only there), and the engines and controls are the ones attached.
 import { describe, expect, it, vi } from 'vitest'
 
-import { IDLE_VOICE, type VoiceEngine, type VoiceSnapshot } from '@/lib/voice/engine'
+import { IDLE_VOICE } from '@/lib/voice/engine'
 import { NO_LIVE_DETAILS, VoiceHost, type VoiceHostDeps } from '@/lib/voice/host/voice-host'
 
-class FakeEngine implements VoiceEngine {
-  current: VoiceSnapshot = IDLE_VOICE
-  private readonly listeners = new Set<(snapshot: VoiceSnapshot) => void>()
-  readonly start = vi.fn(async ({ chatId }: { readonly chatId: string | null }) => {
-    this.emit({ phase: 'connecting', chatId })
-  })
-  readonly release = vi.fn()
-  readonly stop = vi.fn(() => this.emit({ phase: 'idle' }))
-  readonly levels = vi.fn(() => ({ user: 0.2, agent: 0.7 }))
-  readonly dispose = vi.fn()
-  snapshot() {
-    return this.current
-  }
-  subscribe(listener: (snapshot: VoiceSnapshot) => void) {
-    this.listeners.add(listener)
-    return () => {
-      this.listeners.delete(listener)
-    }
-  }
-  emit(patch: Partial<VoiceSnapshot>) {
-    this.current = Object.freeze({ ...this.current, ...patch })
-    this.listeners.forEach((listener) => listener(this.current))
-  }
-}
-
-const DETAILS = Object.freeze({ micSilent: true, inputDevices: Object.freeze([]), captureDeviceId: 'usb-1' })
-
-class FakeLive extends FakeEngine {
-  readonly details = vi.fn(() => DETAILS)
-  readonly toggleMute = vi.fn()
-  readonly pickDevice = vi.fn()
-}
+import { FakeEngine, FakeLive, LIVE_DETAILS as DETAILS } from './support/fake-engines'
 
 function setup(onScreen: string | null = 'chat-1') {
   const live = new FakeLive()
@@ -53,7 +21,6 @@ function setup(onScreen: string | null = 'chat-1') {
     }),
     publishTurn: vi.fn(),
     clearTurn: vi.fn(),
-    turnLanded: vi.fn(),
   } satisfies VoiceHostDeps
   return { host: new VoiceHost(deps), live, quick, screen, deps }
 }
@@ -122,20 +89,20 @@ describe('the voice host — the words and the turns', () => {
     })
   })
 
-  it('a quick-ask turn that ends announces its saved rows; a live call does not', async () => {
-    const { host, live, quick, deps } = setup('chat-1')
-    await host.start('quick')
-    quick.emit({ phase: 'listening' })
-    quick.emit({ phase: 'thinking', heard: 'what is on today' })
-    quick.emit({ phase: 'speaking', reply: 'Two meetings.' })
-    quick.emit({ phase: 'idle' })
-    expect(deps.turnLanded).toHaveBeenCalledTimes(1)
-    expect(deps.turnLanded).toHaveBeenCalledWith('chat-1')
-
+  it('publishes nothing before the session names a conversation, then the conversation it names', async () => {
+    const { host, live, deps } = setup(null)
     await host.start('live')
-    live.emit({ phase: 'speaking' })
-    live.emit({ phase: 'ended' })
-    expect(deps.turnLanded).toHaveBeenCalledTimes(1)
+    live.emit({ phase: 'connecting', heard: '', reply: '' })
+    expect(deps.publishTurn).not.toHaveBeenCalled()
+    live.emit({ chatId: 'voice-thread-1', phase: 'listening', heard: 'hello' })
+    expect(deps.publishTurn).toHaveBeenLastCalledWith({ chatId: 'voice-thread-1', userText: 'hello', agentText: '' })
+  })
+
+  it('a new session starts with no words in progress', async () => {
+    const { host, deps } = setup('chat-1')
+    await host.start('quick')
+    await host.start('quick')
+    expect(deps.clearTurn).toHaveBeenCalledTimes(2)
   })
 })
 

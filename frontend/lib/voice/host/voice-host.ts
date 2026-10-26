@@ -9,8 +9,8 @@
  *   on screen (the session store's chatIdAssigned), as a typed first message does.
  * - Voice belongs to the conversation on screen: moving to another one ends the session.
  * - The session's words in progress go to the conversation they belong to (lib/voice/live-turns.ts), so every chat
- *   on the host's stream shows them as they are spoken. A quick-ask turn that ends announces its conversation's saved
- *   rows (chat_changed), since `POST /api/chat` tells a client that is still connected nothing.
+ *   on the host's stream shows them as they are spoken; a new session starts with none. The saved rows come with
+ *   chat_changed: the backend's for a live call, the quick-ask engine's own announcement for a quick-ask turn.
  */
 import {
   IDLE_VOICE,
@@ -39,8 +39,6 @@ export interface VoiceHostDeps {
   readonly adoptChat: (chatId: string) => void
   readonly publishTurn: (turn: LiveVoiceTurn) => void
   readonly clearTurn: () => void
-  /** A quick-ask turn ended: `chatId`'s saved rows are ready to merge. */
-  readonly turnLanded: (chatId: string) => void
 }
 
 export interface VoiceHostState {
@@ -56,8 +54,6 @@ export const NO_LIVE_DETAILS: LiveCallDetails = Object.freeze({
 })
 const ZERO_LEVELS: VoiceLevels = Object.freeze({ user: 0, agent: 0 })
 const RUNNING: ReadonlySet<VoicePhase> = new Set<VoicePhase>(['connecting', 'listening', 'thinking', 'speaking'])
-const REPLYING: ReadonlySet<VoicePhase> = new Set<VoicePhase>(['thinking', 'speaking'])
-const AT_REST: ReadonlySet<VoicePhase> = new Set<VoicePhase>(['idle', 'ended'])
 
 export class VoiceHost {
   private engine: VoiceEngine | null = null
@@ -126,11 +122,8 @@ export class VoiceHost {
   }
 
   private onEngine(next: VoiceSnapshot): void {
-    const previous = this.state.snapshot
     this.adopt(next)
     if (next.chatId) this.deps.publishTurn({ chatId: next.chatId, userText: next.heard, agentText: next.reply })
-    const quickTurnEnded = this.mode === 'quick' && REPLYING.has(previous.phase) && AT_REST.has(next.phase)
-    if (quickTurnEnded && next.chatId) this.deps.turnLanded(next.chatId)
     this.setState(next)
   }
 
