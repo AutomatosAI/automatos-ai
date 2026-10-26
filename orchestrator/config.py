@@ -2077,10 +2077,10 @@ class Config:
     VOICE_AI_GREETING: str = os.getenv(
         "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant."
     )
-    # Every this many minutes of call time, and after an automatic reconnect,
-    # the next response opens with "Just so you know, I'm an AI assistant."
-    # (Guidelines ¶37). 0 or less reminds on every response; it never turns off.
-    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "10"))
+    # The spoken AI notice is once per call, the greeting above (policy, 23 Oct 2026).
+    # Above 0: every this many minutes of call time and after a reconnect, the next
+    # response opens with "Just so you know, I'm an AI assistant." (¶37). 0 or less: never.
+    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "0"))
     # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
     # AND re-applied on every one-click re-arm. Pinning the language stops
     # multilingual STT from hallucinating confident nonsense; background-speech

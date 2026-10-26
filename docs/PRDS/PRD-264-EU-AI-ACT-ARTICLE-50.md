@@ -203,6 +203,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Acceptance criteria:**
 - [ ] The begin frame (response 0) carries `VOICE_AI_GREETING`, default "Hi, this is Auto, your AI assistant." It is never empty, so Auto speaks first.
 - [ ] After an automatic reconnect, and every `VOICE_AI_REMINDER_MINUTES` of call time (default 10), the next response starts with "Just so you know, I'm an AI assistant." (Guidelines ¶37).
+  - *Changed 23 Oct 2026 (product owner): the spoken notice is once per call. `VOICE_AI_REMINDER_MINUTES` defaults to 0, which never reminds; the greeting stays. The reminder runs only where a deployment sets it above 0. The on-screen label is a small caption, never a pill, and never locks the voice control.*
 - [ ] `VoiceCallPanel.tsx` shows "AI voice assistant" for the whole call, using theme tokens.
 - [ ] Pytest: the begin frame isn't empty and contains "AI"; a reconnect adds the reminder; a fake clock past the interval adds it once. Vitest: the panel label renders during a call.
 

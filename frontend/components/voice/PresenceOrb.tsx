@@ -13,7 +13,7 @@
  *   its absolute host, the beamline sits at `horizon`×height and GLIDES
  *   when it changes (welcome 0.56 → thread 0.74 — words own the upper
  *   field); state intensity lives inside.
- * * `size` band (VoiceCallPanel): the compact beam-and-bars strip.
+ * * `size` band: the compact beam-and-bars strip. Unused since VoiceCallPanel was deleted (theme voice).
  *
  * The background draws GERARD'S REFERENCE: three woven ribbon bundles
  * (gold / magenta / blue, seven offset strands, bright leading strand),
@@ -25,14 +25,19 @@
  * the loop; it can never take the page down again.
  */
 
-import { useEffect, useRef, type MutableRefObject } from 'react'
-import type { VoiceLevels } from '@/hooks/use-retell-call'
+import { useEffect, useRef } from 'react'
+import type { VoiceLevels } from '@/lib/voice/engine'
 import type { OrbState } from '@/lib/voice/orb-state'
+
+/** Where the canvas reads the levels, each frame: a ref, or a getter over the host voice provider's levels. */
+export interface VoiceLevelsSource {
+  readonly current: VoiceLevels
+}
 
 interface PresenceOrbProps {
   state: OrbState
-  levelsRef: MutableRefObject<VoiceLevels>
-  /** Compact-band height (VoiceCallPanel). Ignored in background mode. */
+  levelsRef: VoiceLevelsSource
+  /** Compact-band height. Ignored in background mode. */
   size?: number
   /** Background mode (fills the host). Implied when `horizon` is given. */
   fullBleed?: boolean

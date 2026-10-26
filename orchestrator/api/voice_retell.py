@@ -13,7 +13,8 @@ Retell voice lane (PRD-203 V·S4 seam · PRD-207 Auto Live)
   webhook trust boundary and the WS credential.
 * ``POST /api/voice/retell/events`` — call-lifecycle webhook (HMAC
   fail-closed), the minute meter's write path.
-* ``GET /api/voice/live-status`` — the S7 settings read.
+* ``GET /api/voice/live-status`` — the S7 settings read, and whether Auto
+  Live can start now (``available`` + ``reason``, the plan included).
 
 The self-hosted pod path stays as the fallback; retiring the Pipecat/GPU pod
 is a cross-repo automatos-voice coordination (§8-Qd/Qe), NOT done here.
@@ -37,7 +38,17 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from modules.policy import ai_disclosure
-from modules.voice import arming, call_events, live_settings, live_socket, mint, retell_api, turn_timing, voice_meter
+from modules.voice import (
+    arming,
+    availability,
+    call_events,
+    live_settings,
+    live_socket,
+    mint,
+    retell_api,
+    turn_timing,
+    voice_meter,
+)
 from modules.voice.caller import named_call_agent
 # The mint resolves its caller through this module's name, so a patch here holds.
 from modules.voice.caller import resolve_caller_int_id as _resolve_caller_int_id
@@ -173,7 +184,7 @@ def _is_platform_admin(ctx: RequestContext) -> bool:
 
 
 @router.get("/api/voice/live-status")
-async def voice_live_status(
+def voice_live_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -181,7 +192,11 @@ async def voice_live_status(
 
     Never returns credential VALUES — only whether they are present.
     ``viewer_is_admin`` lets the card show the one-click Arm box to the
-    people who can actually use it.
+    people who can actually use it. ``available`` says whether a mint would
+    pass every gate now (the plan included, on SaaS), and ``reason`` names the
+    first gate that would refuse (``modules/voice/availability.py``); the host
+    voice provider offers Live from it. A plain ``def``: every read here is a
+    synchronous database read, so FastAPI runs it in its threadpool.
     """
     from core.models.workspaces import Workspace
 
@@ -191,9 +206,20 @@ async def voice_live_status(
 
     ws_voice = live_settings.parse_workspace_voice_live(workspace.settings)
     reading = voice_meter.monthly_meter(db, ctx.workspace_id)
+    platform_enabled = live_settings.voice_live_enabled()
+    armed = live_settings.retell_credentials().armed
+    reason = availability.live_unavailable_reason(availability.LiveGates(
+        plan_allows=mint.plan_allows_voice_live(getattr(workspace, "plan", None)),
+        platform_enabled=platform_enabled,
+        armed=armed,
+        workspace_enabled=ws_voice.enabled,
+        cap_allows=voice_meter.cap_allows_mint(reading, ws_voice.monthly_cap_minutes)[0],
+    ))
     return {
-        "platform_enabled": live_settings.voice_live_enabled(),
-        "armed": live_settings.retell_credentials().armed,
+        "available": reason is None,
+        "reason": reason,
+        "platform_enabled": platform_enabled,
+        "armed": armed,
         "workspace_enabled": ws_voice.enabled,
         "retell_voice_id": ws_voice.retell_voice_id,
         "used_minutes": reading.ended_minutes,
