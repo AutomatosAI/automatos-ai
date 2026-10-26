@@ -2,7 +2,8 @@
 // press as a hold and as a toggle, the hotkey (never while the member types), the microphone prompt, a failure's
 // sentence with Try again, the "AI voice assistant" caption and the stop control while the session is the button's,
 // inside the guarded `voice-control` surface, the data attributes and custom properties a theme styles it by, the
-// state for screen readers, and a button that says voice isn't here outside a provider. Never fenced on the AI label.
+// state for screen readers, and a button that says voice isn't here outside a provider. Never fenced on the AI label,
+// and inside a form (Studio's composer) none of its controls submits it.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -211,6 +212,27 @@ describe('what a theme styles it by', () => {
     cleanup()
     const active = draw(QUICK_LISTENING).press.className
     for (const name of VOICE_BUTTON_CSS_VARS) expect(`${idle} ${active}`).toContain(`var(${name},`)
+  })
+})
+
+describe('inside a form (Studio’s composer, a theme’s own)', () => {
+  const SESSIONS: Array<[string, HostVoiceStubPatch, string[]]> = [
+    ['a quick ask', QUICK_LISTENING, [VOICE_BUTTON_WORDS.stop]],
+    ['a failure', { snapshot: { mode: 'quick', phase: 'error', micOpen: false, error: QUICK_ASK_ERRORS.noSpeech } }, ['Try again', 'Close']],
+    ['a live call', { snapshot: { mode: 'live', phase: 'listening', micOpen: true } }, ['Mute microphone', 'End call']],
+    ['an ended call', { snapshot: { mode: 'live', phase: 'ended', micOpen: false } }, ['Close live voice']],
+  ]
+
+  it.each(SESSIONS)('submits nothing from %s’s controls: each is a plain button', (_name, patch, names) => {
+    const submitted = vi.fn((event: React.FormEvent) => event.preventDefault())
+    voice.current = hostVoiceStub(patch)
+    render(<form onSubmit={submitted}><VoiceButton /></form>)
+    for (const name of names) {
+      const control = screen.getByRole('button', { name })
+      expect(control).toHaveAttribute('type', 'button')
+      fireEvent.click(control)
+    }
+    expect(submitted).not.toHaveBeenCalled()
   })
 })
 

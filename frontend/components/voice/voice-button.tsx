@@ -10,7 +10,8 @@
  * - while the session is the button's: the "AI voice assistant" caption (AiVoiceLabel: a tiny caption, never a pill,
  *   and no lock on the button) and the stop control, with mute and the device for a live call, inside a protected
  *   surface (`voice-control`), so no theme stylesheet hides them while the microphone is open;
- * - the state for screen readers, a failure's sentence with Try again, and the provider's silent-microphone notice.
+ * - the state for screen readers, a failure's sentence with Try again, and the provider's silent-microphone notice;
+ * - every control a plain button (`type="button"`), so none submits a form the button sits in (Studio's composer).
  *
  * A theme places, styles and animates it: `data-voice-state` (the session's phase while it is the button's, else
  * idle), `data-voice-mode` (quick or live), `data-voice-press`, `data-voice-size` and `data-voice-mic` (open or
@@ -105,7 +106,14 @@ function StopControl({ voice }: { voice: HostVoice }) {
   if (snapshot.mode === 'live') return <EndOrClose running={running} onStop={voice.stop} />
   if (!running) return null
   return (
-    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={voice.stop} aria-label={VOICE_BUTTON_WORDS.stop}>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-7 w-7 rounded-full"
+      onClick={voice.stop}
+      aria-label={VOICE_BUTTON_WORDS.stop}
+    >
       <Square className={SMALL_ICON} />
     </Button>
   )
