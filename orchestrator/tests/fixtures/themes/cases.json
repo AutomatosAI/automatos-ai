@@ -21,6 +21,7 @@
     "cases": [
       { "name": "the hello manifest", "code": null },
       { "name": "exact engines", "set": { "engines": { "automatos": "1.1.0", "sdk": "1.2.0" } }, "code": null },
+      { "name": "the voice area on SDK ^1.2.0 (theme voice)", "set": { "engines": { "automatos": "^1.1.0", "sdk": "^1.2.0" }, "uses": ["chat", "voice"] }, "code": null },
       { "name": "the fewest fields", "unset": ["description", "routes", "nav", "uses", "look"], "code": null },
       { "name": "every optional field", "set": {
         "pages": {

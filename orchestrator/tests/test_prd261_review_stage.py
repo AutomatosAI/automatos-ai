@@ -4,8 +4,8 @@ Packages are the hello fixture, read by ``read_theme_package`` and then changed 
 (seeded bad packages), so each one fails at its own check. The LLM is a fake answering as the
 Messages API would; the SDK's names are a small test surface, so these tests don't depend on the
 generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/),
-except E3d's storage tests, which review on this host's own list: they prove the SDK's storage area
-is one this host's review accepts. M-03's cases give hello a ``mobile`` block, whose colour pairs the
+except E3d's storage tests and theme voice's voice tests, which review on this host's own list: they
+prove the SDK's storage and voice areas are ones this host's review accepts. M-03's cases give hello a ``mobile`` block, whose colour pairs the
 contrast check measures (an error under AA blocks the verdict).
 The routes that run the stage are covered in ``test_prd261_theme_import.py`` (private upload) and
 by C-01a's submit tests.
@@ -256,6 +256,30 @@ def test_an_sdk_storage_call_without_storage_in_uses_is_a_warning_listing_it():
     assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
     assert uses["undeclaredAreas"] == [STORAGE_AREA]
     assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=STORAGE_AREA)]
+
+
+VOICE_IMPORT = "defineTheme, VoiceButton, readVoiceLevels, useVoice"
+VOICE_AREA = "voice"
+VOICE_NAMES = {"VoiceButton", "readVoiceLevels", "useVoice"}
+
+
+def test_an_sdk_voice_call_declared_in_uses_passes_on_this_hosts_sdk():
+    # Theme voice (TV-C5): the SDK 1.2.0 voice area is one this host's review accepts.
+    report = _review_on_this_host(_entry_importing(VOICE_IMPORT), uses=["theme", VOICE_AREA])
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert VOICE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert VOICE_NAMES <= set(uses["usedNames"])
+
+
+def test_an_sdk_voice_call_without_voice_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(VOICE_IMPORT))
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [VOICE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=VOICE_AREA)]
 
 
 def test_without_the_sdk_name_list_the_uses_check_is_a_warning(monkeypatch):

@@ -320,11 +320,11 @@ Some routes are always the host's: sign-in and sign-up, `/settings`, `/team`, `/
 and the AI label are drawn by the host and guarded, whatever the theme does
 ([CSS layer model](css-layer-model.md)).
 
-A theme reaches data only through `@automatos/theme-sdk` (`frontend/lib/theme-sdk/index.ts`). Its 16 areas are
+A theme reaches data only through `@automatos/theme-sdk` (`frontend/lib/theme-sdk/index.ts`). Its 17 areas are
 listed in `frontend/lib/theme-sdk/surface/`: `assets`, `cards`, `chat`, `context`, `deliverables`, `events`, `looks`,
-`navigation`, `notices`, `storage`, `theme`, and the page areas `pages/agents`, `pages/assignments`,
-`pages/command-center`, `pages/documents`, `pages/playbooks`. Every name is in the
-[SDK surface map](sdk-surface-map.md).
+`navigation`, `notices`, `storage`, `theme`, `voice` (SDK 1.2.0: the host's voice button, the session and its
+levels), and the page areas `pages/agents`, `pages/assignments`, `pages/command-center`, `pages/documents`,
+`pages/playbooks`. Every name is in the [SDK surface map](sdk-surface-map.md).
 
 ## 8. The look runtime
 
