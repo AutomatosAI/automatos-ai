@@ -108,7 +108,7 @@ jobs:
           # CLI presets and the e2e theme fixtures. Keep it on one line:
           # frontend/scripts/__tests__/frontend-ci-lane-paths.test.ts reads it, and fails when a
           # frontend test names a theme module it leaves out.
-          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/contracts/page-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(contract|css_value|listings|look_schema|manifest|optin|review|review_package|review_stage|revocation_admin|revocation_pull|scan|signature_verify|signing|updates)\.py$|^orchestrator/core/(auth/step_up|cli_presets)\.py$|^e2e/browser/fixtures/hello-a(04d|09b)/|^\.github/workflows/test\.yml$
+          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/contracts/page-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(audio_capture|contract|css_value|listings|look_schema|manifest|optin|review|review_package|review_stage|revocation_admin|revocation_pull|scan|signature_verify|signing|updates)\.py$|^orchestrator/core/(auth/step_up|cli_presets)\.py$|^e2e/browser/fixtures/hello-a(04d|09b)/|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$
