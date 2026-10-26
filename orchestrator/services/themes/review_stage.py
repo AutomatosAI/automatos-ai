@@ -24,6 +24,9 @@ host can't make yet:
   ground, so there is no pair to measure (``scan.CONTRAST_NOT_RUN``). The reviewer checks it by
   eye until the look schema declares pairs or axe runs (D3-b);
 * ``uses``: the declared SDK areas against the names the bundle imports (``sdk_uses.py``);
+* ``audioCapture`` (theme voice, TV-C7): the bundle opening the microphone, listening or speaking by
+  itself (``getUserMedia``, ``SpeechRecognition``, ``speechSynthesis``) instead of through the SDK's
+  voice area is an error naming each (``audio_capture.py``);
 * ``clonedFrom``: each cloned page's ``clonedFrom.sha`` against this release's core page files
   (``data/core-pages.json`` through ``drift.py``); a stale clone is a warning;
 * ``llm``: the LLM stage (``llm_stage.py``); when it can't run on all the code it is a warning
@@ -44,6 +47,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Mapping, Optional
 
+from services.themes.audio_capture import audio_capture_check
 from services.themes.drift import stale_clones
 from services.themes.llm_stage import ChunkCall, TokenBudget, llm_check, run_llm_stage
 from services.themes.mobile_contrast import OUTCOME_FAIL, OUTCOME_NOT_MEASURED, OUTCOME_PASS, measure_mobile
@@ -134,6 +138,7 @@ def run_review_stage(
     checks = {
         **_reader_checks(checked, package_bytes),
         "uses": uses_check(checked.manifest, data, surface),
+        "audioCapture": audio_capture_check(data),
         "clonedFrom": clone_check(checked.manifest),
         "llm": llm_check(llm),
     }

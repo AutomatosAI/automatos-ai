@@ -75,12 +75,12 @@ def test_a_clean_package_passes_with_every_check_reported():
     checks = report["checks"]
 
     assert (report["schema"], report["stage"], report["verdict"]) == (REPORT_SCHEMA, "C-02a", "pass")
-    assert set(checks) == {"sizes", "cssScope", "looks", "contrast", "uses", "clonedFrom", "llm"}
+    assert set(checks) == {"sizes", "cssScope", "looks", "contrast", "uses", "audioCapture", "clonedFrom", "llm"}
     assert {name: check["level"] for name, check in checks.items()} == {
         "sizes": "pass", "cssScope": "pass", "looks": "pass", "contrast": "not_measured",
-        "uses": "pass", "clonedFrom": "pass", "llm": "pass",
+        "uses": "pass", "audioCapture": "pass", "clonedFrom": "pass", "llm": "pass",
     }
-    assert report["summary"] == {"pass": 6, "warning": 0, "error": 0, "not_measured": 1}
+    assert report["summary"] == {"pass": 7, "warning": 0, "error": 0, "not_measured": 1}
     assert checks["uses"]["usedAreas"] == ["theme"] and checks["llm"]["calls"] >= 1
 
 
@@ -143,7 +143,7 @@ def test_a_mobile_block_whose_measured_pairs_meet_aa_passes_contrast():
 
     assert (report["verdict"], contrast["level"], contrast["source"]) == ("pass", "pass", "tokens")
     assert [scheme["id"] for scheme in contrast["schemes"]] == ["light"] and "presets" not in contrast
-    assert report["summary"] == {"pass": 7, "warning": 0, "error": 0, "not_measured": 0}
+    assert report["summary"] == {"pass": 8, "warning": 0, "error": 0, "not_measured": 0}
 
 
 def test_from_looks_a_preset_under_aa_blocks_and_is_named():

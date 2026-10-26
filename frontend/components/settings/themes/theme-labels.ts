@@ -50,9 +50,9 @@ export const SIGNATURE_FILE_CHOSEN = 'Signature file:'
 // ===== The scan report of an upload (scan-report.tsx) =====
 /**
  * Every check the review stage stores (`services/themes/review_stage.py` run_review_stage: the
- * reader's `sizes`, `cssScope`, `looks`, then `contrast`, `uses` from sdk_uses.py, `clonedFrom` from
- * drift.py and `llm` from llm_stage.py, which member_view leaves out), and `automated`, which only a
- * report stored before the review stage has (`scan.py`).
+ * reader's `sizes`, `cssScope`, `looks`, then `contrast`, `uses` from sdk_uses.py, `audioCapture` from
+ * audio_capture.py (theme voice), `clonedFrom` from drift.py and `llm` from llm_stage.py, which member_view
+ * leaves out), and `automated`, which only a report stored before the review stage has (`scan.py`).
  */
 export const CHECK_LABELS: Readonly<Record<string, string>> = {
   sizes: 'Sizes',
@@ -60,6 +60,7 @@ export const CHECK_LABELS: Readonly<Record<string, string>> = {
   looks: 'Looks',
   contrast: 'Contrast (AA)',
   uses: 'SDK areas',
+  audioCapture: 'Microphone and speech',
   clonedFrom: 'Cloned core pages',
   llm: 'AI code read',
   automated: 'Automated review',
