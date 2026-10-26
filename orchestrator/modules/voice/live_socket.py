@@ -22,9 +22,10 @@ grows); the route lends the session its turn stream and the call-status read,
 late-bound, so the agent loop stays where it is.
 
 PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto speaks first and says it is an
-AI (the begin frame carries the greeting the route lends, never empty);
-after an automatic reconnect, and every ``VOICE_AI_REMINDER_MINUTES`` of call
-time, the next response opens with the reminder (``modules/voice/ai_notice.py``).
+AI (the begin frame carries the greeting the route lends, never empty). That
+is the call's one notice by default; a deployment that sets
+``VOICE_AI_REMINDER_MINUTES`` above 0 also gets the reminder after an automatic
+reconnect and every that many minutes of call time (``modules/voice/ai_notice.py``).
 
 PRD-266 US-008b (live-only socket): a call is live only while its status is in
 ``LIVE_CALL_STATUSES``. The route refuses any other status (ended, failed,
