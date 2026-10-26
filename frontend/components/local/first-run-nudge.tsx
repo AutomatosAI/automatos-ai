@@ -99,20 +99,22 @@ export function FirstRunNudge() {
     // Zero-height anchor: overlays the top of whichever chat layout hosts it
     // (classic `relative` container or the studio flex column) without
     // taking space from the Chat. Inline flex/height beat the studio's
-    // `.sh-chat-main > * { flex: 1 }` rule.
+    // `.sh-chat-main > * { flex: 1 }` rule. The banner is as wide as its
+    // words up to the screen's width less a margin; on a phone the words wrap
+    // inside it instead of running past its edge.
     <div className="relative z-30" style={{ flex: '0 0 auto', height: 0 }}>
       <div
         role="status"
         aria-live="polite"
         data-testid="first-run-nudge"
-        className="absolute left-1/2 top-3 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur"
+        className="absolute left-1/2 top-3 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur sm:rounded-full"
       >
         <KeyRound className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-        <span>{FIRST_RUN_NUDGE_MESSAGE}</span>
+        <span className="min-w-0">{FIRST_RUN_NUDGE_MESSAGE}</span>
         <Link
           href={FIRST_RUN_NUDGE_SETTINGS_HREF}
           data-testid="first-run-nudge-link"
-          className="font-medium underline underline-offset-4 hover:text-foreground"
+          className="shrink-0 font-medium underline underline-offset-4 hover:text-foreground"
         >
           {FIRST_RUN_NUDGE_LINK_LABEL}
         </Link>
@@ -121,7 +123,7 @@ export function FirstRunNudge() {
           aria-label="Dismiss"
           data-testid="first-run-nudge-dismiss"
           onClick={dismiss}
-          className="rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground"
+          className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground"
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

@@ -94,6 +94,16 @@ describe('FirstRunNudge (PRD-233 S3)', () => {
     expect(getMock).toHaveBeenCalledWith('/api/keys/platform-status')
   })
 
+  it('fits a phone: as wide as its words up to the screen, the words wrapping inside it', async () => {
+    respond([], NO_PLATFORM_KEYS)
+    renderNudge()
+
+    const nudge = await screen.findByTestId('first-run-nudge')
+    expect(nudge).toHaveClass('w-max', 'max-w-[calc(100vw-2rem)]')
+    expect(nudge).not.toHaveClass('whitespace-nowrap')
+    expect(screen.getByTestId('first-run-nudge-link')).toHaveClass('shrink-0')
+  })
+
   it('stays hidden when a BYOK key exists', async () => {
     respond(A_BYOK_KEY, NO_PLATFORM_KEYS)
     renderNudge()
