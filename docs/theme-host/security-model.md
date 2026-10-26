@@ -294,8 +294,9 @@ kit's `keys/theme-signing.json`:
 ```
 
 `keyId` is `ed25519:` and the first 16 hex characters of the sha256 of the SPKI DER. `status` is `active`,
-`retired` or `revoked`. A file that breaks any rule, or names a key twice, doesn't load. The file ships with no key, so
-until a key is added nothing verifies.
+`retired` or `revoked`. A file that breaks any rule, or names a key twice, doesn't load. The file ships one key,
+Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`, `active`, added 2026-10-26); no version is signed with it
+yet.
 
 **Verdicts** (`signature_verify.verify`): `verified` when an active key verifies the signature; `invalid` when no key
 does, or only a retired or revoked one does (that key's id is kept); `unsigned` when there is none. In the local

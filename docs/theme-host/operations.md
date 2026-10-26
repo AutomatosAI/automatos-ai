@@ -93,8 +93,9 @@ A review limit or an AI code read setting of 0 or below falls back to its defaul
 
 ## Add the production signing key
 
-Until a key is in the keys file, no signature verifies: nothing is Official, no signed upload installs, and a pasted
-signature is refused. The private key never goes near the orchestrator.
+Done on 2026-10-26: both files hold Automatos's theme-signing key, `ed25519:e138b6d0fa7aaaf3`, `active`. The steps
+stay for a new key. A keys file with no active key verifies nothing: nothing is Official, no signed upload installs,
+and a pasted signature is refused. The private key never goes near the orchestrator.
 
 1. **In the Design Kit repository, set up the `theme-signing` environment** (Settings › Environments): deployment
    branches `main` only, and the named signers as required reviewers. The kit's
@@ -118,10 +119,11 @@ signature is refused. The private key never goes near the orchestrator.
 
 4. **Put the same bytes in both repositories**: the kit's `keys/theme-signing.json` and this repository's
    `orchestrator/services/themes/data/signing-keys.json`. Merge both, and deploy the core release that carries it.
-   Until the kit's file holds the key, the kit's Theme release workflow attaches no signature. In the same change,
-   update the docs that say no key ships yet: [Themes](../themes/_index.md#who-vouches-for-a-theme),
-   [the signature file](../themes/installing-and-choosing.md#the-signature-file), the FAQ, Marketplace › Themes and
-   [Signatures and revocations](_index.md#11-signatures-and-revocations).
+   Until the kit's file holds an active key, the kit's Theme release workflow attaches no signature. In the same
+   change, update the docs that name the shipped key: [Themes](../themes/_index.md#who-vouches-for-a-theme),
+   [the signature file](../themes/installing-and-choosing.md#the-signature-file),
+   [Marketplace › Themes](../community-marketplace/themes-tab.md),
+   [Signatures and revocations](_index.md#11-signatures-and-revocations) and [Signatures](security-model.md#signatures).
 5. **Check it loads.** A keys file that breaks a rule doesn't load, and then a signature paste and a signed upload
    answer 503, and on the hosted edition `GET /api/themes/revocations` answers 503 too. A first pasted signature that
    stores (`signatureVerified: true` and the key id in the report) proves the key end to end.

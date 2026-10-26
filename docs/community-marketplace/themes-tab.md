@@ -51,7 +51,7 @@ three of the SDK areas it uses, and these badges:
 
 | Badge | Meaning |
 |---|---|
-| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. No card shows it yet: this release's signing keys file holds no Automatos key. |
+| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. No card shows it yet: this release ships Automatos's theme-signing key, but no version is signed with it yet. |
 | **In this workspace** | The workspace has this theme installed. |
 | **Update available** | The workspace runs an older Marketplace version of it. |
 | **Needs a newer Automatos** | No version of this theme runs on this Automatos yet. |

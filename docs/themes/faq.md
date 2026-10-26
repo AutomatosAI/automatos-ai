@@ -82,8 +82,8 @@ verifies. No version is signed yet: see [Who vouches for a theme](_index.md#who-
 
 Only a theme that isn't private can be the workspace default, because a default runs for members who never said yes
 to its code. The reason is written beside the button: "A theme that was not reviewed can’t be the workspace default."
-Add the theme's Marketplace version instead, if it is listed. A signed upload could be the default too, but no upload
-can be signed yet. See [The workspace default](installing-and-choosing.md#the-workspace-default).
+Add the theme's Marketplace version instead, if it is listed. A signed upload could be the default too, but no release
+is signed yet. See [The workspace default](installing-and-choosing.md#the-workspace-default).
 
 ### I opted in last week. Why does it ask again?
 

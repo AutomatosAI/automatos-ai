@@ -10,7 +10,8 @@ Pins (plan §2.2.6, §2.6 C-05a):
   ``verified`` with that keyId; a flipped file hash, a flipped signature byte, a retired key, a
   revoked key are ``invalid``; no signature is ``unsigned``;
 * a keys file with a malformed key, a duplicate keyId or an unknown status fails with a plain
-  message; the shipped (empty) keys file loads and nothing verifies;
+  message; the shipped keys file loads and holds exactly Automatos's theme-signing key, active,
+  which no RFC seed's signature verifies against; a keys file with no key verifies nothing;
 * no private key anywhere under ``services/themes`` or ``tests/fixtures/themes``, and no new
   dependency.
 
@@ -57,6 +58,13 @@ PAYLOAD_CASE = next(case for case in VECTOR["canonical"]["cases"] if case["name"
 SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")  # an Ed25519 public key's SPKI DER, before the key
 X25519_SPKI_PREFIX = bytes.fromhex("302a300506032b656e032100")  # the same shape for an X25519 key
 ADDED = "2026-10-20"
+# Automatos's theme-signing key (C-05n): the one key data/signing-keys.json ships, as the kit's file does.
+SHIPPED_KEY = {
+    "keyId": "ed25519:e138b6d0fa7aaaf3",
+    "spki": "MCowBQYDK2VwAyEA8/ZN550R8owJj73irzwwUlZzYplIx/Ki5D9NXSrgEXU=",
+    "status": "active",
+    "added": "2026-10-26",
+}
 NO_PRIVATE_KEY_ROOTS = (_ORCH / "services" / "themes", _ORCH / "tests" / "fixtures" / "themes")
 PRIVATE_KEY_MARKER = b"PRIVATE KEY"
 
@@ -263,9 +271,26 @@ def test_a_keys_file_that_cannot_be_read_fails_with_a_plain_message(tmp_path):
         sv.load_keys(tmp_path / "missing.json")
 
 
-def test_the_shipped_keys_file_loads_and_nothing_verifies():
+def test_the_shipped_keys_file_holds_exactly_automatoss_theme_signing_key():
     assert sv.KEYS_PATH == _ORCH / "services" / "themes" / "data" / "signing-keys.json"
-    assert json.loads(sv.KEYS_PATH.read_text(encoding="utf-8")) == {"schema": 1, "keys": []}
+    shipped = {"schema": 1, "keys": [SHIPPED_KEY]}
+    assert sv.KEYS_PATH.read_text(encoding="utf-8") == json.dumps(shipped, separators=(",", ":")) + "\n"
+    (key,) = sv.load_keys()
+    assert (key.key_id, key.status) == (SHIPPED_KEY["keyId"], sv.STATUS_ACTIVE)
+    assert isinstance(key.public_key, Ed25519PublicKey)
+    der = base64.b64decode(SHIPPED_KEY["spki"])
+    assert der.startswith(SPKI_PREFIX) and sv.key_id_of(der) == SHIPPED_KEY["keyId"]
+
+
+def test_no_rfc_seed_signs_for_the_shipped_key():
+    assert SHIPPED_KEY["keyId"] not in [case["keyId"] for case in RFC]
+    payload = _payload()
+    for case in RFC:
+        assert sv.verify(payload, _signed(payload, case)) == sv.Verdict("invalid")
+
+
+def test_a_keys_file_with_no_key_loads_and_nothing_verifies(keys_at):
+    keys_at()
     assert sv.load_keys() == ()
     payload = _payload()
     for case in RFC:
