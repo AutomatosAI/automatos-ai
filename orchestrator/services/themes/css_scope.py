@@ -14,7 +14,8 @@ with no new dependency (D1-f):
   ``@-webkit-keyframes``) name and every ``@font-face`` ``font-family`` (quoted or not) starts
   with ``<class>-``, so ``@keyframes spin`` can't replace the host's own ``animate-spin``;
 * no selector may name the app's protected surfaces (``data-protected-surface`` and
-  ``data-protected-surface-inner``, the approval cards' wrappers, PRD-261 A-12c), anywhere in it,
+  ``data-protected-surface-inner``, the approval cards' wrappers, PRD-261 A-12c, and the voice
+  button's control, ``voice-control``: its AI voice caption and stop control), anywhere in it,
   in any case, escaped or not: the cards' own boxes are guarded inline, and this keeps theme
   rules off them and off the elements inside them;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
@@ -78,8 +79,9 @@ TOKEN = re.compile(
     r"|(?P<other>[^{};()\[\]!\"'/\\A-Za-z_\-\u0080-\U0010ffff]+|[/\-])",
     re.S,
 )
-# The approval cards' wrapper attributes (frontend/components/theme-host/protected-surface.tsx);
-# this prefix covers both, data-protected-surface and data-protected-surface-inner.
+# The protected surfaces' wrapper attributes (frontend/components/theme-host/protected-surface.tsx: the
+# approval cards and the voice button's control); this prefix covers both, data-protected-surface and
+# data-protected-surface-inner, whatever surface they name.
 PROTECTED_SURFACE_NAME = "data-protected-surface"
 # A backslash before a character stands for that character (only punctuation may be escaped).
 ESCAPED_CHAR = re.compile(r"\\([\s\S])")
