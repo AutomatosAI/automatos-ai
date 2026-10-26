@@ -1,10 +1,12 @@
 /**
  * Theme voice — one chat turn sent and read outside React: the web quick-ask voice's send. The body useChat
- * (hooks.ts) sends, to the same backend route (POST /api/chat, the AI SDK data stream back), so the turn is a normal
- * chat turn in the conversation (saved, titled, answered by the agent the backend routes to); `spokenMode` (PRD-266 §4.7, D32,
- * chat_models.py ChatRequest.spokenMode) tells the backend the reply is heard, so it answers in short spoken
- * sentences and speechifies the text. The base URL and the auth and workspace headers are apiClient's, as for every
- * other stream the frontend reads (apiClient.request parses JSON and cannot hand over a stream).
+ * (hooks.ts) sends, by the same way: the app's own POST /api/chat (app/api/chat/route.ts), which forwards it to the
+ * backend's with the server's API key where the member has no sign-in token, and streams the AI SDK data stream back.
+ * So the turn is a normal chat turn in the conversation (saved, titled, answered by the agent the backend routes to),
+ * and a voice turn reaches Auto wherever a typed one does. `spokenMode` (PRD-266 §4.7, D32, chat_models.py
+ * ChatRequest.spokenMode) tells the backend the reply is heard, so it answers in short spoken sentences and
+ * speechifies the text. The auth and workspace headers are apiClient's (apiClient.request parses JSON and cannot
+ * hand over a stream).
  *
  * useChat keeps its own inline copy of this request: a changed line inside its body fails the code-shape gate until it
  * is split under the 50-line limit (the PRD-265 note in hooks.ts), so it adopts this module then.
@@ -49,7 +51,8 @@ interface ReadState {
   readonly errorMessage: string | null
 }
 
-const CHAT_ENDPOINT = '/api/chat'
+/** The app's own chat route (app/api/chat/route.ts), not the backend's: useChat posts to it as well. */
+const CHAT_PROXY_PATH = '/api/chat'
 const LOG_PREFIX = '[chat-turn]'
 const FINISHED: ChatTurnOutcome = Object.freeze({ kind: 'finished' })
 const ABORTED: ChatTurnOutcome = Object.freeze({ kind: 'aborted' })
@@ -115,7 +118,7 @@ export async function streamChatTurn(
 ): Promise<ChatTurnOutcome> {
   try {
     const headers = await apiClient.getAuthHeaders()
-    const response = await fetch(`${apiClient.getBaseUrl()}${CHAT_ENDPOINT}`, {
+    const response = await fetch(CHAT_PROXY_PATH, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(chatTurnBody(request)),

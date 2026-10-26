@@ -1,8 +1,9 @@
 /**
  * Theme voice — a chat turn sent outside React (lib/chat/turn-stream.ts, turn-frames.ts): the quick-ask voice's turn
- * is a normal POST /api/chat with spokenMode, through apiClient's base URL and headers; the reply streams to the
- * handlers with narration taken out; a new chat's id is handed over; an `e:` frame, a refused request and a request
- * that never arrived each end as a failure, and Stop as aborted. Only the network and apiClient are stubbed.
+ * is a normal POST /api/chat with spokenMode, to the app's own chat route as useChat's, with apiClient's headers; the
+ * reply streams to the handlers with narration taken out; a new chat's id is handed over; an `e:` frame, a refused
+ * request and a request that never arrived each end as a failure, and Stop as aborted. Only the network and apiClient
+ * are stubbed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -84,14 +85,14 @@ describe('parseChatLine', () => {
 })
 
 describe('streamChatTurn', () => {
-  it('posts the spoken turn to /api/chat with apiClient’s base URL and headers', async () => {
+  it('posts the spoken turn to the app’s own /api/chat, as useChat does, with apiClient’s headers', async () => {
     const fetchMock = vi.fn(async () => chatResponse(['0:"Ok."\n']))
     vi.stubGlobal('fetch', fetchMock)
 
     await streamChatTurn(SPOKEN, handlers(), new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('https://api.automatos.test/api/chat')
+    expect(url).toBe('/api/chat')
     expect(init.method).toBe('POST')
     expect(init.headers).toEqual({
       Authorization: 'Bearer t0k',
