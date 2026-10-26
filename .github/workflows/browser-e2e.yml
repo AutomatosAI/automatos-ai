@@ -25,7 +25,9 @@ name: browser-e2e
 # A-19f4 (W-A8): builtin Play's folders left core with it, and their entries left
 # this list; Play lives only in the Design Kit, and this lane installs its package
 # (the `package` job, below). PRD-261 B-03h added the web app's host file, which the
-# kit's CLI reads (frontend/app/automatos-host.json).
+# kit's CLI reads (frontend/app/automatos-host.json). Theme voice added the host's voice and AI label code
+# (lib/voice, components/voice, lib/ai-label, components/ai-label): Play 1.2.0's message box holds core's voice
+# button and its AI label fences, and the Play specs check both.
 #
 # workflow_dispatch works only once this file is on main: GitHub dispatches only
 # workflows that exist on the default branch. Before that, the lane runs on a
@@ -93,6 +95,10 @@ on:
       - "frontend/components/shared/**"
       - "frontend/lib/theme-host/**"
       - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/voice/**"
+      - "frontend/components/voice/**"
+      - "frontend/lib/ai-label/**"
+      - "frontend/components/ai-label/**"
       - "frontend/lib/look-kit/**"
       - "frontend/lib/chat/**"
       - "frontend/lib/text/plain-line.ts"
@@ -154,6 +160,10 @@ on:
       - "frontend/components/shared/**"
       - "frontend/lib/theme-host/**"
       - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/voice/**"
+      - "frontend/components/voice/**"
+      - "frontend/lib/ai-label/**"
+      - "frontend/components/ai-label/**"
       - "frontend/lib/look-kit/**"
       - "frontend/lib/chat/**"
       - "frontend/lib/text/plain-line.ts"
