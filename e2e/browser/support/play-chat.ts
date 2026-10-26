@@ -16,6 +16,16 @@ const CHAT_STREAM_PATH = '/api/chat'
 const POSTS_KEY = '__playParityChatPosts'
 /** Play's message box (chat/message-box.tsx PLACEHOLDER, its accessible name). */
 export const MESSAGE_BOX = 'Message Auto'
+/** Play's Send (chat/message-box.tsx), in the box's second AI label fence. */
+export const SEND = 'Send'
+/**
+ * The host's voice button in Play's message box, between the words and Send, outside both AI label fences (Play
+ * 1.2.0, chat/message-box.tsx: the SDK's voice.VoiceButton, press "hold", no label). Core draws it and names it:
+ * frontend/components/voice/voice-button-view.ts VOICE_BUTTON_WORDS.hold.
+ */
+export const HOLD_TO_TALK = 'Hold to talk'
+/** The message box's form: the words, the voice button and Send (chat/message-box.tsx). */
+const MESSAGE_FORM = 'form'
 /** Each reply of Auto's (chat/auto-reply.tsx: `${SPEAKER} said`). */
 const REPLY_NAME = 'Auto said'
 /** Auto's column beside the conversation (shell/page-columns.tsx MascotColumn). */
@@ -65,10 +75,25 @@ export function messageBox(page: Page): Locator {
   return page.getByRole('textbox', { name: MESSAGE_BOX, exact: true })
 }
 
+/** The form that holds the message box. */
+function messageForm(page: Page): Locator {
+  return page.locator(MESSAGE_FORM).filter({ has: messageBox(page) })
+}
+
+/** The host's voice button in the message box. */
+export function voiceButton(page: Page): Locator {
+  return messageForm(page).getByRole('button', { name: HOLD_TO_TALK, exact: true })
+}
+
+/** Send in the message box. */
+export function sendButton(page: Page): Locator {
+  return messageForm(page).getByRole('button', { name: SEND, exact: true })
+}
+
 /** Types `words` into the message box and sends them. */
 export async function ask(page: Page, words: string): Promise<void> {
   await messageBox(page).fill(words)
-  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await sendButton(page).click()
 }
 
 /** Auto's replies, oldest first. */
