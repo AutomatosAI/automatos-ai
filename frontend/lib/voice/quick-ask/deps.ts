@@ -8,6 +8,7 @@
  */
 import { cancelChatTurn } from '@/lib/chat/api'
 import { streamChatTurn, type ChatTurnSender } from '@/lib/chat/turn-stream'
+import { CHAT_CHANGED_EVENT } from '@/lib/voice/live-turns'
 
 import type { NoticeStorage } from './ai-notice'
 import { SYSTEM_CLOCK, type QuickAskClock } from './clock'
@@ -35,8 +36,6 @@ export interface QuickAskDeps {
   readonly onPageHidden: (callback: () => void) => () => void
 }
 
-/** The window event the board stream fans chat_changed out as; useChat and the theme chat merge on it. */
-export const CHAT_CHANGED_EVENT = 'automatos:chat-changed'
 /** Recognition and speech language when the browser names none. */
 export const FALLBACK_LANGUAGE = 'en-US'
 

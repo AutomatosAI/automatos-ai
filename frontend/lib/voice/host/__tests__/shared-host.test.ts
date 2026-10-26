@@ -1,7 +1,7 @@
 // Theme voice — the tab's one host wired to the app (lib/voice/host/shared-host.ts): the conversation on screen and
 // a new chat's adoption go through the chat session store, the words go to the live-turns store and settle on the
 // window's chat_changed, the levels read off the host, and a session outlives its provider only for the handover.
-// The quick-ask bridge (quick-engine.ts) runs the stand-in while this lane builds alone: a start fails in words.
+// The quick-ask bridge (quick-engine.ts) is one engine per tab; where the browser can't recognise speech, a start fails in words.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const session = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ import {
   sharedVoiceHost,
 } from '@/lib/voice/host/shared-host'
 import { quickAskEngine } from '@/lib/voice/host/quick-engine'
-import { QUICK_ASK_NOT_BUILT } from '@/lib/voice/host/quick-ask-stand-in'
+import { QUICK_ASK_ERRORS } from '@/lib/voice/quick-ask/copy'
 import { CHAT_CHANGED_EVENT, useLiveTurnStore } from '@/lib/voice/live-turns'
 
 import { FakeEngine, FakeLive } from './support/fake-engines'
@@ -87,12 +87,12 @@ describe('the app voice host — the handover between providers', () => {
   })
 })
 
-describe('the quick-ask bridge, while this lane builds alone', () => {
-  it('is one engine per tab, and its start fails in words without listening', async () => {
+describe('the quick-ask bridge', () => {
+  it('is one engine per tab, and where the browser has no speech recognition its start fails in words', async () => {
     const engine = quickAskEngine()
     expect(quickAskEngine()).toBe(engine)
     await engine.start({ chatId: 'chat-1' })
-    expect(engine.snapshot()).toMatchObject({ mode: 'quick', phase: 'error', micOpen: false, error: QUICK_ASK_NOT_BUILT })
+    expect(engine.snapshot()).toMatchObject({ mode: 'quick', phase: 'error', micOpen: false, error: QUICK_ASK_ERRORS.unsupported })
     engine.stop()
     expect(engine.snapshot().phase).toBe('idle')
   })
