@@ -35,6 +35,8 @@ export { readHostVoiceLevels } from '@/lib/voice/host/shared-host'
 export interface HostVoiceStartOptions {
   /** `auto` (the default): Live when it can start, else quick-ask. */
   readonly mode?: VoiceStartMode
+  /** The conversation the session talks into (null: a new chat); the one on screen when left out. */
+  readonly chatId?: string | null
 }
 
 /** The live call's microphone: what the strip shows and the two things it changes. */
@@ -49,7 +51,7 @@ export interface HostVoice {
   readonly available: VoiceAvailability
   /** Read inside an animation frame; never triggers a render. */
   readonly readLevels: () => VoiceLevels
-  /** Starts a session on the conversation on screen; call it from the member's gesture. */
+  /** Starts a session on the conversation on screen, or the one named; call it from the member's gesture. */
   readonly start: (options?: HostVoiceStartOptions) => Promise<void>
   /** Hold-to-talk: the member let go. */
   readonly release: () => void
@@ -113,7 +115,8 @@ function hostVoiceOf(host: VoiceHost, state: VoiceHostState, available: VoiceAva
     snapshot: state.snapshot,
     available,
     readLevels: host.readLevels,
-    start: (options?: HostVoiceStartOptions) => host.start(resolveVoiceMode(options?.mode ?? 'auto', available)),
+    start: (options?: HostVoiceStartOptions) =>
+      host.start(resolveVoiceMode(options?.mode ?? 'auto', available), options?.chatId),
     release: host.release,
     stop: host.stop,
     live: Object.freeze({ ...state.live, toggleMute: host.toggleMute, pickDevice: host.pickDevice }),

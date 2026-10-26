@@ -95,6 +95,14 @@ describe('VoiceProvider — a session', () => {
     expect(live.start).toHaveBeenCalled()
   })
 
+  it('a start that names a conversation runs on it, not on the one on screen', async () => {
+    const { wrapper, quick } = setup()
+    const { result } = renderHook(() => useHostVoice(), { wrapper })
+    await act(() => result.current.start({ mode: 'quick', chatId: 'chat-7' }))
+    expect(quick.start).toHaveBeenCalledWith({ chatId: 'chat-7' })
+    expect(result.current.snapshot).toMatchObject({ phase: 'connecting', chatId: 'chat-7' })
+  })
+
   it('moving to another conversation ends the session', async () => {
     const { wrapper, live } = setup()
     const { result } = renderHook(() => useHostVoice(), { wrapper })
