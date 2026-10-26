@@ -32,7 +32,7 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-design-kit`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
-uploads `automatos.play-1.2.0.autotheme` as the `kit-theme-package` artifact (the job's summary shows
+uploads `automatos.play-1.2.1.autotheme` as the `kit-theme-package` artifact (the job's summary shows
 its size, sha256 and the kit commit). A dispatch can name another kit commit and theme (below).
 The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with the rest of
 Play. Before it builds, the job fails when a `kitPath` of core's test ledger
