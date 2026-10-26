@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import InstanceState
 
 from core.models.core import Chat, Message
+from core.services.notification_columns import clamp
 from services.notification_events.soon import send_soon
 from services.push.payload import AUTO_MESSAGE_LINE
 
@@ -47,7 +48,6 @@ ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST})
 NEVER_COALESCED: frozenset[str] = frozenset({DAILY_DIGEST})
 AUTO_MESSAGE_COALESCE_SECONDS = 600
 EXCERPT_MAX_CHARS = 200
-ELLIPSIS = "…"
 
 # An auto_message for this person and chat, written within the window. Bound parameters only.
 _TOLD_LATELY_SQL = text(
@@ -110,10 +110,7 @@ def _excerpt(parts: Any) -> str:
         str(part.get("text") or "") for part in (parts or [])
         if isinstance(part, Mapping) and part.get("type") == "text"
     ]
-    whole = " ".join(" ".join(texts).split())
-    if len(whole) <= EXCERPT_MAX_CHARS:
-        return whole
-    return whole[: EXCERPT_MAX_CHARS - len(ELLIPSIS)] + ELLIPSIS
+    return clamp(" ".join(" ".join(texts).split()), EXCERPT_MAX_CHARS)
 
 
 def _open_session() -> Any:

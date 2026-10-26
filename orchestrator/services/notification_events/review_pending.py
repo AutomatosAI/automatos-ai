@@ -19,6 +19,7 @@ from uuid import UUID
 
 from core.models.core import Agent, BoardTask
 from core.models.review_entries import REVIEW
+from core.services.notification_columns import clamp
 from services.notification_events.soon import send_soon
 from services.ticket_numbers import ticket_label
 
@@ -29,7 +30,6 @@ LINK_TYPE = "task"
 STATUS = "action_required"
 TITLE_PREFIX = "Ready for review: "
 TITLE_MAX_CHARS = 200
-ELLIPSIS = "…"
 # A Mission's own card (services/orchestration_board_bridge.py): its Review is its Mission's wait.
 MISSION_CARD_SOURCE = "orchestration"
 
@@ -124,8 +124,5 @@ def _agent_name(db: Any, task: BoardTask) -> Optional[str]:
 
 
 def _title(title: Optional[str]) -> str:
-    """'Ready for review: <title>', at most ``TITLE_MAX_CHARS`` characters."""
-    full = f"{TITLE_PREFIX}{title or ''}"
-    if len(full) <= TITLE_MAX_CHARS:
-        return full
-    return full[: TITLE_MAX_CHARS - len(ELLIPSIS)] + ELLIPSIS
+    """'Ready for review: <title>', at most ``TITLE_MAX_CHARS`` characters ('…' marks a cut)."""
+    return clamp(f"{TITLE_PREFIX}{title or ''}", TITLE_MAX_CHARS)
