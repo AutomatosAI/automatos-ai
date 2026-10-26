@@ -86,12 +86,12 @@ whether it can be the workspace default.
 | **Marketplace theme** | Added from **Marketplace › Themes**. A person at Automatos reviewed every version listed there. | None, or **Signed by Automatos** when its version is signed | No | Yes |
 | **Official** | A Marketplace theme from the reserved `automatos` publisher whose listed version carries a signature an active Automatos key verifies. A reserved name alone is never Official. | **Official** on the Marketplace card, **Signed by Automatos** in Settings | No | Yes |
 
-**No theme is signed yet.** This release's signing keys file holds no Automatos key, so no signature file verifies:
-an upload with one is refused ("No Automatos signing key verifies this signature for these files, so nothing was
-installed."), nothing shows **Signed by Automatos**, and no theme is **Official**. Signed uploads and Official themes
-start working once an Automatos key is in that file (for server operators:
-[Add the production signing key](../theme-host/operations.md#add-the-production-signing-key)). Until then every theme
-you upload is a private upload, and every theme from **Marketplace › Themes** is a Marketplace theme.
+**No theme is signed yet.** This release ships Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`). An
+official version is one Automatos reviewed and signed with that key, and the first signatures will come from the
+Design Kit's Theme sign workflow. Until then nothing shows **Signed by Automatos**, no theme is **Official**, every
+theme you upload is a private upload, and every theme from **Marketplace › Themes** is a Marketplace theme. A
+signature file that key didn't make is refused ("No Automatos signing key verifies this signature for these files, so
+nothing was installed."). For server operators: [the signing key](../theme-host/operations.md#add-the-production-signing-key).
 
 Why the opt-in: a theme's code runs in your browser with your session. The opt-in dialog says it in the server's own
 words: "This theme was not reviewed. Its code runs with your access to all your workspaces." See

@@ -15,8 +15,8 @@ The keys file, ``data/signing-keys.json`` (the same bytes as the kit's ``keys/th
 (``key_id_of``: ``ed25519:`` and the first 16 hex of the DER's sha256); ``status`` is
 ``active``, ``retired`` or ``revoked``; ``added`` a YYYY-MM-DD date. A file that breaks any of
 that, or names a keyId twice, is refused with a plain message (``SigningKeysError``) that echoes
-nothing from the file. It ships with no key until the production key is added (C-05n), so until
-then nothing verifies.
+nothing from the file. It holds one key (C-05n): Automatos's theme-signing key,
+``ed25519:e138b6d0fa7aaaf3``, ``active``, added 2026-10-26. Only a signature that key made verifies.
 
 Verdicts (``Verdict``): ``verified`` when an active key verifies the signature, with that key's
 id; ``invalid`` when no key does, or only a retired or revoked one does (that key's id is kept, so

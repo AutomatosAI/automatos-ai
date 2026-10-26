@@ -141,11 +141,11 @@ The size limits, by default (the server's administrator can change them):
 
 A signature file tells the server that Automatos vouches for exactly these files.
 
-**No signature file works yet.** This release's signing keys file holds no Automatos key, and the Design Kit's
-releases carry no `.sig.json`. An upload with a signature file is always refused: a well-formed file made for this
-package gets "No Automatos signing key verifies this signature for these files, so nothing was installed." What
-follows applies once an Automatos key is in the keys file (for server operators:
-[Add the production signing key](../theme-host/operations.md#add-the-production-signing-key)).
+**No release carries a signature file yet.** This release ships Automatos's theme-signing key
+(`ed25519:e138b6d0fa7aaaf3`), and a signature file that key made verifies. The Design Kit's releases carry no
+`.sig.json` yet: the first signatures will come from the kit's Theme sign workflow. A signature file any other key
+made is refused with "No Automatos signing key verifies this signature for these files, so nothing was installed."
+(For server operators: [the signing key](../theme-host/operations.md#add-the-production-signing-key).)
 
 - It is at most 4 KB. The server checks it against the package's own files before it stores anything.
 - When it is taken, the theme shows **Signed by Automatos** in place of **Private · not reviewed**, in Settings, the
@@ -300,7 +300,7 @@ you.
 Members see the default when they haven't chosen a theme, when the theme they chose was uninstalled, and always while
 members may not choose.
 
-**Only a theme that isn't private can be the default**: a Marketplace theme or a signed upload (no upload can be
+**Only a theme that isn't private can be the default**: a Marketplace theme or a signed upload (no release is
 signed yet, so today that means a Marketplace theme). A default runs for
 members who never said yes to its code. On a private upload, **Make default** is greyed, with this beside it: "A theme
 that was not reviewed can’t be the workspace default." The server holds the same rule: "An unreviewed theme can't be

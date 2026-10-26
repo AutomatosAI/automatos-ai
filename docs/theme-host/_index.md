@@ -364,10 +364,11 @@ Two checks run on every serve, through one rule (`services/themes/revocations.py
 - A version whose stored **signature** doesn't check out reads as `disable` too, until it is signed again
   (`services/themes/signature_state.py`).
 
-The keys come from `services/themes/data/signing-keys.json` (`signature_verify.py`). In this release it holds no key
-(`{"schema":1,"keys":[]}`), so no signature verifies: every signed upload and signature paste is refused, no private
-upload is vouched for, and nothing is Official. [Operations](operations.md#add-the-production-signing-key) says how
-the key is added.
+The keys come from `services/themes/data/signing-keys.json` (`signature_verify.py`). In this release it holds one
+key, Automatos's theme-signing key: `ed25519:e138b6d0fa7aaaf3`, `active`, added 2026-10-26. Only a signature that key
+made verifies. No version is signed yet, so nothing is Official until the first signature from the Design Kit's Theme
+sign workflow is pasted. [Operations](operations.md#add-the-production-signing-key) says how a key is added, retired
+or revoked.
 
 The hosted edition publishes its Marketplace revocations at `GET /api/themes/revocations`; each local edition pulls
 that feed every `THEME_REVOCATIONS_PULL_MINUTES` (60) while the server's scheduler runs. See [Security model](security-model.md#signatures) and
