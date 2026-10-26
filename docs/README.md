@@ -182,6 +182,7 @@ Last synced: 2026-09-09 11:46:48 UTC
   - [NotificationDispatcher](unified-notification-system/notificationdispatcher.md)
   - [Notification API & Settings](unified-notification-system/notification-api-settings.md)
   - [Notification Bell UI](unified-notification-system/notification-bell-ui.md)
+- [Voice](voice/_index.md)
 - [Voice (Auto Live)](voice-auto-live/_index.md)
   - [Voice Backend & Call Lifecycle](voice-auto-live/voice-backend-call-lifecycle.md)
   - [Voice UI Components](voice-auto-live/voice-ui-components.md)

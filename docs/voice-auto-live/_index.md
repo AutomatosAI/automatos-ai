@@ -5,43 +5,49 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/__tests__/prd207-live-voice.test.tsx](frontend/components/__tests__/prd207-live-voice.test.tsx)
-- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
-- [frontend/components/voice/LiveVoiceMode.tsx](frontend/components/voice/LiveVoiceMode.tsx)
-- [frontend/components/voice/MicHealthControl.tsx](frontend/components/voice/MicHealthControl.tsx)
-- [frontend/components/voice/PresenceOrb.tsx](frontend/components/voice/PresenceOrb.tsx)
-- [frontend/components/voice/VoiceErrorBoundary.tsx](frontend/components/voice/VoiceErrorBoundary.tsx)
-- [frontend/hooks/use-retell-call.ts](frontend/hooks/use-retell-call.ts)
-- [frontend/lib/voice/mic-health.ts](frontend/lib/voice/mic-health.ts)
-- [orchestrator/alembic/versions/prd203_voice_turns.py](orchestrator/alembic/versions/prd203_voice_turns.py)
-- [orchestrator/alembic/versions/prd207_su_capture.py](orchestrator/alembic/versions/prd207_su_capture.py)
-- [orchestrator/alembic/versions/prd207_voice_live.py](orchestrator/alembic/versions/prd207_voice_live.py)
-- [orchestrator/api/voice_retell.py](orchestrator/api/voice_retell.py)
-- [orchestrator/core/models/voice_calls.py](orchestrator/core/models/voice_calls.py)
-- [orchestrator/core/models/voice_turns.py](orchestrator/core/models/voice_turns.py)
-- [orchestrator/modules/voice/call_binding.py](orchestrator/modules/voice/call_binding.py)
-- [orchestrator/modules/voice/live_settings.py](orchestrator/modules/voice/live_settings.py)
-- [orchestrator/modules/voice/providers/retell.py](orchestrator/modules/voice/providers/retell.py)
-- [orchestrator/modules/voice/retell_api.py](orchestrator/modules/voice/retell_api.py)
-- [orchestrator/modules/voice/spoken_style.py](orchestrator/modules/voice/spoken_style.py)
-- [orchestrator/modules/voice/telemetry.py](orchestrator/modules/voice/telemetry.py)
-- [orchestrator/modules/voice/voice_meter.py](orchestrator/modules/voice/voice_meter.py)
-- [orchestrator/tests/test_prd203_voice_retell.py](orchestrator/tests/test_prd203_voice_retell.py)
-- [orchestrator/tests/test_prd207_voice_live.py](orchestrator/tests/test_prd207_voice_live.py)
-- [orchestrator/tests/test_voice_quality.py](orchestrator/tests/test_voice_quality.py)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](../../frontend/components/__tests__/prd207-live-voice.test.tsx)
+- [frontend/components/chatbot/chat.tsx](../../frontend/components/chatbot/chat.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx)
+- [frontend/components/voice/PresenceOrb.tsx](../../frontend/components/voice/PresenceOrb.tsx)
+- [frontend/components/voice/VoiceErrorBoundary.tsx](../../frontend/components/voice/VoiceErrorBoundary.tsx)
+- [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx)
+- [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts)
+- [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
+- [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts)
+- [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts)
+- [orchestrator/alembic/versions/prd203_voice_turns.py](../../orchestrator/alembic/versions/prd203_voice_turns.py)
+- [orchestrator/alembic/versions/prd207_su_capture.py](../../orchestrator/alembic/versions/prd207_su_capture.py)
+- [orchestrator/alembic/versions/prd207_voice_live.py](../../orchestrator/alembic/versions/prd207_voice_live.py)
+- [orchestrator/api/voice_retell.py](../../orchestrator/api/voice_retell.py)
+- [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py)
+- [orchestrator/core/models/voice_turns.py](../../orchestrator/core/models/voice_turns.py)
+- [orchestrator/modules/voice/call_binding.py](../../orchestrator/modules/voice/call_binding.py)
+- [orchestrator/modules/voice/live_settings.py](../../orchestrator/modules/voice/live_settings.py)
+- [orchestrator/modules/voice/providers/retell.py](../../orchestrator/modules/voice/providers/retell.py)
+- [orchestrator/modules/voice/retell_api.py](../../orchestrator/modules/voice/retell_api.py)
+- [orchestrator/modules/voice/spoken_style.py](../../orchestrator/modules/voice/spoken_style.py)
+- [orchestrator/modules/voice/telemetry.py](../../orchestrator/modules/voice/telemetry.py)
+- [orchestrator/modules/voice/voice_meter.py](../../orchestrator/modules/voice/voice_meter.py)
+- [orchestrator/tests/test_prd203_voice_retell.py](../../orchestrator/tests/test_prd203_voice_retell.py)
+- [orchestrator/tests/test_prd207_voice_live.py](../../orchestrator/tests/test_prd207_voice_live.py)
+- [orchestrator/tests/test_voice_quality.py](../../orchestrator/tests/test_voice_quality.py)
 
 </details>
 
 
+
+For what voice does for the people using it (quick ask, Auto Live, the AI notice, voice in themes), see the
+[Voice guide](../voice/_index.md).
 
 The Voice (Auto Live) subsystem provides real-time voice interaction capabilities, built upon Retell's transport layer and integrated with Automatos AI's custom LLM loop. This page offers a high-level overview of the system, with detailed technical specifications delegated to its child pages.
 
 The core functionality involves enabling users to converse with AI agents in real-time, with the system handling speech-to-text (STT), text-to-speech (TTS), turn-taking, and barge-in capabilities. A key design principle is to keep the sophisticated Automatos AI agent logic on our side, offloading only the voice-native hard parts to the Retell vendor.
 
 This parent page introduces the main components and their interactions, while the following child pages delve into specifics:
-- [Voice Backend & Call Lifecycle](#24.1) covers the server-side logic, including call minting, Retell integration, and usage metering.
-- [Voice UI Components](#24.2) details the frontend elements that enable and visualize voice interactions.
-- [Spoken Style & Voice Telemetry](#24.3) explains how spoken output is sanitized and how voice call data is collected and analyzed.
+- [Voice Backend & Call Lifecycle](voice-backend-call-lifecycle.md) covers the server-side logic, including call minting, Retell integration, and usage metering.
+- [Voice UI Components](voice-ui-components.md) details the frontend elements that enable and visualize voice interactions.
+- [Spoken Style & Voice Telemetry](spoken-style-voice-telemetry.md) explains how spoken output is sanitized and how voice call data is collected and analyzed.
 
 ## Architecture Overview
 
@@ -51,6 +57,8 @@ The Voice (Auto Live) system bridges the user's browser with the Automatos AI ba
 graph TD
     subgraph "User Interface (Frontend)"
         UI[("User Interface")]
+        VP[Host voice provider]
+        LE[Live engine]
         LV[LiveVoiceMode]
         PO[PresenceOrb]
         MHC[MicHealthControl]
@@ -75,20 +83,22 @@ graph TD
         RETELL_WEBHOOK[Retell Webhook Service]
     end
 
-    UI -- "Initiates Call" --> LV
-    LV -- "Mint Web Call Request" --> API
+    UI -- "Starts a call (Live chip, voice button)" --> VP
+    VP -- "Runs" --> LE
+    LE -- "Mint Web Call Request" --> API
     API -- "Validates & Creates VoiceCall" --> VC
-    API -- "Returns Access Token" --> LV
-    LV -- "Connects via WebRTC" --> RETELL_SDK
+    API -- "Returns Access Token" --> LE
+    LE -- "Connects via WebRTC" --> RETELL_SDK
     RETELL_SDK -- "User Audio" --> RETELL_LLM
     RETELL_LLM -- "LLM WebSocket (User Text)" --> WS
     WS -- "Orchestrates Agent Response" --> LLM_LOOP
     LLM_LOOP -- "Streams Agent Text" --> WS
     WS -- "Agent Audio" --> RETELL_LLM
     RETELL_LLM -- "Agent Audio" --> RETELL_SDK
-    RETELL_SDK -- "Agent Audio" --> LV
-    LV -- "Visualizes Audio Levels" --> PO
-    LV -- "Monitors Mic Health" --> MHC
+    RETELL_SDK -- "Agent Audio" --> LE
+    VP -- "Session state" --> LV
+    VP -- "Audio levels" --> PO
+    LE -- "Monitors Mic Health" --> MHC
 
     RETELL_WEBHOOK -- "Call Lifecycle Events (HMAC Verified)" --> WEBHOOK
     WEBHOOK -- "Updates VoiceCall Status" --> VC
@@ -101,6 +111,8 @@ graph TD
     RTAPI -- "Creates/Updates Retell Agents" --> RETELL_LLM
 
     style UI fill:#f9f,stroke:#333,stroke-width:2px
+    style VP fill:#f9f,stroke:#333,stroke-width:2px
+    style LE fill:#f9f,stroke:#333,stroke-width:2px
     style LV fill:#f9f,stroke:#333,stroke-width:2px
     style PO fill:#f9f,stroke:#333,stroke-width:2px
     style MHC fill:#f9f,stroke:#333,stroke-width:2px
@@ -119,51 +131,55 @@ graph TD
     style RETELL_WEBHOOK fill:#ccf,stroke:#333,stroke-width:2px
 ```
 Title: High-Level Voice (Auto Live) System Architecture
-Sources: [orchestrator/api/voice_retell.py:1-20](), [frontend/components/chatbot/chat.tsx:54-66](), [frontend/hooks/use-retell-call.ts:1-13]()
+Sources: [orchestrator/api/voice_retell.py:1-20](../../orchestrator/api/voice_retell.py), [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx), [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
 
 ## Voice Backend & Call Lifecycle
 
-The backend manages the entire lifecycle of a voice call, from initiation to termination and usage metering. The primary entry point for initiating a web call is the `POST /api/voice/web-call` endpoint [orchestrator/api/voice_retell.py:99-104](). This endpoint performs several fail-closed gating checks, including platform-wide enablement, Retell credential availability, workspace-specific settings, and monthly usage caps [orchestrator/api/voice_retell.py:118-157]().
+The backend manages the entire lifecycle of a voice call, from initiation to termination and usage metering. The primary entry point for initiating a web call is the `POST /api/voice/web-call` endpoint [orchestrator/api/voice_retell.py:99-104](../../orchestrator/api/voice_retell.py). This endpoint performs several fail-closed gating checks, including the workspace's plan (hosted edition only), platform-wide enablement, Retell credential availability, workspace-specific settings, and monthly usage caps; `GET /api/voice/live-status` reports the first gate that would refuse, without refusing ([orchestrator/modules/voice/availability.py](../../orchestrator/modules/voice/availability.py)) [orchestrator/api/voice_retell.py:118-157](../../orchestrator/api/voice_retell.py).
 
-Upon successful minting, a `VoiceCall` record is created in the database [orchestrator/core/models/voice_calls.py](), which serves as both the webhook trust boundary and the WebSocket credential. Retell's custom-LLM transport connects to `WS /api/voice/retell/llm-websocket/{call_id}` [orchestrator/api/voice_retell.py:5-10](), allowing Automatos AI's `StreamingChatService` to drive the agent's responses.
+Upon successful minting, a `VoiceCall` record is created in the database [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py), which serves as both the webhook trust boundary and the WebSocket credential. Retell's custom-LLM transport connects to `WS /api/voice/retell/llm-websocket/{call_id}` [orchestrator/api/voice_retell.py:5-10](../../orchestrator/api/voice_retell.py), allowing Automatos AI's `StreamingChatService` to drive the agent's responses.
 
-Retell also sends call lifecycle events to the `POST /api/voice/retell/events` webhook [orchestrator/api/voice_retell.py:14-15](). These webhooks are crucial for updating the `VoiceCall` status, recording usage in the `voice_meter` [orchestrator/modules/voice/voice_meter.py](), and verifying the call binding [orchestrator/modules/voice/call_binding.py](). The `call_binding` module ensures that the incoming webhook data corresponds to a legitimate, minted call and correctly attributes the conversation to the user and chat thread.
+Retell also sends call lifecycle events to the `POST /api/voice/retell/events` webhook [orchestrator/api/voice_retell.py:14-15](../../orchestrator/api/voice_retell.py). These webhooks are crucial for updating the `VoiceCall` status, recording usage in the `voice_meter` [orchestrator/modules/voice/voice_meter.py](../../orchestrator/modules/voice/voice_meter.py), and verifying the call binding [orchestrator/modules/voice/call_binding.py](../../orchestrator/modules/voice/call_binding.py). The `call_binding` module ensures that the incoming webhook data corresponds to a legitimate, minted call and correctly attributes the conversation to the user and chat thread.
 
-For details, see [Voice Backend & Call Lifecycle](#24.1).
+For details, see [Voice Backend & Call Lifecycle](voice-backend-call-lifecycle.md).
 
 Sources:
-- [orchestrator/api/voice_retell.py:5-15]()
-- [orchestrator/api/voice_retell.py:99-104]()
-- [orchestrator/api/voice_retell.py:118-157]()
-- [orchestrator/core/models/voice_calls.py]()
-- [orchestrator/modules/voice/call_binding.py]()
-- [orchestrator/modules/voice/voice_meter.py]()
+- [orchestrator/api/voice_retell.py:5-15](../../orchestrator/api/voice_retell.py)
+- [orchestrator/api/voice_retell.py:99-104](../../orchestrator/api/voice_retell.py)
+- [orchestrator/api/voice_retell.py:118-157](../../orchestrator/api/voice_retell.py)
+- [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py)
+- [orchestrator/modules/voice/call_binding.py](../../orchestrator/modules/voice/call_binding.py)
+- [orchestrator/modules/voice/voice_meter.py](../../orchestrator/modules/voice/voice_meter.py)
 
 ## Voice UI Components
 
-The frontend provides a rich user experience for real-time voice interactions. The `LiveVoiceMode` component [frontend/components/voice/LiveVoiceMode.tsx]() is the central control strip for an active call, managing the `useRetellCall` hook [frontend/hooks/use-retell-call.ts]() and feeding presence information to other components.
+The browser runs one voice session per tab, held by the host voice provider [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx). `app/chat/layout.tsx` mounts it around the chat page, and a theme's routes get it too, so Studio's chat and every theme read the same session. The provider runs one of two engines behind one contract [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts):
 
-The `PresenceOrb` [frontend/components/voice/PresenceOrb.tsx]() is a visualizer that renders the agent's "presence" and audio levels. In "background mode," it fills the chat window's background, coming alive when the agent speaks [frontend/components/chatbot/chat.tsx:54-57](). In a compact band, it shows a beam-and-bars strip. The `PresenceOrb` uses a mutable ref for audio levels (`levelsRef`) to avoid unnecessary React re-renders, as the canvas updates in its own `rAF` loop [frontend/hooks/use-retell-call.ts:10-12]().
+- **Auto Live** [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts) mints the call (`POST /api/voice/web-call`), connects Retell's WebRTC SDK, walks the presence state machine [frontend/lib/voice/orb-state.ts](../../frontend/lib/voice/orb-state.ts) and measures the microphone for the silent-capture notice [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts).
+- **Quick ask** [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts) is hold-to-talk in the browser: speech recognition, the words sent as a normal chat turn with `spokenMode`, and the reply spoken by the browser's speech synthesis.
 
-The `MicHealthControl` component [frontend/components/voice/MicHealthControl.tsx]() helps users diagnose microphone issues, including detecting digital silence using the `mic-health` utility [frontend/lib/voice/mic-health.ts](). The `VoiceErrorBoundary` [frontend/components/voice/VoiceErrorBoundary.tsx]() provides a robust error handling mechanism for the voice subsystem, ensuring that voice-related failures do not crash the entire application.
+The session is bound to the conversation on screen [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts); its words in progress show at the end of that conversation [frontend/lib/voice/live-turns.ts](../../frontend/lib/voice/live-turns.ts).
 
-For details, see [Voice UI Components](#24.2).
+Studio's surfaces read the provider: the **Live** chip [frontend/components/chatbot/chat-mode-bar.tsx](../../frontend/components/chatbot/chat-mode-bar.tsx), the call strip `LiveVoiceMode` [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx), the presence wave behind the chat [frontend/components/voice/host-presence-orb.tsx](../../frontend/components/voice/host-presence-orb.tsx) over `PresenceOrb` [frontend/components/voice/PresenceOrb.tsx](../../frontend/components/voice/PresenceOrb.tsx), and the quick-ask button beside Send [frontend/components/chatbot/composer-voice.tsx](../../frontend/components/chatbot/composer-voice.tsx). That button is the same `VoiceButton` [frontend/components/voice/voice-button.tsx](../../frontend/components/voice/voice-button.tsx) the theme SDK gives every theme as `voice.VoiceButton`. `MicHealthControl` [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx) offers the microphone picker and the silent-microphone notice; `VoiceErrorBoundary` [frontend/components/voice/VoiceErrorBoundary.tsx](../../frontend/components/voice/VoiceErrorBoundary.tsx) keeps a voice fault from taking down the page.
+
+For details, see [Voice UI Components](voice-ui-components.md).
 
 Sources:
-- [frontend/components/chatbot/chat.tsx:54-57]()
-- [frontend/components/voice/LiveVoiceMode.tsx]()
-- [frontend/components/voice/MicHealthControl.tsx]()
-- [frontend/components/voice/PresenceOrb.tsx]()
-- [frontend/components/voice/VoiceErrorBoundary.tsx]()
-- [frontend/hooks/use-retell-call.ts]()
-- [frontend/hooks/use-retell-call.ts:10-12]()
-- [frontend/lib/voice/mic-health.ts]()
+- [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx)
+- [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts)
+- [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
+- [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts)
+- [frontend/components/voice/voice-button.tsx](../../frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/host-presence-orb.tsx](../../frontend/components/voice/host-presence-orb.tsx)
+- [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx)
+- [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts)
 
 ## Spoken Style & Voice Telemetry
 
-To ensure Auto sounds natural and professional, the system employs a `speechify()` function [orchestrator/modules/voice/spoken_style.py:21-77]() that sanitizes agent output before it's sent to the TTS engine. This process removes Markdown formatting (e.g., `**bold**`, `- bullets`, `## headers`), speaks link labels instead of URLs, and strips emojis, preventing the TTS from pronouncing punctuation or code snippets [orchestrator/tests/test_voice_quality.py:30-77](). The `SPOKEN_OUTPUT_CONTRACT` [orchestrator/modules/voice/spoken_style.py:10-16]() defines these rules.
+To ensure Auto sounds natural and professional, the system employs a `speechify()` function [orchestrator/modules/voice/spoken_style.py:21-77](../../orchestrator/modules/voice/spoken_style.py) that sanitizes agent output before it's sent to the TTS engine. This process removes Markdown formatting (e.g., `**bold**`, `- bullets`, `## headers`), speaks link labels instead of URLs, and strips emojis, preventing the TTS from pronouncing punctuation or code snippets [orchestrator/tests/test_voice_quality.py:30-77](../../orchestrator/tests/test_voice_quality.py). The `SPOKEN_OUTPUT_CONTRACT` [orchestrator/modules/voice/spoken_style.py:10-16](../../orchestrator/modules/voice/spoken_style.py) defines these rules.
 
-The system also captures comprehensive telemetry for voice interactions. `voice_calls` [orchestrator/core/models/voice_calls.py]() and `voice_turns` [orchestrator/core/models/voice_turns.py]() tables store detailed information about each call and individual turn, respectively. This data includes STT/TTS latency decomposition, which is crucial for analyzing and improving voice quality. The `telemetry` module [orchestrator/modules/voice/telemetry.py]() is responsible for recording these metrics.
+The system also captures comprehensive telemetry for voice interactions. `voice_calls` [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py) and `voice_turns` [orchestrator/core/models/voice_turns.py](../../orchestrator/core/models/voice_turns.py) tables store detailed information about each call and individual turn, respectively. This data includes STT/TTS latency decomposition, which is crucial for analyzing and improving voice quality. The `telemetry` module [orchestrator/modules/voice/telemetry.py](../../orchestrator/modules/voice/telemetry.py) is responsible for recording these metrics.
 
 ```mermaid
 graph TD
@@ -205,17 +221,17 @@ graph TD
     style VOICE_QUALITY_TESTS fill:#bbf,stroke:#333,stroke-width:2px
 ```
 Title: Spoken Style and Voice Telemetry Flow
-Sources: [orchestrator/modules/voice/spoken_style.py:21-77](), [orchestrator/modules/voice/spoken_style.py:10-16](), [orchestrator/tests/test_voice_quality.py:30-77](), [orchestrator/core/models/voice_calls.py](), [orchestrator/core/models/voice_turns.py](), [orchestrator/modules/voice/telemetry.py]()
+Sources: [orchestrator/modules/voice/spoken_style.py:21-77](../../orchestrator/modules/voice/spoken_style.py), [orchestrator/modules/voice/spoken_style.py:10-16](../../orchestrator/modules/voice/spoken_style.py), [orchestrator/tests/test_voice_quality.py:30-77](../../orchestrator/tests/test_voice_quality.py), [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py), [orchestrator/core/models/voice_turns.py](../../orchestrator/core/models/voice_turns.py), [orchestrator/modules/voice/telemetry.py](../../orchestrator/modules/voice/telemetry.py)
 
-For details, see [Spoken Style & Voice Telemetry](#24.3).
+For details, see [Spoken Style & Voice Telemetry](spoken-style-voice-telemetry.md).
 
 Sources:
-- [orchestrator/core/models/voice_calls.py]()
-- [orchestrator/core/models/voice_turns.py]()
-- [orchestrator/modules/voice/spoken_style.py]()
-- [orchestrator/modules/voice/spoken_style.py:10-16]()
-- [orchestrator/modules/voice/spoken_style.py:21-77]()
-- [orchestrator/modules/voice/telemetry.py]()
-- [orchestrator/tests/test_voice_quality.py:30-77]()
+- [orchestrator/core/models/voice_calls.py](../../orchestrator/core/models/voice_calls.py)
+- [orchestrator/core/models/voice_turns.py](../../orchestrator/core/models/voice_turns.py)
+- [orchestrator/modules/voice/spoken_style.py](../../orchestrator/modules/voice/spoken_style.py)
+- [orchestrator/modules/voice/spoken_style.py:10-16](../../orchestrator/modules/voice/spoken_style.py)
+- [orchestrator/modules/voice/spoken_style.py:21-77](../../orchestrator/modules/voice/spoken_style.py)
+- [orchestrator/modules/voice/telemetry.py](../../orchestrator/modules/voice/telemetry.py)
+- [orchestrator/tests/test_voice_quality.py:30-77](../../orchestrator/tests/test_voice_quality.py)
 
 ---
