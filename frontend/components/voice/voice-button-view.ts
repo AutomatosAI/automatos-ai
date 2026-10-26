@@ -9,7 +9,7 @@ import { IDLE_VOICE, type VoiceMode, type VoicePhase, type VoiceSnapshot } from 
 import { type VoiceAvailability, resolveVoiceMode } from '@/lib/voice/host/availability'
 import { ORB_STATE_LABELS } from '@/lib/voice/orb-state'
 
-import { MIC_LIVE, MIC_MUTED } from './voice-controls'
+import { MIC_LIVE, MIC_MUTED, STOP } from './voice-controls'
 import { type VoicePressKind, type VoicePressOptions, ownsSession } from './voice-press'
 
 export type VoiceButtonSize = 'sm' | 'md' | 'lg'
@@ -20,7 +20,7 @@ export const VOICE_BUTTON_WORDS = Object.freeze({
   toggle: 'Talk to Auto',
   unavailable: "Voice isn't available on this page.",
   allowMic: 'Allow the microphone if your browser asks.',
-  stop: 'Stop',
+  stop: STOP,
   close: 'Close voice',
   failed: 'Voice stopped. Try again.',
 })

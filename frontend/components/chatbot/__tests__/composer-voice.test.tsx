@@ -112,11 +112,21 @@ describe("the composer's voice button", () => {
     const { stub, root, sendMessage } = draw(QUICK_LISTENING)
     expect(within(root).getByTestId('ai-voice-label')).toHaveTextContent(AI_VOICE_LABEL)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A draft' } })
-    fireEvent.click(within(root).getByRole('button', { name: VOICE_BUTTON_WORDS.stop }))
+    const stop = within(root).getByRole('button', { name: VOICE_BUTTON_WORDS.stop })
+    expect(stop.textContent).toBe(VOICE_BUTTON_WORDS.stop)
+    fireEvent.click(stop)
     expect(stub.stop).toHaveBeenCalledTimes(1)
     expect(sendMessage).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox')).toHaveValue('A draft')
     expect(root.parentElement?.nextElementSibling?.contains(screen.getByRole('button', { name: SEND }))).toBe(true)
+  })
+
+  it("keeps the caption, Mic live and Stop inside the card's width: the card has a limit and the row wraps", () => {
+    const { root } = draw({ snapshot: { mode: 'quick', phase: 'listening', micOpen: true, chatId: null, durationSec: 12 } })
+    expect(root.parentElement?.className).toContain('[&>[data-voice-button=root]]:max-w-[16rem]')
+    const row = within(root).getByTestId('ai-voice-label').parentElement as HTMLElement
+    expect(row.className).toContain('flex-wrap')
+    expect(within(row).getByRole('button', { name: VOICE_BUTTON_WORDS.stop })).toBeInTheDocument()
   })
 })
 

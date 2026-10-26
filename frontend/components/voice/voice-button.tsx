@@ -20,10 +20,9 @@
  * provider the button is drawn disabled, saying voice isn't available on the page.
  */
 import { useMemo } from 'react'
-import { Loader2, Mic, Square } from 'lucide-react'
+import { Loader2, Mic } from 'lucide-react'
 
 import { ProtectedSurface } from '@/components/theme-host/protected-surface'
-import { Button } from '@/components/ui/button'
 import { AiVoiceLabel } from '@/components/voice/AiVoiceLabel'
 import { MicDevicePicker, MicSilentBanner } from '@/components/voice/MicHealthControl'
 import { VoiceErrorBoundary } from '@/components/voice/VoiceErrorBoundary'
@@ -34,7 +33,7 @@ import { LIVE_UNAVAILABLE } from '@/lib/voice/live/refusal'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_LABELS, VOICE_BUTTON_WORDS, type VoiceButtonSize, type VoiceButtonView, voiceButtonView } from './voice-button-view'
-import { EndOrClose, LiveCallFailure, MicState, MuteToggle, formatDuration } from './voice-controls'
+import { EndOrClose, LiveCallFailure, MicState, MuteToggle, StopButton, formatDuration } from './voice-controls'
 import { DEFAULT_VOICE_HOTKEY, useVoiceHotkey } from './voice-hotkey'
 import { type VoicePress, type VoicePressKind, type VoicePressOptions, runPressAction, useVoicePress } from './voice-press'
 
@@ -70,7 +69,6 @@ const IDLE_CLASS =
 const ACTIVE_CLASS =
   'bg-[color:var(--voice-button-active-bg,hsl(var(--warning)))] ' +
   'text-[color:var(--voice-button-active-fg,hsl(var(--warning-foreground)))]'
-const SMALL_ICON = 'h-3.5 w-3.5'
 
 interface PressButtonProps {
   readonly voicePress: VoicePress
@@ -105,18 +103,7 @@ function StopControl({ voice }: { voice: HostVoice }) {
   const running = RUNNING.has(snapshot.phase)
   if (snapshot.mode === 'live') return <EndOrClose running={running} onStop={voice.stop} />
   if (!running) return null
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className="h-7 w-7 rounded-full"
-      onClick={voice.stop}
-      aria-label={VOICE_BUTTON_WORDS.stop}
-    >
-      <Square className={SMALL_ICON} />
-    </Button>
-  )
+  return <StopButton onStop={voice.stop} />
 }
 
 /** The live call's microphone: mute and the device, while on the call. */
@@ -134,6 +121,7 @@ function LiveMicControls({ voice }: { voice: HostVoice }) {
 /**
  * The caption and the stop control, inside the protected surface `voice-control` (the inline !important guard, and
  * the server's CSS scope check refusing any theme selector that names a protected surface). Its parent is core's.
+ * The row wraps, so it fits a phone under the button and the composer's card (composer-voice.tsx, 16rem).
  */
 function VoiceControl({ voice }: { voice: HostVoice }) {
   const { snapshot } = voice
@@ -141,7 +129,7 @@ function VoiceControl({ voice }: { voice: HostVoice }) {
   return (
     <div className="w-fit" data-voice-control-slot="">
       <ProtectedSurface surface="voice-control">
-        <div className="flex items-center gap-2 px-1">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-1">
           <AiVoiceLabel />
           {snapshot.micOpen && <MicState muted={snapshot.muted} />}
           {snapshot.micOpen && snapshot.durationSec > 0 && (
