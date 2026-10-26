@@ -19,7 +19,7 @@ Write down, in the results table's header:
 - the environment's URL, the edition (local or SaaS), the browser and its version, the device;
 - your name and the date.
 
-Get Play: download `automatos.play-1.1.1.autotheme` from the `kit-theme-package` artifact of a green
+Get Play: download `automatos.play-1.2.0.autotheme` from the `kit-theme-package` artifact of a green
 browser-e2e run (or build it in the kit at `KIT_REF`: `npm ci --ignore-scripts`, then `npm run build`
 and `npm run pack` in `themes/play`). Settings › Appearance › Themes › Install theme, upload it, opt
 in to its private code, choose it. The style cookie `automatos-style` reads `theme:install:<uuid>`
@@ -40,7 +40,7 @@ repo. Use the test workspace's own data only: no customer data in a screenshot.
 | A4 | On Windows, turn on a Contrast theme (Settings › Accessibility › Contrast themes). Open `/looks` in Ember, then Daylight, and Tab through it; then the shelf and Conversations. (FX-19, M19) | Every focused control has a visible outline; the chosen option, card, accent and light are marked; the colour swatches keep their own colours. The lane emulates forced colours in Chromium only. |
 | A5 | VoiceOver (Cmd F5): import the same look twice; stop and start the backend; open `/looks/style`. (FX-22, FX-24) | Each import is announced, also the second; "Automatos is asleep", then "Automatos is back"; the style sheet's 12 Autos are not announced as live status. |
 | A6 | Send a message that runs a web search, then one that makes a Deliverable. | The glow behind the page follows Auto: brighter while he works, brightest when he celebrates, coral on a snag. |
-| A7 | On a real phone and a tablet (below 1024 px), under the package: open `/agents`, `/chat`, the theme menu. | The core's own chrome and pages, in the look's colours; the Tone items rest under "Set by your look"; no Play frame. |
+| A7 | On a real phone and a tablet (360 px to 1023 px), under the package: open `/agents`, `/chat`, then Menu and the theme menu in it; hold the voice button on `/chat`. Then a window narrower than 360 px. | From 360 px: Play's phone frame in the look's colours (the top bar with Menu, Chats and Shelf, no sidebar); Menu holds New chat, search, the nav, Recent, Docs, Settings and the host's utilities; the Tone items rest under "Set by your look"; `/chat` has the words, the voice button and Send in one row, nothing wider than the screen. Below 360 px: the core's own chrome and pages, in the look's colours, no Play frame. |
 | A8 | With a real model: ask Auto for something that needs a grant (for example "delete the document X"), approve it; ask for a Mission, approve its plan. | The approval cards show in Auto's reply; Approve & run runs the action and the card says so; the Mission starts. The lane checks these cards with recorded turns only. |
 
 ## B. SaaS only

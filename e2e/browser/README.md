@@ -32,7 +32,7 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 The workflow's `package` job checks out the Design Kit (`AutomatosAI/automatos-design-kit`, public, so
 no secret) at the commit the workflow's `KIT_REF` pins, installs it from its committed lockfile
 (npm at the kit's own version, `npm ci --ignore-scripts`), builds and packs `themes/play`, and
-uploads `automatos.play-1.1.1.autotheme` as the `kit-theme-package` artifact (the job's summary shows
+uploads `automatos.play-1.2.0.autotheme` as the `kit-theme-package` artifact (the job's summary shows
 its size, sha256 and the kit commit). A dispatch can name another kit commit and theme (below).
 The build fetches nothing: since 1.1.0 Auto's clips are committed in the kit with the rest of
 Play. Before it builds, the job fails when a `kitPath` of core's test ledger
@@ -129,10 +129,14 @@ They cover Auto's 12 states on the style sheet (each still and clip served from 
 files), approvals in the chat (a tool card and a Mission card, approve, deny and reject), P260-FX-19
 (Make it yours readable on Paper, in forced colours and with a long name), P260-FX-22 (focus after
 Try again, the asleep screen and This look's toolbar; Studio's `/looks` note names no Play switch),
-P260-FX-30 (Stop keeps the reply), Play below 1024 px (the core chrome in the look's colours, the
-look's tone forced, a stored look painted from the first frame) and Play's pages and route through
-ThemeSlot (`play-routes.spec.ts`: its chat in its frame, the core chat below its width, one frame
-mount on a cold load, Conversations at `/x/conversations`). Play's chat runs on recorded turns
+P260-FX-30 (Stop keeps the reply), Play's narrow widths (`narrow.spec.ts`; Play 1.2.0 draws from its
+minWidth, 360 px: from there to 1023 px its own phone frame, a top bar with Menu, Chats and Shelf and
+no sidebar, in the look's colours with the look's tone forced and the theme menu in its Menu saying
+so; below 360 px the core chrome in the look's colours, the look's tone forced, a stored look painted
+from the first frame) and Play's pages and route through ThemeSlot (`play-routes.spec.ts`: its chat in
+its frame, and in its phone frame at 800 px; at 390 × 844 its message box with the words, the host's
+voice button and Send on screen and no sideways scroll; the core chat below its minWidth; one frame
+mount on a cold load; Conversations at `/x/conversations`). Play's chat runs on recorded turns
 (`fixtures/play-parity/chat-turns.json`, through `support/chat-stream.ts`); no model is called.
 
 They store the member's choice and Play's looks on the lane's one backend, so they carry `@parity`

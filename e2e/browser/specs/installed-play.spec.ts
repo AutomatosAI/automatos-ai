@@ -4,7 +4,7 @@ import { chooseKitPackage, installKitPackage, readKitPackage, resetKitPackage } 
 import { watchPage } from '../support/watch'
 
 // PRD-261 A-17a (@package): Play installed from the Design Kit's package, end to end on the local
-// edition. The lane's `package` job packs automatos.play-1.1.1.autotheme from the kit at its
+// edition. The lane's `package` job packs automatos.play-1.2.0.autotheme from the kit at its
 // pinned commit; it is uploaded, opted in to and chosen through the Install theme UI's routes
 // (support/kit-package.ts), with nothing intercepted: the server's active answer, boot and files
 // route serve it. On a Studio page the host loads the package and reports `active`, and the page
