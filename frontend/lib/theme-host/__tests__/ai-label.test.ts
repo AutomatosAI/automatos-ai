@@ -3,7 +3,8 @@
  * theme can remove it.
  *
  * app/chat/layout.tsx is rendered for real, with the default chat (its input, the one Mission
- * Mode uses too: chat.tsx draws FencedMultimodalInput), with an installed theme whose boot carried
+ * Mode uses too: chat.tsx draws MultimodalInput, its box and controls in the fence and its voice
+ * button outside it), with an installed theme whose boot carried
  * no entry that registers /chat through the theme host (ThemeSlot draws its page in MainLayout: the
  * theme's own markup and stylesheet around a reply's card and its own composer inside the SDK's
  * cards.AiLabelFence, as Play's package draws its message box), and (PRD-261 A-19e1) under the
@@ -59,7 +60,7 @@ vi.mock('@/hooks/use-agent-api', () => ({
 import ChatLayout from '@/app/chat/layout'
 import { AI_LABEL_ATTR, AiLabelGate } from '@/components/ai-label/ai-label'
 import { AI_LABEL_FENCE_ATTR } from '@/components/ai-label/ai-label-fence'
-import { FencedMultimodalInput } from '@/components/ai-label/fenced-multimodal-input'
+import { MultimodalInput } from '@/components/chatbot/multimodal-input'
 import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
 import { AI_LABEL_PAUSED_TEXT, aiLabelText } from '@/lib/ai-label/copy'
 import { useAiLabelStore, usePublishAnsweringAgent } from '@/lib/ai-label/store'
@@ -110,7 +111,7 @@ function addThemeSheet(css: string): void {
 
 /** The default chat's input, as chat.tsx draws it (Mission Mode's too). */
 function defaultChat(): ReactElement {
-  return h(FencedMultimodalInput, {
+  return h(MultimodalInput, {
     chatId: 'ai-label-test', status: 'ready', stop: vi.fn(), sendMessage: vi.fn(), selectedVisibilityType: 'private',
   })
 }

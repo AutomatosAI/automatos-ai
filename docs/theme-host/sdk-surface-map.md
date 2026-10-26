@@ -202,9 +202,12 @@ off, and no manifest field, SDK name or setting does either.
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
   seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
   (`frontend/lib/ai-label/visibility.ts`). While it isn't, every composer inside `AiLabelFence` is disabled
-  (the default chat's input through `FencedMultimodalInput`, Play's message box) and the chat says "This theme
-  hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps the composer only, never a
-  whole chat screen, so the approval cards in a reply stay clickable (they are protected surfaces).
+  (the default chat's input, `MultimodalInput`: its box and every control but the voice button; Play's message box)
+  and the chat says "This theme hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps
+  the composer only, never a whole chat screen, so the approval cards in a reply stay clickable (they are protected
+  surfaces). Voice is never fenced: the voice button (Studio's beside Send, `components/chatbot/composer-voice.tsx`,
+  and a theme's `voice.VoiceButton`) carries its own "AI voice assistant" caption, and Auto says it is an AI once
+  per session.
 - **A theme's composer** sits inside `cards.AiLabelFence`, the host's fence itself (W-A5: Play's message box
   imports it from the SDK), so a theme's chat pauses the same way the host's does.
 - **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:

@@ -2,15 +2,20 @@
 
 /**
  * The chat composer's action row, inside the bottom of the box (multimodal-input.tsx): on the left the attach button
- * and the agent picker, on the right the picked agent's tools (PRD-40: a click asks for that tool's suggestions) and
- * Send, or Stop while a reply streams.
+ * and the agent picker, on the right the picked agent's tools (PRD-40: a click asks for that tool's suggestions), the
+ * voice button (composer-voice.tsx: hold to talk, the quick ask) and Send, or Stop while a reply streams.
+ *
+ * PRD-264 EUAI-11a: every control here but the voice button sits in the AI label's fence, so a theme that hides the
+ * page's label pauses them. The voice button stays out of it: its own caption and the spoken notice say Auto is an AI.
  */
 import { Paperclip, Send, StopCircle } from 'lucide-react'
 
+import { AiLabelFence } from '@/components/ai-label/ai-label-fence'
 import { Button } from '@/components/ui/button'
 import { ToolLogo } from '@/components/ui/tool-logo'
 
 import { AgentSelector, type Agent } from './agent-selector'
+import { ComposerVoice } from './composer-voice'
 
 /** How many of the agent's tools the row shows as logos; the rest are a count. */
 const SHOWN_TOOLS = 4
@@ -122,31 +127,38 @@ export function ComposerActions({
   return (
     <div className="flex items-center justify-between px-3 py-2 border-t border-transparent absolute bottom-0 left-0 right-0">
       {/* Left side: Attachment + Agent Selector */}
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-          disabled={isStreaming || uploading}
-          onClick={onAttach}
-        >
-          <Paperclip className="w-4 h-4" />
-        </Button>
+      <AiLabelFence>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+            disabled={isStreaming || uploading}
+            onClick={onAttach}
+          >
+            <Paperclip className="w-4 h-4" />
+          </Button>
 
-        {/* PRD: Unified Agent-Chat System — the Agent Selector is the real
-            routing control. PRD-180 S3 (F035): the placebo model picker
-            fallback was removed (the backend never read the chosen model —
-            a control that does nothing corrodes trust in the real ones). */}
-        {onAgentChange && (
-          <AgentSelector selectedAgentId={selectedAgentId} onAgentChange={onAgentChange} onAgentData={onAgentData} />
-        )}
-      </div>
+          {/* PRD: Unified Agent-Chat System — the Agent Selector is the real
+              routing control. PRD-180 S3 (F035): the placebo model picker
+              fallback was removed (the backend never read the chosen model —
+              a control that does nothing corrodes trust in the real ones). */}
+          {onAgentChange && (
+            <AgentSelector selectedAgentId={selectedAgentId} onAgentChange={onAgentChange} onAgentData={onAgentData} />
+          )}
+        </div>
+      </AiLabelFence>
 
-      {/* Active Agent Tools - Next to Send Button */}
+      {/* Active Agent Tools, the voice button and Send */}
       <div className="flex items-center gap-3 ml-auto mr-2 mt-1">
-        <AgentToolIcons agent={activeAgent} onToolIconClick={onToolIconClick} />
-        <SendOrStop isStreaming={isStreaming} canSend={canSend} stop={stop} />
+        <AiLabelFence>
+          <AgentToolIcons agent={activeAgent} onToolIconClick={onToolIconClick} />
+        </AiLabelFence>
+        <ComposerVoice />
+        <AiLabelFence>
+          <SendOrStop isStreaming={isStreaming} canSend={canSend} stop={stop} />
+        </AiLabelFence>
       </div>
     </div>
   )
