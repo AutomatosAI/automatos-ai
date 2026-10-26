@@ -12,10 +12,10 @@
  * that fails its theme.json rule drops the whole entry (no entry: the theme is drawn as before,
  * with no registry entry), and a list item that fails is dropped alone.
  *
- * PRD-261 Phase A: the host draws an installed theme's frame and pages from the desktop width up
- * (INSTALLED_FRAME_MIN_WIDTH_PX, where MainLayout draws a frame), whatever minWidth its theme.json
- * names, as it did before installed themes had entries: a smaller one would draw the theme's pages
- * on a phone with no frame around them, a larger one its frame around the core's pages.
+ * The entry keeps the minWidth its theme.json names: from that width up the host draws the theme's
+ * frame and pages (MainLayout hands the page to the frame slot whenever the layout is 'theme', at
+ * any width), below it the core's own chrome and pages. A theme that names a phone's width brings
+ * its own phone frame (HUD's top bar and menu); one that names 1024 keeps the core's phone pages.
  */
 import type { InstalledThemeEntryData } from './boot-types'
 import { HTML_CLASS_PATTERN, THEME_SLOT_IDS } from './constants'
@@ -40,9 +40,9 @@ import type { SlotId, ThemeBase, ThemeEntry, ThemeNavItem, ThemeTonePolicy, UiSt
 export type { InstalledThemeEntryData } from './boot-types'
 
 /**
- * Where MainLayout draws an installed theme's frame: its desktop shell, from useIsTabletOrBelow's
- * 1024 px (hooks/use-mobile.ts). The host loads only Studio-based installs for now (Phase A): the
- * loader refuses any other base (lib/theme-host/manifest.ts, STUDIO_BASE_ONLY).
+ * The width the host draws an installed theme from while it has no entry for it (its boot carried
+ * none yet): the desktop shell's, from useIsTabletOrBelow's 1024 px (hooks/use-mobile.ts), so a
+ * phone never mounts a frame the theme may not have. With an entry, the theme's own minWidth rules.
  */
 export const INSTALLED_FRAME_MIN_WIDTH_PX = 1024
 
@@ -122,6 +122,5 @@ export function installedThemeEntry(style: UiStyle, data: InstalledThemeEntryDat
     ...data,
     ref,
     kind: 'installed',
-    minWidth: INSTALLED_FRAME_MIN_WIDTH_PX,
   }
 }

@@ -94,8 +94,8 @@ function entryOf(style: UiStyle, data: InstalledThemeEntryData): ThemeEntry {
   return entry
 }
 
-/** hello-a09b's entry as the root layout builds it from the boot: tone 'from-look', the host's frame width. */
-const LOOKS_THEME = entryOf(LOOKS_STYLE, HELLO_ENTRY)
+/** hello-a09b's entry as the root layout builds it from the boot: tone 'from-look', drawn from the desktop width (1024) up. */
+const LOOKS_THEME = entryOf(LOOKS_STYLE, { ...HELLO_ENTRY, minWidth: 1024 })
 const USER_TONE_THEME = entryOf(USER_TONE_STYLE, HELLO_PACKAGE_ENTRY)
 
 const html = () => document.documentElement.classList

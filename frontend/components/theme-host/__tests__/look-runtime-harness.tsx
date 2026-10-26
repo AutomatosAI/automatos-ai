@@ -29,7 +29,8 @@ export const USER_DEFAULT_TONE: ThemeTone = 'dark'
 export const HELLO_LOOKS_STYLE: UiStyle = 'theme:install:6e1f3b8f-2d5c-4fab-a4e7-9a2b3d4f5c6e'
 
 function entryOf(style: UiStyle): ThemeEntry {
-  const entry = installedThemeEntry(style, HELLO_ENTRY)
+  // Drawn from the desktop width (1024) up, so the runtime's below-minWidth cases have a width to fall below.
+  const entry = installedThemeEntry(style, { ...HELLO_ENTRY, minWidth: 1024 })
   if (entry === null) throw new Error(`${style} names no installed theme`)
   return entry
 }
