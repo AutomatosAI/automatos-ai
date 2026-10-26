@@ -59,7 +59,10 @@ A theme may still put its own rules in a layer of its own. That only makes them 
 
 `ProtectedSurface` wraps `ToolApprovalWidget` and `MissionApprovalWidget`. They are wrapped in
 their own modules, so every place that draws them is covered: Studio's canvas and a chat reply
-today, and a theme page through the SDK cards area once A-12a ships it.
+today, and a theme page through the SDK cards area once A-12a ships it. The voice button the host
+draws for themes (the SDK's `voice.VoiceButton`, `frontend/components/voice/voice-button.tsx`) puts
+its "AI voice assistant" caption and its stop control (and mute and the device for a call) in one
+too, named `voice-control`, so no theme rule hides them while the microphone is open.
 
 The host (`[data-protected-surface]`) and the inner wrapper (`[data-protected-surface-inner]`)
 each carry these declarations inline, each marked `!important`:

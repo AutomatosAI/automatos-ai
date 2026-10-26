@@ -261,11 +261,13 @@ def test_an_sdk_storage_call_without_storage_in_uses_is_a_warning_listing_it():
 VOICE_IMPORT = "defineTheme, VoiceButton, readVoiceLevels, useVoice"
 VOICE_AREA = "voice"
 VOICE_NAMES = {"VoiceButton", "readVoiceLevels", "useVoice"}
+# The voice area is SDK 1.2.0's: a theme that uses it asks for that SDK, and this host (contract.SDK_VERSION) is it.
+VOICE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.2.0"}
 
 
 def test_an_sdk_voice_call_declared_in_uses_passes_on_this_hosts_sdk():
     # Theme voice (TV-C5): the SDK 1.2.0 voice area is one this host's review accepts.
-    report = _review_on_this_host(_entry_importing(VOICE_IMPORT), uses=["theme", VOICE_AREA])
+    report = _review_on_this_host(_entry_importing(VOICE_IMPORT), uses=["theme", VOICE_AREA], engines=VOICE_ENGINES)
     uses = report["checks"]["uses"]
 
     assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])

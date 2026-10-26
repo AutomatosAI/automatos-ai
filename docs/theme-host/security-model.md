@@ -161,6 +161,10 @@ How the review checks it:
 - The `uses` check reads `dist/` for imports from `@automatos/theme-sdk`. A name the host's SDK doesn't export is an
   error (the module can't link). A namespace or dynamic import of the SDK is a warning, since its names can't be
   checked one by one (`sdk_uses.py`).
+- The `audioCapture` check reads `dist/` for a theme's own audio: `getUserMedia`, `SpeechRecognition` /
+  `webkitSpeechRecognition` or `speechSynthesis` is an error naming each, so the version is blocked
+  (`audio_capture.py`). A theme talks to Auto by voice only through the SDK's voice area, whose button the host draws
+  with the AI voice caption and the stop control in a protected surface.
 - The isolated kit review job runs the Design Kit's JS rules on `source/` (next section).
 
 ## The review
@@ -173,7 +177,8 @@ It runs on every private upload and every Marketplace submission, before the rou
 - reads the code the browser runs, `dist/entry.js`, `dist/chunks/*.js` and `dist/theme.css`, and also `source/` for a
   Marketplace submission; one score, the highest of every part;
 - asks the model to report exfiltration, acting as the member, remote or dynamic code, deception (fake sign-in or
-  approval forms, content over the approval cards), abuse of the device, obfuscation, and prompt injection;
+  approval forms, content over the approval cards), abuse of the device, obfuscation, prompt injection, and audio
+  captured or spoken in the theme's own code rather than through the SDK's voice area;
 - wraps each part between delimiters carrying a fresh random nonce, so text in the package can't close the part or
   speak as the reviewer, and holds the score at the review threshold (20) whenever a file holds text aimed at an AI
   reviewer (`llm_guard.py`);
