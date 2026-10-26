@@ -17,6 +17,7 @@ import {
   useStoppedReplies,
   withStoppedReplies,
 } from '@/hooks/use-stopped-reply'
+import { VOICE_LIVE_ASSISTANT_ID, VOICE_LIVE_USER_ID } from '@/lib/chat/live-voice-turns'
 import type { ChatMessage } from '@/types'
 
 const message = (id: string, role: 'user' | 'assistant', text: string) =>
@@ -35,6 +36,13 @@ describe('the reply being written', () => {
     expect(replyBeingWritten({ messages: [HELLO, PARTIAL], status: 'idle' })).toBeNull()
     expect(replyBeingWritten({ messages: [HELLO], status: 'streaming' })).toBeNull()
     expect(replyBeingWritten({ messages: [PARTIAL], status: 'streaming' })).toBeNull()
+  })
+
+  it("is the typed reply, never a voice session's words in progress after it", () => {
+    const heard = message(VOICE_LIVE_USER_ID, 'user', 'And the weather?')
+    const saying = message(VOICE_LIVE_ASSISTANT_ID, 'assistant', 'Sunny, mostly')
+    expect(replyBeingWritten({ messages: [HELLO, PARTIAL, heard, saying], status: 'streaming' })).toEqual(STOPPED)
+    expect(replyBeingWritten({ messages: [HELLO, heard, saying], status: 'streaming' })).toBeNull()
   })
 
   it('is none while the page only awaits a reply the server finishes detached', () => {

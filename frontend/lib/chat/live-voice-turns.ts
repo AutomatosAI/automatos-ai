@@ -19,6 +19,11 @@ import type { ChatMessage } from '@/types'
 export const VOICE_LIVE_USER_ID = 'voice-live-user'
 export const VOICE_LIVE_ASSISTANT_ID = 'voice-live-assistant'
 
+/** One of the voice session's two entries, which no other part of the chat (Stop, a kept reply) may take as its own. */
+export function isLiveVoiceEntry(message: Pick<ChatMessage, 'id'>): boolean {
+  return message.id === VOICE_LIVE_USER_ID || message.id === VOICE_LIVE_ASSISTANT_ID
+}
+
 function liveEntry(id: string, role: 'user' | 'assistant', text: string): ChatMessage {
   return { id, role, content: text, parts: [{ type: 'text', text }] } as unknown as ChatMessage
 }
