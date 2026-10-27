@@ -38,6 +38,8 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
+from core.database import pool_watch
+from core import health_probe  # GET /health's probes (F229, F458)
 from core.models import Base
 
 # Import API routers
@@ -1392,40 +1394,6 @@ async def readiness_probe(request: Request):
     return {"status": "ready"}
 
 
-def _health_database() -> str:
-    """The database probe of GET /health (a SELECT 1): healthy, or unhealthy and logged."""
-    from sqlalchemy import text as _text
-
-    try:
-        db = SessionLocal()
-        try:
-            db.execute(_text("SELECT 1"))
-            return "healthy"
-        finally:
-            db.close()
-    except Exception:
-        logger.exception("Health: database check failed")
-        return "unhealthy"
-
-
-def _health_metrics() -> dict:
-    """The process host's CPU and memory for GET /health (F229: the CPU reading never
-    sleeps; ``interval=None`` is the use since the previous reading). Empty when psutil
-    cannot read them."""
-    import psutil
-
-    try:
-        cpu_pct = psutil.cpu_percent(interval=None)
-        mem = psutil.virtual_memory()
-        return {
-            "cpu_percent": round(cpu_pct, 1),
-            "memory_used_percent": round(mem.percent, 1),
-            "memory_available_mb": round(mem.available / (1024 * 1024), 0),
-        }
-    except Exception:  # noqa: BLE001 — the health answer goes out without metrics
-        return {}
-
-
 # Health check endpoint
 @app.get("/health",
          summary="🏥 System Health Check",
@@ -1436,31 +1404,22 @@ def health_check():
     """
     System health check with real probes for database, config, and resources.
 
-    A plain ``def`` (F229, F105): its database probe and its /proc reads run in the
-    threadpool, never on the event loop, and the CPU reading never sleeps
-    (``interval=None``: the use since the previous reading).
+    A plain ``def`` (F229, F105): its probes (core/health_probe.py) run in the
+    threadpool, never on the event loop, and none of them waits long. A full
+    connection pool is read from its counters (F458): ``database`` is ``busy`` and
+    the answer degraded, at once; a pool full for HEALTH_POOL_STUCK_SECONDS is
+    ``stuck`` and answers 503, so the liveness watchdog restarts the backend.
 
     **Status Values:**
     - `healthy`: All systems operational
     - `degraded`: Some issues but functional
     - `unhealthy`: Critical issues detected
     """
-    components = {"api_server": "healthy", "database": _health_database()}
-
-    # Critical config check
-    has_db_url = bool(config.DATABASE_URL)
-    components["config"] = "healthy" if has_db_url else "degraded"
-
-    metrics = _health_metrics()
-
-    # Derive overall status
-    statuses = list(components.values())
-    if "unhealthy" in statuses:
-        overall_status = "unhealthy"
-    elif "degraded" in statuses:
-        overall_status = "degraded"
-    else:
-        overall_status = "healthy"
+    components = {
+        "api_server": "healthy",
+        "database": health_probe.database_status(),
+        "config": "healthy" if config.DATABASE_URL else "degraded",  # critical config
+    }
 
     # PRD-123 Pattern #2: Include trust gate and extension health
     trust_passed = getattr(app.state, "trust_passed", None)
@@ -1471,26 +1430,22 @@ def health_check():
     if deferred_init is not None:
         components["extensions"] = "healthy" if deferred_init.all_healthy else "degraded"
 
-    # Re-derive overall status with new components
-    statuses = list(components.values())
-    if "unhealthy" in statuses:
-        overall_status = "unhealthy"
-    elif "degraded" in statuses:
-        overall_status = "degraded"
-
-    return {
-        "status": overall_status,
+    body = {
+        "status": health_probe.overall_status(components),
         "service": "automatos-ai-api",
         "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat(),
         "components": components,
-        "metrics": metrics,
+        "db_pool": pool_watch.pool_numbers(),
+        "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,
         # PRD-234 S1b: the CLI host refuses to serve anything but a LOCAL edition
         # with session mode on — it reads both here before pairing. Names only.
         "edition": config.AUTH_EDITION,
         "cli_runtime_enabled": bool(getattr(config, "CLI_RUNTIME_ENABLED", False)),
     }
+    status_code = health_probe.http_status(components)
+    return body if status_code == health_probe.HTTP_OK else JSONResponse(status_code=status_code, content=body)
 
 
 @app.get("/health/bootstrap",

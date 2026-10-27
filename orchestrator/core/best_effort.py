@@ -12,8 +12,8 @@ context (workspace, usage scope) with them. A sync writer called on an event
 loop hands the write over and returns at once (``off_loop``); an async writer
 awaits its write without holding the loop (``awaitable_off_loop``). A stalled
 write costs its own thread, never the loop — and not for long: a handed-over
-write waits at most ``BEST_EFFORT_POOL_WAIT_S`` for room in the connection pool,
-then is dropped with a log line instead of queueing behind requests for the
+write waits at most ``BEST_EFFORT_POOL_WAIT_S`` for room in the connection pool
+(read from its counters, ``core.database.pool_watch``), then is dropped with a log line instead of queueing behind requests for the
 pool's own 30 s. (The room check and the checkout are not atomic: a request
 that takes the last connection in between still makes the write wait the
 pool's bound — on its own thread.) With no loop running in the thread
@@ -32,6 +32,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional, Set
 
 from config import config
+from core.database import pool_watch
 
 logger = logging.getLogger(__name__)
 
@@ -45,20 +46,9 @@ _executor: Optional[ThreadPoolExecutor] = None
 _pending: Set[Future] = set()
 
 
-def _pool_has_room() -> bool:
-    """A connection is idle, or one more may be opened. Unreadable → True."""
-    try:
-        from core.database import database
-
-        pool = database.engine.pool
-        return pool.checkedin() > 0 or pool.overflow() < pool._max_overflow
-    except Exception:  # noqa: BLE001 — a faked or foreign pool: just write
-        return True
-
-
 def _within_pool_bound(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     deadline = time.monotonic() + config.BEST_EFFORT_POOL_WAIT_S
-    while not _pool_has_room():
+    while not pool_watch.pool_has_room():
         if time.monotonic() >= deadline:
             logger.warning("best-effort write dropped: no connection free within %gs (%s)",
                            config.BEST_EFFORT_POOL_WAIT_S, getattr(fn, "__qualname__", fn))
