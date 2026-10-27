@@ -69,6 +69,7 @@
 #   - Search: Add --profile search (searxng, web search for agents; also SEARXNG_URL)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
+#   - Voice: Add --profile voice (voice-tts, Auto's server voice) and VOICE_TTS_URL=http://voice-tts:8100 in .env
 #   - Core, five containers (PRD-262 US-040): `make up CORE=1`, or
 #     docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
 #     The override puts the workspace-worker behind a `workspace` profile, so
@@ -402,6 +403,9 @@ services:
       # The same, for media-render (the media profile). SOCIALS_RENDER_URL is in
       # envs/api.defaults.
       SOCIALS_RENDER_TOKEN: ${SOCIALS_RENDER_TOKEN:-}
+      # Auto's server voice (the voice profile); empty = off, the device speaks.
+      VOICE_TTS_URL: ${VOICE_TTS_URL:-}
+      VOICE_TTS_TOKEN: ${VOICE_TTS_TOKEN:-}
       
       # Clerk Authentication — SaaS-only. `:-` (not `:?`) so their ABSENCE never
       # blocks `docker compose up` in local mode; when set (saas) they resolve
@@ -678,6 +682,32 @@ services:
       start_period: 60s
       # PRD-262 US-038: probed every second while it starts (Docker Engine 25 or later),
       # within a start period long enough for the renderer's first start.
+      start_interval: 1s
+    networks:
+      - automatos
+
+  # voice-tts: Auto's server voice, Kokoro streamed as MP3 (services/voice-tts).
+  # Add with --profile voice. Port 8100 stays inside the compose network.
+  voice-tts:
+    build:
+      context: ./services/voice-tts
+    container_name: automatos_voice_tts
+    restart: unless-stopped
+    profiles: ["voice"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_RELAY_ENABLED: "false"
+      SERVICE_NAME: voice-tts
+      VOICE_TTS_TOKEN: ${VOICE_TTS_TOKEN:-}
+    deploy:
+      resources:
+        limits: {cpus: '2.0', memory: 2G}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
       start_interval: 1s
     networks:
       - automatos

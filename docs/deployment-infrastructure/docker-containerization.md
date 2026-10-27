@@ -166,6 +166,36 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 
 Sources: [services/media-render/Dockerfile](), [services/media-render/README.md](), [orchestrator/core/media_render_client.py](), [orchestrator/modules/socials/render.py](), [docker-compose.yml]()
 
+## 5. `voice-tts`: Auto's server voice
+
+`voice-tts` speaks Auto's replies for the phone (Automatos Go) and the web quick-ask. Kokoro speaks each sentence and one LAME process streams the answer out as MP3, so the first sentence plays while the rest are spoken. It holds no data. Its Dockerfile is `services/voice-tts/Dockerfile`, and its API and settings are in `services/voice-tts/README.md`.
+
+| | |
+|---|---|
+| **Image** | `python:3.12-slim`, Kokoro v1.0 (the fp32 model and all 54 voices, checked against `kokoro/SHA256SUMS`, the same pins as media-render's), kokoro-onnx, onnxruntime and aiohttp from a hash-checked lock, and Debian's `lame` and `tini`. No Node, browser or ffmpeg. About 410 MB compressed. |
+| **Port** | 8100 (`VOICE_TTS_PORT`), internal only. `/healthz`, `/readyz` and `/voices` are open; `POST /speak` needs `Authorization: Bearer <VOICE_TTS_TOKEN>`. |
+| **Concurrency** | As many syntheses at once as the container has CPUs (its cgroup quota, `VOICE_TTS_MAX_CONCURRENT`); the next request is a 429 `tts_busy` at once, never queued. |
+| **GPL boundary** | As media-render's: phonemizer and espeak-ng live only in the image, which CI builds and scans but never publishes. |
+
+**How the backend uses it.** `POST /api/voice/speech` (`orchestrator/api/voice_speech.py`, `modules/voice/speech.py`) streams the MP3 through to any member who may chat, with refusals the clients treat as "use the device voice". `GET /api/voice/voices` relays the voice list, cached for five minutes. Discovery lists the `tts` capability only while `VOICE_TTS_URL` is set.
+
+| Backend setting | Default | What it does |
+|---|---|---|
+| `VOICE_TTS_URL` | empty | Where the voice is (local: `http://voice-tts:8100`; Railway: `http://voice-tts.railway.internal:8100`). Empty = off: 503 `tts_off`, and discovery does not list `tts`. |
+| `VOICE_TTS_TOKEN` | empty | Sent as `Authorization: Bearer`; the same name and value on the service. |
+| `VOICE_TTS_TIMEOUT_SECONDS` | 15 | The most one answer may take, the stream included. |
+| `VOICE_TTS_CONNECT_TIMEOUT_SECONDS` | 2 | How long a connection may take before the voice counts as unavailable, so a client falls back at once. |
+| `VOICE_TTS_DEFAULT_VOICE` | `af_heart` | The voice when a request names none. |
+| `VOICE_TTS_RATE_PER_MINUTE` | 60 | Sentences a workspace may have spoken a minute; past it, 429 `tts_busy`. 0 turns the limit off. |
+
+**Local edition.** The optional compose profile `voice` (`docker compose --profile voice up -d voice-tts`, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`), capped at 2 CPUs and 2 GB. See [self-hosting](../getting-started/self-hosting.md#7c-autos-server-voice-the-voice-profile).
+
+**SaaS.** Its own Railway service, 2 vCPU / 2 GB to start, one replica, health check `/readyz` (`infrastructure/railway-manifest.json`). The owner's setup steps are in [self-hosting](../getting-started/self-hosting.md#voice-tts-on-railway-saas).
+
+**CI.** `.github/workflows/voice-tts.yml`, on pull requests that touch `services/voice-tts/`, checks the compose profile, builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and speaks through the running container. `images.yml` builds, measures and scans the production stage for amd64 and arm64, and never publishes it.
+
+Sources: [services/voice-tts/Dockerfile](), [services/voice-tts/README.md](), [orchestrator/modules/voice/speech.py](), [orchestrator/api/voice_speech.py](), [docker-compose.yml]()
+
 ## Multi-Service Coordination
 
 The `docker-compose.yml` file orchestrates the local stack, including a local S3-compatible store (MinIO) to provide a durable knowledge flywheel during development [docker-compose.yml:83-89](). It also includes an optional Qdrant service for durable and field memory, activated via the `memory` profile [docker-compose.yml:116-133]().

@@ -479,7 +479,7 @@ workspace worker, five containers instead of six (§1b, §5):
 
 **Optional profiles.** Each profile adds its services to the default stack:
 `docker compose --profile <profile> up -d`, or name the service, as below. All
-but `media` pull a published image.
+but `media` and `voice` pull a published image.
 
 | Profile | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|---|
@@ -487,6 +487,7 @@ but `media` pull a published image.
 | `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
 | `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
 | `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
+| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
 
 Every third-party image above is pinned by digest in `docker-compose.yml`, and
 Dependabot moves the pins once a week. The CI test
@@ -896,6 +897,62 @@ The hosted edition runs the renderer as its own Railway service (owner sizing,
    *Needs approval*, and the file shows in Deliverables. The tab shows
    *Render minutes: used / quota this month*.
 
+## 7c. Auto's server voice (the `voice` profile)
+
+The phone (Automatos Go) and the web quick-ask can play Auto's replies in a
+natural voice instead of the device's own. The voice is `voice-tts`, a small
+service (`services/voice-tts`): Kokoro speaks each reply and it streams as MP3.
+It is off until you start it and point the backend at it:
+
+```bash
+docker compose --profile voice up -d voice-tts
+```
+
+Then set `VOICE_TTS_URL=http://voice-tts:8100` in `.env` and recreate the
+backend (`docker compose up -d backend`). No registry publishes this image
+either, so after a `git pull` that changes `services/voice-tts`, run
+`docker compose --profile voice up -d --build voice-tts`.
+
+- **Off is a normal state.** While `VOICE_TTS_URL` is empty, the backend's
+  discovery document (`/.well-known/automatos.json`) does not list `tts`, and
+  `POST /api/voice/speech` answers 503 `tts_off`. Clients then use the device's
+  voice, as they do on any answer that is not audio.
+- **Wiring.** An optional shared secret, `VOICE_TTS_TOKEN` in `.env`, reaches both
+  containers. The backend sends it as `Authorization: Bearer`.
+- **Resources.** Compose caps it at 2 CPUs and 2 GB. It holds the 310 MB Kokoro
+  model in memory, about 500 MB idle. It speaks as many replies at once as it has
+  CPUs and refuses the next with 429 `tts_busy` rather than queueing it.
+- **Tuning** (optional): `VOICE_TTS_DEFAULT_VOICE` (`af_heart`), and
+  `VOICE_TTS_RATE_PER_MINUTE` (60 sentences a minute per workspace), in
+  `envs/api.local`. The service's own settings are in `services/voice-tts/README.md`.
+
+### voice-tts on Railway (SaaS)
+
+The hosted edition runs the voice as its own Railway service. The entry is
+`voice-tts` in `infrastructure/railway-manifest.json`.
+
+1. **Create the service** in the Automatos AI project: *New → GitHub repo →
+   AutomatosAI/automatos-ai*, with **root directory `services/voice-tts`**. It
+   builds the Dockerfile with no build args (the last stage, `production`).
+2. **Size it: 2 vCPU / 2 GB to start, one replica.** It speaks as many replies at
+   once as it has vCPUs; raise the vCPUs, not the replicas, when it answers
+   `tts_busy`.
+3. **No public domain.** It is reached over Railway's private network only. Set
+   the health check path to `/readyz`, which answers 200 only once the model has
+   loaded, so a deploy takes traffic only when it can speak.
+4. **Set its variables:**
+   - `VOICE_TTS_TOKEN`: a long random secret (boot refuses production without one);
+   - `ENVIRONMENT=production`, `SERVICE_NAME=voice-tts`;
+   - optional: `LOG_LEVEL`, `LOG_RELAY_ENABLED`, `VOICE_TTS_MAX_CONCURRENT` (the
+     container's vCPUs by default).
+5. **Point the API at it** (the `automatos-ai-api` service):
+   - `VOICE_TTS_URL=http://voice-tts.railway.internal:8100`;
+   - `VOICE_TTS_TOKEN`: the same secret;
+   - optional: `VOICE_TTS_DEFAULT_VOICE` (`af_heart`), `VOICE_TTS_RATE_PER_MINUTE`
+     (60), `VOICE_TTS_TIMEOUT_SECONDS` (15), `VOICE_TTS_CONNECT_TIMEOUT_SECONDS` (2).
+6. **Check it.** `/.well-known/automatos.json` lists `tts` among its
+   `capabilities`, and a reply in the phone's spoken mode plays in the server voice.
+
 ## 8. What a fresh instance contains
 
 Every boot in the local edition runs an idempotent first-run seed
@@ -994,7 +1051,8 @@ Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
 rendering, rebuild that service as well:
-`docker compose --profile media up -d --build media-render` (§7b).
+`docker compose --profile media up -d --build media-render` (§7b), and the
+voice: `docker compose --profile voice up -d --build voice-tts` (§7c).
 Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.

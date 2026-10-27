@@ -44,6 +44,7 @@ RAILWAY_DOCKERFILES = (
     "services/media-render/Dockerfile",
     "services/workspace-worker/Dockerfile",
     "services/agent-opt-worker/Dockerfile",
+    "services/voice-tts/Dockerfile",
 )
 
 # Dockerfile, Dockerfile.<variant> and <name>.Dockerfile; not a Dockerfile's own
