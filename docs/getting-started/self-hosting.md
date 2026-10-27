@@ -487,7 +487,7 @@ but `media` and `voice` pull a published image.
 | `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
 | `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
 | `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
-| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
+| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone (the web quick-ask is next). `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
 
 Every third-party image above is pinned by digest in `docker-compose.yml`, and
 Dependabot moves the pins once a week. The CI test
@@ -903,10 +903,11 @@ The hosted edition runs the renderer as its own Railway service (owner sizing,
 
 ## 7c. Auto's server voice (the `voice` profile)
 
-The phone (Automatos Go) and the web quick-ask can play Auto's replies in a
-natural voice instead of the device's own. The voice is `voice-tts`, a small
-service (`services/voice-tts`): Kokoro speaks each reply and it streams as MP3.
-It is off until you start it and point the backend at it:
+The phone (Automatos Go) can play Auto's replies in a natural voice instead of
+the device's own. The web quick-ask still speaks in the browser's voice; the
+server voice is coming to it, and isn't wired up yet. The voice is `voice-tts`, a
+small service (`services/voice-tts`): Kokoro speaks each reply and it streams as
+MP3. It is off until you start it and point the backend at it:
 
 ```bash
 docker compose --profile voice up -d voice-tts
@@ -925,6 +926,15 @@ either, so after a `git pull` that changes `services/voice-tts`, run
   sends it as `Authorization: Bearer`. `make env` (and so `make up`) generates it with
   `openssl rand -hex 24`, on an install that has already started too. Without `make`,
   set it yourself: voice-tts refuses to start without one.
+- **Languages.** It speaks Kokoro's nine languages: English (US and UK),
+  Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese and Mandarin.
+  Japanese and Mandarin are phonemized with espeak and sound weaker. It has no
+  European Portuguese voice, so the phone speaks Portuguese (Portugal) in its own
+  voice. The phone listens and speaks English and Portuguese (Portugal and
+  Brazil), chosen in its **Settings → Voice**. Automatic language detection
+  (about 100 languages, speech recognition on the server) is planned and needs a
+  GPU; nothing in this stack does it yet
+  ([PRD-269](../PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).
 - **Resources.** Compose caps it at 2 CPUs and 2 GB. It holds the 310 MB Kokoro
   model in memory, about 500 MB idle. It speaks as many replies at once as it has
   CPUs and refuses the next with 429 `tts_busy` rather than queueing it.
@@ -1717,6 +1727,7 @@ Check four things:
   | `mobile_theme` | Installed workspace themes on the phone, as data only, never code: colours (the member's own look, for themes that paint from looks), fonts (`.ttf` or `.otf`, up to 400 KB each) and Auto's clips and stills (`.mp4` up to `THEME_MAX_CLIP_KB`, 1024 KB by default; `.png` up to 512 KB; the phone loads none over 2 MB). Each theme the member may use that has a phone block is listed under Studio in the phone's style picker. A theme that is not reviewed (an upload to this workspace without Automatos's signature, or a Marketplace theme still in review) shows only after the member opts in to it in the web app, and a theme revoked with `disable` is not shown. Play and HUD are the phone's own styles. A paired phone gets the themes of the one workspace it paired to. See Themes: [On your phone](../themes/on-your-phone.md) for members, and [the phone's side of a theme](../theme-host/mobile.md) for the answer and who may call. |
   | `push` | Notifications, but only while `push.expo` is `true` (below). |
   | `spoken_mode` | Spoken replies when you talk to Auto by voice. |
+  | `tts` | Auto's natural voice for those replies (§7c), in place of the phone's own. Listed only while `VOICE_TTS_URL` is set. |
   | `voice_live` | Auto Live, a live voice conversation with Auto. |
 
   Today's Automatos Go uses none of them yet. The notifications, styles (themes)
