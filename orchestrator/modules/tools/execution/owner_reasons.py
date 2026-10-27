@@ -26,7 +26,14 @@ SENT_WRONG = "it was sent in the wrong form, so nothing ran"
 NO_SUCH_ACTION = "the platform has no such action, so nothing ran"
 DATA_FAILED = "the data query failed"
 PLATFORM_FAILED = "it failed inside the platform"
-INTENT_REFUSED = "{what} isn't allowed for this request"
+# F459 (night 18): the intent gate's refusal says whose check stopped the action and why, so a send it
+# stops is never read as the app refusing it ("Gmail refused the send", rows 290, 401, 551, 589, 764).
+INTENT_REFUSED = ("Automatos stopped the {app} '{does}' action before it reached {app}, because your request "
+                  "didn't read as asking for that, so nothing ran")
+INTENT_REFUSED_NO_APP = "Automatos stopped that action before it ran, because your request didn't read as asking for it"
+# The model's text for the same refusal: the router's prefix, the gate's reason, and that the app never saw it.
+INTENT_GATE_ERROR = ("Action not allowed for this intent: {reason}. This was Automatos's own check of the owner's "
+                     "request, not {app}: the action never reached {app}, so {app} did not refuse it.")
 AGENTS_SHARE_A_NAME = "{count} agents are called {name}, so it wasn't clear which one you meant"
 
 # The data actions: a failure inside one is the query's (night 17: psycopg2 at asks 38, 100, 214, 436).
@@ -64,9 +71,22 @@ def refused(said: Any, reason: Optional[str] = None) -> Dict[str, Any]:
 
 
 def intent_refused(action_id: Any) -> str:
-    """The intent gate's refusal of a Composio action: "the Gmail action isn't allowed for this request"."""
-    app = str(action_id or "").strip().split(_SLUG_SEP)[0].capitalize()
-    return INTENT_REFUSED.format(what=f"the {app} action" if app else "that action")
+    """The intent gate's refusal of a Composio action, for the owner: "Automatos stopped the Gmail
+    'send email' action before it reached Gmail, because your request didn't read as asking for that…"."""
+    app, does = _app_and_act(action_id)
+    return INTENT_REFUSED.format(app=app, does=does) if app and does else INTENT_REFUSED_NO_APP
+
+
+def intent_gate_error(action_id: Any, reason: str) -> str:
+    """The intent gate's refusal of a Composio action, for the model (F459): it names the gate, not the app."""
+    app = _app_and_act(action_id)[0] or "the app"
+    return INTENT_GATE_ERROR.format(reason=str(reason).rstrip("."), app=app)
+
+
+def _app_and_act(action_id: Any) -> tuple:
+    """('Gmail', 'send email') for GMAIL_SEND_EMAIL; ('', '') without a slug."""
+    words = [word for word in str(action_id or "").strip().split(_SLUG_SEP) if word]
+    return (words[0].capitalize(), " ".join(words[1:]).lower()) if words else ("", "")
 
 
 def agents_share_a_name(count: int, name: Any) -> str:
@@ -88,6 +108,7 @@ def said_in(answer: Dict[str, Any], key: str) -> Optional[str]:
     return said.strip() if isinstance(said, str) and said.strip() else None
 
 
-__all__ = ["ACTS_ON", "AGENTS_SHARE_A_NAME", "DATA_ACTIONS", "DATA_FAILED", "INTENT_REFUSED", "NO_SUCH_ACTION",
-           "OWNER_REASON", "PLATFORM_FAILED", "Refusal", "SENT_WRONG", "agents_share_a_name", "failed_inside",
-           "intent_refused", "owner_fields", "refused", "said_in"]
+__all__ = ["ACTS_ON", "AGENTS_SHARE_A_NAME", "DATA_ACTIONS", "DATA_FAILED", "INTENT_GATE_ERROR", "INTENT_REFUSED",
+           "INTENT_REFUSED_NO_APP", "NO_SUCH_ACTION", "OWNER_REASON", "PLATFORM_FAILED", "Refusal", "SENT_WRONG",
+           "agents_share_a_name", "failed_inside", "intent_gate_error", "intent_refused", "owner_fields", "refused",
+           "said_in"]

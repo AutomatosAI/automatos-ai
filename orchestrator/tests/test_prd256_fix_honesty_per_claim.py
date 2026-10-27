@@ -776,7 +776,7 @@ def test_rvw36_a_loaded_skill_backs_no_post_said_live():
     answer = "Your post is now live on LinkedIn."
     (loaded,) = _receipts(SKILL_LOADED)
     assert loaded["kind"] == READ
-    assert _said(answer) == [NOTHING_DONE_LINE] and _said(answer, SKILL_LOADED) == []   # N17-5: after a read, no line
+    assert _said(answer) == _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]   # night 18: a skill observed nothing
     assert nudged(answer, SKILL_LOADED) == "done"                       # …and the loaded skill still backs nothing
 
 
@@ -797,4 +797,4 @@ def test_rvw36_a_saved_memory_backs_no_rejection_and_the_reject_write_does():
 @pytest.mark.parametrize("answer", ONLY_WORK_HAPPENED)
 def test_rvw36_a_claim_that_says_only_work_happened_takes_any_done_write(answer):
     assert _said(answer, MEMORY_STORED) == [] and _said(answer) == [NOTHING_DONE_LINE]      # no call at all: caught
-    assert _said(answer, SKILL_LOADED) == ([] if " is now " in answer else [NOTHING_DONE_LINE])   # N17-5: is_now, a finding
+    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]           # night 18: a loaded skill found nothing

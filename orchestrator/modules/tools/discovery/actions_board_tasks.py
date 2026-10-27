@@ -492,7 +492,9 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
             "(platform_cancel_scheduled_task is for timers, not tickets). A closed ticket is never changed. "
             "Cancelling a playbook's or a mission's card stops its run; a mission's step is the mission's to stop. "
             "A ticket in review moved to 'done' is approved; moved to 'assigned' it is sent back for a redo "
-            "with its draft kept — put what to fix in 'note'. A ticket with no work on it can't go to "
+            "with its draft kept — put what to fix in 'note'. A ticket in progress moved to 'assigned' is "
+            "queued to start again with its agent, not stopped (cancel stops it); moving it back is a "
+            "send-back too, as from review. A ticket with no work on it can't go to "
             "review or done, and a running one can only be cancelled: the refusal says what the owner can press."
         ),
         category="tasks",

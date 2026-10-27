@@ -19,7 +19,7 @@ import pytest
 
 from consumers.chatbot.receipts import REFUSED, WRITE, build_receipts, honesty_lines, receipt
 from modules.tools.execution.owner_reasons import (
-    DATA_FAILED, NO_SUCH_ACTION, OWNER_REASON, PLATFORM_FAILED, SENT_WRONG, Refusal,
+    DATA_FAILED, NO_SUCH_ACTION, OWNER_REASON, PLATFORM_FAILED, SENT_WRONG, Refusal, intent_refused,
 )
 from modules.tools.execution.refused_calls import in_the_owners_words
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
@@ -145,7 +145,8 @@ def test_the_intent_gate_names_the_app_and_the_model_still_reads_its_refusal():
     assert envelope["llm_context"].startswith("Tool composio_execute failed: Action not allowed for this intent")
     assert _reason("composio_execute", sent, {"success": False, "llm_context": envelope["llm_context"],
                                               "raw_result": envelope["raw_result"]}) == \
-        "the Gmail action isn't allowed for this request"
+        intent_refused("GMAIL_SEND_EMAIL")
+    assert "before it reached Gmail" in intent_refused("GMAIL_SEND_EMAIL")     # F459: the gate's, never Gmail's
     ran.assert_not_called()
 
 
@@ -201,7 +202,7 @@ def test_a_line_names_the_real_failure_after_a_call_sent_wrong():
 
 def test_the_same_line_is_said_once():
     """Ask 370: two refusals that read the same are one line."""
-    gated = "the Gmail action isn't allowed for this request"
+    gated = intent_refused("GMAIL_REPLY_TO_THREAD")
     writes = [{"action": slug, "kind": WRITE, "status": REFUSED, "subject": "", "reason": gated}
               for slug in ("GMAIL_REPLY_TO_THREAD", "GMAIL_FORWARD_MESSAGE")]
 
