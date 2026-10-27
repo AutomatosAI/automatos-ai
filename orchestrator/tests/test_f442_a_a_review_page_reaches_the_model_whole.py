@@ -193,3 +193,27 @@ def test_a_smaller_max_chars_is_honoured(board):
     head, numbers = _read(said)
     assert int(head["shown"]) == len(numbers) > 0 and SKIPPED.search(said)
     assert BRIEF_WORDS.strip() not in said
+
+
+DISPATCHER = "platform_execute"       # F460 (night 18): the name the chat calls the board read by
+
+
+def test_a_page_read_through_platform_execute_reaches_the_model_whole(board):
+    said = _seen(_page(board, limit=100), DISPATCHER)
+    head, numbers = _read(said)
+
+    assert said.startswith(f"Tool: {DISPATCHER}\n") and OWNER_LEGEND in said
+    assert count_tokens(said) <= PAGE_TOKENS and truncate_to_token_budget(said, CHAT_TOOL_TOKENS) == said
+    assert head["total"] == "120" and int(head["shown"]) == len(numbers) >= 30
+    assert BRIEF_WORDS.strip() not in said and SKIPPED.search(said)
+
+
+def test_following_next_offset_through_platform_execute_reads_every_card_once(board):
+    seen, offset, calls = [], 0, 0
+    while offset is not None and calls < MOST_CALLS:
+        head, numbers = _read(_seen(_page(board, limit=100, offset=offset), DISPATCHER))
+        seen += numbers
+        calls += 1
+        offset = None if head["next_offset"] == "null" else int(head["next_offset"])
+
+    assert calls <= 4 and len(seen) == len(set(seen)) == REVIEW and set(seen) == EVERY_NUMBER

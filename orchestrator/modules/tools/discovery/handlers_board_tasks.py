@@ -12,6 +12,7 @@ from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_
 from modules.tools.discovery.new_card_checks import checks_the_new_card
 from modules.tools.discovery.ticket_edits import briefs_like_the_board, notes_say_who_asked
 from services import ticket_redo
+from modules.tools.discovery.card_files import with_its_files
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
@@ -454,7 +455,6 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
     if _widget_turn():
         return {"success": True, "task": task_visitor_view(task)}
 
-    # Resolve agent name
     agent_name = None
     if task.assigned_agent_id:
         from core.models import Agent
@@ -484,7 +484,7 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
     }
     if params.get("_driving_user_id"):   # N17-6 (F445): the owner's own chat sees the card's send-backs
         answer["task"] = {**answer["task"], **ticket_redo.send_back_seen(db, workspace_id, task, params["_driving_user_id"])}
-    return answer
+    return with_its_files(db, workspace_id, task, answer)   # F460 (night 18): the card's files, as the worker reads them
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers

@@ -14,6 +14,11 @@ that work with the board's own search (``board_task_list.named_filter``), newest
 cancelled one, each with its agent and its newest Deliverable's file. Only ``_a_copy`` reads them: a
 card named by what it is never joins the cards named by number (``owner_turn.cards_named``), so no
 other rule judges a call against it.
+
+F460 (night 18): "Show me the Taunton quote." read no card and showed the wrong file. ``named`` reads
+"the <name> <noun>" with or without an edit word, so the chat's turn can name the cards that hold it
+(``consumers/chatbot/named_work_note.py``); the name runs to five words ("the Harbour Lights Box
+launch wording draft").
 """
 from __future__ import annotations
 
@@ -32,8 +37,8 @@ EDITS = re.compile(r"\bshort(?:er|en\w*)\b|\blonger\b"
                    r"|\bmake\b[^.;!?\n]*?\binstead\b", re.I)
 # Where one clause of the owner's words ends: a sentence's end, a comma, "and".
 CLAUSE_ENDS = re.compile(r"[.;!?\n]|, | and ", re.I)
-# "the Guji quote", "the Hale & Co invoice": one to three words that name it (never "the"), then what it is.
-THE_NAMED_WORK = re.compile(rf"\bthe\s+((?:(?!the\b)[\w'’&-]+\s+){{1,3}}?(?:{WORK_NOUNS}))\b", re.I)
+# "the Guji quote", "the Hale & Co invoice": one to five words that name it (never "the"), then what it is.
+THE_NAMED_WORK = re.compile(rf"\bthe\s+((?:(?!the\b)[\w'’&-]+\s+){{1,5}}?(?:{WORK_NOUNS}))\b", re.I)
 DESCRIBED_LIMIT = 3
 CANCELLED = "cancelled"
 UNASSIGNED = "unassigned"
@@ -79,6 +84,16 @@ def described(text: str) -> List[str]:
     return []
 
 
+def work_named(text: str) -> List[str]:
+    """F460: the search words of the first "the <name> <noun>" in ``text``, a change asked for or not
+    ("Show me the Taunton quote"); [] when no clause names a piece of work."""
+    for clause in CLAUSE_ENDS.split(text or ""):
+        found = THE_NAMED_WORK.search(clause)
+        if found:
+            return search_words(found.group(1))
+    return []
+
+
 def described_cards(db: Session, workspace_id: Any, words: Sequence[str],
                     limit: int = DESCRIBED_LIMIT) -> List[DescribedCard]:
     """This workspace's cards holding every word of ``words`` on their title or a Deliverable on them
@@ -109,5 +124,5 @@ def newest_file(db: Session, workspace_id: Any, card_id: int) -> Optional[str]:
     return (rows[0].get("file_path") or None) if rows else None
 
 
-__all__ = ["DESCRIBED_LIMIT", "EDITS", "DescribedCard", "asks_for_a_change", "described", "described_cards",
-           "newest_file"]
+__all__ = ["DESCRIBED_LIMIT", "EDITS", "THE_NAMED_WORK", "DescribedCard", "asks_for_a_change", "described",
+           "described_cards", "newest_file", "work_named"]

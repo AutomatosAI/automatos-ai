@@ -112,15 +112,44 @@ def _session_places(name: str, base: str) -> List[str]:
     ``deliverables/sessions/980/…overview.md``, which the join alone looked for
     as ``sessions/980/deliverables/sessions/980/…`` (F161). A name in a folder
     the platform writes at the root, ``reports/…``, is looked for there too (F365)."""
-    from services.cli_host_service import configured_workspace_dir
-
     places = [posixpath.normpath(posixpath.join(base, name))]
-    root = configured_workspace_dir()
-    head, _, rest = name.partition("/")
-    rooted = rest if root and rest and head == posixpath.basename(root) else name
+    rooted = from_the_root(name)
     if rooted != name or rooted.startswith(base + "/") or _platform_written(rooted):
         places.append(posixpath.normpath(rooted))
     return list(dict.fromkeys(places))
+
+
+def from_the_root(name: str) -> str:
+    """``name`` without the deliverables root's own folder name in front of it
+    ("deliverables/sessions/980/x.md" → "sessions/980/x.md", F161); as it came otherwise."""
+    from services.cli_host_service import configured_workspace_dir
+
+    root = configured_workspace_dir()
+    head, _, rest = name.partition("/")
+    return rest if root and rest and head == posixpath.basename(root) else name
+
+
+def worker_read_path(path: str, workspace_id: str, projects_dir: Optional[str] = None) -> str:
+    """F460 (night 18): a read-only workspace tool's path as the worker reads it. An absolute
+    host path under the workspace root (or the projects folder) becomes relative to it, the way
+    a session's files are mapped (``workspace_relative_path``); a name written from the
+    deliverables root loses the root's own name (``from_the_root``). Anything else goes as it
+    came, so the worker's own check still refuses an absolute path or a step out of the root."""
+    from services.cli_host_service import workspace_relative_path
+    from services.host_paths import as_host_path, is_absolute_host_path
+
+    raw = str(path or "")
+    if is_absolute_host_path(as_host_path(raw)):
+        return workspace_relative_path(raw, workspace_id, projects_dir) or raw
+    stripped = from_the_root(raw)
+    # Security review: a name with a '.' or '..' step is never rewritten here, so the platform holds the
+    # root on its own and does not lean on the worker's check alone; the worker refuses it as it came.
+    return raw if _has_dot_steps(stripped) else stripped
+
+
+def _has_dot_steps(name: str) -> bool:
+    """Whether a relative name has a '.' or '..' segment ('/' or '\\' separated)."""
+    return any(part in (".", "..") for part in re.split(r"[\\/]", name))
 
 
 def _platform_written(name: str) -> bool:

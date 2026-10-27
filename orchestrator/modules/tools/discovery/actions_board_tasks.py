@@ -177,6 +177,16 @@ def _list_tasks_parameters() -> Dict[str, Any]:
                     "them (its title or file name), holds every word of it, in any order."
                 ),
             },
+            "completed_after": {
+                "type": "string",
+                "description": ("Keep the tasks finished on or after this date (YYYY-MM-DD, UTC). Last "
+                                "week's done cards: status done, completed_after last Monday, completed_before "
+                                "this Monday."),
+            },
+            "completed_before": {
+                "type": "string",
+                "description": "Keep the tasks finished before this date (YYYY-MM-DD, UTC; that day itself left out).",
+            },
             "limit": {
                 "type": "integer",
                 "description": "Page size (default 20, max 200).",

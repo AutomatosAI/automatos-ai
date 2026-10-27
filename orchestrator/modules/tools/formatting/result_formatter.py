@@ -442,7 +442,6 @@ class ToolResultFormatter:
     def format_database(result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Format database query results consistently.
-        
         Input: Raw database query result
         Output: Standardized format
         """
@@ -454,6 +453,7 @@ class ToolResultFormatter:
             'columns': result.get('columns', []),
             'execution_time_ms': result.get('execution_time_ms', 0),
             'pandas_ai': result.get('pandas_ai'),  # Optional insight
+            'notes': result.get('notes') or [],  # F460: F301's notes reach the model
         }
     
     @staticmethod
@@ -892,13 +892,12 @@ class ToolResultFormatter:
 
         summary_parts = [f"Tool: {tool_name}"]
         summary_parts.append(f"Status: {standardized['status']}")
-        summary_parts.append(f"Results: {standardized['metadata']['count']} items")
-        
+        from modules.tools.formatting.llm_summary_parts import count_lines, tool_lines  # F383; F460: count_lines
+
+        summary_parts.extend(count_lines(tool_name, standardized))
         # Add preview of results
         results = standardized['results'][:4]  # Top 4 to fit token limits
-        
         # F383: each branch's lines live in llm_summary_parts (a search's sources carry their document id).
-        from modules.tools.formatting.llm_summary_parts import tool_lines
 
         summary_parts.extend(tool_lines(tool_name, standardized, results))
 

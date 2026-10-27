@@ -15,13 +15,20 @@ past-work source (``services/past_work.py``: the board's answers, one workspace-
 no embedding) with two differences for Auto, who reports to the owner: a card in review comes
 back too, marked as not approved yet, and each part of a message that asks several things is
 matched on its own words, so a brief's club-box line finds the club-box cards.
+
+F460 (night 18): "Did the Bell Yard invoice come back?" ranked an old card whose answer happened
+to hold "income" and "feedback" above #1848, the card titled for the Bell Yard invoice: title and
+answer were one string, matched part-word, and "come" and "back" counted as what it was about. Now
+each word matches whole (a plural too), a title hit weighs ``TITLE_WEIGHT`` against an answer's
+one, ties go newest first, and a card whose title holds the words comes back before it has an
+answer. "come", "came" and "back" say how the owner asks; "count" says what about.
 """
 from __future__ import annotations
 
 import math
 import re
 from functools import reduce
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from uuid import UUID
 
 STATUSES = ("done", "review")
@@ -32,6 +39,10 @@ MAX_TERMS = 8
 MIN_TERMS = 2
 MATCH_SHARE = 0.5
 EXCERPT_CHARS = 700
+TITLE_WEIGHT = 2
+NO_ANSWER = "(no answer on the card yet)"
+# A whole word, or its plural: Postgres regex word bounds, the term escaped and bound as a parameter.
+WHOLE_WORD = r"\m{term}(?:e?s)?\M"
 _WORD = re.compile(r"[^\W_][\w'-]{2,}", re.UNICODE)
 _PART = re.compile(r"[?.!;:\n]+|,\s+|\s+[-–—]\s+")
 _SPACE = re.compile(r"\s+")
@@ -40,11 +51,11 @@ _STOP = frozenset("""
 what what's which when where whom whose who why how many much does did do done have has had having the and
 for are was were our ours you your yours their them they this that these those with from into onto about there
 here please tell give need needs any all can could would should will just still also now today week weeks this
-yesterday tomorrow number total count counted counts check checked look looked find found already earlier first
+yesterday tomorrow number total counted counts check checked look looked find found already earlier first
 team board boards card cards task tasks ticket tickets agent agents analyst business watchdog support ops
 manager creator helper get got say said says anything something everything every each some more most less than
 then it's i'm i've you're don't isn't not but out off over under only very really like make sure know let want
-going goes way one two did they've she he her his its we're
+going goes way one two did they've she he her his its we're come came back
 """.split())
 
 
@@ -74,18 +85,43 @@ def parts_of(message: str) -> List[List[str]]:
     return useful[:MAX_PARTS] or ([whole] if len(whole) >= MIN_TERMS else [])
 
 
-def _cards_for(db: Any, workspace_id: UUID, terms: List[str], limit: int) -> List[Any]:
-    from sqlalchemy import case, func, literal
+def _hits(column: Any, term: str) -> Any:
+    """``column`` holds ``term`` as a whole word (F460: "come" never matches "income")."""
+    from sqlalchemy import func
+
+    return func.coalesce(column, "").regexp_match(WHOLE_WORD.format(term=re.escape(term)), flags="i")
+
+
+def _scores(terms: List[str]) -> Tuple[Any, Any, Any]:
+    """(the terms a card holds anywhere, those its title holds, its rank: a title hit weighs
+    ``TITLE_WEIGHT``, an answer's one)."""
+    from sqlalchemy import case, literal, or_
 
     from core.models.core import BoardTask
 
-    said = func.coalesce(BoardTask.title, "") + " " + func.coalesce(BoardTask.result, "")
-    score = reduce(lambda total, term: total + case((said.ilike(f"%{term}%"), 1), else_=0), terms, literal(0))
+    def total(hits: List[Any]) -> Any:
+        return reduce(lambda added, hit: added + hit, hits, literal(0))
+
+    on_title = [_hits(BoardTask.title, term) for term in terms]
+    on_answer = [_hits(BoardTask.result, term) for term in terms]
+    held = total([case((or_(title, answer), 1), else_=0) for title, answer in zip(on_title, on_answer)])
+    titled = total([case((title, 1), else_=0) for title in on_title])
+    rank = total([case((title, TITLE_WEIGHT), (answer, 1), else_=0) for title, answer in zip(on_title, on_answer)])
+    return held, titled, rank
+
+
+def _cards_for(db: Any, workspace_id: UUID, terms: List[str], limit: int) -> List[Any]:
+    from sqlalchemy import func, or_
+
+    from core.models.core import BoardTask
+
+    held, titled, rank = _scores(terms)
     needed = max(MIN_TERMS, math.ceil(len(terms) * MATCH_SHARE))
+    newest = func.coalesce(BoardTask.completed_at, BoardTask.updated_at, BoardTask.created_at)
     return (db.query(BoardTask)
             .filter(BoardTask.workspace_id == workspace_id, BoardTask.status.in_(STATUSES),
-                    BoardTask.result.isnot(None), score >= needed)
-            .order_by(score.desc(), BoardTask.completed_at.desc().nullslast(), BoardTask.id.desc())
+                    or_(BoardTask.result.isnot(None), titled >= needed), held >= needed)
+            .order_by(rank.desc(), newest.desc().nullslast(), BoardTask.id.desc())
             .limit(limit).all())
 
 
@@ -100,7 +136,7 @@ def _finding(card: Any, number: Any, agent: str) -> Dict[str, Any]:
     when = card.completed_at or card.updated_at
     return {"number": number or f"ticket {card.id}", "title": card.title, "agent": agent, "status": card.status,
             "day": f"{when.day} {when.strftime('%b')}" if when else "an unknown day",
-            "excerpt": _SPACE.sub(" ", str(card.result)).strip()[:EXCERPT_CHARS]}
+            "excerpt": _SPACE.sub(" ", str(card.result or "")).strip()[:EXCERPT_CHARS] or NO_ANSWER}
 
 
 def team_findings(db: Any, workspace_id: Any, message: str) -> List[Dict[str, Any]]:

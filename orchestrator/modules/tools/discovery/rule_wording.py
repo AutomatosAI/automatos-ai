@@ -20,6 +20,14 @@ P256-FIX-N17-4 (nights 16-17, F447): the owner's lead-in ('New standing rule, re
 'The only one that counts:') sits inside their sentence, so Auto's shorter copy of the rule keeps
 too little of it and is no rule. ``their_sentence`` names the owner's own sentence that holds what
 Auto stored, which Auto may store as it stands: the check itself (``in_their_words``) is unchanged.
+
+F460 (night 18): "Two things to remember, please: from November we post on Tuesdays. And Quay…" was
+stored as "From November we post on Tuesdays." (6 of 11 words), so it was a memory, not a rule, and
+the Thursday rule it replaced stayed. A lead-in that announces several things heads a list: it is
+not part of each item. So the clause after its ':' is weighed as a sentence of its own too, but only
+when the lead-in names several things (``SEVERAL``) and holds no negation, no condition and no scope
+word (``SCOPES``: 'Two rules for the Falmouth shop:' keeps its shop). Any other lead-in stays inside
+its sentence, as N17-4 has it. The owner's words stay verbatim: nothing is added or changed.
 """
 from __future__ import annotations
 
@@ -35,6 +43,11 @@ CONTRACTED = {"can't": "can", "won't": "will", "shan't": "shall", "ain't": "is",
 CONDITIONS = frozenset({"if", "unless", "except", "until", "only", "before", "after", "ask", "confirm", "approve",
                         "approval", "first", "when", "once", "while", "but"})
 MAX_RULE_WORDS = 80
+# F460: a lead-in naming several things ('Two things to remember, please:') heads a list.
+SEVERAL = frozenset({"two", "three", "four", "five", "several", "few", "couple", "both", "things", "rules", "points"})
+# Words in a lead-in that may set where or for whom its items hold: such a lead-in is never left out.
+SCOPES = frozenset({"for", "at", "in", "on"})
+_LEAD_IN = re.compile(r"^(?P<lead>[^:]+):\s+(?P<rest>\S.*)$", re.S)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
 _WORD = re.compile(r"[\w£$€%][\w'£$€%.,:/-]*")
 _TRAILING = "'.,:/-"
@@ -78,7 +91,7 @@ def their_sentence(text: str, owner_turns: Sequence[str], coverage: float) -> Op
 def _their_sentences(turn: str) -> List[Tuple[str, List[str]]]:
     """Each sentence of a message that is no question, nor past the cap: its text (NFKC) and its
     words (``_statements``' sentences, with the text they were read from)."""
-    sentences = (s for s in _SENTENCE.findall(unicodedata.normalize("NFKC", turn or "")) if "?" not in s)
+    sentences = (s for s in _listed(_SENTENCE.findall(unicodedata.normalize("NFKC", turn or ""))) if "?" not in s)
     pairs = [(sentence, _words(_normal(sentence))) for sentence in sentences]
     return [(sentence, seq) for sentence, seq in pairs if seq and len(seq) <= MAX_RULE_WORDS]
 
@@ -115,8 +128,26 @@ def _normal(text: Optional[str]) -> str:
 
 def _statements(turn: str) -> List[List[str]]:
     """The words of each of a message's sentences that is no question, nor past the cap."""
-    sentences = (s for s in _SENTENCE.findall(_normal(turn)) if "?" not in s)
+    sentences = (s for s in _listed(_SENTENCE.findall(_normal(turn))) if "?" not in s)
     return [seq for seq in map(_words, sentences) if seq and len(seq) <= MAX_RULE_WORDS]
+
+
+def _listed(sentences: Sequence[str]) -> List[str]:
+    """Each sentence, and after it the clause past its lead-in's ':' when that lead-in heads a list
+    (F460, above)."""
+    out: List[str] = []
+    for sentence in sentences:
+        out.append(sentence)
+        found = _LEAD_IN.match(sentence.strip())
+        if found and _heads_a_list(found.group("lead")):
+            out.append(found.group("rest"))
+    return out
+
+
+def _heads_a_list(lead: str) -> bool:
+    """A lead-in that names several things and holds no negation, condition or scope word."""
+    said = set(_words(_normal(lead)))
+    return bool(said & SEVERAL) and NEGATION not in said and not said & (CONDITIONS | SCOPES)
 
 
 def _weighed(sentence: str) -> Optional[List[str]]:

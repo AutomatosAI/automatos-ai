@@ -21,6 +21,9 @@ say the team hasn't covered something a card answers. A message asking what the 
 also gets "answer from what the cards say, not a count of cards by status", or, when no card
 matches, how to look for them. The read shows in the activity trail and counts as this turn's
 board read. A widget visitor's turn reads nothing: the board is the owner's (F155).
+
+F460 (night 18): the same read names the cards that hold a piece of work the owner names, question
+or not ("Show me the Taunton quote."): ``named_work_note``, one note after this one.
 """
 from __future__ import annotations
 
@@ -120,17 +123,22 @@ Turn = Callable[..., AsyncGenerator[Any, None]]
 
 def reads_what_the_team_found(retrieval_first: Turn) -> Turn:
     """Wrap ``StreamingChatService._retrieval_first``: a question reads the cards that already
-    answer it, and their answers go in after the document passages (see the module)."""
+    answer it, and their answers go in after the document passages (see the module); then the
+    cards holding the work the owner names (F460)."""
+    from consumers.chatbot.named_work_note import reads_the_named_work
+
     @functools.wraps(retrieval_first)
     async def wrapped(chat: Any, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime: Any,
                       chat_id: str, prefetched: List[Any]) -> AsyncGenerator[Any, None]:
         note, frames = reads_the_team(chat, latest_text, prefetched)
+        named = reads_the_named_work(chat, latest_text, prefetched, already=note or "")
         for frame in frames:
             yield frame
         async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
             yield frame
-        if note:
-            llm_messages.append({"role": SYSTEM_ROLE, "content": note})
+        for said in (note, named):
+            if said:
+                llm_messages.append({"role": SYSTEM_ROLE, "content": said})
     return wrapped
 
 

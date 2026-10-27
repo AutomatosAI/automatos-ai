@@ -37,7 +37,9 @@ PAPER_KINDS = (r"letters?|invoices?|quotes?|quotations?|estimates?|proposals?|ag
                r"flyers?|leaflets?|posters?|brochures?|price ?lists?|welcome sheets?|receipts?|newsletters?|"
                r"one-pagers?|menus?")
 # Made work the owner names to change it: the paperwork and the rest (a regex alternation; F449).
-WORK_NOUNS = PAPER_KINDS + r"|drafts?|posts?|intros?|introductions?|notes?|reports?|write-?ups?"
+# F460 (night 18): counts, lists, routines and checklists are made work the owner asks after too.
+WORK_NOUNS = (PAPER_KINDS + r"|drafts?|posts?|intros?|introductions?|notes?|reports?|write-?ups?"
+              r"|counts?|checklists?|lists?|routines?")
 
 
 def search_words(raw: Any) -> List[str]:

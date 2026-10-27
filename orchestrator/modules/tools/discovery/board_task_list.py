@@ -12,8 +12,14 @@ F426 (night 15): Auto could not find "the Guji blog draft" waiting in Review
 without its number: the action had no search. ``search`` keeps the cards whose
 title, or a Deliverable on them (its title or file name), holds every word that
 names the work (services/named_work.py).
+
+F460 (night 18): "Close the done cards from last week" never reached the bulk update: the list had
+no completed-date filter, so Auto could not list last week's done cards. ``completed_after`` and
+``completed_before`` (ISO dates, UTC) keep the cards finished on or after the one day and before
+the other.
 """
 
+from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -29,6 +35,9 @@ from services.ticket_refs import by_ticket_number
 # SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
 MAX_LIST_TASKS_LIMIT = 200
 DEFAULT_LIST_TASKS_LIMIT = 20
+# F460: the completed-date window, ISO dates (UTC): on or after the one, before the other.
+COMPLETED_AFTER, COMPLETED_BEFORE = "completed_after", "completed_before"
+BAD_DATE = "{key} must be a date as YYYY-MM-DD, e.g. 2026-10-12; got {value!r}."
 # The Deliverables registered on a card (source_type 'task', the card's id): what search reads.
 CARD_DELIVERABLES = table(
     "deliverables", column("workspace_id"), column("source_type"), column("source_id"),
@@ -65,7 +74,7 @@ def _agent_filter(db: Session, workspace_id: UUID, name: str) -> Optional[int]:
 
 
 def _filtered(query: Any, params: Dict[str, Any]) -> Any:
-    """Status, priority, tags and search filters. BoardTask.tags is JSONB, so .contains([...])
+    """Status, priority, tags, completed-date and search filters. BoardTask.tags is JSONB, so .contains([...])
     compiles to ``tags @> [...]``: a task carrying ALL the tags. HARNESS finds its
     own '[HARNESS]' tasks (tagged 'harness' + 'rx:{id}') this way."""
     from core.models.core import BoardTask
@@ -78,7 +87,36 @@ def _filtered(query: Any, params: Dict[str, Any]) -> Any:
     tags = [tags] if isinstance(tags, str) else tags
     if isinstance(tags, list) and tags:
         query = query.filter(BoardTask.tags.contains(tags))
-    return named_filter(query, params.get("search"))
+    return named_filter(_completed_window(query, params), params.get("search"))
+
+
+def _day_start(value: Any) -> datetime:
+    """The start (00:00 UTC) of the ISO date ``value`` ("2026-10-12", or a datetime's day); ValueError
+    when it is no date."""
+    day = date.fromisoformat(str(value).strip()[:10])
+    return datetime.combine(day, time.min, tzinfo=timezone.utc)
+
+
+def completed_window_error(params: Dict[str, Any]) -> Optional[str]:
+    """Why the completed-date window can't be read (F460), or None."""
+    for key in (COMPLETED_AFTER, COMPLETED_BEFORE):
+        if params.get(key):
+            try:
+                _day_start(params[key])
+            except ValueError:
+                return BAD_DATE.format(key=key, value=params[key])
+    return None
+
+
+def _completed_window(query: Any, params: Dict[str, Any]) -> Any:
+    """F460: the cards finished on or after ``completed_after`` and before ``completed_before``."""
+    from core.models.core import BoardTask
+
+    if params.get(COMPLETED_AFTER):
+        query = query.filter(BoardTask.completed_at >= _day_start(params[COMPLETED_AFTER]))
+    if params.get(COMPLETED_BEFORE):
+        query = query.filter(BoardTask.completed_at < _day_start(params[COMPLETED_BEFORE]))
+    return query
 
 
 def _on_card(pattern: str) -> Any:
@@ -138,6 +176,8 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     from core.models.core import BoardTask
 
     offset, limit = _page(params)
+    if (bad_date := completed_window_error(params)) is not None:
+        return {"success": False, "error": bad_date}
     query = _filtered(db.query(BoardTask).filter(BoardTask.workspace_id == workspace_id), params)
     agent_name = params.get("assigned_agent_name")
     if agent_name:

@@ -449,7 +449,10 @@ def test_resolve_known_user_name_db_error_is_none():
 
 def test_atom_identity_clause_mirrors_personality_wording():
     svc = _chat_service_module()
-    assert svc.atom_identity_clause("Test Operator") == " You're talking to Test Operator."
+    from consumers.chatbot.owner_is_you import owner_is_you
+
+    # F460 (night 18): the clause also says the person the documents name is the one Auto talks to.
+    assert svc.atom_identity_clause("Test Operator") == f" You're talking to Test Operator. {owner_is_you('Test Operator')}"
     assert svc.atom_identity_clause(None) == ""
     assert svc.atom_identity_clause("   ") == ""
     assert svc.atom_identity_clause(MagicMock()) == ""
