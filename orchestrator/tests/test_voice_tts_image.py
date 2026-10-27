@@ -100,7 +100,7 @@ def test_the_runtime_speaks_only():
         assert not re.search(rf"\b{absent}\b", runtime.replace("--no-install-recommends", "")), absent
     assert re.search(r'^ENTRYPOINT \["tini", "--", "python", "-m", "voice_tts"\]$', runtime, re.M)
     assert "/healthz" in runtime and "EXPOSE 8100" in runtime
-    assert "USER voice" in runtime
+    assert "USER tts" in runtime
 
 
 def test_the_lock_keeps_every_input_pin_hashed_at_media_renders_versions():

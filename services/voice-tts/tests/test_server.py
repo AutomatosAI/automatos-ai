@@ -218,7 +218,8 @@ def test_past_the_concurrency_limit_speak_is_a_429_tts_busy_at_once(settings, tm
             answered = await first
             assert answered.status == 200
             await answered.read()
-            assert client.app[server.STATE].active == 0
+            # The slot is given back once the handler returns, just after the body's last byte.
+            await _settle(lambda: client.app[server.STATE].active == 0)
             third = await client.post("/speak", json={"text": "The third answer."}, headers=AUTH)
             assert third.status == 200
 

@@ -98,9 +98,10 @@ COPY --link --from=py /opt/venv /opt/venv
 COPY --link --from=py /opt/espeak /opt/espeak
 ENV PATH=/opt/venv/bin:$PATH
 
-RUN useradd -m -u 1000 voice
-USER voice
-ENV HOME=/home/voice
+# Not `voice`: Debian already has a system group of that name.
+RUN useradd -m -u 1000 tts
+USER tts
+ENV HOME=/home/tts
 
 COPY . .
 ENV PYTHONPATH=/app \
@@ -124,6 +125,6 @@ FROM runtime AS test
 USER root
 COPY --from=uv /uv /usr/local/bin/uv
 RUN uv pip install --python /opt/venv/bin/python --no-cache -r /app/requirements-test.txt
-USER voice
+USER tts
 
 FROM runtime AS production

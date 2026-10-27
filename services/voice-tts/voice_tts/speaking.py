@@ -88,7 +88,10 @@ class Speaker:
         response.content_type = CONTENT_TYPE
         await response.prepare(request)
         outcome = await self._pipe(encoder, response, answer, first, rest, spec)
+        # Logged before the last chunk ends the body, so the line is written when the client has it.
         self._log(spec, len(pieces), answer, outcome)
+        if outcome == "ok":
+            await response.write_eof()
         return response
 
     async def _pipe(
@@ -100,7 +103,6 @@ class Speaker:
         relay = asyncio.create_task(self._relay(encoder, response, answer))
         try:
             await asyncio.gather(feeder, relay)
-            await response.write_eof()
             return "ok"
         except ConnectionResetError:
             return "client_gone"
