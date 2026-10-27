@@ -53,6 +53,7 @@ updates:
       - /orchestrator
       - /services/agent-opt-worker
       - /services/media-render
+      - /services/voice-tts
       - /services/workspace-worker
     schedule:
       interval: weekly
@@ -128,4 +129,23 @@ updates:
       include: scope
     groups:
       media-render-js:
+        patterns: ["*"]
+
+  # voice-tts's Python dependencies (Auto's server voice). As for media-render, the pip
+  # updater moves the pins in requirements.in and requirements-test.txt and cannot
+  # rewrite requirements.lock, so its pull request fails
+  # orchestrator/tests/test_voice_tts_image.py, which holds the lock to requirements.in,
+  # until the lock is compiled again with the command at the top of requirements.in.
+  - package-ecosystem: pip
+    directory: /services/voice-tts
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      voice-tts-python:
         patterns: ["*"]

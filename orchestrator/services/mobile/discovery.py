@@ -19,6 +19,9 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
 * ``capabilities`` lists only what this build implements, each name mapped in
   ``CAPABILITY_ROUTES`` to the live route that implements it (a test checks every entry
   against the app's routes). The app gates every feature on these names, never on a version.
+  A capability that also needs this server set up for it is listed only while it is, read
+  from config on every call (``CONFIGURED_CAPABILITIES``): ``tts`` only with ``VOICE_TTS_URL``,
+  so a phone never asks a server with no voice for one.
 
 Names and capabilities only, never a secret: the publishable key is the one key in the body,
 and it is public by design (the web app ships it in its bundle). A misconfigured address or
@@ -29,9 +32,10 @@ from __future__ import annotations
 import base64
 import binascii
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from config import config
+from modules.voice.speech import is_configured as voice_tts_configured
 from services.mobile.remote_access import MODE_PAIRED
 from services.mobile.urls import MobileUrlError, api_url, web_url
 from services.push.consent import expo_push_allowed
@@ -53,12 +57,20 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # the phone's digest time (W2 US-013); its switch is the daily_digest push preference row.
 # mobile_theme: the member's installed theme as data for the phone (PRD-261 M-04: colours,
 # fonts and mascot files, never code), which the app offers under Studio only when this is listed.
+# tts: Auto's server voice, a sentence of a reply as MP3 (services/voice-tts); the phone speaks
+# with the device's voice without it.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "digest": ("GET", "/api/notification-preferences"),
     "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "push": ("POST", "/api/v1/mobile/devices"),
     "spoken_mode": ("POST", "/api/chat"),
+    "tts": ("POST", "/api/voice/speech"),
     "voice_live": ("POST", "/api/voice/web-call"),
+})
+# The capabilities this build implements that need the server set up for them, each with the
+# check that says it is. The others are listed whenever this build runs.
+CONFIGURED_CAPABILITIES: Mapping[str, Callable[[], bool]] = MappingProxyType({
+    "tts": voice_tts_configured,
 })
 
 
@@ -103,6 +115,11 @@ def _auth_and_pairing() -> Tuple[Dict[str, Any], Dict[str, bool]]:
     return {"modes": [AUTH_MODE_CLERK], "clerk": _clerk_block()}, {"enabled": False}
 
 
+def offered_capabilities() -> List[str]:
+    """``CAPABILITY_ROUTES``'s names, less any whose setup this server lacks, sorted."""
+    return sorted(name for name in CAPABILITY_ROUTES if CONFIGURED_CAPABILITIES.get(name, lambda: True)())
+
+
 def build_discovery(request_base_url: str) -> Dict[str, Any]:
     """The §4.1 discovery document for this server, read fresh from config on every call.
 
@@ -123,14 +140,16 @@ def build_discovery(request_base_url: str) -> Dict[str, Any]:
         "auth": auth,
         "pairing": pairing,
         "push": {"expo": expo_push_allowed()},
-        "capabilities": sorted(CAPABILITY_ROUTES),
+        "capabilities": offered_capabilities(),
     }
 
 
 __all__ = [
     "CAPABILITY_ROUTES",
+    "CONFIGURED_CAPABILITIES",
     "DISCOVERY_SCHEMA",
     "DiscoveryUnavailable",
     "build_discovery",
     "clerk_frontend_api",
+    "offered_capabilities",
 ]

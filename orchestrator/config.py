@@ -2173,6 +2173,19 @@ class Config:
     VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
         "VOICE_LIVE_SKIP_COMPOSIO", "true"
     ).strip().lower() == "true"
+    # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
+    # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
+    # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
+    # keep the device voice. The token is sent as `Authorization: Bearer` and must match
+    # the service's own VOICE_TTS_TOKEN. TIMEOUT bounds one whole answer, the stream
+    # included; CONNECT is short so a refusal is fast. RATE is sentences a workspace may
+    # have spoken a minute (0 = no limit).
+    VOICE_TTS_URL: str = os.getenv("VOICE_TTS_URL", "").strip().rstrip("/")
+    VOICE_TTS_TOKEN: str = os.getenv("VOICE_TTS_TOKEN", "").strip()
+    VOICE_TTS_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_TIMEOUT_SECONDS", "15"))
+    VOICE_TTS_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_CONNECT_TIMEOUT_SECONDS", "2"))
+    VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart").strip()
+    VOICE_TTS_RATE_PER_MINUTE: int = int(os.getenv("VOICE_TTS_RATE_PER_MINUTE", "60"))
     # The ONE public host (PRD-258 US-003; it was defined twice): Retell's
     # custom-LLM socket + events webhook (arming builds the agent's URLs from
     # it) and the channels' inbound webhook URLs (PRD-142 W3-S5 / G7). Railway

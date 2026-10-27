@@ -9,7 +9,10 @@ run as their first recipe line:
   volume does not exist (Postgres keeps its first password), and never touches any other
   value, nor a key the shell sets (compose runs the shell's value);
 * on an install that has started with a placeholder, changes nothing and stops with the
-  backend entrypoint's own message (orchestrator/docker-secrets-guard.sh): how to rotate.
+  backend entrypoint's own message (orchestrator/docker-secrets-guard.sh): how to rotate;
+* once the three pass, fills VOICE_TTS_TOKEN (the backend and voice-tts share it) the same
+  way when it is empty or a placeholder, on a started install too, since it guards no stored
+  data; the shell's value is left alone, and a refusal above leaves it unfilled.
 
 The script runs for real under sh against a copy of ``.env.example`` in a temporary
 directory, with ``docker`` and ``openssl`` replaced by stubs that record their calls:
@@ -35,6 +38,7 @@ _GUARD = _REPO / "orchestrator" / "docker-secrets-guard.sh"
 _EXAMPLE = _REPO / ".env.example"
 _MAKEFILE = _REPO / "Makefile"
 _KEYS = ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_KEY")
+_TOKEN = "VOICE_TTS_TOKEN"
 _VOLUME = "automatos_postgres_data"
 _SECRET = re.compile(r"[0-9a-f]{48}")
 _REAL = "ab" * 24
@@ -96,7 +100,7 @@ def _values(text: str) -> dict:
 
 
 def _without_secrets(text: str) -> list[str]:
-    return [line for line in text.splitlines() if line.partition("=")[0] not in _KEYS]
+    return [line for line in text.splitlines() if line.partition("=")[0] not in (*_KEYS, _TOKEN)]
 
 
 def _placeholder_env(root: Path) -> bytes:
@@ -107,18 +111,19 @@ def _placeholder_env(root: Path) -> bytes:
 # --------------------------------------------------------------------------- a fresh checkout
 
 
-def test_a_fresh_checkout_gets_a_private_env_with_three_generated_secrets(checkout):
+def test_a_fresh_checkout_gets_a_private_env_with_three_generated_secrets_and_the_voice_token(checkout):
     code, calls, out = _make_env(checkout)
     assert code == 0, out
     env = checkout / ".env"
     assert stat.S_IMODE(env.stat().st_mode) == 0o600
     values = _values(env.read_text(encoding="utf-8"))
-    secrets = [values[key] for key in _KEYS]
+    secrets = [values[key] for key in (*_KEYS, _TOKEN)]
     assert all(_SECRET.fullmatch(secret) for secret in secrets), secrets
-    assert len(set(secrets)) == 3, "each secret is generated on its own"
-    assert calls == ["docker volume ls -q"] + ["openssl rand -hex 24"] * 3
+    assert len(set(secrets)) == 4, "each secret is generated on its own"
+    assert calls == ["docker volume ls -q"] + ["openssl rand -hex 24"] * 4
     assert "created .env from .env.example" in out
     assert "generated POSTGRES_PASSWORD REDIS_PASSWORD API_KEY in .env" in out
+    assert "generated VOICE_TTS_TOKEN in .env" in out
 
 
 def test_every_other_line_of_env_example_is_kept_as_it_is(checkout):
@@ -139,7 +144,7 @@ def test_a_second_run_changes_nothing_and_asks_neither_docker_nor_openssl(checko
 
 def test_real_secrets_and_every_other_value_are_never_touched(checkout):
     env = checkout / ".env"
-    env.write_text(f"POSTGRES_PASSWORD={_REAL}\nREDIS_PASSWORD=mine\nAPI_KEY={_REAL}\n"
+    env.write_text(f"POSTGRES_PASSWORD={_REAL}\nREDIS_PASSWORD=mine\nAPI_KEY={_REAL}\n{_TOKEN}={_REAL}\n"
                    "MINIO_ROOT_PASSWORD=CHANGE_ME_too\nDEFAULT_WORKSPACE_ID=\n", encoding="utf-8")
     env.chmod(0o640)
     before = env.read_bytes()
@@ -166,10 +171,11 @@ def test_empty_quoted_and_missing_secrets_are_filled_and_nothing_else(checkout):
 
 def test_a_key_the_shell_sets_is_left_to_the_shell(checkout):
     _placeholder_env(checkout)
-    code, calls, out = _make_env(checkout, API_KEY=_REAL)
+    code, calls, out = _make_env(checkout, API_KEY=_REAL, VOICE_TTS_TOKEN=_REAL)
     assert code == 0, out
     values = _values((checkout / ".env").read_text(encoding="utf-8"))
     assert values["API_KEY"].startswith("CHANGE_ME"), "compose runs the shell's value"
+    assert values[_TOKEN] == "", "the shell's token too"
     assert _SECRET.fullmatch(values["POSTGRES_PASSWORD"]) and _SECRET.fullmatch(values["REDIS_PASSWORD"])
     assert calls.count("openssl rand -hex 24") == 2
 
@@ -217,11 +223,39 @@ def test_a_started_install_with_an_empty_secret_stops_without_generating_one(che
 
 
 def test_real_secrets_on_a_started_install_pass_without_asking_docker(checkout):
-    (checkout / ".env").write_text(f"POSTGRES_PASSWORD={_REAL}\nREDIS_PASSWORD={_REAL}\nAPI_KEY={_REAL}\n",
-                                   encoding="utf-8")
+    (checkout / ".env").write_text(f"POSTGRES_PASSWORD={_REAL}\nREDIS_PASSWORD={_REAL}\nAPI_KEY={_REAL}\n"
+                                   f"{_TOKEN}={_REAL}\n", encoding="utf-8")
     code, calls, out = _make_env(checkout, FAKE_VOLUMES=_VOLUME)
     assert code == 0, out
     assert calls == []
+
+
+# --------------------------------------------------------------------------- the voice token
+
+
+@pytest.mark.parametrize("token_line", ["", f"{_TOKEN}=\n", f"{_TOKEN}=CHANGE_ME_voice\n"])
+def test_a_started_install_gets_its_missing_voice_token_and_nothing_else(checkout, token_line):
+    env = checkout / ".env"
+    real = f"POSTGRES_PASSWORD={_REAL}\nREDIS_PASSWORD={_REAL}\nAPI_KEY={_REAL}\n"
+    env.write_text(real + token_line, encoding="utf-8")
+    code, calls, out = _make_env(checkout, FAKE_VOLUMES=_VOLUME)
+    assert code == 0, out
+    assert calls == ["openssl rand -hex 24"], "the token alone; Docker is not asked"
+    text = env.read_text(encoding="utf-8")
+    assert text.startswith(real) and _SECRET.fullmatch(_values(text)[_TOKEN])
+    assert text.count(f"{_TOKEN}=") == 1
+    assert "generated VOICE_TTS_TOKEN in .env" in out
+
+
+def test_a_refused_install_does_not_get_a_voice_token_either(checkout):
+    before = _placeholder_env(checkout)
+    code, calls, _ = _make_env(checkout, FAKE_VOLUMES=_VOLUME)
+    assert code != 0
+    assert (checkout / ".env").read_bytes() == before and "openssl rand -hex 24" not in calls
+
+
+def test_env_example_ships_an_empty_voice_token_for_make_env_to_fill():
+    assert _values(_EXAMPLE.read_text(encoding="utf-8"))[_TOKEN] == ""
 
 
 # --------------------------------------------------------------------------- failures change nothing

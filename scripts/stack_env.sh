@@ -16,6 +16,11 @@
 #      placeholder stops here: orchestrator/docker-secrets-guard.sh, which the
 #      backend's entrypoint runs too, prints how to rotate it, and this exits 1
 #      with .env unchanged.
+#   4. Once the three pass, VOICE_TTS_TOKEN (the backend and voice-tts share it; the
+#      voice refuses to start without one) gets `openssl rand -hex 24` the same way
+#      when it is empty or a placeholder, on a started install too: it guards no
+#      stored data, so a new one only needs the two containers recreated. The shell's
+#      value is left alone.
 #
 #   sh scripts/stack_env.sh [directory]   (default: this repository's root)
 #
@@ -31,6 +36,8 @@ ENV_FILE="$ROOT/.env"
 EXAMPLE="$ROOT/.env.example"
 GUARD="$SCRIPT_DIR/../orchestrator/docker-secrets-guard.sh"
 SECRET_KEYS="POSTGRES_PASSWORD REDIS_PASSWORD API_KEY"
+# Tokens between two of the stack's own containers: no stored data depends on them.
+SERVICE_TOKENS="VOICE_TTS_TOKEN"
 DATABASE_VOLUME="automatos_postgres_data"
 SECRET_BYTES=24
 
@@ -54,9 +61,9 @@ effective() {
     if in_shell "$1"; then printenv "$1"; else file_value "$1"; fi
 }
 
-# The secrets make env may fill: not set in the shell, empty or a placeholder in .env.
+# The keys of $1 make env may fill: not set in the shell, empty or a placeholder in .env.
 keys_to_fill() {
-    for key in $SECRET_KEYS; do
+    for key in $1; do
         if in_shell "$key"; then
             continue
         fi
@@ -131,7 +138,7 @@ create_env_file() {
 main() {
     [ -f "$GUARD" ] || stop "$GUARD is missing: make env runs it to refuse placeholder secrets"
     [ -f "$ENV_FILE" ] || create_env_file
-    fill=$(keys_to_fill)
+    fill=$(keys_to_fill "$SECRET_KEYS")
     fill=${fill% }
     started=no
     if [ -n "$fill" ]; then
@@ -148,6 +155,25 @@ main() {
         stop "the shell or the make command line sets a CHANGE_ME value (above): unset it, or set a real one."
     fi
     [ "$started" = no ] || stop "empty in .env: $fill. The $DATABASE_VOLUME volume exists, so this install has started, and make env generates secrets only before the first start: set the value this install was created with (from the .env that started it). .env is unchanged."
+    fill_service_tokens
+}
+
+# The service tokens, filled whatever the volume says: they guard no stored data.
+fill_service_tokens() {
+    tokens=$(keys_to_fill "$SERVICE_TOKENS")
+    tokens=${tokens% }
+    [ -n "$tokens" ] || return 0
+    command -v openssl > /dev/null 2>&1 \
+        || stop "openssl is not installed, so make env cannot generate $tokens: install it, or set it in .env by hand."
+    pairs=""
+    for key in $tokens; do
+        value=$(new_secret) || stop "openssl rand -hex $SECRET_BYTES failed while generating $key."
+        pairs="$pairs $key=$value"
+    done
+    for pair in $pairs; do
+        set_value "${pair%%=*}" "${pair#*=}"
+    done
+    say "generated $tokens in .env (openssl rand -hex $SECRET_BYTES), shared by the backend and voice-tts."
 }
 
 main

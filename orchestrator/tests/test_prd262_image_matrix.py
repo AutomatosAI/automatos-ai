@@ -84,7 +84,7 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
         assert "NEXT_PUBLIC_AUTH_EDITION=local\nNEXT_PUBLIC_API_URL=http://localhost:8000" in entry["build_args"]
 
 
-EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render"]
+EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render", "voice-tts"]
 
 
 @pytest.mark.parametrize("path,names", [
@@ -194,7 +194,7 @@ def test_only_publishing_runs_write_the_cache_and_the_api_writes_min():
     modes = {image["name"]: image["cache_mode"] for image in IMAGES}
     assert modes["api"] == "min" and modes["frontend"] == "max"
     gha = {image["name"] for image in IMAGES if image.get("cache", "gha") == "gha"}
-    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker"}
+    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker", "voice-tts"}
     for publish in (False, True):
         for entry in _pick([], publish=publish, every=True):
             if entry["name"] not in gha:

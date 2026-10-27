@@ -20,6 +20,10 @@
     "media-render": {
       "amd64": {"max_mb": 800.0, "on_disk_max_mb": 1300.0, "reason": "PRD-262 US-054: never built in images.yml before. on_disk_max_mb is the §8 bar, 1.30 GB as docker image inspect reports it (1.81 GB in media-render.yml run 37612086159, before W8). max_mb is an estimate (18 Oct) of the W8 image, about 740 MB: python:3.12-slim 43.3 MB, the Kokoro model 302 MB at its measured gzip ratio of 0.929 and the cut voices file 13 MB, the CfT headless shell less its locales 103 MB, the node binary about 47 MB, the apt layer less Mesa about 130 MB, the venv about 42 MB, Hyperframes' locked tree about 40 MB and the music 13 MB. Replace it with the W8 pull request's measured size plus 2% before that PR merges."},
       "arm64": {"max_mb": 800.0, "reason": "PRD-262 US-054: never built in images.yml before, so an estimate (18 Oct), about 710 MB: the amd64 sum with Playwright's arm64 headless shell, stripped (about 78 MB), in place of the CfT build. §8 sets no arm64 on-disk bar, so the build reports its on-disk size without one. Replace max_mb with the W8 pull request's measured size plus 2% before that PR merges."}
+    },
+    "voice-tts": {
+      "amd64": {"max_mb": 450.0, "reason": "Auto's server voice, never built before, so an estimate (27 Oct 2026) of about 410 MB: python:3.12-slim 43.3 MB, the Kokoro fp32 model 302 MB at media-render's measured gzip ratio and the uncut voices file 26 MB, the venv (onnxruntime, numpy, aiohttp, kokoro-onnx, phonemizer) trimmed as media-render's about 30 MB, espeak-ng's full data about 6 MB, lame and tini about 3 MB. Replace it with the first measured size plus 2%."},
+      "arm64": {"max_mb": 450.0, "reason": "Auto's server voice, never built before, so an estimate (27 Oct 2026): the amd64 sum with arm64's onnxruntime and numpy wheels, about 400 MB. Replace it with the first measured size plus 2%."}
     }
   },
   "updates": {

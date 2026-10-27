@@ -46,8 +46,8 @@ _GATES_PATH = "scripts/ci/smoke_health_gates.py"
 _FLOOR_PATH = "scripts/stack_docker_floor.sh"
 _SYNTAX = "# syntax=docker/dockerfile:1"
 # Every compose service with a healthcheck, and so a start_interval (US-038's list,
-# with media-render's probe as US-051 asks).
-_PROBED = {"postgres", "redis", "minio", "backend", "workspace-worker", "media-render"}
+# with media-render's probe as US-051 asks, and voice-tts's, Auto's server voice).
+_PROBED = {"postgres", "redis", "minio", "backend", "workspace-worker", "media-render", "voice-tts"}
 _FLOOR_MESSAGE = "Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later"
 NS = 1_000_000_000
 T0 = 1_792_100_000  # a whole epoch second

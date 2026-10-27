@@ -105,7 +105,8 @@ def test_every_target_that_builds_ends_with_make_clean():
 # `s/<service-id>-<path>`. The service ids are unknown (PRD-262 §10), so the experiment
 # measures the layer cache alone and none of them gets a cache mount until they are known.
 _RAILWAY_DOCKERFILES = ("orchestrator/Dockerfile", "frontend/Dockerfile", "services/workspace-worker/Dockerfile",
-                        "services/media-render/Dockerfile", "services/agent-opt-worker/Dockerfile")
+                        "services/media-render/Dockerfile", "services/agent-opt-worker/Dockerfile",
+                        "services/voice-tts/Dockerfile")
 
 
 @pytest.mark.parametrize("dockerfile", _RAILWAY_DOCKERFILES)
