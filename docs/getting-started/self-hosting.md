@@ -917,12 +917,15 @@ either, so after a `git pull` that changes `services/voice-tts`, run
   discovery document (`/.well-known/automatos.json`) does not list `tts`, and
   `POST /api/voice/speech` answers 503 `tts_off`. Clients then use the device's
   voice, as they do on any answer that is not audio.
-- **Wiring.** An optional shared secret, `VOICE_TTS_TOKEN` in `.env`, reaches both
-  containers. The backend sends it as `Authorization: Bearer`.
+- **Wiring.** `VOICE_TTS_TOKEN` in `.env` reaches both containers, and the backend
+  sends it as `Authorization: Bearer`. `make env` (and so `make up`) generates it with
+  `openssl rand -hex 24`, on an install that has already started too. Without `make`,
+  set it yourself: voice-tts refuses to start without one.
 - **Resources.** Compose caps it at 2 CPUs and 2 GB. It holds the 310 MB Kokoro
   model in memory, about 500 MB idle. It speaks as many replies at once as it has
   CPUs and refuses the next with 429 `tts_busy` rather than queueing it.
-- **Tuning** (optional): `VOICE_TTS_DEFAULT_VOICE` (`af_heart`), and
+- **Tuning** (optional): `VOICE_TTS_DEFAULT_VOICE` (`af_heart`; a voice the service
+  does not hold falls back to its own default), and
   `VOICE_TTS_RATE_PER_MINUTE` (60 sentences a minute per workspace), in
   `envs/api.local`. The service's own settings are in `services/voice-tts/README.md`.
 

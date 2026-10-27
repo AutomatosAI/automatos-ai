@@ -687,7 +687,7 @@ services:
       - automatos
 
   # voice-tts: Auto's server voice, Kokoro streamed as MP3 (services/voice-tts).
-  # Add with --profile voice. Port 8100 stays inside the compose network.
+  # Port 8100 stays inside the compose network. Add with: --profile voice
   voice-tts:
     build:
       context: ./services/voice-tts
