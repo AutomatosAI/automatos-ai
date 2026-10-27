@@ -289,7 +289,7 @@ from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116; PRD-25
     submit_social_post,
     get_social_history,
     get_social_post,
-    get_social_plan,
+    get_social_plan, get_social_plan_slots,  # P256-FIX-SOC-5: why a plan's slot is empty
     list_social_posts,
 )
 
@@ -1304,7 +1304,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_get_social_post": get_social_post,
     "platform_list_social_posts": list_social_posts,
     # PRD-251B (US-B204): a plan's content bank, for the research playbook. Draft-only.
-    "platform_get_social_plan": get_social_plan,
+    "platform_get_social_plan": get_social_plan, "platform_get_social_plan_slots": get_social_plan_slots,  # P256-FIX-SOC-5
     "platform_add_social_topics": add_social_topics,
     "platform_get_social_history": get_social_history,  # PRD-251C US-C103: what the workspace posted
     "platform_get_workspace_info": get_workspace_info,

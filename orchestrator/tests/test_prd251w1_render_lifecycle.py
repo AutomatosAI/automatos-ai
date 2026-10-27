@@ -618,7 +618,7 @@ def test_a_failed_post_is_edited_and_rendered_again_and_nothing_else():
     service.update_post(post, "author", {"variables": {"headline": {"value": "Shorter", "claim": False}}})
     assert post.status == service.FAILED and post.content_hash != before
     service.start_render(post, "author")
-    assert post.status == service.RENDERING
+    assert post.status == service.RENDERING  # P256-FIX-SOC-5: and the slot sweep ends a plan's failed post (test_f437_b/d)
 
 
 @pytest.mark.parametrize("status", ["approved", "scheduled", "archived", "rendering", "publishing", "published"])

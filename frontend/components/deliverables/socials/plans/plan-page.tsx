@@ -65,15 +65,20 @@ interface StepBodyProps {
   set: (c: Partial<PlanDraft>) => void
   planId: string | null
   auto: AutoState
-  /** PRD-251C: the saved plan's next batch, for the Making step. */
-  nextBatchAt?: string | null
+  /** PRD-251C: the saved plan, for the Making step's next batch (and P256-FIX-SOC-5: its current batch and warnings). */
+  saved?: SocialPlan | null
 }
 
-function StepBody({ step, draft, set, planId, auto, nextBatchAt }: StepBodyProps) {
+function StepBody({ step, draft, set, planId, auto, saved }: StepBodyProps) {
   if (step === 0) return <PlanStepGoal draft={draft} set={set} />
   if (step === 1) return <PlanStepCadence draft={draft} set={set} />
   if (step === 2) return <PlanStepResearch draft={draft} set={set} />
-  if (step === 3) return <PlanStepMaking draft={draft} set={set} nextBatchAt={nextBatchAt} />
+  if (step === 3) {
+    return (
+      <PlanStepMaking draft={draft} set={set} nextBatchAt={saved?.next_batch_at}
+        currentBatch={saved?.current_batch} warnings={saved?.warnings ?? []} />
+    )
+  }
   return <PlanStepBank planId={planId} ideas={auto.draft?.topics} onLeaveOut={auto.leaveOut} />
 }
 
@@ -181,7 +186,7 @@ export function SocialsPlanPage({ planId, canEdit, onSaved, canDelete = false, o
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
         <StepsNav step={step} onStep={setStep} />
         <section aria-label={PLAN_STEPS[step]} className="flex min-h-[520px] flex-col gap-5 rounded-xl border border-border bg-background p-5">
-          <StepBody step={step} draft={draft} set={set} planId={planId} auto={auto} nextBatchAt={plan?.next_batch_at} />
+          <StepBody step={step} draft={draft} set={set} planId={planId} auto={auto} saved={plan} />
           <footer className="mt-auto flex gap-2 border-t border-border pt-3.5">
             <Button type="button" variant="ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</Button>
             {last ? saveButton : <Button type="button" variant="outline" onClick={() => setStep(step + 1)}>Next</Button>}

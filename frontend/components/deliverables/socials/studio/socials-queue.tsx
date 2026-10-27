@@ -11,6 +11,9 @@
  * ("Week of 19 Oct · Countdown · 7 posts"), with "Approve the week" (or month) for whoever may
  * approve: each post by its hash on screen, whatever the series switch says (O2). A post that
  * changed since it was shown is left and named.
+ *
+ * P256-FIX-SOC-2: a plan's drafts that wait for the owner's input are listed apart, "Waits for
+ * you" (queue-waiting.tsx): each opens its editor, and none is offered for approval.
  */
 import { useMemo } from 'react'
 import { Inbox, Loader2 } from 'lucide-react'
@@ -24,7 +27,10 @@ import { hasChannels } from '../socials-review'
 import { postActions } from '../socials-status'
 import { QueueList } from './queue-list'
 import { QueuePane } from './queue-pane'
-import { inBatch, isMonthBatch, queueBatches, queueGroups, queueHeading, waitingToday, type QueueBatch, type QueueGroup } from './queue-model'
+import { QueueWaiting } from './queue-waiting'
+import {
+  inBatch, isMonthBatch, queueBatches, queueGroups, queueHeading, waitingForInput, waitingToday, type QueueBatch, type QueueGroup,
+} from './queue-model'
 import { SocialsPostDetail } from '../socials-post-detail'
 
 export { queuedPosts } from './queue-model'
@@ -71,6 +77,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
     ...queueGroups(posts.filter((post) => !inBatch(post)), new Date()),
   ], [posts, campaigns])
   const shown = groups.flatMap((group) => group.posts)
+  const waitingInput = useMemo(() => waitingForInput(posts), [posts])
   // F256: a post with no channel publishes nothing: Approve all shown leaves it out.
   const approvable = shown.filter(hasChannels)
   const selected = shown.find((post) => post.id === selectedId) ?? shown[0] ?? null
@@ -96,6 +103,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
           </Button>
         )}
       </div>
+      <QueueWaiting posts={waitingInput} onEdit={onEdit} />
       {shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
           <Inbox className="h-7 w-7 text-muted-foreground" aria-hidden />

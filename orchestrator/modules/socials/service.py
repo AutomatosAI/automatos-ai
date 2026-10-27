@@ -25,9 +25,9 @@
   checked. So an edit another worker commits mid-request is never approved,
   an approval never lands on copy nobody reviewed, and a stale copy of
   ``review_log`` never overwrites entries another writer committed.
-* **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry in ``sources``. ``approve``
-  refuses unsourced claims unless the approver overrides, and the override is stored and named in
-  ``review_log``. Wave 1 (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``): a
+* **Facts carry sources (D7).** A variable marked ``claim: true``, or with a value in a field its template marks
+  a claim (F433, ``template_claims.py``), needs an entry in ``sources``. ``approve`` refuses unsourced claims
+  unless the approver overrides, and the override is stored and named in ``review_log``. Wave 1 (S1.4) resolves the sources in the workspace (``modules/socials/sources.py``): a
   claim whose source no longer resolves, a deleted Deliverable say, counts as unsourced, and the approval record names why.
 * **The publish guard.** ``assert_publishable`` passes only an approved or scheduled post
   whose approval matches its content as it is NOW and whose rendered video shows the
@@ -52,7 +52,7 @@
   again. Like the voice it is a render setting, outside the hash: the rendered
   files' digests carry what it changed.
 * **Music credit (Wave 1 S1.6).** A CC BY track asks for credit wherever the
-  video is published: ``with_credits`` appends its line to the post's copy,
+  video is published: ``credits.with_credits`` appends its line to the post's copy,
   the base text and every channel's own text, once. A render appends the line
   of the music it mixed (``finish_render``); a save appends those of the media
   it names (``modules/socials/credits.py``).
@@ -71,9 +71,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -83,7 +82,9 @@ from sqlalchemy import func, or_, update
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
-from modules.socials import ai_media, deepfake_label, post_text, text_search
+from modules.socials import ai_media, deepfake_label, post_text, rendered_files, text_search
+from modules.socials import credits as post_credits
+from modules.socials import template_claims as post_claims
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
@@ -131,6 +132,8 @@ ACTION_SLOT_PASSED = "slot_passed"
 ACTION_RESLOT = "reslot"
 # US-116: an agent drafted the post. Only logged, never a move of the status machine.
 ACTION_DRAFT = "draft"
+# P256-FIX-SOC-2: a plan's post the render refused waits for the owner's input. Only logged too.
+ACTION_NEEDS_INPUT = "needs_input"
 
 # The whole status machine: action → {from status: to status}. An action
 # applies only from the statuses listed for it.
@@ -154,7 +157,10 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
         FAILED: RENDERING,
     },
     ACTION_RENDER_DONE: {RENDERING: NEEDS_APPROVAL},
-    ACTION_RENDER_FAILED: {RENDERING: FAILED},
+    # P256-FIX-SOC-5 (F437): a plan's draft the platform refused to render (no renderer, no render
+    # minutes, a report it cannot read) fails too (``refuse_render``); ``fail_render`` still ends only
+    # a render that started.
+    ACTION_RENDER_FAILED: {RENDERING: FAILED, DRAFT: FAILED},
     # Wave 3 (US-301): an approved or scheduled post publishes; a retry re-runs the
     # failed targets of a publish that failed or published partly.
     ACTION_PUBLISH: {APPROVED: PUBLISHING, SCHEDULED: PUBLISHING, MISSED: PUBLISHING},
@@ -164,8 +170,9 @@ TRANSITIONS: Dict[str, Dict[str, str]] = {
     ACTION_PUBLISH_FAILED: {PUBLISHING: FAILED},
     ACTION_MISSED: {SCHEDULED: MISSED},
     # PRD-251B (B11): an unapproved post whose planned slot passed ends missed too
-    # (nothing was posted); a missed post without an approval restarts as a draft.
-    ACTION_SLOT_PASSED: {DRAFT: MISSED, NEEDS_APPROVAL: MISSED, CHANGES_REQUESTED: MISSED},
+    # (nothing was posted); a missed post without an approval restarts as a draft. P256-FIX-SOC-5: so
+    # does a plan's failed post that never tried to publish (``schedule_jobs.pass_planned_slots``).
+    ACTION_SLOT_PASSED: {DRAFT: MISSED, NEEDS_APPROVAL: MISSED, CHANGES_REQUESTED: MISSED, FAILED: MISSED},
     ACTION_RESLOT: {MISSED: DRAFT},
 }
 
@@ -222,12 +229,6 @@ SOURCE_KINDS = ("deliverable", "report", "document", "url", "metric")
 
 TITLE_MAX_CHARS = 500
 COMMENT_MAX_CHARS = 2000
-
-# A rendered file record in ``media`` (finish_render): its Deliverable, the
-# sha256 of its bytes and what the renderer measured.
-RENDERED_FILE_REQUIRED = ("deliverable_id", "name", "sha256", "bytes")
-RENDERED_FILE_OPTIONAL = ("content_type", "duration", "width", "height")
-SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 # compute_content_hash's output: sha256, lowercase hex.
 CONTENT_HASH_PATTERN = r"^[0-9a-f]{64}$"
@@ -629,45 +630,22 @@ def _move(post: SocialPost, action: str) -> None:
 
 
 # ── D7 ──────────────────────────────────────────────────────────────────────
-def unsourced_claims(post: Any, unresolved: Optional[Iterable[str]] = None) -> List[str]:
-    """Names of the variables marked ``claim: true`` that have no entry in
-    ``sources``, or whose source is among ``unresolved`` (it does not resolve in
-    the workspace any more, S1.4)."""
+def _is_claim(name: str, spec: Any, template_claims: frozenset) -> bool:
+    """A claim (D7): marked ``claim: true``, or a value in a field its template marks a claim (F433)."""
+    return isinstance(spec, dict) and (spec.get("claim") is True or (name in template_claims and post_claims.has_value(spec)))
+
+
+def unsourced_claims(post: Any, unresolved: Optional[Iterable[str]] = None, template_claims: Iterable[str] = ()) -> List[str]:
+    """Names of the claims (:func:`_is_claim`, ``template_claims`` the variables the post's
+    template marks, ``template_claims.names``) that have no entry in ``sources``, or whose source is
+    among ``unresolved`` (it does not resolve in the workspace any more, S1.4)."""
     variables = getattr(post, "variables", None) or {}
     sources = getattr(post, "sources", None) or {}
-    broken = set(unresolved or ())
+    broken, marked = set(unresolved or ()), frozenset(template_claims)
     return sorted(
-        name
-        for name, spec in variables.items()
-        if isinstance(spec, dict) and spec.get("claim") is True and (name not in sources or name in broken)
+        name for name, spec in variables.items()
+        if _is_claim(name, spec, marked) and (name not in sources or name in broken)
     )
-
-
-# ── music credit (S1.6) ─────────────────────────────────────────────────────
-def _credited(text: Any, lines: Sequence[str]) -> Any:
-    if not isinstance(text, str):
-        return text  # not copy the validators take (null included): left for them to refuse
-    body = text.rstrip()
-    missing = [line for line in lines if line not in body]
-    if not missing:
-        return text
-    return "\n\n".join(([body] if body else []) + missing)
-
-
-def with_credits(copy: Any, lines: Iterable[str]) -> Any:
-    """``copy`` with each credit line at the end of its base text (one it lacks
-    starts as the lines) and of every channel's own text that lacks it: a new
-    object. A line already there is not added again, and copy with nothing to
-    add comes back as it was."""
-    wanted = [line for line in dict.fromkeys(lines) if isinstance(line, str) and line]
-    if not wanted or (copy is not None and not isinstance(copy, dict)):
-        return copy
-    out = dict(copy or {})
-    out["base"] = _credited(out.get("base", ""), wanted)
-    channels = out.get("channels")
-    if isinstance(channels, dict) and channels:
-        out["channels"] = {name: _credited(text, wanted) for name, text in channels.items()}
-    return out if out != (copy or {}) else copy
 
 
 # ── the lifecycle ───────────────────────────────────────────────────────────
@@ -825,6 +803,7 @@ def approve(
     override_unsourced: bool = False,
     comment: Optional[str] = None,
     unresolved_sources: Optional[Mapping[str, str]] = None,
+    template_claims: Iterable[str] = (),
 ) -> SocialPost:
     """needs_approval → approved, bound to the content the approver saw (D6).
 
@@ -834,6 +813,7 @@ def approve(
     Refuses unsourced claims (D7) unless ``override_unsourced``; an override is stored on the post and names
     the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the sources the caller found
     missing from the workspace (S1.4): their claims count as unsourced, and an override records why.
+    ``template_claims``: the fields its template marks as claims (F433), gated whatever the post's flags say.
     """
     target = _target(post, ACTION_APPROVE)
     comment = _validate_comment(comment, required=False, what="comment")
@@ -841,7 +821,7 @@ def approve(
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
     ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video shows the label as the post sets it
-    unsourced = unsourced_claims(post, unresolved_sources)
+    unsourced = unsourced_claims(post, unresolved_sources, template_claims)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced, unresolved_sources)
 
@@ -867,8 +847,24 @@ def approve(
     return post
 
 
+def ask_for_input(post: SocialPost, actor: str, comment: str, *, fields: Sequence[str] = (),
+                  questions: Sequence[str] = (), warnings: Sequence[str] = ()) -> SocialPost:
+    """P256-FIX-SOC-2: the post waits for the owner: a ``needs_input`` entry with what to fill in
+    (``fields``, in the owner's words), ``comment`` saying why, and the composer's ``questions``
+    and ``warnings``. Only logged: the status, the hash and the approval are untouched."""
+    _log(post, actor, ACTION_NEEDS_INPUT, str(comment or "").strip()[:COMMENT_MAX_CHARS] or None,
+         fields=list(fields), questions=list(questions), warnings=list(warnings))
+    return post
+
+
+def waits_for_input(post: Any) -> bool:
+    """A draft whose last history entry is :func:`ask_for_input`'s: it waits for the owner (not failed, not for approval)."""
+    log = getattr(post, "review_log", None) or []
+    return getattr(post, "status", None) == DRAFT and bool(log) and isinstance(log[-1], dict) and log[-1].get("action") == ACTION_NEEDS_INPUT
+
+
 def slot_passed(post: SocialPost, actor: str, reason: str) -> SocialPost:
-    """draft, needs_approval or changes_requested → missed (B11): the planned slot passed
+    """draft, needs_approval, changes_requested or failed → missed (B11): the planned slot passed
     with no approval, so nothing was posted. A new slot restarts it (``reslot``)."""
     target = _target(post, ACTION_SLOT_PASSED)
     slot = post.planned_for.isoformat() if post.planned_for else None
@@ -943,61 +939,14 @@ def assert_can_render(post: Any) -> None:
     _target(post, ACTION_RENDER)
 
 
-def start_render(post: SocialPost, actor: str) -> SocialPost:
-    """draft, changes_requested, needs_approval or failed → rendering."""
+def start_render(post: SocialPost, actor: str, *, gives_up_after: Optional[int] = None) -> SocialPost:
+    """draft, changes_requested, needs_approval or failed → rendering. P256-FIX-SOC-5 (F437): with
+    ``gives_up_after`` (seconds), the entry also says when the render gives up, from the same clock."""
     _move(post, ACTION_RENDER)
-    _log(post, actor, ACTION_RENDER)
+    now = _utcnow()
+    deadline = {"gives_up_at": (now + timedelta(seconds=gives_up_after)).isoformat()} if gives_up_after else {}
+    _log(post, actor, ACTION_RENDER, None, at=now.isoformat(), **deadline)
     return post
-
-
-def _optional_number(record: Mapping[str, Any], key: str, where: str) -> Optional[float]:
-    value = record.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-        raise InvalidPost(f"{where}.{key} must be a non-negative number")
-    return value
-
-
-def _rendered_file(record: Any, where: str) -> Dict[str, Any]:
-    if not isinstance(record, dict):
-        raise InvalidPost(f"{where} must be a rendered file record")
-    unknown = [k for k in record if k not in RENDERED_FILE_REQUIRED + RENDERED_FILE_OPTIONAL]
-    missing = [k for k in RENDERED_FILE_REQUIRED if k not in record]
-    if unknown or missing:
-        raise InvalidPost(f"{where} has unknown keys {unknown!r} or lacks {missing!r}")
-    for key in ("deliverable_id", "name"):
-        if not isinstance(record[key], str) or not record[key].strip():
-            raise InvalidPost(f"{where}.{key} is required")
-    if not isinstance(record["sha256"], str) or not SHA256_PATTERN.match(record["sha256"]):
-        raise InvalidPost(f"{where}.sha256 must be a lowercase sha256")
-    size = record["bytes"]
-    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
-        raise InvalidPost(f"{where}.bytes must be a positive whole number")
-    clean: Dict[str, Any] = {key: record[key] for key in RENDERED_FILE_REQUIRED}
-    if record.get("content_type") is not None:
-        if not isinstance(record["content_type"], str):
-            raise InvalidPost(f"{where}.content_type must be a string")
-        clean["content_type"] = record["content_type"]
-    for key in ("duration", "width", "height"):
-        value = _optional_number(record, key, where)
-        if value is not None:
-            clean[key] = value
-    return clean
-
-
-def _rendered_media(media: Any) -> Dict[str, List[Dict[str, Any]]]:
-    """``{aspect: [rendered file records]}``, at least one file."""
-    if not isinstance(media, Mapping) or not media:
-        raise InvalidPost("a render must produce at least one file")
-    clean: Dict[str, List[Dict[str, Any]]] = {}
-    for aspect, records in media.items():
-        if not isinstance(aspect, str) or not aspect.strip():
-            raise InvalidPost("a rendered aspect must be named")
-        if not isinstance(records, (list, tuple)) or not records:
-            raise InvalidPost(f"media.{aspect} must list the rendered files")
-        clean[aspect] = [_rendered_file(r, f"media.{aspect}[{i}]") for i, r in enumerate(records)]
-    return clean
 
 
 def finish_render(
@@ -1020,8 +969,8 @@ def finish_render(
     """
     target = _target(post, ACTION_RENDER_DONE)
     before = post.media if isinstance(post.media, Mapping) else {}
-    post.media = {**{aspect: before[aspect] for aspect in keep if aspect in before}, **_rendered_media(media)}
-    credited = with_credits(post.copy, credits)
+    post.media = {**{aspect: before[aspect] for aspect in keep if aspect in before}, **rendered_files.rendered_media(media, InvalidPost)}
+    credited = post_credits.with_credits(post.copy, credits)
     added = credited is not post.copy
     if added:
         post.copy = credited
@@ -1043,13 +992,27 @@ def fail_render(
 ) -> SocialPost:
     """rendering → failed, with the reason and the renderer's report in ``review_log``.
 
-    The post's content is untouched: edit it and render again.
+    The post's content is untouched: edit it and render again. Only a render that started ends
+    here: a draft the platform refused is :func:`refuse_render`'s (P256-FIX-SOC-5).
     """
+    if post.status != RENDERING:
+        raise IllegalTransition(post.status, ACTION_RENDER_FAILED)
     target = _target(post, ACTION_RENDER_FAILED)
     text = (message or "The render failed.").strip()[:COMMENT_MAX_CHARS]
     post.status = target
     extra = {"report": dict(report)} if report else {}
     _log(post, actor, ACTION_RENDER_FAILED, text, **extra)
+    return post
+
+
+def refuse_render(post: SocialPost, actor: str, message: str) -> SocialPost:
+    """draft → failed (P256-FIX-SOC-5, F437): the platform refused to render a plan's draft, so the
+    reason is a ``render_failed`` entry every reader of a failed render shows. ``message`` is the
+    caller's user-safe text. Only a draft: a render that started ends in :func:`fail_render`."""
+    if post.status != DRAFT:
+        raise IllegalTransition(post.status, ACTION_RENDER_FAILED)
+    post.status = _target(post, ACTION_RENDER_FAILED)
+    _log(post, actor, ACTION_RENDER_FAILED, (message or "The render was refused.").strip()[:COMMENT_MAX_CHARS])
     return post
 
 

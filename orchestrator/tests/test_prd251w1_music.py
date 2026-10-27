@@ -71,6 +71,7 @@ import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
 import core.media_render_quota as render_quota  # noqa: E402
 import modules.documents.generation_service as generation_service  # noqa: E402
+import modules.socials.credits as post_credits  # noqa: E402
 import modules.socials.media_store as media_store  # noqa: E402
 import modules.socials.render as render  # noqa: E402
 import modules.socials.service as service  # noqa: E402
@@ -297,19 +298,19 @@ def test_a_render_must_report_the_track_its_bundle_asked_for():
 def test_with_credits_appends_each_line_once_to_the_base_and_every_channel():
     copy = {"base": "Three weeks to go.", "channels": {"linkedin": "On LinkedIn.", "x": "On X.\n" + CREDIT}}
     kept = json.loads(json.dumps(copy))
-    credited = service.with_credits(copy, [CREDIT, CREDIT])
+    credited = post_credits.with_credits(copy, [CREDIT, CREDIT])
     assert credited == {
         "base": "Three weeks to go.\n\n" + CREDIT,
         "channels": {"linkedin": "On LinkedIn.\n\n" + CREDIT, "x": "On X.\n" + CREDIT},
     }
     assert copy == kept, "the copy it was given is left as it was"
-    assert service.with_credits(credited, [CREDIT]) is credited
-    assert service.with_credits(None, [CREDIT]) == service.with_credits({}, [CREDIT]) == {"base": CREDIT}
-    assert service.with_credits({"channels": {"x": "On X."}}, [CREDIT]) == {"base": CREDIT, "channels": {"x": "On X.\n\n" + CREDIT}}
-    assert service.with_credits(copy, []) is copy
+    assert post_credits.with_credits(credited, [CREDIT]) is credited
+    assert post_credits.with_credits(None, [CREDIT]) == post_credits.with_credits({}, [CREDIT]) == {"base": CREDIT}
+    assert post_credits.with_credits({"channels": {"x": "On X."}}, [CREDIT]) == {"base": CREDIT, "channels": {"x": "On X.\n\n" + CREDIT}}
+    assert post_credits.with_credits(copy, []) is copy
     # Copy the validators refuse (a null text, say) is left for them to refuse, never filled in.
     odd = {"base": None, "channels": {"x": None}}
-    assert service.with_credits(odd, [CREDIT]) is odd
+    assert post_credits.with_credits(odd, [CREDIT]) is odd
 
 
 def test_finish_render_puts_the_credit_in_the_copy_the_hash_covers():

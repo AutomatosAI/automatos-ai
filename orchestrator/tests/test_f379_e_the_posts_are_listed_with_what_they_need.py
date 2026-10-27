@@ -5,6 +5,8 @@ back whole, and the chat keeps about 2,000 tokens of an answer) and called a car
 caption "good to post". GET /api/socials/posts?limit=5 returned all 66 posts (friction 19). Now a
 row is compact and says what the post still needs, the answer counts every match first, a queue
 picks the posts waiting for approval or not rendered, and the route honours ``limit``.
+
+P256-FIX-SOC-2: a plan's draft the render refused says what the owner must fill in.
 """
 from __future__ import annotations
 
@@ -44,6 +46,23 @@ def test_a_row_says_what_the_post_still_needs_in_plain_words():
     assert listing.what_it_needs(_post("needs_approval", media={"4:5": [{}]})) == [
         "the owner's approval in the Socials tab", "a caption: its copy is empty"]   # never "good to post"
     assert set(listing.post_row(waiting)) == ROW_KEYS and listing.post_row(waiting)["rendered"] is True
+
+
+def test_soc2_a_draft_that_waits_for_input_says_what_to_fill_in():
+    asked = {"action": "needs_input", "comment": "Fill in Big number before rendering.", "fields": ["Big number"]}
+    waiting = _post("draft", review_log=[asked])
+
+    assert "your input: Big number" in listing.what_it_needs(waiting)
+    edited = _post("draft", review_log=[asked, {"action": "edit", "comment": "Edited by Auto: variables."}])
+    assert not any(need.startswith("your input") for need in listing.what_it_needs(edited))  # no longer waiting
+    assert service.waits_for_input(_row_like(waiting)) and not service.waits_for_input(_row_like(edited))
+
+
+def _row_like(post):
+    """The dict as a stored post (the service reads attributes)."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(**post)
 
 
 def test_a_queue_picks_the_posts_by_what_they_need_and_an_unknown_one_is_refused():

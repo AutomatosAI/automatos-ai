@@ -96,7 +96,8 @@ def test_the_answer_keeps_the_post_and_trims_only_its_history(env):
     assert read["status"] == "published" and read["title"] == "Harvest Club: six reasons"
     assert {"voice", "footage", "copy", "variables", "media", "sources"} <= set(read)
     assert not {"preview", "content_hash", "approved_hash", "workspace_id"} & set(read)
-    assert list(read)[:6] == ["id", "status", "title", "format", "template_id", "targets"]
+    # P256-FIX-SOC-5 (F437): the render's state follows the status, so a cut answer still carries it.
+    assert list(read)[:7] == ["id", "status", "render", "title", "format", "template_id", "targets"]
     assert read["targets"] == [{key: post.to_dict()["targets"][0][key] for key in (
         "toolkit", "post_kind", "options", "status", "published_at", "remote_id", "permalink", "error", "notes")}]
     assert read["review_log_total"] == 10 and len(read["review_log"]) == 5

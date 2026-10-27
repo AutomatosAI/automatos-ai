@@ -4,6 +4,9 @@ Create, update, pause, resume and end a plan (a ``social_campaigns`` row of kind
 ``plan``); read its slots in a window with what was made for each; move or skip a
 planned slot (``slot_overrides``). Every read is scoped to the workspace. Nothing here
 commits: the caller (the api, the make tick) owns the transaction.
+
+P256-FIX-SOC-5 (F436): a slot also says why it is empty (``slot_phases``): its phase, why, and
+the batch that makes it. :func:`slot_facts` reads what a phase needs once per request.
 """
 from __future__ import annotations
 
@@ -14,7 +17,9 @@ from uuid import UUID
 from sqlalchemy import func
 
 from core.models.socials import SocialCampaign, SocialPost, SocialTopic
-from modules.socials import campaigns, plans
+from core.models.workspaces import Workspace
+from modules.socials import batches, campaigns, plans, slot_phases, topics
+from modules.socials.settings import socials_off_reason
 from modules.socials.template_gallery import gallery
 
 # What a status change may come from (B6): an ended plan stays ended.
@@ -184,21 +189,49 @@ def _post_summary(post: SocialPost) -> Dict[str, Any]:
     return {"id": str(post.id), "title": post.title, "status": post.status, "at": moment.isoformat() if moment else None}
 
 
-def plan_slots(db: Any, plan: SocialCampaign, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+def _last_made(db: Any, plan: SocialCampaign) -> Dict[Optional[str], datetime]:
+    """When the plan last made a post of each batch (a daily plan's under ``None``), as UTC."""
+    rows = (
+        db.query(SocialPost.batch_key, func.max(SocialPost.created_at))
+        .filter(SocialPost.campaign_id == plan.id, SocialPost.slot_key.isnot(None))
+        .group_by(SocialPost.batch_key)
+        .all()
+    )
+    return {key: batches.as_utc(at) for key, at in rows if at is not None}
+
+
+def slot_facts(db: Any, plan: SocialCampaign) -> slot_phases.SlotFacts:
+    """What the plan's slot phases read, once: whether Socials is on, the slots its posts hold, its
+    unused topics and when each batch last made a post (P256-FIX-SOC-5)."""
+    return slot_phases.SlotFacts(
+        socials_off=socials_off_reason(db.get(Workspace, plan.workspace_id)),
+        taken=frozenset(taken_keys(db, plan)),
+        unused=tuple(topics.unused_topics(db, plan)),
+        last_made=_last_made(db, plan),
+    )
+
+
+def plan_slots(db: Any, plan: SocialCampaign, start: datetime, end: datetime, now: datetime,
+               facts: Optional[slot_phases.SlotFacts] = None) -> List[Dict[str, Any]]:
     """The plan's slots in [start, end): each ``planned`` (no post yet, with the topic
-    pinned to its day, if any) or ``made`` (with its post)."""
+    pinned to its day, if any) or ``made`` (with its post), and (P256-FIX-SOC-5) its ``phase``,
+    ``why`` and ``batch`` at ``now`` (``slot_phases.slot_phase``; ``facts`` when the caller read
+    them already). ``state`` stays made or planned."""
     slots = plans.expand_slots(plan, start, end)
     made = made_posts(db, plan, [slot.key for slot in slots])
     pinned = pinned_topics(db, plan)
+    facts = facts if facts is not None else slot_facts(db, plan)
     rows = []
     for slot in slots:
         post = made.get(slot.key)
         topic = pinned.get(slot.local_date.isoformat())
+        phase, why, batch = slot_phases.slot_phase(plan, slot, now, post, facts)
         rows.append({
             **slot.to_dict(),
             "state": "made" if post is not None else "planned",
             "post": _post_summary(post) if post is not None else None,
             "topic": {"id": str(topic.id), "title": topic.title} if topic is not None and post is None else None,
+            "phase": phase, "why": why, "batch": batch,
         })
     return rows
 

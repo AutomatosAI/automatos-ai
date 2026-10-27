@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func
 
 from core.models.socials import SocialCampaign, SocialPost
-from modules.socials import service, voice_examples
+from modules.socials import service, template_claims, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.settings import parse_workspace_socials
 
@@ -301,18 +301,27 @@ def _precheck(
     return None
 
 
+def _claims_of(db: Any, workspace_id: UUID, post: SocialPost, cache: Dict[Optional[UUID], frozenset]) -> frozenset:
+    """The claims the post's template marks (F433), read once per template in a series."""
+    if post.template_id not in cache:
+        cache[post.template_id] = template_claims.names(db, workspace_id, post.template_id)
+    return cache[post.template_id]
+
+
 def _approve_one(
     db: Any, ids: Tuple[UUID, UUID], actor: str, item: ShownPost, comment: Optional[str],
-    batch_key: Optional[str] = None,
+    batch_key: Optional[str] = None, claims_cache: Optional[Dict[Optional[UUID], frozenset]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """One shown post of the campaign ``ids`` (workspace id, campaign id), approved
-    exactly as a single approval: (the approved post, None) or (None, why it was left)."""
+    exactly as a single approval: (the approved post, None) or (None, why it was left).
+    ``claims_cache`` holds the claims of the templates the series has read (F433)."""
     workspace_id, campaign_id = ids
     post = service.get_post(db, workspace_id, item.post_id)
     refused = _precheck(post, campaign_id, item, batch_key)
     if refused is not None:
         return None, refused
     unresolved = post_sources.unresolved(db, workspace_id, post.sources)
+    claims = _claims_of(db, workspace_id, post, {} if claims_cache is None else claims_cache)
     try:
         service.approve(
             post,
@@ -321,6 +330,7 @@ def _approve_one(
             override_unsourced=item.override_unsourced,
             comment=comment,
             unresolved_sources=unresolved,
+            template_claims=claims,
         )
         return _commit_approval(db, post, campaign_id, item.content_hash), None
     except service.StaleContent as exc:
@@ -373,8 +383,9 @@ def approve_series(
     campaign_id, workspace_id = campaign.id, campaign.workspace_id
     approved: List[Dict[str, Any]] = []
     left: List[Dict[str, Any]] = []
+    claims_cache: Dict[Optional[UUID], frozenset] = {}  # F433: each template's claims, read once
     for item in items:
-        done, why = _approve_one(db, (workspace_id, campaign_id), actor, item, comment, batch_key)
+        done, why = _approve_one(db, (workspace_id, campaign_id), actor, item, comment, batch_key, claims_cache)
         if done is not None:
             approved.append(done)
         else:

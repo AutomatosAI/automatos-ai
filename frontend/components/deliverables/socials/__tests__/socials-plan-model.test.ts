@@ -13,6 +13,8 @@
  *   a story row reads and sets through the format select, goes out as `kind`, and names the
  *   channels that post no stories (US-C301); a row's own visual: the choices its format takes,
  *   the toolkits that make its AI media, the round trip, and its AI spend over a month (US-C302).
+ * * P256-FIX-SOC-5 (F436): a planned slot says why it has no post yet: a slot its batch has not
+ *   made reads when it is made, a stalled one its why; the current batch reads in a line.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -27,9 +29,9 @@ import { planSpendLine, storyNote } from '@/components/deliverables/socials/plan
 import {
   keptVisual, rowSpend, spendLine, toolkitChoices, visualChoices,
 } from '@/components/deliverables/socials/plans/plan-row-visual'
-import { batchDayChange, nextBatchLine, ordinal, rhythmSummary } from '@/components/deliverables/socials/plans/plan-rhythm'
+import { batchDayChange, currentBatchLine, nextBatchLine, ordinal, rhythmSummary } from '@/components/deliverables/socials/plans/plan-rhythm'
 import {
-  parsePlannedId, plannedEvents, plannedId, plannedSlots, planRailLine,
+  BEING_MADE, parsePlannedId, plannedEvents, plannedId, plannedPhaseLine, plannedSlots, plannedTitle, planRailLine,
 } from '@/components/deliverables/socials/studio/plan-calendar-model'
 import { musicFrom, musicValue, trackLabel } from '@/components/deliverables/socials/socials-music-picker'
 
@@ -211,6 +213,41 @@ describe('a plan on the calendar', () => {
     expect(plannedEvents(planned, span, 'all')).toHaveLength(1)
     expect(plannedEvents(planned, span, 'linkedin')).toHaveLength(0)
     expect(planRailLine(plan())).toBe('1.1 posts a day · 18 of 24 topics unused')
+  })
+})
+
+describe('P256-FIX-SOC-5: why a planned slot is empty', () => {
+  const slot = (phase: string, why: string | null, batch: any) => ({
+    key: 'r1|2026-10-22|09:00', row_id: 'r1', channels: ['twitter'], format: 'video', length_seconds: null, template_id: null,
+    local_date: '2026-10-22', local_time: '09:00', at: '2026-10-22T08:00:00Z', moved: false, state: 'planned' as const,
+    post: null, topic: null, phase: phase as any, why, batch,
+  })
+  const W43 = { key: '2026-W43', label: 'the week of 19 Oct', made_at: '2026-10-21T12:44:00+00:00' }
+
+  it('a slot its batch has not made yet is still planned and says when it is made', () => {
+    const answers = [{ plan_id: PLAN_ID, slots: [slot('waiting', null, W43)] }]
+    const [planned] = plannedSlots(answers, [plan()])
+    expect(planned.slot.key).toBe('r1|2026-10-22|09:00')
+    expect(plannedPhaseLine(planned)).toBe('made Wed 21 Oct, 13:44')  // Europe/London, BST
+    expect(plannedTitle(planned)).toBe('Planned: Countdown · made Wed 21 Oct, 13:44')
+  })
+
+  it('a stalled slot shows its why, a building one says so, and an older answer adds nothing', () => {
+    const [stalled] = plannedSlots([{ plan_id: PLAN_ID, slots: [slot('stalled', 'no unused topic in the bank suits a video', W43)] }], [plan()])
+    expect(plannedPhaseLine(stalled)).toBe('Stalled: no unused topic in the bank suits a video')
+    const [building] = plannedSlots([{ plan_id: PLAN_ID, slots: [slot('building', null, W43)] }], [plan()])
+    expect(plannedPhaseLine(building)).toBe(BEING_MADE)
+    const [older] = plannedSlots([{ plan_id: PLAN_ID, slots: [{ ...slot('waiting', null, null), phase: undefined }] }], [plan()])
+    expect(plannedTitle(older)).toBe('Planned: Countdown')
+  })
+
+  it('the current batch reads in a line: building, stalled with why, ready', () => {
+    const batch = { key: '2026-W43', label: 'the week of 19 Oct', since: '2026-10-18T16:00:00Z', made: 3, left: 4, why: null }
+    expect(currentBatchLine({ ...batch, state: 'building' })).toBe('The week of 19 Oct is being made: 3 made, 4 to go.')
+    expect(currentBatchLine({ ...batch, state: 'stalled', why: 'no unused topic in the bank suits a video' }))
+      .toBe('The week of 19 Oct is stalled: no unused topic in the bank suits a video.')
+    expect(currentBatchLine({ ...batch, state: 'ready', made: 7, left: 0 })).toBe('The week of 19 Oct is ready in your Queue: 7 made.')
+    expect(currentBatchLine(null)).toBeNull()
   })
 })
 

@@ -12,15 +12,25 @@ render that failed, and why; a render not made yet; a caption). The answer gives
 match before the rows, and ``queue`` picks the posts by what they need: ``awaiting_approval``
 (waiting for the owner), ``not_rendered`` (failed renders and drafts with nothing rendered yet)
 or ``open`` (everything not yet approved or out).
+
+P256-FIX-SOC-2: a plan's draft the render refused waits for the owner's input; its row says
+what to fill in ("your input: Big number, Top item 1: value"), from its history.
+
+P256-FIX-SOC-5 (F437): that line replaces "a render: nothing is rendered yet", which was the only
+thing such a draft said (a plan's post the composer could not write waits the same way, saying
+so); and a rendering post says since when and when it gives up, from the post's ``render``.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 AWAITING_APPROVAL, NOT_RENDERED, OPEN = "awaiting_approval", "not_rendered", "open"
 QUEUES = (AWAITING_APPROVAL, NOT_RENDERED, OPEN)
 FAILED, DRAFT, CHANGES, WAITING, RENDERING = "failed", "draft", "changes_requested", "needs_approval", "rendering"
 RENDER_FAILED, REQUEST_CHANGES = "render_failed", "request_changes"   # modules/socials/service.py ACTION_*
+NEEDS_INPUT = "needs_input"   # modules/socials/service.py ACTION_NEEDS_INPUT (service.waits_for_input)
 REASON_CHARS = 200
 
 NEEDS_APPROVAL = "the owner's approval in the Socials tab"
@@ -29,6 +39,9 @@ NEEDS_FIX = "its render failed: {why}"
 NEEDS_CHANGES = "the changes a reviewer asked for: {why}"
 NEEDS_CAPTION = "a caption: its copy is empty"
 IS_RENDERING = "rendering now"
+IS_RENDERING_SINCE = "rendering since {since} (gives up at {gives_up})"
+CLOCK_ZONE = "UTC"  # a post with no timezone of its own reads its render's times in UTC
+NEEDS_YOUR_INPUT = "your input: {fields}"
 UNKNOWN_QUEUE = "queue must be one of {queues}."
 
 
@@ -51,16 +64,45 @@ def _last_comment(post: Mapping[str, Any], *actions: str) -> str:
     return "see platform_get_social_post"
 
 
+def _input_asked(post: Mapping[str, Any]) -> List[str]:
+    """What a draft waiting for the owner's input asks for, from its last history entry (as
+    ``service.waits_for_input`` reads it); [] for any other post."""
+    log = post.get("review_log") or []
+    last = log[-1] if log and isinstance(log[-1], dict) else {}
+    if post.get("status") != DRAFT or last.get("action") != NEEDS_INPUT:
+        return []
+    fields = ", ".join(str(field) for field in last.get("fields") or [] if field)
+    return [NEEDS_YOUR_INPUT.format(fields=fields or str(last.get("comment") or "")[:REASON_CHARS])]
+
+
+def _clock(value: Any, zone: Any) -> Optional[str]:
+    """An ISO time as HH:MM in the post's timezone (UTC without one); None for anything else."""
+    try:
+        moment = datetime.fromisoformat(str(value))
+        return f"{moment.astimezone(ZoneInfo(str(zone or CLOCK_ZONE))):%H:%M}"
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return None
+
+
+def _rendering(post: Mapping[str, Any]) -> str:
+    """"rendering since 16:22 (gives up at 16:47)", from the post's ``render``; else "rendering now"."""
+    block = post.get("render") if isinstance(post.get("render"), Mapping) else {}
+    since, gives_up = (_clock(block.get(key), post.get("timezone")) for key in ("started_at", "gives_up_at"))
+    return IS_RENDERING_SINCE.format(since=since, gives_up=gives_up) if since and gives_up else IS_RENDERING
+
+
 def what_it_needs(post: Mapping[str, Any]) -> List[str]:
     """What the post still needs before it can go out, in plain words; [] when nothing."""
     status = post.get("status")
     needs: List[str] = []
+    asked = _input_asked(post)  # P256-FIX-SOC-5: a draft that waits for you says so, not "a render"
     if status == FAILED:
         needs.append(NEEDS_FIX.format(why=_last_comment(post, RENDER_FAILED)))
     elif status == RENDERING:
-        needs.append(IS_RENDERING)
-    elif status in (DRAFT, CHANGES) and not _rendered(post):
+        needs.append(_rendering(post))
+    elif status in (DRAFT, CHANGES) and not _rendered(post) and not asked:
         needs.append(NEEDS_RENDER)
+    needs.extend(asked)
     if status == CHANGES:
         needs.append(NEEDS_CHANGES.format(why=_last_comment(post, REQUEST_CHANGES)))
     if status == WAITING:

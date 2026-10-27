@@ -100,6 +100,25 @@ export interface SocialPlan {
   bank: { topics: number; unused: number }
   /** PRD-251C: when a weekly or monthly plan's next batch is made (ISO); null for a daily plan. */
   next_batch_at?: string | null
+  /** P256-FIX-SOC-5: where the latest batch whose moment has come stands; null for a daily plan. */
+  current_batch?: SocialPlanCurrentBatch | null
+  /** P256-FIX-SOC-5: lines the plan's settings call for (a batch day that splits the calendar week). */
+  warnings?: string[]
+}
+
+/** P256-FIX-SOC-5 (F436): a batch's state: still being made, stuck (why), late, announced, or done. */
+export type SocialPlanBatchState = 'building' | 'stalled' | 'late' | 'ready' | 'complete'
+
+export interface SocialPlanCurrentBatch {
+  key: string
+  /** "the week of 19 Oct", "November 2026". */
+  label: string
+  /** When the batch was made (its moment), UTC ISO. */
+  since: string
+  state: SocialPlanBatchState
+  made: number
+  left: number
+  why: string | null
 }
 
 export interface SocialPlansResponse {
@@ -177,7 +196,14 @@ export interface SocialPlanSlot {
   post: { id: string; title: string; status: string; at: string | null } | null
   /** The topic pinned to the slot's day, while the slot is not made. */
   topic: { id: string; title: string } | null
+  /** P256-FIX-SOC-5 (F436): why the slot is (not yet) made; `state` stays made | planned. */
+  phase?: SocialPlanSlotPhase
+  why?: string | null
+  /** The batch that makes it and when (a daily plan's make time, with no key). */
+  batch?: { key: string | null; label: string | null; made_at: string } | null
 }
+
+export type SocialPlanSlotPhase = 'made' | 'skipped' | 'waiting' | 'stalled' | 'late' | 'building'
 
 export interface SocialPlanSlotsResponse {
   plan_id: string

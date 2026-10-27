@@ -15,7 +15,8 @@ Pinned:
   announced once; a slot no channel posts skipped and recorded, the batch still announced;
   a slot whose time came before the tick made it (the leader was down) recorded as skipped
   and named in the notice, once; a row added after its batch made at the next tick; a daily
-  plan unchanged;
+  plan unchanged; a post the render refused (P256-FIX-SOC-2) counted apart as waiting for you,
+  its slot not tried again;
 * US-C207: a weekly plan researches the day before its batch day, follows it when it moves,
   and keeps a day the owner chose; the bank shows when research last ran.
 """
@@ -38,9 +39,10 @@ import anyio  # noqa: E402
 import tests.test_prd251_api as api_harness  # noqa: E402
 from config import config  # noqa: E402
 from core.models.socials import SocialCampaign, SocialPost  # noqa: E402
-from modules.socials import batches, plan_notify, plans  # noqa: E402
+from modules.socials import batches, plan_notify, plans, service  # noqa: E402
 from services import socials_plan_maker as maker_mod  # noqa: E402
 from services import socials_plan_research as research_mod  # noqa: E402
+from tests.test_f433_plan_post_waits_for_input import STATS, allow_templates, image_template  # noqa: E402
 from tests.test_prd251bw2_maker import _topic as _maker_topic  # noqa: E402
 from tests.test_prd251bw2_maker import maker  # noqa: E402,F401  (the fixture)
 from tests.test_prd251bw2_plans import _create as _create_plan  # noqa: E402
@@ -230,7 +232,7 @@ def test_a_slot_whose_time_came_before_the_tick_made_it_is_recorded_and_named_on
     made = _posts(week, plan)
     assert [post.slot_key for post in made][0] == "r1|2026-10-20|09:00" and len(made) == 6  # Monday's 09:00 had passed
     week.session.refresh(row)
-    assert row.make["batches"]["2026-W43"]["skipped"] == {"r1|2026-10-19|09:00": maker_mod.PASSED_UNMADE}
+    assert row.make["batches"]["2026-W43"]["skipped"] == {"r1|2026-10-19|09:00": batches.PASSED_UNMADE}
     assert week.reviews == [("Your week is ready: ", "Countdown: 6 posts for the week of 19 Oct; 1 passed before it could be made")]
     _tick(_at(2026, 10, 19, 10, 5))
     assert len(_posts(week, plan)) == 6 and len(week.reviews) == 1
@@ -246,6 +248,21 @@ def test_a_row_added_after_its_batch_is_made_at_the_next_tick(week):
     keys = [post.slot_key for post in _posts(week, plan)]
     assert len(keys) == 8 and any(key.endswith("|2026-10-23|18:00") for key in keys)
     assert len(week.reviews) == 1  # the week was announced once
+
+
+def test_soc2_a_post_that_waits_for_you_is_named_apart_and_its_slot_not_tried_again(week, monkeypatch):
+    template_id = image_template(week, STATS)
+    waiting = allow_templates(monkeypatch, template_id)
+    stats_row = {**DAILY_ROW, "id": "r2", "format": "image", "template_id": str(template_id), "days": ["tue"]}
+    plan = _weekly_plan(week, rows=({**DAILY_ROW, "days": [day for day in plans.WEEKDAYS if day != "tue"]}, stats_row))
+    _tick()  # the maker harness's proposal fills no field: the stats post's render is refused
+    made = _posts(week, plan)
+    (waits,) = [post for post in made if service.waits_for_input(post)]
+    assert len(made) == 7 and waits.slot_key.endswith("|2026-10-20|09:00") and len(waiting) == 1
+    assert week.reviews == [("Your week is ready: ", "Countdown: 6 posts for the week of 19 Oct; 1 waits for you")]
+    assert not [event for event, _title in week.told.plan if event == "social_plan_slot_skipped"]
+    _tick(_at(2026, 10, 18, 17, 40))
+    assert len(_posts(week, plan)) == 7 and len(week.reviews) == 1 and len(waiting) == 1
 
 
 def test_a_daily_plan_is_unchanged(week):

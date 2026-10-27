@@ -485,6 +485,23 @@ export interface SocialReviewEntry {
   /** F378: a `retake` entry keeps the take it replaced; a `retake_undone` one names the retake it undid. */
   previous?: Record<string, unknown>
   undid?: string
+  /** P256-FIX-SOC-2: a `needs_input` entry names the fields to fill in (their labels) and the composer's questions. */
+  fields?: string[]
+  questions?: string[]
+  /** P256-FIX-SOC-5: a `render` entry says when that render gives up (UTC ISO). */
+  gives_up_at?: string
+}
+
+/**
+ * P256-FIX-SOC-5 (F437): where a post's render stands, derived by the server from its history
+ * (orchestrator/core/social_render_state.py); `null` before any render.
+ */
+export interface SocialPostRender {
+  state: 'rendering' | 'done' | 'failed' | 'waiting'
+  started_at: string | null
+  gives_up_at: string | null
+  finished_at: string | null
+  why: string | null
 }
 
 /**
@@ -537,6 +554,8 @@ export interface SocialPost {
   /** Slot name → the footage it asks for; `null` plays the template's own motion graphics. */
   footage?: Record<string, SocialPostFootage> | null
   status: SocialPostStatus
+  /** P256-FIX-SOC-5: where its render stands (when it started, when it gives up, why it waits or failed). */
+  render?: SocialPostRender | null
   content_hash: string
   approved_hash: string | null
   approved_by: string | null
