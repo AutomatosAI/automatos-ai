@@ -1,0 +1,115 @@
+# voice-tts, Auto's server voice: the image builds as Railway builds it, the service's
+# own suite passes inside it (the real Kokoro model and the image's LAME among it), and
+# the running container answers its contract. It runs on pull requests that touch the
+# service or this file, and from the Actions tab. images.yml builds and scans the
+# production stage on both arches; this job proves it speaks.
+name: voice-tts
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "services/voice-tts/**"
+      - ".github/workflows/voice-tts.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  voice-tts:
+    name: voice-tts — image builds, its suite passes inside it, and it speaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: voice-tts:ci
+      TEST_IMAGE: voice-tts:test
+      TOKEN: ci-voice-token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The local edition runs the service as the optional compose profile `voice`.
+      # Throwaway values for the three `:?`-required secrets; nothing starts.
+      - name: Compose — the voice profile runs voice-tts; the default stack does not
+        env:
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+          API_KEY: ci
+          VOICE_TTS_URL: http://voice-tts:8100
+        run: |
+          voice=$(docker compose --profile voice config --services)
+          plain=$(docker compose config --services)
+          echo "$voice" | grep -qx voice-tts || { echo "::error::docker compose --profile voice config has no voice-tts service"; exit 1; }
+          if echo "$plain" | grep -qx voice-tts; then echo "::error::voice-tts starts without the voice profile"; exit 1; fi
+          docker compose --profile voice config > "$RUNNER_TEMP/compose-voice.yml"
+          grep -qE 'VOICE_TTS_URL: *"?http://voice-tts:8100' "$RUNNER_TEMP/compose-voice.yml" \
+            || { echo "::error::the backend does not pass VOICE_TTS_URL through from .env"; exit 1; }
+          if sed -n '/^  voice-tts:/,/^  [a-z]/p' "$RUNNER_TEMP/compose-voice.yml" | grep -q '^    ports:'; then
+            echo "::error::voice-tts publishes a port; it stays inside the compose network"; exit 1
+          fi
+          echo "the voice profile adds voice-tts, with no published port: PASS"
+
+      - name: Build the image (default target, as Railway builds it)
+        run: |
+          start=$(date +%s)
+          docker build -t "$IMAGE" services/voice-tts/
+          echo "image build: $(( $(date +%s) - start )) s"
+          docker image ls "$IMAGE"
+
+      - name: The service's own suite, inside the image
+        run: |
+          docker build --target test -t "$TEST_IMAGE" services/voice-tts/
+          docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
+
+      - name: Boot assertion — production without a token stops the container
+        run: |
+          set +e
+          timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false -e ENVIRONMENT=production "$IMAGE" > boot.log 2>&1
+          code=$?
+          set -e
+          cat boot.log
+          if [ "$code" -ne 2 ]; then echo "::error::expected exit 2 without VOICE_TTS_TOKEN in production, got $code"; exit 1; fi
+          grep -q 'VOICE_TTS_TOKEN is not set' boot.log
+          echo "production without a token refused to boot (exit 2): PASS"
+
+      - name: The container warms, answers its contract and streams MP3
+        run: |
+          docker run -d --name voice-tts -e LOG_RELAY_ENABLED=false -e ENVIRONMENT=production \
+            -e VOICE_TTS_TOKEN="$TOKEN" -p 127.0.0.1:8100:8100 "$IMAGE"
+          trap 'docker logs voice-tts; docker rm -f voice-tts > /dev/null' EXIT
+          started=$(date +%s)
+          ready=""
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8100/readyz > /dev/null 2>&1; then ready=1; break; fi
+            curl -fsS http://127.0.0.1:8100/healthz || true; echo
+            sleep 2
+          done
+          [ -n "$ready" ] || { echo "::error::/readyz never answered 200"; exit 1; }
+          echo "model ready $(( $(date +%s) - started )) s after docker run"
+          curl -fsS http://127.0.0.1:8100/healthz | grep -q '"ready": true'
+          curl -fsS http://127.0.0.1:8100/voices > voices.json
+          python3 -c 'import json; v = json.load(open("voices.json")); assert v["default"] == "af_heart", v["default"]; ids = [x["id"] for x in v["voices"]]; assert len(ids) == 54 and ids[0].startswith("af_"), ids[:3]; print(len(ids), "voices, English first")'
+          body='{"text": "Good morning. Your board has three tasks waiting.", "voice": "bf_emma", "speed": 1.0}'
+          status=$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d "$body" http://127.0.0.1:8100/speak)
+          [ "$status" = 401 ] || { echo "::error::/speak without the token answered $status, not 401"; exit 1; }
+          status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"text": "Hi", "voice": "xx_nobody"}' http://127.0.0.1:8100/speak)
+          [ "$status" = 422 ] || { echo "::error::an unknown voice answered $status, not 422"; exit 1; }
+          curl -fsS -D headers.txt -o speech.mp3 -w 'first byte %{time_starttransfer} s, total %{time_total} s, %{size_download} bytes\n' \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$body" http://127.0.0.1:8100/speak
+          cat headers.txt
+          grep -qi '^content-type: audio/mpeg' headers.txt
+          grep -qi '^x-voice-id: bf_emma' headers.txt
+          grep -qi '^cache-control: no-store' headers.txt
+          head -c 2 speech.mp3 | od -An -tx1 | grep -q 'ff f3' || { echo "::error::the answer does not start with an MPEG-2 Layer III frame"; exit 1; }
+          health=$(docker inspect -f '{{.State.Health.Status}}' voice-tts)
+          echo "Docker's health status: $health"
+          [ "$health" = healthy ] || { echo "::error::the image's HEALTHCHECK did not report healthy"; exit 1; }
+          echo "voice-tts warms, refuses without the token, and streams MP3: PASS"
