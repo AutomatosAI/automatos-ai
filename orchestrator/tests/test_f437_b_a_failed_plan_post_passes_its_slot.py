@@ -71,7 +71,8 @@ def test_a_failed_post_that_tried_to_publish_stays_retryable(maker):  # noqa: F8
     plan = _text_plan(maker)
     post = _failed(maker, plan, [_entry("draft"), _entry("submit"), _entry("approve"), _entry("publish", channels=["linkedin"]),
                                  _entry("publish_failed")])
-    post_targets.replace_targets(post, [{"toolkit": "linkedin", "post_kind": "text", "options": {}}])
+    targets = post_targets.validate_targets([{"toolkit": "linkedin", "post_kind": "text", "options": {}}])
+    post_targets.replace_targets(post, targets)
     post.targets[0].status = publish_lifecycle.TARGET_FAILED
     post.content_hash = service.compute_content_hash(post)
     post.approved_hash = post.content_hash
