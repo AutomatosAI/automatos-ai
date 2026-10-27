@@ -66,6 +66,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.heartbeat"),
     RouterSpec("api.channels"),
     RouterSpec("api.voice_retell"),  # PRD-203 V·S4 — Retell streaming custom-LLM webhook
+    RouterSpec("api.voice_speech"),  # Auto's server voice: speech as MP3 from voice-tts, and its voices
     RouterSpec("api.reports"),
     RouterSpec("api.deliverables"),
     RouterSpec("api.deliverable_thumbnails"),  # F353 — a document card's first-page picture

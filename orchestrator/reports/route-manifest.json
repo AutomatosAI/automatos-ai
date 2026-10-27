@@ -1,5 +1,5 @@
 {
-  "route_count": 981,
+  "route_count": 983,
   "routes": [
     {
       "method": "GET",
@@ -3292,6 +3292,14 @@
     {
       "method": "",
       "path": "/api/voice/retell/llm-websocket/{call_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/speech"
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/voices"
     },
     {
       "method": "POST",
