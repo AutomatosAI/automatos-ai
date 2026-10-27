@@ -462,7 +462,9 @@ def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
     assert not [line for line in INSTRUCTIONS if "gosu" in line]
     exec_line = (WORKER / "entrypoint.sh").read_text().rstrip().splitlines()[-1]
     assert exec_line == f'exec {" ".join(toolchain.SETPRIV_DROP)} python -m main "$@"'
-    assert toolchain.WORKER_IDENTITY == "1000 1000 /home/worker 1"   # no_new_privs set (F452)
+    # F452: no_new_privs set, and (security review) no capability left after the drop.
+    assert toolchain.WORKER_IDENTITY == "1000 1000 /home/worker"
+    assert toolchain.NO_NEW_PRIVS == "1" and toolchain.NO_CAPABILITIES == "0000000000000000 0000000000000000"
 
 
 def test_images_runs_the_site_packages_check_as_the_worker_user():

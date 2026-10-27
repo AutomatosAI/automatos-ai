@@ -58,7 +58,10 @@ WALK = ("find {volume} -mindepth 1 ( -path */projects -o -path {local} ) -prune 
 DEFAULT_ID = "00000000-0000-0000-0000-0000000000c1"
 # Whether uid 1000 can write your deliverables folder, asked as the worker.
 PROBE = "setpriv --reuid=worker --regid=worker --init-groups test -w {local}"
-START = "gosu worker python -m main --flag"
+# The entrypoint's final exec, as every other assertion below inlines it: stale here
+# before this fix (it said "gosu worker...", pre-PRD-262's gosu->setpriv move), and
+# unused until the two US-040 security-review tests below started reading it.
+START = f"{DROP} --flag"
 ROOT_OWNS = "[entrypoint] root owns your deliverables folder (AUTOMATOS_WORKSPACE_DIR)"
 # What getent finds in the worker's image (python:3.12-slim's base-passwd, and the worker):
 # "database:id:name" each. Any other id is free.
