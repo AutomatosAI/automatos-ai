@@ -1487,8 +1487,14 @@ jobs:
       # the worker already owns is left alone (its ctime holds), and projects/ is skipped.
       # Then a read-only volume: every chown fails, the block logs that, and the script
       # still starts the worker. A stand-in `python`, first on PATH, takes the worker's
-      # place and prints the uid setpriv dropped it to and its HOME, which the entrypoint
-      # sets because setpriv, unlike the gosu it replaced (PRD-262, row 47), leaves root's.
+      # place and prints the uid and gid setpriv dropped it to and its HOME, which the
+      # entrypoint sets because setpriv, unlike the gosu it replaced (PRD-262, row 47),
+      # leaves root's. Then deliverables folders uid 1000 cannot write (US-040): one an
+      # image account owns, www-data, which the worker never becomes; one the host's uid
+      # 1001 owns, whose uid and gid the worker takes; one in root's group, whose uid
+      # alone it takes (the security review's fixes). F452: the stand-in also prints the
+      # NoNewPrivs that setpriv --no-new-privs set, and no file in the image keeps a setuid
+      # or setgid bit (the Dockerfile strips them; images.yml checks the GHCR build too).
       - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
         run: |
           docker volume create parity-wk-readonly > /dev/null
@@ -1500,9 +1506,11 @@ jobs:
           check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
           owner() { stat -c %U "$1"; }  # no -L: a symlink's own owner
           mkdir -p /tmp/stand-in
-          printf '#!/bin/sh\necho "worker started as uid $(id -u) with HOME=$HOME"\n' > /tmp/stand-in/python
+          printf '#!/bin/sh\necho "worker started as uid $(id -u) gid $(id -g) with HOME=$HOME no_new_privs=$(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)"\n' > /tmp/stand-in/python
           chmod 755 /tmp/stand-in/python
           boot() { WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
+          setid=$(find / -xdev -perm /6000 -type f)
+          check "files with a setuid or setgid bit" "${setid:-none}" none
 
           vol=/tmp/volume
           mkdir -p "$vol/ws/projects" "$vol/ws/sub"
@@ -1524,6 +1532,7 @@ jobs:
           check "the ctime of a file the worker already owned" "$(stat -c %z "$vol/ws/owned")" "$owned_ctime"
           check "the worker" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the worker's HOME" "$(grep -o 'HOME=[^ ]*' <<< "$out")" "HOME=/home/worker"
+          check "the worker's no_new_privs" "$(grep -o 'no_new_privs=[0-9]*' <<< "$out")" "no_new_privs=1"
           check "failed-chown lines on a writable volume" "$(grep -c 'could not be re-owned' <<< "$out")" 0
 
           out=$(boot /srv/readonly); code=$?
@@ -1533,9 +1542,20 @@ jobs:
           check "the worker after the failed chown" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the read-only file" "$(owner /srv/readonly/ws/file)" root
 
+          # PRD-262 US-040's security review: a folder an image account owns, www-data (33),
+          # never makes the worker that account. It stays uid 1000, and the log says why.
+          theirs=/tmp/volume3/local
+          mkdir -p "$theirs"
+          chown 33:33 "$theirs"
+          out=$(LOCAL_WORKSPACE_ROOT="$theirs" boot /tmp/volume3); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder www-data owns" "$code" 0
+          check "the worker with a folder www-data owns" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "the log line for that folder" "$(grep -c "cannot take that uid (www-data's in the worker's image)" <<< "$out")" 1
+
           # PRD-262 US-040: a deliverables folder uid 1000 cannot write, as on a Linux host whose
           # user is uid 1001. The worker runs as the folder's owner, and the walk leaves the folder
-          # alone. Last: it changes the worker's uid in this container.
+          # alone. This case and the next change the worker's uid in this container: they run last.
           mine=/tmp/volume2/local
           mkdir -p "$mine/projects"
           touch "$mine/file" "$mine/older"
@@ -1548,6 +1568,17 @@ jobs:
           check "a file in that folder" "$(stat -c %u "$mine/file")" 1001
           check "a uid 1000 file in that folder" "$(stat -c %u "$mine/older")" 1000
           check "the volume root with that folder" "$(stat -c %u /tmp/volume2)" 1001
+          check "the worker's gid with that folder" "$(grep -o 'started as uid [0-9]* gid [0-9]*' <<< "$out")" "started as uid 1001 gid 1001"
+
+          # The security review: a folder in root's group, 1002:0. The worker takes uid 1002
+          # and keeps its own gid, 1001 since the case above, never root's group.
+          rootgroup=/tmp/volume4/local
+          mkdir -p "$rootgroup"
+          chown 1002:0 "$rootgroup"
+          out=$(LOCAL_WORKSPACE_ROOT="$rootgroup" boot /tmp/volume4); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder in root's group" "$code" 0
+          check "the worker with a folder in root's group" "$(grep -o 'started as uid [0-9]* gid [0-9]*' <<< "$out")" "started as uid 1002 gid 1001"
           exit "$bad"
           SH
 

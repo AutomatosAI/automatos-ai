@@ -652,6 +652,10 @@ profile and its files live **on your machine**:
   `projects/`. When root owns the folder (`make up` run as root), the worker
   stays uid 1000 and cannot write it, and its log says so: give the folder to
   another user with `sudo chown -R <user>: <folder>` and restart the worker.
+  The same holds for a folder owned by an account the worker's image already
+  has, such as `www-data` (33) or `nobody` (65534): the worker never becomes
+  it. When the folder's group is root's (gid 0) or one of the image's own
+  groups, the worker takes your uid and keeps its own group.
 - **Running without it.** `make up CORE=1` (or
   `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
   the five other containers and not the worker (§1b). Code Canvas, the

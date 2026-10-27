@@ -265,6 +265,15 @@ COPY --from=locks /locks/sdk.lock /opt/worker-locks/
 RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
     -r /opt/worker-locks/sdk.lock
 
+# F452: no setuid or setgid file, after every install so none brings one back. The
+# base image and openssh-client brought su, mount, umount, passwd, chsh, chfn, newgrp,
+# gpasswd and ssh-keysign setuid root; the same find clears any setgid bit too. Nothing
+# the worker or an agent runs needs one: the worker drops to uid 1000 with
+# --no-new-privs (entrypoint.sh), and git over ssh signs with the workspace's key, not
+# ssh-keysign's host key. -xdev keeps find on the image's own filesystem.
+# scripts/ci/image_worker_toolchain.py finds no such file in the built image.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
 # Entrypoint fixes volume ownership then drops to worker user. --chmod sets the mode
 # in the copy itself; a separate chmod RUN published an empty layer, since git already
 # carries the exec bit (PRD-262 US-045).
