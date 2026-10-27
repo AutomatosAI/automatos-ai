@@ -364,8 +364,8 @@ async def resolve_repo_dir(client) -> Optional[str]:
     return None
 
 
-@reads_in_the_workers_form  # F460 (night 18): a read's path in the worker's own form
 @shows_a_read_file  # F420 (night 14): in the owner's chat, a file read is theirs to see
+@reads_in_the_workers_form  # F460 (night 18): a read's path in the worker's own form
 async def execute_workspace_action(
     executor,
     tool_name: str,
