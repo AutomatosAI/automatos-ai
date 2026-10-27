@@ -1,5 +1,6 @@
 """The HTTP API with a stand-in model and encoder: the bearer gate, the refusals and their codes,
-the streamed answer, the concurrency limit and the warm-up. test_speech.py speaks for real.
+the streamed answer, the concurrency limit (a dropped request keeps its slot while its synthesis
+runs), the warm-up, and failures that never put the text in a log. test_speech.py speaks for real.
 """
 
 from __future__ import annotations
@@ -8,21 +9,23 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from dataclasses import replace
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from helpers import AUTH, TOKEN, FakeEncoder, FakeEngine, catalogue
+from voice_tts.mp3 import EncoderError
 from voice_tts import server
 from voice_tts.server import create_app, token_matches, warm_in_background
 
 SECRET_TEXT = "The quarterly numbers for Project Nightingale are confidential."
 
 
-def _client(settings, tmp_path, engine=None) -> TestClient:
-    app = create_app(settings, engine=engine or FakeEngine(), catalogue=catalogue(tmp_path), encoder=FakeEncoder.start)
-    return TestClient(TestServer(app))
+def _client(settings, tmp_path, engine=None, encoder=FakeEncoder.start, **server_options) -> TestClient:
+    app = create_app(settings, engine=engine or FakeEngine(), catalogue=catalogue(tmp_path), encoder=encoder)
+    return TestClient(TestServer(app, **server_options))
 
 
 def _run(coro):
@@ -219,7 +222,7 @@ def test_past_the_concurrency_limit_speak_is_a_429_tts_busy_at_once(settings, tm
             assert answered.status == 200
             await answered.read()
             # The slot is given back once the handler returns, just after the body's last byte.
-            await _settle(lambda: client.app[server.STATE].active == 0)
+            await _settle(lambda: client.app[server.STATE].slots.held == 0)
             third = await client.post("/speak", json={"text": "The third answer."}, headers=AUTH)
             assert third.status == 200
 
@@ -229,10 +232,128 @@ def test_past_the_concurrency_limit_speak_is_a_429_tts_busy_at_once(settings, tm
         engine.hold.set()
 
 
-def test_an_open_service_speaks_without_a_token_in_development(settings, tmp_path):
+def test_an_open_service_speaks_without_a_token_when_a_developer_allowed_it(settings, tmp_path):
     async def go():
-        async with _client(replace(settings, token=""), tmp_path) as client:
+        async with _client(replace(settings, token="", allow_no_token=True), tmp_path) as client:
             response = await client.post("/speak", data=json.dumps({"text": "Hi there."}))
             assert response.status == 200
 
     _run(go())
+
+
+class _Watched:
+    """The app's speaker, noting when a request's handler is cancelled (its client went away)."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.cancelled = asyncio.Event()
+
+    async def stream(self, request, spec, slot):
+        try:
+            return await self.inner.stream(request, spec, slot)
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+def test_a_dropped_request_keeps_its_slot_until_its_synthesis_ends_and_meanwhile_others_get_429(settings, tmp_path):
+    engine = FakeEngine()
+    engine.hold = threading.Event()
+    one_slot = replace(settings, max_concurrent=1)
+
+    async def go():
+        async with _client(one_slot, tmp_path, engine, handler_cancellation=True) as client:
+            state = client.app[server.STATE]
+            watched = _Watched(state.speaker)
+            state.speaker = watched
+            dropped = asyncio.ensure_future(client.post("/speak", json={"text": "The first answer."}, headers=AUTH))
+            await _settle(engine.started.is_set)
+            dropped.cancel()  # the client goes away mid-synthesis
+            await asyncio.gather(dropped, return_exceptions=True)
+            await asyncio.wait_for(watched.cancelled.wait(), timeout=10)
+            assert state.slots.held == 1, "Kokoro's thread still runs, so its slot is still held"
+            meanwhile = await asyncio.wait_for(
+                client.post("/speak", json={"text": "The second answer."}, headers=AUTH), timeout=5)
+            assert meanwhile.status == 429
+            assert (await meanwhile.json())["code"] == "tts_busy"
+            engine.hold.set()
+            await _settle(lambda: state.slots.held == 0)
+            after = await client.post("/speak", json={"text": "The third answer."}, headers=AUTH)
+            assert after.status == 200
+            await after.read()
+
+    try:
+        _run(go())
+    finally:
+        engine.hold.set()
+
+
+class _BrokenEngine(FakeEngine):
+    """Fails with an error whose message carries the text, as a library's might, on the sentences named."""
+
+    def __init__(self, broken_on) -> None:
+        super().__init__()
+        self.broken_on = broken_on
+
+    def speak(self, text, voice, speed, language):
+        if any(part in text for part in self.broken_on):
+            time.sleep(0.5)  # the audio before it has gone out by then
+            raise RuntimeError(f"espeak could not phonemize {text!r}")
+        return super().speak(text, voice, speed, language)
+
+
+def test_a_failure_before_any_audio_is_a_500_tts_failed_and_the_text_is_never_logged(settings, tmp_path, caplog):
+    async def go():
+        async with _client(settings, tmp_path, _BrokenEngine(["Nightingale"])) as client:
+            response = await client.post("/speak", json={"text": SECRET_TEXT, "voice": "bm_george"}, headers=AUTH)
+            assert response.status == 500
+            assert (await response.json())["code"] == "tts_failed"
+            assert "Nightingale" not in await response.text()
+
+    with caplog.at_level(logging.DEBUG):
+        _run(go())
+    assert any("RuntimeError voice=bm_george" in record.getMessage() for record in caplog.records)
+    assert "Nightingale" not in caplog.text
+
+
+def test_a_failure_after_audio_went_out_ends_the_stream_cleanly_and_the_text_is_never_logged(
+    settings, tmp_path, caplog,
+):
+    text = "Your board has three tasks waiting. Project Nightingale is the first of them."
+
+    async def go():
+        async with _client(settings, tmp_path, _BrokenEngine(["Nightingale"])) as client:
+            response = await client.post("/speak", json={"text": text}, headers=AUTH)
+            assert response.status == 200
+            audio = await response.read()  # the body ends; no broken transfer
+            assert audio.startswith(b"\xff\xf3") and b"\x01\x00" in audio
+
+    with caplog.at_level(logging.DEBUG):
+        _run(go())
+    assert any("RuntimeError voice=af_heart" in record.getMessage() for record in caplog.records)
+    assert any(record.getMessage().startswith("speak failed:") for record in caplog.records)
+    assert "Nightingale" not in caplog.text
+
+
+class _BrokenEncoder(FakeEncoder):
+    """LAME that fails before its first frame."""
+
+    @classmethod
+    async def start(cls, settings):
+        return cls()
+
+    async def frames(self):
+        raise EncoderError("LAME exited with 1: bad input")
+        yield b""  # pragma: no cover
+
+
+def test_an_encoder_that_fails_before_its_first_frame_is_a_500_tts_failed(settings, tmp_path):
+    async def go():
+        async with _client(settings, tmp_path, encoder=_BrokenEncoder.start) as client:
+            response = await client.post("/speak", json={"text": "Hello there, how are you?"}, headers=AUTH)
+            assert response.status == 500
+            assert (await response.json())["code"] == "tts_failed"
+            assert client.app[server.STATE].slots.held == 0
+
+    _run(go())
+

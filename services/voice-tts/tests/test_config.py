@@ -22,7 +22,7 @@ def test_the_defaults_describe_the_image(tmp_path):
     assert settings.espeak_data_path == "/opt/espeak"
     assert (settings.max_chars, settings.mp3_kbps, settings.lame_bin) == (500, 64, "lame")
     assert (settings.max_concurrent, settings.threads) == (4, 4)
-    assert settings.token == "" and not settings.is_production
+    assert settings.token == "" and not settings.allow_no_token and not settings.is_production
 
 
 def test_the_token_never_reaches_a_repr():
@@ -63,6 +63,11 @@ def test_no_quota_or_no_cgroup_file_is_the_machines_cpus(tmp_path):
 
 def test_a_quota_above_the_machine_is_held_to_the_machine(tmp_path):
     assert available_cpus(_cpu_max(tmp_path, "800000 100000\n"), cpu_count=4) == 4
+
+
+@pytest.mark.parametrize("raw, allowed", [("true", True), ("TRUE", True), ("1", False), ("yes", False), ("", False)])
+def test_running_without_a_token_takes_the_explicit_flag(raw, allowed):
+    assert load_settings({"VOICE_TTS_ALLOW_NO_TOKEN": raw}, cpus=1).allow_no_token is allowed
 
 
 def test_production_is_named_by_environment():

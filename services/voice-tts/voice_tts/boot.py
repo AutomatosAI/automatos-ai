@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import List, Sequence
 
-from .config import TOKEN_ENV, Settings
+from .config import ALLOW_NO_TOKEN_ENV, TOKEN_ENV, Settings
 from .voices import VoicesError, load_catalogue
 
 BOOT_FAILURE_EXIT_CODE = 2
@@ -28,9 +28,12 @@ class BootError(RuntimeError):
 
 
 def token_problems(settings: Settings) -> List[str]:
-    """Production never speaks for anyone who asks; development may."""
-    if settings.is_production and not settings.token:
-        return [f"{TOKEN_ENV} is not set, and production refuses an unauthenticated voice"]
+    """No voice speaks for anyone who asks, whatever ENVIRONMENT says, unless a developer said so."""
+    if not settings.token and not settings.allow_no_token:
+        return [
+            f"{TOKEN_ENV} is not set, and the voice refuses to run unauthenticated "
+            f"(make env generates it; {ALLOW_NO_TOKEN_ENV}=true is for a developer's own machine only)"
+        ]
     return []
 
 

@@ -14,7 +14,7 @@ from typing import List, Optional
 from automatos_logging import setup_logging
 
 from .boot import BOOT_FAILURE_EXIT_CODE, BootError, assert_boot_environment
-from .config import TOKEN_ENV, ConfigError, load_settings
+from .config import ALLOW_NO_TOKEN_ENV, TOKEN_ENV, ConfigError, load_settings
 
 logger = logging.getLogger("voice_tts")
 
@@ -38,7 +38,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"voice-tts: {exc}", file=sys.stderr)
         return BOOT_FAILURE_EXIT_CODE
     if not settings.token:
-        logger.warning("%s is not set: /speak is open (development only)", TOKEN_ENV)
+        logger.warning("%s is not set and %s=true: /speak is open (development only)", TOKEN_ENV,
+                       ALLOW_NO_TOKEN_ENV)
     if (args.command or "serve") == "boot-check":
         print("voice-tts: boot checks passed")
         return 0

@@ -45,7 +45,11 @@ def lame_command(settings: Settings) -> List[str]:
 
 
 class Mp3Encoder:
-    """One LAME process: ``feed`` PCM, iterate ``frames`` for the MP3, ``finish`` when done."""
+    """One LAME process: ``feed`` PCM, iterate ``frames`` for the MP3, ``end_input`` when done.
+
+    ``feed`` and ``frames`` must run at once (two tasks): LAME stops reading its input while
+    nobody reads its output, so a feed with no reader blocks once the pipes are full.
+    """
 
     def __init__(self, process: asyncio.subprocess.Process, timeout_seconds: int) -> None:
         self._process = process
@@ -65,7 +69,7 @@ class Mp3Encoder:
         return cls(process, settings.encode_timeout_seconds)
 
     async def feed(self, pcm: bytes) -> None:
-        """Hand LAME more PCM, waiting while its pipe is full."""
+        """Hand LAME more PCM, waiting while its pipe is full. Read ``frames`` meanwhile, or this blocks."""
         stdin = self._process.stdin
         if stdin is None or not pcm:
             return

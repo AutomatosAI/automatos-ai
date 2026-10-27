@@ -8,9 +8,10 @@
 ``POST /speak`` refuses before it speaks, with ``{"code", "detail"}``: 401 without the
 token (compared in constant time), 422 ``tts_bad_request`` for a body it cannot speak
 (an unknown voice among them), 413 ``tts_too_long``, 503 ``tts_warming`` while the
-model loads, and 429 ``tts_busy`` when ``VOICE_TTS_MAX_CONCURRENT`` syntheses are
-already running. It never waits for a slot: the caller falls back to the device's
-own voice at once. The text is never logged.
+model loads, and 429 ``tts_busy`` when all ``VOICE_TTS_MAX_CONCURRENT`` slots are held
+(slots.py: a slot is held until its synthesis thread has finished, even when the client
+has gone). It never waits for a slot: the caller falls back to the device's own voice
+at once. Any other failure is a 500 ``tts_failed`` (speaking.py). The text is never logged.
 
 Once the service is listening the model loads in a background thread (the PRD-262
 US-053 pattern from media-render), so /healthz answers at once.
@@ -30,6 +31,7 @@ from aiohttp import web
 from .config import TOKEN_ENV, Settings
 from .engine import Engine
 from .request import RequestError, parse_speech
+from .slots import Slots
 from .speaking import Speaker, SpeakError
 from .voices import Catalogue, load_catalogue
 
@@ -48,7 +50,7 @@ class ServiceState:
     catalogue: Catalogue
     engine: Any
     speaker: Speaker
-    active: int = 0
+    slots: Slots
     tasks: Set["asyncio.Task[None]"] = field(default_factory=set)
 
 
@@ -85,38 +87,30 @@ async def _read_json(request: web.Request) -> Any:
         raise RequestError(422, "tts_bad_request", "the body is not JSON") from None
 
 
-def _admission(state: ServiceState) -> Optional[web.Response]:
-    """503 while the model loads, 429 when every synthesis slot is taken; None when it may speak."""
-    if not state.engine.loaded:
-        return refusal(503, "tts_warming", "the voice model is still loading; try again in a few seconds")
-    if state.active >= state.settings.max_concurrent:
-        logger.info("speak refused: %d syntheses already running", state.active)
-        return refusal(429, "tts_busy", "the voice is busy; try again shortly")
-    return None
-
-
 async def speak(request: web.Request) -> web.StreamResponse:
     state = request.app[STATE]
     try:
         spec = parse_speech(await _read_json(request), state.settings, state.catalogue)
     except RequestError as exc:
         return refusal(exc.status, exc.code, exc.detail)
-    refused = _admission(state)
-    if refused is not None:
-        return refused
-    # No await between the check above and this count: admission is one step.
-    state.active += 1
+    if not state.engine.loaded:
+        return refusal(503, "tts_warming", "the voice model is still loading; try again in a few seconds")
+    slot = state.slots.try_acquire()
+    if slot is None:
+        logger.info("speak refused: all %d synthesis slots are held", state.slots.limit)
+        return refusal(429, "tts_busy", "the voice is busy; try again shortly")
     try:
-        return await state.speaker.stream(request, spec)
+        return await state.speaker.stream(request, spec, slot)
     except SpeakError as exc:
         return refusal(exc.status, exc.code, exc.detail)
     finally:
-        state.active -= 1
+        slot.close()
 
 
 def _bearer_gate(settings: Settings) -> Callable[..., Any]:
     @web.middleware
     async def bearer(request: web.Request, handler):
+        # No token only with VOICE_TTS_ALLOW_NO_TOKEN: boot refuses to start without one otherwise.
         if request.path in PUBLIC_PATHS or not settings.token:
             return await handler(request)
         if not token_matches(request.headers.get(AUTHORIZATION, ""), settings.token):
@@ -134,7 +128,9 @@ def create_app(
     catalogue = catalogue or load_catalogue(settings.kokoro_voices_path, settings.default_voice)
     speaker = Speaker(settings, engine) if encoder is None else Speaker(settings, engine, encoder=encoder)
     app = web.Application(middlewares=[_bearer_gate(settings)], client_max_size=MAX_BODY_BYTES)
-    app[STATE] = ServiceState(settings=settings, catalogue=catalogue, engine=engine, speaker=speaker)
+    app[STATE] = ServiceState(
+        settings=settings, catalogue=catalogue, engine=engine, speaker=speaker, slots=Slots(settings.max_concurrent)
+    )
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/readyz", readyz)
     app.router.add_get("/voices", voices)
@@ -144,10 +140,12 @@ def create_app(
 
 
 async def _cancel_tasks(app: web.Application) -> None:
-    tasks = list(app[STATE].tasks)
+    state = app[STATE]
+    tasks = list(state.tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    state.slots.shutdown()
 
 
 async def _warm(state: ServiceState) -> None:

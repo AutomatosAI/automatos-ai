@@ -7,6 +7,8 @@ import subprocess
 import sys
 from dataclasses import replace
 
+import pytest
+
 from voice_tts.boot import BOOT_FAILURE_EXIT_CODE, boot_problems
 
 
@@ -14,10 +16,15 @@ def test_the_image_passes_its_boot_checks(settings):
     assert boot_problems(settings) == []
 
 
-def test_production_without_a_token_is_refused(settings):
-    problems = boot_problems(replace(settings, environment="production", token=""))
+@pytest.mark.parametrize("environment", ["production", "development", "staging", ""])
+def test_no_token_is_refused_in_every_environment(settings, environment):
+    problems = boot_problems(replace(settings, environment=environment, token=""))
 
     assert any("VOICE_TTS_TOKEN is not set" in problem for problem in problems)
+
+
+def test_no_token_boots_only_when_a_developer_allowed_it(settings):
+    assert boot_problems(replace(settings, token="", allow_no_token=True)) == []
 
 
 def test_a_missing_model_voices_file_default_voice_or_encoder_is_refused(settings, tmp_path):
@@ -44,7 +51,8 @@ def test_an_espeak_path_espeak_ng_would_truncate_is_refused(settings, tmp_path):
 
 
 def test_the_entrypoint_exits_2_on_a_boot_problem():
-    env = {**os.environ, "ENVIRONMENT": "production", "VOICE_TTS_TOKEN": "", "LOG_RELAY_ENABLED": "false"}
+    env = {**os.environ, "ENVIRONMENT": "development", "VOICE_TTS_TOKEN": "", "LOG_RELAY_ENABLED": "false"}
+    env.pop("VOICE_TTS_ALLOW_NO_TOKEN", None)
 
     result = subprocess.run(
         [sys.executable, "-m", "voice_tts", "boot-check"], capture_output=True, text=True, env=env, timeout=60,

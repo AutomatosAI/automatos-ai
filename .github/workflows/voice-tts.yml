@@ -68,16 +68,18 @@ jobs:
           docker build --target test -t "$TEST_IMAGE" services/voice-tts/
           docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
 
-      - name: Boot assertion — production without a token stops the container
+      - name: Boot assertion — no token stops the container, whatever ENVIRONMENT says
         run: |
-          set +e
-          timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false -e ENVIRONMENT=production "$IMAGE" > boot.log 2>&1
-          code=$?
-          set -e
-          cat boot.log
-          if [ "$code" -ne 2 ]; then echo "::error::expected exit 2 without VOICE_TTS_TOKEN in production, got $code"; exit 1; fi
-          grep -q 'VOICE_TTS_TOKEN is not set' boot.log
-          echo "production without a token refused to boot (exit 2): PASS"
+          for environment in production development; do
+            set +e
+            timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false -e ENVIRONMENT="$environment" "$IMAGE" > boot.log 2>&1
+            code=$?
+            set -e
+            cat boot.log
+            if [ "$code" -ne 2 ]; then echo "::error::expected exit 2 without VOICE_TTS_TOKEN ($environment), got $code"; exit 1; fi
+            grep -q 'VOICE_TTS_TOKEN is not set' boot.log
+          done
+          echo "no token refused to boot (exit 2) in production and in development: PASS"
 
       - name: The container warms, answers its contract and streams MP3
         run: |

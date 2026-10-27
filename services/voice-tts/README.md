@@ -21,10 +21,12 @@ The orchestrator reaches it at `VOICE_TTS_URL` through `POST /api/voice/speech` 
 | 422 | `tts_bad_request` | The body is not the object above, the text is empty once trimmed, the voice is not one `/voices` lists, the speed is not a finite number, or the text has nothing Kokoro can say. |
 | 413 | `tts_too_long` | The text is over `VOICE_TTS_MAX_CHARS` (500) once trimmed. |
 | 503 | `tts_warming` | The model is still loading. |
-| 429 | `tts_busy` | `VOICE_TTS_MAX_CONCURRENT` syntheses are already running. The request is refused at once, never queued: the caller falls back to the device voice. |
+| 429 | `tts_busy` | All `VOICE_TTS_MAX_CONCURRENT` slots are held. The request is refused at once, never queued: the caller falls back to the device voice. |
+| 500 | `tts_failed` | Kokoro, espeak-ng or LAME failed before any audio went out. Once audio has gone out, a failure ends the stream cleanly instead. |
 
 - **Speed** is clamped to 0.8–1.2. Null means 1.0.
-- **The text is never logged.** One line per answer gives the voice, the number of characters and sentences, the speed, the seconds to the first byte and in total, and the bytes. kokoro-onnx would log each text's phonemes at DEBUG, so its logger is held at WARNING.
+- **The text is never logged.** One line per answer gives the voice, the number of characters and sentences, the speed, the seconds to the first byte and in total, and the bytes. kokoro-onnx would log each text's phonemes at DEBUG, so its logger is held at WARNING. A library's error message or traceback can carry the text, so a failure is logged by its exception type and the voice alone.
+- **No token, no voice.** Boot refuses an empty `VOICE_TTS_TOKEN` in every environment. `VOICE_TTS_ALLOW_NO_TOKEN=true` opens `/speak` on a developer's own machine only. `make env` generates the token for compose.
 
 ### How an answer streams
 
@@ -39,6 +41,7 @@ If the client goes away, no further sentence is spoken and LAME is stopped.
 
 ### Concurrency and CPU
 
+- Each answer takes a slot (`voice_tts/slots.py`), and its sentences are spoken on a pool of as many threads as there are slots. A slot goes back only when the answer has ended **and** its synthesis thread has finished. Kokoro cannot be stopped mid-sentence, so a client that drops keeps its slot until its sentence is done: connecting and dropping again and again never runs more syntheses than there are slots.
 - `VOICE_TTS_MAX_CONCURRENT` defaults to the container's CPUs. That is the cgroup quota (`/sys/fs/cgroup/cpu.max`, so Railway's plan or compose's `cpus`), not the host's count.
 - One onnxruntime session serves every request with `VOICE_TTS_THREADS` intra-op threads (the same default). The session does not spin while idle, so concurrent syntheses share the CPU instead of burning it.
 - kokoro-onnx serialises espeak-ng's phonemizing (it has process-wide state) and runs inference concurrently.
@@ -110,7 +113,8 @@ These are estimates; the first `images.yml` build reports the real size.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VOICE_TTS_TOKEN` | empty | The bearer token `/speak` asks for. The orchestrator sends the same value. Boot refuses `ENVIRONMENT=production` without one. |
+| `VOICE_TTS_TOKEN` | empty | The bearer token `/speak` asks for. The orchestrator sends the same value. Boot refuses to start without one, in every environment. |
+| `VOICE_TTS_ALLOW_NO_TOKEN` | `false` | `true` lets it start with no token, and `/speak` is then open. Only for a developer's own machine or a test. |
 | `VOICE_TTS_PORT` / `VOICE_TTS_BIND_HOST` | `8100` / `0.0.0.0` | Where it listens. |
 | `VOICE_TTS_DEFAULT_VOICE` | `af_heart` | The voice for a request that names none. Boot refuses one the image lacks. |
 | `VOICE_TTS_MAX_CHARS` | `500` | The longest text, once trimmed. |
@@ -130,7 +134,7 @@ These are estimates; the first `images.yml` build reports the real size.
 docker compose --profile voice up -d voice-tts
 ```
 
-Then set `VOICE_TTS_URL=http://voice-tts:8100` in the root `.env` and recreate the backend. An optional shared secret, `VOICE_TTS_TOKEN`, also goes in `.env`, and compose passes it to both services. Without the URL, the backend's discovery document does not list `tts`, so the phone and the web keep the device voice. See `docs/getting-started/self-hosting.md`.
+Then set `VOICE_TTS_URL=http://voice-tts:8100` in the root `.env` and recreate the backend. `make env` (which `make up` runs) generates `VOICE_TTS_TOKEN` in `.env`, and compose passes it to both services. Without `make`, set it yourself (`openssl rand -hex 24`): the service will not start without one. Without the URL, the backend's discovery document does not list `tts`, so the phone and the web keep the device voice. See `docs/getting-started/self-hosting.md`.
 
 **SaaS.** It runs as its own Railway service, `voice-tts` in `infrastructure/railway-manifest.json`. The steps are in `docs/getting-started/self-hosting.md` under "voice-tts on Railway".
 

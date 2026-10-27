@@ -16,6 +16,9 @@ from typing import Callable, Mapping, Optional, TypeVar
 
 # The same name on both sides: the orchestrator sends it as ``Authorization: Bearer``.
 TOKEN_ENV = "VOICE_TTS_TOKEN"
+# The one way to run without a token, for a developer's or a test's own machine: boot
+# refuses an empty VOICE_TTS_TOKEN in every environment unless this is "true".
+ALLOW_NO_TOKEN_ENV = "VOICE_TTS_ALLOW_NO_TOKEN"
 
 # The contract (README "API"): text of 1 to 500 characters after trimming; speed clamped to 0.8-1.2.
 DEFAULT_MAX_CHARS = 500
@@ -40,6 +43,7 @@ class Settings:
     port: int
     # Never in a repr, so never in a log line.
     token: str = field(repr=False)
+    allow_no_token: bool
     kokoro_model_path: str
     kokoro_voices_path: str
     espeak_data_path: str
@@ -131,6 +135,7 @@ def load_settings(environ: Optional[Mapping[str, str]] = None, cpus: Optional[in
         bind_host=env.text("VOICE_TTS_BIND_HOST", "0.0.0.0"),
         port=_parse("VOICE_TTS_PORT", env.text("VOICE_TTS_PORT", "8100"), int, lambda v: 0 < v < 65536, "a TCP port"),
         token=(env.source.get(TOKEN_ENV) or "").strip(),
+        allow_no_token=env.text(ALLOW_NO_TOKEN_ENV, "false").lower() == "true",
         kokoro_model_path=env.text("VOICE_TTS_KOKORO_MODEL", "/opt/kokoro/kokoro-v1.0.onnx"),
         kokoro_voices_path=env.text("VOICE_TTS_KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin"),
         espeak_data_path=env.text("VOICE_TTS_ESPEAK_DATA_PATH", "/opt/espeak"),

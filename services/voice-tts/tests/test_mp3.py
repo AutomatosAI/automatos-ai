@@ -50,18 +50,28 @@ def test_pcm_becomes_a_mono_24khz_mp3_of_the_same_length(settings):
     assert len(mp3) == pytest.approx(2.25 * 8000, rel=0.1)
 
 
+async def _drain(frames) -> int:
+    size = 0
+    async for chunk in frames:
+        size += len(chunk)
+    return size
+
+
 def test_frames_come_out_while_input_still_arrives(settings):
     async def go():
         encoder = await Mp3Encoder.start(settings)
+        frames = encoder.frames()
+        first = asyncio.ensure_future(frames.__anext__())  # read while feeding, as speaking.py does
         try:
-            await encoder.feed(_tone(2.0))
-            frames = encoder.frames()
-            first = await asyncio.wait_for(frames.__anext__(), timeout=10)
-            assert first[:2] == MPEG2_LAYER3_SYNC
+            await encoder.feed(_tone(1.0))
+            # The first frame arrives while LAME's input is still open, more PCM to come.
+            assert (await asyncio.wait_for(first, timeout=10))[:2] == MPEG2_LAYER3_SYNC
+            rest = asyncio.ensure_future(_drain(frames))
+            await encoder.feed(_tone(1.0, 660.0))
             await encoder.end_input()
-            async for _ in frames:
-                pass
+            assert await asyncio.wait_for(rest, timeout=10) > 0
         finally:
+            first.cancel()
             await encoder.close()
 
     asyncio.run(go())
