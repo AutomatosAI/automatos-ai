@@ -76,6 +76,12 @@ def test_mid_build_the_plan_says_building_since_its_moment(week, monkeypatch):  
 
     tick(MOMENT + timedelta(minutes=1))
 
+    # The tick announces the batch on its own session (services/socials_plan_maker.py); week's
+    # shared session (test_prd251_api.py's get_db override) still holds the plan it loaded before
+    # the tick, so a plain re-read would return that cached row, not the committed announcement
+    # (test_prd251_api.py:193 and :218/:234 hit this same staleness the same way).
+    week.session.expire_all()
+
     after = _batch(week, plan)
     assert (after["state"], after["made"], after["left"]) == ("ready", 3, 0)
 
