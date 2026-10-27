@@ -1,0 +1,32 @@
+# voice-tts runtime: the direct dependencies, pinned exactly (the versions
+# media-render runs, so the two images speak the same way).
+#
+# The image installs requirements.lock, never this file: every pin there, the
+# transitive ones included, carries its hashes, and the Dockerfile's `py` stage
+# installs it with uv pip install --require-hashes --no-deps. --universal resolves
+# for every platform, because the lock installs on linux/amd64 and linux/arm64
+# whatever machine compiles it. Regenerate it from the repository root after
+# changing this file:
+#
+#   uv pip compile services/voice-tts/requirements.in \
+#     --universal --python-version 3.12 --generate-hashes \
+#     --no-emit-package protobuf --no-emit-package flatbuffers \
+#     -o services/voice-tts/requirements.lock
+#
+# onnxruntime requires protobuf and flatbuffers, but only its transformers,
+# quantization and tools subpackages import them, and the image deletes those
+# (as media-render's does), so they stay out of the lock.
+#
+# No soundfile: Kokoro's samples go to LAME as PCM (the runtime's `lame`), and only
+# the test stage decodes MP3 (requirements-test.txt).
+
+# HTTP service (media-render's and the worker's server library)
+aiohttp==3.14.3
+
+# Kokoro TTS. kokoro-onnx drives espeak-ng through phonemizer: both are GPL-3.0
+# and stay inside this image (the GPL boundary).
+kokoro-onnx==0.6.1
+espeakng-loader==0.2.4
+phonemizer==3.4.0
+onnxruntime==1.30.0
+numpy==2.5.3

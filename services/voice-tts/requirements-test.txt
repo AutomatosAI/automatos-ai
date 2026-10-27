@@ -1,0 +1,4 @@
+# The service's own suite, installed only in the Dockerfile's `test` stage: pytest,
+# and soundfile, whose bundled libsndfile decodes the MP3 the suite checks.
+pytest==9.1.1
+soundfile==0.14.0
