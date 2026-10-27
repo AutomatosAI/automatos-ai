@@ -9,7 +9,12 @@ that is down is refused at once and the client falls back to the device's voice.
 
 voice-tts's refusals map to this server's codes: 413 stays ``tts_too_long``, 422 stays
 ``tts_bad_request`` (an unknown voice among them), 429 stays ``tts_busy``, and anything else
-(503 ``tts_warming`` while its model loads, a refused token, an error) is ``tts_unavailable``.
+(503 ``tts_warming`` while its model loads, a 500 ``tts_failed``, a refused token) is
+``tts_unavailable``, so the client falls back to the device's voice.
+
+A request with no voice gets ``VOICE_TTS_DEFAULT_VOICE`` when voice-tts's list (cached) holds
+it, and voice-tts's own default otherwise: the hosted API carries a value of that name from the
+voice service #625 retired. With no list to check against, voice-tts picks its own default.
 """
 from __future__ import annotations
 
@@ -73,6 +78,8 @@ class _CachedVoices:
     url: str
     fetched: float
     body: Dict[str, Any]
+    # The voice a request that names none is spoken in (default_voice).
+    spoken_default: str
 
 
 _shared: Optional[_Client] = None
@@ -119,6 +126,25 @@ async def _refusal(response: httpx.Response, workspace_id: str) -> SpeechRefused
     return SpeechRefused(response.status_code, code, detail)
 
 
+async def default_voice() -> Optional[str]:
+    """``VOICE_TTS_DEFAULT_VOICE`` when voice-tts holds it, else voice-tts's own default; None
+    (voice-tts chooses) when its list cannot be had."""
+    try:
+        return (await _listing()).spoken_default
+    except SpeechRefused:
+        return None
+
+
+def _spoken_default(body: Dict[str, Any]) -> str:
+    """The configured default when the list holds it; voice-tts's own, with a warning, when not."""
+    configured = config.VOICE_TTS_DEFAULT_VOICE
+    if configured in {voice["id"] for voice in body["voices"]}:
+        return configured
+    logger.warning("VOICE_TTS_DEFAULT_VOICE=%r is not one of voice-tts's voices; speaking in its default %s",
+                   configured, body["default"])
+    return body["default"]
+
+
 @dataclass(frozen=True)
 class SpeechStream:
     """voice-tts's 200: the voice it speaks with, and its body still to be read."""
@@ -131,8 +157,9 @@ class SpeechStream:
 async def open_speech(spec: SpeechRequest, workspace_id: str) -> SpeechStream:
     """Ask voice-tts to speak, up to its status and headers. Raises SpeechRefused."""
     require_configured()
+    voice = spec.voice if spec.voice is not None else await default_voice()
     client = _client()
-    payload = {"text": spec.text, "voice": spec.voice, "speed": spec.speed}
+    payload = {"text": spec.text, "voice": voice, "speed": spec.speed}
     started = time.monotonic()
     try:
         response = await client.send(client.build_request("POST", _url(SPEAK_PATH), json=payload), stream=True)
@@ -141,7 +168,7 @@ async def open_speech(spec: SpeechRequest, workspace_id: str) -> SpeechStream:
         raise unavailable() from exc
     if response.status_code != 200:
         raise await _refusal(response, workspace_id)
-    return SpeechStream(voice=response.headers.get(VOICE_HEADER, spec.voice), response=response, started=started)
+    return SpeechStream(voice=response.headers.get(VOICE_HEADER) or voice or "", response=response, started=started)
 
 
 async def relay(stream: SpeechStream, spec: SpeechRequest, workspace_id: str) -> AsyncIterator[bytes]:
@@ -179,12 +206,17 @@ async def relay(stream: SpeechStream, spec: SpeechRequest, workspace_id: str) ->
 
 async def fetch_voices() -> Dict[str, Any]:
     """voice-tts's voice list, answered from a copy for VOICES_CACHE_SECONDS. Raises SpeechRefused."""
+    return (await _listing()).body
+
+
+async def _listing() -> _CachedVoices:
+    """The cached copy of voice-tts's list, fetched again once it is VOICES_CACHE_SECONDS old."""
     global _voices
     require_configured()
     url = _url(VOICES_PATH)
     now = time.monotonic()
     if _voices is not None and _voices.url == url and now - _voices.fetched < VOICES_CACHE_SECONDS:
-        return _voices.body
+        return _voices
     try:
         response = await _client().get(url)
         response.raise_for_status()
@@ -192,8 +224,8 @@ async def fetch_voices() -> Dict[str, Any]:
     except (httpx.HTTPError, ValueError, ValidationError) as exc:
         logger.warning("voice_tts_voices_unavailable error=%s", type(exc).__name__)
         raise unavailable() from exc
-    _voices = _CachedVoices(url=url, fetched=now, body=body)
-    return body
+    _voices = _CachedVoices(url=url, fetched=now, body=body, spoken_default=_spoken_default(body))
+    return _voices
 
 
 def forget_voices() -> None:

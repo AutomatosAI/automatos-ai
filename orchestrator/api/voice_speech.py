@@ -14,8 +14,11 @@ token, with ``X-Workspace-ID``), and the permission ``POST /api/chat`` asks for
 * ``GET /api/voice/voices`` -> voice-tts's voice list (cached), or 503 ``tts_off`` /
   ``tts_unavailable``.
 
-The stream needs no database, so the pooled connection the permission check used is given
-back before it starts: a listener would otherwise hold one for the whole answer.
+The stream needs no database. FastAPI ends ``get_db`` only after the whole response has gone
+out, so the permission check's transaction is ended (rolled back) before the stream starts,
+which hands its pooled connection back: a listener would otherwise hold one for the whole
+answer. ``get_db`` still closes the session, once, when the request ends. The body is capped
+at ``MAX_BODY_BYTES`` on the wire (``main.PATH_BODY_LIMITS``), before it is read.
 """
 from __future__ import annotations
 
@@ -39,6 +42,7 @@ from modules.voice.speech import TTS_BAD_REQUEST, TTS_BUSY, TTS_TOO_LONG, Speech
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice"])
 
+SPEECH_ROUTE = "/api/voice/speech"
 SPEECH_PERMISSION = "agents:execute"
 MP3 = "audio/mpeg"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -89,15 +93,16 @@ async def _within_rate(workspace_id: str) -> None:
                             retry_after=reset_seconds)
 
 
-@router.post("/api/voice/speech", dependencies=[Depends(require_workspace_permission(SPEECH_PERMISSION))])
+@router.post(SPEECH_ROUTE, dependencies=[Depends(require_workspace_permission(SPEECH_PERMISSION))])
 async def speak(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Response:
     """Auto's words as MP3, streamed from voice-tts; a ``{"code", "detail"}`` refusal otherwise."""
-    # The permission check above was this request's last use of the database.
-    await asyncio.to_thread(db.close)
+    # The permission check above was this request's last use of the database: end its transaction,
+    # which gives the pooled connection back now; get_db closes the session after the stream.
+    await asyncio.to_thread(db.rollback)
     workspace_id = str(ctx.workspace_id)
     try:
         speech.require_configured()

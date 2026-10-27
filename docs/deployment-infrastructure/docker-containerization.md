@@ -177,7 +177,7 @@ Sources: [services/media-render/Dockerfile](), [services/media-render/README.md]
 | **Concurrency** | As many syntheses at once as the container has CPUs (its cgroup quota, `VOICE_TTS_MAX_CONCURRENT`); the next request is a 429 `tts_busy` at once, never queued. |
 | **GPL boundary** | As media-render's: phonemizer and espeak-ng live only in the image, which CI builds and scans but never publishes. |
 
-**How the backend uses it.** `POST /api/voice/speech` (`orchestrator/api/voice_speech.py`, `modules/voice/speech.py`) streams the MP3 through to any member who may chat, with refusals the clients treat as "use the device voice". `GET /api/voice/voices` relays the voice list, cached for five minutes. Discovery lists the `tts` capability only while `VOICE_TTS_URL` is set.
+**How the backend uses it.** `POST /api/voice/speech` (`orchestrator/api/voice_speech.py`, `modules/voice/speech.py`) streams the MP3 through to any member who may chat, with refusals the clients treat as "use the device voice"; a voice-tts 500 `tts_failed` is `tts_unavailable` there. Its body is capped at 16 KiB on the wire (`main.PATH_BODY_LIMITS`). `GET /api/voice/voices` relays the voice list, cached for five minutes. Discovery lists the `tts` capability only while `VOICE_TTS_URL` is set.
 
 | Backend setting | Default | What it does |
 |---|---|---|
@@ -185,7 +185,7 @@ Sources: [services/media-render/Dockerfile](), [services/media-render/README.md]
 | `VOICE_TTS_TOKEN` | empty | Sent as `Authorization: Bearer`; the same name and value on the service. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | 15 | The most one answer may take, the stream included. |
 | `VOICE_TTS_CONNECT_TIMEOUT_SECONDS` | 2 | How long a connection may take before the voice counts as unavailable, so a client falls back at once. |
-| `VOICE_TTS_DEFAULT_VOICE` | `af_heart` | The voice when a request names none. |
+| `VOICE_TTS_DEFAULT_VOICE` | `af_heart` | The voice when a request names none, used only when voice-tts lists it; otherwise voice-tts's own default (the hosted API still carries a value of this name from the voice service retired in #625). |
 | `VOICE_TTS_RATE_PER_MINUTE` | 60 | Sentences a workspace may have spoken a minute; past it, 429 `tts_busy`. 0 turns the limit off. |
 
 **Local edition.** The optional compose profile `voice` (`docker compose --profile voice up -d voice-tts`, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`), capped at 2 CPUs and 2 GB. See [self-hosting](../getting-started/self-hosting.md#7c-autos-server-voice-the-voice-profile).

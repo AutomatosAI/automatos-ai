@@ -9,9 +9,12 @@ so the contract is the refusals as much as the audio:
   never called), 422 ``tts_bad_request``, 413 ``tts_too_long``, 429 ``tts_busy`` (voice-tts busy, or
   the workspace's ``VOICE_TTS_RATE_PER_MINUTE`` spent) and 503 ``tts_unavailable`` (voice-tts down,
   warming, refusing the token, or too slow);
-* voice-tts gets ``{text, voice, speed}`` with the bearer token, the speed clamped and the default
-  voice filled in; one usage line per answer names the workspace, the voice, the characters and the
-  latency, never the text; the permission check's database connection is given back first;
+* voice-tts gets ``{text, voice, speed}`` with the bearer token and the speed clamped; a request
+  with no voice gets ``VOICE_TTS_DEFAULT_VOICE`` only when voice-tts lists it (a stale value from the
+  retired voice service falls back to voice-tts's default, and with no list voice-tts chooses); one
+  usage line per answer names the workspace, the voice, the characters and the latency, never the
+  text; the permission check's transaction is ended before the stream, and the session not closed
+  twice; a voice-tts 500 ``tts_failed`` is this server's ``tts_unavailable``;
 * the voice list is voice-tts's, cached, and checked before it is passed on;
 * discovery lists ``tts`` only while ``VOICE_TTS_URL`` is set, and the routes are mounted and in the
   route manifest.
@@ -77,18 +80,29 @@ class _Body(httpx.AsyncByteStream):
             yield chunk
 
 
+def _voice_tts(request: httpx.Request) -> httpx.Response:
+    """voice-tts's two routes: its voice list, and the MP3 in the voice it was asked for."""
+    if request.url.path == "/voices":
+        return httpx.Response(200, json=VOICE_LIST)
+    voice = json.loads(request.content)["voice"] or VOICE_LIST["default"]
+    return httpx.Response(200, headers={"Content-Type": "audio/mpeg", "X-Voice-Id": voice}, stream=_Body(MP3_CHUNKS))
+
+
 class _Voice:
     """voice-tts behind a MockTransport: records each request, answers with ``answer(request)``."""
 
     def __init__(self, answer=None):
         self.requests = []
-        self.answer = answer or (lambda request: httpx.Response(
-            200, headers={"Content-Type": "audio/mpeg", "X-Voice-Id": json.loads(request.content)["voice"]},
-            stream=_Body(MP3_CHUNKS)))
+        self.answer = answer or _voice_tts
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         return self.answer(request)
+
+    @property
+    def spoken(self) -> list:
+        """The bodies of the POST /speak requests voice-tts was sent."""
+        return [json.loads(r.content) for r in self.requests if r.url.path == "/speak"]
 
 
 class _FakeRedis:
@@ -182,8 +196,8 @@ def test_a_member_who_may_chat_gets_voice_tts_mp3_streamed_through(voice, role):
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-voice-id"] == "bm_george"
     assert response.content == b"".join(MP3_CHUNKS)
-    sent = voice.requests[0]
-    assert str(sent.url) == f"{URL}/speak"
+    (sent,) = voice.requests
+    assert str(sent.url) == f"{URL}/speak", "a named voice needs no list"
     assert sent.headers["authorization"] == f"Bearer {TOKEN}"
     assert json.loads(sent.content) == {"text": "Your board has three tasks waiting.", "voice": "bm_george", "speed": 1.2}
 
@@ -193,8 +207,45 @@ def test_null_voice_is_the_default_and_speed_is_clamped(voice, role, given, sent
     response = _speak({"text": "Hello there.", "voice": None, "speed": given})
 
     assert response.status_code == 200
-    assert json.loads(voice.requests[0].content)["voice"] == "af_heart"
-    assert json.loads(voice.requests[0].content)["speed"] == sent
+    assert voice.spoken[0]["voice"] == "af_heart"
+    assert voice.spoken[0]["speed"] == sent
+    assert response.headers["x-voice-id"] == "af_heart"
+
+
+@pytest.mark.parametrize("configured", ["bm_george", "af_heart"])
+def test_a_configured_default_voice_tts_holds_is_used(voice, role, monkeypatch, configured):
+    monkeypatch.setattr(config, "VOICE_TTS_DEFAULT_VOICE", configured)
+
+    assert _speak({"text": "Hello there."}).headers["x-voice-id"] == configured
+    assert voice.spoken[0]["voice"] == configured
+
+
+@pytest.mark.parametrize("stale", ["11labs-Willa", "nova", "af_retired"])
+def test_a_stale_default_from_the_retired_voice_service_falls_back_to_voice_tts_own(
+    voice, role, monkeypatch, caplog, stale,
+):
+    monkeypatch.setattr(config, "VOICE_TTS_DEFAULT_VOICE", stale)
+
+    with caplog.at_level(logging.WARNING):
+        first = _speak({"text": "Hello there."})
+        second = _speak({"text": "Hello again."})
+
+    assert first.status_code == second.status_code == 200
+    assert [body["voice"] for body in voice.spoken] == ["af_heart", "af_heart"]
+    assert sum("VOICE_TTS_DEFAULT_VOICE" in r.getMessage() for r in caplog.records) == 1, "warned once per list"
+    assert sum(r.url.path == "/voices" for r in voice.requests) == 1, "the list is cached"
+
+
+def test_with_no_voice_list_to_check_against_voice_tts_chooses(voice, role):
+    def no_list(request):
+        return httpx.Response(503, json={"code": "tts_warming"}) if request.url.path == "/voices" else _voice_tts(request)
+
+    voice.answer = no_list
+
+    response = _speak({"text": "Hello there."})
+
+    assert response.status_code == 200
+    assert voice.spoken[0]["voice"] is None
     assert response.headers["x-voice-id"] == "af_heart"
 
 
@@ -234,11 +285,12 @@ def test_one_usage_line_per_answer_and_never_the_text(voice, role, caplog):
     assert "Nightingale" not in caplog.text
 
 
-def test_the_permission_checks_connection_is_given_back_before_the_stream(voice, role):
+def test_the_permission_checks_transaction_ends_before_the_stream_and_the_session_is_closed_once(voice, role):
     db = MagicMock()
 
     assert _speak({"text": "Hello there."}, db=db).status_code == 200
-    db.close.assert_called()
+    db.rollback.assert_called_once()
+    db.close.assert_not_called()  # get_db closes it, once, when the request ends
 
 
 def test_the_client_sends_the_token_and_gives_up_on_a_connection_fast(monkeypatch):
@@ -314,6 +366,7 @@ def test_a_body_over_16_kib_is_413(voice, role):
     (503, {"code": "tts_warming", "detail": "loading"}, "tts_unavailable"),
     (401, {"code": "unauthorized", "detail": "send the token"}, "tts_unavailable"),
     (500, None, "tts_unavailable"),
+    (500, {"code": "tts_failed", "detail": "the voice could not speak this text"}, "tts_unavailable"),
 ])
 def test_voice_tts_refusals_become_this_servers_codes(voice, role, status, upstream, code):
     voice.answer = lambda request: httpx.Response(status, json=upstream) if upstream else httpx.Response(status)
@@ -324,6 +377,8 @@ def test_voice_tts_refusals_become_this_servers_codes(voice, role, status, upstr
     assert response.json()["code"] == code
     if status == 422:
         assert "af_nobody" in response.json()["detail"]
+    if code == "tts_unavailable":
+        assert response.json()["detail"] == speech.UNAVAILABLE_DETAIL, "voice-tts's own words are not passed on"
 
 
 @pytest.mark.parametrize("error", [httpx.ConnectError("refused"), httpx.ConnectTimeout("slow"),
@@ -374,7 +429,7 @@ def test_past_the_workspaces_sentences_a_minute_it_is_429_tts_busy(voice, role, 
     assert statuses == [200, 200]
     assert refused.status_code == 429 and refused.json()["code"] == "tts_busy"
     assert int(refused.headers["retry-after"]) > 0
-    assert len(voice.requests) == 2, "the refused sentence never reached voice-tts"
+    assert len(voice.spoken) == 2, "the refused sentence never reached voice-tts"
     assert _speak({"text": "Hello there."}, workspace=OTHER_WS).status_code == 200, "one bucket per workspace"
 
 

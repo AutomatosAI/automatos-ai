@@ -83,6 +83,7 @@ from api.billing import router as billing_router  # PRD-265 US-008: balance, sta
 from api.billing_manage import router as billing_manage_router  # PRD-265 W2: card, invoices, plan changes in-app
 from api.billing_webhooks import STRIPE_WEBHOOK_MAX_BYTES, STRIPE_WEBHOOK_ROUTE  # PRD-265: its body cap
 from api.billing_webhooks import router as billing_webhooks_router  # PRD-265 US-010: Stripe webhook (no auth)
+from api.voice_speech import MAX_BODY_BYTES as SPEECH_MAX_BODY_BYTES, SPEECH_ROUTE  # its body cap
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
@@ -1077,6 +1078,9 @@ PATH_BODY_LIMITS = {
     # PRD-265 W2: Stripe's webhook carries no Clerk auth (its signature is checked after the
     # body is read), so its body is counted on the wire too.
     STRIPE_WEBHOOK_ROUTE: STRIPE_WEBHOOK_MAX_BYTES,
+    # Auto's server voice: a sentence of a reply is far under 16 KiB, so a bigger body is refused as it
+    # arrives, never read whole first.
+    SPEECH_ROUTE: SPEECH_MAX_BODY_BYTES,
 }
 
 

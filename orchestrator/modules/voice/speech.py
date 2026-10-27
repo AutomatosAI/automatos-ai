@@ -17,7 +17,10 @@ voice on ANY answer that is not audio, so every refusal is fast and says why, as
 ==========================  ==============================================================
 
 The speed is clamped to 0.8-1.2, as voice-tts clamps it. Which voices exist is voice-tts's
-answer (``GET /api/voice/voices``): an id it does not hold comes back as its 422.
+answer (``GET /api/voice/voices``): an id it does not hold comes back as its 422. A request
+that names no voice is spoken in ``VOICE_TTS_DEFAULT_VOICE`` only when voice-tts holds it
+(``speech_client.default_voice``): the hosted API still carries a value of that name from the
+voice service retired in #625, which may be no Kokoro voice at all.
 
 No text is ever logged. ``record_usage`` writes one line per answer, and it is the one place
 speech would be metered: no credit is charged for it yet (the owner decides SaaS metering).
@@ -95,7 +98,8 @@ class SpeechBody(BaseModel):
 @dataclass(frozen=True)
 class SpeechRequest:
     text: str
-    voice: str
+    # None: the request named no voice; the default is chosen against voice-tts's list.
+    voice: Optional[str]
     speed: float
 
 
@@ -112,9 +116,9 @@ def _speed(raw: Optional[float]) -> float:
     return min(high, max(low, float(raw)))
 
 
-def _voice(raw: Optional[str]) -> str:
+def _voice(raw: Optional[str]) -> Optional[str]:
     if raw is None:
-        return config.VOICE_TTS_DEFAULT_VOICE
+        return None
     if not VOICE_ID.match(raw):
         raise _bad("voice must be a voice id from GET /api/voice/voices, or null")
     return raw
