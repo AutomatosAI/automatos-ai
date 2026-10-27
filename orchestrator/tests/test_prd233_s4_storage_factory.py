@@ -152,8 +152,17 @@ def test_bespoke_local_fallbacks_are_deleted():
 
 
 def test_browser_facing_presigns_use_the_public_client():
-    """Links that leave the backend must be minted against S3_PUBLIC_ENDPOINT_URL."""
-    for rel in ("api/documents.py", "api/document_generation.py", "modules/attachments/store.py"):
+    """Links that leave the backend must be minted against S3_PUBLIC_ENDPOINT_URL.
+
+    F453 moved the documents download presign out of api/documents.py into
+    services/document_downloads.py (the shared helper both download routes call);
+    api/documents.py itself no longer mints a presigned URL directly.
+    """
+    for rel in (
+        "services/document_downloads.py",
+        "api/document_generation.py",
+        "modules/attachments/store.py",
+    ):
         src = (ORCHESTRATOR_ROOT / rel).read_text(encoding="utf-8")
         assert "get_public_s3_client().generate_presigned_url(" in src, rel
         assert "get_s3_client().generate_presigned_url(" not in src, rel

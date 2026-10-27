@@ -18,7 +18,9 @@ ORCH = pathlib.Path(__file__).resolve().parents[2]
 
 def test_content_path_read_requires_auth():
     txt = (ORCH / "api/documents.py").read_text()
-    block = txt.split('@router.get("/content")')[1][:300]
+    # F453 (b) added a documents:read dependency inside the same decorator
+    # parens, so match on the open prefix rather than the old no-args form.
+    block = txt.split('@router.get("/content"')[1][:300]
     assert "ctx: RequestContext = Depends(get_request_context_hybrid)" in block, (
         "/api/documents/content is still an unauthenticated path-read"
     )
