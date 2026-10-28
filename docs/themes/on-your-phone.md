@@ -60,8 +60,8 @@ Your looks for Play and HUD stay in step with the web while the theme is install
 
 <table>
   <tr>
-    <td><img src="../assets/showcase/go-play-chat-thinking.jpg" width="220" alt="Automatos Go in Play: Auto thinking, with Needs you and the Command Centre above the chat"></td>
-    <td><img src="../assets/showcase/go-play-shelf.jpg" width="220" alt="Automatos Go in Play: the shelf of Deliverables"></td>
+    <td><img src="../assets/showcase/go-play-chat-laptop.jpg" width="220" alt="Automatos Go in Play: Auto's pick of three light laptops for travel, with Needs you and the Command Centre above the chat"></td>
+    <td><img src="../assets/showcase/go-play-shelf-blog.jpg" width="220" alt="Automatos Go in Play: the shelf, with the blog posts Auto wrote"></td>
   </tr>
   <tr>
     <td>Chat with Auto in Play.</td>
