@@ -583,7 +583,7 @@ def test_two_starts_at_once_file_one_ticket(live, new_session, monkeypatch):
             if runner.is_alive() or runner.ident:
                 runner.join(LOCK_WAIT)
     assert results["second"] == "already_started"
-    assert results["first"]["opens"]["type"] == "board_task"
+    assert results["first"].opens["type"] == "board_task"
     assert len(_tickets(new_session(), sid)) == 1
 
 

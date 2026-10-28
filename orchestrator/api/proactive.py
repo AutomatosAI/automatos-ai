@@ -166,11 +166,12 @@ def start_suggestion(
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
     try:
         decider = _decider(db, ctx, body.via if body else None)
-        return decisions.start(db, ctx.workspace_id, suggestion_id, decider, locale)
+        started = decisions.start(db, ctx.workspace_id, suggestion_id, decider, locale)
     except decisions.Refused as refusal:
         return _refused(locale, refusal.code, refusal.http_status)
     except SQLAlchemyError as failure:
         return _unavailable(db, locale, "start", failure, UNAVAILABLE)
+    return {"suggestion": started.suggestion, "opens": started.opens}
 
 
 @router.post("/suggestions/{suggestion_id}/hide", response_model=None)
@@ -188,11 +189,12 @@ def hide_suggestion(
     asked = body or HideRequest()
     try:
         decider = _decider(db, ctx, asked.via)
-        return decisions.hide(db, ctx.workspace_id, suggestion_id, decider, asked.reason, any_row=_manages(db, ctx))
+        hidden = decisions.hide(db, ctx.workspace_id, suggestion_id, decider, asked.reason, any_row=_manages(db, ctx))
     except decisions.Refused as refusal:
         return _refused(locale, refusal.code, refusal.http_status)
     except SQLAlchemyError as failure:
         return _unavailable(db, locale, "hide", failure, UNAVAILABLE)
+    return {"suggestion": hidden}
 
 
 @router.get("/runs", response_model=None)

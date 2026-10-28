@@ -28,7 +28,9 @@ answered as it is. Started or expired, it is refused by its state.
 
 Audit rows (``proactive:suggestion_started``, ``proactive:suggestion_hidden``; their details
 say where, by whom as ``user:<id>``, and what) are written after the decision's commit (K15):
-``AuditService.log`` commits its own row and never fails the decision. A database error is raised to the route, after which nothing was written.
+``AuditService.log`` commits its own row and never fails the decision. A database error
+before the decision's commit is raised to the route, and nothing is written. The route
+shapes the answer: ``Started`` for a Start, the suggestion as it now is for a Hide.
 """
 from __future__ import annotations
 
@@ -54,7 +56,7 @@ from services.proactive import start_ticket
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Decider", "Refused", "START_KINDS", "hide", "start"]
+__all__ = ["Decider", "Refused", "START_KINDS", "Started", "hide", "start"]
 
 # K12: what Start makes in W1. Mission and playbook_run are accepted by the schema, refused here.
 START_KINDS = (BOARD_TASK, CHAT)
@@ -88,6 +90,14 @@ class Decider:
     created_by: Optional[str]
     actor: str
     via: str
+
+
+@dataclass(frozen=True)
+class Started:
+    """A Start made: the suggestion as it now is, and what the client opens."""
+
+    suggestion: Dict[str, Any]
+    opens: Dict[str, Any]
 
 
 def _now() -> datetime:
@@ -173,8 +183,8 @@ def _begin(db: Session, row: ProactiveSuggestion, kind: str, decider: Decider,
     return {"type": OPENS_BOARD_TASK, "board_task_id": task.id}, task
 
 
-def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider, locale: str) -> Dict[str, Any]:
-    """Start the suggestion: ``{suggestion, opens}``, or ``Refused``."""
+def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider, locale: str) -> Started:
+    """Start the suggestion, or raise ``Refused``."""
     row = _find(db, workspace_id, suggestion_id)
     kind = _kind(row)
     if kind not in START_KINDS:
@@ -186,7 +196,7 @@ def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider
         raise _lost(db, workspace_id, suggestion_id)
     opens, task = _begin(db, row, kind, decider, locale)
     db.commit()
-    answer = {"suggestion": row.to_dict(), "opens": opens}
+    answer = Started(suggestion=row.to_dict(), opens=opens)
     if task is not None:
         _wake(db, task, decider)
     logger.info("[proactive] suggestion %s started (%s) in workspace %s", row.id, kind, workspace_id)
@@ -197,22 +207,22 @@ def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider
 
 def hide(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider, reason: Optional[str], *,
          any_row: bool) -> Dict[str, Any]:
-    """Hide the suggestion: ``{suggestion}``, or ``Refused``. ``any_row`` is an owner's or
-    admin's; anyone else hides only what is addressed to them."""
+    """Hide the suggestion and answer it as it now is, or raise ``Refused``. ``any_row`` is an
+    owner's or admin's; anyone else hides only what is addressed to them."""
     row = _find(db, workspace_id, suggestion_id)
     if not any_row and (decider.user_pk is None or row.user_id != decider.user_pk):
         raise Refused(NOT_YOURS, HTTP_FORBIDDEN)
     if row.status == SUGGESTION_HIDDEN:
-        return {"suggestion": row.to_dict()}
+        return row.to_dict()
     _require_open(row)
     hidden = {"status": SUGGESTION_HIDDEN, "hide_reason": reason, "decided_via": decider.via, "decided_at": _now()}
     if not _claim(db, row, hidden):
         refusal = _lost(db, workspace_id, suggestion_id)
         if refusal.code == ALREADY_HIDDEN:  # a Hide at the same moment: hidden either way
-            return {"suggestion": _find(db, workspace_id, suggestion_id).to_dict()}
+            return _find(db, workspace_id, suggestion_id).to_dict()
         raise refusal
     db.commit()
-    answer = {"suggestion": row.to_dict()}
+    answer = row.to_dict()
     logger.info("[proactive] suggestion %s hidden (%s) in workspace %s", row.id, reason, workspace_id)
     _audit(db, row, decider, HIDDEN_ACTION, {"reason": reason})
     return answer
