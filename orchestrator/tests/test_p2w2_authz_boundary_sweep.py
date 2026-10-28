@@ -239,6 +239,11 @@ OWN_GATE_IN_HANDLER = {
     ("DELETE", "/api/v1/mobile/devices/{device_id}"),
     # rotate: the device lane on its own device, presenting its current token (else 404/409).
     ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
+    # digest now (api/mobile_push.py _digest_asker): today's brief for the CALLER only, into
+    # their own Auto thread. 404 without a workspace, 403 when no person stands behind the
+    # caller or the person isn't a current member (services.mobile.digest.belongs, the
+    # scheduled digest's own read); the body names nobody. One per person per interval.
+    ("POST", "/api/v1/mobile/digest/now"),
 }
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
