@@ -612,9 +612,9 @@ def _cards_not_named(params: Dict[str, Any]) -> str:
 
 def _said_subject(params: Dict[str, Any]) -> str:
     """What the call names when no card or row does: mission_id='…', app_name='slack'."""
-    from modules.tools.discovery.platform_executor import _subject_line
+    from modules.tools.execution.subject_targets import subject_line
 
-    return _subject_line(params).removeprefix(" on ")
+    return subject_line(params).removeprefix(" on ")
 
 
 def _clicker(grant: Any) -> Optional[str]:

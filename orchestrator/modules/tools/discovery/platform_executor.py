@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -137,6 +137,7 @@ from modules.tools.discovery.handlers_board_task_review import create_board_task
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 US-004: the owner's click
 from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
+from modules.tools.discovery.check_in_lane import reads_only_in_a_check_in  # PRD-268 US-C02b
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
@@ -522,27 +523,6 @@ def _bind_ask_orchestrator_context(
     return bound
 
 
-# Params that identify WHAT an action will act on, in the order a person reads them. An approval
-# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
-# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
-_SUBJECT_PARAMS: Tuple[str, ...] = (
-    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
-    "report_id", "id", "app_name", "query", "playbook_name",
-)
-
-
-def _subject_line(params: Dict[str, Any]) -> str:
-    """" on <what this will act on>", or "" when nothing identifies it."""
-    if not isinstance(params, dict):
-        return ""
-    named = [
-        f"{key}={params[key]!r}"
-        for key in _SUBJECT_PARAMS
-        if params.get(key) not in (None, "", [], {})
-    ]
-    return f" on {', '.join(named[:3])}" if named else ""
-
-
 # F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the full-autonomy dial.
 # These actions ask on every lane nobody is instructing (a ticket, a mission, a playbook) even with the
 # dial on, because what they do cannot be taken back: a public link, once shared, stays shared. An
@@ -720,6 +700,7 @@ class PlatformActionExecutor:
             )
             return False
 
+    @reads_only_in_a_check_in  # PRD-268 US-C02b: a check-in clears only what reads, before any gate
     @asks_at_the_confirmation_gate  # PRD-193 S1/S2, last: a grant on this exact call, or the ask
     def clear(
         self,
