@@ -45,6 +45,8 @@ The check is `orchestrator/services/themes/css_scope.py` (A-06a, wave W-B1). Eve
   `data-protected-surface-inner`, anywhere in it: in an attribute selector, inside `:has()` or
   `:not()`, in any case, escaped or not (A-12c, code `CSS_UNSCOPED`). So no theme rule can reach
   the approval cards, or the buttons and text inside them, by name;
+- a selector that names the host's AI label, `data-ai-label` (which covers its copy's
+  `data-ai-label-caption`), the same way (PRD-264 EUAI-11a, code `CSS_UNSCOPED`);
 - an `@keyframes` name or an `@font-face` `font-family` that does not start with `<htmlClass>-`;
 - `!important`, which is any `!` outside a string or a comment;
 - `@import`, and every at-rule except `@media`, `@supports`, `@layer`, `@container`, `@font-face`
@@ -159,18 +161,42 @@ renders the label outside the theme's page slot (`AiLabelGate`, `frontend/compon
 and checks at run time that a person can see it (`frontend/lib/ai-label/visibility.ts`): displayed, visible,
 at least half opaque through all its ancestors, at least 4 px each way and wholly inside the viewport.
 
-While the check fails, the chat is paused: every composer inside `AiLabelFence` is disabled, and the chat says
-"This theme hides the AI notice, so chat is paused. Switch theme in Settings." A theme rule that hides, fades,
-shrinks or moves the label therefore never leaves a chat running without it; it stops the chat. The fence
-wraps only the composer, so a theme can't use the label to switch off the approval cards either. Auto's
-floating widget draws its own label in its panel (`WidgetAiLabelFrame`), and its fence pauses only the widget.
+While the check fails, the host draws the same words again, at the label's spot, in a layer of its own that
+theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`), and the chat keeps working:
+nothing is disabled and nothing is paused. Since 28 Oct 2026 this replaces the chat lock (the old `AiLabelFence`
+pause and its "chat is paused" notice): the product rule is that the AI label is a small caption and never
+locks the composer. The copy holds three ways:
 
-The fence guards the composer, not the call, so the theme SDK's chat reads the same state (EUAI-11b): Send
-and Try again on `useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at
-the moment they are called, and return false, sending nothing, unless the page's label is mounted and was seen
-at its last check (`frontend/lib/theme-sdk/internal/ai-label-gate.ts`). A theme that calls Send from a button
-of its own or a timer, or opens a chat in its frame on a page with no label, starts no turn. Auto's widget's
-label never clears a theme's chat. Stop always runs.
+- **A shadow root.** The words sit in an open shadow root of an element the host appends to `<body>` itself
+  (`data-ai-label-caption`), outside the theme's page, frame and slots. No selector in a document stylesheet
+  matches an element inside a shadow root. The words carry `all: initial` and their own values inline, so
+  nothing they would inherit from a theme's `<html>` or `<body>` reaches them, and they read no custom property
+  (their colours are the system's `Canvas` and `CanvasText`).
+- **The cards' guard on its element.** The element in the page's DOM carries `PROTECTED_SURFACE_GUARD` inline,
+  every value `!important`, but fixed, empty (0 by 0) and click-through, and also `will-change`, `perspective`,
+  `backdrop-filter` and `container-type` closed. As for the cards, an important declaration attached to the
+  element beats every stylesheet declaration.
+- **The browser's top layer.** The words are a manual popover, shown with `showPopover()`: above every
+  `z-index`, and out of reach of what an ancestor does to its descendants (opacity, filter, transform,
+  clip-path, overflow). Where the browser has no popover, they stay a fixed element.
 
-Not checked, and so review rules for the label as for the cards: an element the theme draws over it (an
-overlay, a pseudo-element, a fixed layer), and code the theme runs in the page.
+The check logs a theme-host warning the first time it finds a label hidden, and again only when the way it is
+hidden changes: `[theme-host] the active theme hides the page AI label (display); the host draws it in its own
+layer instead`. Auto's floating widget draws its own label in its panel (`WidgetAiLabelFrame`) and its copy at
+the top of the panel, kept inside the viewport.
+
+The review still flags a theme that tries. The scope check refuses every selector that names `data-ai-label`
+(the label, and the copy's `data-ai-label-caption`), as it refuses the cards' names. The LLM stage's
+"Deception" category names content placed over, hiding or imitating the host's AI label, and code that removes,
+moves or restyles it (`orchestrator/services/themes/llm_stage.py`).
+
+The theme SDK's `cards.AiLabelFence` stays exported, because installed themes (Play, HUD) wrap their composers
+in it, but it draws its children alone and disables nothing. The SDK's chat (EUAI-11b): Send and Try again on
+`useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at the moment they are
+called, and return false, sending nothing, only when no page label is mounted
+(`frontend/lib/theme-sdk/internal/ai-label-gate.ts`): a theme that opens a chat in its frame on a page with no
+label starts no turn. A hidden label is still on screen, in the host's layer, so it never stops a turn. Auto's
+widget's label never clears a theme's chat. Stop always runs.
+
+Not covered, and so review rules for the label as for the cards: a top-layer element of the theme's own shown
+after the copy (it would sit above it), and code the theme runs in the page (it could remove any element).

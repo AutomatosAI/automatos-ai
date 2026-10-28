@@ -191,9 +191,9 @@ export type AiLabelId = 'page' | 'widget'
 
 export interface AiLabelFenceProps {
   readonly children: ReactNode
-  /** The label beside this chat: the page's (the default) or Auto's floating widget's. */
+  /** The label beside this chat, the page's or Auto's floating widget's: taken, changes nothing. */
   readonly label?: AiLabelId
-  /** Keep the composer disabled until that label has been checked once. */
+  /** Taken, changes nothing: no composer waits on the host's AI label. */
   readonly held?: boolean
 }
 
@@ -245,9 +245,9 @@ export declare function FirstRunNudge(): ReactElement
 export declare function HeaderUtilities(): ReactElement
 
 /**
- * The host's AI label fence (PRD-264 EUAI-11a) around a theme's chat composer: every control inside it is
- * disabled while a theme keeps the host's AI label beside that chat from being seen. It draws no box. Wrap the
- * composer only, never a whole chat screen (the approval cards in a reply stay clickable).
+ * Once the host's AI label fence (PRD-264 EUAI-11a) around a theme's chat composer; now its children and
+ * nothing else. No theme can hide the host's AI label (a hidden one is drawn again in the host's own layer),
+ * so no composer waits on it: this disables nothing and draws no element. Kept so themes that use it load.
  */
 export declare function AiLabelFence(props: AiLabelFenceProps): ReactElement
 

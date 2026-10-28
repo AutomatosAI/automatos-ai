@@ -5,11 +5,12 @@
  *
  * The real AutoWidget renders here, its data sources stubbed as in
  * components/layout/__tests__/main-layout-widget-page.test.tsx. Opened, its panel shows the host's
- * label above the conversation, outside the label's fence, with the input and the starter chips
- * inside it. Hostile fixture sheets then hide the label (display, visibility, opacity, size, an
- * off-screen move, a fade on an ancestor): each time the widget's input and chips are disabled and
- * the panel says why, while a page chat's composer, fenced by the page's label, keeps running.
- * Closing the panel lifts its pause.
+ * label above the conversation, with the input and the starter chips enabled. Hostile fixture
+ * sheets then hide the label (display, visibility, opacity, size, an off-screen move, a fade on an
+ * ancestor): each time the host draws the same words at the top of the panel in its own layer
+ * (components/ai-label/protected-caption.tsx), a theme-host warning names what the theme did, and
+ * the widget keeps working: its input and chips stay enabled, and nothing says it is paused.
+ * Closing the panel takes the copy away.
  *
  * jsdom lays nothing out, so getBoundingClientRect is mocked from each element's computed left,
  * top, width and height, as in ai-label.test.ts.
@@ -54,10 +55,10 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { AI_LABEL_ATTR } from '@/components/ai-label/ai-label'
-import { AI_LABEL_FENCE_ATTR, AiLabelFence } from '@/components/ai-label/ai-label-fence'
+import { AI_LABEL_CAPTION_ATTR } from '@/components/ai-label/protected-caption'
+import { aiLabelHiddenWarning } from '@/components/ai-label/use-ai-label-check'
 import { WIDGET_LABEL_SETTLE_MS } from '@/components/ai-label/widget-ai-label'
 import { AutoWidget } from '@/components/chatbot/chat-widget'
-import { AI_LABEL_PAUSED_TEXT } from '@/lib/ai-label/copy'
 import { useAiLabelStore, WIDGET_AI_LABEL } from '@/lib/ai-label/store'
 import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
 
@@ -67,7 +68,8 @@ const STARTER_CHIP = 'Where did we leave off?'
 const PAGE_INPUT = 'Page chat input'
 const HOSTILE_CLASS = 'hostile-theme'
 const LABEL = `[${AI_LABEL_ATTR}]`
-const FENCE = `[${AI_LABEL_FENCE_ATTR}]`
+const CAPTION_HOST = `[${AI_LABEL_CAPTION_ATTR}]`
+const THEME_HOST_LOG = '[theme-host]'
 /** Past the panel's settle delay, with room for the check to land. */
 const SETTLED = { timeout: WIDGET_LABEL_SETTLE_MS + 1500 }
 /** Where a label-sized box sits in jsdom's 1024 x 768 window when no style moves or sizes it. */
@@ -94,13 +96,11 @@ function addThemeSheet(css: string): void {
   document.head.appendChild(sheet)
 }
 
-/** Auto's widget beside a page chat's composer (fenced by the page's label, which isn't mounted here). */
+/** Auto's widget beside a page chat's composer. */
 async function openWidget(): Promise<void> {
   render(
     <>
-      <AiLabelFence>
-        <input aria-label={PAGE_INPUT} />
-      </AiLabelFence>
+      <input aria-label={PAGE_INPUT} />
       <AutoWidget position="bottom-right" currentPage="dashboard" />
     </>,
   )
@@ -117,10 +117,25 @@ function theLabel(): HTMLElement {
   return labels[0]
 }
 
+/** The label's words in the host's own layer, inside its element's shadow root; throws while there are none. */
+function theCaption(): HTMLElement {
+  const hosts = document.querySelectorAll<HTMLElement>(CAPTION_HOST)
+  expect(hosts.length).toBeLessThanOrEqual(1)
+  const caption = hosts[0]?.shadowRoot?.querySelector<HTMLElement>('[role="note"]')
+  if (!caption) throw new Error("the host drew no copy of the widget's label in its own layer")
+  return caption
+}
+
+/** The theme-host warnings logged so far. */
+function hostWarnings(): unknown[][] {
+  return vi.mocked(console.warn).mock.calls.filter(([prefix]) => prefix === THEME_HOST_LOG)
+}
+
 beforeEach(() => {
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     return boxOf(this)
   })
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 })
 
 afterEach(() => {
@@ -132,24 +147,20 @@ afterEach(() => {
 })
 
 describe("the AI label in Auto's floating widget (PRD-264 EUAI-11a)", () => {
-  it('shows "Auto is an AI" in the open panel, outside the fence, with the input inside it', async () => {
+  it('shows "Auto is an AI" in the open panel, above a conversation that runs from the start', async () => {
     await openWidget()
     const note = await screen.findByRole('note', { name: AUTO_LABEL })
     expect(note).toHaveTextContent(AUTO_LABEL)
     expect(theLabel()).toBe(note)
-    expect(note.closest(FENCE)).toBeNull()
-    expect(widgetInput().closest(FENCE)).not.toBeNull()
-    expect(screen.getByRole('button', { name: STARTER_CHIP }).closest(FENCE)).not.toBeNull()
-    // held until the label has been checked once the panel settles, then running
-    await waitFor(() => expect(widgetInput()).toBeEnabled(), SETTLED)
+    // never held: the input and the chips run before the first check and after it
+    expect(widgetInput()).toBeEnabled()
     expect(screen.getByRole('button', { name: STARTER_CHIP })).toBeEnabled()
+    expect(note.closest('fieldset')).toBeNull()
+    expect(widgetInput().closest('fieldset')).toBeNull()
+    await waitFor(() => expect(useAiLabelStore.getState().shownLabels).toEqual([WIDGET_AI_LABEL]), SETTLED)
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-
-  it('holds the input until the first check has run', async () => {
-    await openWidget()
-    expect(widgetInput()).toBeDisabled()
+    expect(document.querySelector(CAPTION_HOST)).toBeNull()
+    expect(hostWarnings()).toEqual([])
   })
 })
 
@@ -163,40 +174,48 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
 ]
 
 describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
-  it.each(HOSTILE_RULES)('a theme that sets %s on it pauses the widget only', async (_name, css, reason) => {
+  it.each(HOSTILE_RULES)("a theme that sets %s on it gets the label drawn in the host's own layer, and the widget runs", async (_name, css, reason) => {
     document.documentElement.classList.add(HOSTILE_CLASS)
     addThemeSheet(css)
     await openWidget()
     const label = theLabel()
     expect(label).toHaveTextContent(AUTO_LABEL)
     expect(aiLabelHiddenReason(label, window)).toBe(reason)
-    await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual([WIDGET_AI_LABEL]), SETTLED)
-    expect(widgetInput()).toBeDisabled()
-    expect(screen.getByRole('button', { name: STARTER_CHIP, hidden: true })).toBeDisabled()
-    expect(screen.getByRole('alert', { hidden: true })).toHaveTextContent(AI_LABEL_PAUSED_TEXT)
-    // the page's chat is fenced by the page's label, not the widget's
+    const caption = await waitFor(theCaption, SETTLED)
+    expect(caption).toHaveTextContent(AUTO_LABEL)
+    expect(aiLabelHiddenReason(caption, window)).toBeNull()
+    // at the top of the panel's conversation, where the label sits, inside the viewport
+    expect(caption.style.top).toMatch(/px$/)
+    expect(caption.style.left).toMatch(/px$/)
+    expect(widgetInput()).toBeEnabled()
+    expect(screen.getByRole('button', { name: STARTER_CHIP, hidden: true })).toBeEnabled()
+    expect(screen.queryByRole('alert', { hidden: true })).toBeNull()
+    expect(useAiLabelStore.getState()).toMatchObject({ hiddenLabels: [WIDGET_AI_LABEL], shownLabels: [WIDGET_AI_LABEL] })
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning(WIDGET_AI_LABEL, reason)]])
     expect(screen.getByRole('textbox', { name: PAGE_INPUT, hidden: true })).toBeEnabled()
   })
 
-  it('pauses the widget when a hiding theme is switched in after it opened, and lifts the pause when it goes', async () => {
+  it('brings the copy when a hiding theme is switched in after the panel opened, and takes it away when the theme goes', async () => {
     await openWidget()
-    await waitFor(() => expect(widgetInput()).toBeEnabled(), SETTLED)
+    await waitFor(() => expect(useAiLabelStore.getState().shownLabels).toEqual([WIDGET_AI_LABEL]), SETTLED)
     addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { display: none; }`)
     document.documentElement.classList.add(HOSTILE_CLASS)
-    await waitFor(() => expect(widgetInput()).toBeDisabled())
-    expect(screen.getByRole('alert', { hidden: true })).toHaveTextContent(AI_LABEL_PAUSED_TEXT)
+    await waitFor(theCaption)
+    expect(widgetInput()).toBeEnabled()
     document.documentElement.classList.remove(HOSTILE_CLASS)
-    await waitFor(() => expect(widgetInput()).toBeEnabled())
-    expect(screen.queryByRole('alert', { hidden: true })).toBeNull()
+    await waitFor(() => expect(document.querySelector(CAPTION_HOST)).toBeNull())
+    expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
+    expect(widgetInput()).toBeEnabled()
   })
 
-  it('takes its pause with it when the panel closes', async () => {
+  it('takes its copy with it when the panel closes', async () => {
     document.documentElement.classList.add(HOSTILE_CLASS)
     addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { opacity: 0; }`)
     await openWidget()
-    await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual([WIDGET_AI_LABEL]), SETTLED)
+    await waitFor(theCaption, SETTLED)
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(document.querySelector(LABEL)).toBeNull())
+    expect(document.querySelector(CAPTION_HOST)).toBeNull()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
     // released, not marked seen: a closed panel's label is not on screen
     expect(useAiLabelStore.getState().shownLabels).toEqual([])

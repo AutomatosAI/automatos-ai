@@ -319,7 +319,7 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
   })
 })
 
-describe("PRD-264 EUAI-11b — useChatController(conversation) starts no turn unless the host's AI label is on screen", () => {
+describe("PRD-264 EUAI-11b — useChatController(conversation) starts no turn on a page without the host's AI label", () => {
   function expectRefused(core: ReturnType<typeof coreView>, chat: { send: (text: string) => boolean; retry: () => boolean }) {
     expect(chat.send('Hello')).toBe(false)
     expect(chat.retry()).toBe(false)
@@ -333,16 +333,16 @@ describe("PRD-264 EUAI-11b — useChatController(conversation) starts no turn un
     expectRefused(core, openChat(core).result.current)
   })
 
-  it("refuses while the page's label is hidden, still stops, and sends again once the label is seen", () => {
+  it("sends while a theme hides the page's label: the host draws it in its own layer, so the chat is never paused", () => {
     const core = coreView()
     const { result } = openChat(core)
     useAiLabelStore.getState().setHidden(PAGE_AI_LABEL, true)
-    expectRefused(core, result.current)
-    result.current.stop()
-    expect(core.stop).toHaveBeenCalledTimes(1)
-    useAiLabelStore.getState().setHidden(PAGE_AI_LABEL, false)
     expect(result.current.send('Hello')).toBe(true)
     expect(core.send).toHaveBeenCalledWith('Hello')
+    expect(result.current.retry()).toBe(true)
+    expect(core.retry).toHaveBeenCalledTimes(1)
+    result.current.stop()
+    expect(core.stop).toHaveBeenCalledTimes(1)
   })
 
   it('asks at call time: a Send the theme kept from a render while the label was shown is refused once its gate goes', () => {

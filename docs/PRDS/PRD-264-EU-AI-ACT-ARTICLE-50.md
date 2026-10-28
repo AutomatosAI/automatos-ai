@@ -241,8 +241,9 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - [ ] Play's other chat surfaces outside `/chat` (today `frontend/app/conversations/page.tsx`) render the same label.
 - [ ] `/x/` theme routes: if `frontend/app/x/` exists when this branch rebases, its layout renders the label for every theme whose manifest `uses` declares the chat area. If it doesn't exist yet, EUAI-11b's rule makes the PRD-261 wave that adds it render the label, and that wave's tests prove it.
 - [ ] The label is "Auto is an AI" (or "{agent name} is an AI" when another agent answers), uses theme tokens, never `dark:` classes, and has `role="note"` with the same words for screen readers.
-- [ ] **No theme can hide it.** On mount and when the theme changes, the label checks that it is displayed, visible, not zero-sized and inside the viewport. If not, the chat input is disabled with "This theme hides the AI notice, so chat is paused. Switch theme in Settings." No manifest field turns the label off.
-- [ ] Theme-host test (`ai-label.test.ts`): the label renders with builtin Play, with a fixture theme that registers `/chat`, and with a fixture theme whose CSS sets `display:none`, `visibility:hidden`, `opacity:0` or zero size on it, and in each hiding case the input is disabled.
+- [ ] **No theme can hide it.** On mount and when the theme changes, the label checks that it is displayed, visible, not zero-sized and inside the viewport. If not, the host draws the same words at the label's spot in a layer of its own that theme CSS can't reach (a shadow root on a guarded element of the host's, the words in the browser's top layer), logs a theme-host warning, and the chat keeps working. No manifest field turns the label off, and the theme review refuses CSS that names the label.
+  - *Changed 28 Oct 2026 (product owner): the chat lock is gone. It disabled the input with "This theme hides the AI notice, so chat is paused. Switch theme in Settings." The AI label is a small caption, never a pill and never a composer lock; the obligation is met by a copy no theme can hide (`frontend/components/ai-label/protected-caption.tsx`).*
+- [ ] Theme-host test (`ai-label.test.ts`): the label renders with builtin Play, with a fixture theme that registers `/chat`, and with a fixture theme whose CSS sets `display:none`, `visibility:hidden`, `opacity:0` or zero size on it, and in each hiding case the host's copy is on screen and the input stays enabled. A sheet aimed at the copy itself leaves it on screen.
 - [ ] Every agent's system prompt, Auto's, marketplace agents' and custom personas', ends with a platform rule: "If anyone asks whether they are talking to a person or an AI, say that you are an AI agent acting for {principal}. Never claim or imply that you are human." `{principal}` follows FR-15; with no public name the rule reads "say that you are an AI agent". It is appended after the persona text, so a persona can't remove it. A test asserts the rule in the assembled prompt for Auto, a marketplace agent and an agent with a custom persona.
 - [ ] **[UI]** Owner check on the deployed build: the label shows on `/chat` in the default look and in Play, in light and dark.
 
@@ -251,7 +252,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Repos · wave:** automatos-play (session, Wed 21); automatos-ai (`docs/theme-host/`, in EU-A2) · **Depends on:** —
 
 **Acceptance criteria:**
-- [ ] The theme skill (automatos-play `skills/build-automatos-interface/references/chat-stream.md`, tracked) says: the host renders the AI label on `/chat` and on every `/x/` route that uses the chat area; a theme can't remove, cover or restyle it away; chat pauses if it is hidden.
+- [ ] The theme skill (automatos-play `skills/build-automatos-interface/references/chat-stream.md`, tracked) says: the host renders the AI label on `/chat` and on every `/x/` route that uses the chat area; a theme can't remove, cover or restyle it away; if a theme hides it, the host draws it in its own layer and the review flags the theme. *(Changed 28 Oct 2026: it said "chat pauses if it is hidden".)*
 - [ ] The same rule goes in automatos-ai's theme-host docs (`docs/theme-host/`), which are tracked.
 - [ ] PRD-261 (`docs/prd/core/PRD-261-INSTALLABLE-THEMES.md`) gets the rule beside the `pages` field (`:192`), the `routes` field (`:193`) and the "own design" list (`:294`). That folder is kept out of git on purpose (`.git/info/exclude`), so the file is edited in place and is **not** committed unless Gerard says so.
 - [ ] The PRD-261 wave that builds `/x/` and the SDK chat area carries the rule as an acceptance criterion: the chat stream doesn't start until the host label is mounted.
@@ -463,7 +464,7 @@ Built in #1250 (merged 20 Oct). The counsel check on scope was dropped by Gerard
 - **At first exposure:** the notice appears before or with the AI's first output, never after a scroll or a click.
 - **Perceivable:** a visible label with enough contrast in both themes, using theme tokens (not `dark:` classes, which are inert in this frontend). Screen readers get the same words through `aria-label`.
 - **Persistent where the AI keeps talking:** the badge and labels stay for the whole session. A voice call adds a spoken reminder after reconnect and at an interval (EUAI-04).
-- **Not hideable:** no setting, theme, deployer config or CSS removes it. Where a theme controls the DOM, the host renders the label outside the theme's slot (EUAI-11a).
+- **Not hideable:** no setting, theme, deployer config or CSS removes it. Where a theme controls the DOM, the host renders the label outside the theme's slot, and draws a label a theme hides again in a layer of its own that theme CSS can't reach (EUAI-11a). The label never locks the chat.
 - **Localised:** badge terms come from one table (D17). English is the fallback when a locale has no entry.
 
 ## 9. Technical considerations
@@ -477,7 +478,7 @@ Built in #1250 (merged 20 Oct). The counsel check on scope was dropped by Gerard
 - **Migrations:** two new revisions (EUAI-08b, EUAI-10), chained in merge order, both head pins moved each time, `IF NOT EXISTS` throughout.
 - **The public route** (D16) is the only unauthenticated endpoint this PRD adds. It reads one indexed column, returns no workspace data and is rate-limited. The `/verify` page is host-owned and public in both editions.
 - **Redis** holds the channel notice state with a TTL. Losing it only means a person sees the notice again.
-- **Theme host:** the label is rendered by the host outside the theme's slot, and the chat pauses if the label can't be seen. CSS alone can't guarantee visibility against arbitrary theme CSS, so the runtime check is the guarantee and the hostile-theme test is the proof.
+- **Theme host:** the label is rendered by the host outside the theme's slot. CSS on the label alone can't guarantee visibility against arbitrary theme CSS (a rule on an ancestor wins), so a runtime check finds a hidden label, and the host then draws it in its own layer: a shadow root no document selector reaches, an inline `!important` guard on its element, and the browser's top layer. The hostile-theme tests (jsdom, and installed Play in the browser lane) are the proof. *(Changed 28 Oct 2026: the chat paused instead.)*
 - **Widget SDK:** the chat-widget and blog-widget packages have no tests today. EUAI-02b and EUAI-08c add a vitest config to each, following `packages/loader/vitest.config.ts`.
 - **Composio schemas** for YouTube, LinkedIn, X and Instagram are read at build time, not assumed. Each finding is recorded in the PR.
 
@@ -523,7 +524,7 @@ Gerard approved D11, D12 and D14 to D18 on 19 Oct (§3). These stay open:
 |---|---|---|---|
 | 1 | Too much work for ten working days with four lanes (D18) | HIGH | Fixed lane plan (§4); 06a ships the mark on its own by Fri 23; checkpoint Mon 26 (D13) |
 | 2 | c2pa dependency or signing set-up slips (D14, D15) | HIGH | Approval on Mon 19; set-up on a scratch branch from Tue 20; self-signed fallback; 06a already marks every file |
-| 3 | A theme or deployer hides the notice | HIGH | The host renders it outside the theme slot; the chat stream won't start until it is mounted; a browser test with a hostile fixture theme (EUAI-11a) |
+| 3 | A theme or deployer hides the notice | HIGH | The host renders it outside the theme slot and draws a hidden one again in its own layer; the theme SDK's chat stream won't start until it is mounted; the theme review refuses CSS that names it; hostile-theme tests in jsdom and the browser (EUAI-11a) |
 | 4 | Public detection route abused or used to probe workspaces | MED | Hash only, no file upload, no workspace data in the answer, per-IP rate limit, security review (D16) |
 | 5 | Seams between parallel branches and PRD-261/262/263 work | HIGH | Fixed merge order, seam review, trial merge, alembic chain rebased on the live head (§4) |
 | 6 | A notice claimed publicly before it is live | HIGH | EUAI-15 flips status only after a production check |

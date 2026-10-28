@@ -40,7 +40,7 @@ code. Core keeps the host: the SDK, the look runtime (`lib/look-kit`, `lib/theme
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
-| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | SDK | `cards.AiLabelFence` | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label (see "Host-owned AI label" below). The SDK name is the host's fence with the host's props (`label`, `held`); the label check and the pause stay the host's. Added by W-A5's seam owner; the SDK stays 1.0.0, as for W-A2's and W-A4's names: it has not been published yet (the CDN secrets do not exist). |
+| `@/components/ai-label/ai-label-fence` (removed 28 Oct 2026) | c/play/chat/message-box.tsx | SDK | `cards.AiLabelFence` | PRD-264 EUAI-11a: once the host's AI label fence around the composer, which disabled it while a theme hid the label. Since 28 Oct 2026 no theme can hide the label (see "Host-owned AI label" below), the host's fence is gone, and the SDK name draws its children alone, taking `label` and `held` and changing nothing; it stays because installed themes (Play, HUD) import it. Added by W-A5's seam owner; the SDK stays 1.0.0, as for W-A2's and W-A4's names: it has not been published yet (the CDN secrets do not exist). |
 | `@/components/chatbot/mission-created-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionCreatedCard` | The host's card for the Mission the chat created. |
 | `@/components/chatbot/mission-suggestion-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionSuggestionCard` | The host's card offering a Mission. |
 | `@/components/chatbot/task-card` | c/play/chat/reply-cards.tsx | SDK | `cards.TaskCard` | The host's task card. |
@@ -195,26 +195,32 @@ off, and no manifest field, SDK name or setting does either.
   `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there. Auto's floating
   widget, which `MainLayout` draws on every page but `/chat` (theme-drawn pages among them), carries its own
   label inside its panel (`WidgetAiLabelFrame`, `frontend/components/ai-label/widget-ai-label.tsx`), checked
-  the same way; while it is hidden, the widget's input and starter chips are disabled.
+  the same way.
 - **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
   (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
   seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
-  (`frontend/lib/ai-label/visibility.ts`). While it isn't, every composer inside `AiLabelFence` is disabled
-  (the default chat's input, `MultimodalInput`: its box and every control but the voice button; Play's message box)
-  and the chat says "This theme hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps
-  the composer only, never a whole chat screen, so the approval cards in a reply stay clickable (they are protected
-  surfaces). Voice is never fenced: the voice button (Studio's beside Send, `components/chatbot/composer-voice.tsx`,
-  and a theme's `voice.VoiceButton`) carries its own "AI voice assistant" caption, and Auto says it is an AI once
-  per session.
-- **A theme's composer** sits inside `cards.AiLabelFence`, the host's fence itself (W-A5: Play's message box
-  imports it from the SDK), so a theme's chat pauses the same way the host's does.
-- **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:
-  a theme's composer built on `chat.useChatController` must pause the same way while the label is hidden, and
-  the chat stream must not start until the host's label is mounted. A-11b's tests prove both.
+  (`frontend/lib/ai-label/visibility.ts`). While it isn't, the host draws the same words again at the label's
+  spot in a layer of its own that theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`: a
+  shadow root on a guarded element of the host's, the words in the browser's top layer; how it holds is in
+  [CSS layer model](css-layer-model.md)), and logs a theme-host warning that names the label and how it is
+  hidden. The chat keeps working: no composer is disabled, and nothing says the chat is paused (the AI label is
+  a small caption and never locks the composer). Voice carries its own notice too: the voice button (Studio's
+  beside Send, `components/chatbot/composer-voice.tsx`, and a theme's `voice.VoiceButton`) has its "AI voice
+  assistant" caption, and Auto says it is an AI once per session.
+- **A theme's composer** may sit inside `cards.AiLabelFence` (Play's message box and HUD's composer do), which
+  now draws its children alone and disables nothing; a new theme needs no fence.
+- **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`): Send and Try again start no turn on a page with no
+  host label mounted (`internal/ai-label-gate.ts`), so a theme's chat opened in its frame on a page without one
+  sends nothing. A label a theme hides is still on screen, in the host's layer, so it never stops a turn.
+- **What the review flags.** The scope check refuses a theme stylesheet whose selectors name `data-ai-label`
+  (`orchestrator/services/themes/css_scope.py`), and the LLM stage reports content over, hiding or imitating the
+  label and code that removes, moves or restyles it (`llm_stage.py`, "Deception").
 - **Proof.** `frontend/lib/theme-host/__tests__/ai-label.test.ts` renders the chat layout with the default chat
-  and a fixture theme that owns `/chat` (Play's own chat is proven in the theme kit), then with hostile fixture sheets that set
-  `display:none`, `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label: in each
-  hiding case the input is disabled. `frontend/lib/theme-host/__tests__/ai-label-widget.test.tsx` does the
-  same for Auto's floating widget.
+  and a fixture theme that owns `/chat` (Play's own chat is proven in the theme kit), then with hostile fixture
+  sheets that set `display:none`, `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the
+  label: in each hiding case the host's copy is on screen, a warning is logged and the input stays enabled, and a
+  sheet aimed at the copy itself leaves it on screen. `frontend/lib/theme-host/__tests__/ai-label-widget.test.tsx`
+  does the same for Auto's floating widget. The browser half, the top layer included, is
+  `e2e/browser/specs/installed-play-ai-label.spec.ts` on installed Play.

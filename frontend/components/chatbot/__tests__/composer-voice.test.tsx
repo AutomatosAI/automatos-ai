@@ -2,8 +2,8 @@
 // composer-actions.tsx), over a HostVoice stub: the host's voice button sits right before Send (and Stop), at Send's
 // size; a hold starts the quick ask on the conversation on screen and letting go sends it; a click no pointer made
 // toggles; there is no hotkey (Space is the page's and the box's); its own controls never submit the composer's form;
-// it is never fenced on the AI label, while the box and Send are; outside a voice provider it is drawn disabled and
-// says why; a browser that can't recognise speech says so, and typing and Send still work.
+// nothing in the composer waits on the AI label (PRD-264: no theme can hide it); outside a voice provider it is drawn
+// disabled and says why; a browser that can't recognise speech says so, and typing and Send still work.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,7 +13,6 @@ vi.mock('@/components/voice/voice-provider', () => ({ useOptionalHostVoice: () =
 vi.mock('../agent-selector', () => ({ AgentSelector: () => null }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { uploadAttachment: vi.fn() } }))
 
-import { AI_LABEL_FENCE_ATTR } from '@/components/ai-label/ai-label-fence'
 import { type HostVoiceStubPatch, hostVoiceStub } from '@/components/voice/__tests__/support/host-voice-stub'
 import { AI_VOICE_LABEL } from '@/components/voice/AiVoiceLabel'
 import { VOICE_BUTTON_WORDS } from '@/components/voice/voice-button-view'
@@ -29,7 +28,6 @@ const UNSUPPORTED: HostVoiceStubPatch = {
   snapshot: { mode: 'quick', phase: 'error', micOpen: false, chatId: null, error: QUICK_ASK_ERRORS.unsupported },
 }
 const SEND = /send message/i
-const FENCE = `[${AI_LABEL_FENCE_ATTR}]`
 
 type Status = 'ready' | 'streaming'
 
@@ -142,15 +140,15 @@ describe('the composer around it', () => {
     expect(box).toHaveValue('')
   })
 
-  it('fences the box and Send on the AI label, never the voice button', () => {
+  it('waits on no AI label: with the page label hidden, the box, Send and the voice button all run', () => {
     useAiLabelStore.getState().setHidden(PAGE_AI_LABEL, true)
-    const { stub, press } = draw(IDLE)
+    const { stub, press, sendMessage } = draw(IDLE)
     const box = screen.getByRole('textbox')
-    expect(box).toBeDisabled()
-    expect(box.closest(FENCE)).not.toBeNull()
-    expect(screen.getByRole('button', { name: SEND }).closest(FENCE)).toHaveProperty('disabled', true)
-    expect(press).toBeEnabled()
+    expect(box.closest('fieldset')).toBeNull()
     expect(press.closest('fieldset')).toBeNull()
+    fireEvent.change(box, { target: { value: 'Still here' } })
+    fireEvent.click(screen.getByRole('button', { name: SEND }))
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'Still here' }))
     fireEvent.pointerDown(press)
     expect(stub.start).toHaveBeenCalledWith({ mode: 'quick' })
   })
