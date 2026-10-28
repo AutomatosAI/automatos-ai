@@ -280,6 +280,7 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['a clip-path', `html.${HOSTILE_CLASS} [role="note"] { clip-path: inset(50%); }`, 'paint'],
   ['a mask', `html.${HOSTILE_CLASS} [role="note"] { mask-image: linear-gradient(transparent, transparent); }`, 'paint'],
   ['a filter on an ancestor', `html.${HOSTILE_CLASS} body { filter: opacity(0); }`, 'paint'],
+  ['a blend mode on the words', `html.${HOSTILE_CLASS} [role="note"] span { mix-blend-mode: difference; }`, 'paint'],
   ['a tiny font', `html.${HOSTILE_CLASS} [role="note"] { font-size: 4px; }`, 'font'],
   // a 3px stroke in the ground's own colour on 24px type: not thick enough to fill the glyphs, but it blots them
   [

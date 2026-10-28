@@ -11,7 +11,8 @@
  *   the words are `visibility: visible`; the product of their and their ancestors' opacity is at
  *   least MIN_LABEL_OPACITY;
  * - nothing around the words cuts or repaints them: no `clip-path`, mask or `filter`, and no
- *   `content-visibility: hidden`, on the words, the label or an ancestor ('paint');
+ *   `content-visibility: hidden` or a `mix-blend-mode` other than normal, on the words, the label or an ancestor
+ *   ('paint');
  * - the font is at least MIN_FONT_SIZE_PX ('font');
  * - the colour the words are filled with (`-webkit-text-fill-color`, else `color`) is not
  *   transparent and has at least MIN_TEXT_CONTRAST against every ground behind them at every point
@@ -84,6 +85,8 @@ export { AI_LABEL_PROBE_ATTR, type Box, JITTERED_POINTS_PER_LINE, SAMPLE_POINTS_
 
 const HIDDEN_VISIBILITY = new Set(['hidden', 'collapse'])
 const NO_PAINT_CHANGE = new Set(['', 'none'])
+/** A blend mode can make the words match whatever is under them (difference, multiply, …): only `normal` reads. */
+const NO_BLEND = new Set(['', 'normal'])
 const PAINT_PROPERTIES = ['clip-path', 'mask-image', '-webkit-mask-image', 'filter'] as const
 
 /** The element and every element around it, up to <html> (or the top of its shadow tree). */
@@ -101,7 +104,8 @@ function nearestValue(styles: readonly CSSStyleDeclaration[], property: string):
 function repainted(style: CSSStyleDeclaration): boolean {
   return (
     PAINT_PROPERTIES.some((property) => !NO_PAINT_CHANGE.has(style.getPropertyValue(property).trim())) ||
-    style.getPropertyValue('content-visibility').trim() === 'hidden'
+    style.getPropertyValue('content-visibility').trim() === 'hidden' ||
+    !NO_BLEND.has(style.getPropertyValue('mix-blend-mode').trim())
   )
 }
 
