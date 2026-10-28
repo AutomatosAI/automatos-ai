@@ -1,0 +1,294 @@
+{
+ "project": "PRD-268 W1 Check-ins: Proactive Auto's engine. Read-only check-ins that suggest, the lane, streaks, Start/Hide, switches and caps, status words, readiness (one branch, one PR, one CI run)",
+ "branchName": "feat/prd-268-w1-check-ins",
+ "baseBranch": "RALPH_BASE_REF (origin/main once #1362 merges; else origin/docs/prd-268-proactive-auto)",
+ "prBase": "main",
+ "trackingIssue": "#1358",
+ "prdPullRequest": "#1362",
+ "description": "PRD-268 (docs/PRDS/PRD-268-PROACTIVE-AUTO.md) wave W1: US-C01–C07, US-C17 and US-C18, re-cut into 19 one-session stories in dependency order. Core only (no frontend); ONE Alembic revision (prd268_w1_proactive); no new dependency; no third-party client. Diff base for every check: `bash scripts/ralph/acceptance-prd268w1.sh --print-base`.",
+ "decisions": [
+  "K1 Branch and PR. All work happens on feat/prd-268-w1-check-ins in <workspace>/.worktrees/automatos-ai/feat+prd-268-w1-check-ins. The branch is cut from RALPH_BASE_REF: origin/main once PR #1362 (the PRD) has merged, else origin/docs/prd-268-proactive-auto. One PR for the wave (base main, closes tracking issue #1358) and one CI run at the end.",
+  "K2 Story order is the dependency order (the `priority` field), and each story gets one session. A story never waits on CI.",
+  "K3 Files over 800 lines never grow. Where a story must add lines to one, it moves at least as many lines out in the same commit, to a new module, re-exported when tests import it. Before moving a name, grep orchestrator/tests for `<module>.<name>` patch targets; a name a test patches by module path stays put. The files: services/heartbeat_service.py 1825, modules/tools/discovery/platform_executor.py 1543, modules/tools/execution/unified_executor.py 1390, main.py 1666, modules/agents/factory/agent_factory.py 1982, api/missions.py 2107, api/board_tasks.py 2282, services/activity_service.py 1267, core/llm/manager.py 1063. Re-measure each. The exceptions: orchestrator/config.py gains its settings lines, and route-manifest.json and config-surface.json gain their entries.",
+  "K4 Never touch a line inside a function over 50 code lines (scripts/ci/check_changed_code_shape.py fails every touched line inside one). The seams that don't count: a decorator line above `def` (PlatformActionExecutor.clear already has one), a new short function, a new module, a line in a short function (schedule_agent_heartbeat and schedule_orchestrator_heartbeat are short). The gate compares these functions byte for byte with the base: HeartbeatService._agent_tick, _orchestrator_tick, _orchestrator_tick_llm, _dispatch_heartbeat_notification, _route_heartbeat_to_auto, PlatformActionExecutor.clear and PlatformActionExecutor._run_cleared.",
+  "K5 This Mac cannot import the orchestrator. route-manifest.json and config-surface.json are edited by hand or with a stdlib-only python snippet, in the format of scripts/dump_routes.py: routes sorted by (path, method), route_count equal to the number of routes, written as json.dumps(..., indent=2, sort_keys=True) + newline. Setting names go in sorted position.",
+  "K6 Exactly one Alembic revision, prd268_w1_proactive, chained onto the current head (re-read EXPECTED_HEAD in orchestrator/tests/test_prd209_alembic_single_head.py; it was prd266_w2_push on 28 Oct). It uses CREATE TABLE IF NOT EXISTS and moves both pins: test_prd209_alembic_single_head.py (the comment chain plus EXPECTED_HEAD) and test_prd236_w1_routes.py (read the new file, assert its down_revision, update the EXPECTED_HEAD line).",
+  "K7 Rollout. The proactive mode is off | shadow | live: a platform system setting (category `proactive`, key `mode`), read strictly, with config PROACTIVE_MODE_DEFAULT='off'. A failed read means off, like Socials (modules/socials/settings.py:108-133). In shadow, today's heartbeats run unchanged and check-ins run beside them, recording suggestions. In live, check_in agents and the orchestrator heartbeat at proactive_level silent or notify run check-ins INSTEAD of today's tick. W1 ships no delivery (W2 brings it), so live stays off until W2; the code supports it now and the tests cover it.",
+  "K8 The check-in runner owns its tool loop; it never goes through AgentFactory. It offers only read platform actions plus platform_suggest_next_step, and runs every call through PlatformActionExecutor.execute with caller_context lane='check_in', the run id and the run's read log. Composio, plugins, the Anthropic memory tool, sub-agents, Missions and platform_execute are never offered. A decorator on PlatformActionExecutor.clear refuses any call in the lane that isn't positively `read`, unknown actions included (defence in depth). A decorator on UnifiedToolExecutor.execute_tool refuses any non-platform tool in the lane.",
+  "K9 Model and caps. Every check-in calls LLMManager(service_name='heartbeat'), the platform orchestrator_llm system setting (default claude-haiku-5-5). An agent's own model_config is not used in the check-in lane. Per run: at most 4 tool iterations, 800 output tokens, 12,000 tokens of context and $0.05; past the ceiling the run stops and records `error`.",
+  "K10 Heartbeat mode. heartbeat.mode is check_in | act. When unset: act if the heartbeat's auto_act is true, else check_in (PRD §12-Q1). An agent whose work needs connector reads (Composio) can't do them in a check-in, which fails closed; its owner keeps it `act`. CLI-agent heartbeats (file_cli_ticket, one open per agent) are unchanged in W1. The Run-now routes (run_agent_heartbeat, run_orchestrator_heartbeat) keep today's tick.",
+  "K11 The addressee of a suggestion is the workspace owner (§12-Q2).",
+  "K12 Start kinds in W1: board_task and chat. The schema accepts mission and playbook_run, but Start answers 409 'not available in this version' for them until US-C14 (W4), where check-ins first propose them. W1's check-in prompts propose board_task or chat only.",
+  "K13 Language. Server-written copy (next_step sentences, run notes, refusal text) comes from strings tables in English and Portuguese (Brazil), chosen by the request's Accept-Language (en default). No stored preference in W1. Background copy uses en.",
+  "K14 Spend. The lane string 'check_in' joins BACKGROUND_LANES (services/credits/asks.py:38), so a trial never pays for it. background_allowed (services/credits/routing.py:170) and daily_spend_guard.refuse_new_work are checked at every run start. The ceiling is off (0) by default and fails open, so tests set one.",
+  "K15 Audit. AuditService.log commits the caller's session (core/workspaces/audit.py:97). Call it after the atomic status UPDATE has committed, or in its own session; never inside the Start or Hide transaction.",
+  "K16 Approvals. Gerard approved PRD-268 on 28 Oct 2026 (\"get it all started\"; tracking issue #1358). This wave adds a guardrail (the lane), changes heartbeat behaviour in live mode and governs background spend: build exactly what the ACs say.",
+  "K17 Mislabelled actions. Every action states its level. platform_field_inject writes (handlers_field.py:119) and becomes `write`, with its hierarchy-gate entry (scripts/check_hierarchy_gate.py: _HIERARCHY_TARGETS, admin_only, or ALLOW_LIST with a reason). A read action the sweep catches writing is relabelled, never excepted."
+ ],
+ "ownerTest": [
+  "Shadow week, step 0 (PRD §10): set the platform system setting proactive.mode = shadow, then settings.proactive.enabled = true on Gerard's workspace and c1 (PUT /api/proactive/settings). Over the week compare GET /api/proactive/runs with the tickets the heartbeats filed. Live stays off until W2 delivers.",
+  "Read 20 random proactive_runs rows: silent runs have zero llm_usage rows; suggested runs cite reads the run made.",
+  "Confirm the read-only lane on SaaS: a check-in transcript shows no write tool offered (the run's tool list), and the lane refusal never fired against a legitimate read."
+ ],
+ "userStories": [
+  {
+   "id": "US-C01",
+   "title": "Suggestion, run and person tables: migration prd268_w1_proactive, models, both head pins",
+   "description": "As the platform, I need one record per suggestion, per proactive run and per person's proactive settings, so delivery, decisions, cost and pauses are counted in one place (PRD-268 §6.2.4, §6.9).",
+   "acceptanceCriteria": [
+    "One revision orchestrator/alembic/versions/prd268_w1_proactive.py (revision 'prd268_w1_proactive', down_revision = the head on the base), CREATE TABLE IF NOT EXISTS for: proactive_suggestions (§6.2.4 columns: id UUID pk, workspace_id FK workspaces ON DELETE CASCADE, user_id int, source_type, source_agent_id, run_id, title varchar(120), detail varchar(600), evidence jsonb, proposed_action jsonb, subject_key, severity, status, occurrences int default 1, last_seen_at, started_ref jsonb, decided_via, hide_reason, decided_at, est_credits, created_at, delivered_at, expires_at), proactive_runs (id, workspace_id FK cascade, agent_id, kind, window_since, window_until, outcome, signals jsonb, suggestions int, model, tokens int, cost_usd numeric, error_class, created_at), proactive_person_settings (workspace_id FK cascade, user_id, paused bool default false, quiet_start time, quiet_end time, timezone, updated_at; unique (workspace_id, user_id)); a partial unique index on proactive_suggestions (workspace_id, user_id, subject_key) WHERE status = 'open'; indexes on proactive_runs (workspace_id, agent_id, created_at) and proactive_suggestions (workspace_id, status, created_at)",
+    "Models in orchestrator/core/models/proactive.py (ProactiveSuggestion, ProactiveRun, ProactivePersonSettings) registered in core/models/__init__.py; to_dict() on ProactiveSuggestion; status values open | started | hidden | expired and outcome values silent | suggested | error | skipped_quiet | skipped_cap | skipped_credits | skipped_paused | skipped_off as module constants",
+    "Both head pins moved per K6",
+    "New test orchestrator/tests/test_prd268_proactive_models.py: model columns equal the revision's DDL columns per table; the partial unique index refuses a second open row with the same subject_key and allows one hidden plus one open (realdb); workspace delete cascades (realdb)"
+   ],
+   "priority": 1,
+   "passes": false,
+   "notes": "One migration in the wave (K6). Copy the shape of alembic/versions/prd266_w2_push.py (docstring ending Revision ID / Revises / Create Date). Cascade pattern: core/models/mobile_push.py:58. Realdb fixtures: tests/conftest.py new_session(engine) and a module engine fixture like test_prd266_auto_message.py:49-61."
+  },
+  {
+   "id": "US-C02a",
+   "title": "Every action states its permission level; the field tools are labelled; platform_field_inject is a write",
+   "description": "As an owner, I need every platform action to say whether it reads or writes, so a read-only lane can trust the label (PRD-268 §6.2.3, FR-1, K17).",
+   "acceptanceCriteria": [
+    "ActionDefinition.permission_level (modules/tools/discovery/action_registry.py:64) has no default: constructing an ActionDefinition without it raises a TypeError or ValueError naming the action, at registration (registration is lazy: _ensure_initialized :131-137)",
+    "actions_field.py states a level on platform_field_query (read), platform_field_inject (write: handlers_field.py:119 calls field.inject) and platform_field_stability (read); platform_field_inject passes scripts/check_hierarchy_gate.py (a hierarchy target, admin_only, or an ALLOW_LIST entry with a one-line reason)",
+    "scripts/check_hierarchy_gate.py no longer defaults a missing level to read (:48, :189): a missing level is a gate failure naming the action",
+    "The 19 ActionDefinition(...) constructions in orchestrator/tests that omit the level gain an explicit permission_level matching what the test means (read unless it tests a write); no assertion changes",
+    "New test orchestrator/tests/test_prd268_action_levels.py: every registered action's level is one of read | write | destructive; constructing one without a level raises; platform_field_inject is write"
+   ],
+   "priority": 2,
+   "passes": false,
+   "notes": "Count on 28 Oct: 218 definitions; 215 state a level (read 115, write 92, destructive 8); the 3 field tools omit it. The 19 test constructions: test_tool_surface_prb.py (3), test_prd232_us006_corpus_embeddings.py (2), test_prd143_su_registry.py (2), 12 files with 1 each (grep 'ActionDefinition(' in orchestrator/tests). Changing platform_field_inject to write changes how the policy gate classifies it: say so in the DONE mark."
+  },
+  {
+   "id": "US-C02b",
+   "title": "The read-only lane: the executor refuses every non-read call in a check-in",
+   "description": "As an owner, I need background checks that cannot change anything, so a check-in can never send, edit or delete (PRD-268 §6.2.3, FR-1, K8).",
+   "acceptanceCriteria": [
+    "A decorator reads_only_in_a_check_in (in a new module modules/tools/discovery/check_in_lane.py) wraps PlatformActionExecutor.clear (one decorator line above the existing @asks_at_the_confirmation_gate; clear's body is byte-identical to the base): when caller_context.get('lane') == 'check_in', a call is refused unless its registered definition's permission_level is 'read' or its name is 'platform_suggest_next_step'; an unknown action is refused; the refusal is {'success': False, 'error': CHECK_IN_REFUSAL} where CHECK_IN_REFUSAL is 'Not available in a check-in, which can only read. Suggest it as a next step instead.'",
+    "A decorator on UnifiedToolExecutor.execute_tool (modules/tools/execution/unified_executor.py:882) refuses, in the lane, any tool that is not a platform action (Composio, plugins, workspace tools), with the same text",
+    "With no lane, or any other lane, both executors behave exactly as on the base (the tests prove it on a write and a read)",
+    "platform_executor.py and unified_executor.py do not grow (K3)",
+    "New test orchestrator/tests/test_prd268_check_in_lane.py: in the lane a write, a destructive, an unknown and a Composio-named call are refused with the text; a read and platform_suggest_next_step clear; outside the lane a write still clears as before"
+   ],
+   "priority": 3,
+   "passes": false,
+   "notes": "clear() is 141 lines: never touch a line inside it (K4); the gate compares it. The workspace tools call clear() directly (exec_workspace.py:246), so the decorator covers them too. caller_context is a plain dict; document the new 'lane' key in the decorator module's docstring, not in execute's docstring (execute is long)."
+  },
+  {
+   "id": "US-C02c",
+   "title": "ContextMode.CHECK_IN and the read_only tool strategy",
+   "description": "As the platform, I need a lean context for check-ins that loads only read actions, so the model is never shown a tool it may not call (PRD-268 §6.2.3).",
+   "acceptanceCriteria": [
+    "ContextMode.CHECK_IN in modules/context/modes.py with ModeConfig(sections=['identity','field_memory','datetime_context','task_context'], tool_loading='read_only', personality=False, max_tokens=12000); a DEFAULT_BUDGETS entry in modules/context/budget.py",
+    "ToolLoadingStrategy gains READ_ONLY (modules/context/sections/tools.py): it loads the platform actions whose permission_level is 'read' plus platform_suggest_next_step, and no Composio, plugin, workspace or sub-agent tools",
+    "No other mode's config or loading changes",
+    "New test orchestrator/tests/test_prd268_check_in_mode.py: every tool name CHECK_IN loads is a read action or platform_suggest_next_step; none is Composio or a plugin; the budget is 12000"
+   ],
+   "priority": 4,
+   "passes": false,
+   "notes": "Precedent for a mode-scoped filter: EXECUTION_ONLY_TOOLS / strip_actions_from_surface (modes.py:34-81), applied at context/service.py:752-757. tool_loading is consumed in ContextService._load_tools (service.py:711-758)."
+  },
+  {
+   "id": "US-C02d",
+   "title": "A sweep test: every read action writes nothing",
+   "description": "As an owner, I need proof that 'read' means read, so the lane cannot be bypassed by a mislabelled action (PRD-268 §6.2.3, §9).",
+   "acceptanceCriteria": [
+    "New test orchestrator/tests/test_prd268_read_actions_write_nothing.py calls every registered read action's handler with parameters synthesised from its JSON schema (required fields with minimal valid values), against a session whose add, delete, flush, commit and execute of INSERT, UPDATE or DELETE are recorded, and an outbound HTTP transport (httpx and requests) that records; it asserts zero writes per action and names each action that wrote. A handler that raises still counts as checked.",
+    "Any read action the sweep catches writing is relabelled write (with its hierarchy-gate status) in the same story, never excepted (K17)",
+    "No new dependency (use unittest.mock and the existing fixtures)"
+   ],
+   "priority": 5,
+   "passes": false,
+   "notes": "Registry: get_action_registry().get_by_permission('read') (action_registry.py:166-169). Handlers: PLATFORM_HANDLERS (platform_executor.py:1277). Keep the test file at most 800 lines; helpers may go in a tests helper module."
+  },
+  {
+   "id": "US-C03a",
+   "title": "The pure proactive module: window, dedupe keys, caps, streak rules, provenance",
+   "description": "As the platform, I need the check-in rules as pure functions, so they are proven once and used everywhere (PRD-268 §6.2.1, §6.2.2, §6.2.4, §6.9).",
+   "acceptanceCriteria": [
+    "New package orchestrator/modules/proactive/ (pure, no I/O): check_in_window(last_success_at, now) -> since (the last successful run, else now - 24h); normalise_title(title) (case, spacing, trailing punctuation); subject_key helpers (agent error streak 'agent:<id>:error:<class>', ticket 'ticket:<number>', title 'title:<normalised>'); is_duplicate(candidate, open_rows, hidden_rows, now) with the 14-day hidden window; caps (a frozen Caps dataclass with the §6.9 defaults) and cap checks returning the refusal outcome; streak rules: next_interval(base_minutes, consecutive_failures) doubling from the 3rd failure up to 24 h, reset on success; provenance_ok(evidence_refs, run_reads)",
+    "New test orchestrator/tests/test_prd268_proactive_pure.py covers each function, including a window after a failed run (it starts at the last success), a duplicate hidden 13 and 15 days ago, and doubling capped at 24 h"
+   ],
+   "priority": 6,
+   "passes": false,
+   "notes": "Every function under 50 code lines, files 200-400 lines. Returns new objects; nothing mutates its arguments."
+  },
+  {
+   "id": "US-C03b",
+   "title": "The tool platform_suggest_next_step (3-file pattern), with dedupe and provenance",
+   "description": "As a check-in, I need one write tool that records a suggestion and nothing else, so what I find reaches a person as Start / Hide (PRD-268 §6.2.3-6.2.5, FR-6).",
+   "acceptanceCriteria": [
+    "actions_proactive.py registers platform_suggest_next_step (permission_level 'write', category proactive; parameters title ≤ 120, detail ≤ 600, evidence up to 5 {type, id} refs, proposed_action {kind: board_task | chat, payload}, severity today | can_wait, subject_key optional); handlers_proactive.py implements it; it is wired into PLATFORM_HANDLERS and register_all_actions; it passes scripts/check_hierarchy_gate.py through an ALLOW_LIST entry ('writes only a proactive_suggestions row, in the check-in lane')",
+    "The handler refuses outside the check-in lane; refuses a third-plus suggestion in one run (cap 3); refuses evidence not in caller_context['check_in_reads'] (provenance); refuses a duplicate of an open suggestion or one hidden in the last 14 days, returning an error string the model reads ('Already suggested: <title>'); else inserts an open row addressed to the workspace owner (K11) with run_id and source fields",
+    "New test orchestrator/tests/test_prd268_suggest_tool.py (realdb): each refusal, one insert, the per-run cap"
+   ],
+   "priority": 7,
+   "passes": false,
+   "notes": "The README's 3 files (modules/tools/README.md:75-91) plus PLATFORM_HANDLERS (platform_executor.py:1277) and register_all_actions (platform_actions.py:101-153). platform_executor.py must not grow (K3): move lines out to offset the handler entry."
+  },
+  {
+   "id": "US-C03c",
+   "title": "Signal readers for Auto's workspace check-in",
+   "description": "As Auto, I need a deterministic diff of what changed, so a quiet workspace costs no model call (PRD-268 §6.2.1, FR-3).",
+   "acceptanceCriteria": [
+    "services/proactive/signals.py: read_signals(db, workspace_id, since, until) -> tuple of frozen Signal(kind, subject_key, ref, at, summary) for: board tickets that became failed, blocked or stuck; heartbeat results with status error or objective_met false; watch events missed_run, benched, expired, budget_exhausted; reports with requires_approval not acknowledged; approval grants expiring within 24 h; skipped scheduled runs; credits_low. Every query is scoped to the workspace.",
+    "New test orchestrator/tests/test_prd268_signals.py (realdb): each kind seeded once yields one signal; another workspace's rows yield none; an empty window yields none"
+   ],
+   "priority": 8,
+   "passes": false,
+   "notes": "Sources named in PRD §6.2.1; the watch event kinds are in watch_enums.py:71-80. Split readers into small functions (one per kind)."
+  },
+  {
+   "id": "US-C03d",
+   "title": "The check-in runner: Auto's workspace check-in and agent check-ins, in the lane",
+   "description": "As an owner, I want Auto and my agents to look at what changed and tell me only what is new, so I am not told the same thing twice (PRD-268 §6.2.1, §6.9, FR-2, FR-3, FR-13, K8, K9, K14).",
+   "acceptanceCriteria": [
+    "services/proactive/runner.py: run_workspace_check_in(workspace_id) and run_agent_check_in(agent_id, workspace_id, hb_config). Each checks, in order, the switches (US-C07a), background_allowed, refuse_new_work and the caps; each refusal writes a proactive_runs row with its outcome and makes no model call",
+    "Auto's check-in: no signal → a 'silent' run row and zero llm_usage rows; signals → one model call through LLMManager(service_name='heartbeat') in the lane, the prompt listing the signals, the open and recently hidden titles, and 'most check-ins should record nothing'",
+    "Agent check-in: the agent's heartbeat prompt and identity built through ContextService with ContextMode.CHECK_IN; the same loop",
+    "The loop: at most 4 iterations, 800 output tokens, $0.05; tools = the CHECK_IN read actions plus platform_suggest_next_step; every call through PlatformActionExecutor.execute with caller_context {'lane': 'check_in', 'run_id', 'check_in_reads': the run's successful reads so far}; the run row records signals, suggestions, model, tokens, cost",
+    "'check_in' joins BACKGROUND_LANES in services/credits/asks.py",
+    "New test orchestrator/tests/test_prd268_runner.py: silent run with zero LLM calls; one mocked LLM call writing one suggestion through the tool; the iteration and cost ceilings; a trial workspace is skipped; a set spend ceiling refuses"
+   ],
+   "priority": 9,
+   "passes": false,
+   "notes": "Mirror the tool loop of HeartbeatService._orchestrator_tick_llm (heartbeat_service.py:797-975) in the new module; never touch that function. Never go through AgentFactory (K8). Split the runner into small files (runner.py, loop.py, prompts.py) so every function stays under 50 code lines."
+  },
+  {
+   "id": "US-C04a",
+   "title": "Make room in heartbeat_service.py for the bridge",
+   "description": "As a maintainer, I need heartbeat_service.py to shrink before it gains the bridge, so the file never grows (AGENTS.md code shape, K3).",
+   "acceptanceCriteria": [
+    "Move at least 20 lines out of services/heartbeat_service.py into a new module under services/heartbeats/, re-exported where a test imports the name; choose code no test patches by module path (grep orchestrator/tests for 'services.heartbeat_service.<name>' first)",
+    "Behaviour identical: no test edited; the K4 functions are byte-identical",
+    "New test orchestrator/tests/test_prd268_heartbeat_split.py asserts the moved names resolve from both paths (identity)"
+   ],
+   "priority": 10,
+   "passes": false,
+   "notes": "A behaviour-preserving move only. Record which names moved and why they were safe in the DONE mark."
+  },
+  {
+   "id": "US-C04b",
+   "title": "The heartbeat bridge: check-ins beside or instead of today's ticks, by mode",
+   "description": "As an owner, I want my agents' scheduled checks to suggest, not to file tickets, without a risky rewrite of the tick (PRD-268 §6.2.1, FR-4, K7, K10).",
+   "acceptanceCriteria": [
+    "services/proactive/heartbeat_bridge.py: agent_job(service) and orchestrator_job(service) return the coroutine the scheduler runs. off → today's tick only; shadow → today's tick, then the check-in; live → the check-in only for check_in agents and for the orchestrator at proactive_level silent or notify; act agents and act_notify/autonomous run today's tick",
+    "schedule_agent_heartbeat and schedule_orchestrator_heartbeat pass the bridge's job instead of self._agent_tick / self._orchestrator_tick (one line each); _agent_tick and _orchestrator_tick are byte-identical to the base; heartbeat_service.py does not grow overall (US-C04a)",
+    "heartbeat.mode check_in | act is accepted by HeartbeatConfigPayload (api/heartbeat.py:59-68) and echoed by GET with the effective default (K10)",
+    "In live mode a check_in agent with report_to=auto creates zero BoardTasks, files no per-tick report and writes a heartbeat_complete bell row only when its run made a suggestion or started an error streak",
+    "New test orchestrator/tests/test_prd268_heartbeat_bridge.py: each mode × config takes the right path; the live zero-ticket case (realdb); the payload accepts and echoes mode"
+   ],
+   "priority": 11,
+   "passes": false,
+   "notes": "The scheduler functions (:429, :501) are short: changing their add_job target is allowed (K4). The import goes in the room US-C04a made."
+  },
+  {
+   "id": "US-C05",
+   "title": "Failing streaks: one suggestion per streak, interval doubling, reset on success",
+   "description": "As an owner, I want one card for an agent that keeps failing, not one per tick (PRD-268 §6.2.2, FR-5).",
+   "acceptanceCriteria": [
+    "An erroring agent check-in (provider refusal, tool failure, timeout) writes an 'error' run row with error_class and makes no further model call; the first failure of an (agent, error class) streak creates one suggestion (subject_key 'agent:<id>:error:<class>', a deterministic title and detail, no model call); later failures update occurrences and last_seen_at",
+    "From the 3rd consecutive failure the bridge skips runs until next_interval (doubling up to 24 h) has passed, and the suggestion says so; the first success resets it and expires the suggestion with a 'works again' detail",
+    "New test orchestrator/tests/test_prd268_streaks.py: 12 failing ticks (the 26 Oct VECTOR case, from fixtures) → 1 suggestion, 0 BoardTasks, the doubling schedule; a success expires it"
+   ],
+   "priority": 12,
+   "passes": false,
+   "notes": "Consecutive failures are read from proactive_runs; no extra column. Pure rules from modules/proactive (US-C03a)."
+  },
+  {
+   "id": "US-C06a",
+   "title": "Suggestions API: list, Start, Hide, runs",
+   "description": "As a person, I want to see suggestions, start or hide one, and see what Start did; as an owner, I want to compare runs (PRD-268 §6.2.5, FR-7, FR-14).",
+   "acceptanceCriteria": [
+    "api/proactive.py, registered through RouterSpec('api.proactive') in router_manifest.py; plain def handlers on the sync session; authenticated and workspace-scoped: GET /api/proactive/suggestions?status=open (the addressee, owners and admins), POST /api/proactive/suggestions/{id}/start (owners, admins and editors), POST /api/proactive/suggestions/{id}/hide with an optional reason not_now | not_useful | wrong_agent (the addressee, owners and admins), GET /api/proactive/runs?since= (owners and admins); viewers neither start nor hide; another workspace's id is 404",
+    "Start moves open → started in one UPDATE … WHERE status = 'open' RETURNING (one Start wins). For board_task it creates a BoardTask with source_type 'suggestion', source_id the suggestion id, created_by_type 'user', review_mode 'human', assigned to the proposed agent, and a brief that quotes the evidence as data. For chat it returns opens {type: 'chat', suggestion_id}. Mission and playbook_run answer 409 (K12). Start calls refuse_new_work first; a refusal leaves the row open and returns the reason.",
+    "Hide is never gated; it records hide_reason, decided_via and decided_at",
+    "Audit rows for Start and Hide written after the commit (K15)",
+    "The routes are in orchestrator/reports/route-manifest.json (K5)",
+    "New test orchestrator/tests/test_prd268_suggestions_api.py (realdb): roles, tenancy 404, Start creates the ticket, two concurrent Starts create one ticket, Hide, runs listing, the manifest entries, plain def handlers"
+   ],
+   "priority": 13,
+   "passes": false,
+   "notes": "The test convention for a new router: tests/test_prd266_digest_now.py:358-365. api/board_tasks.py is 2282 lines: create the BoardTask through a small service function, never by editing a long route."
+  },
+  {
+   "id": "US-C06b",
+   "title": "Started work is watched",
+   "description": "As a person, I want what a suggestion started to be supervised, so its outcome comes back to me (PRD-268 §6.2.5, FR-8).",
+   "acceptanceCriteria": [
+    "Each started board_task gets a watch through the existing watch service (target board task) and started_ref records {board_task_id, watch_id}",
+    "New test orchestrator/tests/test_prd268_started_watch.py (realdb): Start creates the watch; started_ref holds both ids"
+   ],
+   "priority": 14,
+   "passes": false,
+   "notes": "Watch targets include board tasks (watch_enums.py:48). Reuse the service; no new watch kind."
+  },
+  {
+   "id": "US-C07a",
+   "title": "Switches and caps: platform mode, workspace switch, person pause, the §6.9 caps",
+   "description": "As an owner, I need to bound what proactive work costs and turn it off at any level (PRD-268 §6.9, FR-13, K7).",
+   "acceptanceCriteria": [
+    "services/proactive/switches.py: effective_mode(db, workspace_id) reads the platform system setting (category proactive, key mode; strict read; failure → off; default config PROACTIVE_MODE_DEFAULT='off') and the workspace switch settings.proactive.enabled (default false); person_paused(db, workspace_id, user_id) reads proactive_person_settings",
+    "GET and PUT /api/proactive/settings (owners and admins; PUT behind the workspace manage permission) read and write settings.proactive (enabled and the caps), with flag_modified and an audit row; GET and PUT /api/proactive/me (any member) for paused",
+    "Caps with defaults in config.py (PROACTIVE_MAX_MODEL_RUNS_PER_DAY=48, PROACTIVE_MAX_SUGGESTIONS_PER_RUN=3, PROACTIVE_MAX_NEW_PER_PERSON_PER_DAY=10, PROACTIVE_MAX_OPEN_PER_PERSON=20, PROACTIVE_MAX_OPEN_PER_AGENT=3, PROACTIVE_MIN_INTERVAL_MINUTES=30, PROACTIVE_MAX_INTERVAL_MINUTES=1440), each in config-surface.json; each refusal is a run row (skipped_cap, skipped_paused, skipped_off)",
+    "New test orchestrator/tests/test_prd268_switches.py: a settings read error skips the run (fail closed); each cap refuses with its outcome; the routes' roles"
+   ],
+   "priority": 15,
+   "passes": false,
+   "notes": "Workspace settings writes: api/mobile_push.py:139-160 is the pattern. The platform switch is read like Socials (modules/socials/settings.py:108-133)."
+  },
+  {
+   "id": "US-C07b",
+   "title": "Per-person quiet hours",
+   "description": "As a person, I need my own quiet hours, so suggestions never reach me at night (PRD-268 §6.9).",
+   "acceptanceCriteria": [
+    "proactive_person_settings quiet_start, quiet_end and timezone are written through PUT /api/proactive/me; services/proactive/quiet.py is_person_quiet(settings, workspace_settings, now) combines them with the workspace window (core/services/auto_reporting.py is_quiet_hours); W1 records and exposes it, and W2's push reads it",
+    "New test orchestrator/tests/test_prd268_quiet_hours.py: windows across midnight, a DST change, and the workspace window applying on top"
+   ],
+   "priority": 16,
+   "passes": false,
+   "notes": "Pure function plus the route field; no push in W1."
+  },
+  {
+   "id": "US-C17a",
+   "title": "Status, next step and retry on needs-you rows, in English and Portuguese (Brazil)",
+   "description": "As a person, I want every needs-you row to say where it stands and what happens next, in my language (PRD-268 §6.11.1, K13).",
+   "acceptanceCriteria": [
+    "services/proactive/display_state.py: display_state(source, status, kind) per the §6.11.1 table (unknown → None); next_step sentences from a strings table in services/proactive/strings.py with 'en' and 'pt-BR' for every STUCK_* constant (services/needs_you.py:68-74) and every kind; retry for failed rows",
+    "GET /api/activity/needs-you adds display_state, next_step (≤ 90 characters) and retry to each row, the language chosen by Accept-Language (en default); needs_you() itself and the row counts are unchanged",
+    "New test orchestrator/tests/test_prd268_needs_you_status.py: every kind and STUCK_* constant maps; both languages have every key; Accept-Language pt-BR returns Portuguese; counts unchanged"
+   ],
+   "priority": 17,
+   "passes": false,
+   "notes": "Add the fields in the route or a small post-processor (api/activity.py:329-345 is short), not inside needs_you()'s long functions."
+  },
+  {
+   "id": "US-C17b",
+   "title": "Status, next step and retry on Missions and board reads",
+   "description": "As a person, I want the Missions list and the board to use the same status words (PRD-268 §6.11.1).",
+   "acceptanceCriteria": [
+    "The Missions list rows (GET /api/missions, api/missions.py _run_to_response :330) and the board task reads (services/board_task_view.py board_dict) gain display_state, next_step and retry from services/proactive/display_state.py; api/missions.py and api/board_tasks.py do not grow (K3)",
+    "New test orchestrator/tests/test_prd268_missions_board_status.py: running, planning, completed and failed runs map; board statuses map; unknown → None"
+   ],
+   "priority": 18,
+   "passes": false,
+   "notes": "list_missions is async def over a sync session (api/missions.py:652): don't touch it; change the short helper only."
+  },
+  {
+   "id": "US-C18",
+   "title": "Readiness: probes and routes",
+   "description": "As a person, I want to see what Auto depends on and what it couldn't check (PRD-268 §6.11.3).",
+   "acceptanceCriteria": [
+    "services/readiness/ with one probe per server item: core (SELECT 1), model_route (the orchestrator_llm setting resolves to a configured provider and model, no model call), web_search (a search provider is configured), push (the Expo push path or operator consent is configured); each with a timeout from config (READINESS_PROBE_TIMEOUT_SECONDS) where a timeout reads not_checked; items carry needed_by and a fix href that is an app path",
+    "GET /api/readiness and POST /api/readiness/check (rate-limited with the existing limiter), authenticated and workspace-scoped, plain def; in the route manifest",
+    "On SaaS no detail contains a hostname or latency; the local edition may show them",
+    "New test orchestrator/tests/test_prd268_readiness.py: each probe's three states; a timeout gives not_checked; fix hrefs start with '/'; no hostname on saas; the rate limit"
+   ],
+   "priority": 19,
+   "passes": false,
+   "notes": "Reuse api/system_health_checks.py _database where possible (it has no timeout: wrap it). No calendar item in W1 (§12-Q20)."
+  }
+ ],
+ "instructions": "Mark an AC done by appending, outside backticks and exactly as written, `→ DONE — <evidence>`. An AC only the owner can check gets `→ OWNER: <what to check>`."
+}
