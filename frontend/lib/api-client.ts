@@ -775,6 +775,17 @@ export interface WorkspaceSocialsState {
   series_approval?: boolean
 }
 
+/**
+ * The `voice_live` block of GET /api/workspaces/current (mirrors `WorkspaceSocialsState`):
+ * `available` is the SaaS plan gate for Auto Live (D34; always true in the local edition),
+ * `enabled` is this workspace's own switch (Settings → Voice → Auto Live). The platform
+ * switch and the Retell credentials live under System Settings → Voice instead.
+ */
+export interface WorkspaceVoiceLiveState {
+  available: boolean
+  enabled: boolean
+}
+
 /** This month's render minutes (PRD-251 S1.1c): `quota_minutes` is null when the plan has no quota. */
 export interface SocialRenderMinutes {
   used_minutes: number
@@ -3421,6 +3432,14 @@ class ApiClient {
     return this.request('/api/workspaces/current/socials', {
       method: 'PUT',
       body: JSON.stringify({ socials: { enabled } }),
+    })
+  }
+
+  /** Settings → Voice → Auto Live: the workspace's own switch (`workspace:manage`). */
+  async setWorkspaceVoiceLiveEnabled(enabled: boolean): Promise<{ status: string; voice_live: Record<string, unknown> }> {
+    return this.request('/api/workspaces/current/voice-live', {
+      method: 'PUT',
+      body: JSON.stringify({ voice_live: { enabled } }),
     })
   }
 

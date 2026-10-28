@@ -114,6 +114,90 @@ def test_validate_voice_live_update_matrix():
 
 
 # ---------------------------------------------------------------------------
+# The Settings switch (Settings → Voice → Auto Live) — GET /api/workspaces/current's
+# `voice_live` block: the plan gate the card cannot see for itself, and the workspace's
+# own choice. No new route: a field addition to the GET that already exists.
+# ---------------------------------------------------------------------------
+
+
+def test_voice_live_plan_allows_is_unrestricted_on_the_local_edition(monkeypatch):
+    from config import config
+    from modules.voice.live_settings import voice_live_plan_allows
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    assert voice_live_plan_allows("basic") is True  # the local edition is never plan-gated
+
+
+def test_voice_live_plan_allows_delegates_to_the_mints_own_rule(monkeypatch):
+    from config import config
+    from modules.voice.live_settings import voice_live_plan_allows
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: plan == "business")
+    assert voice_live_plan_allows("business") is True
+    assert voice_live_plan_allows("basic") is False
+
+
+def test_voice_live_state_reports_the_plan_gate_and_the_workspace_switch(monkeypatch):
+    from config import config
+    from modules.voice.live_settings import voice_live_state
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")  # always available here
+    on = SimpleNamespace(plan="basic", settings={"voice_live": {"enabled": True}})
+    off = SimpleNamespace(plan="basic", settings={"voice_live": {"enabled": False}})
+    never_set = SimpleNamespace(plan="basic", settings={})
+    assert voice_live_state(on) == {"available": True, "enabled": True}
+    assert voice_live_state(off) == {"available": True, "enabled": False}
+    assert voice_live_state(never_set) == {"available": True, "enabled": False}  # never live by accident
+
+
+def test_voice_live_state_available_follows_the_plan_gate_on_saas(monkeypatch):
+    from config import config
+    from modules.voice.live_settings import voice_live_state
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: False)
+    blocked = SimpleNamespace(plan="basic", settings={"voice_live": {"enabled": True}})
+    # the card is disabled by `available`, whatever the workspace stored earlier
+    assert voice_live_state(blocked) == {"available": False, "enabled": True}
+
+
+def test_voice_live_state_handles_no_workspace():
+    from modules.voice.live_settings import voice_live_state
+
+    assert voice_live_state(None)["enabled"] is False
+
+
+def test_get_current_workspace_reports_voice_live(monkeypatch):
+    """GET /api/workspaces/current carries `voice_live` (field addition, the
+    `socials` block's pattern) so the Settings card has no second round trip."""
+    import api.workspaces as workspaces_api
+    import services.plan_tiers as plan_tiers
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(plan_tiers, "exposure_for_local_edition", lambda: {})
+    monkeypatch.setattr(workspaces_api, "public_snapshot", lambda ws: {})
+    monkeypatch.setattr(workspaces_api, "socials_state", lambda settings: {})
+    monkeypatch.setattr(workspaces_api, "ai_providers_or_none", lambda db, workspace_id: None)
+
+    ws = SimpleNamespace(
+        id=uuid.uuid4(), name="N", slug="n", plan="basic", plan_limits={},
+        settings={"voice_live": {"enabled": True}}, onboarding={}, webhook_key="k" * 32,
+    )
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+    ctx = SimpleNamespace(auth_type="anonymous", user=SimpleNamespace(system_role="user"), workspace_id=ws.id)
+
+    out = workspaces_api.get_current_workspace(ctx=ctx, db=db)
+    assert out["voice_live"] == {"available": True, "enabled": True}
+
+
+# ---------------------------------------------------------------------------
 # S4 · the cap formula (pure) — reservation bounds the two-tabs race
 # ---------------------------------------------------------------------------
 
@@ -1671,6 +1755,94 @@ def test_voice_live_put_merges_not_replaces(monkeypatch):
         "monthly_cap_minutes": 200,
     }
     assert db.commit.called
+
+
+# ---------------------------------------------------------------------------
+# The PUT's own plan gate (D34): turning Auto Live ON needs the workspace's
+# plan; turning it OFF never does — a fix to the Settings switch review found
+# the route stored `enabled: true` for a plan the mint would refuse anyway.
+# ---------------------------------------------------------------------------
+
+
+def test_voice_live_put_refuses_enabling_without_the_plan_and_stores_nothing(monkeypatch):
+    from fastapi import HTTPException
+
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    from modules.voice.mint import VOICE_LIVE_PLAN_REQUIRED, VOICE_LIVE_PLAN_REQUIRED_MESSAGE
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: False)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={"voice_live": {"enabled": False}})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == {"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE}
+    assert ws.settings["voice_live"]["enabled"] is False  # nothing written
+    assert db.commit.called is False
+
+
+def test_voice_live_put_disabling_always_succeeds_even_without_the_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: False)
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={"voice_live": {"enabled": True}})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": False}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is False
+    assert db.commit.called
+
+
+def test_voice_live_put_allows_enabling_on_the_local_edition_regardless_of_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is True
+
+
+def test_voice_live_put_allows_enabling_on_saas_with_the_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: True)
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="business", settings={})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is True
 
 
 def test_live_status_payload_never_leaks_credentials(monkeypatch):

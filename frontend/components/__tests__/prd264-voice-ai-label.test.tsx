@@ -19,6 +19,7 @@ import { AI_VOICE_LABEL } from '@/components/voice/AiVoiceLabel'
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
 import { hostVoiceStub } from '@/components/voice/__tests__/support/host-voice-stub'
 import type { VoicePhase } from '@/lib/voice/engine'
+import { LIVE_REASON_SENTENCES } from '@/lib/voice/live/refusal'
 
 const CALL_STATES: ReadonlyArray<{ phase: VoicePhase }> = [
   { phase: 'connecting' },
@@ -70,7 +71,7 @@ describe("PRD-264 EUAI-04 — LiveVoiceMode (the chat screen's call strip)", () 
   // A Retell/network fault can land mid-call, while Auto is still talking:
   // the failure box replaces the controls, never the label (PRD-264 §8).
   it.each([
-    { kind: 'refusal', error: 'Auto Live is off for this workspace. An admin can turn it on in Settings.' },
+    { kind: 'refusal', error: LIVE_REASON_SENTENCES.voice_live_workspace_off },
     { kind: 'mid-call error', error: 'Could not connect the call — check your connection and try again.' },
   ])('keeps "AI voice assistant" on a $kind', ({ error }) => {
     inCallState('error', error)

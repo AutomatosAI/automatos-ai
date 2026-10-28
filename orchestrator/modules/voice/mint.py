@@ -40,7 +40,7 @@ VOICE_LIVE_PLAN_REQUIRED = "voice_live_plan_required"
 VOICE_LIVE_PLAN_REQUIRED_MESSAGE = "Auto Live is on the Business plan"
 
 PLATFORM_DISABLED = "Auto Live is switched off platform-wide"
-NOT_ARMED = "Auto Live is not armed — Retell credentials are missing in Settings"
+NOT_ARMED = "Auto Live is not armed — Retell credentials are missing in Settings → System Settings → Voice"
 WORKSPACE_NOT_FOUND = "Workspace not found"
 WORKSPACE_DISABLED = "Auto Live is not enabled for this workspace"
 CHAT_NOT_VALID = "chat_id is not a valid chat"

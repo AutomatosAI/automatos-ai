@@ -19,6 +19,7 @@ DB-free.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import os
 import uuid
@@ -159,6 +160,19 @@ def _platform_voice(floor) -> None:
     })
 
 
+def _store_voice_live_enabled(floor, enabled: bool) -> None:
+    """Writes ``workspace.settings.voice_live.enabled`` straight to the column — the shape a
+    plan downgrade leaves behind (the workspace was on Business, switched Auto Live on, then
+    dropped to Basic). The PUT route's own plan gate refuses turning it on through the route
+    once the plan no longer allows it, so a stuck-on workspace from before a downgrade is a
+    direct write, never that route."""
+    floor.db.execute(
+        text("UPDATE workspaces SET settings = CAST(:s AS jsonb) WHERE id = CAST(:id AS uuid)"),
+        {"s": json.dumps({"voice_live": {"enabled": enabled}}), "id": floor.ws},
+    )
+    floor.db.expire_all()
+
+
 # ---------------------------------------------------------------------------
 # The field, in both editions
 # ---------------------------------------------------------------------------
@@ -228,10 +242,13 @@ def test_switching_auto_live_on_adds_retell_and_switching_it_off_removes_it(floo
 
 
 def test_a_basic_workspace_with_auto_live_on_never_lists_retell(floor):
+    # A workspace downgraded off the plan that had Auto Live on keeps that switch stored
+    # (the PUT would now refuse re-enabling it on Basic, D34) — Retell must still stay off
+    # the list regardless of what workspace.settings carries.
     _plan(floor, "basic")
     _platform_voice(floor)
+    _store_voice_live_enabled(floor, True)
 
-    assert floor.client.put(VOICE_LIVE, json={"voice_live": {"enabled": True}}).status_code == 200
     assert _current(floor)["ai_providers"] == []
 
 

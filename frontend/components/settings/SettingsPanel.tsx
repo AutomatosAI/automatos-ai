@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -13,6 +13,7 @@ import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { SessionModeTab } from './SessionModeTab'
 import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
+import { WorkspaceVoiceLiveCard } from './WorkspaceVoiceLiveCard'
 import { AppearanceTab } from './themes/appearance-tab'
 import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { BillingTab } from './billing/billing-tab'
@@ -36,6 +37,10 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  * Socials (PRD-251B US-B106) is the WORKSPACE switch, in both editions: the
  * platform master stays under System Settings (super-admin).
  *
+ * Voice is the workspace's own Auto Live switch, in both editions: the platform's
+ * setup (Retell credentials, the platform-wide on/off) stays under System Settings → Voice
+ * (super-admin); this tab only shows and flips `workspace.settings.voice_live.enabled`.
+ *
  * Appearance (PRD-261 A-07d) holds Themes, in both editions: installing a private theme is
  * on by default in the local edition (THEMES_PRIVATE_UPLOAD=auto).
  *
@@ -53,6 +58,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'credentials',
   'channels',
   'notifications',
+  'voice',  // the workspace's own Auto Live switch (Settings → Voice → Auto Live)
   'socials',  // PRD-251B US-B106 — the workspace's own Socials switch
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
   'appearance',  // PRD-261 A-07d — Themes: install, opt in, choose
@@ -74,6 +80,7 @@ export function SettingsPanel() {
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
     { value: 'phones-devices', label: 'Phones & devices', icon: Smartphone },
+    { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
@@ -172,6 +179,11 @@ export function SettingsPanel() {
         {/* PRD-266 US-005c: Phones & devices — the device list, Revoke, and pairing in paired mode */}
         <TabsContent value="phones-devices">
           <PhonesDevicesTab />
+        </TabsContent>
+
+        {/* The workspace's own Auto Live switch (the platform's setup is under System Settings → Voice) */}
+        <TabsContent value="voice">
+          <WorkspaceVoiceLiveCard />
         </TabsContent>
 
         {/* PRD-251B US-B106: the workspace's own Socials switch (the master is under System Settings) */}
