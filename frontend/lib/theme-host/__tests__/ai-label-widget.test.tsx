@@ -7,13 +7,13 @@
  * components/layout/__tests__/main-layout-widget-page.test.tsx. Opened, its panel shows the host's
  * label above the conversation, with the input and the starter chips enabled. Hostile fixture
  * sheets then hide the label (display, visibility, opacity, size, an off-screen move, a fade on an
- * ancestor): each time the host draws the same words at the top of the panel in its own layer
+ * ancestor, transparent words, a clip-path): each time the host draws the same words at the top of the panel in its own layer
  * (components/ai-label/protected-caption.tsx), a theme-host warning names what the theme did, and
  * the widget keeps working: its input and chips stay enabled, and nothing says it is paused.
  * Closing the panel takes the copy away.
  *
- * jsdom lays nothing out, so getBoundingClientRect is mocked from each element's computed left,
- * top, width and height, as in ai-label.test.ts.
+ * jsdom lays nothing out, so ai-label-layout.ts installs what a browser would hand the check, as in
+ * ai-label.test.ts.
  */
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -55,12 +55,13 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { AI_LABEL_ATTR } from '@/components/ai-label/ai-label'
-import { AI_LABEL_CAPTION_ATTR } from '@/components/ai-label/protected-caption'
 import { aiLabelHiddenWarning } from '@/components/ai-label/use-ai-label-check'
 import { WIDGET_LABEL_SETTLE_MS } from '@/components/ai-label/widget-ai-label'
 import { AutoWidget } from '@/components/chatbot/chat-widget'
 import { useAiLabelStore, WIDGET_AI_LABEL } from '@/lib/ai-label/store'
 import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
+
+import { captionHost, installLabelLayout, theCaption } from './ai-label-layout'
 
 const AUTO_LABEL = 'Auto is an AI'
 const WIDGET_PLACEHOLDER = 'Ask Auto anything...'
@@ -68,26 +69,11 @@ const STARTER_CHIP = 'Where did we leave off?'
 const PAGE_INPUT = 'Page chat input'
 const HOSTILE_CLASS = 'hostile-theme'
 const LABEL = `[${AI_LABEL_ATTR}]`
-const CAPTION_HOST = `[${AI_LABEL_CAPTION_ATTR}]`
 const THEME_HOST_LOG = '[theme-host]'
 /** Past the panel's settle delay, with room for the check to land. */
 const SETTLED = { timeout: WIDGET_LABEL_SETTLE_MS + 1500 }
 /** Where a label-sized box sits in jsdom's 1024 x 768 window when no style moves or sizes it. */
 const LABEL_BOX = { left: 40, top: 300, width: 110, height: 20 }
-
-function px(value: string, fallback: number): number {
-  const parsed = Number.parseFloat(value)
-  return value.trim().endsWith('px') && Number.isFinite(parsed) ? parsed : fallback
-}
-
-function boxOf(element: Element): DOMRect {
-  const style = window.getComputedStyle(element)
-  const left = px(style.left, LABEL_BOX.left)
-  const top = px(style.top, LABEL_BOX.top)
-  const width = px(style.width, LABEL_BOX.width)
-  const height = px(style.height, LABEL_BOX.height)
-  return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect
-}
 
 function addThemeSheet(css: string): void {
   const sheet = document.createElement('style')
@@ -117,15 +103,6 @@ function theLabel(): HTMLElement {
   return labels[0]
 }
 
-/** The label's words in the host's own layer, inside its element's shadow root; throws while there are none. */
-function theCaption(): HTMLElement {
-  const hosts = document.querySelectorAll<HTMLElement>(CAPTION_HOST)
-  expect(hosts.length).toBeLessThanOrEqual(1)
-  const caption = hosts[0]?.shadowRoot?.querySelector<HTMLElement>('[role="note"]')
-  if (!caption) throw new Error("the host drew no copy of the widget's label in its own layer")
-  return caption
-}
-
 /** The class names on `element` that would draw a pill: a rounding, a border, a background, a shadow or a ring. */
 function pillClasses(element: Element): string[] {
   return [...element.classList].filter((name) => /^(rounded|border|bg-|shadow|ring)/.test(name))
@@ -136,15 +113,16 @@ function hostWarnings(): unknown[][] {
   return vi.mocked(console.warn).mock.calls.filter(([prefix]) => prefix === THEME_HOST_LOG)
 }
 
+let uninstallLayout: () => void
+
 beforeEach(() => {
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    return boxOf(this)
-  })
+  ;({ uninstall: uninstallLayout } = installLabelLayout(LABEL_BOX))
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 })
 
 afterEach(() => {
   cleanup()
+  uninstallLayout()
   vi.restoreAllMocks()
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(HOSTILE_CLASS)
@@ -169,7 +147,7 @@ describe("the AI label in Auto's floating widget (PRD-264 EUAI-11a)", () => {
     // the caption's own styles never read as hidden
     expect(aiLabelHiddenReason(note, window)).toBeNull()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
-    expect(document.querySelector(CAPTION_HOST)).toBeNull()
+    expect(captionHost()).toBeNull()
     expect(hostWarnings()).toEqual([])
   })
 })
@@ -181,6 +159,8 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['zero size', `html.${HOSTILE_CLASS} ${LABEL} { width: 0px; height: 0px; }`, 'size'],
   ['an off-screen move', `html.${HOSTILE_CLASS} ${LABEL} { position: fixed; top: -500px; }`, 'viewport'],
   ['a fade on an ancestor', `html.${HOSTILE_CLASS} body { opacity: 0.2; }`, 'opacity'],
+  ['transparent words', `html.${HOSTILE_CLASS} [role="note"] { color: transparent; }`, 'color'],
+  ['a clip-path', `html.${HOSTILE_CLASS} [role="note"] { clip-path: inset(50%); }`, 'paint'],
 ]
 
 describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
@@ -193,7 +173,7 @@ describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
     expect(aiLabelHiddenReason(label, window)).toBe(reason)
     const caption = await waitFor(theCaption, SETTLED)
     expect(caption).toHaveTextContent(AUTO_LABEL)
-    expect(aiLabelHiddenReason(caption, window)).toBeNull()
+    expect(window.getComputedStyle(caption).display).toBe('block')
     // at the top of the panel's conversation, where the label sits, inside the viewport
     expect(caption.style.top).toMatch(/px$/)
     expect(caption.style.left).toMatch(/px$/)
@@ -213,7 +193,7 @@ describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
     await waitFor(theCaption)
     expect(widgetInput()).toBeEnabled()
     document.documentElement.classList.remove(HOSTILE_CLASS)
-    await waitFor(() => expect(document.querySelector(CAPTION_HOST)).toBeNull())
+    await waitFor(() => expect(captionHost()).toBeNull())
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
     expect(widgetInput()).toBeEnabled()
   })
@@ -225,7 +205,7 @@ describe("no theme can hide the widget's AI label (PRD-264 EUAI-11a)", () => {
     await waitFor(theCaption, SETTLED)
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(document.querySelector(LABEL)).toBeNull())
-    expect(document.querySelector(CAPTION_HOST)).toBeNull()
+    expect(captionHost()).toBeNull()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
     // released, not marked seen: a closed panel's label is not on screen
     expect(useAiLabelStore.getState().shownLabels).toEqual([])

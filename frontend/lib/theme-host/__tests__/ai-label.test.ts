@@ -11,23 +11,22 @@
  * page a theme's own composer inside cards.AiLabelFence. No theme is compiled into the app (A-19f1),
  * so every theme's chat reaches the page through the theme host.
  * The label renders once, after ThemeSlot, outside the theme's page, with role="note" and the
- * same words. Then hostile fixture themes set `display:none`, `visibility:hidden`, `opacity:0`,
- * zero size or an off-screen position on the label (and a fade on an ancestor): each time the label
+ * same words. Then hostile fixture themes hide it: `display:none`, `visibility:hidden`, `opacity:0`,
+ * zero size, an off-screen move, a fade on an ancestor, transparent or faint words (by colour or by
+ * `-webkit-text-fill-color`), a clip-path, a mask, a filter on an ancestor, a tiny font, words the
+ * browser would lay out squeezed or off-screen, and something drawn over them. Each time the label
  * reports itself hidden, the host draws the same words in its own layer (components/ai-label/
- * protected-caption.tsx: a shadow root on an element of the host's at the end of <body>, guarded
- * inline), a theme-host warning names what the theme did, and the chat keeps working: its input and
- * a card's button stay enabled, and nothing says the chat is paused. A sheet aimed at that copy
- * itself leaves it on screen. A theme switched in after mount (the observer on <html> and <head>)
- * brings the copy, and switching back takes it away.
+ * protected-caption.tsx: a closed shadow root on an element of the host's at the end of <body>,
+ * guarded inline), a theme-host warning names what the theme did, and the chat keeps working: its
+ * input and a card's button stay enabled, and nothing says the chat is paused. A sheet aimed at
+ * that copy itself leaves it on screen. A theme switched in after mount (the observer on <html>
+ * and <head>) brings the copy, and switching back takes it away.
  *
- * jsdom applies <style> rules and inline styles in getComputedStyle (display, visibility,
- * opacity, width, height, top, left) but lays nothing out, so getBoundingClientRect returns
- * zeros. It is mocked explicitly: each element's box comes from its computed left, top, width
- * and height, a fixed label-sized box where those are unset. A theme's `width: 0px` or
- * `top: -500px` therefore reaches the check the way a browser's layout would hand it over.
- * jsdom also matches a document's rules against elements inside a shadow root, which a browser
- * never does, so its verdict on the host's copy is harsher than a browser's; jsdom has no top
- * layer, so that half is e2e/browser/specs/installed-play-ai-label.spec.ts's.
+ * jsdom lays nothing out, so ai-label-layout.ts installs what a browser would hand the check
+ * (element and text boxes, hit-testing, the copy's closed shadow roots, a popover stand-in). jsdom
+ * also matches a document's rules against elements inside a shadow root, which a browser never
+ * does, so its verdict on the host's copy is harsher than a browser's; the top layer, real text
+ * layout and real hit-testing are e2e/browser/specs/installed-play-ai-label.spec.ts's.
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { createElement as h, type ReactElement, type ReactNode } from 'react'
@@ -63,7 +62,6 @@ vi.mock('@/hooks/use-agent-api', () => ({
 
 import ChatLayout from '@/app/chat/layout'
 import { AI_LABEL_ATTR, AiLabelGate } from '@/components/ai-label/ai-label'
-import { AI_LABEL_CAPTION_ATTR } from '@/components/ai-label/protected-caption'
 import { aiLabelHiddenWarning } from '@/components/ai-label/use-ai-label-check'
 import { MultimodalInput } from '@/components/chatbot/multimodal-input'
 import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
@@ -73,6 +71,7 @@ import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
 import { AiLabelFence as ThemeAiLabelFence } from '@/lib/theme-sdk/host-cards/ai-label-fence'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
+import { type LabelLayout, captionHost, installLabelLayout, installPopover, theCaption } from './ai-label-layout'
 import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from './fixture-theme-entry'
 
 type Page = 'default' | 'theme' | 'fixture'
@@ -91,23 +90,8 @@ const FIXTURE_SEND = 'Send to the fixture theme'
 /** Where a label-sized box sits in jsdom's 1024 x 768 window when no style moves or sizes it. */
 const LABEL_BOX = { left: 880, top: 740, width: 110, height: 20 }
 const LABEL = `[${AI_LABEL_ATTR}]`
-const CAPTION_HOST = `[${AI_LABEL_CAPTION_ATTR}]`
+const CAPTION_HOST = '[data-ai-label-caption]'
 const THEME_HOST_LOG = '[theme-host]'
-
-/** A computed length in px, or the fallback when the style leaves it unset. */
-function px(value: string, fallback: number): number {
-  const parsed = Number.parseFloat(value)
-  return value.trim().endsWith('px') && Number.isFinite(parsed) ? parsed : fallback
-}
-
-function boxOf(element: Element): DOMRect {
-  const style = window.getComputedStyle(element)
-  const left = px(style.left, LABEL_BOX.left)
-  const top = px(style.top, LABEL_BOX.top)
-  const width = px(style.width, LABEL_BOX.width)
-  const height = px(style.height, LABEL_BOX.height)
-  return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect
-}
 
 function addThemeSheet(css: string): void {
   const sheet = document.createElement('style')
@@ -204,20 +188,6 @@ function pillClasses(element: Element): string[] {
   return [...element.classList].filter((name) => /^(rounded|border|bg-|shadow|ring)/.test(name))
 }
 
-/** The host's element that holds the label's copy in its own layer, or null while there is none. */
-function captionHost(): HTMLElement | null {
-  const hosts = document.querySelectorAll<HTMLElement>(CAPTION_HOST)
-  expect(hosts.length).toBeLessThanOrEqual(1)
-  return hosts[0] ?? null
-}
-
-/** The label's words in the host's own layer: inside the host element's shadow root. */
-function theCaption(): HTMLElement {
-  const caption = captionHost()?.shadowRoot?.querySelector<HTMLElement>('[role="note"]')
-  if (!caption) throw new Error("the host drew no copy of the label in its own layer")
-  return caption
-}
-
 /** A theme hides the label with `css`; resolves once the host's copy is on screen. */
 async function hideWith(css: string): Promise<HTMLElement> {
   addThemeSheet(css)
@@ -230,15 +200,27 @@ function hostWarnings(): unknown[][] {
   return vi.mocked(console.warn).mock.calls.filter(([prefix]) => prefix === THEME_HOST_LOG)
 }
 
+let layout: LabelLayout
+let uninstallLayout: () => void
+
+/**
+ * The copy's own styles keep it on screen: displayed, visible, opaque, a readable size. Its hit-test
+ * isn't probed here: the probe writes to the copy, and the copy rebuilds itself on any write.
+ */
+function expectCopyShown(caption: HTMLElement): void {
+  const style = window.getComputedStyle(caption)
+  expect([style.display, style.visibility, style.opacity]).toEqual(['block', 'visible', '1'])
+  expect(caption.isConnected).toBe(true)
+}
+
 beforeEach(() => {
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    return boxOf(this)
-  })
+  ;({ layout, uninstall: uninstallLayout } = installLabelLayout(LABEL_BOX))
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 })
 
 afterEach(() => {
   cleanup()
+  uninstallLayout()
   vi.restoreAllMocks()
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(THEME_CLASS, HOSTILE_CLASS)
@@ -286,6 +268,15 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['zero size', `html.${HOSTILE_CLASS} ${LABEL} { width: 0px; height: 0px; }`, 'size'],
   ['an off-screen move', `html.${HOSTILE_CLASS} ${LABEL} { position: fixed; top: -500px; }`, 'viewport'],
   ['a fade on an ancestor', `html.${HOSTILE_CLASS} body { opacity: 0.2; }`, 'opacity'],
+  // paint the check reads, by generic selectors the server's scope check lets through
+  ['transparent words', `html.${HOSTILE_CLASS} [role="note"] { color: transparent; }`, 'color'],
+  ['a transparent text fill', `html.${HOSTILE_CLASS} [role="note"] { -webkit-text-fill-color: transparent; }`, 'color'],
+  ['faint words', `html.${HOSTILE_CLASS} [role="note"] { color: rgb(236, 236, 236); }`, 'color'],
+  ['words the colour of their ground', `html.${HOSTILE_CLASS} body { background-color: rgb(20, 20, 20); color: rgb(28, 28, 28); }`, 'color'],
+  ['a clip-path', `html.${HOSTILE_CLASS} [role="note"] { clip-path: inset(50%); }`, 'paint'],
+  ['a mask', `html.${HOSTILE_CLASS} [role="note"] { mask-image: linear-gradient(transparent, transparent); }`, 'paint'],
+  ['a filter on an ancestor', `html.${HOSTILE_CLASS} body { filter: opacity(0); }`, 'paint'],
+  ['a tiny font', `html.${HOSTILE_CLASS} [role="note"] { font-size: 4px; }`, 'font'],
 ]
 
 describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
@@ -302,7 +293,7 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     const caption = await waitFor(theCaption)
     expect(caption).toHaveTextContent(AUTO_LABEL)
     expect(caption).toHaveAttribute('aria-label', AUTO_LABEL)
-    expect(aiLabelHiddenReason(caption, window)).toBeNull()
+    expectCopyShown(caption)
     // the chat is never paused: the composer and a reply's card stay enabled, and nothing says otherwise
     expect(inputOf(page)).toBeEnabled()
     expect(cardButton()).toBeEnabled()
@@ -320,9 +311,13 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     for (const property of ['display', 'visibility', 'opacity', 'position', 'pointer-events']) {
       expect(host.style.getPropertyPriority(property)).toBe('important')
     }
-    // a document's selectors don't reach inside the host's shadow root: only the theme's hidden label answers
+    // closed: a theme's code gets no shadowRoot, and a document's selectors don't reach inside it
+    expect(host.shadowRoot).toBeNull()
     expect(document.querySelectorAll(`[aria-label="${AUTO_LABEL}"]`)).toHaveLength(1)
     expect(theCaption().getAttribute('popover')).toBe('manual')
+    for (const property of ['display', 'visibility', 'opacity', 'color', 'font', 'white-space', 'max-width']) {
+      expect(theCaption().style.getPropertyPriority(property)).toBe('important')
+    }
   })
 
   it("keeps the copy on screen against a sheet aimed at it, its host and everything around it", async () => {
@@ -337,25 +332,57 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     const host = captionHost() as HTMLElement
     const hostStyle = window.getComputedStyle(host)
     expect([hostStyle.display, hostStyle.visibility, hostStyle.opacity, hostStyle.position]).toEqual(['block', 'visible', '1', 'fixed'])
-    expect(aiLabelHiddenReason(theCaption(), window)).toBeNull()
+    expectCopyShown(theCaption())
     expect(theCaption()).toHaveTextContent(AUTO_LABEL)
     // the sheet hides the page with <body>; the composer is still not disabled
     expect(screen.getByRole('textbox', { name: THEME_COMPOSER, hidden: true })).toBeEnabled()
   })
 
   it('raises the copy into the browser\'s top layer where the browser has one', async () => {
-    const raised: Element[] = []
-    const showPopover = function (this: Element) {
-      raised.push(this)
-    }
-    Object.defineProperty(HTMLElement.prototype, 'showPopover', { value: showPopover, configurable: true })
+    const popover = installPopover()
     try {
       renderChat('default')
       const caption = await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { opacity: 0; }`)
-      expect(raised).toEqual([caption])
+      expect(popover.raised).toEqual([caption])
     } finally {
-      delete (HTMLElement.prototype as { showPopover?: unknown }).showPopover
+      popover.uninstall()
     }
+  })
+
+  it.each([
+    ['a line the browser lays out squeezed', { left: 880, top: 740, width: 12, height: 20 }],
+    ['a line the browser lays out too short', { left: 880, top: 740, width: 110, height: 5 }],
+    ['words indented off-screen', { left: -9119, top: 740, width: 110, height: 20 }],
+  ])("brings the copy for %s (the words' own box, not the label's)", async (_name, textBox) => {
+    renderChat('default')
+    expect(captionHost()).toBeNull()
+    layout.textBox = textBox
+    const caption = await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { color: rgb(80, 80, 80); }`)
+    expect(aiLabelHiddenReason(theLabel(), window)).toBe('text')
+    expect(caption).toHaveTextContent(AUTO_LABEL)
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'text')]])
+    expect(inputOf('default')).toBeEnabled()
+  })
+
+  it('brings the copy when the label clips its own words (a 4 px box with overflow hidden)', async () => {
+    renderChat('default')
+    layout.textBox = { left: 880, top: 740, width: 70, height: 13 }
+    await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { width: 4px; height: 4px; overflow: hidden; }`)
+    expect(aiLabelHiddenReason(theLabel(), window)).toBe('text')
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'text')]])
+  })
+
+  it("brings the copy when something is drawn over the words, the label's own pseudo-element included", async () => {
+    renderChat('theme')
+    expect(captionHost()).toBeNull()
+    layout.cover = theLabel()
+    const caption = await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { color: rgb(80, 80, 80); }`)
+    expect(aiLabelHiddenReason(theLabel(), window)).toBe('covered')
+    expect(caption).toHaveTextContent(AUTO_LABEL)
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'covered')]])
+    expect(inputOf('theme')).toBeEnabled()
+    // the probe gives the label its own pointer-events back
+    expect(theLabel().style.getPropertyValue('pointer-events')).toBe('')
   })
 
   it("the SDK's cards.AiLabelFence disables nothing: the fixture theme's own box and Send keep working while the label is hidden", async () => {

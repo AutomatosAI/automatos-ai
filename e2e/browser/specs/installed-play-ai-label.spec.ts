@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type ElementHandle, type Page } from '@playwright/test'
+import { CAPTION_SELECTOR, copyState, recordCopyRoots, watchWarnings } from '../support/ai-label-copy'
 import { noStoredConversations } from '../support/chat-stream'
 import { chooseKitPackage, installKitPackage, resetKitPackage } from '../support/kit-package'
 import { messageBox, sendButton, voiceButton } from '../support/play-chat'
@@ -13,16 +14,19 @@ import { watchPage } from '../support/watch'
 //
 // The label is the host's (components/ai-label/ai-label.tsx, drawn by app/chat/layout.tsx after the
 // theme's page): role="note", "Auto is an AI", once, outside Play's page, frame and composer, a tiny caption
-// with no border, background or rounding (never a pill). Since
-// Play 1.2.0 its message box (the kit's themes/play/src/components/play/chat/message-box.tsx) holds the
-// words, then the host's voice button (the SDK's voice.VoiceButton), then Send, the words and Send each in
-// the SDK's cards.AiLabelFence, which now draws its children alone. While a style keeps the label from being
-// seen, the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a shadow
-// root on an element of the host's at the end of <body>, guarded inline, the words a popover in the browser's
-// top layer. A second style aimed at that copy, its element and anything like it leaves it on screen. The
-// words, Send and the voice button stay enabled throughout. This is the browser half of
-// lib/theme-host/__tests__/ai-label.test.ts (jsdom has no top layer and matches a document's rules inside
-// shadow roots), on installed Play, the only Play since W-A8 took builtin Play out of core.
+// with no border, background or rounding (never a pill). Since Play 1.2.0 its message box (the kit's
+// themes/play/src/components/play/chat/message-box.tsx) holds the words, then the host's voice button (the
+// SDK's voice.VoiceButton), then Send, the words and Send each in the SDK's cards.AiLabelFence, which now
+// draws its children alone. While a style keeps the label from being seen, by any of the ways the host's
+// check reads (display, transparent words, a clipped box, an indent off-screen, a clip-path, something drawn
+// over it), the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
+// closed shadow root on a guarded element of the host's at the end of <body>, the words a popover in the
+// browser's top layer, and logs a theme-host warning that names how. A second style aimed at that copy,
+// and a popover of the page's shown after it, leave it on screen and on top (support/ai-label-copy.ts reads
+// the closed root). The words, Send and the voice button stay enabled throughout. This is the browser half
+// of lib/theme-host/__tests__/ai-label.test.ts (jsdom has no layout, hit-testing or top layer, and matches
+// a document's rules inside shadow roots), on installed Play, the only Play since W-A8 took builtin Play out
+// of core.
 //
 // The specs store the member's choice on the lane's one backend, so they run in the @package step,
 // one test at a time; each starts and ends on Studio with no install of Play's package.
@@ -33,9 +37,8 @@ const STATUS_ATTR = 'data-theme-host'
 const PLAY_CLASS = /\bplay\b/
 /** The host's label (lib/ai-label/copy.ts aiLabelText, with no agent picked). */
 const AI_LABEL = 'Auto is an AI'
-/** components/ai-label/ai-label.tsx AI_LABEL_ATTR, and protected-caption.tsx AI_LABEL_CAPTION_ATTR. */
+/** components/ai-label/ai-label.tsx AI_LABEL_ATTR. */
 const LABEL_SELECTOR = '[data-ai-label]'
-const CAPTION_SELECTOR = '[data-ai-label-caption]'
 /** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx). */
 const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
 /** A stylesheet that hides the host's label under installed Play's own <html> class, as a hostile theme's would. */
@@ -60,9 +63,62 @@ async function openInstalledPlayChat(page: Page, request: APIRequestContext): Pr
   await expect(messageBox(page)).toBeVisible({ timeout: THEME_LOAD_TIMEOUT_MS })
 }
 
-/** The host's copy of the label in its own layer (the role engine reads inside the open shadow root). */
-function hostCopy(page: Page) {
-  return page.locator(CAPTION_SELECTOR).getByRole('note', { name: AI_LABEL, exact: true })
+/** The copy on screen, whole, on top and in the top layer, saying the label's words. */
+const COPY_ON_TOP = { text: AI_LABEL, open: true, inViewport: true, painted: true, topmost: true }
+
+/** The theme-host warning use-ai-label-check.ts logs for the page label hidden by `reason`. */
+function hiddenWarning(reason: string): RegExp {
+  return new RegExp(`\\[theme-host\\] the active theme hides the page AI label \\(${reason}\\)`)
+}
+
+/**
+ * Ways a theme's style can hide the label that the host's check reads, by generic selectors the server's
+ * scope check would let through (role=note), or by name (refused at upload, injected here directly), each
+ * with the reason the check gives.
+ */
+const HIDING_WAYS: ReadonlyArray<readonly [string, string, string]> = [
+  ['transparent words', 'html.play [role="note"] { color: transparent !important; }', 'color'],
+  ['a 4 px box that clips its words', `html.play ${LABEL_SELECTOR} { width: 4px !important; height: 4px !important; overflow: hidden !important; }`, 'text'],
+  ['words indented off-screen', `html.play ${LABEL_SELECTOR} { text-indent: -9999px !important; }`, 'text'],
+  ['a clip-path', `html.play ${LABEL_SELECTOR} { clip-path: inset(50%) !important; }`, 'paint'],
+]
+
+/** Draws an element of the page's over the label's corner, above its z-index; returns what takes it away. */
+async function coverTheLabel(page: Page): Promise<() => Promise<void>> {
+  const cover = await page.evaluateHandle((selector) => {
+    const box = document.querySelector(selector)?.getBoundingClientRect()
+    const element = document.createElement('div')
+    element.setAttribute('data-test-cover', '')
+    const style = `position: fixed; left: ${(box?.left ?? 0) - 8}px; top: ${(box?.top ?? 0) - 8}px;` +
+      ` width: ${(box?.width ?? 0) + 16}px; height: ${(box?.height ?? 0) + 16}px; z-index: 2147483000; background: rgb(250, 0, 0);`
+    element.setAttribute('style', style)
+    document.body.appendChild(element)
+    return element
+  }, LABEL_SELECTOR)
+  return async () => {
+    await cover.evaluate((element: Element) => element.remove())
+  }
+}
+
+/** Shows a popover of the page's over the bottom of the viewport, after the copy; returns what hides it. */
+async function showPagePopover(page: Page): Promise<() => Promise<void>> {
+  const popover = await page.evaluateHandle(() => {
+    const element = document.createElement('div')
+    element.setAttribute('popover', 'manual')
+    element.setAttribute('style', 'position: fixed; inset: auto 0 0 0; width: 100vw; height: 160px; margin: 0; background: rgb(0, 0, 250);')
+    document.body.appendChild(element)
+    element.showPopover()
+    return element
+  })
+  return async () => {
+    await popover.evaluate((element: Element) => element.remove())
+  }
+}
+
+async function removeStyle(style: ElementHandle<Node>): Promise<void> {
+  await style.evaluate((node: Node) => {
+    node.parentNode?.removeChild(node)
+  })
 }
 
 /** The label's computed box under Play: a caption draws no border, background or rounding (never a pill). */
@@ -82,8 +138,9 @@ async function expectChatRuns(page: Page): Promise<void> {
 }
 
 test.describe("PRD-261 A-19e1 — installed Play's /chat carries the host's AI label (PRD-264)", () => {
-  test.beforeEach(async ({ request }) => {
+  test.beforeEach(async ({ page, request }) => {
     await resetKitPackage(request)
+    await recordCopyRoots(page)
   })
 
   test.afterEach(async ({ request }) => {
@@ -103,30 +160,28 @@ test.describe("PRD-261 A-19e1 — installed Play's /chat carries the host's AI l
     await expect(page.locator(PLAY_FRAME)).toBeVisible()
     await expect(page.locator(`${PLAY_FRAME} ${LABEL_SELECTOR}`)).toHaveCount(0)
     await expect(page.locator(`main ${LABEL_SELECTOR}`)).toHaveCount(0)
-    // the host's check reads the caption as seen: no copy in its own layer
+    // the host's check reads the caption as seen (painted, readable, nothing over it): no copy in its own layer
     await expect(page.locator(CAPTION_SELECTOR)).toHaveCount(0)
+    expect(await copyState(page)).toBeNull()
     await messageBox(page).fill(DRAFT)
     await expectChatRuns(page)
     expect(watch.pageErrors).toEqual([])
   })
 
   test("a style that hides the label brings the host's own copy, which a style aimed at it can't hide; the chat runs throughout", { tag: '@package' }, async ({ page, request }) => {
+    const warnings = watchWarnings(page)
     await openInstalledPlayChat(page, request)
     await messageBox(page).fill(DRAFT)
     await expectChatRuns(page)
 
     const hiding = await page.addStyleTag({ content: HIDING_STYLE })
     await expect(page.locator(LABEL_SELECTOR)).toBeHidden()
-    await expect(hostCopy(page)).toBeVisible()
-    await expect(hostCopy(page)).toHaveText(AI_LABEL)
-    await expect(hostCopy(page)).toBeInViewport()
-    expect(await hostCopy(page).evaluate((node: Element) => node.matches(':popover-open'))).toBe(true)
+    await expect.poll(() => copyState(page)).toMatchObject(COPY_ON_TOP)
+    await expect.poll(() => warnings.some((warning) => hiddenWarning('display').test(warning))).toBe(true)
     await expectChatRuns(page)
 
     const aimed = await page.addStyleTag({ content: AIMED_AT_COPY })
-    await expect(hostCopy(page)).toBeVisible()
-    await expect(hostCopy(page)).toBeInViewport()
-    expect(await hostCopy(page).evaluate((node: Element) => window.getComputedStyle(node).opacity)).toBe('1')
+    await expect.poll(() => copyState(page)).toMatchObject(COPY_ON_TOP)
     // the host's element keeps its inline guard against the important rules aimed at it
     const guard = await page.locator(CAPTION_SELECTOR).evaluate((node: Element) => {
       const style = window.getComputedStyle(node)
@@ -134,14 +189,38 @@ test.describe("PRD-261 A-19e1 — installed Play's /chat carries the host's AI l
     })
     expect(guard).toEqual(['block', 'visible', '1', 'none'])
     await expectChatRuns(page)
+    await removeStyle(aimed)
 
-    for (const style of [aimed, hiding]) {
-      await style.evaluate((node: Node) => {
-        node.parentNode?.removeChild(node)
-      })
-    }
+    // a popover of the page's shown after the copy: the copy rises above it again
+    const hidePopover = await showPagePopover(page)
+    await expect.poll(() => copyState(page)).toMatchObject(COPY_ON_TOP)
+    await hidePopover()
+
+    await removeStyle(hiding)
     await expect(page.locator(LABEL_SELECTOR)).toBeVisible()
     await expect(page.locator(CAPTION_SELECTOR)).toHaveCount(0)
     await expectChatRuns(page)
+  })
+
+  test('every way of hiding the label the check reads brings the copy and a warning; taking it away takes the copy away', { tag: '@package' }, async ({ page, request }) => {
+    const warnings = watchWarnings(page)
+    await openInstalledPlayChat(page, request)
+    await messageBox(page).fill(DRAFT)
+
+    for (const [name, css, reason] of HIDING_WAYS) {
+      const style = await page.addStyleTag({ content: css })
+      await expect.poll(() => copyState(page), { message: name }).toMatchObject(COPY_ON_TOP)
+      await expect.poll(() => warnings.some((warning) => hiddenWarning(reason).test(warning)), { message: name }).toBe(true)
+      await expectChatRuns(page)
+      await removeStyle(style)
+      await expect.poll(() => copyState(page), { message: `${name}, taken away` }).toBeNull()
+    }
+
+    const uncover = await coverTheLabel(page)
+    await expect.poll(() => copyState(page), { message: 'something drawn over the label' }).toMatchObject(COPY_ON_TOP)
+    await expect.poll(() => warnings.some((warning) => hiddenWarning('covered').test(warning))).toBe(true)
+    await expectChatRuns(page)
+    await uncover()
+    await expect.poll(() => copyState(page), { message: 'the cover taken away' }).toBeNull()
   })
 })

@@ -53,7 +53,7 @@ function WidgetAiLabelNote({ frame, hidden, onHiddenChange }: WidgetAiLabelNoteP
   return (
     <>
       <p ref={ref} role="note" aria-label={text} data-ai-label="" className={LABEL_CLASS}>
-        {text}
+        <span data-ai-label-text="">{text}</span>
       </p>
       {hidden ? <ProtectedAiCaption text={text} place={place} /> : null}
     </>

@@ -157,21 +157,42 @@ hostile sheet.
 The in-app AI label ("Auto is an AI", EU AI Act Art. 50(1)) is protected differently from the approval cards.
 It carries no inline `!important` guard: a guard would beat a theme's rule on the label itself, but not a
 `display: none`, `opacity` or off-screen move on an element around it (the review rules above). So the host
-renders the label outside the theme's page slot (`AiLabelGate`, `frontend/components/ai-label/ai-label.tsx`)
-and checks at run time that a person can see it (`frontend/lib/ai-label/visibility.ts`): displayed, visible,
-at least half opaque through all its ancestors, at least 4 px each way and wholly inside the viewport.
+renders the label outside the theme's page slot (`AiLabelGate`, `frontend/components/ai-label/ai-label.tsx`),
+checks at run time that a person can see it, and, when they can't, draws the same words again in a layer of
+its own that theme CSS can't reach. The chat keeps working: nothing is disabled and nothing is paused. Since
+28 Oct 2026 this replaces the chat lock (the old `AiLabelFence` pause and its "chat is paused" notice): the
+product rule is that the AI label is a small caption and never locks the composer.
 
-While the check fails, the host draws the same words again, at the label's spot, in a layer of its own that
-theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`), and the chat keeps working:
-nothing is disabled and nothing is paused. Since 28 Oct 2026 this replaces the chat lock (the old `AiLabelFence`
-pause and its "chat is paused" notice): the product rule is that the AI label is a small caption and never
-locks the composer. The copy holds three ways:
+### The check (`frontend/lib/ai-label/visibility.ts`)
 
-- **A shadow root.** The words sit in an open shadow root of an element the host appends to `<body>` itself
-  (`data-ai-label-caption`), outside the theme's page, frame and slots. No selector in a document stylesheet
-  matches an element inside a shadow root. The words carry `all: initial` and their own values inline, so
-  nothing they would inherit from a theme's `<html>` or `<body>` reaches them, and they read no custom property
-  (their colours are the system's `Canvas` and `CanvasText`).
+A false alarm costs nothing but the copy, so the check is strict: what it can't confirm reads as hidden. The
+label's words sit in their own element (`data-ai-label-text`), and the label counts as seen only when:
+
+| Reason when it fails | What the check reads |
+|---|---|
+| `display`, `visibility`, `opacity` | No `display: none` on the words or around them; the words visible; their opacity times their ancestors' at least 0.5 |
+| `paint` | No `clip-path`, `mask-image`, `-webkit-mask-image` or `filter`, and no `content-visibility: hidden`, on the words, the label or any ancestor |
+| `font` | A font size of at least 9 px |
+| `color` | The fill (`-webkit-text-fill-color`, else `color`) is not transparent and has at least 3:1 against what is behind it: the first opaque `background-color` up the ancestors with the translucent ones between painted over it, or the page's own white (and black too, where the root allows a dark scheme). A colour in any space is read: `rgb()` and `color(srgb)` as text, any other through a 1 by 1 canvas |
+| `size`, `viewport` | The label's box at least 4 px each way and inside the viewport |
+| `text` | The words themselves, measured as a Range: at least 9 px tall and 0.3 em per character wide, wholly inside the viewport, and inside the label's own box when the label clips its overflow. So `text-indent`, a tiny or clipped box, `letter-spacing` and a scale transform all fail |
+| `covered` | Hit-testing at the start, middle and end of the words finds the words' own element on top. The label is `pointer-events: none`, which hit-testing skips, so the label and its words take `pointer-events: auto` for the probe only and get their own value back. An ancestor's clipping, an overlay of the theme's, and the label's own `::before` or `::after` (which hits as the label, not as its words) all fail |
+
+Where the browser can't measure text (no Range boxes) or hit-test (no `elementsFromPoint`), the label reads as
+hidden. The check runs on mount, when `<html>`'s classes or attributes or `<head>`'s elements change, on resize
+and every two seconds, and logs a theme-host warning the first time it finds the label hidden and again only
+when the way changes: `[theme-host] the active theme hides the page AI label (color); the host draws it in its
+own layer instead`.
+
+### The copy (`frontend/components/ai-label/protected-caption.tsx`, `protected-caption-parts.ts`)
+
+- **A closed shadow root.** The words sit in a closed shadow root of an element the host appends to `<body>`
+  itself (`data-ai-label-caption`), outside the theme's page, frame and slots. No selector in a document
+  stylesheet matches inside a shadow root, and `host.shadowRoot` is null to a theme's code. The words carry
+  `all: initial` and their own values inline, every one `!important`, so nothing they would inherit from a
+  theme's `<html>` or `<body>` reaches them, and they read no custom property (their colours are the system's
+  `Canvas` and `CanvasText`). They wrap inside the viewport, and an agent name past 40 characters is cut with
+  an ellipsis (`frontend/lib/ai-label/copy.ts`), so " is an AI" is never lost.
 - **The cards' guard on its element.** The element in the page's DOM carries `PROTECTED_SURFACE_GUARD` inline,
   every value `!important`, but fixed, empty (0 by 0) and click-through, and also `will-change`, `perspective`,
   `backdrop-filter` and `container-type` closed. As for the cards, an important declaration attached to the
@@ -179,24 +200,50 @@ locks the composer. The copy holds three ways:
 - **The browser's top layer.** The words are a manual popover, shown with `showPopover()`: above every
   `z-index`, and out of reach of what an ancestor does to its descendants (opacity, filter, transform,
   clip-path, overflow). Where the browser has no popover, they stay a fixed element.
+- **It heals itself.** A MutationObserver on `<body>`'s children, the host's attributes and the whole shadow
+  tree rebuilds the copy from scratch the moment it is removed, moved or changed (its words, its guard). Its
+  own `toggle` event re-shows it after a `hidePopover()`. `beforetoggle` and `toggle` caught at the document in
+  the capture phase, and `fullscreenchange`, raise it again (hide, then show, which puts it last in the top
+  layer) whenever something else enters the top layer. A watchdog on the same two-second tick checks it is
+  whole, rebuilds it if not, and raises it, for whatever no event reports (a dialog in a theme's own shadow
+  root). A theme that undoes every repair gets five immediate repairs a second and the watchdog's after that,
+  so it can't make the page spin. Each kind of tampering logs one warning: `[theme-host] something in the page
+  removed the AI label's protected copy; the host put it back`.
 
-The check logs a theme-host warning the first time it finds a label hidden, and again only when the way it is
-hidden changes: `[theme-host] the active theme hides the page AI label (display); the host draws it in its own
-layer instead`. Auto's floating widget draws its own label in its panel (`WidgetAiLabelFrame`) and its copy at
-the top of the panel, kept inside the viewport.
+Auto's floating widget draws its own label in its panel (`WidgetAiLabelFrame`), checked the same way, and its
+copy at the top of the panel, kept inside the viewport.
 
-The review still flags a theme that tries. The scope check refuses every selector that names `data-ai-label`
-(the label, and the copy's `data-ai-label-caption`), as it refuses the cards' names. The LLM stage's
-"Deception" category names content placed over, hiding or imitating the host's AI label, and code that removes,
-moves or restyles it (`orchestrator/services/themes/llm_stage.py`).
+### What the review still flags
 
-The theme SDK's `cards.AiLabelFence` stays exported, because installed themes (Play, HUD) wrap their composers
-in it, but it draws its children alone and disables nothing. The SDK's chat (EUAI-11b): Send and Try again on
+The scope check refuses every selector that names `data-ai-label` (the label, its words' `data-ai-label-text`,
+and the copy's `data-ai-label-caption`), as it refuses the cards' names. The LLM stage's "Deception" category
+names content placed over, hiding or imitating the host's AI label, and code that removes, moves or restyles
+it (`orchestrator/services/themes/llm_stage.py`).
+
+### The SDK
+
+`cards.AiLabelFence` stays exported, because installed themes (Play, HUD) wrap their composers in it, but it
+draws its children alone and disables nothing. The SDK's chat (EUAI-11b): Send and Try again on
 `useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at the moment they are
 called, and return false, sending nothing, only when no page label is mounted
 (`frontend/lib/theme-sdk/internal/ai-label-gate.ts`): a theme that opens a chat in its frame on a page with no
 label starts no turn. A hidden label is still on screen, in the host's layer, so it never stops a turn. Auto's
 widget's label never clears a theme's chat. Stop always runs.
 
-Not covered, and so review rules for the label as for the cards: a top-layer element of the theme's own shown
-after the copy (it would sit above it), and code the theme runs in the page (it could remove any element).
+### Guaranteed at run time, and what stays a review rule
+
+Guaranteed against theme CSS: every way of hiding the label in the check's table brings the copy, and no
+stylesheet rule hides, fades, moves, clips, covers or recolours the copy. Guaranteed against a theme's code
+once the copy exists: removing, moving or editing it, or hiding it with `hidePopover()`, is undone at once, and
+a popover, dialog or fullscreen element shown later is put back under it.
+
+Review rules, not guarantees:
+
+- **Paint the check doesn't read:** a background image behind the words, and a font of the theme's whose
+  glyphs are blank (its `@font-face` family must start with the theme's class, so the review sees it).
+- **Code the theme runs before the copy exists:** wrapping `attachShadow`, `showPopover` or
+  `MutationObserver` to reach or quiet the copy, or a loop that undoes every repair (it can't spin the page,
+  but each undo shows for up to two seconds). Sandboxing a theme's code is not something the host does; the
+  review reads that code, and installed themes are signed.
+- **A top-layer element of the theme's opened in its own shadow root** sits above the copy until the next
+  watchdog tick, two seconds at most.

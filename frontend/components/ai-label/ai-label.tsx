@@ -21,8 +21,9 @@ import { useAiLabelCheck } from './use-ai-label-check'
  * theme's muted-foreground token (no border, background or rounding: never a pill), with
  * role="note" and the same words for screen readers.
  *
- * No theme can hide it: the label checks it can be seen (use-ai-label-check.ts) and publishes
- * the answer (lib/ai-label/store.ts). While it can't be seen, the same words are drawn again at the
+ * No theme can hide it: the label checks it can be seen (use-ai-label-check.ts, lib/ai-label/visibility.ts:
+ * its words, in their own element so they can be measured and hit-tested, painted, readable and on top)
+ * and publishes the answer (lib/ai-label/store.ts). While it can't be seen, the same words are drawn again at the
  * label's spot in the host's own layer, where no theme CSS reaches (protected-caption.tsx), a
  * theme-host warning names what the theme did, and the chat keeps working: nothing is disabled.
  * No prop, manifest field or setting turns the label off. Auto's floating widget, which MainLayout
@@ -40,10 +41,12 @@ const PLACEMENT_CLASS: Readonly<Record<AiLabelPlacement, string>> = {
 }
 /**
  * A tiny muted caption. The padding draws nothing (no border or background); it keeps the words on the
- * spot the label's pill put them, 11 px up from bottom-2 and 23 px in from right-3 or left-3.
+ * spot the label's pill put them, 11 px up from bottom-2 and 23 px in from right-3 or left-3. A long
+ * agent name wraps inside the viewport rather than running off it.
  */
 const LABEL_CLASS =
-  'pointer-events-none fixed bottom-2 z-40 px-[11px] py-[3px] text-[11px] font-medium leading-4 text-muted-foreground'
+  'pointer-events-none fixed bottom-2 z-40 max-w-[calc(100vw-1.5rem)] px-[11px] py-[3px] text-[11px] font-medium ' +
+  'leading-4 text-muted-foreground'
 
 /** Where the label's words sit (bottom-2 and right-3 or left-3, plus its padding), in px. */
 const LABEL_TEXT_BOTTOM_PX = 11
@@ -71,7 +74,7 @@ function AiLabelNote({ name, placement, hidden, onHiddenChange }: AiLabelNotePro
   return (
     <>
       <p ref={ref} role="note" aria-label={text} data-ai-label="" className={`${LABEL_CLASS} ${PLACEMENT_CLASS[placement]}`}>
-        {text}
+        <span data-ai-label-text="">{text}</span>
       </p>
       {hidden ? <ProtectedAiCaption text={text} place={CAPTION_PLACE[placement]} /> : null}
     </>

@@ -113,6 +113,17 @@ Every rule in `dist/theme.css` must sit under the theme's own `html.<htmlClass>`
 `@import`, and no selector naming a protected surface or the host's AI label. The full list of what the scope check refuses, and how the
 approval cards and the AI label hold against theme CSS, is in [CSS layer model](css-layer-model.md).
 
+**The AI label at run time (PRD-264 EUAI-11a).** The host checks that a person can see the label: displayed,
+visible and opaque; not clipped, masked or filtered; at least 9 px; its words at least 3:1 against what is
+behind them; its words' own box a real line of text inside the viewport and the label's box; and nothing
+drawn over them (hit-testing). Anything it can't confirm reads as hidden. A hidden label is drawn again in a
+closed shadow root on a guarded element of the host's, in the browser's top layer, and that copy heals itself:
+removed, moved, edited or hidden by a theme's code, it is rebuilt at once, and anything that enters the top
+layer later is put back under it. Chat is never locked. What stays a review rule (a background image behind
+the words, a blank font, code that wraps browser methods before the copy exists) is listed in
+[CSS layer model](css-layer-model.md#guaranteed-at-run-time-and-what-stays-a-review-rule); the host does not
+sandbox a theme's code.
+
 **Reserved classes.** `htmlClass` is 3 to 32 characters of lower-case letters, digits and hyphens, starting with a
 letter, and never one of the classes core owns on `<html>`: `studio`, `classic`, `dark`, `light`, `system`
 (`contract.RESERVED_HTML_CLASSES`). A theme's `@keyframes` names and `@font-face` families must start with

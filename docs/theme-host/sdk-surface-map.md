@@ -201,12 +201,14 @@ off, and no manifest field, SDK name or setting does either.
   caption, 11 px in the theme's `muted-foreground` token, with no border, background or rounding (never a pill).
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
-  seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
-  (`frontend/lib/ai-label/visibility.ts`). While it isn't, the host draws the same words again at the label's
-  spot in a layer of its own that theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`: a
-  shadow root on a guarded element of the host's, the words in the browser's top layer; how it holds is in
-  [CSS layer model](css-layer-model.md)), and logs a theme-host warning that names the label and how it is
-  hidden. The chat keeps working: no composer is disabled, and nothing says the chat is paused (the AI label is
+  seconds that it can be seen (`frontend/lib/ai-label/visibility.ts`): displayed, visible and opaque; not
+  clipped, masked or filtered; at least 9 px; its words at least 3:1 against what is behind them; its words' own
+  box a real line inside the viewport and the label's box; nothing drawn over them. Whatever it can't confirm
+  reads as hidden. While it isn't seen, the host draws the same words again at the label's spot in a layer of
+  its own that theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`: a closed shadow root
+  on a guarded element of the host's, the words in the browser's top layer, rebuilt and raised again whenever
+  something removes, edits, hides or covers it; how it holds is in [CSS layer model](css-layer-model.md)), and
+  logs a theme-host warning that names the label and how it is hidden. The chat keeps working: no composer is disabled, and nothing says the chat is paused (the AI label is
   a small caption and never locks the composer). Voice carries its own notice too: the voice button (Studio's
   beside Send, `components/chatbot/composer-voice.tsx`, and a theme's `voice.VoiceButton`) has its "AI voice
   assistant" caption, and Auto says it is an AI once per session.
