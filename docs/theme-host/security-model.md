@@ -110,7 +110,7 @@ Who may upload private code at all (`records.private_upload_refusal`, `settings.
 ## CSS scope, reserved classes and publishers
 
 Every rule in `dist/theme.css` must sit under the theme's own `html.<htmlClass>`, with no `!important`, no
-`@import`, and no selector naming a protected surface. The full list of what the scope check refuses, and how the
+`@import`, and no selector naming a protected surface or the host's AI label. The full list of what the scope check refuses, and how the
 approval cards and the AI label hold against theme CSS, is in [CSS layer model](css-layer-model.md).
 
 **Reserved classes.** `htmlClass` is 3 to 32 characters of lower-case letters, digits and hyphens, starting with a
@@ -177,8 +177,9 @@ It runs on every private upload and every Marketplace submission, before the rou
 - reads the code the browser runs, `dist/entry.js`, `dist/chunks/*.js` and `dist/theme.css`, and also `source/` for a
   Marketplace submission; one score, the highest of every part;
 - asks the model to report exfiltration, acting as the member, remote or dynamic code, deception (fake sign-in or
-  approval forms, content over the approval cards), abuse of the device, obfuscation, prompt injection, and audio
-  captured or spoken in the theme's own code rather than through the SDK's voice area;
+  approval forms, content over the approval cards, hiding, covering or restyling the host's AI label), abuse of the
+  device, obfuscation, prompt injection, and audio captured or spoken in the theme's own code rather than through
+  the SDK's voice area;
 - wraps each part between delimiters carrying a fresh random nonce, so text in the package can't close the part or
   speak as the reviewer, and holds the score at the review threshold (20) whenever a file holds text aimed at an AI
   reviewer (`llm_guard.py`);

@@ -338,7 +338,14 @@
       { "name": "a protected surface inside @media", "css": "@media (min-width: 1px) { html.hello [data-protected-surface-inner] { translate: -9999px; } }", "code": "CSS_UNSCOPED" },
       { "name": "the voice control's protected surface, by name (theme voice)", "css": "html.hello [data-protected-surface=\"voice-control\"] { display: none; }", "code": "CSS_UNSCOPED" },
       { "name": "the AI voice caption inside the voice control", "css": "html.hello [data-protected-surface-inner] [role=note] { opacity: 0; }", "code": "CSS_UNSCOPED" },
-      { "name": "the protected surface's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-protected-surface\"; }", "code": null }
+      { "name": "the protected surface's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-protected-surface\"; }", "code": null },
+      { "name": "a rule on the host's AI label (PRD-264 EUAI-11a)", "css": "html.hello [data-ai-label] { display: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label moved off-screen inside @media", "css": "@media (min-width: 1px) { html.hello p[data-ai-label] { position: fixed; top: -500px; } }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label named in upper case with escaped hyphens", "css": "html.hello [DATA\\-AI\\-LABEL] { opacity: 0; }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label's ancestor through :has()", "css": "html.hello :has(> [data-ai-label]) { visibility: hidden; }", "code": "CSS_UNSCOPED" },
+      { "name": "the host's copy of the AI label in its own layer", "css": "html.hello [data-ai-label-caption] { display: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label in a nested rule", "css": "html.hello { [data-ai-label] { width: 0; } }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-ai-label\"; }", "code": null }
     ]
   },
   "packages": {

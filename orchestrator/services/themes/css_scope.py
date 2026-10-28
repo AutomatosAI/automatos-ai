@@ -18,6 +18,9 @@ with no new dependency (D1-f):
   button's control, ``voice-control``: its AI voice caption and stop control), anywhere in it,
   in any case, escaped or not: the cards' own boxes are guarded inline, and this keeps theme
   rules off them and off the elements inside them;
+* nor the host's AI label (``data-ai-label``, PRD-264 EUAI-11a, and ``data-ai-label-caption``,
+  the copy the host draws in its own layer while a theme hides the label): a rule that names the
+  label is a theme trying to restyle or hide it, so the package is refused before anyone runs it;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
   and every other at-rule;
 * anything the tokenizer could read differently from a browser is refused rather than
@@ -83,6 +86,14 @@ TOKEN = re.compile(
 # approval cards and the voice button's control); this prefix covers both, data-protected-surface and
 # data-protected-surface-inner, whatever surface they name.
 PROTECTED_SURFACE_NAME = "data-protected-surface"
+# The host's AI label (frontend/components/ai-label/ai-label.tsx) and its copy in the host's own layer
+# (protected-caption.tsx); this prefix covers both, data-ai-label and data-ai-label-caption.
+AI_LABEL_NAME = "data-ai-label"
+# Each name no theme rule may hold, and why, as the refusal says it.
+PROTECTED_NAMES = {
+    PROTECTED_SURFACE_NAME: "a theme may not style the approval cards, which must always show as the app draws them.",
+    AI_LABEL_NAME: "a theme may not style the AI label, which every chat must show as the app draws it.",
+}
 # A backslash before a character stands for that character (only punctuation may be escaped).
 ESCAPED_CHAR = re.compile(r"\\([\s\S])")
 # A selector's pieces, for splitting a list at its top-level commas.
@@ -164,13 +175,14 @@ def is_anchored_nested_selector_list(prelude: str) -> bool:
     return all(is_anchored_nested_selector(part) for part in _split_top_level(prelude))
 
 
-def names_protected_surface(selector: str) -> bool:
-    """True when the selector names a protected surface's attribute anywhere, in any case or escape.
+def protected_name_in(selector: str) -> Optional[str]:
+    """The protected name (PROTECTED_NAMES) the selector holds anywhere, in any case or escape, or None.
 
     HTML attribute names match case-insensitively, and ``\\-`` reads as ``-``, so both are undone
     before the check. A string that happens to hold the name is refused too: refusing more is safe.
     """
-    return PROTECTED_SURFACE_NAME in ESCAPED_CHAR.sub(r"\1", selector).lower()
+    plain = ESCAPED_CHAR.sub(r"\1", selector).lower()
+    return next((name for name in PROTECTED_NAMES if name in plain), None)
 
 
 def _at_name(prelude: str) -> str:
@@ -331,11 +343,10 @@ class _Scanner:
 
     def rule_frame(self, prelude: str, parent: _Frame, at: int) -> _Frame:
         contained = parent.kind == "contained" or parent.scoped
-        if names_protected_surface(prelude):
+        protected = protected_name_in(prelude)
+        if protected is not None:
             self.error(
-                "CSS_UNSCOPED", at,
-                f'the rule "{echo(prelude)}" names {PROTECTED_SURFACE_NAME}: '
-                "a theme may not style the approval cards, which must always show as the app draws them.",
+                "CSS_UNSCOPED", at, f'the rule "{echo(prelude)}" names {protected}: {PROTECTED_NAMES[protected]}',
             )
         elif contained and not is_anchored_nested_selector_list(prelude):
             self.error(
