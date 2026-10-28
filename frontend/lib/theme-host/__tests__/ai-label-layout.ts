@@ -13,9 +13,11 @@
  *   test says what the browser would measure (`layout.textBox`, for a squeezed or shifted line jsdom
  *   can't lay out);
  * - hit-testing (elementsFromPoint, on a document and on a shadow root): `layout.cover` when a test
- *   draws something over the words, then the words' element, then the label, skipping, as a browser
- *   does, any whose computed `pointer-events` is `none` (so the check's transient probe sheet, which
- *   makes everything hittable, decides whether a click-through cover is seen);
+ *   draws something over the words, then the words' element, then the label, then `layout.under` when a
+ *   test lays something of the page's under the label, then the label's ancestors up to <html>, as a
+ *   browser's paint stack lists them (the check reads the ground from it), skipping, as a browser does,
+ *   any whose computed `pointer-events` is `none` (so the check's transient probe sheet, which makes
+ *   everything hittable, decides whether a click-through cover is seen);
  * - the copy's closed shadow roots, read off a spy on attachShadow (no handle sits on the element);
  * - a popover stand-in (installPopover): showPopover and hidePopover keep a per-element state and
  *   fire `toggle` a microtask later with the state then, as a browser coalesces a hide and a show.
@@ -38,6 +40,10 @@ export interface LabelLayout {
   cover: Element | null
   /** Where `cover` is drawn: only at the points this says (a striped overlay); null: at every point. */
   coverAt: ((x: number, y: number) => boolean) | null
+  /** An element of the page's laid out under the label, not around it; null: nothing is. */
+  under: Element | null
+  /** Where `under` lies: only at the points this says (a patch under part of the words); null: at every point. */
+  underAt: ((x: number, y: number) => boolean) | null
 }
 
 type Hits = (this: Document | ShadowRoot, x: number, y: number) => Element[]
@@ -63,11 +69,22 @@ function boxOf(element: Element, fallback: LayoutBox): DOMRect {
   })
 }
 
-/** What a browser's hit-test would find at any point of the words: the cover, the words, the label, topmost first. */
-function stackIn(root: Document | ShadowRoot, cover: Element | null): Element[] {
+/** The element's ancestors, nearest first, up to <html>. */
+function ancestorsOf(element: Element | null): Element[] {
+  const chain: Element[] = []
+  for (let node = element?.parentElement ?? null; node !== null; node = node.parentElement) chain.push(node)
+  return chain
+}
+
+/**
+ * What a browser's hit-test would find at a point of the words, topmost first: the cover, the words, the label,
+ * what lies under the label, and the label's ancestors; each once.
+ */
+function stackIn(root: Document | ShadowRoot, cover: Element | null, under: Element | null): Element[] {
   const words = Array.from(root.querySelectorAll(WORDS))
-  const stack: Array<Element | null> = [cover, ...words.flatMap((word) => [word, word.parentElement])]
-  return stack.filter((element): element is Element => element !== null && window.getComputedStyle(element).pointerEvents !== 'none')
+  const stack: Array<Element | null> = [cover, ...words.flatMap((word) => [word, word.parentElement, under, ...ancestorsOf(word.parentElement)])]
+  const hittable = stack.filter((element): element is Element => element !== null && window.getComputedStyle(element).pointerEvents !== 'none')
+  return hittable.filter((element, index) => hittable.indexOf(element) === index)
 }
 
 function defineOn(target: object, name: string, value: unknown): () => void {
@@ -79,14 +96,15 @@ function defineOn(target: object, name: string, value: unknown): () => void {
 
 /** Installs the label's layout with `fallback` as the default box; returns what a test sets, and what undoes it. */
 export function installLabelLayout(fallback: LayoutBox): { readonly layout: LabelLayout; readonly uninstall: () => void } {
-  const layout: LabelLayout = { textBox: null, cover: null, coverAt: null }
+  const layout: LabelLayout = { textBox: null, cover: null, coverAt: null, under: null, underAt: null }
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     return boxOf(this, fallback)
   })
   vi.spyOn(Element.prototype, 'attachShadow')
   const hits: Hits = function (this: Document | ShadowRoot, x: number, y: number) {
     const covered = layout.coverAt === null || layout.coverAt(x, y)
-    return stackIn(this, covered ? layout.cover : null)
+    const under = layout.underAt === null || layout.underAt(x, y)
+    return stackIn(this, covered ? layout.cover : null, under ? layout.under : null)
   }
   const textRect = function (this: Range) {
     const start = this.startContainer

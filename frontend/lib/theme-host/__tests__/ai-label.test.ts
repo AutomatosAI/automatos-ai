@@ -15,7 +15,10 @@
  * zero size, an off-screen move, a fade on an ancestor, transparent or faint words (by colour or by
  * `-webkit-text-fill-color`), a blank ::first-line or ::first-letter, a clip-path, a mask, a filter on an
  * ancestor, a tiny font, words the
- * browser would lay out squeezed or off-screen, and something drawn over them. Each time the label
+ * browser would lay out squeezed or off-screen, something drawn over them, and a ground under them the
+ * page lays out that isn't the label's ancestor (an element, a gradient or a patch under one point in the
+ * words' own colour, an image no check can read; an opaque element faded out fakes no ground, and HUD's
+ * backdrop as built is no harm). Each time the label
  * reports itself hidden, the host draws the same words in its own layer (components/ai-label/
  * protected-caption.tsx: a closed shadow root on an element of the host's at the end of <body>,
  * guarded inline), a theme-host warning names what the theme did, and the chat keeps working: its
@@ -497,6 +500,101 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { color: rgb(80, 80, 80); }`)
     expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'covered')]])
     expect(inputOf('default')).toBeEnabled()
+  })
+
+  // The ground under the fixed label is whatever the page lays under its corner, not only the label's ancestors:
+  // a dark page (body) with light words, and an element of the page's under the corner (layout.under) that a theme paints.
+  const DARK_PAGE = `html.${HOSTILE_CLASS} body { background-color: rgb(20, 20, 20); } html.${HOSTILE_CLASS} [role="note"] { color: rgb(236, 236, 236); }`
+
+  /** An element of the page's laid out under the label (only at the points `at` says, if it says); returns it. */
+  function layUnder(at: ((x: number, y: number) => boolean) | null = null, parent: Element = document.body): HTMLElement {
+    const under = parent.appendChild(document.createElement('div'))
+    under.setAttribute('data-test-under', '')
+    layout.under = under
+    layout.underAt = at
+    return under
+  }
+
+  it.each([
+    ["an element under the corner in the words' own colour", 'background-color: rgb(236, 236, 236);', null],
+    ["a gradient in the words' own colour on an element under the corner", 'background-image: linear-gradient(to right, rgb(236, 236, 236), rgb(236, 236, 236));', null],
+    ['an image under the corner, which no check can read', 'background-image: url("ground.png");', null],
+    // the words' line in jsdom's layout runs from 880 to 990: one of the evenly spaced points sits at about 895
+    ["a patch in the words' own colour under one point of them", 'background-color: rgb(236, 236, 236);', (x: number) => x >= 894 && x <= 897],
+  ])('brings the copy for %s: the ground is read from what paints under the words', async (_name, paint, at) => {
+    renderChat('default')
+    document.documentElement.classList.add(HOSTILE_CLASS)
+    addThemeSheet(DARK_PAGE)
+    expect(aiLabelHiddenReason(theLabel(), window)).toBeNull()
+    const under = layUnder(at)
+    try {
+      await hideWith(`html.${HOSTILE_CLASS} [data-test-under] { ${paint} }`)
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('color')
+      expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'color')]])
+      expect(inputOf('default')).toBeEnabled()
+    } finally {
+      under.remove()
+    }
+  })
+
+  it("brings the copy for a ramp under the words whose middle is their own grey, though both its ends stand out from them", async () => {
+    renderChat('default')
+    const under = layUnder()
+    try {
+      // rgb(118, 118, 118) keeps 4:1 against the dark page, and against black and white each, but not against the grey half-way
+      await hideWith(
+        `html.${HOSTILE_CLASS} body { background-color: rgb(20, 20, 20); } html.${HOSTILE_CLASS} [role="note"] { color: rgb(118, 118, 118); }\n` +
+          `html.${HOSTILE_CLASS} [data-test-under] { background-image: linear-gradient(to right, rgb(0, 0, 0), rgb(255, 255, 255)); }`,
+      )
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('color')
+    } finally {
+      under.remove()
+    }
+  })
+
+  it.each([
+    ['its own opacity', (under: HTMLElement) => under.setAttribute('style', 'opacity: 0')],
+    ["an ancestor's opacity", (under: HTMLElement) => under.parentElement?.setAttribute('style', 'opacity: 0')],
+  ])("doesn't let an opaque element faded out by %s fake a ground the words stand out from", (_name, fade) => {
+    renderChat('default')
+    const wrapper = document.body.appendChild(document.createElement('div'))
+    const under = layUnder(null, wrapper)
+    try {
+      // the page is nearly the words' own light colour; the black element under them makes them readable while it is painted
+      document.documentElement.classList.add(HOSTILE_CLASS)
+      addThemeSheet(
+        `html.${HOSTILE_CLASS} body { background-color: rgb(236, 236, 236); } html.${HOSTILE_CLASS} [role="note"] { color: rgb(250, 250, 250); }\n` +
+          `html.${HOSTILE_CLASS} [data-test-under] { background-color: rgb(0, 0, 0); }`,
+      )
+      expect(aiLabelHiddenReason(theLabel(), window)).toBeNull()
+      fade(under)
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('color')
+    } finally {
+      wrapper.remove()
+    }
+  })
+
+  it("reads HUD's backdrop as built under the corner (its glow, grid and scan lines, on its ground) as no harm", () => {
+    document.documentElement.classList.add(HOSTILE_CLASS)
+    // the ghost accent on the void ground at its brightest grid and glow (themes/hud: glow capped where its second text reads)
+    // its scan lines over its glow and grid (one element here: the first layer paints on top)
+    addThemeSheet(
+      `html.${HOSTILE_CLASS} body { background-color: rgb(3, 5, 7); } html.${HOSTILE_CLASS} [role="note"] { color: rgb(147, 166, 175); }\n` +
+        `html.${HOSTILE_CLASS} [data-test-under] { background-image:` +
+        ' repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0px, rgba(0, 0, 0, 0.18) 1px, transparent 1px, transparent 3px),' +
+        ' radial-gradient(640px 520px at 50% 46%, rgba(227, 236, 240, 0.2), transparent 70%),' +
+        ' linear-gradient(rgba(227, 236, 240, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(227, 236, 240, 0.1) 1px, transparent 1px); }',
+    )
+    renderChat('default')
+    const under = layUnder()
+    try {
+      expect(window.getComputedStyle(under).backgroundImage).toContain('radial-gradient')
+      expect(aiLabelHiddenReason(theLabel(), window)).toBeNull()
+      expect(captionHost()).toBeNull()
+      expect(hostWarnings()).toEqual([])
+    } finally {
+      under.remove()
+    }
   })
 
   it('treats the label as hidden when its check throws (a getComputedStyle a theme patched), and shows the copy', async () => {

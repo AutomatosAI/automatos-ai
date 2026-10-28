@@ -202,7 +202,9 @@ off, and no manifest field, SDK name or setting does either.
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
   seconds that it can be seen (`frontend/lib/ai-label/visibility.ts`): displayed, visible and opaque; not
-  clipped, masked or filtered; at least 9 px; its words at least 3:1 against what is behind them; its words' own
+  clipped, masked or filtered; at least 9 px; its words at least 3:1 against what is behind them, read from what
+  the page paints under them at each point it hit-tests (any element there, the label's ancestor or not, its
+  background colour and gradients; a background image that is no gradient fails); its words' own
   box a real line inside the viewport and the label's box; nothing drawn over them. Whatever it can't confirm
   reads as hidden. While it isn't seen, the host draws the same words again at the label's spot in a layer of
   its own that theme CSS can't reach (`frontend/components/ai-label/protected-caption.tsx`: a closed shadow root

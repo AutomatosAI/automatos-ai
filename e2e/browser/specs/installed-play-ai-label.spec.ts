@@ -18,8 +18,10 @@ import { watchPage } from '../support/watch'
 // themes/play/src/components/play/chat/message-box.tsx) holds the words, then the host's voice button (the
 // SDK's voice.VoiceButton), then Send, the words and Send each in the SDK's cards.AiLabelFence, which now
 // draws its children alone. While a style keeps the label from being seen, by any of the ways the host's
-// check reads (display, transparent words, a blank ::first-line or ::first-letter, a ::before of the words, a
-// text stroke, a clipped box, an indent off-screen, a clip-path, something drawn over it, click-through or not),
+// check reads (Play's frame under the label's corner painted the words' own colour, by colour or by a gradient,
+// though it is not the label's ancestor; display, transparent words, a blank ::first-line or ::first-letter, a
+// ::before of the words, a text stroke, a clipped box, an indent off-screen, a clip-path, something drawn over
+// it, click-through or not),
 // or its check throws, the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
 // closed shadow root on a guarded element of the host's at the end of <body>, the words a popover in the
 // browser's top layer, and logs a theme-host warning that names how. A second style aimed at that copy,
@@ -80,6 +82,17 @@ function hiddenWarning(reason: string): RegExp {
  * with the reason the check gives.
  */
 const HIDING_WAYS: ReadonlyArray<readonly [string, string, string]> = [
+  // Play's frame lies under the fixed label's corner but is not its ancestor: the ground is read from the paint stack
+  [
+    "Play's frame under the label painted the words' own colour",
+    `html.play body > div:has(> ${PLAY_FRAME}) { background-color: hsl(var(--muted-foreground)) !important; }`,
+    'color',
+  ],
+  [
+    "a gradient of the words' own colour on Play's frame under the label",
+    `html.play body > div:has(> ${PLAY_FRAME}) { background-image: linear-gradient(hsl(var(--muted-foreground)), hsl(var(--muted-foreground))) !important; }`,
+    'color',
+  ],
   ['transparent words', 'html.play [role="note"] { color: transparent !important; }', 'color'],
   ['a 4 px box that clips its words', `html.play ${LABEL_SELECTOR} { width: 4px !important; height: 4px !important; overflow: hidden !important; }`, 'text'],
   ['words indented off-screen', `html.play ${LABEL_SELECTOR} { text-indent: -9999px !important; }`, 'text'],
