@@ -17,14 +17,15 @@ import { contrastRatio, over, parseCssColor, type Rgba } from './contrast'
 import { type StyleRuleRead, pseudoRulesReach } from './pseudo-rules'
 
 const LINE_PSEUDOS = ['::first-line', '::first-letter'] as const
-const NAMES_LINE_PSEUDO = /::?first-(?:line|letter)\b/i
+const LINE_PSEUDO_NAMES: ReadonlySet<string> = new Set(['first-line', 'first-letter'])
+const MENTIONS_LINE_PSEUDO = /first-(?:line|letter)/i
 const HIDDEN_VISIBILITY = new Set(['hidden', 'collapse'])
 
 type WithCss = Window & { readonly CSS?: { readonly supports?: (condition: string) => boolean } }
 
 /** Whether a rule styles the ::first-line or ::first-letter of the words or an element around them, whatever it sets. */
 export function lineRulesReach(chain: readonly Element[], rules: readonly StyleRuleRead[]): boolean {
-  return pseudoRulesReach(rules, NAMES_LINE_PSEUDO, chain)
+  return pseudoRulesReach(rules, LINE_PSEUDO_NAMES, MENTIONS_LINE_PSEUDO, chain)
 }
 
 function lineStyleHides(style: CSSStyleDeclaration, grounds: readonly Rgba[], minOpacity: number, minContrast: number): boolean {

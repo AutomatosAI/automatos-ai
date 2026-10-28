@@ -25,7 +25,8 @@ export const MAX_TEXT_STROKE_PX = 0.5
 /** A stroke wider than this share of the font fills the glyphs' counters, whatever its colour. */
 export const THICK_TEXT_STROKE_EM = 0.15
 
-const NAMES_OWN_PSEUDO = /::?(?:before|after)\b/i
+const OWN_PSEUDO_NAMES: ReadonlySet<string> = new Set(['before', 'after'])
+const MENTIONS_OWN_PSEUDO = /before|after/i
 const OWN_PSEUDOS = ['::before', '::after'] as const
 const NO_CONTENT = new Set(['', 'none', 'normal'])
 const LENGTH = /^(-?(?:\d+\.?\d*|\.\d+))(px|em)?$/i
@@ -40,7 +41,7 @@ function drawsContent(value: string): boolean {
 export function ownPseudosDrawn(label: Element, words: Element, view: Window, rules: readonly StyleRuleRead[]): boolean {
   const targets = words === label ? [label] : [words, label]
   const setsContent = (rule: CSSStyleRule) => drawsContent(rule.style.getPropertyValue('content'))
-  if (pseudoRulesReach(rules, NAMES_OWN_PSEUDO, targets, setsContent)) return true
+  if (pseudoRulesReach(rules, OWN_PSEUDO_NAMES, MENTIONS_OWN_PSEUDO, targets, setsContent)) return true
   if (!pseudoStylesReadable(view, '::before')) return false
   return targets.some((element) => OWN_PSEUDOS.some((pseudo) => drawsContent(view.getComputedStyle(element, pseudo).content)))
 }

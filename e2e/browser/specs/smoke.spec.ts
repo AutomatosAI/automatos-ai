@@ -124,12 +124,12 @@ test("on a 390 px phone Studio's chat composer has its box, the voice button and
 
 test("Studio's default /chat shows the host's AI label as seen: no protected copy, no theme-host warning", { tag: '@smoke' }, async ({ page }) => {
   const watch = watchPage(page)
-  const labelWarnings: string[] = []
+  // every theme-host line, so a false alarm says which check fired and why (its reason is in the warning)
+  const hostLines: string[] = []
   page.on('console', (message) => {
-    if (message.type() === 'warning' && message.text().includes('[theme-host]') && message.text().includes('AI label')) {
-      labelWarnings.push(message.text())
-    }
+    if (message.text().includes('[theme-host]')) hostLines.push(`${message.type()}: ${message.text()}`)
   })
+  const labelWarnings = () => hostLines.filter((line) => line.startsWith('warning:') && line.includes('AI label'))
   await page.goto(CHAT_PATH)
   await expect(page.locator('html')).toHaveClass(STUDIO_CLASS)
   await expect(page.locator(CORE_COMPOSER).filter({ visible: true }).first()).toBeVisible()
@@ -143,7 +143,9 @@ test("Studio's default /chat shows the host's AI label as seen: no protected cop
 
   // a few rounds of the check: on mount, then every two seconds
   await page.waitForTimeout(CHECK_ROUNDS_MS)
-  await expect(page.locator(AI_LABEL_COPY)).toHaveCount(0)
-  expect(labelWarnings).toEqual([])
+  const explained = `theme-host console: ${hostLines.length > 0 ? hostLines.join(' | ') : 'nothing'}`
+  await test.info().attach('theme-host console', { body: hostLines.join('\n') || 'nothing', contentType: 'text/plain' })
+  await expect(page.locator(AI_LABEL_COPY), explained).toHaveCount(0)
+  expect(labelWarnings(), explained).toEqual([])
   expect(watch.pageErrors).toEqual([])
 })

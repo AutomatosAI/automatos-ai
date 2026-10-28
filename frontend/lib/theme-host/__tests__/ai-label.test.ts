@@ -442,6 +442,14 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
       `html.${HOSTILE_CLASS} [role="note"] { font-size: 12px; -webkit-text-stroke-width: 1px; -webkit-text-stroke-color: rgb(0, 0, 0); }`,
     ],
     [
+      // Studio's own compiled Tailwind (shadcn's resizable handle): an escaped `\:after` inside a class is no
+      // pseudo-element (CI run 40760817606 read it as one and drew the copy on Studio's default /chat)
+      "Tailwind's before: and after: variant utilities, their escaped colons included",
+      String.raw`.data-\[panel-group-direction\=vertical\]\:after\:left-0[data-panel-group-direction="vertical"]::after { content: var(--tw-content); left: 0px; }` +
+        '\n' +
+        String.raw`.hover\:before\:opacity-100:hover::before { content: var(--tw-content); opacity: 1; }`,
+    ],
+    [
       'pseudo-elements that draw nothing, or belong to the page',
       `html.${HOSTILE_CLASS} *, html.${HOSTILE_CLASS} ::before, html.${HOSTILE_CLASS} ::after { box-sizing: border-box; }\n` +
         `html.${HOSTILE_CLASS} [role="note"] span::before { color: red; }\n` +
