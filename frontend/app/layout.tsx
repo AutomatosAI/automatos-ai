@@ -21,6 +21,21 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = {
   title: 'Automatos AI Platform',
   description: 'Automatos Studio: agents, documents, socials and a marketplace on the open-source Automatos OS',
+  // Family favicon set (the compass mark): SVG first, ICO as the universal fallback, and the
+  // Apple touch icon for home-screen pins. The manifest carries the 192/512 PNGs for Android
+  // and PWA install prompts.
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: 'any' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
+  other: {
+    'msapplication-TileImage': '/tile-256.png',
+    'msapplication-TileColor': '#FF6A02',
+  },
 }
 
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so
