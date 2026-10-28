@@ -5,7 +5,13 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_field_actions(registry: ActionRegistry) -> None:
     """Register shared field tools for mission agents."""
+    _register_field_query(registry)
+    _register_field_inject(registry)
+    _register_field_stability(registry)
 
+
+def _register_field_query(registry: ActionRegistry) -> None:
+    """platform_field_query: read what other agents put in the mission field."""
     registry.register(ActionDefinition(
         name="platform_field_query",
         description=(
@@ -43,6 +49,9 @@ def register_field_actions(registry: ActionRegistry) -> None:
         accepts=("field_id",),
     ))
 
+
+def _register_field_inject(registry: ActionRegistry) -> None:
+    """platform_field_inject: share a finding into the mission field (a write)."""
     registry.register(ActionDefinition(
         name="platform_field_inject",
         description=(
@@ -84,6 +93,9 @@ def register_field_actions(registry: ActionRegistry) -> None:
         accepts=("field_id",),
     ))
 
+
+def _register_field_stability(registry: ActionRegistry) -> None:
+    """platform_field_stability: read how converged the mission field is."""
     registry.register(ActionDefinition(
         name="platform_field_stability",
         description=(
