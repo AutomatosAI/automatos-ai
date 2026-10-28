@@ -62,13 +62,6 @@ export default async function RootLayout({
             constant script that applies it before first paint. */}
         <ThemeImportMap integrity={boot.integrity} />
         <ThemeBootScripts boot={boot} />
-        {/* The family favicon (the compass mark). Plain links, not metadata.icons: on this
-            force-dynamic layout the metadata route outlined a Suspense boundary into the server
-            HTML (e2e default-build.spec.ts 'in no outlined boundary'). */}
-        <link rel="icon" href="/favicon.ico" sizes="48x48" />
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body>
         <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined} initialTheme={installedTheme}>
