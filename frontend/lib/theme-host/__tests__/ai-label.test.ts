@@ -338,8 +338,10 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     expect([hostStyle.display, hostStyle.visibility, hostStyle.opacity, hostStyle.position]).toEqual(['block', 'visible', '1', 'fixed'])
     expectCopyShown(theCaption())
     expect(theCaption()).toHaveTextContent(AUTO_LABEL)
-    // the sheet hides the page with <body>; the composer is still not disabled
-    expect(screen.getByRole('textbox', { name: THEME_COMPOSER, hidden: true })).toBeEnabled()
+    // the sheet hides the page with <body>, so nothing in it has an accessible name (a hidden element's is
+    // empty) and a role query can't find the composer by name; found by its label instead, it is not disabled
+    expect(screen.getByLabelText(THEME_COMPOSER)).toBeEnabled()
+    expect(screen.getByText(THEME_SEND)).toBeEnabled()
   })
 
   it('raises the copy into the browser\'s top layer where the browser has one', async () => {
