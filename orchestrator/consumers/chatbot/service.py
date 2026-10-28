@@ -77,6 +77,7 @@ from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
 from consumers.chatbot.reply_locale import replies_in_the_persons_locale  # the variant Auto replies in (pt-BR)
+from consumers.chatbot.spoken_model import answers_on_the_turns_model  # spoken turns: SPOKEN_MODE_MODEL
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_failure_key as _same_failure_key  # F030
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
@@ -2458,6 +2459,7 @@ class StreamingChatService:
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
+    @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,

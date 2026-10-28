@@ -945,6 +945,12 @@ either, so after a `git pull` that changes `services/voice-tts`, run
   does not hold falls back to its own default), and
   `VOICE_TTS_RATE_PER_MINUTE` (60 sentences a minute per workspace), in
   `envs/api.local`. The service's own settings are in `services/voice-tts/README.md`.
+- **The model that answers aloud.** A spoken turn (the quick-ask, the phone, Auto
+  Live) answers on `SPOKEN_MODE_MODEL` from `SPOKEN_MODE_PROVIDER`
+  (`claude-haiku-5-5` on `anthropic`), so the answer starts sooner; a typed turn
+  keeps the agent's own model. With no key for that provider, or with
+  `SPOKEN_MODE_MODEL` empty, spoken turns use the agent's model too. This applies
+  whether or not `voice-tts` runs.
 
 ### voice-tts on Railway (SaaS)
 
