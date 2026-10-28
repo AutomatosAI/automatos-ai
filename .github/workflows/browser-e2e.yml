@@ -27,7 +27,7 @@ name: browser-e2e
 # (the `package` job, below). PRD-261 B-03h added the web app's host file, which the
 # kit's CLI reads (frontend/app/automatos-host.json). Theme voice added the host's voice and AI label code
 # (lib/voice, components/voice, lib/ai-label, components/ai-label): Play 1.2.0's message box holds core's voice
-# button and its AI label fences, and the Play specs check both.
+# button, and the Play specs check it and the host's AI label (and its copy in the host's own layer).
 #
 # workflow_dispatch works only once this file is on main: GitHub dispatches only
 # workflows that exist on the default branch. Before that, the lane runs on a

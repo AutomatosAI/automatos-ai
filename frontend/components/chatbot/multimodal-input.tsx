@@ -2,12 +2,10 @@
 
 /**
  * The chat composer: the default chat's input, and Mission Mode's (components/chatbot/chat.tsx). PRD-264 EUAI-11a:
- * the box and every control but the voice button sit in the AI label's fence (AiLabelFence), so a theme that keeps
- * the page's label from being seen pauses typing and sending; the voice button (composer-voice.tsx) has its own
- * caption and spoken notice, and is never fenced.
+ * the page's AI label beside it is the host's (components/ai-label/ai-label.tsx), and no theme can hide it, so nothing
+ * here ever waits on it; the voice button (composer-voice.tsx) has its own caption and spoken notice.
  */
 import { useState, useRef, useEffect, type RefObject } from 'react'
-import { AiLabelFence } from '@/components/ai-label/ai-label-fence'
 import { Textarea } from '@/components/ui/textarea'
 import type { Agent } from './agent-selector'
 import type { VisibilityType, AppUsage } from '@/types'
@@ -126,23 +124,19 @@ export function MultimodalInput({
   return (
     <form onSubmit={handleSubmit} className="w-full">
       {/* PRD-127: Ephemeral attachment upload, and the uploaded attachments */}
-      <AiLabelFence>
-        <AttachmentPicker attachments={attachments} />
-        <AttachmentStrip attachments={attachments} />
-      </AiLabelFence>
+      <AttachmentPicker attachments={attachments} />
+      <AttachmentStrip attachments={attachments} />
 
       <div className={BOX_CLASS}>
-        <AiLabelFence>
-          <Textarea
-            ref={textareaRef}
-            value={safeInput}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
-            className="min-h-[60px] max-h-[200px] w-full resize-none rounded-3xl bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-            rows={1}
-          />
-        </AiLabelFence>
+        <Textarea
+          ref={textareaRef}
+          value={safeInput}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Send a message..."
+          className="min-h-[60px] max-h-[200px] w-full resize-none rounded-3xl bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          rows={1}
+        />
 
         {/* Bottom toolbar - inside the input */}
         <ComposerActions

@@ -11,6 +11,12 @@ type Box = NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>
 // Theme voice: on a 390 px phone, Studio's chat composer keeps its box, the quick ask's voice button
 // (components/chatbot/composer-voice.tsx) and Send in one row inside the screen, the button enabled
 // because app/chat/layout.tsx mounts the host voice provider.
+// PRD-264 EUAI-11a: on Studio's default /chat, with no installed theme, the host's AI label passes every
+// check its strict visibility check runs (lib/ai-label/visibility.ts): no protected copy is drawn and no
+// theme-host warning names the label, over a few rounds of the check. The chat's decorative layers, such as
+// the empty state's presence orb (components/chatbot/chat.tsx, `pointer-events-none absolute inset-0 z-0`),
+// become hittable during the check's probe, and the label (fixed, z-[60]) still wins the hit-test at its
+// words: the spec runs that probe itself and reads the topmost element.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const SMOKE_PATH = '/agents'
@@ -25,6 +31,35 @@ const HOLD_TO_TALK = 'Hold to talk'
 const SEND = 'Send message'
 /** Rounding between two boxes laid out on the same row. */
 const SAME_ROW_PX = 1
+/** The host's AI label, its words, and its protected copy (components/ai-label/*). */
+const AI_LABEL = '[data-ai-label]'
+const AI_LABEL_WORDS = '[data-ai-label-text]'
+const AI_LABEL_COPY = '[data-ai-label-caption]'
+/** lib/ai-label/visibility.ts's probe: everything hittable for the moment of a hit-test. */
+const PROBE_RULE = '*, *::before, *::after { pointer-events: auto !important; }'
+/** Past the label check's first two-second round, with room to land (components/ai-label/use-ai-label-check.ts). */
+const CHECK_ROUNDS_MS = 4500
+
+/** At each of the words' lines' middles, with everything hittable as the check's probe makes it: is the words' element on top? */
+async function wordsOnTopWithEverythingHittable(page: Page): Promise<boolean[]> {
+  return page.evaluate(({ words, rule }) => {
+    const element = document.querySelector(words)
+    if (!element) return []
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(rule)
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+    try {
+      return Array.from(range.getClientRects()).map((line) => {
+        const hit = document.elementsFromPoint(line.left + line.width / 2, line.top + line.height / 2)[0]
+        return hit === element
+      })
+    } finally {
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((adopted) => adopted !== sheet)
+    }
+  }, { words: AI_LABEL_WORDS, rule: PROBE_RULE })
+}
 
 /** Opens /agents and checks the workspace answered, `core`'s chrome drew and nothing threw. */
 async function expectShellDraws(page: Page, core: CoreStyle): Promise<void> {
@@ -84,5 +119,33 @@ test("on a 390 px phone Studio's chat composer has its box, the voice button and
   expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(box.x + box.width)
   expect(Math.abs(voiceBox.height - sendBox.height)).toBeLessThanOrEqual(SAME_ROW_PX)
   expect(Math.abs(voiceBox.y - sendBox.y)).toBeLessThanOrEqual(SAME_ROW_PX)
+  expect(watch.pageErrors).toEqual([])
+})
+
+test("Studio's default /chat shows the host's AI label as seen: no protected copy, no theme-host warning", { tag: '@smoke' }, async ({ page }) => {
+  const watch = watchPage(page)
+  // every theme-host line, so a false alarm says which check fired and why (its reason is in the warning)
+  const hostLines: string[] = []
+  page.on('console', (message) => {
+    if (message.text().includes('[theme-host]')) hostLines.push(`${message.type()}: ${message.text()}`)
+  })
+  const labelWarnings = () => hostLines.filter((line) => line.startsWith('warning:') && line.includes('AI label'))
+  await page.goto(CHAT_PATH)
+  await expect(page.locator('html')).toHaveClass(STUDIO_CLASS)
+  await expect(page.locator(CORE_COMPOSER).filter({ visible: true }).first()).toBeVisible()
+
+  const label = page.locator(AI_LABEL)
+  await expect(label).toHaveCount(1)
+  await expect(label).toBeVisible()
+  await expect(label).toBeInViewport()
+  await expect(label).toHaveText('Auto is an AI')
+  expect(await wordsOnTopWithEverythingHittable(page)).toEqual([true])
+
+  // a few rounds of the check: on mount, then every two seconds
+  await page.waitForTimeout(CHECK_ROUNDS_MS)
+  const explained = `theme-host console: ${hostLines.length > 0 ? hostLines.join(' | ') : 'nothing'}`
+  await test.info().attach('theme-host console', { body: hostLines.join('\n') || 'nothing', contentType: 'text/plain' })
+  await expect(page.locator(AI_LABEL_COPY), explained).toHaveCount(0)
+  expect(labelWarnings(), explained).toEqual([])
   expect(watch.pageErrors).toEqual([])
 })

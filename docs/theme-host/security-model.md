@@ -110,8 +110,25 @@ Who may upload private code at all (`records.private_upload_refusal`, `settings.
 ## CSS scope, reserved classes and publishers
 
 Every rule in `dist/theme.css` must sit under the theme's own `html.<htmlClass>`, with no `!important`, no
-`@import`, and no selector naming a protected surface. The full list of what the scope check refuses, and how the
+`@import`, and no selector naming a protected surface or the host's AI label. The full list of what the scope check refuses, and how the
 approval cards and the AI label hold against theme CSS, is in [CSS layer model](css-layer-model.md).
+
+**The AI label at run time (PRD-264 EUAI-11a).** The host checks that a person can see the label: displayed,
+visible and opaque; not clipped, masked or filtered; at least 9 px; its words at least 3:1 against what is
+behind them at every point, `::first-line` and `::first-letter` included, the ground read from what the page
+paints under them (any element, its background colour and gradients faded by its opacity; a background image that
+is no gradient fails); its words' own box a real line of text inside the
+viewport and the label's box; and nothing drawn over them, click-through or not (hit-testing with a transient
+sheet that makes everything hittable). Anything it can't confirm reads as hidden, and a check that throws counts
+the label as hidden too. A hidden label is drawn again in a closed shadow root on a guarded element of the
+host's, in the browser's top layer, and that copy heals itself: removed, moved, edited or hidden by a theme's
+code, it is rebuilt at once and then checked every animation frame for as long as the tampering goes on, and
+anything that enters the top layer later is put back under it. Chat is never locked. What stays a review rule
+(what a replaced element or another element's pseudo-element under the words draws, a backdrop-filter, a blank
+font, a theme observer that races each frame's repair, code that patches browser methods before the copy exists)
+is listed in
+[CSS layer model](css-layer-model.md#guaranteed-at-run-time-and-what-stays-a-review-rule); the host does not
+sandbox a theme's code.
 
 **Reserved classes.** `htmlClass` is 3 to 32 characters of lower-case letters, digits and hyphens, starting with a
 letter, and never one of the classes core owns on `<html>`: `studio`, `classic`, `dark`, `light`, `system`
@@ -177,8 +194,9 @@ It runs on every private upload and every Marketplace submission, before the rou
 - reads the code the browser runs, `dist/entry.js`, `dist/chunks/*.js` and `dist/theme.css`, and also `source/` for a
   Marketplace submission; one score, the highest of every part;
 - asks the model to report exfiltration, acting as the member, remote or dynamic code, deception (fake sign-in or
-  approval forms, content over the approval cards), abuse of the device, obfuscation, prompt injection, and audio
-  captured or spoken in the theme's own code rather than through the SDK's voice area;
+  approval forms, content over the approval cards, hiding, covering or restyling the host's AI label), abuse of the
+  device, obfuscation, prompt injection, and audio captured or spoken in the theme's own code rather than through
+  the SDK's voice area;
 - wraps each part between delimiters carrying a fresh random nonce, so text in the package can't close the part or
   speak as the reviewer, and holds the score at the review threshold (20) whenever a file holds text aimed at an AI
   reviewer (`llm_guard.py`);

@@ -45,6 +45,8 @@ The check is `orchestrator/services/themes/css_scope.py` (A-06a, wave W-B1). Eve
   `data-protected-surface-inner`, anywhere in it: in an attribute selector, inside `:has()` or
   `:not()`, in any case, escaped or not (A-12c, code `CSS_UNSCOPED`). So no theme rule can reach
   the approval cards, or the buttons and text inside them, by name;
+- a selector that names the host's AI label, `data-ai-label` (which covers its copy's
+  `data-ai-label-caption`), the same way (PRD-264 EUAI-11a, code `CSS_UNSCOPED`);
 - an `@keyframes` name or an `@font-face` `font-family` that does not start with `<htmlClass>-`;
 - `!important`, which is any `!` outside a string or a comment;
 - `@import`, and every at-rule except `@media`, `@supports`, `@layer`, `@container`, `@font-face`
@@ -155,22 +157,164 @@ hostile sheet.
 The in-app AI label ("Auto is an AI", EU AI Act Art. 50(1)) is protected differently from the approval cards.
 It carries no inline `!important` guard: a guard would beat a theme's rule on the label itself, but not a
 `display: none`, `opacity` or off-screen move on an element around it (the review rules above). So the host
-renders the label outside the theme's page slot (`AiLabelGate`, `frontend/components/ai-label/ai-label.tsx`)
-and checks at run time that a person can see it (`frontend/lib/ai-label/visibility.ts`): displayed, visible,
-at least half opaque through all its ancestors, at least 4 px each way and wholly inside the viewport.
+renders the label outside the theme's page slot (`AiLabelGate`, `frontend/components/ai-label/ai-label.tsx`),
+checks at run time that a person can see it, and, when they can't, draws the same words again in a layer of
+its own that theme CSS can't reach. The chat keeps working: nothing is disabled and nothing is paused. Since
+28 Oct 2026 this replaces the chat lock (the old `AiLabelFence` pause and its "chat is paused" notice): the
+product rule is that the AI label is a small caption and never locks the composer.
 
-While the check fails, the chat is paused: every composer inside `AiLabelFence` is disabled, and the chat says
-"This theme hides the AI notice, so chat is paused. Switch theme in Settings." A theme rule that hides, fades,
-shrinks or moves the label therefore never leaves a chat running without it; it stops the chat. The fence
-wraps only the composer, so a theme can't use the label to switch off the approval cards either. Auto's
-floating widget draws its own label in its panel (`WidgetAiLabelFrame`), and its fence pauses only the widget.
+### The check (`frontend/lib/ai-label/visibility.ts`)
 
-The fence guards the composer, not the call, so the theme SDK's chat reads the same state (EUAI-11b): Send
-and Try again on `useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at
-the moment they are called, and return false, sending nothing, unless the page's label is mounted and was seen
-at its last check (`frontend/lib/theme-sdk/internal/ai-label-gate.ts`). A theme that calls Send from a button
-of its own or a timer, or opens a chat in its frame on a page with no label, starts no turn. Auto's widget's
-label never clears a theme's chat. Stop always runs.
+A false alarm costs nothing but the copy, so the check is strict: what it can't confirm reads as hidden. The
+label's words sit in their own element (`data-ai-label-text`), and the label counts as seen only when:
 
-Not checked, and so review rules for the label as for the cards: an element the theme draws over it (an
-overlay, a pseudo-element, a fixed layer), and code the theme runs in the page.
+| Reason when it fails | What the check reads |
+|---|---|
+| `display`, `visibility`, `opacity` | No `display: none` on the words or around them; the words visible; their opacity times their ancestors' at least 0.5 |
+| `paint` | No `clip-path`, `mask-image`, `-webkit-mask-image` or `filter`, and no `content-visibility: hidden`, on the words, the label or any ancestor |
+| `paint` (text stroke) | The words' `-webkit-text-stroke`, as the words' element computes it (it inherits, and the words are what it paints): wider than 0.5 px and either thicker than 0.15 em (it fills the glyphs' counters, whatever its colour) or in a colour under 3:1 against what is behind the words, read the way the fill is (a stroke in the background's colour blots the glyphs while the fill passes). A transparent stroke paints nothing; a thin outline that stands out is fine. `text-shadow` is not read: it paints beneath the glyphs (`frontend/lib/ai-label/own-paint.ts`) |
+| `paint` (::before, ::after) | Neither the words' element nor the label has a `::before` or `::after` drawn. One of the words' own pseudo-elements hit-tests as the words, so the hit-test can't see it drawn over them, and one that adds text changes what the label says. Read two ways, so the check never depends on the browser reporting pseudo-element styles: the rules (`frontend/lib/ai-label/pseudo-rules.ts`, which reads a selector as CSS does, outside escapes and strings, so the escaped `\:after` in a Tailwind class such as `.hover\:after\:scale-100` is no pseudo-element: any readable rule, inside `@media`, `@supports`, `@layer`, `@container` and nested rules too, whose selector names `::before` or `::after`, single colon too, matches the words' element or the label once that is taken off, and sets `content` other than `none` or `normal`; a pseudo-element with no content is never drawn), always, jsdom included; and, where the browser reports them (`CSS.supports`), the computed `content`. Only these two elements: an ancestor's pseudo-element hit-tests as that ancestor, so the hit-test catches it, and themes paint the page's own (scan lines on `<body>`, the box-sizing reset on `*::before`), which must not read as hiding the label. Core, Play and HUD set `content` only on their own classes and on `<body>` |
+| `font` | A font size of at least 9 px |
+| `color` | The fill (`-webkit-text-fill-color`, else `color`) is not transparent and has at least 3:1 against every ground behind it, at every point the check hit-tests: one point over a patch of the words' own colour is enough. The ground is read from the paint stack at each point, not from the label's ancestors (see [The ground](#the-ground-frontendlibai-labelgroundts) below), so an element of the page under the fixed label's corner counts, whoever's it is. A colour in any space is read: `rgb()` and `color(srgb)` as text, any other through a 1 by 1 canvas; a colour nothing reads, or a background image that is no gradient, fails |
+| `paint` (::first-line, ::first-letter) | `getComputedStyle(element)` doesn't show what these paint, so the check reads the rules (`pseudo-rules.ts`, as for `::before` above, one selector of a list at a time): any rule whose selector names `::first-line` or `::first-letter` (or the single-colon form) and, without them, matches the words or any element around them, restyles the label, whatever it sets. A selector the browser can't match counts as matching (`frontend/lib/ai-label/line-pseudos.ts`) |
+| `color` (::first-line, ::first-letter) | Where the browser reports those pseudo-elements' computed styles (it says so through `CSS.supports('selector(::first-line)')`), each one on the words and on every element around them keeps its opacity and visibility and fills the words at 3:1 against its own background painted over what is behind them |
+| `size`, `viewport` | The label's box at least 4 px each way and inside the viewport |
+| `text` | The words themselves, measured as a Range: at least 9 px tall and 0.3 em per character wide, wholly inside the viewport, and inside the label's own box when the label clips its overflow. So `text-indent`, a tiny or clipped box, `letter-spacing` and a scale transform all fail |
+| `covered` | Hit-testing finds the words' own element on top at nine points evenly across each line of the words (ends included, at the line's middle height) and at two more per line placed at random, inside the line and its middle half, new each check: bounded (eleven a line), and a striped overlay laid between known points can't stay unseen. The points are hit-tested once per check (`frontend/lib/ai-label/hit-test.ts`), and the same stacks give the `color` row its ground. Hit-testing skips anything that is `pointer-events: none`: the label itself, and an overlay a theme makes click-through to hide behind. So for the probe only, a transient stylesheet makes everything hittable, `*, *::before, *::after { pointer-events: auto !important }`, and comes out in a `finally`; in, probe and out happen in one task, so no frame paints with it. It is a constructed sheet (`adoptedStyleSheets`), which adds no element, so no theme rule can tell it is there (a `<style>` element could be noticed by `:has()`); a browser without constructed sheets gets a `<style data-ai-label-probe>` at the end of `<html>`, outside what the label's and the copy's observers watch. Theme CSS can't beat it (the scope check refuses `!important`); only an inline `!important` does, and the one there is the host's copy, which must not count as a cover. An ancestor's clipping, an overlay of the theme's, click-through or not, and the label's own `::before` or `::after` (which hits as the label, not as its words) all fail |
+| `unchecked` | The check itself threw (a page script may have patched `getComputedStyle`, `Range`, `elementsFromPoint` or a canvas): the label counts as hidden, and the warning carries the error |
+
+Where the browser can't measure text (no Range boxes) or hit-test (no `elementsFromPoint`), the label reads as
+hidden. The check fails closed everywhere: a throw anywhere in it is `unchecked`, and if the observer that
+reruns it on theme changes can't be set up, it still runs on its interval and on resize. The check runs on mount, when `<html>`'s classes or attributes or `<head>`'s elements change, on resize
+and every two seconds, and logs a theme-host warning the first time it finds the label hidden and again only
+when the way changes: `[theme-host] the active theme hides the page AI label (color); the host draws it in its
+own layer instead`.
+
+### The ground (`frontend/lib/ai-label/ground.ts`)
+
+The label is fixed in a bottom corner, so what lies under its words is the page's, not its ancestors': a rail,
+a composer, a theme's frame. Until 28 Oct 2026 the check read only the ancestors (the label, then `<body>`), so a
+theme could paint an element under the corner in the words' own colour, with CSS alone, and pass. Now, at each
+point the check hit-tests, with everything hittable for the moment, the elements under the words, from the
+words' own element down, are what paints behind them:
+
+- **Each element paints its background colour, then its background image layers over it**, each faded by the
+  element's effective opacity (its own times every ancestor's), so an opaque element at `opacity: 0`, or inside
+  a faded ancestor, paints nothing and can't fake a ground. A colour reaches the point only inside the box its
+  `background-clip` paints; a layer clipped to `text` paints only inside its element's own glyphs, so it is no
+  ground for the label's words.
+- **The walk stops at the first opaque colour.** Below the last element is the page's root background
+  (`<html>`'s, or `<body>`'s where `<html>` paints none, which covers the whole page wherever `<body>`'s box
+  ends), then the page itself: white, and black too where the root allows a dark scheme.
+- **The translucent layers in between are blended down onto that ground**, and every colour they can make is
+  a ground the words must keep 3:1 against. More than 4096 possible grounds at one point counts as unknown.
+- **A gradient is read where it paints**: its tile under the point (`background-size`, `-position`, `-repeat`,
+  `-origin`, `-clip`, `-attachment`, `frontend/lib/ai-label/background-tile.ts`), and the one colour the
+  gradient paints at that point of its tile: a linear gradient's angle or corner, a radial gradient's size and
+  centre, a conic gradient's start, stop positions in px, percentages and `calc()`, hints, repeating periods,
+  the blend in premultiplied sRGB (`gradient-parse.ts`, `gradient-paint.ts`). So a ramp from black to white
+  whose middle is the words' own grey fails where its middle lies under them, though both its ends pass.
+  Where the gradient's geometry or layout isn't read (a prefixed `-webkit-` gradient, `in oklch`, a size in
+  `min()`, `space`), it counts as every colour it could paint there: its stops, the blends a quarter, half and
+  three quarters of the way between neighbours, and, where its tile may not reach the point, nothing.
+- **Fails closed** (the ground is unknown, the label counts as hidden): a background image that is no gradient
+  (`url()`, `image-set()`, `cross-fade()` and the rest), a stop or background colour nothing reads.
+
+**Why gradients are read, not failed closed on.** The first plan was to fail closed on any background image
+between the words and the first opaque colour. Checked against the themes as built, that would show the copy
+on every HUD page: HUD's backdrop (its glow and grid) and its scan lines are real elements, not pseudo-elements
+(`.backdrop` and `.scan` in the kit's `themes/hud/src/frame/frame.module.css`: `position: fixed; inset: 0;
+z-index: -1`, inside the frame, which isolates its stacking and paints the opaque `--hud-bg`), so under every
+HUD page they sit between the label's words and the first opaque colour. Core's classic shell does the same
+with `.gradient-bg` on MainLayout's root, and Play and HUD draw cards' corner brackets and Play's turns as small
+no-repeat gradients. Reading every stop as a possible ground wherever the element lies isn't enough either:
+with HUD's glow at its cap and the grid at its brightest stacked at once, the ghost accent on the ember ground
+reads 2.89:1. Read where they paint, at the label's corner HUD's glow is clear (outside its ellipse's 70% stop),
+its 1 px grid lines count only where a point lands on one, and its worst look reads 4.8:1 at a grid crossing.
+As built: Studio's default /chat at desktop width grounds the label on the Auto now rail's opaque
+`--secondary` (5.8:1 for `--muted-foreground` in Studio dark); Play's frame and page paint nothing under the corner (its glow is on
+`body::before`, a pseudo-element), so its ground is its page colour; core's own gradients are on component
+classes (`.gradient-accent`, buttons, cards), counted only where such an element lies under the words.
+
+**Not read** (review rules): what a replaced element under the words draws (an `<img>`, `<canvas>`, `<video>`,
+`<iframe>` or `<svg>`: its background is read, its content isn't; Studio's empty-chat presence orb is a
+`<canvas>` that can lie under the label in a narrow layout, so failing closed on it would show the copy there,
+and adding one takes markup, which is code); an element's `::before` or `::after` under the words (a
+pseudo-element hit-tests as its element, so where it paints is unknown; Play's page glow is one, on `<body>`); a
+`backdrop-filter` on an element under the words, which changes what shows through it (a classic dark-mode glass
+panel blurs the page behind it, and the check reads that page unblurred); and a `mix-blend-mode`. Where no
+hit-test reaches the words (no `elementsFromPoint`, a label not laid out), the ground is read from the
+ancestors as before, and the label reads as hidden anyway (`text` or `covered`).
+
+### The copy (`frontend/components/ai-label/protected-caption.tsx`, `protected-caption-parts.ts`)
+
+- **A closed shadow root.** The words sit in a closed shadow root of an element the host appends to `<body>`
+  itself (`data-ai-label-caption`), outside the theme's page, frame and slots. No selector in a document
+  stylesheet matches inside a shadow root, and `host.shadowRoot` is null to a theme's code. The words carry
+  `all: initial` and their own values inline, every one `!important`, so nothing they would inherit from a
+  theme's `<html>` or `<body>` reaches them, and they read no custom property (their colours are the system's
+  `Canvas` and `CanvasText`). They wrap inside the viewport, and an agent name past 40 characters is cut with
+  an ellipsis (`frontend/lib/ai-label/copy.ts`), so " is an AI" is never lost.
+- **The cards' guard on its element.** The element in the page's DOM carries `PROTECTED_SURFACE_GUARD` inline,
+  every value `!important`, but fixed, empty (0 by 0) and click-through, and also `will-change`, `perspective`,
+  `backdrop-filter` and `container-type` closed. As for the cards, an important declaration attached to the
+  element beats every stylesheet declaration.
+- **The browser's top layer.** The words are a manual popover, shown with `showPopover()`: above every
+  `z-index`, and out of reach of what an ancestor does to its descendants (opacity, filter, transform,
+  clip-path, overflow). Where the browser has no popover, they stay a fixed element.
+- **It heals itself.** A MutationObserver on `<body>`'s children, the host's attributes and the whole shadow
+  tree rebuilds the copy from scratch the moment it is removed, moved or changed (its words, its guard), up to
+  five times a second (an unlimited rebuild would let a theme's own observer ping-pong with it and hang the
+  page). Its own `toggle` event re-shows it after a `hidePopover()`. `beforetoggle` and `toggle` caught at the
+  document in the capture phase, and `fullscreenchange`, raise it again (hide, then show, which puts it last in
+  the top layer) whenever something else enters the top layer. A watchdog checks it is whole, rebuilds it if
+  not, and raises it: every two seconds while nothing happens, and, from the first tampering until three
+  seconds pass with none, every animation frame (`requestAnimationFrame`: once a frame, before that frame
+  paints, never a spin). That also covers what no event reports (a dialog in a theme's own shadow root).
+- **It fails safe.** Every step (building, the observers' and events' handlers, the watchdog) runs guarded:
+  anything that throws is logged, counted as tampering, and retried the next frame. Where `attachShadow`
+  throws, the words sit in the guarded host instead, still every value `!important` inline.
+- **It tells.** The first tampering of each kind logs one warning, `[theme-host] something in the page removed
+  the AI label's protected copy; the host put it back`, and while tampering goes on a count is logged at most
+  every ten seconds: `[theme-host] something in the page has tampered with the AI label's protected copy 37
+  times in the last 10 s; the host keeps putting it back`.
+
+Auto's floating widget draws its own label in its panel (`WidgetAiLabelFrame`), checked the same way, and its
+copy at the top of the panel, kept inside the viewport.
+
+### What the review still flags
+
+The scope check refuses every selector that names `data-ai-label` (the label, its words' `data-ai-label-text`,
+and the copy's `data-ai-label-caption`), as it refuses the cards' names. The LLM stage's "Deception" category
+names content placed over, hiding or imitating the host's AI label, and code that removes, moves or restyles
+it (`orchestrator/services/themes/llm_stage.py`).
+
+### The SDK
+
+`cards.AiLabelFence` stays exported, because installed themes (Play, HUD) wrap their composers in it, but it
+draws its children alone and disables nothing. The SDK's chat (EUAI-11b): Send and Try again on
+`useChatController(conversation)` ask the label store (`frontend/lib/ai-label/store.ts`) at the moment they are
+called, and return false, sending nothing, only when no page label is mounted
+(`frontend/lib/theme-sdk/internal/ai-label-gate.ts`): a theme that opens a chat in its frame on a page with no
+label starts no turn. A hidden label is still on screen, in the host's layer, so it never stops a turn. Auto's
+widget's label never clears a theme's chat. Stop always runs.
+
+### Guaranteed at run time, and what stays a review rule
+
+| | Guaranteed at run time | A review rule, not a guarantee |
+|---|---|---|
+| **Theme CSS on the label** | Every way of hiding it in the check's table brings the copy and a warning: display, visibility, opacity, clip-path, mask, filter, a text stroke, a tiny font, transparent or faint words (by `color`, `-webkit-text-fill-color`, `::first-line` or `::first-letter`), a `::before` or `::after` of the words or the label, a squeezed, indented, clipped or off-screen line, anything drawn over the words, click-through (`pointer-events: none`) or not, striped or whole, and a ground under the words in or near their colour, painted by any element of the page under them, the label's ancestor or not, by colour or by gradient, under one point of them or all, or a background image under them that is no gradient | What a replaced element under the words draws, an element's `::before` or `::after` under them, a `backdrop-filter` or `mix-blend-mode` (see [The ground](#the-ground-frontendlibai-labelgroundts)); a font of the theme's whose glyphs are blank (its `@font-face` family must start with the theme's class, so the review sees it); a `text-shadow` (it paints beneath the glyphs); an overlay narrower than the gaps between the nine even points that also dodges the two random ones for as long as it stays (each check draws them anew) |
+| **Theme CSS on the copy** | No stylesheet rule hides, fades, moves, clips, covers or recolours it: closed shadow root, every value `!important` inline, top layer | None |
+| **The check itself** | Fails closed: a throw anywhere in it (a patched `getComputedStyle`, `Range`, `elementsFromPoint` or canvas) counts the label as hidden, with the error in the warning | None |
+| **A theme's code on the copy, once it exists** | Removing, moving or editing it, rewriting its guard, or hiding it with `hidePopover()` is undone at once (up to five times a second) and then once every animation frame, before that frame paints, for as long as it goes on; a popover, dialog or fullscreen element shown later is put back under it; every kind is logged, with a running count | A theme's own MutationObserver that removes the copy again in the same frame, after the frame's repair (in the microtask checkpoint after it), can keep it off those frames: winning that race would mean spinning with the theme's code, which hangs the page. The bound is the frame, not the paint |
+| **A theme's code before the copy exists** | None | Patching `attachShadow`, `showPopover`, `MutationObserver`, `requestAnimationFrame`, `getComputedStyle` or anything else the host calls, to reach or quiet the copy or to answer the check. The check fails closed if a patch throws, but a patch that lies is not caught. Sandboxing a theme's code is not something the host does; the review reads that code, and installed themes are signed |
+| **A top-layer element of the theme's in its own shadow root** | Raised over at the next watchdog check (the next frame while tampering goes on, two seconds otherwise) | Until then it sits above the copy |
+| **Covers the probe can't see** | Any element of the page, click-through or not, drawn over the words | An element inside a theme's own shadow root made click-through by that root's styles (the probe's sheet is the document's), an `inert` element, or an inline `pointer-events: none !important` set by a theme's code; and, in a browser without constructed stylesheets (Safari before 16.4), a `:has()` rule that notices the probe's fallback `<style>` |
+
+### Not refused at upload: `::first-line` and `::first-letter`
+
+The scope check does not refuse `::first-line` or `::first-letter` in theme CSS. Drop caps and styled first lines
+are ordinary typography a theme may want, and the scope check can't tell whether a selector reaches the label: a
+generic `html.<htmlClass> p::first-letter` does, `html.<htmlClass> .article p::first-letter` doesn't. Whether a
+rule reaches the label is a question about the live page, so the run-time check answers it, against the rules
+themselves and against the computed pseudo-element styles, and brings the copy when one does.

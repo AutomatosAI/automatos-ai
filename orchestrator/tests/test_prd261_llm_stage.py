@@ -163,6 +163,14 @@ def test_the_prompt_keeps_tokens_cookies_or_foreign_data_stored_through_it_in_ca
     assert all(name in exfiltration for name in RAW_BROWSER_STORAGE)
 
 
+def test_the_prompt_names_hiding_or_covering_the_hosts_ai_label_as_deception():
+    # PRD-264 EUAI-11a: the host draws a hidden label again in its own layer, and the review still flags the try.
+    deception = _prompt_paragraph("4. ")
+    assert deception.startswith("4. **Deception**")
+    assert "the host's AI label" in deception and "Auto is an AI" in deception
+    assert "removes, moves or restyles that label" in deception
+
+
 VOICE_CALLS = ("VoiceButton", "useVoice", "readVoiceLevels")
 AUDIO_APIS = ("getUserMedia", "SpeechRecognition", "webkitSpeechRecognition", "speechSynthesis")
 
