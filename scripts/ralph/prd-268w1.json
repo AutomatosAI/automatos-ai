@@ -288,6 +288,58 @@
    "priority": 19,
    "passes": false,
    "notes": "Reuse api/system_health_checks.py _database where possible (it has no timeout: wrap it). No calendar item in W1 (§12-Q20)."
+  },
+  {
+   "id": "P268W1-RVW-1",
+   "title": "Read-labelled actions that write are offered and cleared in a check-in: relabel them, or make them read (K17)",
+   "description": "As an owner, I need 'read' to mean read in the check-in lane, so a background check-in never commits a write (PRD-268 §6.2.3, FR-1, K17; review finding, HIGH). The lane clears any action registered as read (check_in_lane.may_clear_in_a_check_in / offered_in_a_check_in), and several read actions write on a path a check-in reaches with a real workspace's data. US-C02d's own evidence lists them as 'open for the owner, not relabelled because the empty-database sweep cannot reach them', which excepts them, and K17 says a read action that writes is relabelled, never excepted.",
+   "acceptanceCriteria": [
+    "Cause, confirmed in the code: (a) platform_search_packages (actions_packages.py, read) calls handlers_packages._record_offer_if_onboarding, which runs onboarding_state.record_package_event(..., commit=True) on the executor's session: in a workspace whose onboarding stage is not terminal, a check-in rewrites workspaces.settings.onboarding.funnel and commits; (b) platform_codegraph_search and platform_codegraph_get_symbol (actions_codegraph.py, read) reach codegraph_service._log_query, which INSERTs a codegraph_query_logs row and commits; (c) platform_read_document (actions_read_document.py, read) calls services.spreadsheet_workspace.workspace_copies, which writes a spreadsheet's copy into the workspace when it is missing; (d) the rest of US-C02d's own list: platform_query_data (audit and training rows), platform_search_documents (telemetry and last_accessed through its own sessions); and, latent (inert in the lane today because no session ticket is injected), platform_render_preview, which writes into a session folder when one is. The empty-database sweep (tests/test_prd268_read_actions_write_nothing.py) cannot see any of these: the data that triggers each write is absent, and writes on a session the handler opens itself bypass spy_session.",
+    "Change: each action in (a)–(d) either becomes permission_level='write' with its hierarchy-gate entry (scripts/check_hierarchy_gate.py: _HIERARCHY_TARGETS, admin_only, or ALLOW_LIST with a reason), or its handler stops writing so the 'read' label is true (for example, the telemetry or funnel write is skipped when caller_context is a check-in's, or moved out of the read path). None is excepted. Record per action which was chosen and why (Strict mode asks before a write in chat, so relabelling a document read changes chat behaviour; that is the trade-off to state).",
+    "Test: the sweep is extended so it would have caught these: seed what triggers each write (a workspace mid-onboarding with a matching package, a codegraph project with a matching symbol, a spreadsheet document without its workspace copy, a data source for platform_query_data), and record writes on sessions the handler opens itself (patch core.database.database.SessionLocal to hand out spy sessions) and file writes into the workspace. The extended sweep fails on the commit before this story and passes after it. A lane test proves each relabelled action is neither offered (offered_in_a_check_in) nor cleared (may_clear_in_a_check_in), and each made-read action writes nothing when run through PlatformActionExecutor.execute with caller_context lane='check_in'."
+   ],
+   "priority": 20,
+   "passes": false,
+   "notes": "Review finding (security-reviewer MEDIUM-1, raised to HIGH: it is the wave's guardrail, and K17 already decided relabel-never-except). Verified: handlers_packages.py:108,133; codegraph_service.py:1371-1405; handlers_documents.py:525-528 (workspace_copies). K3/K4 apply: handlers over 50 lines are not touched inside; add a short function or a decorator. platform_field_query (US-C02d) is the precedent for a relabel and its knock-ons."
+  },
+  {
+   "id": "P268W1-RVW-2",
+   "title": "Building a check-in's context reinforces the workspace field: the CHECK_IN field_memory read records no access",
+   "description": "As an owner, I need a check-in to change nothing, including the vector field (PRD-268 §6.2.3, FR-1; review finding, MEDIUM). ContextMode.CHECK_IN (modes.py, this wave) includes the field_memory section. FieldMemorySection._query_workspace_field calls VectorFieldSharedContext.query_workspace, which runs _scored_search with record_access=True: Hebbian reinforcement (_reinforce_batch updates access_count, last_accessed and strength) on every pattern it returns, and ensure_shared_collection may create the collection. That is the same write US-C02d relabelled platform_field_query as a write for, and it happens on every check-in in ContextService.build_context, before the lane sees any call, so patterns a check-in reads stop decaying.",
+   "acceptanceCriteria": [
+    "Cause: modules/context/adapters/vector_field.py query_workspace takes no record_access and always reinforces; modules/context/sections/field_memory.py calls it the same way in every mode.",
+    "Change: query_workspace accepts record_access (default True, so every other caller is unchanged) and passes it to _scored_search; FieldMemorySection passes record_access=False when ctx.context_mode is ContextMode.CHECK_IN's value. No other mode's behaviour changes.",
+    "Test: building a CHECK_IN context calls query_workspace with record_access=False and _reinforce_batch is never called (stub field adapter); HEARTBEAT_AGENT and PLANNING still call it with record_access left True; the test fails on the commit before this story."
+   ],
+   "priority": 21,
+   "passes": false,
+   "notes": "Review finding (security-reviewer MEDIUM-2; noted but left in US-C02d's evidence: 'ContextMode.CHECK_IN's field_memory section calls query_workspace with record_access left True'). SectionContext.context_mode is set by ContextService (service.py:189). The trace inspector's record_access=False on query() (PRD-178 S2) is the precedent."
+  },
+  {
+   "id": "P268W1-RVW-3",
+   "title": "Open suggestions never expire at expires_at: lapsed rows stay startable, block dedupe and hold an agent at its open cap",
+   "description": "As an owner running the shadow week, I need a suggestion to lapse after 7 days as §6.2.4 says, so an agent whose three suggestions nobody answered can suggest again and a stale suggestion cannot be started (PRD-268 §6.2.4 'Open suggestions expire after 7 days', §6.9; review finding, MEDIUM). platform_suggest_next_step writes expires_at = created_at + 7 days, but nothing reads it: the only paths to 'expired' are the open-per-person overflow (_make_room) and a streak's success. In W1 nobody sees the suggestions (no delivery, no frontend), so during the shadow week every agent reaches max_open_per_agent (3) and every later suggestion of that agent is refused, its check-ins still spending a model call; a subject once suggested is blocked by dedupe for good; GET /api/proactive/suggestions lists month-old rows as open; and Start files a ticket from a lapsed one.",
+   "acceptanceCriteria": [
+    "Cause: services/proactive/decisions.py _require_open checks status only; services/proactive/limits.py open_for_agent and handlers_proactive._duplicate count every status='open' row; services/proactive/listing.py lists them; no code moves an open row past its expires_at to expired.",
+    "Change: one function (for example services/proactive/expiry.py expire_lapsed(db, workspace_id, now)) runs one UPDATE proactive_suggestions SET status='expired' WHERE workspace_id = :ws AND status = 'open' AND expires_at <= :now, workspace-scoped; it runs at every check-in start before the caps and the dedupe read (the runner's prepare), and in Start, Hide and the list before they read; a Start or Hide of a lapsed row answers 409 expired and files nothing. A streak card's expires_at keeps being pushed on while the agent fails (failing_streaks), so a live streak never lapses.",
+    "Test (realdb): an open suggestion 8 days old is expired at the next check-in and no longer counts toward max_open_per_agent or dedupe (the agent can suggest the same subject again); Start of a lapsed row is 409 expired with no ticket; GET ?status=open omits it and ?status=expired lists it; a 6-day-old row is untouched; another workspace's lapsed rows are not touched; the tests fail on the commit before this story."
+   ],
+   "priority": 22,
+   "passes": false,
+   "notes": "Review finding (code-reviewer MEDIUM, confirmed by security-reviewer LOW-1). No W1 AC names the lapse, but §6.2.4 defines it and the shadow week (ownerTest step 0) is skewed without it. Raising a suggestion_changed event on expiry stays W2 (US-C08). If the owner prefers this in W2, it is the owner's call to move it; until then it is open here."
+  },
+  {
+   "id": "P268W1-RVW-4",
+   "title": "The proactive routes' 503 path logs only the exception's class: log the detail",
+   "description": "As an operator, I need the server log to carry what failed when a suggestion or settings route answers 503 (AGENTS.md 'Errors and inputs': the detail goes to the server log; review finding, LOW). api/proactive.py _unavailable logs logger.error('proactive %s failed: %s', what, type(failure).__name__): a database error on list, Start, Hide or the settings writes leaves no message and no stack.",
+   "acceptanceCriteria": [
+    "Cause: api/proactive.py _unavailable (line ~196) logs type(failure).__name__ only.",
+    "Change: _unavailable logs with the exception's message and stack (logger.error(..., exc_info=failure) or logger.exception inside the except), keeping the response unchanged (the same refusal code, 503, no internals in the body).",
+    "Test: a route whose service raises SQLAlchemyError answers 503 with the same body, and the captured log record carries exc_info (caplog); the test fails on the commit before this story."
+   ],
+   "priority": 23,
+   "passes": false,
+   "notes": "Review finding (code-reviewer LOW). One-line change in a short function."
   }
  ],
  "instructions": "Mark an AC done by appending, outside backticks and exactly as written, `→ DONE — <evidence>`. An AC only the owner can check gets `→ OWNER: <what to check>`."
