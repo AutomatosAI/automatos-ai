@@ -126,6 +126,11 @@ function theCaption(): HTMLElement {
   return caption
 }
 
+/** The class names on `element` that would draw a pill: a rounding, a border, a background, a shadow or a ring. */
+function pillClasses(element: Element): string[] {
+  return [...element.classList].filter((name) => /^(rounded|border|bg-|shadow|ring)/.test(name))
+}
+
 /** The theme-host warnings logged so far. */
 function hostWarnings(): unknown[][] {
   return vi.mocked(console.warn).mock.calls.filter(([prefix]) => prefix === THEME_HOST_LOG)
@@ -152,12 +157,17 @@ describe("the AI label in Auto's floating widget (PRD-264 EUAI-11a)", () => {
     const note = await screen.findByRole('note', { name: AUTO_LABEL })
     expect(note).toHaveTextContent(AUTO_LABEL)
     expect(theLabel()).toBe(note)
+    // a tiny muted caption, never a pill
+    expect(pillClasses(note)).toEqual([])
+    expect(note).toHaveClass('text-[11px]', 'text-muted-foreground')
     // never held: the input and the chips run before the first check and after it
     expect(widgetInput()).toBeEnabled()
     expect(screen.getByRole('button', { name: STARTER_CHIP })).toBeEnabled()
     expect(note.closest('fieldset')).toBeNull()
     expect(widgetInput().closest('fieldset')).toBeNull()
     await waitFor(() => expect(useAiLabelStore.getState().shownLabels).toEqual([WIDGET_AI_LABEL]), SETTLED)
+    // the caption's own styles never read as hidden
+    expect(aiLabelHiddenReason(note, window)).toBeNull()
     expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
     expect(document.querySelector(CAPTION_HOST)).toBeNull()
     expect(hostWarnings()).toEqual([])

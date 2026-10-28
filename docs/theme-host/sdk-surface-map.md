@@ -197,7 +197,8 @@ off, and no manifest field, SDK name or setting does either.
   label inside its panel (`WidgetAiLabelFrame`, `frontend/components/ai-label/widget-ai-label.tsx`), checked
   the same way.
 - **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
-  (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
+  (`frontend/lib/ai-label/copy.ts`), with `role="note"` and the same words for screen readers. It is a tiny
+  caption, 11 px in the theme's `muted-foreground` token, with no border, background or rounding (never a pill).
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
   `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
   seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport

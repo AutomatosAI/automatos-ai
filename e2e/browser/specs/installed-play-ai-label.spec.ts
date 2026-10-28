@@ -12,7 +12,8 @@ import { watchPage } from '../support/watch'
 // chat opens on a new chat, and nothing is sent.
 //
 // The label is the host's (components/ai-label/ai-label.tsx, drawn by app/chat/layout.tsx after the
-// theme's page): role="note", "Auto is an AI", once, outside Play's page, frame and composer. Since
+// theme's page): role="note", "Auto is an AI", once, outside Play's page, frame and composer, a tiny caption
+// with no border, background or rounding (never a pill). Since
 // Play 1.2.0 its message box (the kit's themes/play/src/components/play/chat/message-box.tsx) holds the
 // words, then the host's voice button (the SDK's voice.VoiceButton), then Send, the words and Send each in
 // the SDK's cards.AiLabelFence, which now draws its children alone. While a style keeps the label from being
@@ -64,6 +65,14 @@ function hostCopy(page: Page) {
   return page.locator(CAPTION_SELECTOR).getByRole('note', { name: AI_LABEL, exact: true })
 }
 
+/** The label's computed box under Play: a caption draws no border, background or rounding (never a pill). */
+async function labelBox(page: Page): Promise<readonly string[]> {
+  return page.locator(LABEL_SELECTOR).evaluate((node: Element) => {
+    const style = window.getComputedStyle(node)
+    return [style.borderTopWidth, style.borderRadius, style.backgroundColor, style.boxShadow]
+  })
+}
+
 /** Play's words, Send and the voice button all run, the draft still in the box. */
 async function expectChatRuns(page: Page): Promise<void> {
   await expect(messageBox(page)).toBeEnabled()
@@ -90,9 +99,11 @@ test.describe("PRD-261 A-19e1 — installed Play's /chat carries the host's AI l
     await expect(label).toHaveText(AI_LABEL)
     await expect(label).toBeInViewport()
     await expect(page.locator(LABEL_SELECTOR)).toHaveCount(1)
+    expect(await labelBox(page)).toEqual(['0px', '0px', 'rgba(0, 0, 0, 0)', 'none'])
     await expect(page.locator(PLAY_FRAME)).toBeVisible()
     await expect(page.locator(`${PLAY_FRAME} ${LABEL_SELECTOR}`)).toHaveCount(0)
     await expect(page.locator(`main ${LABEL_SELECTOR}`)).toHaveCount(0)
+    // the host's check reads the caption as seen: no copy in its own layer
     await expect(page.locator(CAPTION_SELECTOR)).toHaveCount(0)
     await messageBox(page).fill(DRAFT)
     await expectChatRuns(page)

@@ -14,7 +14,8 @@ import { useAiLabelCheck } from './use-ai-label-check'
  * MainLayout draws Auto's widget (components/chatbot/chat-widget.tsx) on every page but /chat,
  * pages a theme draws among them, so the page's label (AiLabelGate) is not beside it. The widget's
  * conversation sits in this frame instead: the host's label, "Auto is an AI" (the widget always
- * talks to Auto), first, then the conversation. The label is checked the way the page's is
+ * talks to Auto), a tiny caption in the theme's muted-foreground token (never a pill), first, then
+ * the conversation. The label is checked the way the page's is
  * (use-ai-label-check.ts); while a theme keeps it from being seen, the same words are drawn again
  * at the label's spot, the top of the frame, in the host's own layer (protected-caption.tsx), and
  * the widget keeps working: its input and starter chips are never disabled.
@@ -28,9 +29,12 @@ import { useAiLabelCheck } from './use-ai-label-check'
 export const WIDGET_LABEL_SETTLE_MS = 400
 
 const FRAME_CLASS = 'flex min-h-0 flex-1 flex-col'
-const LABEL_CLASS =
-  'mx-3 mt-1 self-start rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground'
-/** Where the label's words sit in the frame (mt-1 and mx-3, plus its border and padding), in px. */
+/**
+ * A tiny muted caption. The padding draws nothing (no border or background); it keeps the words, and the
+ * conversation below them, where the label's pill put them.
+ */
+const LABEL_CLASS = 'mx-3 mt-1 self-start px-[9px] py-[3px] text-[11px] font-medium text-muted-foreground'
+/** Where the label's words sit in the frame (mt-1 and mx-3, plus its padding), in px. */
 const LABEL_TEXT_INSET: CaptionInset = { top: 7, left: 21 }
 
 interface WidgetAiLabelNoteProps {

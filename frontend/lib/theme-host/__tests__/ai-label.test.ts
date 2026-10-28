@@ -199,6 +199,11 @@ function theLabel(): HTMLElement {
   return labels[0]
 }
 
+/** The class names on `element` that would draw a pill: a rounding, a border, a background, a shadow or a ring. */
+function pillClasses(element: Element): string[] {
+  return [...element.classList].filter((name) => /^(rounded|border|bg-|shadow|ring)/.test(name))
+}
+
 /** The host's element that holds the label's copy in its own layer, or null while there is none. */
 function captionHost(): HTMLElement | null {
   const hosts = document.querySelectorAll<HTMLElement>(CAPTION_HOST)
@@ -252,6 +257,10 @@ describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
     const note = screen.getByRole('note', { name: AUTO_LABEL })
     expect(note).toHaveTextContent(AUTO_LABEL)
     expect(theLabel()).toBe(note)
+    // a tiny muted caption, never a pill, and the check still reads it as seen
+    expect(pillClasses(note)).toEqual([])
+    expect(note).toHaveClass('text-[11px]', 'text-muted-foreground')
+    expect(aiLabelHiddenReason(note, window)).toBeNull()
     // after ThemeSlot, outside the page and the theme's markup: no page or theme draws it
     const pageRoot = screen.getByTestId(PAGE_ROOT[page])
     expect(pageRoot.contains(note)).toBe(false)

@@ -17,7 +17,8 @@ import { useAiLabelCheck } from './use-ai-label-check'
  * route, Play's Conversations among them). The gate renders the label after the page, outside the
  * theme's page slot (ThemeSlot) and outside the theme's frame and routes, so no page, frame or theme
  * component draws it or can leave it out. It reads "Auto is an
- * AI", or "{agent name} is an AI" while the owner's picked agent answers, in theme tokens, with
+ * AI", or "{agent name} is an AI" while the owner's picked agent answers: a tiny caption in the
+ * theme's muted-foreground token (no border, background or rounding: never a pill), with
  * role="note" and the same words for screen readers.
  *
  * No theme can hide it: the label checks it can be seen (use-ai-label-check.ts) and publishes
@@ -37,11 +38,14 @@ const PLACEMENT_CLASS: Readonly<Record<AiLabelPlacement, string>> = {
   'bottom-right': 'right-3',
   'bottom-left': 'left-3',
 }
+/**
+ * A tiny muted caption. The padding draws nothing (no border or background); it keeps the words on the
+ * spot the label's pill put them, 11 px up from bottom-2 and 23 px in from right-3 or left-3.
+ */
 const LABEL_CLASS =
-  'pointer-events-none fixed bottom-2 z-40 rounded-full border border-border bg-background px-2.5 py-0.5 ' +
-  'text-xs font-medium text-foreground shadow-sm'
+  'pointer-events-none fixed bottom-2 z-40 px-[11px] py-[3px] text-[11px] font-medium leading-4 text-muted-foreground'
 
-/** Where the label's words sit (bottom-2 and right-3 or left-3, plus its border and padding), in px. */
+/** Where the label's words sit (bottom-2 and right-3 or left-3, plus its padding), in px. */
 const LABEL_TEXT_BOTTOM_PX = 11
 const LABEL_TEXT_SIDE_PX = 23
 
