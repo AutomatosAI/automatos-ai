@@ -2235,6 +2235,14 @@ class Config:
     DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
 
     # =============================================================================
+    # PRD-268 Proactive Auto: check-ins that suggest
+    # =============================================================================
+    # K7: the platform mode is off | shadow | live, the ``proactive.mode`` system setting
+    # (services/proactive/switches.py), read strictly. No row takes this default; a value
+    # that is none of the three, or a read that cannot complete, is off.
+    PROACTIVE_MODE_DEFAULT: str = (os.getenv("PROACTIVE_MODE_DEFAULT") or "off").strip().lower()
+
+    # =============================================================================
     # PRD-251 Socials
     # =============================================================================
     # Socials is gated two ways (D1): the platform master switch is the

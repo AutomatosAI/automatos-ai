@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 
 # The ask's lane when the run named none.
 LANE_AGENT_RUN = "agent_run"
-# Lanes nobody is waiting on: never paid from the trial (PRD-222 FR-17).
-BACKGROUND_LANES = frozenset({"heartbeat", "scheduled_task"})
+# Lanes nobody is waiting on: never paid from the trial (PRD-222 FR-17). PRD-268 K14: a
+# check-in (services/proactive/runner.py) is one of them.
+BACKGROUND_LANES = frozenset({"heartbeat", "scheduled_task", "check_in"})
 
 ASK_ID_MAX = 64
 

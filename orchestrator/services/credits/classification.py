@@ -43,6 +43,7 @@ OVERHEAD_PURPOSES = frozenset({
 CUSTOMER_PURPOSES = frozenset({
     "blog_cover_gen",         # modules/tools/discovery/handlers_blog
     "brand_style_read",       # modules/documents/brand_style
+    "check_in",               # services/proactive/runner — one ask per check-in (PRD-268)
     "cover_image",            # modules/tools/discovery/handlers_blog — a post's cover image
     "clarification",          # services/orchestrator_answers — answers a worker mid-run
     "heartbeat",              # services/heartbeat_service — one ask per tick

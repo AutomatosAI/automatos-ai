@@ -20,6 +20,12 @@ The lane is enforced in depth, failing closed, by two decorators:
 What a check-in is shown matches what it may run: ``offered_in_a_check_in`` is the rule
 the ``read_only`` tool strategy (``ContextMode.CHECK_IN``, US-C02c) loads by.
 
+PRD-268 US-C03d: a check-in reads the workspace, and nothing beyond it. The reads that
+reach outside the platform (the ``web`` category: ``platform_web_fetch``,
+``platform_web_search``) are labelled read, yet a check-in reads untrusted data, and a fetch
+or a search would carry it out of the workspace. They are neither offered nor cleared in
+the lane; everywhere else they run as before.
+
 ``caller_context`` is the plain dict the server builds for a call. Its ``lane`` key is
 new here: ``"check_in"`` marks a check-in's call. With any other value, or none, both
 executors run exactly as they did before the lane existed.
@@ -50,6 +56,8 @@ SUGGEST_NEXT_STEP = "platform_suggest_next_step"
 PLATFORM_PREFIX = "platform_"
 PLATFORM_DISPATCHER = "platform_execute"
 CHECK_IN_REFUSAL = "Not available in a check-in, which can only read. Suggest it as a next step instead."
+# PRD-268 US-C03d: read categories that reach outside the platform, never in a check-in.
+OUTSIDE_CATEGORIES = frozenset({"web"})
 # The check-in's own facts in caller_context (US-C03b), and the server-side parameter
 # that hands them to platform_suggest_next_step.
 RUN_ID_KEY = "run_id"
@@ -70,10 +78,18 @@ def check_in_refusal() -> Dict[str, Any]:
     return {"success": False, "error": CHECK_IN_REFUSAL}
 
 
+def reads_the_workspace(action: Any) -> bool:
+    """Whether ``action`` is positively ``read`` and reads inside the platform (not one of
+    ``OUTSIDE_CATEGORIES``)."""
+    return (getattr(action, "permission_level", None) == READ_LEVEL
+            and getattr(action, "category", None) not in OUTSIDE_CATEGORIES)
+
+
 def may_clear_in_a_check_in(action_name: str) -> bool:
     """Whether a check-in may run ``action_name``: ``platform_suggest_next_step``, or an
-    action registered as positively ``read``. Unknown, write and destructive actions are
-    refused, and so is one whose definition cannot be read."""
+    action registered as positively ``read`` that reads inside the platform. Unknown, write
+    and destructive actions are refused, a web read too, and so is one whose definition
+    cannot be read."""
     if action_name == SUGGEST_NEXT_STEP:
         return True
     try:
@@ -83,7 +99,7 @@ def may_clear_in_a_check_in(action_name: str) -> bool:
     except Exception:
         logger.exception("[check_in_lane] could not read the definition of %s; refused", action_name)
         return False
-    return action_def is not None and getattr(action_def, "permission_level", None) == READ_LEVEL
+    return action_def is not None and reads_the_workspace(action_def)
 
 
 def is_a_platform_action(tool_name: Any) -> bool:
@@ -96,7 +112,8 @@ def is_a_platform_action(tool_name: Any) -> bool:
 def offered_in_a_check_in(action: Any) -> bool:
     """PRD-268 US-C02c: whether a check-in's tool surface (``ContextMode.CHECK_IN``) offers
     ``action``, a registered definition. It must be a platform action that is positively
-    ``read``, or ``platform_suggest_next_step``; needs no admin; and can run on this server.
+    ``read`` and reads inside the platform, or ``platform_suggest_next_step``; needs no
+    admin; and can run on this server.
     The surface offers nothing the two decorators below would refuse, so the model is
     never shown a tool it may not call."""
     name = getattr(action, "name", None)
@@ -104,7 +121,7 @@ def offered_in_a_check_in(action: Any) -> bool:
         return False
     if getattr(action, "admin_only", False) or getattr(action, "super_admin_only", False):
         return False
-    if name != SUGGEST_NEXT_STEP and getattr(action, "permission_level", None) != READ_LEVEL:
+    if name != SUGGEST_NEXT_STEP and not reads_the_workspace(action):
         return False
     from modules.tools.discovery.action_registry import action_is_available
 
@@ -185,6 +202,7 @@ __all__ = [
     "CHECK_IN_PARAM",
     "CHECK_IN_REFUSAL",
     "LANE_KEY",
+    "OUTSIDE_CATEGORIES",
     "READS_KEY",
     "RUN_ID_KEY",
     "SUGGEST_NEXT_STEP",
@@ -198,4 +216,5 @@ __all__ = [
     "offered_in_a_check_in",
     "platform_actions_only_in_a_check_in",
     "reads_only_in_a_check_in",
+    "reads_the_workspace",
 ]
