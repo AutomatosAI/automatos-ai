@@ -487,7 +487,7 @@ but `media` and `voice` pull a published image.
 | `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
 | `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
 | `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
-| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone (the web quick-ask is next). `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
+| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
 
 Every third-party image above is pinned by digest in `docker-compose.yml`, and
 Dependabot moves the pins once a week. The CI test
@@ -903,9 +903,8 @@ The hosted edition runs the renderer as its own Railway service (owner sizing,
 
 ## 7c. Auto's server voice (the `voice` profile)
 
-The phone (Automatos Go) can play Auto's replies in a natural voice instead of
-the device's own. The web quick-ask still speaks in the browser's voice; the
-server voice is coming to it, and isn't wired up yet. The voice is `voice-tts`, a
+The phone (Automatos Go) and the web quick-ask play Auto's replies in a natural
+voice instead of the device's or the browser's own. The voice is `voice-tts`, a
 small service (`services/voice-tts`): Kokoro speaks each reply and it streams as
 MP3. It is off until you start it and point the backend at it:
 
@@ -932,7 +931,10 @@ either, so after a `git pull` that changes `services/voice-tts`, run
   listens and speaks English and Portuguese (Brazil), chosen in its
   **Settings → Voice**. It recognises your voice on the iPhone for the iPhone's
   own language; for another language, on the iPhone when its dictation model is
-  installed, otherwise by Apple's speech recognition. Automatic language detection
+  installed, otherwise by Apple's speech recognition. The web quick-ask speaks in
+  the browser's language: the default voice for any variety of its language (any
+  English, by default), else a voice for exactly that language and region
+  (`pt-BR`, `fr-FR`), else the browser's own voice. Automatic language detection
   (about 100 languages, speech recognition on the server) is planned and needs a
   GPU; nothing in this stack does it yet
   ([PRD-269](../PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).

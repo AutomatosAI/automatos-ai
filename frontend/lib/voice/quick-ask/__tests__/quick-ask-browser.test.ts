@@ -3,7 +3,9 @@
  * and the page unloading and tell the open chat a turn landed; and the engine with no deps given runs end to end over
  * stand-ins for SpeechRecognition, speechSynthesis and fetch: the member's words go to POST /api/chat with spokenMode
  * through apiClient's base URL, the streamed reply is spoken with the AI notice first, and Stop cancels the turn
- * through the chat's own Stop (POST /api/chat/{id}/cancel).
+ * through the chat's own Stop (POST /api/chat/{id}/cancel). apiClient's stand-in answers GET /api/voice/voices with no
+ * list, so Auto's server voice has no voice here and the browser's speaks (quick-ask-server-voice.test.ts has the
+ * server voice speaking). deps.ts keeps that choice for the page session (module scope): every test here shares it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -77,11 +79,16 @@ describe('browserDeps', () => {
     expect(deps.storage).toBe(window.sessionStorage)
   })
 
-  it('has no speech in a browser without it', () => {
+  it('has no recognition in a browser without it, and no browser voice behind the server voice', async () => {
     const deps = browserDeps()
+    const events = { onStart: vi.fn(), onBoundary: vi.fn(), onEnd: vi.fn() }
 
-    expect(deps.synthesis).toBeNull()
     expect(deps.recognition()).toBeNull()
+    deps.synthesis?.speak('Hello.', events)
+
+    // No server voice here (no voice list) and no browser voice: the piece ends unsaid, so a turn still finishes.
+    await vi.waitFor(() => expect(events.onEnd).toHaveBeenCalledTimes(1))
+    expect(events.onStart).not.toHaveBeenCalled()
   })
 })
 
@@ -115,12 +122,22 @@ class FakeUtterance {
   constructor(readonly text: string) {}
 }
 
+/** The server voice's <audio> element: unlocked in the press, never played here (the server has no voice). */
+class FakeAudio extends EventTarget {
+  src = ''
+  readonly play = vi.fn(async () => undefined)
+  readonly pause = vi.fn()
+  readonly load = vi.fn()
+  readonly removeAttribute = vi.fn()
+}
+
 /** speechSynthesis's stand-in: it keeps every utterance for the test to play. */
 function installSpeech() {
   const synthesis = { speaking: false, pending: false, speak: vi.fn(), cancel: vi.fn() }
   vi.stubGlobal('SpeechRecognition', FakeRecognition)
   vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
   vi.stubGlobal('speechSynthesis', synthesis)
+  vi.stubGlobal('Audio', FakeAudio)
   const utterance = (index: number): FakeUtterance => synthesis.speak.mock.calls[index][0] as FakeUtterance
   const texts = (): string[] => synthesis.speak.mock.calls.map(([spoken]) => (spoken as FakeUtterance).text)
   return { synthesis, utterance, texts }

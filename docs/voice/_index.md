@@ -20,6 +20,8 @@ The following files were used as context for generating this page:
 - [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts)
 - [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts)
 - [frontend/lib/voice/quick-ask/config.ts](../../frontend/lib/voice/quick-ask/config.ts)
+- [frontend/lib/voice/quick-ask/server-speech.ts](../../frontend/lib/voice/quick-ask/server-speech.ts)
+- [frontend/lib/voice/quick-ask/voice-choice.ts](../../frontend/lib/voice/quick-ask/voice-choice.ts)
 - [frontend/lib/voice/quick-ask/copy.ts](../../frontend/lib/voice/quick-ask/copy.ts)
 - [frontend/lib/voice/quick-ask/stop-phrase.ts](../../frontend/lib/voice/quick-ask/stop-phrase.ts)
 - [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
@@ -28,6 +30,7 @@ The following files were used as context for generating this page:
 - [frontend/components/settings/VoiceLiveArmingTab.tsx](../../frontend/components/settings/VoiceLiveArmingTab.tsx)
 - [orchestrator/api/chat_models.py](../../orchestrator/api/chat_models.py)
 - [orchestrator/api/voice_retell.py](../../orchestrator/api/voice_retell.py)
+- [orchestrator/api/voice_speech.py](../../orchestrator/api/voice_speech.py)
 - [orchestrator/api/workspaces.py](../../orchestrator/api/workspaces.py)
 - [orchestrator/modules/voice/availability.py](../../orchestrator/modules/voice/availability.py)
 - [orchestrator/modules/voice/mint.py](../../orchestrator/modules/voice/mint.py)
@@ -42,7 +45,7 @@ You can talk to Auto instead of typing, in two ways:
 |---|---|---|
 | **What it is** | Hold to talk: ask, let go, and hear Auto's reply. | A real-time voice call with Auto. You talk back and forth, and can speak over Auto to cut in. |
 | **Where it is** | The microphone beside **Send** in the chat box, and a theme's voice button. | The **Live** chip under the chat box, next to **Code** and **Plan**, and a theme's voice button. |
-| **Who hears you and who speaks** | Your browser: its own speech recognition and speech voice. Automatos receives only the words. | Retell, the voice service Auto Live runs on. Automatos writes the replies. |
+| **Who hears you and who speaks** | Your browser hears you, with its own speech recognition; Automatos receives only the words. Auto speaks in its natural server voice where the server runs one, otherwise in your browser's voice. | Retell, the voice service Auto Live runs on. Automatos writes the replies. |
 | **Plans and editions** | Every plan, both editions. | Where the server has it set up (below). On the hosted edition, the workspace's plan decides too. |
 | **What you need** | A browser that can recognise speech. Where it can't, the button says so and you can still type. | A current Chrome, Edge or Safari, and a microphone. |
 | **Language** | Your browser's language. See [Languages](#languages). | One language for the whole server, `en-GB` unless the server sets another. |
@@ -67,6 +70,12 @@ Auto is told the reply will be heard, so it answers in short sentences without f
 sentence by sentence as it arrives. Code, tables and links aren't read out ("There's code in the chat."): the chat
 shows them.
 
+Auto speaks in its natural voice, the server voice (see [Languages](#languages)), when the server runs one and it has a
+voice for your browser's language; the next sentence is made while the current one plays. Otherwise your browser's
+own voice speaks. If the server voice fails on a sentence (it is busy or down, or doesn't have the sentence ready
+within four seconds), your browser's voice speaks that sentence and the rest of the answer, so one answer never
+switches back and forth between two voices. Your next question tries the server voice again.
+
 - **Keyboard and screen readers.** A press that no pointer made (Space or Enter on the focused button, a screen
   reader's activation) works as a toggle: press once to start, again to send.
 - **Stop.** The stop control next to the button ends listening or the reply. Pressing the button while Auto speaks
@@ -79,8 +88,9 @@ shows them.
 When something goes wrong, the button says why in a sentence, with **Try again**: the microphone is blocked for the
 site, nothing was heard, no microphone was found, or the browser can't recognise speech.
 
-Your browser does the listening and the speaking. Some browsers send the audio to their maker's online speech
-service to turn it into words; Automatos never receives the audio.
+Your browser does the listening. Some browsers send the audio to their maker's online speech service to turn it into
+words; Automatos never receives your audio, only the words. With the server voice, the sentences of Auto's reply go to
+your Automatos server to be turned into sound; without it, your browser speaks them.
 
 ---
 
@@ -126,9 +136,12 @@ Auto Live needs a Retell account. On a server you run:
 
 - **Writing.** Auto answers in the language you write or speak to it in, for any language the model handles. There
   is nothing to set.
-- **Quick ask in the browser.** The browser listens and speaks in the language it is set to (`en-US` when it names
-  none). To talk in another language, change the browser's language. The reply is spoken in the browser's own voice
-  for that language; Auto's natural server voice (below) is coming to the web, and isn't wired up there yet.
+- **Quick ask in the browser.** The browser listens in the language it is set to (`en-US` when it names none). To
+  talk in another language, change the browser's language. The reply is spoken in Auto's natural server voice (below)
+  when the server runs it and has a voice for that language: the server's default voice for any variety of its
+  language (any English, by default), otherwise a voice for exactly the browser's language and region, such as Portuguese
+  (Brazil) for `pt-BR`. For a language or region it has no voice for (`pt-PT`, German), the browser's own voice
+  speaks.
 - **Auto Live** listens in one language for the whole server: `VOICE_LIVE_LANGUAGE`, `en-GB` by default.
 - **Automatos Go** (iPhone) listens and speaks English and Portuguese (Brazil). Choose the language in
   **Settings → Voice**; a one-tap EN/PT switch changes it. Your voice is recognised on the iPhone for the iPhone's own
@@ -155,6 +168,9 @@ draws the button and everything around it, so voice behaves the same in every th
   type);
 - the "AI voice assistant" caption and the stop control, which no theme's styles can hide;
 - the microphone prompt, a failure with **Try again**, and, for a call, mute and the microphone picker.
+
+Auto's voice is the same in every theme as in Studio: the server voice where the server runs one, otherwise the
+browser's.
 
 A theme is not meant to open the microphone or speak by itself: the automated checks report code that does as an
 error, and the Marketplace review refuses that version.

@@ -1,7 +1,7 @@
 /**
  * Theme voice, web quick-ask: the engine. Hold to talk with the browser's speech recognition, the words sent as a
- * normal chat turn with spokenMode, the reply spoken by the browser sentence by sentence, the AI notice once per
- * browser session; Stop and "Auto, stop" end it. It keeps the voice contract (lib/voice/engine.ts) so the host's
+ * normal chat turn with spokenMode, the reply spoken sentence by sentence (Auto's server voice, or the browser's where
+ * the server can't), the AI notice once per browser session; Stop and "Auto, stop" end it. It keeps the voice contract (lib/voice/engine.ts) so the host's
  * voice provider, the theme SDK's voice area and Studio's chat read it like Live.
  *
  * Never throws to the caller: an unexpected failure is logged and shown as a plain sentence. A hidden tab or an

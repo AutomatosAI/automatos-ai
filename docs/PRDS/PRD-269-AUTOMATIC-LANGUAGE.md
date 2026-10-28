@@ -15,7 +15,7 @@ Auto already answers in the language you write or speak to it in, for any langua
 | Surface | Hears you with | Speaks with | Languages today |
 |---|---|---|---|
 | Typed chat | n/a | n/a | Any language the model handles |
-| Web quick ask | The browser's `SpeechRecognition`, in `navigator.language` (`en-US` when none) [T `frontend/lib/voice/quick-ask/deps.ts`] | The browser's `speechSynthesis` in the same language [T] | The browser's language |
+| Web quick ask | The browser's `SpeechRecognition`, in `navigator.language` (`en-US` when none) [T `frontend/lib/voice/quick-ask/deps.ts`] | Auto's natural voice (`POST /api/voice/speech`) for the same language where Kokoro has one, else the browser's `speechSynthesis` [T `frontend/lib/voice/quick-ask/voice-choice.ts`] | The browser's language |
 | Automatos Go | Apple's recognizer, in the locale chosen up front [T `src/voice/quick-ask`]: on the iPhone for the iPhone's own language; for another language, on the iPhone when its dictation model is installed, otherwise Apple's speech recognition | Auto's natural voice (`POST /api/voice/speech`), else the iPhone's voice | English, Portuguese (Brazil) |
 | Auto Live | Retell, pinned to `VOICE_LIVE_LANGUAGE` (`en-GB`) ("pinning `language` stops multilingual STT hallucinating confident nonsense") [T `modules/voice/retell_api.py`] | Retell's voice | One per server |
 | voice-tts (Kokoro) | n/a | Kokoro, on CPU [T `services/voice-tts`] | 9: English (US, UK), Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese, Mandarin. Japanese and Mandarin are phonemized with espeak and sound weaker. No European Portuguese |
@@ -105,7 +105,7 @@ The once-per-session AI notice is spoken in the detected language. A translated 
 
 - **Recording:** the browser's `MediaRecorder`; the format differs by browser [I]. The clip goes through `apiClient` to the same route [T AGENTS.md: no raw `fetch`].
 - **When it's offered:** "Automatic" shows where the server offers `stt`. It also gives browsers with no speech recognition a way to talk to Auto at all.
-- **The voice:** the browser's `speechSynthesis` with the detected language. Auto's natural server voice reaches the web when that separate work lands; it isn't wired up today.
+- **The voice:** Auto's natural server voice where Kokoro has one for the detected language, else the browser's `speechSynthesis` in it. The web already speaks with the server voice, chosen by the page's language [T `frontend/lib/voice/quick-ask/voice-choice.ts`]; with detection it would follow the detected language.
 
 ### 4.7 Privacy
 

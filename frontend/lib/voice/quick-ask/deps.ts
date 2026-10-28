@@ -1,24 +1,31 @@
 /**
  * Theme voice, web quick-ask: everything the engine reaches outside itself, injectable so its tests use fakes. The
- * browser's defaults: speech recognition and speech synthesis in the page's language, the chat turn sent with
- * spokenMode (lib/chat/turn-stream.ts), the chat's own Stop (lib/chat/api.ts cancelChatTurn), the chat_changed
- * window event the open conversation merges on, the page's clock, this tab's sessionStorage, and the tab being hidden.
+ * browser's defaults: speech recognition in the page's language; Auto's server voice (server-speech.ts, Kokoro through
+ * POST /api/voice/speech) in the page's language, with the browser's speech synthesis behind it for what the server
+ * can't say; the chat turn sent with spokenMode (lib/chat/turn-stream.ts), the chat's own Stop (lib/chat/api.ts
+ * cancelChatTurn), the chat_changed window event the open conversation merges on, the page's clock, this tab's
+ * sessionStorage, and the tab being hidden.
  *
- * Built only when an engine is created (in the browser): importing this module touches no browser object.
+ * Built only when an engine is created (in the browser): importing this module touches no browser object, and the
+ * server voice's list is asked for only when Auto first speaks or a hold primes it.
  */
 import { cancelChatTurn } from '@/lib/chat/api'
 import { streamChatTurn, type ChatTurnSender } from '@/lib/chat/turn-stream'
 import { CHAT_CHANGED_EVENT } from '@/lib/voice/live-turns'
 
 import type { NoticeStorage } from './ai-notice'
+import { browserAudioPlayer } from './audio-player'
 import { SYSTEM_CLOCK, type QuickAskClock } from './clock'
 import { browserRecognitionConstructor, browserRecognitionPort, type RecognitionFactory } from './recognition'
+import { serverSpeechPort } from './server-speech'
 import { browserSynthesisPort, type SynthesisPort } from './speaker'
+import { createServerVoiceSession, type ServerVoiceSession } from './voice-choice'
+import { fetchSpeech, fetchVoices } from './voice-api'
 
 export interface QuickAskDeps {
   /** A new recognition port per hold; null when the browser has no speech recognition. */
   readonly recognition: RecognitionFactory
-  /** The browser's speech synthesis; null when it has none. */
+  /** Auto's voice: the server's, with the browser's speech synthesis behind it; null for none (a test's choice). */
   readonly synthesis: SynthesisPort | null
   /** Sends the heard words as a chat turn with spokenMode and streams the reply back. */
   readonly sendTurn: ChatTurnSender
@@ -57,6 +64,25 @@ function browserSynthesis(): SynthesisPort | null {
   return browserSynthesisPort(window.speechSynthesis, pageLanguage())
 }
 
+let pageVoice: ServerVoiceSession | null = null
+
+/** The page session's server voice, whichever engine speaks: its voice list asked for once, a tts_off remembered. */
+function pageVoiceSession(): ServerVoiceSession {
+  if (pageVoice === null) pageVoice = createServerVoiceSession(fetchVoices, pageLanguage())
+  return pageVoice
+}
+
+/** Auto's voice: the server's, with the browser's (when it has one) for every piece the server can't say. */
+function speechPort(): SynthesisPort {
+  return serverSpeechPort({
+    fetchSpeech,
+    player: browserAudioPlayer(),
+    fallback: browserSynthesis(),
+    session: pageVoiceSession(),
+    clock: SYSTEM_CLOCK,
+  })
+}
+
 function tabStorage(): NoticeStorage | null {
   try {
     return typeof window === 'undefined' ? null : window.sessionStorage
@@ -89,7 +115,7 @@ function onPageHidden(callback: () => void): () => void {
 export function browserDeps(): QuickAskDeps {
   return Object.freeze({
     recognition: recognitionFactory(),
-    synthesis: browserSynthesis(),
+    synthesis: speechPort(),
     sendTurn: streamChatTurn,
     cancelTurn: cancelChatTurn,
     announceTurn,
