@@ -59,6 +59,8 @@ const OK = 200
 const NO_STATUS = 0
 /** The project whose media loader sends Range for a <video>, so the 206 is proven in a browser. */
 const RANGED_MEDIA_PROJECT = 'chromium'
+/** The project that must prove real playback through the proxy (VP9 in Chromium). */
+const PLAYBACK_PROOF_PROJECT = 'chromium'
 const PLAY_TIMEOUT_MS = 10_000
 
 interface UploadAnswer {
@@ -206,18 +208,23 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
     expect(response.status()).toBe(403)
   })
 
-  test('plays a VP9 clip through the proxy, proving playback without depending on HEVC', { tag: '@host' }, async ({ page, request }) => {
+  test('plays a VP9 clip through the proxy, proving playback without depending on HEVC', { tag: '@host' }, async ({ page, request }, testInfo) => {
     const src = clipUrl(await installClip(request), CLIP2_PATH)
     const response = await request.get(src)
     expect(response.ok(), `GET ${src} answered ${response.status()}: ${await response.text()}`).toBe(true)
     expect(response.headers()['content-type']).toBe(CLIP2_TYPE)
     await page.goto(PAGE_PATH)
     const outcome = await playVideo(page, src, VP9_CLIP)
-    if (outcome.decodable) {
-      expect(outcome, 'a browser that decodes VP9 plays the clip through the proxy').toMatchObject({ played: true })
-    } else {
-      // Unproven here, not failed: VP9 isn't decodable in this build; the HEVC test covers 206/Range.
-      test.info().annotations.push({ type: 'unproven', description: `${CLIP2_CODEC} is not decodable in this build` })
+    if (testInfo.project.name === PLAYBACK_PROOF_PROJECT) {
+      // The suite's playback proof: Chromium always ships libvpx, so it must decode and play the clip.
+      expect(outcome, 'Chromium plays the VP9 clip through the proxy').toMatchObject({ decodable: true, played: true, error: null })
+      return
+    }
+    // Other engines: a media error is still a failure; a silent stall is not proof either way. Playwright 1.64's
+    // headless WebKit claims VP9 and HEVC (canPlayType and MediaCapabilities) and then never plays either.
+    expect(outcome.error, 'the <video> raised no media error on the proxied clip').toBeNull()
+    if (!outcome.played) {
+      test.info().annotations.push({ type: 'unproven', description: `${testInfo.project.name}: ${CLIP2_CODEC} did not play; Chromium proves playback` })
     }
   })
 })
