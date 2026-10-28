@@ -2230,6 +2230,9 @@ class Config:
     # The digest time of a phone that names none, 'HH:MM' in the phone's timezone; a value that
     # is not HH:MM reads as 08:00 (services.mobile.digest.default_digest_time).
     DIGEST_DEFAULT_TIME: str = (os.getenv("DIGEST_DEFAULT_TIME") or "08:00").strip()
+    # "Send me today's brief now" (POST /api/v1/mobile/digest/now): one per person at most this
+    # many seconds apart, at least one.
+    DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
 
     # =============================================================================
     # PRD-251 Socials

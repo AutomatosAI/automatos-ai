@@ -1,5 +1,5 @@
 {
-  "route_count": 983,
+  "route_count": 984,
   "routes": [
     {
       "method": "GET",
@@ -3056,6 +3056,10 @@
     {
       "method": "POST",
       "path": "/api/v1/mobile/devices/{device_id}/rotate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/digest/now"
     },
     {
       "method": "POST",
