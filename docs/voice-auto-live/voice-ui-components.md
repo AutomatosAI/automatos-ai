@@ -110,8 +110,13 @@ There is one Live engine per tab, so one Retell session per tab. Every call has 
 - the browser's speech recognition hears the member, with interim words in `snapshot.heard`;
 - the release (or the browser's own end of speech, or 60 seconds of holding) sends the words as a normal
   `POST /api/chat` turn with `spokenMode`, through the app's own chat route as a typed turn goes;
-- the streamed reply is cut into speakable sentences (no markdown, code, tables or URLs) and queued to
-  `speechSynthesis`; a sentence over 200 characters is spoken in pieces;
+- the streamed reply is cut into speakable sentences (no markdown, code, tables or URLs); a sentence over 200
+  characters is spoken in pieces. Each piece is spoken by Auto's server voice
+  [frontend/lib/voice/quick-ask/server-speech.ts](../../frontend/lib/voice/quick-ask/server-speech.ts): one MP3 per
+  piece from `POST /api/voice/speech` (services/voice-tts), the next one fetched while the current one plays, played
+  on one `<audio>` element that the press unlocks. A piece the server refuses, that fails or that takes over four
+  seconds is spoken by `speechSynthesis` instead; after `tts_off`, or when the server has no voice for the language,
+  `speechSynthesis` speaks every piece and the server is asked nothing more until the page reloads;
 - the AI notice, the backend's greeting, is spoken once per browser tab session before the first reply
   [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts);
 - "Auto, stop" (or "stop", "cancel", "stop it") as the whole utterance stops and sends nothing; a press while Auto
@@ -119,7 +124,10 @@ There is one Live engine per tab, so one Retell session per tab. Every call has 
 - a hidden tab or an unloading page stops the microphone and the speech;
 - recognition and speech both use the browser's language, `navigator.language` (`en-US` when it names none)
   [frontend/lib/voice/quick-ask/deps.ts](../../frontend/lib/voice/quick-ask/deps.ts); the stop phrases are
-  English. Auto's server voice (`POST /api/voice/speech`, services/voice-tts) is not wired into quick ask yet.
+  English. The server voice for that language comes from `GET /api/voice/voices`, asked once per page: the server's
+  default when it speaks the language in any accent, else the first voice in exactly the browser's language and
+  region, else none
+  [frontend/lib/voice/quick-ask/voice-choice.ts](../../frontend/lib/voice/quick-ask/voice-choice.ts).
 
 Sources:
 - [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts)

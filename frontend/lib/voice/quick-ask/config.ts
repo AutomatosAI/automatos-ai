@@ -23,6 +23,19 @@ export const DURATION_TICK_MS = 1_000
 export const SPEECH_MAX_CHARS = 200
 
 /**
+ * Auto's server voice (POST /api/voice/speech, server-speech.ts): how many pieces after the one playing have their
+ * MP3 asked for. One: the next sentence is synthesised while this one plays (about 0.5 s for a short sentence, up to
+ * 2 s for a long one), so there is no gap, and a reply never asks for all its sentences at once.
+ */
+export const SERVER_SPEECH_PREFETCH_AHEAD = 1
+
+/**
+ * How long the piece due to play next (nothing playing before it) waits for its MP3; then the browser's voice speaks
+ * it, and the next piece asks the server again. automatos-go's SERVER_VOICE_WAIT_MS.
+ */
+export const SERVER_VOICE_WAIT_MS = 4_000
+
+/**
  * Said as the WHOLE utterance while holding, these stop Auto and send nothing (stop-phrase.ts drops a leading
  * 'auto' or 'hey auto' first). 'stop the deploy' is a request and goes to Auto as said.
  */
