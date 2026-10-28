@@ -76,6 +76,7 @@ from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's call
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
+from consumers.chatbot.reply_locale import replies_in_the_persons_locale  # the variant Auto replies in (pt-BR)
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_failure_key as _same_failure_key  # F030
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
@@ -830,6 +831,7 @@ class StreamingChatService:
     # ─────────────────────────────────────────────────────────────────────
 
     @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
+    @replies_in_the_persons_locale  # the turn's locale (pt-BR) names the language variant Auto replies in
     async def _prepare_messages(
         self,
         messages: List[Dict[str, Any]],
@@ -2399,6 +2401,7 @@ class StreamingChatService:
         is_super_admin: bool = False,
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
+        locale: Optional[str] = None,  # the person's checked BCP 47 tag (api.chat_models), pt-BR
     ) -> AsyncGenerator[str, None]:
         """Stream a chat response produced by the specified agent.
 
@@ -2415,6 +2418,7 @@ class StreamingChatService:
         # F351 (night 10b): a document conversation keeps its document tools on a follow-up —
         # the full path (never the dispatcher-only ATOM lane) and the template actions ranked in.
         self._document_turn = not self.widget_mode and about_a_document(messages)
+        self._reply_locale = locale  # read by reply_locale.replies_in_the_persons_locale; None: none named
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
