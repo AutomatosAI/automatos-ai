@@ -12,7 +12,8 @@ US-C05, or ``cost_ceiling``); for a skip, the check that refused it (``switched_
 The runner reads back where a check-in's window starts (its last successful run of the same
 kind, ``modules.proactive.window``), the check-ins that reached the model in the last day
 (the §6.9 cap counts those, a silent run without a model call does not), and the person's
-open and recently hidden titles its prompt lists.
+open and recently hidden titles its prompt lists. The heartbeat bridge reads the run before
+a failed one, to tell whether that failure starts a streak (``modules.proactive.streaks``).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from sqlalchemy.orm import Session
 from core.models.proactive import (
     ERROR_CLASS_LENGTH,
     MODEL_LENGTH,
+    RUN_ERROR,
     SUGGESTION_HIDDEN,
     SUGGESTION_OPEN,
     ProactiveRun,
@@ -36,6 +38,7 @@ from modules.proactive.dedupe import HIDDEN_WINDOW
 from modules.proactive.window import SUCCESSFUL_OUTCOMES, last_success_at
 
 __all__ = [
+    "FINISHED_OUTCOMES",
     "KIND_AGENT",
     "KIND_WORKSPACE",
     "MAX_TITLES",
@@ -44,6 +47,7 @@ __all__ = [
     "known_titles",
     "last_success",
     "model_runs_today",
+    "previous_finished",
     "suggestions_made",
     "write_run",
 ]
@@ -55,6 +59,8 @@ KIND_AGENT = "agent_check_in"
 MODEL_RUN_WINDOW = timedelta(hours=24)
 # The open and recently hidden titles a prompt lists, newest first: the open-per-person cap is 20.
 MAX_TITLES = 20
+# The outcomes of a run that read: a skipped run neither counts in a streak nor ends it.
+FINISHED_OUTCOMES = frozenset(SUCCESSFUL_OUTCOMES | {RUN_ERROR})
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,17 @@ def last_success(db: Session, workspace_id: UUID, kind: str, agent_id: Optional[
         *_same_check_in(workspace_id, kind, agent_id), ProactiveRun.outcome.in_(tuple(SUCCESSFUL_OUTCOMES)),
     ).order_by(ProactiveRun.created_at.desc()).limit(1).all()
     return last_success_at(latest)
+
+
+def previous_finished(db: Session, workspace_id: UUID, kind: str, agent_id: Optional[int],
+                      run_id: UUID) -> Optional[ProactiveRun]:
+    """This check-in's newest run that read (silent, suggested or error) other than
+    ``run_id``, the run just written; None when there is none. Skipped runs are passed
+    over, as a streak passes over them."""
+    return db.query(ProactiveRun).filter(
+        *_same_check_in(workspace_id, kind, agent_id), ProactiveRun.id != run_id,
+        ProactiveRun.outcome.in_(tuple(FINISHED_OUTCOMES)),
+    ).order_by(ProactiveRun.created_at.desc()).first()
 
 
 def model_runs_today(db: Session, workspace_id: UUID, now: datetime) -> int:

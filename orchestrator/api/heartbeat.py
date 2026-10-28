@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from core.auth.super_admin import require_super_admin
 from core.auth.workspace_permission import require_workspace_permission
 from core.security.web_access import resolve_outbound_async
 from core.models import Agent
+from modules.proactive.heartbeats import HEARTBEAT_MODES, MODE_KEY, heartbeat_mode, stated_mode
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,25 @@ class HeartbeatConfigPayload(BaseModel):
     report_to: str = "orchestrator"  # orchestrator | direct | channel:<id> | webhook
     webhook_url: Optional[str] = None
     channel_id: Optional[str] = None
+    # PRD-268 K10: check_in | act. Unset: act when auto_act is set, else check_in.
+    mode: Optional[str] = None
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, value: Optional[str]) -> Optional[str]:
+        """A stated mode is one of ``HEARTBEAT_MODES``; None leaves it unset."""
+        if value is None or value in HEARTBEAT_MODES:
+            return value
+        raise ValueError(f"mode must be one of: {', '.join(HEARTBEAT_MODES)}")
+
+
+def _kept_mode(payload: HeartbeatConfigPayload, stored: Dict[str, Any], current: Any) -> Dict[str, Any]:
+    """The block to save (PRD-268 K10): a mode the PUT sends is stated (null unsets it); a
+    PUT that leaves ``mode`` out keeps the mode the block states, so a client that does not
+    know the field never resets it."""
+    if MODE_KEY in payload.model_fields_set:
+        return stored
+    return {**stored, MODE_KEY: stated_mode(current)}
 
 
 # ── Agent Heartbeat Config CRUD ───────────────────────────────────
@@ -113,6 +133,7 @@ async def get_agent_heartbeat_config(
         "report_to": hb.get("report_to", "orchestrator"),
         "webhook_url": hb.get("webhook_url"),
         "channel_id": hb.get("channel_id"),
+        "mode": heartbeat_mode(hb),  # PRD-268 K10: the stated mode, else its effective default
     }
 
 
@@ -145,6 +166,7 @@ async def save_agent_heartbeat_config(
     ).fetchone()
 
     current_config = dict(row.configuration) if row and row.configuration else {}
+    stored = _kept_mode(payload, stored, current_config.get("heartbeat"))
     new_config = {**current_config, "heartbeat": stored}
 
     db.execute(

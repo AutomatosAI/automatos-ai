@@ -12,6 +12,8 @@ these functions decide. Nothing here mutates its arguments.
   from the third failure up to 24 hours (§6.2.2).
 - :mod:`modules.proactive.provenance`: a suggestion cites only reads its own run
   made (§6.2.3).
+- :mod:`modules.proactive.heartbeats`: which heartbeats become check-ins, an
+  agent's ``check_in`` or ``act`` and the orchestrator's proactive levels (K10).
 """
 from modules.proactive.caps import CapRefusal, Caps, clamp_interval, oldest_to_expire, run_refusal, suggestion_refusal
 from modules.proactive.dedupe import (
@@ -25,14 +27,24 @@ from modules.proactive.dedupe import (
     ticket_key,
     title_key,
 )
+from modules.proactive.heartbeats import (
+    CHECK_IN_LEVELS,
+    HEARTBEAT_ACT,
+    HEARTBEAT_CHECK_IN,
+    heartbeat_mode,
+    stated_mode,
+)
 from modules.proactive.provenance import provenance_ok
 from modules.proactive.streaks import consecutive_failures, is_due, next_interval
 from modules.proactive.window import check_in_window, last_success_at
 
 __all__ = [
+    "CHECK_IN_LEVELS",
     "CapRefusal",
     "Caps",
     "Candidate",
+    "HEARTBEAT_ACT",
+    "HEARTBEAT_CHECK_IN",
     "agent_error_key",
     "board_number",
     "check_in_window",
@@ -40,6 +52,7 @@ __all__ = [
     "consecutive_failures",
     "error_class_name",
     "find_duplicate",
+    "heartbeat_mode",
     "is_due",
     "is_duplicate",
     "last_success_at",
@@ -48,6 +61,7 @@ __all__ = [
     "oldest_to_expire",
     "provenance_ok",
     "run_refusal",
+    "stated_mode",
     "suggestion_refusal",
     "ticket_key",
     "title_key",

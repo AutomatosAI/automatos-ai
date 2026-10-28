@@ -24,6 +24,7 @@ from services.credits.asks import runs_as_an_ask
 from services.heartbeats.triage_shadow import (
     shadow_heartbeat_triage as _shadow_heartbeat_triage,
 )
+from services.proactive.heartbeat_bridge import agent_job, orchestrator_job
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +402,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._orchestrator_tick,
+            orchestrator_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[workspace_id, hb_config],
@@ -474,7 +475,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._agent_tick,
+            agent_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[agent_id, workspace_id, hb_config],
