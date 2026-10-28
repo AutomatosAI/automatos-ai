@@ -27,6 +27,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from openai import OpenAI
 
+from modules.codegraph.query_log import log_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -1377,36 +1379,8 @@ class CodeGraphService:
         duration_ms: float,
         workspace_id: Optional[str],
     ) -> None:
-        """Best-effort query-log write.
-
-        The codegraph_query_logs table stores duration_ms (not execution_time_ms)
-        and a NOT NULL workspace_id; the old INSERTs targeted a phantom column and
-        omitted workspace_id, so every write failed. A telemetry write must never
-        fail the search, so any failure is rolled back and swallowed.
-        """
-        try:
-            self.db.execute(
-                text("""
-                    INSERT INTO codegraph_query_logs
-                    (project_id, query_type, query_text, results_count, duration_ms, workspace_id)
-                    VALUES (:project_id, :query_type, :query_text, :results_count, :duration_ms, :workspace_id)
-                """),
-                {
-                    "project_id": project_id,
-                    "query_type": query_type,
-                    "query_text": query_text,
-                    "results_count": results_count,
-                    "duration_ms": duration_ms,
-                    "workspace_id": workspace_id,
-                },
-            )
-            self.db.commit()
-        except Exception as e:
-            logger.warning(f"CodeGraph query-log write failed (non-fatal): {e}")
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
+        """Best-effort query-log write (``query_log.log_query``); none in a check-in."""
+        log_query(self.db, project_id, query_type, query_text, results_count, duration_ms, workspace_id)
 
     def _format_prompt_block(self, symbols: List[Dict], query: str) -> str:
         """Format search results as prompt block for LLM"""

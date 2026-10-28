@@ -12,20 +12,28 @@
   an upsert, a delete, a payload set), not when it reads (a GET, a retrieve, a search, a
   scroll, a count). Every other request leaves the platform, so every one is recorded.
 - ``minimal_params``: an action's required parameters, each with its minimal valid value.
+- ``own_sessions`` (P268W1-RVW-1): ``core.database.database.SessionLocal`` hands out
+  sessions that record each write and answer no read (a read raises, so no process cache
+  keeps an empty answer), so a write on a session the code opens itself is seen too. A
+  write into the workspace's files goes over httpx to the workspace worker, so
+  ``recording_http`` records it.
+- ``seeded_session`` (P268W1-RVW-1): a spy session over a database holding a little, so a
+  write reached only when something exists can be reached.
+- ``settle``: waits for the work a call left running, so its writes count as the call's.
 
-What the spies cannot see: a write reached only when rows exist (the database is empty), a
-session the code opens itself (``SessionLocal``), Redis, and clients that are neither httpx
-nor requests (boto3).
+What the spies cannot see: a session bound at import time (``from ... import SessionLocal``
+at module level), Redis, and clients that are neither httpx nor requests (boto3).
 
 Pure: no database, no network.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import re
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Set
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
@@ -39,6 +47,8 @@ from sqlalchemy.sql.elements import TextClause
 
 MINIMAL_STRING = "1"
 MINIMAL_NUMBER = 1
+# How long work a call left running (a task it created) has to finish.
+SETTLE_SECONDS = 1.0
 
 # What the session records instead of doing. ``merge`` hands back what it was given.
 SESSION_WRITES = ("add", "add_all", "delete", "merge", "flush", "commit",
@@ -285,6 +295,142 @@ def spy_session(log: WriteLog) -> MagicMock:
     session.is_active = True
     session.in_transaction.return_value = False
     return session
+
+
+class _Rows(EmptyResult):
+    """The result of a statement that found ``rows``."""
+
+    def __init__(self, rows: Iterable[Any]) -> None:
+        self._rows = list(rows)
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._rows)
+
+    def all(self) -> List[Any]:
+        return list(self._rows)
+
+    fetchall = all
+
+    def first(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+    fetchone = scalar = scalar_one_or_none = one_or_none = first
+
+
+class FoundQuery(EmptyQuery):
+    """``session.query(Model)`` over a database holding one ``found`` row."""
+
+    def __init__(self, log: WriteLog, found: Any) -> None:
+        super().__init__(log)
+        self._found = found
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter([self._found])
+
+    def all(self) -> List[Any]:
+        return [self._found]
+
+    def first(self) -> Any:
+        return self._found
+
+    scalar = one_or_none = one = first
+
+    def get(self, *args: Any, **kwargs: Any) -> Any:
+        return self._found
+
+    def count(self) -> int:
+        return 1
+
+
+def _sql_of(statement: Any) -> str:
+    text = getattr(getattr(statement, "element", statement), "text", statement)
+    return " ".join(str(text).split())
+
+
+def seeded_session(log: WriteLog, *, rows: Optional[Mapping[str, List[Any]]] = None,
+                   found: Optional[Mapping[Any, Any]] = None) -> MagicMock:
+    """``spy_session(log)`` over a database holding a little: an ``execute`` whose SQL holds a
+    key of ``rows`` returns those rows, and ``query(X)`` of a key of ``found`` finds that row.
+    Every write is recorded as ever, and every other read finds nothing."""
+    session = spy_session(log)
+    spy = _executing(log, "execute", EmptyResult)
+    held_rows, held = dict(rows or {}), dict(found or {})
+
+    def execute(statement: Any = None, *args: Any, **kwargs: Any) -> Any:
+        result = spy(statement, *args, **kwargs)
+        sql = _sql_of(statement)
+        matched = next((answer for key, answer in held_rows.items() if key in sql), None)
+        return _Rows(matched) if matched is not None else result
+
+    def query(*entities: Any, **kwargs: Any) -> EmptyQuery:
+        entity = entities[0] if entities else None
+        return FoundQuery(log, held[entity]) if _holds(held, entity) else EmptyQuery(log)
+
+    session.execute.side_effect = execute
+    session.query.side_effect = query
+    return session
+
+
+def _holds(held: Dict[Any, Any], entity: Any) -> bool:
+    return any(key is entity for key in held)
+
+
+class OwnSessionRead(RuntimeError):
+    """A read on a session the code opened itself, while ``own_sessions`` watches."""
+
+
+def _refuse_read(*args: Any, **kwargs: Any) -> Any:
+    raise OwnSessionRead("a session opened under the write spies answers no reads")
+
+
+def _writes_only(log: WriteLog, verb: str, empty: Any) -> Callable[..., Any]:
+    """An ``execute``-like call that records a write and refuses a read."""
+    record = _executing(log, verb, empty)
+
+    def run(statement: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if not writes_data(statement):
+            _refuse_read()
+        return record(statement, *args, **kwargs)
+    return run
+
+
+def _opened_session(log: WriteLog) -> MagicMock:
+    """A session the code opens itself: every write is recorded as on the spy, also as
+    ``with SessionLocal() as db``, and every read raises ``OwnSessionRead``. A read that
+    found nothing would be an answer a process cache keeps (the RAG settings memoise one)
+    and hands the run's later tests; a read that raises is kept by none."""
+    session = spy_session(log)
+    session.query.side_effect = _refuse_read
+    session.get.side_effect = _refuse_read
+    for verb, empty in (("execute", EmptyResult), ("scalar", None), ("scalars", EmptyResult)):
+        getattr(session, verb).side_effect = _writes_only(log, verb, empty)
+    session.__enter__.return_value = session
+    session.__exit__.return_value = False
+    return session
+
+
+@contextmanager
+def own_sessions(log: WriteLog) -> Iterator[WriteLog]:
+    """``core.database.database.SessionLocal`` hands out sessions that record each write into
+    ``log`` and answer no read, so a write on a session the code opens itself (on any thread)
+    is seen like one on the session it was given."""
+    with patch("core.database.database.SessionLocal", lambda *args, **kwargs: _opened_session(log)):
+        yield log
+
+
+async def settle(left: Set["asyncio.Task[Any]"]) -> None:
+    """Wait for the work a call left running, then cancel what is still going and let it
+    unwind, all while the spies still record."""
+    if not left:
+        return
+    _, pending = await asyncio.wait(left, timeout=SETTLE_SECONDS)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=SETTLE_SECONDS)
+    for task in left:
+        if task.done() and not task.cancelled():
+            task.exception()
 
 
 def _requests_answer(request: Any) -> requests.Response:

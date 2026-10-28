@@ -10,14 +10,44 @@ Usage:
     store = SQLExampleStore()
     await store.add_example("top 10 customers", "SELECT ...", source_id, ...)
     examples = await store.get_similar_examples("show top clients", source_id)
+
+PRD-268 P268W1-RVW-1 (K17): platform_query_data is labelled read, so in a check-in
+(``core.read_only_call``) the store is only read: no example is stored (its SQL would be a
+model's, written over reads a check-in cannot trust) and no example handed out counts a use.
 """
 
+import functools
 import logging
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from datetime import datetime
 
+from core.read_only_call import only_reading
+
 logger = logging.getLogger(__name__)
+
+
+def _stores_nothing_in_a_check_in(add: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    """Wrap ``add_example``: in a check-in nothing is stored, and the id is empty."""
+    @functools.wraps(add)
+    async def wrapped(self: Any, *args: Any, **kwargs: Any) -> str:
+        if only_reading():
+            logger.info("[nl2sql] a check-in stores no training example")
+            return ""
+        return await add(self, *args, **kwargs)
+    return wrapped
+
+
+def _count_the_use(db: Any, examples: List[Any]) -> None:
+    """Each example handed out for few-shot counts one use (``usage_count`` ranks the
+    store's stats) and is stamped ``last_used_at``; nothing in a check-in."""
+    if not examples or only_reading():
+        return
+    now = datetime.utcnow()
+    for ex in examples:
+        ex.usage_count = (ex.usage_count or 0) + 1
+        ex.last_used_at = now
+    db.commit()
 
 
 class SQLExampleStore:
@@ -62,6 +92,7 @@ class SQLExampleStore:
             except Exception:
                 pass
 
+    @_stores_nothing_in_a_check_in
     async def add_example(
         self,
         question: str,
@@ -222,11 +253,7 @@ class SQLExampleStore:
                 "is_verified": ex.is_verified,
                 "usage_count": ex.usage_count or 0,
             })
-            ex.usage_count = (ex.usage_count or 0) + 1
-            ex.last_used_at = datetime.utcnow()
-
-        if results:
-            db.commit()
+        _count_the_use(db, [ex for _, ex in scored[:limit]])
 
         return results
 
@@ -265,11 +292,7 @@ class SQLExampleStore:
                 "is_verified": ex.is_verified,
                 "usage_count": ex.usage_count or 0,
             })
-            ex.usage_count = (ex.usage_count or 0) + 1
-            ex.last_used_at = datetime.utcnow()
-
-        if results:
-            db.commit()
+        _count_the_use(db, [ex for _, ex in scored[:limit]])
 
         return results
 
