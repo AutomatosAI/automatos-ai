@@ -22,8 +22,12 @@ owner (K11); the run row records the signals, the suggestions, the model, tokens
 
 The runner's own database work before and after the turn (the checks, the signals, the run
 row) runs off the event loop; the turn's tool calls run as every platform call does. A
-failure anywhere is the run's ``error``, named by its class, with what the turn spent. The
-bridge from the heartbeat scheduler is US-C04b's; failing streaks are US-C05's.
+failure anywhere is the run's ``error``, named by its class (``services.proactive.failures``),
+with what the turn spent. An agent's check-in also keeps its failing streak
+(``services.proactive.failing_streaks``): from the third failure in a row it is held back
+at its start until its doubled interval has passed, a failure records the streak's one
+card, and a run that works ends the streak. The heartbeat scheduler runs the check-ins
+through ``services.proactive.heartbeat_bridge``.
 """
 from __future__ import annotations
 
@@ -40,6 +44,8 @@ from sqlalchemy.orm import Session
 
 from core.models.proactive import RUN_ERROR, RUN_SILENT, RUN_SUGGESTED
 from modules.proactive import check_in_window
+from services.proactive.failing_streaks import held_back, note_run
+from services.proactive.failures import failure_class
 from services.proactive.gates import Refusal, start_refusal
 from services.proactive.loop import LoopResult, LoopSpec, run_loop
 from services.proactive.prompts import MAX_SIGNALS, agent_task, start_message, workspace_task
@@ -49,6 +55,7 @@ from services.proactive.runs import (
     RunRecord,
     known_titles,
     last_success,
+    owner_id,
     suggestions_made,
     write_run,
 )
@@ -125,15 +132,6 @@ def heartbeat_llm(workspace_id: UUID, agent_id: Optional[int]) -> Any:
                       request_type=CHECK_IN_PURPOSE)
 
 
-def _owner_id(db: Session, workspace_id: UUID) -> Optional[int]:
-    """The addressee (K11): the workspace owner's ``users.id``, or None."""
-    from core.models.workspaces import Workspace
-    from core.workspaces.owner import workspace_owner
-
-    owner = workspace_owner(db, db.query(Workspace).filter(Workspace.id == workspace_id).first())
-    return int(owner.id) if owner is not None else None
-
-
 def _refused(db: Session, record: RunRecord, refusal: Refusal) -> CheckInResult:
     write_run(db, replace(record, outcome=refusal.outcome, error_class=refusal.reason))
     return CheckInResult(record.run_id, refusal.outcome, error_class=refusal.reason)
@@ -149,8 +147,8 @@ def _errored(db: Session, record: RunRecord, error_class: str) -> CheckInResult:
 def _prepare_workspace(db: Session, record: RunRecord, now: datetime) -> Union[CheckInResult, _Plan]:
     """Auto's check-in up to its model call: refused, silent (no signal), or a plan."""
     workspace_id = record.workspace_id
-    owner_id = _owner_id(db, workspace_id)
-    refusal = start_refusal(db, workspace_id, owner_id, now, f"Auto's check-in of workspace {workspace_id}")
+    owner = owner_id(db, workspace_id)
+    refusal = start_refusal(db, workspace_id, owner, now, f"Auto's check-in of workspace {workspace_id}")
     if refusal is not None:
         return _refused(db, record, refusal)
     since = check_in_window(last_success(db, workspace_id, KIND_WORKSPACE, None), now)
@@ -160,7 +158,7 @@ def _prepare_workspace(db: Session, record: RunRecord, now: datetime) -> Union[C
     if not signals:
         write_run(db, record)
         return CheckInResult(record.run_id, RUN_SILENT)
-    open_titles, hidden_titles = known_titles(db, workspace_id, owner_id, now)
+    open_titles, hidden_titles = known_titles(db, workspace_id, owner, now)
     # The run read every signal, and may cite those its prompt lists.
     return _Plan(record=record, task=workspace_task(signals, since, now, open_titles, hidden_titles), agent=AUTO,
                  reads=tuple(signal.evidence for signal in signals[:MAX_SIGNALS]),
@@ -173,15 +171,16 @@ def _prepare_agent(db: Session, record: RunRecord, hb_config: Dict[str, Any],
     from core.models.core import Agent
 
     workspace_id, agent_id = record.workspace_id, record.agent_id
-    owner_id = _owner_id(db, workspace_id)
-    refusal = start_refusal(db, workspace_id, owner_id, now, f"agent {agent_id}'s check-in")
+    owner = owner_id(db, workspace_id)
+    refusal = (start_refusal(db, workspace_id, owner, now, f"agent {agent_id}'s check-in")
+               or held_back(db, workspace_id, agent_id, hb_config, now))
     if refusal is not None:
         return _refused(db, record, refusal)
     agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == workspace_id).first()
     if agent is None:
         return _errored(db, record, AGENT_NOT_FOUND)
     since = check_in_window(last_success(db, workspace_id, KIND_AGENT, agent_id), now)
-    open_titles, hidden_titles = known_titles(db, workspace_id, owner_id, now)
+    open_titles, hidden_titles = known_titles(db, workspace_id, owner, now)
     task = agent_task(hb_config.get("prompt"), since, now, open_titles, hidden_titles)
     return _Plan(record=replace(record, window_since=since, window_until=now), task=task, agent=agent, reads=(),
                  llm=heartbeat_llm(workspace_id, agent_id))
@@ -238,7 +237,7 @@ async def _run(db: Session, record: RunRecord, prepare: Callable[[], Union[Check
         return await asyncio.to_thread(_finish, db, record, result)
     except Exception as exc:  # noqa: BLE001 — recorded as the run's error, by its class
         logger.exception("[proactive] %s run %s in %s failed", record.kind, record.run_id, record.workspace_id)
-        return await asyncio.to_thread(_errored, db, record, type(exc).__name__)
+        return await asyncio.to_thread(_errored, db, record, failure_class(exc))
 
 
 async def run_workspace_check_in(workspace_id: Any) -> CheckInResult:
@@ -250,10 +249,13 @@ async def run_workspace_check_in(workspace_id: Any) -> CheckInResult:
 
 
 async def run_agent_check_in(agent_id: int, workspace_id: Any, hb_config: Optional[Dict[str, Any]]) -> CheckInResult:
-    """Run ``agent_id``'s check-in once, with its heartbeat config, and record it."""
+    """Run ``agent_id``'s check-in once, with its heartbeat config, record it, and keep its
+    failing streak."""
     record = RunRecord(run_id=uuid4(), workspace_id=UUID(str(workspace_id)), kind=KIND_AGENT, outcome=RUN_SILENT,
                        agent_id=int(agent_id))
     now = _now()
     heartbeat = dict(hb_config or {})
     with _session() as db:
-        return await _run(db, record, lambda: _prepare_agent(db, record, heartbeat, now), now)
+        result = await _run(db, record, lambda: _prepare_agent(db, record, heartbeat, now), now)
+        await asyncio.to_thread(note_run, db, result, record.workspace_id, record.agent_id, heartbeat, now)
+        return result

@@ -12,6 +12,10 @@ decide on.
   :mod:`~services.proactive.runs` (the run rows), :mod:`~services.proactive.prompts`,
   :mod:`~services.proactive.loop` (the tool loop) and :mod:`~services.proactive.reads`
   (the run's read log, which a suggestion's evidence must come from).
+  :mod:`~services.proactive.failing_streaks` keeps an agent's failing streak: one card,
+  a slower check-in from the third failure, the reset (§6.2.2), with
+  :mod:`~services.proactive.failures` (the error class) and
+  :mod:`~services.proactive.streak_text` (what the card says).
 - :mod:`services.proactive.heartbeat_bridge`: the jobs the heartbeat scheduler runs, today's
   tick, a check-in or both, by the proactive mode (§6.2.1, K7, K10); a live check-in rings
   the heartbeat bell only through :mod:`~services.proactive.heartbeat_bell`.

@@ -43,6 +43,7 @@ __all__ = [
     "SEVERITIES",
     "Suggestion",
     "canonical_subject_key",
+    "plain_text",
     "read_suggestion",
 ]
 
@@ -85,7 +86,7 @@ def _plain_char(char: str, keep_lines: bool) -> str:
     return "" if unicodedata.category(char) in _DROPPED_CATEGORIES else char
 
 
-def _plain(value: str, keep_lines: bool) -> str:
+def plain_text(value: str, keep_lines: bool = False) -> str:
     """``value`` as plain text: no control or format characters, each line's spaces
     collapsed; one line unless ``keep_lines``."""
     text = "".join(_plain_char(char, keep_lines) for char in value)
@@ -98,7 +99,7 @@ def _text(params: Mapping, name: str, limit: int, keep_lines: bool = False) -> s
         return ""
     if not isinstance(value, str):
         raise ValueError(f"{name} is text.")
-    text = _plain(value, keep_lines)
+    text = plain_text(value, keep_lines)
     if len(text) > limit:
         raise ValueError(f"{name} is at most {limit} characters; this one is {len(text)}. Shorten it.")
     return text

@@ -20,7 +20,8 @@ reach it:
   read. A refused suggestion is answered, and the model may correct it.
 
 Anything that fails after the first model call ends the run as an ``error`` named by its
-class, keeping what was spent. A tool call that fails is answered with the failure, and
+class (``services.proactive.failures``: a provider's refusal is ``http_<status>``), keeping
+what was spent, and no model call follows it. A tool call that fails is answered with the failure, and
 the run goes on.
 """
 from __future__ import annotations
@@ -43,6 +44,7 @@ from modules.tools.discovery.check_in_lane import (
     RUN_ID_KEY,
     SUGGEST_NEXT_STEP,
 )
+from services.proactive.failures import failure_class
 from services.proactive.reads import read_succeeded, refs_of_read, with_reads
 
 logger = logging.getLogger(__name__)
@@ -240,7 +242,7 @@ async def run_loop(db: Session, llm: Any, spec: LoopSpec) -> LoopResult:
             turn = await _run_calls(db, executor, spec, calls, reads)
         except Exception as exc:  # noqa: BLE001 — the run ends as an error named by its class, its spend kept
             logger.exception("[proactive] run %s failed", spec.run_id)
-            return _result(llm, spend, type(exc).__name__)
+            return _result(llm, spend, failure_class(exc))
         messages, reads = [*messages, _assistant(response, calls), *turn.messages], turn.reads
         if turn.all_suggested:
             break

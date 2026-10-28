@@ -12,7 +12,8 @@ Command Center feed (``link_type`` heartbeat) with the run's id. Its copy is the
 from ``STRINGS``, built from structured fields only (the agent's name, the count, the run's
 error class); no word the model wrote reaches it. Background copy is English (K13).
 
-The streak's own suggestion, its count and the doubling interval are US-C05's.
+The streak's own card, its count and the doubling interval are
+``services.proactive.failing_streaks``'s; the bell rings once, at the streak's first failure.
 """
 from __future__ import annotations
 

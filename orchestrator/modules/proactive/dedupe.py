@@ -24,6 +24,7 @@ __all__ = [
     "TICKET_DIGITS",
     "Candidate",
     "agent_error_key",
+    "agent_error_prefix",
     "board_number",
     "error_class_name",
     "find_duplicate",
@@ -69,12 +70,17 @@ def error_class_name(error_class: Any) -> str:
     return "_".join(str(error_class or "").casefold().split())
 
 
+def agent_error_prefix(agent_id: Any) -> str:
+    """What every failing-streak key of one agent starts with: ``agent:578:error:``."""
+    return f"agent:{int(agent_id)}:error:"
+
+
 def agent_error_key(agent_id: Any, error_class: Any) -> str:
     """The key of one agent's failing streak: ``agent:578:error:401``."""
     error = error_class_name(error_class)
     if not error:
         raise ValueError("a failing streak's key needs its error class")
-    return _key("agent", f"{int(agent_id)}:error:{error}")
+    return f"{agent_error_prefix(agent_id)}{error}"[:SUBJECT_KEY_LENGTH]
 
 
 def board_number(value: Any) -> Optional[str]:

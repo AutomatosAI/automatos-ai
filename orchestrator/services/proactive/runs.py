@@ -13,7 +13,8 @@ The runner reads back where a check-in's window starts (its last successful run 
 kind, ``modules.proactive.window``), the check-ins that reached the model in the last day
 (the §6.9 cap counts those, a silent run without a model call does not), and the person's
 open and recently hidden titles its prompt lists. The heartbeat bridge reads the run before
-a failed one, to tell whether that failure starts a streak (``modules.proactive.streaks``).
+a failed one, to tell whether that failure starts a streak (``modules.proactive.streaks``),
+and ``services.proactive.failing_streaks`` an agent's newest finished runs, to count it.
 """
 from __future__ import annotations
 
@@ -44,9 +45,11 @@ __all__ = [
     "MAX_TITLES",
     "MODEL_RUN_WINDOW",
     "RunRecord",
+    "finished_runs",
     "known_titles",
     "last_success",
     "model_runs_today",
+    "owner_id",
     "previous_finished",
     "suggestions_made",
     "write_run",
@@ -100,6 +103,12 @@ def write_run(db: Session, record: RunRecord) -> ProactiveRun:
     return row
 
 
+def _newest_first() -> Tuple[Any, ...]:
+    """Runs newest first: by when they were written, then by when they started reading (a
+    tie, as in one transaction, still puts the later run first)."""
+    return ProactiveRun.created_at.desc(), ProactiveRun.window_until.desc().nulls_last()
+
+
 def _same_check_in(workspace_id: UUID, kind: str, agent_id: Optional[int]) -> Tuple[Any, ...]:
     agent = ProactiveRun.agent_id.is_(None) if agent_id is None else ProactiveRun.agent_id == agent_id
     return ProactiveRun.workspace_id == workspace_id, ProactiveRun.kind == kind, agent
@@ -113,6 +122,15 @@ def last_success(db: Session, workspace_id: UUID, kind: str, agent_id: Optional[
     return last_success_at(latest)
 
 
+def finished_runs(db: Session, workspace_id: UUID, kind: str, agent_id: Optional[int],
+                  limit: int) -> Tuple[ProactiveRun, ...]:
+    """This check-in's newest runs that read (silent, suggested or error), newest first, at
+    most ``limit``: a failing streak is counted from them, skips passed over."""
+    return tuple(db.query(ProactiveRun).filter(
+        *_same_check_in(workspace_id, kind, agent_id), ProactiveRun.outcome.in_(tuple(FINISHED_OUTCOMES)),
+    ).order_by(*_newest_first()).limit(limit).all())
+
+
 def previous_finished(db: Session, workspace_id: UUID, kind: str, agent_id: Optional[int],
                       run_id: UUID) -> Optional[ProactiveRun]:
     """This check-in's newest run that read (silent, suggested or error) other than
@@ -121,7 +139,16 @@ def previous_finished(db: Session, workspace_id: UUID, kind: str, agent_id: Opti
     return db.query(ProactiveRun).filter(
         *_same_check_in(workspace_id, kind, agent_id), ProactiveRun.id != run_id,
         ProactiveRun.outcome.in_(tuple(FINISHED_OUTCOMES)),
-    ).order_by(ProactiveRun.created_at.desc()).first()
+    ).order_by(*_newest_first()).first()
+
+
+def owner_id(db: Session, workspace_id: UUID) -> Optional[int]:
+    """The addressee of a check-in's suggestions (K11): the workspace owner's ``users.id``, or None."""
+    from core.models.workspaces import Workspace
+    from core.workspaces.owner import workspace_owner
+
+    owner = workspace_owner(db, db.query(Workspace).filter(Workspace.id == workspace_id).first())
+    return int(owner.id) if owner is not None else None
 
 
 def model_runs_today(db: Session, workspace_id: UUID, now: datetime) -> int:
