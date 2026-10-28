@@ -67,6 +67,7 @@ from .actions_packages import register_package_actions  # PRD-230 US-006
 from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + platform_web_search
 from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials drafts (never approve/publish)
 from .actions_my_actions import register_my_actions_action  # P256-FIX-N14-3 (F417): what Auto did
+from .actions_proactive import register_proactive_actions  # PRD-268 US-C03b: a check-in's one write
 
 
 def _register_documents_actions(registry: ActionRegistry) -> None:
@@ -98,6 +99,14 @@ def _register_marketplace_actions(registry: ActionRegistry) -> None:
     register_model_install_action(registry)
 
 
+def _register_asking_actions(registry: ActionRegistry) -> None:
+    """A run reaching a person: asking the owner (PRD-225), asking Auto mid-run (PRD-229), and
+    a check-in's suggestion (PRD-268 US-C03b)."""
+    register_asks_actions(registry)
+    register_clarify_actions(registry)
+    register_proactive_actions(registry)
+
+
 def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     register_agents_actions(registry)
@@ -123,8 +132,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_analytics_enhanced_actions(registry)
     register_mission_resume_action(registry)  # F247: left actions_missions.py
     register_governance_actions(registry)
-    register_asks_actions(registry)  # PRD-225: platform_ask_human
-    register_clarify_actions(registry)  # PRD-229: ask_orchestrator (mid-run clarification)
+    _register_asking_actions(registry)  # PRD-225/229: ask_human, ask_orchestrator; PRD-268: suggest_next_step
     register_harness_actions(registry)
     register_graph_actions(registry)
     register_codegraph_actions(registry)  # PRD-165 S4: codegraph as an agent capability

@@ -23,6 +23,15 @@ the ``read_only`` tool strategy (``ContextMode.CHECK_IN``, US-C02c) loads by.
 ``caller_context`` is the plain dict the server builds for a call. Its ``lane`` key is
 new here: ``"check_in"`` marks a check-in's call. With any other value, or none, both
 executors run exactly as they did before the lane existed.
+
+PRD-268 US-C03b: a check-in's runner also puts its own facts in ``caller_context``:
+``run_id`` (the ``proactive_runs`` id of this run), ``check_in_reads`` (the ``{type, id}``
+refs of the reads this run made that succeeded, so far) and ``check_in_agent_id`` (the
+agent whose check-in it is; absent for Auto's workspace check-in).
+``carries_the_check_in`` wraps ``PlatformActionExecutor.execute`` and hands them to
+``platform_suggest_next_step`` as the server-side ``_check_in`` parameter. A
+caller-supplied ``_check_in`` is stripped from every call, so a model can neither forge
+its run nor its reads, and the tool refuses a call that carries none.
 """
 from __future__ import annotations
 
@@ -41,6 +50,12 @@ SUGGEST_NEXT_STEP = "platform_suggest_next_step"
 PLATFORM_PREFIX = "platform_"
 PLATFORM_DISPATCHER = "platform_execute"
 CHECK_IN_REFUSAL = "Not available in a check-in, which can only read. Suggest it as a next step instead."
+# The check-in's own facts in caller_context (US-C03b), and the server-side parameter
+# that hands them to platform_suggest_next_step.
+RUN_ID_KEY = "run_id"
+READS_KEY = "check_in_reads"
+AGENT_KEY = "check_in_agent_id"
+CHECK_IN_PARAM = "_check_in"
 
 ExecuteTool = Callable[..., Awaitable[Dict[str, Any]]]
 
@@ -129,11 +144,53 @@ def platform_actions_only_in_a_check_in(execute_tool: ExecuteTool) -> ExecuteToo
     return wrapped
 
 
+def check_in_of(caller_context: Any) -> Optional[Dict[str, Any]]:
+    """A check-in's own facts, from the server-built ``caller_context``: ``run_id``,
+    ``reads`` (a new list) and ``agent_id``. None outside the lane."""
+    if not in_a_check_in(caller_context):
+        return None
+    reads = caller_context.get(READS_KEY)
+    return {
+        "run_id": caller_context.get(RUN_ID_KEY),
+        "reads": list(reads) if isinstance(reads, (list, tuple)) else [],
+        "agent_id": caller_context.get(AGENT_KEY),
+    }
+
+
+def check_in_params(action_name: str, params: Any, caller_context: Any) -> Any:
+    """``params`` without a caller-supplied ``_check_in``; ``platform_suggest_next_step``
+    called in a check-in gets the run's own, from ``caller_context``."""
+    from modules.tools.execution.params_text import params_object
+
+    params = params_object(params)
+    if not isinstance(params, dict):
+        return params
+    kept = {key: value for key, value in params.items() if key != CHECK_IN_PARAM}
+    check_in = check_in_of(caller_context) if action_name == SUGGEST_NEXT_STEP else None
+    return {**kept, CHECK_IN_PARAM: check_in} if check_in is not None else kept
+
+
+def carries_the_check_in(execute: ExecuteTool) -> ExecuteTool:
+    """Wrap ``PlatformActionExecutor.execute`` so the check-in's run and reads reach the
+    suggestion tool server-side, and never from the model."""
+    @functools.wraps(execute)
+    async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
+        return await execute(self, action_name, check_in_params(action_name, params, caller_context), caller_context)
+    return wrapped
+
+
 __all__ = [
+    "AGENT_KEY",
     "CHECK_IN_LANE",
+    "CHECK_IN_PARAM",
     "CHECK_IN_REFUSAL",
     "LANE_KEY",
+    "READS_KEY",
+    "RUN_ID_KEY",
     "SUGGEST_NEXT_STEP",
+    "carries_the_check_in",
+    "check_in_of",
+    "check_in_params",
     "check_in_refusal",
     "in_a_check_in",
     "is_a_platform_action",

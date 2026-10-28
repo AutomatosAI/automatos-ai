@@ -115,6 +115,9 @@ ALLOW_LIST: Set[str] = {
     # field and reinforces the ones it returns, creating the field on first use; it
     # changes no agent, ticket or member.
     "platform_field_query",
+    # PRD-268 US-C03b: writes only a proactive_suggestions row, in the check-in lane (the
+    # handler refuses any call that is not a check-in's); no agent, ticket or member to scope.
+    "platform_suggest_next_step",
     # F151: the workspace's own watches.
     "platform_create_watch",
     "platform_cancel_watch",
