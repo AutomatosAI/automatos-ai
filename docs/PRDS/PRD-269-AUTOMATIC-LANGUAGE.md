@@ -2,7 +2,7 @@
 
 **Status:** Draft, waiting for a GPU. Nothing here is built, and nothing is approved; every choice is in §11 with a recommendation. · **Owner:** Gerard · **Written:** 27 Oct 2026, grounded on `origin/main @ 79f0b7701` and on `AutomatosAI/automatos-go` `main`.
 **Why it waits:** Gerard, 27 Oct: "it needs a GPU, so let's WAIT". Until a GPU server exists, the docs, the repos and the sites list automatic language detection as **planned**, never as available.
-**What ships first instead:** English and Portuguese (Portugal and Brazil) on the phone, chosen in Settings → Voice with a one-tap EN/PT switch (automatos-go, "voice languages"). Gerard: "Let's do English and Portuguese, since I am in Portugal and the WebSummit is here."
+**What ships first instead:** English and Portuguese (Brazil) on the phone, chosen in Settings → Voice with a one-tap EN/PT switch (automatos-go, "voice languages"). Gerard: "Let's do English and Portuguese, since I am in Portugal and the WebSummit is here." He has since dropped European Portuguese from the phone.
 **Type:** extension. It reuses the quick-ask flow, the `spokenMode` chat turn, the discovery document and voice-tts's service pattern; the new piece is a speech-recognition service.
 **Depends on:** a GPU server (§7, §11-Q2); automatos-go's voice-languages work (the Settings → Voice language choice this PRD adds to).
 
@@ -16,7 +16,7 @@ Auto already answers in the language you write or speak to it in, for any langua
 |---|---|---|---|
 | Typed chat | n/a | n/a | Any language the model handles |
 | Web quick ask | The browser's `SpeechRecognition`, in `navigator.language` (`en-US` when none) [T `frontend/lib/voice/quick-ask/deps.ts`] | The browser's `speechSynthesis` in the same language [T] | The browser's language |
-| Automatos Go | Apple's on-device recognizer, in the locale chosen up front [T `src/voice/quick-ask`] | Auto's natural voice (`POST /api/voice/speech`), else the iPhone's voice | English, Portuguese (Portugal and Brazil) |
+| Automatos Go | Apple's recognizer, in the locale chosen up front [T `src/voice/quick-ask`]: on the iPhone for the iPhone's own language; for another language, on the iPhone when its dictation model is installed, otherwise Apple's speech recognition | Auto's natural voice (`POST /api/voice/speech`), else the iPhone's voice | English, Portuguese (Brazil) |
 | Auto Live | Retell, pinned to `VOICE_LIVE_LANGUAGE` (`en-GB`) ("pinning `language` stops multilingual STT hallucinating confident nonsense") [T `modules/voice/retell_api.py`] | Retell's voice | One per server |
 | voice-tts (Kokoro) | n/a | Kokoro, on CPU [T `services/voice-tts`] | 9: English (US, UK), Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese, Mandarin. Japanese and Mandarin are phonemized with espeak and sound weaker. No European Portuguese |
 
@@ -29,7 +29,7 @@ Auto already answers in the language you write or speak to it in, for any langua
 - Speak to Auto in any of about 100 languages **without choosing one first**: the server returns the words and the language it heard.
 - Auto answers in that language, and speaks the answer in it: Kokoro's voice where Kokoro has one, otherwise the phone's or the browser's voice for that language.
 - One route for the phone and the web quick ask.
-- Apple's recognizer stays the default for a chosen language, because it shows your words live and runs on the device. "Automatic (any language)" is an extra choice, offered only where the server can do it.
+- Apple's recognizer stays the default for a chosen language, because it shows your words live and, for the iPhone's own language, runs on the iPhone (§4.7). "Automatic (any language)" is an extra choice, offered only where the server can do it.
 - Off is a normal state. A server without the recognition service behaves exactly as today, just as the server voice's `tts_off` does [T `modules/voice/speech.py`].
 - No audio is kept.
 
@@ -37,7 +37,7 @@ Auto already answers in the language you write or speak to it in, for any langua
 
 - [G] "The option to work with 100 [languages] goes into the docs and all repos, websites": as **planned**.
 - [G] "It needs a GPU, so let's WAIT": no build until a GPU server exists.
-- [G] English and Portuguese ship first, on the phone, with the language chosen in Settings → Voice.
+- [G] English and Portuguese (Brazil) ship first, on the phone, with the language chosen in Settings → Voice. European Portuguese is dropped from the phone.
 - [G] The paid-model budget is Anthropic only. Any new vendor (option C below) needs Gerard's OK.
 
 ## 4. Design
@@ -95,7 +95,7 @@ It mirrors voice-tts [T `services/voice-tts/README.md`]:
 | Heard | Phone | Web quick ask |
 |---|---|---|
 | English | Kokoro, US or UK by the member's setting | The browser's voice until the web's server voice is wired, then Kokoro |
-| Portuguese | Brazil: Kokoro. Portugal (the member's setting): the iPhone's pt-PT voice, since Kokoro has none | The browser's voice for `pt-PT` or `pt-BR` |
+| Portuguese | Kokoro, Brazilian Portuguese | The browser's voice for `pt-PT` or `pt-BR` |
 | Spanish, French, Italian, Hindi, Japanese, Mandarin | Kokoro (Japanese and Mandarin weaker) | The browser's voice, then Kokoro |
 | Any other | The iPhone's voice for that language, where one is installed | The browser's voice for that language |
 
@@ -109,7 +109,7 @@ The once-per-session AI notice is spoken in the detected language. A translated 
 
 ### 4.7 Privacy
 
-- **Today:** on the phone, Apple's recognizer runs on the device [T]. On the web, the browser may send audio to its maker; Automatos never receives audio [T `docs/voice/_index.md`].
+- **Today:** on the phone, your voice is recognised on the iPhone for the iPhone's own language; for another language, on the iPhone when its dictation model is installed, otherwise by Apple's speech recognition. On the web, the browser may send audio to its maker; Automatos never receives audio [T `docs/voice/_index.md`].
 - **With Automatic:** the audio leaves the device for the Automatos server. On SaaS that is our GPU server (in the EU [P]); on a self-hosted install it is the operator's own server.
 - **Retention: none.** The audio lives in memory for one request and is never written or logged. The transcript is saved as the chat message, like typed words.
 - **Copy:** the setting says so in one line. The app's privacy copy and its App Store privacy answers name audio sent to the server (automatos-go).
@@ -130,12 +130,12 @@ The once-per-session AI notice is spoken in the detected language. A translated 
 ## 6. Evals
 
 - **Gold set:** recorded questions per language, kept **local**, never committed (a public repo).
-- **WER per language,** English and Portuguese (Portugal) first, then Portuguese (Brazil), Spanish, French, Italian and German [P]. Each runs against Apple's on-device recognizer on the same English and Portuguese (Portugal) clips.
+- **WER per language,** English and Portuguese (Brazil) first, then Portuguese (Portugal), Spanish, French, Italian and German [P]. Each runs against Apple's recognizer on the same English and Portuguese (Brazil) clips.
 - **Language ID** on short clips: one word, and 2 to 5 seconds.
 - **Latency,** reusing PRD-258's report (`orchestrator/scripts/eval/voice_latency`: nearest-rank p50/p90, never an invented number) [T]. Two measures: release to transcript, and release to Auto's first spoken word.
 - **Reply language:** the reply comes back in the detected language.
 - **Proposed bars** [P]:
-  - Automatic's WER within 2 points of Apple's on English and Portuguese (Portugal);
+  - Automatic's WER within 2 points of Apple's on English and Portuguese (Brazil);
   - language ID at least 95% on 2–5 s clips;
   - release to transcript p50 ≤ 0.8 s and p95 ≤ 1.5 s for clips up to 15 s, on the GPU;
   - the reply in the detected language in at least 98% of turns.
@@ -166,7 +166,7 @@ Self-hosters get the compose `stt` profile on an NVIDIA GPU, or option B if §11
 
 ## 10. Success metrics
 
-- The §6 bars, met for English and Portuguese (Portugal) before the phone shows Automatic.
+- The §6 bars, met for English and Portuguese (Brazil) before the phone shows Automatic.
 - Zero audio files or transcripts in the service's logs or disks (a test, and a check on the running server).
 - No change for a server without `VOICE_STT_URL` (discovery and every client path, tested).
 

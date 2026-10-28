@@ -86,7 +86,7 @@ One workspace and one Auto, with the same agents, Knowledge and Deliverables, wh
   <img src="docs/assets/showcase/hud-1440-voice-listening-arc.png" alt="HUD listening to a question by voice, with Mic live and the AI voice assistant caption" width="720">
 </p>
 
-**Automatos Go** is the phone app ([AutomatosAI/automatos-go](https://github.com/AutomatosAI/automatos-go), iOS first, in beta): chat with Auto, the Command Centre, push notifications for a question, an approval or a review that needs you, and hold-to-talk voice in English and Portuguese (Portugal and Brazil), in three styles: Studio, Play and HUD. By default the app follows the theme you choose in Studio and paints its phone skin: the theme's colours, fonts and mascot.
+**Automatos Go** is the phone app ([AutomatosAI/automatos-go](https://github.com/AutomatosAI/automatos-go), iOS first, in beta): chat with Auto, the Command Centre, push notifications for a question, an approval or a review that needs you, and hold-to-talk voice in English and Portuguese (Brazil), in three styles: Studio, Play and HUD. By default the app follows the theme you choose in Studio and paints its phone skin: the theme's colours, fonts and mascot.
 
 <p align="center">
   <img src="docs/assets/showcase/go-play-chat-thinking.jpg" alt="Automatos Go in Play: Auto thinking about a request" width="200">

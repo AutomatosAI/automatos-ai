@@ -81,7 +81,7 @@ The image is speech only: no Node, no browser, no ffmpeg, no music, no video.
 
   The second letter is the gender. espeak-ng keeps every dictionary for the same reason.
 - **Japanese and Chinese quality.** Those voices are phonemized by espeak-ng, not by misaki, which Kokoro's own pipeline uses for them. They are the weakest.
-- **No European Portuguese.** Kokoro's Portuguese voices are Brazilian (`p`, pt-br). The phone speaks Portuguese (Portugal) in its own voice instead.
+- **No European Portuguese.** Kokoro's Portuguese voices are Brazilian (`p`, pt-br).
 - **No speech recognition.** This service only speaks. Automatic language detection (speech recognition on the server, about 100 languages) is planned and needs a GPU: `docs/PRDS/PRD-269-AUTOMATIC-LANGUAGE.md`.
 - **The GPL boundary.** phonemizer and espeak-ng are GPL-3.0. Kokoro needs them, and they live only in this image and media-render's. The orchestrator never imports them (`orchestrator/tests/test_prd251w1_media_render_image.py` and `test_voice_tts_image.py`).
 - **LAME** is LGPL and runs as its own process.

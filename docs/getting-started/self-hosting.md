@@ -928,10 +928,11 @@ either, so after a `git pull` that changes `services/voice-tts`, run
   set it yourself: voice-tts refuses to start without one.
 - **Languages.** It speaks Kokoro's nine languages: English (US and UK),
   Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese and Mandarin.
-  Japanese and Mandarin are phonemized with espeak and sound weaker. It has no
-  European Portuguese voice, so the phone speaks Portuguese (Portugal) in its own
-  voice. The phone listens and speaks English and Portuguese (Portugal and
-  Brazil), chosen in its **Settings → Voice**. Automatic language detection
+  Japanese and Mandarin are phonemized with espeak and sound weaker. The phone
+  listens and speaks English and Portuguese (Brazil), chosen in its
+  **Settings → Voice**. It recognises your voice on the iPhone for the iPhone's
+  own language; for another language, on the iPhone when its dictation model is
+  installed, otherwise by Apple's speech recognition. Automatic language detection
   (about 100 languages, speech recognition on the server) is planned and needs a
   GPU; nothing in this stack does it yet
   ([PRD-269](../PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).
