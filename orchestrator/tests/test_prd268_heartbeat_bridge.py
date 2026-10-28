@@ -507,6 +507,17 @@ def _prior_run(shop, outcome: str, hours_ago: float, error_class=None) -> None:
     shop.db.commit()
 
 
+def _an_interval_passes(shop) -> None:
+    """The scheduler's next fire comes one heartbeat interval later: every run the shop has
+    moves back by it, so the next check-in is not refused as sooner than
+    ``min_interval_minutes`` after the last (``services.proactive.gates``)."""
+    shop.db.execute(text(
+        "UPDATE proactive_runs SET created_at = created_at - :gap, window_since = window_since - :gap, "
+        "window_until = window_until - :gap WHERE workspace_id = CAST(:ws AS uuid)"),
+        {"gap": timedelta(minutes=CHECK_IN_HB["interval_minutes"]), "ws": str(shop.ws)})
+    shop.db.commit()
+
+
 def _assert_no_tick(shop, live) -> None:
     """Today's tick never ran: no board ticket, no heartbeat result, no per-tick report."""
     assert live.ticks == [] and live.reports == []
@@ -544,7 +555,9 @@ def test_live_a_suggestion_rings_one_heartbeat_bell_and_files_no_ticket(shop, li
 def test_live_the_first_failure_of_a_streak_rings_and_the_next_does_not(shop, live):
     live.llm = FakeLLM(fails=True)
 
-    first, second = _fire(shop, live), _fire(shop, live)
+    first = _fire(shop, live)
+    _an_interval_passes(shop)
+    second = _fire(shop, live)
 
     assert (first["outcome"], first["error_class"], first["rang"]) == ("error", "RuntimeError", True)
     assert (second["outcome"], second["rang"]) == ("error", False)

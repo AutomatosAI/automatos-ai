@@ -154,7 +154,9 @@ def test_check_in_loads_only_reads_and_the_suggestion(monkeypatch, agent_surface
     monkeypatch.setattr(action_registry, "get_action_registry", _stub_registry)
     tools, tool_choice = _load_check_in_tools(agent_surface)
 
-    assert _names(tools) == [READ, SUGGEST_NEXT_STEP]
+    # Nothing is hidden here, so the Socials read is a read like any other; the two tests
+    # below prove it stays out while its category is hidden.
+    assert _names(tools) == [READ, SUGGEST_NEXT_STEP, HIDDEN_READ]
     assert tool_choice == "auto"
     assert all(tool["type"] == "function" for tool in tools)
 

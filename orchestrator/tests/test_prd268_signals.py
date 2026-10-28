@@ -233,7 +233,10 @@ def test_another_workspaces_rows_yield_none(db, now):
 def test_an_empty_window_yields_none(db, now):
     mine = _seed_every_kind(db, _workspace(db), now)
 
-    assert read_signals(db, mine.ws, now - 48 * HOUR, now - 24 * HOUR) == ()  # before any of it happened
+    # Between ticket 0005's failure (48 hours ago, the oldest row) and the rest (now): rows on
+    # both sides of the window and none inside it. The window holds its start, so a start at
+    # 48 hours ago would hold that failure.
+    assert read_signals(db, mine.ws, now - 47 * HOUR, now - 24 * HOUR) == ()
     assert read_signals(db, mine.ws, now, now) == ()
 
 
