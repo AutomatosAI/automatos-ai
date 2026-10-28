@@ -231,7 +231,7 @@ def _counted(
     row = db.execute(_COUNTS, {"ws": str(workspace_id), "ended": _ended_states()}).first()
     questions = _asks(db, workspace_id, questions=True, limit=limit) if may_answer else (0, [])
     approvals = _asks(db, workspace_id, questions=False, limit=limit) if may_answer else (0, [])
-    stuck = _stuck(db, workspace_id, limit=limit)
+    stuck = stuck_tickets(db, workspace_id, limit=limit)
     counts = {
         "review": _count(row, "review"),
         "question": questions[0],
@@ -255,8 +255,9 @@ def _asks(db: Session, workspace_id: Any, *, questions: bool, limit: int) -> Tup
     return (int(found[0].of_all) if found else 0), [r.id for r in found]
 
 
-def _stuck(db: Session, workspace_id: Any, *, limit: int) -> Tuple[int, List[Any]]:
-    """How many tickets are stuck, and the newest ``limit`` of them."""
+def stuck_tickets(db: Session, workspace_id: Any, *, limit: int) -> Tuple[int, List[Any]]:
+    """How many tickets are stuck, and the newest ``limit`` of them (each with its ``why``
+    and ``at``, its last change). Auto's check-in reads them too (services.proactive.signals)."""
     from services.cli_ticket_lane import NO_CLI_HOST_PREFIX, NO_HOST_REASON
 
     found = db.execute(_STUCK_ROWS, {
