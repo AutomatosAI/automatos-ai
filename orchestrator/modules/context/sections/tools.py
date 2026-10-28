@@ -198,15 +198,20 @@ class ToolsSection(BaseSection):
         first-class tool (the rule is ``offered_in_a_check_in``). Never built through
         ``get_tools_for_agent``, which adds the agent's Composio, plugin and workspace
         tools, and never the ``platform_execute`` dispatcher. The categories the workspace
-        is not shown stay out, as on every other surface.
+        is not shown stay out, as on every other surface. A registry that cannot be read
+        loads no tools, and the model is told to call none.
         """
         from modules.tools.discovery.action_registry import get_action_registry
         from modules.tools.discovery.check_in_lane import offered_in_a_check_in
         from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace, without_hidden
 
-        hidden = hidden_categories_for_workspace(workspace_id, db_session)
-        actions = without_hidden(get_action_registry().get_all(), hidden)
-        tools = [action.to_openai_schema() for action in actions if offered_in_a_check_in(action)]
+        try:
+            hidden = hidden_categories_for_workspace(workspace_id, db_session)
+            actions = without_hidden(get_action_registry().get_all(), hidden)
+            tools = [action.to_openai_schema() for action in actions if offered_in_a_check_in(action)]
+        except Exception:
+            logger.exception("ToolsSection: the check-in tools could not be loaded (workspace=%s)", workspace_id)
+            return [], "none"
         return tools, ("auto" if tools else "none")
 
     async def _load_full(

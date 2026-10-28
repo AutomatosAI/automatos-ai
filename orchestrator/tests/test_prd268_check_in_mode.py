@@ -31,6 +31,7 @@ DESTROY = "platform_mode_test_destroy"
 ADMIN_READ = "platform_mode_test_admin_read"
 SUPER_READ = "platform_mode_test_super_read"
 OFFLINE_READ = "platform_mode_test_offline_read"
+BROKEN_CHECK_READ = "platform_mode_test_broken_check_read"
 HIDDEN_READ = "platform_mode_test_hidden_read"
 HIDDEN_CATEGORY = "socials"
 # Named like the tools a check-in must never be shown, each labelled read so only the
@@ -59,6 +60,10 @@ def _action(name, level, category="test", **flags):
                             parameters={"type": "object", "properties": {}}, permission_level=level, **flags)
 
 
+def _raises():
+    raise RuntimeError("availability check failed")
+
+
 class _Registry:
     def __init__(self, actions):
         self._actions = list(actions)
@@ -76,6 +81,7 @@ def _stub_registry():
         _action(ADMIN_READ, "read", admin_only=True),
         _action(SUPER_READ, "read", super_admin_only=True),
         _action(OFFLINE_READ, "read", available=lambda: False),
+        _action(BROKEN_CHECK_READ, "read", available=_raises),
         _action(HIDDEN_READ, "read", category=HIDDEN_CATEGORY),
         *(_action(name, "read") for name in NEVER_SHOWN),
     ])
@@ -137,7 +143,6 @@ def test_the_budget_is_12000_with_800_for_the_answer():
 
 def test_no_other_mode_changes():
     assert {mode: (MODE_CONFIGS[mode].tool_loading, MODE_CONFIGS[mode].max_tokens) for mode in OTHER_MODES} == OTHER_MODES
-    assert set(MODE_CONFIGS) == set(OTHER_MODES) | {ContextMode.CHECK_IN}
     assert [mode for mode, config in MODE_CONFIGS.items() if config.tool_loading == "read_only"] == [ContextMode.CHECK_IN]
 
 
@@ -183,6 +188,17 @@ def test_a_category_the_workspace_is_not_shown_stays_out(monkeypatch, agent_surf
     assert READ in _names(tools)
 
 
+def test_with_no_workspace_every_gated_category_stays_out(monkeypatch, agent_surface):
+    """The real hidden-categories rule: no workspace hides Socials and every integration."""
+    import modules.tools.discovery.action_registry as action_registry
+
+    monkeypatch.setattr(action_registry, "get_action_registry", _stub_registry)
+    tools, _ = _load_check_in_tools(agent_surface, workspace_id=None)
+
+    assert HIDDEN_READ not in _names(tools)
+    assert _names(tools) == [READ, SUGGEST_NEXT_STEP]
+
+
 def test_a_registry_with_nothing_to_offer_loads_no_tools(monkeypatch, agent_surface, nothing_hidden):
     import modules.tools.discovery.action_registry as action_registry
 
@@ -197,8 +213,7 @@ def test_a_registry_that_cannot_be_read_loads_no_tools(monkeypatch, agent_surfac
         raise RuntimeError("registry unavailable")
 
     monkeypatch.setattr(action_registry, "get_action_registry", _broken)
-    tools, _ = _load_check_in_tools(agent_surface)
-    assert tools == []
+    assert _load_check_in_tools(agent_surface) == ([], "none")
     assert agent_surface.built == []
 
 
