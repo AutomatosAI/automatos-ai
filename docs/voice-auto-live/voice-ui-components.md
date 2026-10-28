@@ -116,7 +116,10 @@ There is one Live engine per tab, so one Retell session per tab. Every call has 
   [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts);
 - "Auto, stop" (or "stop", "cancel", "stop it") as the whole utterance stops and sends nothing; a press while Auto
   speaks cancels the recognition, the speech and the streaming turn, on the server too;
-- a hidden tab or an unloading page stops the microphone and the speech.
+- a hidden tab or an unloading page stops the microphone and the speech;
+- recognition and speech both use the browser's language, `navigator.language` (`en-US` when it names none)
+  [frontend/lib/voice/quick-ask/deps.ts](../../frontend/lib/voice/quick-ask/deps.ts); the stop phrases are
+  English. Auto's server voice (`POST /api/voice/speech`, services/voice-tts) is not wired into quick ask yet.
 
 Sources:
 - [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts)

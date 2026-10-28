@@ -1,6 +1,6 @@
 # voice-tts
 
-Auto's server voice. Kokoro speaks a short text, and LAME streams it out as MP3. The phone (Automatos Go) and the web quick-ask play Auto's replies through it in a natural voice instead of the device's own.
+Auto's server voice. Kokoro speaks a short text, and LAME streams it out as MP3. The phone (Automatos Go) plays Auto's replies through it in a natural voice instead of the device's own. The web quick-ask still uses the browser's voice; it is next, and isn't wired up yet.
 
 The orchestrator reaches it at `VOICE_TTS_URL` through `POST /api/voice/speech` (`orchestrator/api/voice_speech.py`, `orchestrator/modules/voice/speech.py`). Clients never call it directly, and it has no public port. It speaks only; it holds no data and keeps no files.
 
@@ -81,6 +81,8 @@ The image is speech only: no Node, no browser, no ffmpeg, no music, no video.
 
   The second letter is the gender. espeak-ng keeps every dictionary for the same reason.
 - **Japanese and Chinese quality.** Those voices are phonemized by espeak-ng, not by misaki, which Kokoro's own pipeline uses for them. They are the weakest.
+- **No European Portuguese.** Kokoro's Portuguese voices are Brazilian (`p`, pt-br).
+- **No speech recognition.** This service only speaks. Automatic language detection (speech recognition on the server, about 100 languages) is planned and needs a GPU: `docs/PRDS/PRD-269-AUTOMATIC-LANGUAGE.md`.
 - **The GPL boundary.** phonemizer and espeak-ng are GPL-3.0. Kokoro needs them, and they live only in this image and media-render's. The orchestrator never imports them (`orchestrator/tests/test_prd251w1_media_render_image.py` and `test_voice_tts_image.py`).
 - **LAME** is LGPL and runs as its own process.
 - **Not published.** For the same reason as media-render (GPL espeak-ng and phonemizer), CI builds this image and never publishes it. Compose and Railway build it from this directory.

@@ -45,6 +45,7 @@ You can talk to Auto instead of typing, in two ways:
 | **Who hears you and who speaks** | Your browser: its own speech recognition and speech voice. Automatos receives only the words. | Retell, the voice service Auto Live runs on. Automatos writes the replies. |
 | **Plans and editions** | Every plan, both editions. | Where the server has it set up (below). On the hosted edition, the workspace's plan decides too. |
 | **What you need** | A browser that can recognise speech. Where it can't, the button says so and you can still type. | A current Chrome, Edge or Safari, and a microphone. |
+| **Language** | Your browser's language. See [Languages](#languages). | One language for the whole server, `en-GB` unless the server sets another. |
 
 Either way, what you say and Auto's reply land in the conversation on screen, saved like typed messages. Voice belongs
 to that conversation: opening another one ends the voice session.
@@ -121,6 +122,30 @@ Auto Live needs a Retell account. On a server you run:
 
 ---
 
+## Languages
+
+- **Writing.** Auto answers in the language you write or speak to it in, for any language the model handles. There
+  is nothing to set.
+- **Quick ask in the browser.** The browser listens and speaks in the language it is set to (`en-US` when it names
+  none). To talk in another language, change the browser's language. The reply is spoken in the browser's own voice
+  for that language; Auto's natural server voice (below) is coming to the web, and isn't wired up there yet.
+- **Auto Live** listens in one language for the whole server: `VOICE_LIVE_LANGUAGE`, `en-GB` by default.
+- **Automatos Go** (iPhone) listens and speaks English and Portuguese (Brazil). Choose the language in
+  **Settings → Voice**; a one-tap EN/PT switch changes it. Your voice is recognised on the iPhone for the iPhone's own
+  language; for another language, on the iPhone when its dictation model is installed, otherwise by Apple's speech
+  recognition.
+- **Auto's natural voice** is the server voice, `voice-tts` (Kokoro, run on the server's CPU; see
+  [self-hosting](../getting-started/self-hosting.md#7c-autos-server-voice-the-voice-profile)). It speaks Kokoro's
+  nine languages: English (US and UK), Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese and Mandarin.
+  Japanese and Mandarin sound weaker: their words are turned into sounds by espeak.
+
+**Planned, not built: automatic language detection.** Speak in any of about 100 languages without choosing one
+first. The server would recognise the speech (Whisper-family models), and Auto would answer and speak in the same
+language. It needs a GPU server, so it waits for one. The plan is
+[PRD-269](../PRDS/PRD-269-AUTOMATIC-LANGUAGE.md).
+
+---
+
 ## In themes
 
 A theme places the voice button through the theme SDK (`voice.VoiceButton`, SDK 1.2.0); Play and HUD do. Automatos
@@ -148,7 +173,9 @@ error, and the Marketplace review refuses that version.
 
 ## On your phone
 
-[Automatos Go](https://github.com/AutomatosAI/automatos-go), the phone app, has hold-to-talk too.
+[Automatos Go](https://github.com/AutomatosAI/automatos-go), the phone app, has hold-to-talk too, in English and
+Portuguese (Brazil), chosen in **Settings → Voice**. Where the server runs Auto's natural voice, the phone
+can play Auto's replies in it; otherwise it uses the phone's own voice.
 
 Related:
 
