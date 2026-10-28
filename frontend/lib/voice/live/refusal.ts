@@ -12,8 +12,8 @@
 export const LIVE_REASON_SENTENCES: Readonly<Record<string, string>> = Object.freeze({
   voice_live_plan_required: 'Auto Live comes with the Business plan, and this workspace is on another plan.',
   voice_live_platform_off: 'Auto Live is switched off on this Automatos.',
-  voice_live_not_armed: "Auto Live isn't set up yet. An admin can set it up in Settings.",
-  voice_live_workspace_off: 'Auto Live is off for this workspace. An admin can turn it on in Settings.',
+  voice_live_not_armed: "Auto Live isn't set up yet. An admin can set it up in Settings → System Settings → Voice.",
+  voice_live_workspace_off: 'Auto Live is off for this workspace. An admin can turn it on in Settings → Voice → Auto Live.',
   voice_live_cap_reached: 'This workspace has used its Auto Live minutes for this month.',
 })
 

@@ -28,6 +28,8 @@ The following files were used as context for generating this page:
 - [frontend/lib/voice/live/refusal.ts](../../frontend/lib/voice/live/refusal.ts)
 - [frontend/lib/theme-sdk/voice.ts](../../frontend/lib/theme-sdk/voice.ts)
 - [frontend/components/settings/VoiceLiveArmingTab.tsx](../../frontend/components/settings/VoiceLiveArmingTab.tsx)
+- [frontend/components/settings/WorkspaceVoiceLiveCard.tsx](../../frontend/components/settings/WorkspaceVoiceLiveCard.tsx)
+- [orchestrator/modules/voice/live_settings.py](../../orchestrator/modules/voice/live_settings.py)
 - [orchestrator/api/chat_models.py](../../orchestrator/api/chat_models.py)
 - [orchestrator/api/voice_retell.py](../../orchestrator/api/voice_retell.py)
 - [orchestrator/api/voice_speech.py](../../orchestrator/api/voice_speech.py)
@@ -116,9 +118,11 @@ Auto Live needs a Retell account. On a server you run:
 - an admin enters the Retell API key, the webhook signing key and the Retell agent id, and turns on **Live voice
   enabled**, in **Settings › System Settings › Voice**. Turning it off refuses new calls and silences the calls in
   progress at once;
-- each workspace has its own switch and monthly allowance of minutes, which an owner or admin sets with
-  `PUT /api/workspaces/current/voice-live`. A workspace is off until it is turned on. Studio has no screen for this
-  switch.
+- each workspace has its own switch, in **Settings › Voice › Auto Live**: an owner or admin turns it on or off
+  (`PUT /api/workspaces/current/voice-live` underneath). A workspace is off until it is turned on there. The
+  switch stays visible but disabled, with a plain reason, while the workspace's plan does not include Auto Live
+  or the viewer cannot manage the workspace. The monthly allowance of minutes and the chosen Retell voice are the
+  same route's fields; Settings has no editor for them yet.
 
 ---
 

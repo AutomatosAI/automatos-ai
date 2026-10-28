@@ -113,6 +113,7 @@ def get_current_workspace(
         member_role = resolve_workspace_role(db, ctx) or "viewer"
 
     from services.plan_tiers import exposure_for_local_edition, exposure_for_plan
+    from modules.voice.live_settings import voice_live_state
 
     return {
         "id": str(workspace.id),
@@ -141,6 +142,9 @@ def get_current_workspace(
         # PRD-251 S0.1 (D1): the two Socials switches — `available` is the
         # platform master switch, `enabled` this workspace's. Field addition only.
         "socials": socials_state(workspace.settings),
+        # Settings → Voice → Auto Live: `available` is the plan gate, `enabled`
+        # the workspace's own switch. Field addition only.
+        "voice_live": voice_live_state(workspace),
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
         "settings": settings,
