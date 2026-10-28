@@ -63,6 +63,7 @@ The chat API accepts POST requests at `/api/chat`. The request body is processed
 | `message` | `ChatMessageRequest` | Structured message content including `parts` (text/attachments) [orchestrator/api/chat.py:51-58]() |
 | `agentId` | `int?` | Explicit agent selection (Tier 0 override) [orchestrator/api/chat.py:71]() |
 | `context` | `dict?` | Page context (e.g., `page`, `route`, `tab`) for preamble injection [orchestrator/api/chat.py:69]() |
+| `locale` | `string?` | The person's language and region as a BCP 47 tag (`pt-BR`). Auto replies in that variant unless the person writes or speaks in another language; a value that is not a tag is ignored [orchestrator/api/chat_models.py](), [orchestrator/consumers/chatbot/reply_locale.py]() |
 
 Sources: [orchestrator/api/chat.py:36-77](), [orchestrator/services/page_context.py:46-54]()
 

@@ -135,7 +135,8 @@ Auto Live needs a Retell account. On a server you run:
 ## Languages
 
 - **Writing.** Auto answers in the language you write or speak to it in, for any language the model handles. There
-  is nothing to set.
+  is nothing to set. A client that knows your language and region sends it with the turn (`locale`, such as `pt-BR`),
+  and Auto then answers in that variety: Brazilian Portuguese, not European, for `pt-BR`.
 - **Quick ask in the browser.** The browser listens in the language it is set to (`en-US` when it names none). To
   talk in another language, change the browser's language. The reply is spoken in Auto's natural server voice (below)
   when the server runs it and has a voice for that language: the server's default voice for any variety of its

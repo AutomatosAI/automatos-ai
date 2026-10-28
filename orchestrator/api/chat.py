@@ -287,6 +287,7 @@ class _Turn:
     is_super_admin: bool
     page_context: Any
     spoken_mode: bool
+    locale: Optional[str] = None  # the person's checked BCP 47 tag (pt-BR); None: none named
 
 
 async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn, messages: List[Dict[str, Any]]):
@@ -311,9 +312,8 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         chat_id=turn.chat_id, messages=messages, agent_id=lane.agent_id, user_id=turn.user_id,
         skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
-        is_super_admin=turn.is_super_admin,
-        # PRD-221 S3/S4: the sanitized reference set rides into the turn's
-        # context_trace and the page-prior action exposure.
+        is_super_admin=turn.is_super_admin, locale=turn.locale,  # locale: the variant Auto replies in (pt-BR)
+        # PRD-221 S3/S4: the sanitized reference set rides into the turn's context_trace and the page-prior action exposure.
         page_context=turn.page_context,
         # PRD-266 US-007a (D32): the reply is heard (the app's quick-ask voice); Auto is told so.
         spoken_mode=turn.spoken_mode,
@@ -392,7 +392,7 @@ async def stream_chat(
     # response ends, which may be before the turn does.
     turn = _Turn(
         workspace_id=ctx.workspace_id, chat_id=chat_id, user_id=user_id, message=current_msg,
-        message_id=getattr(saved, "id", None), lane=lane,
+        message_id=getattr(saved, "id", None), lane=lane, locale=request.locale,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
     )
