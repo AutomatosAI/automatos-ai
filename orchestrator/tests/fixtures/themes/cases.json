@@ -344,6 +344,7 @@
       { "name": "the AI label named in upper case with escaped hyphens", "css": "html.hello [DATA\\-AI\\-LABEL] { opacity: 0; }", "code": "CSS_UNSCOPED" },
       { "name": "the AI label's ancestor through :has()", "css": "html.hello :has(> [data-ai-label]) { visibility: hidden; }", "code": "CSS_UNSCOPED" },
       { "name": "the host's copy of the AI label in its own layer", "css": "html.hello [data-ai-label-caption] { display: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "the AI label's words", "css": "html.hello [data-ai-label-text] { color: transparent; }", "code": "CSS_UNSCOPED" },
       { "name": "the AI label in a nested rule", "css": "html.hello { [data-ai-label] { width: 0; } }", "code": "CSS_UNSCOPED" },
       { "name": "the AI label's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-ai-label\"; }", "code": null }
     ]

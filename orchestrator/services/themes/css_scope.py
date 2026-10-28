@@ -18,9 +18,10 @@ with no new dependency (D1-f):
   button's control, ``voice-control``: its AI voice caption and stop control), anywhere in it,
   in any case, escaped or not: the cards' own boxes are guarded inline, and this keeps theme
   rules off them and off the elements inside them;
-* nor the host's AI label (``data-ai-label``, PRD-264 EUAI-11a, and ``data-ai-label-caption``,
-  the copy the host draws in its own layer while a theme hides the label): a rule that names the
-  label is a theme trying to restyle or hide it, so the package is refused before anyone runs it;
+* nor the host's AI label (``data-ai-label``, PRD-264 EUAI-11a, its words' ``data-ai-label-text``,
+  and ``data-ai-label-caption``, the copy the host draws in its own layer while a theme hides the
+  label): a rule that names the label is a theme trying to restyle or hide it, so the package is
+  refused before anyone runs it;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
   and every other at-rule;
 * anything the tokenizer could read differently from a browser is refused rather than
@@ -86,8 +87,8 @@ TOKEN = re.compile(
 # approval cards and the voice button's control); this prefix covers both, data-protected-surface and
 # data-protected-surface-inner, whatever surface they name.
 PROTECTED_SURFACE_NAME = "data-protected-surface"
-# The host's AI label (frontend/components/ai-label/ai-label.tsx) and its copy in the host's own layer
-# (protected-caption.tsx); this prefix covers both, data-ai-label and data-ai-label-caption.
+# The host's AI label (frontend/components/ai-label/ai-label.tsx), its words and its copy in the host's own
+# layer (protected-caption-parts.ts); this prefix covers data-ai-label, -text and -caption.
 AI_LABEL_NAME = "data-ai-label"
 # Each name no theme rule may hold, and why, as the refusal says it.
 PROTECTED_NAMES = {
