@@ -174,12 +174,16 @@ label's words sit in their own element (`data-ai-label-text`), and the label cou
 | `paint` | No `clip-path`, `mask-image`, `-webkit-mask-image` or `filter`, and no `content-visibility: hidden`, on the words, the label or any ancestor |
 | `font` | A font size of at least 9 px |
 | `color` | The fill (`-webkit-text-fill-color`, else `color`) is not transparent and has at least 3:1 against what is behind it: the first opaque `background-color` up the ancestors with the translucent ones between painted over it, or the page's own white (and black too, where the root allows a dark scheme). A colour in any space is read: `rgb()` and `color(srgb)` as text, any other through a 1 by 1 canvas |
+| `paint` (::first-line, ::first-letter) | `getComputedStyle(element)` doesn't show what these paint, so the check reads the rules: any rule in a stylesheet the page can read (inside `@media`, `@supports`, `@layer`, `@container` and nested rules too) whose selector names `::first-line` or `::first-letter` (or the single-colon form) and, without them, matches the words or any element around them, restyles the label, whatever it sets. A selector the browser can't match counts as matching (`frontend/lib/ai-label/line-pseudos.ts`) |
+| `color` (::first-line, ::first-letter) | Where the browser reports those pseudo-elements' computed styles (it says so through `CSS.supports('selector(::first-line)')`), each one on the words and on every element around them keeps its opacity and visibility and fills the words at 3:1 against its own background painted over what is behind them |
 | `size`, `viewport` | The label's box at least 4 px each way and inside the viewport |
 | `text` | The words themselves, measured as a Range: at least 9 px tall and 0.3 em per character wide, wholly inside the viewport, and inside the label's own box when the label clips its overflow. So `text-indent`, a tiny or clipped box, `letter-spacing` and a scale transform all fail |
-| `covered` | Hit-testing at the start, middle and end of the words finds the words' own element on top. The label is `pointer-events: none`, which hit-testing skips, so the label and its words take `pointer-events: auto` for the probe only and get their own value back. An ancestor's clipping, an overlay of the theme's, and the label's own `::before` or `::after` (which hits as the label, not as its words) all fail |
+| `covered` | Hit-testing at the start, middle and end of each line of the words finds the words' own element on top. Hit-testing skips anything that is `pointer-events: none`: the label itself, and an overlay a theme makes click-through to hide behind. So for the probe only, a transient stylesheet makes everything hittable, `*, *::before, *::after { pointer-events: auto !important }`, and comes out in a `finally`; in, probe and out happen in one task, so no frame paints with it. It is a constructed sheet (`adoptedStyleSheets`), which adds no element, so no theme rule can tell it is there (a `<style>` element could be noticed by `:has()`); a browser without constructed sheets gets a `<style data-ai-label-probe>` at the end of `<html>`, outside what the label's and the copy's observers watch. Theme CSS can't beat it (the scope check refuses `!important`); only an inline `!important` does, and the one there is the host's copy, which must not count as a cover. An ancestor's clipping, an overlay of the theme's, click-through or not, and the label's own `::before` or `::after` (which hits as the label, not as its words) all fail |
+| `unchecked` | The check itself threw (a page script may have patched `getComputedStyle`, `Range`, `elementsFromPoint` or a canvas): the label counts as hidden, and the warning carries the error |
 
 Where the browser can't measure text (no Range boxes) or hit-test (no `elementsFromPoint`), the label reads as
-hidden. The check runs on mount, when `<html>`'s classes or attributes or `<head>`'s elements change, on resize
+hidden. The check fails closed everywhere: a throw anywhere in it is `unchecked`, and if the observer that
+reruns it on theme changes can't be set up, it still runs on its interval and on resize. The check runs on mount, when `<html>`'s classes or attributes or `<head>`'s elements change, on resize
 and every two seconds, and logs a theme-host warning the first time it finds the label hidden and again only
 when the way changes: `[theme-host] the active theme hides the page AI label (color); the host draws it in its
 own layer instead`.
@@ -201,14 +205,21 @@ own layer instead`.
   `z-index`, and out of reach of what an ancestor does to its descendants (opacity, filter, transform,
   clip-path, overflow). Where the browser has no popover, they stay a fixed element.
 - **It heals itself.** A MutationObserver on `<body>`'s children, the host's attributes and the whole shadow
-  tree rebuilds the copy from scratch the moment it is removed, moved or changed (its words, its guard). Its
-  own `toggle` event re-shows it after a `hidePopover()`. `beforetoggle` and `toggle` caught at the document in
-  the capture phase, and `fullscreenchange`, raise it again (hide, then show, which puts it last in the top
-  layer) whenever something else enters the top layer. A watchdog on the same two-second tick checks it is
-  whole, rebuilds it if not, and raises it, for whatever no event reports (a dialog in a theme's own shadow
-  root). A theme that undoes every repair gets five immediate repairs a second and the watchdog's after that,
-  so it can't make the page spin. Each kind of tampering logs one warning: `[theme-host] something in the page
-  removed the AI label's protected copy; the host put it back`.
+  tree rebuilds the copy from scratch the moment it is removed, moved or changed (its words, its guard), up to
+  five times a second (an unlimited rebuild would let a theme's own observer ping-pong with it and hang the
+  page). Its own `toggle` event re-shows it after a `hidePopover()`. `beforetoggle` and `toggle` caught at the
+  document in the capture phase, and `fullscreenchange`, raise it again (hide, then show, which puts it last in
+  the top layer) whenever something else enters the top layer. A watchdog checks it is whole, rebuilds it if
+  not, and raises it: every two seconds while nothing happens, and, from the first tampering until three
+  seconds pass with none, every animation frame (`requestAnimationFrame`: once a frame, before that frame
+  paints, never a spin). That also covers what no event reports (a dialog in a theme's own shadow root).
+- **It fails safe.** Every step (building, the observers' and events' handlers, the watchdog) runs guarded:
+  anything that throws is logged, counted as tampering, and retried the next frame. Where `attachShadow`
+  throws, the words sit in the guarded host instead, still every value `!important` inline.
+- **It tells.** The first tampering of each kind logs one warning, `[theme-host] something in the page removed
+  the AI label's protected copy; the host put it back`, and while tampering goes on a count is logged at most
+  every ten seconds: `[theme-host] something in the page has tampered with the AI label's protected copy 37
+  times in the last 10 s; the host keeps putting it back`.
 
 Auto's floating widget draws its own label in its panel (`WidgetAiLabelFrame`), checked the same way, and its
 copy at the top of the panel, kept inside the viewport.
@@ -232,18 +243,20 @@ widget's label never clears a theme's chat. Stop always runs.
 
 ### Guaranteed at run time, and what stays a review rule
 
-Guaranteed against theme CSS: every way of hiding the label in the check's table brings the copy, and no
-stylesheet rule hides, fades, moves, clips, covers or recolours the copy. Guaranteed against a theme's code
-once the copy exists: removing, moving or editing it, or hiding it with `hidePopover()`, is undone at once, and
-a popover, dialog or fullscreen element shown later is put back under it.
+| | Guaranteed at run time | A review rule, not a guarantee |
+|---|---|---|
+| **Theme CSS on the label** | Every way of hiding it in the check's table brings the copy and a warning: display, visibility, opacity, clip-path, mask, filter, a tiny font, transparent or faint words (by `color`, `-webkit-text-fill-color`, `::first-line` or `::first-letter`), a squeezed, indented, clipped or off-screen line, and anything drawn over the words, click-through (`pointer-events: none`) or not | A background image behind the words (the check reads background colours only); a font of the theme's whose glyphs are blank (its `@font-face` family must start with the theme's class, so the review sees it) |
+| **Theme CSS on the copy** | No stylesheet rule hides, fades, moves, clips, covers or recolours it: closed shadow root, every value `!important` inline, top layer | None |
+| **The check itself** | Fails closed: a throw anywhere in it (a patched `getComputedStyle`, `Range`, `elementsFromPoint` or canvas) counts the label as hidden, with the error in the warning | None |
+| **A theme's code on the copy, once it exists** | Removing, moving or editing it, rewriting its guard, or hiding it with `hidePopover()` is undone at once (up to five times a second) and then once every animation frame, before that frame paints, for as long as it goes on; a popover, dialog or fullscreen element shown later is put back under it; every kind is logged, with a running count | A theme's own MutationObserver that removes the copy again in the same frame, after the frame's repair (in the microtask checkpoint after it), can keep it off those frames: winning that race would mean spinning with the theme's code, which hangs the page. The bound is the frame, not the paint |
+| **A theme's code before the copy exists** | None | Patching `attachShadow`, `showPopover`, `MutationObserver`, `requestAnimationFrame`, `getComputedStyle` or anything else the host calls, to reach or quiet the copy or to answer the check. The check fails closed if a patch throws, but a patch that lies is not caught. Sandboxing a theme's code is not something the host does; the review reads that code, and installed themes are signed |
+| **A top-layer element of the theme's in its own shadow root** | Raised over at the next watchdog check (the next frame while tampering goes on, two seconds otherwise) | Until then it sits above the copy |
+| **Covers the probe can't see** | Any element of the page, click-through or not, drawn over the words | An element inside a theme's own shadow root made click-through by that root's styles (the probe's sheet is the document's), an `inert` element, or an inline `pointer-events: none !important` set by a theme's code; and, in a browser without constructed stylesheets (Safari before 16.4), a `:has()` rule that notices the probe's fallback `<style>` |
 
-Review rules, not guarantees:
+### Not refused at upload: `::first-line` and `::first-letter`
 
-- **Paint the check doesn't read:** a background image behind the words, and a font of the theme's whose
-  glyphs are blank (its `@font-face` family must start with the theme's class, so the review sees it).
-- **Code the theme runs before the copy exists:** wrapping `attachShadow`, `showPopover` or
-  `MutationObserver` to reach or quiet the copy, or a loop that undoes every repair (it can't spin the page,
-  but each undo shows for up to two seconds). Sandboxing a theme's code is not something the host does; the
-  review reads that code, and installed themes are signed.
-- **A top-layer element of the theme's opened in its own shadow root** sits above the copy until the next
-  watchdog tick, two seconds at most.
+The scope check does not refuse `::first-line` or `::first-letter` in theme CSS. Drop caps and styled first lines
+are ordinary typography a theme may want, and the scope check can't tell whether a selector reaches the label: a
+generic `html.<htmlClass> p::first-letter` does, `html.<htmlClass> .article p::first-letter` doesn't. Whether a
+rule reaches the label is a question about the live page, so the run-time check answers it, against the rules
+themselves and against the computed pseudo-element styles, and brings the copy when one does.
