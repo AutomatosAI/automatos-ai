@@ -91,4 +91,21 @@ describe('WorkspaceVoiceLiveCard (Settings → Voice → Auto Live)', () => {
     expect(screen.getByRole('switch')).toBeDisabled()
     expect(screen.getByText(ASK_AN_ADMIN_TEXT)).toBeInTheDocument()
   })
+
+  it('shows OFF and only the plan reason for a downgrade that left `enabled: true` stored', () => {
+    // A workspace that was on and then lost the plan (or an old PUT from before the backend
+    // gate existed): the master's own gate wins, like WorkspaceSocialsCard's `available && enabled`.
+    workspaceState.current = workspace('owner', { available: false, enabled: true })
+    renderCard()
+
+    expect(screen.getByText('OFF')).toBeInTheDocument()
+    const toggle = screen.getByRole('switch')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(toggle).toBeDisabled()
+    expect(screen.getByTestId('voice-live-plan-blocked')).toHaveTextContent(
+      LIVE_REASON_SENTENCES.voice_live_plan_required,
+    )
+    expect(screen.queryByText(ASK_AN_ADMIN_TEXT)).not.toBeInTheDocument()
+    expect(screen.queryByText('This workspace can start a live call with Auto.')).not.toBeInTheDocument()
+  })
 })

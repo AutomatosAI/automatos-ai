@@ -1757,6 +1757,94 @@ def test_voice_live_put_merges_not_replaces(monkeypatch):
     assert db.commit.called
 
 
+# ---------------------------------------------------------------------------
+# The PUT's own plan gate (D34): turning Auto Live ON needs the workspace's
+# plan; turning it OFF never does — a fix to the Settings switch review found
+# the route stored `enabled: true` for a plan the mint would refuse anyway.
+# ---------------------------------------------------------------------------
+
+
+def test_voice_live_put_refuses_enabling_without_the_plan_and_stores_nothing(monkeypatch):
+    from fastapi import HTTPException
+
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    from modules.voice.mint import VOICE_LIVE_PLAN_REQUIRED, VOICE_LIVE_PLAN_REQUIRED_MESSAGE
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: False)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={"voice_live": {"enabled": False}})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == {"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE}
+    assert ws.settings["voice_live"]["enabled"] is False  # nothing written
+    assert db.commit.called is False
+
+
+def test_voice_live_put_disabling_always_succeeds_even_without_the_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: False)
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={"voice_live": {"enabled": True}})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": False}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is False
+    assert db.commit.called
+
+
+def test_voice_live_put_allows_enabling_on_the_local_edition_regardless_of_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="basic", settings={})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is True
+
+
+def test_voice_live_put_allows_enabling_on_saas_with_the_plan(monkeypatch):
+    from api.workspaces import save_voice_live_settings
+    from config import config
+    import services.plan_tiers as plan_tiers
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(plan_tiers, "family_enabled", lambda plan, family: True)
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
+
+    ws = SimpleNamespace(id=uuid.uuid4(), plan="business", settings={})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
+    )
+    assert out["voice_live"]["enabled"] is True
+
+
 def test_live_status_payload_never_leaks_credentials(monkeypatch):
     import api.voice_retell as vr
     from modules.voice.live_settings import RetellCredentials

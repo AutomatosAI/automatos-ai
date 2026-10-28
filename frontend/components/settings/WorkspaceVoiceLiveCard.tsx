@@ -34,7 +34,7 @@ export function WorkspaceVoiceLiveCard() {
   const { workspace } = useWorkspace()
   const setVoiceLive = useSetWorkspaceVoiceLive()
   const planAllows = workspace?.voiceLive?.available ?? false
-  const enabled = workspace?.voiceLive?.enabled ?? false
+  const enabled = planAllows && (workspace?.voiceLive?.enabled ?? false)
   const canManage = canManageVoiceLive(workspace?.role)
   const disabled = !planAllows || !canManage || setVoiceLive.isLoading
 

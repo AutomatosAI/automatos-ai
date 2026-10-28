@@ -474,8 +474,16 @@ async def save_voice_live_settings(
     Body: ``{"voice_live": {"enabled": bool, "monthly_cap_minutes"?: int,
     "retell_voice_id"?: str}}`` — validated by the SAME fail-closed rules as
     the platform tool (one whitelist, two doors), merged never replace-blind.
+
+    Turning it ON is refused (403, the mint's own coded reason, D34) on SaaS
+    when the workspace's plan has no voice family: the mint would refuse every
+    call anyway, so storing ``enabled: true`` here would be a switch that lies
+    about what it does, not just one that is inert. Turning it OFF always
+    succeeds — a workspace downgraded off the plan must still be able to
+    switch itself off.
     """
-    from modules.voice.live_settings import validate_voice_live_update
+    from modules.voice.live_settings import validate_voice_live_update, voice_live_plan_allows
+    from modules.voice.mint import VOICE_LIVE_PLAN_REQUIRED, VOICE_LIVE_PLAN_REQUIRED_MESSAGE
 
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
@@ -485,6 +493,12 @@ async def save_voice_live_settings(
         normalized = validate_voice_live_update(payload.get("voice_live"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if normalized.get("enabled") is True and not voice_live_plan_allows(getattr(workspace, "plan", None)):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE},
+        )
 
     settings = dict(workspace.settings or {})
     merged = dict(settings.get("voice_live", {}))
