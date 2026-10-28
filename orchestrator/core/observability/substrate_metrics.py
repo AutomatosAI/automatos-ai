@@ -17,6 +17,10 @@ Contract with the hot path:
 
 Seam vocabulary is fixed here; status vocabulary is the tracer's
 (hit / empty / error).
+
+PRD-268 P268W1-RVW-1 (K17): a check-in's search records nothing. The searches a check-in
+may run are labelled read, so in ``core.read_only_call.reading_only()`` both calls return
+at once. The check sits before the executor hop, which does not carry the caller's context.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from core.read_only_call import only_reading
 from core.observability.tracer import (
     STATUS_EMPTY,
     STATUS_ERROR,
@@ -91,8 +96,10 @@ async def record_substrate_search(
     ``query`` is optional: pass it on seams that don't already emit a
     retrieval score at a higher level (memory/field); the documents seam
     passes None because ``RAGService.retrieve`` fires the query-level
-    score itself.
+    score itself. Nothing in a check-in.
     """
+    if only_reading():
+        return
     try:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
@@ -121,7 +128,10 @@ async def record_substrate_search(
 
 def record_substrate_search_nowait(**kwargs: Any) -> None:
     """Fire-and-forget wrapper for hot paths: schedules the record as a
-    task so the retrieval that produced it never waits on telemetry."""
+    task so the retrieval that produced it never waits on telemetry.
+    Nothing in a check-in."""
+    if only_reading():
+        return
     try:
         asyncio.get_running_loop().create_task(record_substrate_search(**kwargs))
     except RuntimeError:

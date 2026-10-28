@@ -26,6 +26,8 @@ import logging
 from typing import Any, Dict, List
 from uuid import UUID
 
+from core.read_only_call import only_reading
+
 logger = logging.getLogger(__name__)
 
 ONE_PACKAGE_DURING_ONBOARDING = (
@@ -96,7 +98,10 @@ def _record_offer_if_onboarding(db: Any, workspace_id: UUID, slug: str) -> None:
     terminal (post-onboarding search is just browsing, not a funnel moment).
 
     Best-effort: the funnel is a side channel, so a read/record failure is logged
-    and swallowed — it must never break the search the user is actually running."""
+    and swallowed — it must never break the search the user is actually running.
+    PRD-268 P268W1-RVW-1: a check-in's search is no offer to anyone, and stamps nothing."""
+    if only_reading():
+        return
     try:
         from services import onboarding_state
 

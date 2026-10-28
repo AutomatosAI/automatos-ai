@@ -13,9 +13,13 @@ existing digest builder (``field_scoring.budget_results`` +
 ``field_scoring.format_digest``, the same pipeline ``_attach_field_digest`` uses
 for dispatch). No second builder, no second ranking.
 
-Included in HEARTBEAT_AGENT and PLANNING modes only. Priority 7 (just after the
-user-memory section at 6): dropped before task-critical sections under budget
+Included in HEARTBEAT_AGENT, PLANNING and CHECK_IN modes. Priority 7 (just after
+the user-memory section at 6): dropped before task-critical sections under budget
 pressure, but ahead of the knowledge-graph excerpt.
+
+PRD-268 (§6.2.3, FR-1): a check-in changes nothing, so in ``ContextMode.CHECK_IN``
+the read records no access: the patterns it returns get no Hebbian reinforcement
+and keep decaying. Every other mode reinforces what it reads, as before.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import logging
 from typing import Any, List, Optional
 
 from modules.context.factory import get_shared_context
+from modules.context.modes import ContextMode
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
@@ -69,7 +74,10 @@ class FieldMemorySection(BaseSection):
         if not query:
             return ""
 
-        rows = await self._query_workspace_field(str(ctx.workspace_id), query)
+        rows = await self._query_workspace_field(
+            str(ctx.workspace_id), query,
+            record_access=ctx.context_mode != ContextMode.CHECK_IN.value,
+        )
         if not rows:
             return ""
 
@@ -87,7 +95,7 @@ class FieldMemorySection(BaseSection):
 
     @staticmethod
     async def _query_workspace_field(
-        workspace_id: str, query: str
+        workspace_id: str, query: str, record_access: bool = True
     ) -> List[dict[str, Any]]:
         """Workspace-scoped field read via the shared-context backend.
 
@@ -95,6 +103,7 @@ class FieldMemorySection(BaseSection):
         instrumentation wrapper (the ``getattr(field, '_inner', field)`` idiom
         the coordinator uses). Returns [] when the backend is unavailable so the
         section degrades to nothing rather than failing the build.
+        ``record_access=False`` reads without reinforcing (a check-in's read).
         """
         from config import config
 
@@ -109,6 +118,7 @@ class FieldMemorySection(BaseSection):
             workspace_id=workspace_id,
             query=query,
             top_k=config.FIELD_QUERY_TOP_K,
+            record_access=record_access,
         )
         return list(results or [])
 

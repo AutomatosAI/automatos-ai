@@ -38,6 +38,12 @@ agent whose check-in it is; absent for Auto's workspace check-in).
 ``platform_suggest_next_step`` as the server-side ``_check_in`` parameter. A
 caller-supplied ``_check_in`` is stripped from every call, so a model can neither forge
 its run nor its reads, and the tool refuses a call that carries none.
+
+PRD-268 P268W1-RVW-1 (K17): ``read`` means read in the lane. A few read actions keep a
+record of their own as they read (a search's log row, the onboarding funnel's stamp, a
+spreadsheet's copy in the workspace, the NL2SQL audit and training rows, a preview's
+picture). ``carries_the_check_in`` runs every check-in call but the suggestion inside
+``core.read_only_call.reading_only()``, and each of those records is skipped there.
 """
 from __future__ import annotations
 
@@ -45,6 +51,8 @@ import functools
 import inspect
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
+
+from core.read_only_call import reading_only
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +197,15 @@ def check_in_params(action_name: str, params: Any, caller_context: Any) -> Any:
 
 def carries_the_check_in(execute: ExecuteTool) -> ExecuteTool:
     """Wrap ``PlatformActionExecutor.execute`` so the check-in's run and reads reach the
-    suggestion tool server-side, and never from the model."""
+    suggestion tool server-side, and never from the model. Every other call in the lane
+    runs ``reading_only()`` (P268W1-RVW-1): a read's own records are skipped."""
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
-        return await execute(self, action_name, check_in_params(action_name, params, caller_context), caller_context)
+        params = check_in_params(action_name, params, caller_context)
+        if not in_a_check_in(caller_context) or action_name == SUGGEST_NEXT_STEP:
+            return await execute(self, action_name, params, caller_context)
+        with reading_only():
+            return await execute(self, action_name, params, caller_context)
     return wrapped
 
 

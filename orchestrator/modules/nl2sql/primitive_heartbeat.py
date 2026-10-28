@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from core.read_only_call import only_reading
 from services.heartbeat_service import emit_primitive_finding
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,11 @@ def _emit_nl2sql_primitive(
             caught validation / execution error (down).
         detail: Short human-readable context (truncated to 500 chars by
             ``emit_primitive_finding``).
+
+    PRD-268 P268W1-RVW-1: nothing in a check-in, whose query (platform_query_data,
+    labelled read) writes no row.
     """
-    if not workspace_id:
+    if not workspace_id or only_reading():
         return
     status = "green" if success else "down"
     try:

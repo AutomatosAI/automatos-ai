@@ -3,11 +3,13 @@
 The check-in lane (US-C02b) runs only what is labelled ``read``, so the lane is only as good
 as the labels. This sweep calls every registered read action's handler (the one
 ``PLATFORM_HANDLERS`` names, its wrappers included) with parameters synthesised from its
-JSON schema (its required fields, each with its minimal valid value). Each runs against a
-session over an empty database that records every write, while httpx and requests answer
-every request without sending it (``tests/helpers_write_spies.py``). A write fails the
-sweep, naming the action and what it wrote. A handler that raises, or runs past its time,
-still counts as checked; work it leaves running is waited for and counted as its own.
+JSON schema (its required fields, each with its minimal valid value), as a check-in calls
+it (``core.read_only_call.reading_only``). Each runs against a session over an empty
+database that records every write, while every session the handler opens itself
+(``SessionLocal``) records too, and httpx and requests answer every request without sending
+it (``tests/helpers_write_spies.py``). A write fails the sweep, naming the action and what it
+wrote. A handler that raises, or runs past its time, still counts as checked; work it leaves
+running is waited for and counted as its own.
 
 What counts as a write:
 
@@ -20,13 +22,27 @@ What counts as a write:
   to it counts (a collection or an index created, an upsert, a delete, a payload set), and
   its reads (a GET, a retrieve, a search, a scroll, a count) do not.
 
-What the sweep cannot see: a write reached only when rows exist (the database is empty), a
-session the handler opens itself, Redis, and clients that are neither httpx nor requests.
+- into the workspace's files: a write goes over httpx to the workspace worker, so it is a
+  request like any other.
+
+P268W1-RVW-1: an empty database hides a write reached only when something exists. The
+seeded cases (``tests/helpers_check_in_seeds.py``) put that something in place for each read
+action that kept a record of its own as it read: a package search mid-onboarding, a code
+search of an indexed project, a spreadsheet without its workspace copy, a question to a
+connected database, a document search that finds a passage, a preview with a session's
+ticket. Each writes nothing in a check-in, and outside one it still makes the write its seed
+brings it to, so the seed is known to reach it.
+
+What the sweep cannot see: a session bound at import time, Redis, and clients that are
+neither httpx nor requests.
 
 A read action the sweep catches writing is relabelled ``write``, with its hierarchy-gate
 entry, and never excepted (K17). It caught ``platform_field_query``: on first use it creates
 the shared field's collection and indexes, and it reinforces every pattern it returns
 (``record_access``). That action is now a write.
+
+Those seeded actions stay ``read``: each record is skipped in a check-in (``reading_only``)
+and kept everywhere else, so none is relabelled and chat is unchanged.
 
 A read action with no platform handler (the workspace file tools) never runs in a check-in:
 the lane refuses every tool that is not a platform action.
@@ -36,8 +52,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Callable, Dict, Set
+from typing import Any, Callable, Dict
 from uuid import uuid4
 
 import httpx
@@ -45,15 +62,23 @@ import pytest
 import requests
 from sqlalchemy import column, delete, insert, literal, select, table, text, update
 
-from tests.helpers_write_spies import WriteLog, minimal_params, recording_http, spy_session
+from core.read_only_call import reading_only
+from tests.helpers_check_in_seeds import SEEDS, WORKER
+from tests.helpers_write_spies import (
+    WriteLog,
+    minimal_params,
+    own_sessions,
+    recording_http,
+    seeded_session,
+    settle,
+    spy_session,
+)
 
 ORCH = Path(__file__).resolve().parents[1]
 # Long enough for a handler that waits on a store that never answers to give up; a
 # handler past it is cancelled and counts as checked.
 HANDLER_SECONDS = 5.0
 OUTCOME_CHARS = 120
-# How long work a handler left running (a task it created) has to finish.
-SETTLE_SECONDS = 1.0
 RELABELLED = ("platform_field_query",)
 VECTOR_STORE = "http://vectors.test:6333"
 ELSEWHERE = "https://api.example.test/v1/things"
@@ -62,35 +87,22 @@ CARDS = table("cards", column("id"), column("title"))
 
 # ── the sweep ───────────────────────────────────────────────────────────────
 
-async def _settle(left: Set["asyncio.Task[Any]"]) -> None:
-    """Wait for the work a handler left running, then cancel what is still going and let it
-    unwind, all while the spies still record."""
-    if not left:
-        return
-    _, pending = await asyncio.wait(left, timeout=SETTLE_SECONDS)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.wait(pending, timeout=SETTLE_SECONDS)
-    for task in left:
-        if task.done() and not task.cancelled():
-            task.exception()
-
-
-async def _call(handler: Callable[..., Any], params: Dict[str, Any]) -> WriteLog:
-    """One handler's call against the spies: what it wrote, and how it ended."""
+async def _call(handler: Callable[..., Any], params: Dict[str, Any],
+                session_for: Callable[[WriteLog], Any] = spy_session, checking_in: bool = True) -> WriteLog:
+    """One handler's call against the spies, as a check-in makes it unless ``checking_in`` is
+    False: what it wrote (on its session, one it opened itself, or over HTTP), and how it ended."""
     log = WriteLog()
-    with recording_http(log):
+    with recording_http(log), own_sessions(log), (reading_only() if checking_in else nullcontext()):
         before = asyncio.all_tasks()
         try:
-            outcome = handler(spy_session(log), uuid4(), params)
+            outcome = handler(session_for(log), uuid4(), params)
             if inspect.isawaitable(outcome):
                 await asyncio.wait_for(outcome, HANDLER_SECONDS)
         except asyncio.TimeoutError:
             log.outcome = "timed out"
         except (Exception, asyncio.CancelledError) as error:
             log.outcome = f"raised {type(error).__name__}: {error}"[:OUTCOME_CHARS]
-        await _settle(asyncio.all_tasks() - before)
+        await settle(asyncio.all_tasks() - before)
     return log
 
 
@@ -166,6 +178,40 @@ def test_every_read_action_the_sweep_does_not_call_is_refused_in_a_check_in():
     assert [name for name in unswept if offered_in_a_check_in(reads[name])] == []
 
 
+# ── seeded: the writes an empty database hides (P268W1-RVW-1) ───────────────
+
+def _seeded_call(seed: Any, monkeypatch: Any, tmp_path: Any, *, checking_in: bool) -> WriteLog:
+    session_for = seed.plant(monkeypatch, tmp_path)
+    handler = _platform_handlers()[seed.action]
+    return asyncio.run(_call(handler, dict(seed.params), session_for, checking_in=checking_in))
+
+
+def test_every_seeded_action_is_a_read_a_check_in_may_run():
+    from modules.tools.discovery.check_in_lane import may_clear_in_a_check_in
+
+    reads = _registry_reads()
+
+    assert [seed.action for seed in SEEDS if seed.action not in reads] == []
+    assert [seed.action for seed in SEEDS if not may_clear_in_a_check_in(seed.action)] == []
+
+
+@pytest.mark.parametrize("seed", SEEDS, ids=lambda seed: seed.action)
+def test_a_seeded_read_action_writes_nothing_in_a_check_in(seed, monkeypatch, tmp_path):
+    log = _seeded_call(seed, monkeypatch, tmp_path, checking_in=True)
+
+    assert log.writes == [], f"{seed.action} [{log.outcome}] wrote in a check-in: {'; '.join(log.writes)}"
+    assert log.outcome == "returned"
+
+
+@pytest.mark.parametrize("seed", SEEDS, ids=lambda seed: seed.action)
+def test_a_seeded_read_action_reaches_its_record_outside_a_check_in(seed, monkeypatch, tmp_path):
+    """Outside a check-in each still keeps its record, so its seed is known to reach it."""
+    log = _seeded_call(seed, monkeypatch, tmp_path, checking_in=False)
+
+    missing = [mark for mark in seed.marks if not any(mark in write for write in log.writes)]
+    assert missing == [], f"{seed.action} [{log.outcome}] wrote only: {'; '.join(log.writes)}"
+
+
 # ── the spies see every kind of write ───────────────────────────────────────
 
 class _Row:
@@ -201,6 +247,73 @@ class _Row:
 ])
 def test_the_spies_record_each_kind_of_write(label, step):
     assert _run(step).writes, label
+
+
+def test_a_session_the_handler_opens_itself_is_watched():
+    def opens_its_own(db):
+        from core.database import database
+
+        with database.SessionLocal() as own:
+            own.add(_Row())
+            own.commit()
+        other = database.SessionLocal()
+        other.execute(text("UPDATE cards SET title = 'x'"))
+
+    log = _run(opens_its_own)
+
+    assert log.writes == ["add(_Row)", "commit", "execute UPDATE cards SET title = 'x'"]
+
+
+@pytest.mark.parametrize("read", [
+    lambda own: own.query(_Row).first(),
+    lambda own: own.execute(text("SELECT id FROM cards")),
+    lambda own: own.scalar(select(CARDS.c.id)),
+    lambda own: own.get(_Row, 1),
+])
+def test_a_session_the_handler_opens_itself_answers_no_read(read):
+    """So no process cache keeps an empty answer for the run's later tests."""
+    def opens_its_own(db):
+        from core.database import database
+
+        read(database.SessionLocal())
+
+    log = _run(opens_its_own)
+
+    assert log.writes == [] and log.outcome.startswith("raised OwnSessionRead")
+
+
+def test_a_write_into_the_workspace_is_seen(monkeypatch):
+    import core.workspace_client as workspace_client
+    from config import config
+
+    monkeypatch.setattr(config, "WORKER_INTERNAL_URL", WORKER, raising=False)
+    monkeypatch.setattr(workspace_client, "_client", None)
+
+    log = _run(lambda db: workspace_client.WorkspaceClient("ws-1").write_file("documents/notes.csv", "a\n1\n"))
+
+    assert log.writes == ["HTTP POST worker.test"]
+
+
+def test_a_seeded_session_finds_what_it_holds_and_still_records_writes():
+    found = {}
+    planted = _Row()
+
+    def reads_and_writes(db):
+        found["row"] = db.execute(text("SELECT id FROM cards WHERE title = :t"), {"t": "x"}).fetchone()
+        found["other"] = db.execute(text("SELECT id FROM decks")).fetchall()
+        found["model"] = db.query(_Row).filter(True).first()
+        found["none"] = db.query(CARDS.c.id).first()
+        db.execute(text("INSERT INTO cards (title) VALUES ('x')"))
+
+    async def handler(db, workspace_id, params):
+        reads_and_writes(db)
+        return {"success": True}
+
+    held = {"FROM cards WHERE title": [("row", 7)]}
+    log = asyncio.run(_call(handler, {}, lambda log: seeded_session(log, rows=held, found={_Row: planted})))
+
+    assert found == {"row": ("row", 7), "other": [], "model": planted, "none": None}
+    assert log.writes == ["execute INSERT INTO cards (title) VALUES ('x')"]
 
 
 def test_a_requests_answer_streams_and_closes():

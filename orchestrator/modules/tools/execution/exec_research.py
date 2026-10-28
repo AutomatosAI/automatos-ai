@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from core.read_only_call import only_reading
 from modules.tools.execution.nl2sql_card_words import card_words
 
 logger = logging.getLogger(__name__)
@@ -194,7 +195,8 @@ class NL2SQLCall:
 
 
 async def _ask(service: Any, call: NL2SQLCall) -> Dict[str, Any]:
-    """Run the question through the service; a failure becomes a safe message."""
+    """Run the question through the service; a failure becomes a safe message. PRD-268
+    P268W1-RVW-1: a check-in's query (platform_query_data, labelled read) trains nothing."""
     try:
         if call.method == "smart_query":
             return await service.smart_query(
@@ -204,6 +206,7 @@ async def _ask(service: Any, call: NL2SQLCall) -> Dict[str, Any]:
         return await service.query_database(
             source_id=call.source_id, natural_language_query=call.query, user_id=call.user_id,
             agent_id=call.agent, workspace_id=call.workspace_id, owner_question=call.owner_question,
+            auto_train=not only_reading(),
         )
     except Exception:  # noqa: BLE001 — logged; the agent gets a safe message, never internals
         logger.exception(
@@ -214,7 +217,10 @@ async def _ask(service: Any, call: NL2SQLCall) -> Dict[str, Any]:
 
 async def _audit(service: Any, call: NL2SQLCall, result: Any) -> None:
     """PRD-160 S4: every NL query lands one audit row. Best-effort: a failed write
-    is logged and never fails the answer."""
+    is logged and never fails the answer. PRD-268 P268W1-RVW-1: but a check-in's query
+    (platform_query_data, labelled read) writes none (K17)."""
+    if only_reading():
+        return
     try:
         await service.write_nl_audit(
             source_id=call.source_id,
