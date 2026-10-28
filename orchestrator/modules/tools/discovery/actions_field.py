@@ -11,7 +11,12 @@ def register_field_actions(registry: ActionRegistry) -> None:
 
 
 def _register_field_query(registry: ActionRegistry) -> None:
-    """platform_field_query: read what other agents put in the mission field."""
+    """platform_field_query: find what other agents put in the mission field.
+
+    PRD-268 US-C02d (K17): a write. The read sweep caught it creating the shared field's
+    collection on first use, and every query reinforces the patterns it returns (Hebbian
+    ``record_access``), so a check-in never runs it.
+    """
     registry.register(ActionDefinition(
         name="platform_field_query",
         description=(
@@ -23,7 +28,7 @@ def _register_field_query(registry: ActionRegistry) -> None:
         ),
         category="field",
         promoted=True,
-        permission_level="read",
+        permission_level="write",
         parameters={
             "type": "object",
             "properties": {

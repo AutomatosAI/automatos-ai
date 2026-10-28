@@ -111,6 +111,10 @@ ALLOW_LIST: Set[str] = {
     # PRD-268 US-C02a: shares one finding into a mission's shared field (the calling
     # task's, PRD-178 S1, unless the call names one); no agent, ticket or member to scope.
     "platform_field_inject",
+    # PRD-268 US-C02d: the read sweep caught it writing. It finds patterns in the same
+    # field and reinforces the ones it returns, creating the field on first use; it
+    # changes no agent, ticket or member.
+    "platform_field_query",
     # F151: the workspace's own watches.
     "platform_create_watch",
     "platform_cancel_watch",

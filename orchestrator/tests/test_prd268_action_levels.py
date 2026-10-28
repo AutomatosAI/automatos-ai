@@ -8,7 +8,8 @@ to be stated, never defaulted:
   (the registry loads lazily, in ``_ensure_initialized``);
 - every registered action is ``read``, ``write`` or ``destructive``;
 - the field tools state theirs, and ``platform_field_inject`` (its handler calls
-  ``field.inject``) is a write the hierarchy gate accounts for;
+  ``field.inject``) is a write the hierarchy gate accounts for; so is
+  ``platform_field_query`` since US-C02d, whose read sweep caught it writing;
 - the hierarchy gate no longer reads a missing level as ``read``: it stops, naming
   the action.
 """
@@ -102,7 +103,7 @@ def test_every_registered_action_reads_writes_or_destroys():
 
 
 @pytest.mark.parametrize("name,level", [
-    ("platform_field_query", "read"),
+    ("platform_field_query", "write"),  # US-C02d: the read sweep caught it writing (K17)
     ("platform_field_inject", "write"),
     ("platform_field_stability", "read"),
 ])
@@ -131,7 +132,7 @@ def test_platform_field_inject_is_judged_a_write_wherever_the_level_is_read():
 
     assert classify_action("platform_field_inject", permission_level=level) == RISK_INTERNAL_WRITE
     assert is_read("platform_field_inject") is False
-    assert is_read("platform_field_query") is True
+    assert is_read("platform_field_stability") is True
 
 
 # ── the hierarchy gate ──────────────────────────────────────────────────────
