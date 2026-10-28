@@ -2,7 +2,8 @@
 
 * ``suggestions``: one workspace's suggestions in one state, newest first. ``everyone`` (an
   owner or admin) lists every person's; anyone else lists only the ones addressed to them
-  (``user_id``), and nothing without one.
+  (``user_id``), and nothing without one. The workspace's open suggestions past their 7 days
+  lapse first (``services.proactive.expiry``): they list as ``expired``, never ``open``.
 * ``runs``: one workspace's check-in runs since a time, newest first: the audit an owner
   compares with the tickets the heartbeats filed over the shadow week (§10). Without a time,
   the last ``RUNS_WINDOW``.
@@ -18,6 +19,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.proactive import ProactiveRun, ProactiveSuggestion
+from services.proactive.expiry import expire_lapsed
 
 __all__ = [
     "DEFAULT_RUNS",
@@ -40,9 +42,11 @@ RUNS_WINDOW = timedelta(days=7)
 def suggestions(db: Session, workspace_id: UUID, *, status: str, limit: int, everyone: bool,
                 user_id: Optional[int]) -> List[ProactiveSuggestion]:
     """The workspace's suggestions in ``status``, newest first: every person's when
-    ``everyone``, else ``user_id``'s alone (none without one)."""
+    ``everyone``, else ``user_id``'s alone (none without one). Open ones that have lapsed
+    are expired before the read."""
     if not everyone and user_id is None:
         return []
+    expire_lapsed(db, workspace_id, datetime.now(timezone.utc))
     query = db.query(ProactiveSuggestion).filter(
         ProactiveSuggestion.workspace_id == workspace_id, ProactiveSuggestion.status == status)
     if not everyone:

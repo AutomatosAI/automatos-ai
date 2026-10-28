@@ -4,11 +4,13 @@
 
 1. The suggestion is read in the caller's workspace; another workspace's id is
    ``not_found`` (404).
-2. What Start does is ``proposed_action.kind``: ``board_task`` and ``chat`` in W1. A Mission
+2. A suggestion that is no longer open is refused by its state (409): ``already_started``,
+   ``already_hidden`` or ``expired``. The workspace's open suggestions past their 7 days lapse
+   first (``services.proactive.expiry``), so a lapsed one is ``expired`` and files nothing,
+   whatever its kind.
+3. What Start does is ``proposed_action.kind``: ``board_task`` and ``chat`` in W1. A Mission
    or a playbook run answers ``not_available`` (409, K12) until US-C14, and so does any other
    kind.
-3. A suggestion that is no longer open is refused by its state (409): ``already_started``,
-   ``already_hidden`` or ``expired``.
 4. ``refuse_new_work`` (the day's spend ceiling, as board pickup) comes before anything is
    written: a refusal is ``spend_ceiling`` (409) and leaves the suggestion open.
 5. One ``UPDATE … WHERE status = 'open' RETURNING`` moves it to ``started`` with
@@ -25,7 +27,8 @@
 **Hide** (``hide``) is never gated: no switch, cap or spend check. The person it is
 addressed to, or (``any_row``) an owner or admin, moves it from open to ``hidden`` with
 ``hide_reason``, ``decided_via`` and ``decided_at``; a hidden suggestion hidden again is
-answered as it is. Started or expired, it is refused by its state.
+answered as it is. Started or expired (lapsed ones first, as for Start), it is refused by
+its state.
 
 Audit rows (``proactive:suggestion_started``, ``proactive:suggestion_hidden``; their details
 say where, by whom as ``user:<id>``, and what) are written after the decision's commit (K15):
@@ -54,6 +57,7 @@ from core.models.proactive import (
 )
 from modules.tools.discovery.suggestion_fields import BOARD_TASK, CHAT
 from services.proactive import start_ticket
+from services.proactive.expiry import expire_lapsed
 
 logger = logging.getLogger(__name__)
 
@@ -188,13 +192,15 @@ def _begin(db: Session, row: ProactiveSuggestion, kind: str, decider: Decider,
 
 def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider, locale: str) -> Started:
     """Start the suggestion, or raise ``Refused``."""
+    now = _now()
+    expire_lapsed(db, workspace_id, now)
     row = _find(db, workspace_id, suggestion_id)
+    _require_open(row)
     kind = _kind(row)
     if kind not in START_KINDS:
         raise Refused(NOT_AVAILABLE, HTTP_CONFLICT)
-    _require_open(row)
     _refuse_on_spend(db, row)
-    claimed = {"status": SUGGESTION_STARTED, "decided_via": decider.via, "decided_at": _now()}
+    claimed = {"status": SUGGESTION_STARTED, "decided_via": decider.via, "decided_at": now}
     if not _claim(db, row, claimed):
         raise _lost(db, workspace_id, suggestion_id)
     opens, task = _begin(db, row, kind, decider, locale)
@@ -212,13 +218,15 @@ def hide(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider,
          any_row: bool) -> Dict[str, Any]:
     """Hide the suggestion and answer it as it now is, or raise ``Refused``. ``any_row`` is an
     owner's or admin's; anyone else hides only what is addressed to them."""
+    now = _now()
+    expire_lapsed(db, workspace_id, now)
     row = _find(db, workspace_id, suggestion_id)
     if not any_row and (decider.user_pk is None or row.user_id != decider.user_pk):
         raise Refused(NOT_YOURS, HTTP_FORBIDDEN)
     if row.status == SUGGESTION_HIDDEN:
         return row.to_dict()
     _require_open(row)
-    hidden = {"status": SUGGESTION_HIDDEN, "hide_reason": reason, "decided_via": decider.via, "decided_at": _now()}
+    hidden = {"status": SUGGESTION_HIDDEN, "hide_reason": reason, "decided_via": decider.via, "decided_at": now}
     if not _claim(db, row, hidden):
         refusal = _lost(db, workspace_id, suggestion_id)
         if refusal.code == ALREADY_HIDDEN:  # a Hide at the same moment: hidden either way
