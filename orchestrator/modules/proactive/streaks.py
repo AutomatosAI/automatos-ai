@@ -8,8 +8,8 @@ as the streak's key writes them (``error_class_name``): "Timeout" and "timeout" 
 
 The interval stays the agent's own for the first two failures. From the third it doubles
 on every failure, up to 24 hours, and the first success brings it back (the count is 0).
-The 24 hours are the PRD's, whatever a workspace's interval cap: a failing agent still
-checks in once a day.
+The caller may pass a shorter ceiling (a workspace's ``max_interval_minutes``, which can
+only tighten the platform's); never a longer one: a failing agent still checks in once a day.
 """
 from __future__ import annotations
 
@@ -54,13 +54,15 @@ def consecutive_failures(runs_newest_first: Iterable[Any], error_class: str) -> 
     return count
 
 
-def next_interval(base_minutes: int, consecutive_failures: int) -> int:
+def next_interval(base_minutes: int, consecutive_failures: int,
+                  ceiling_minutes: int = MAX_STREAK_INTERVAL_MINUTES) -> int:
     """The minutes until an agent's next check-in: ``base_minutes`` until the third failure
-    in a row, then doubled per failure, up to 24 hours (or the base, when that is longer).
-    No failures, as after a success, is the base: the reset."""
+    in a row, then doubled per failure, up to ``ceiling_minutes`` (24 hours unless the caller
+    passes a shorter one; the base, when that is longer). No failures, as after a success,
+    is the base: the reset."""
     if base_minutes <= 0 or consecutive_failures < 0:
         raise ValueError("the interval is positive and the failure count is not negative")
-    ceiling = max(base_minutes, MAX_STREAK_INTERVAL_MINUTES)
+    ceiling = max(base_minutes, min(ceiling_minutes, MAX_STREAK_INTERVAL_MINUTES))
     interval = base_minutes
     for _ in range(consecutive_failures - DOUBLING_FROM + 1):
         interval *= 2
@@ -69,11 +71,12 @@ def next_interval(base_minutes: int, consecutive_failures: int) -> int:
     return interval
 
 
-def is_due(last_run_at: datetime, base_minutes: int, consecutive_failures: int, now: datetime) -> bool:
-    """True when ``next_interval`` has passed since the agent's last run: a streak's later
-    ticks are skipped until then.
+def is_due(last_run_at: datetime, base_minutes: int, consecutive_failures: int, now: datetime,
+           ceiling_minutes: int = MAX_STREAK_INTERVAL_MINUTES) -> bool:
+    """True when ``next_interval`` (up to ``ceiling_minutes``) has passed since the agent's
+    last run: a streak's later ticks are skipped until then.
 
     ``last_run_at`` is the agent's last run that was not skipped: a skipped tick never
     moves the clock on, or a streak's skips would keep the agent from ever being due.
     """
-    return now - last_run_at >= timedelta(minutes=next_interval(base_minutes, consecutive_failures))
+    return now - last_run_at >= timedelta(minutes=next_interval(base_minutes, consecutive_failures, ceiling_minutes))

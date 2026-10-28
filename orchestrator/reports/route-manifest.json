@@ -1,5 +1,5 @@
 {
-  "route_count": 988,
+  "route_count": 992,
   "routes": [
     {
       "method": "GET",
@@ -2079,7 +2079,23 @@
     },
     {
       "method": "GET",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "GET",
       "path": "/api/proactive/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/settings"
     },
     {
       "method": "GET",

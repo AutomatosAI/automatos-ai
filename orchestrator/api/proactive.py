@@ -1,4 +1,4 @@
-"""PRD-268 §6.2.5, FR-7, FR-14 — Proactive Auto's suggestions and runs (``/api/proactive``).
+"""PRD-268 §6.2.5, §6.9, FR-7, FR-13, FR-14 — Proactive Auto's suggestions, runs and settings (``/api/proactive``).
 
 * ``GET /suggestions?status=open`` — the suggestions in one state (``open`` by default),
   newest first: an owner or admin sees every person's in the workspace, anyone else only the
@@ -15,13 +15,21 @@
   or an owner or admin (a viewer is 403, even as the addressee). ``{suggestion}``.
 * ``GET /runs?since=`` — the workspace's check-in runs since a time (the last 7 days by
   default), newest first: owners and admins.
+* ``GET /settings`` and ``PUT /settings`` ``{enabled?, caps?}`` — the workspace switch and the
+  §6.9 caps, each cap over its default (owners and admins, the workspace manage permission):
+  ``{enabled, caps, platform_caps}``. A workspace can only tighten the platform's caps: a cap
+  looser than ``platform_caps`` is 422 ``caps_looser``, and caps that would not fit together
+  422 ``caps_wrong``; nothing is saved. A cap sent as null is back at its default. A change
+  is audited.
+* ``GET /me`` and ``PUT /me`` ``{paused}`` — the caller's own "Pause suggestions" in this
+  workspace (any member; no person behind the caller is 403): ``{paused}``. A change is audited.
 
 Another workspace's suggestion is 404. ``via`` says where the person decided (``web``,
 ``go``, ``push``, ``chat``, ``telegram``): left out, ``go`` for a paired device and ``web``
 otherwise. A refusal is ``{"code", "detail"}``, its sentence in English or Portuguese
-(Brazil) by ``Accept-Language`` (K13). The rules are ``services.proactive.decisions`` and
-``services.proactive.listing``. Plain ``def`` routes on the sync session, registered through
-``RouterSpec("api.proactive")`` in ``router_manifest.py``.
+(Brazil) by ``Accept-Language`` (K13). The rules are ``services.proactive.decisions``,
+``services.proactive.listing`` and ``services.proactive.settings``. Plain ``def`` routes on
+the sync session, registered through ``RouterSpec("api.proactive")`` in ``router_manifest.py``.
 """
 from __future__ import annotations
 
@@ -33,7 +41,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -52,19 +60,28 @@ from core.models.proactive import SUGGESTION_OPEN
 from modules.proactive.locale import request_locale
 from services.board_consent import actor_ref
 from services.proactive import decisions, listing
+from services.proactive import settings as proactive_settings
 from services.proactive.decision_text import say
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/proactive", tags=["proactive"])
 
-# Owners and admins: every person's suggestions, any suggestion's Hide, the runs.
+# Owners and admins: every person's suggestions, any suggestion's Hide, the runs, the settings.
 MANAGE_PERMISSION = "workspace:manage"
+# Every workspace role holds it: a member's own pause.
+MEMBER_PERMISSION = "members:read"
 NO_WORKSPACE = "no_workspace"
 NO_PERSON = "no_person"
 UNREADABLE = "unreadable"
 UNAVAILABLE = "unavailable"
-HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_UNAVAILABLE = 403, 404, 503
+SETTINGS_UNREADABLE = "settings_unreadable"
+SETTINGS_UNAVAILABLE = "settings_unavailable"
+CAPS_WRONG = "caps_wrong"
+CAPS_LOOSER = "caps_looser"
+CAPS_STORED_WRONG = "caps_stored_wrong"
+HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_UNPROCESSABLE, HTTP_UNAVAILABLE = 403, 404, 409, 422, 503
+PAUSED_KEY = "paused"
 VIA_WEB, VIA_GO = "web", "go"
 
 SuggestionStatus = Literal["open", "started", "hidden", "expired"]
@@ -87,6 +104,37 @@ class HideRequest(BaseModel):
 
     reason: Optional[HideReason] = None
     via: Optional[Via] = None
+
+
+class CapsChange(BaseModel):
+    """The caps a ``PUT …/settings`` changes: each a whole number, or null for its default."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_model_runs_per_day: Optional[StrictInt] = Field(None, ge=0)
+    max_suggestions_per_run: Optional[StrictInt] = Field(None, ge=0)
+    max_new_per_person_per_day: Optional[StrictInt] = Field(None, ge=0)
+    max_open_per_person: Optional[StrictInt] = Field(None, ge=0)
+    max_open_per_agent: Optional[StrictInt] = Field(None, ge=0)
+    min_interval_minutes: Optional[StrictInt] = Field(None, ge=1)
+    max_interval_minutes: Optional[StrictInt] = Field(None, ge=1)
+
+
+class SettingsRequest(BaseModel):
+    """``PUT …/settings``: the workspace switch and the caps to change; what is left out stays."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Optional[StrictBool] = None
+    caps: Optional[CapsChange] = None
+
+
+class PauseRequest(BaseModel):
+    """``PUT …/me``: pause the caller's suggestions, or resume them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paused: StrictBool
 
 
 @dataclass(frozen=True)
@@ -123,7 +171,7 @@ def _decider(db: Session, ctx: RequestContext, via: Optional[str]) -> decisions.
                              actor=actor_ref(ctx), via=via or default_via)
 
 
-def _unavailable(db: Session, locale: str, what: str, failure: SQLAlchemyError, code: str) -> JSONResponse:
+def _unavailable(db: Session, locale: str, what: str, failure: Exception, code: str) -> JSONResponse:
     db.rollback()
     logger.error("proactive %s failed: %s", what, type(failure).__name__)
     return _refused(locale, code, HTTP_UNAVAILABLE)
@@ -214,3 +262,92 @@ def list_runs(
     except SQLAlchemyError as failure:
         return _unavailable(db, locale, "run list", failure, UNREADABLE)
     return {"runs": [row.to_dict() for row in rows]}
+
+
+@router.get("/settings", response_model=None)
+def get_settings(
+    accept_language: Optional[str] = Header(None),
+    ctx: RequestContext = Depends(require_workspace_permission(MANAGE_PERMISSION)),
+    db: Session = Depends(get_db),
+) -> Union[Dict[str, Any], JSONResponse]:
+    """The workspace switch and its caps, each over its default."""
+    locale = request_locale(accept_language)
+    if ctx.workspace_id is None:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    try:
+        current = proactive_settings.read_workspace(db, ctx.workspace_id)
+    except proactive_settings.NoWorkspace:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    except proactive_settings.CapsWrong:
+        logger.warning("proactive caps of workspace %s are stored wrong", ctx.workspace_id)
+        return _refused(locale, CAPS_STORED_WRONG, HTTP_CONFLICT)
+    except SQLAlchemyError as failure:
+        return _unavailable(db, locale, "settings read", failure, SETTINGS_UNREADABLE)
+    return current.to_dict()
+
+
+@router.put("/settings", response_model=None)
+def put_settings(
+    body: SettingsRequest,
+    accept_language: Optional[str] = Header(None),
+    ctx: RequestContext = Depends(require_workspace_permission(MANAGE_PERMISSION)),
+    db: Session = Depends(get_db),
+) -> Union[Dict[str, Any], JSONResponse]:
+    """Switch the workspace's check-ins on or off and change its caps."""
+    locale = request_locale(accept_language)
+    if ctx.workspace_id is None:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    caps = body.caps.model_dump(exclude_unset=True) if body.caps is not None else {}
+    try:
+        changed = proactive_settings.change_workspace(db, ctx.workspace_id, body.enabled, caps,
+                                                      resolve_user_pk(db, ctx), actor_ref(ctx))
+    except proactive_settings.NoWorkspace:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    except proactive_settings.CapsLooser:
+        return _refused(locale, CAPS_LOOSER, HTTP_UNPROCESSABLE)
+    except proactive_settings.CapsWrong:
+        return _refused(locale, CAPS_WRONG, HTTP_UNPROCESSABLE)
+    except SQLAlchemyError as failure:
+        return _unavailable(db, locale, "settings write", failure, SETTINGS_UNAVAILABLE)
+    return changed.to_dict()
+
+
+@router.get("/me", response_model=None)
+def get_my_settings(
+    accept_language: Optional[str] = Header(None),
+    ctx: RequestContext = Depends(require_workspace_permission(MEMBER_PERMISSION)),
+    db: Session = Depends(get_db),
+) -> Union[Dict[str, Any], JSONResponse]:
+    """The caller's own proactive settings in this workspace: ``{paused}``."""
+    locale = request_locale(accept_language)
+    if ctx.workspace_id is None:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    try:
+        user_pk = resolve_user_pk(db, ctx)
+        if user_pk is None:
+            return _refused(locale, NO_PERSON, HTTP_FORBIDDEN)
+        paused = proactive_settings.read_pause(db, ctx.workspace_id, user_pk)
+    except SQLAlchemyError as failure:
+        return _unavailable(db, locale, "pause read", failure, SETTINGS_UNREADABLE)
+    return {PAUSED_KEY: paused}
+
+
+@router.put("/me", response_model=None)
+def put_my_settings(
+    body: PauseRequest,
+    accept_language: Optional[str] = Header(None),
+    ctx: RequestContext = Depends(require_workspace_permission(MEMBER_PERMISSION)),
+    db: Session = Depends(get_db),
+) -> Union[Dict[str, Any], JSONResponse]:
+    """Pause the caller's suggestions in this workspace, or resume them."""
+    locale = request_locale(accept_language)
+    if ctx.workspace_id is None:
+        return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
+    try:
+        user_pk = resolve_user_pk(db, ctx)
+        if user_pk is None:
+            return _refused(locale, NO_PERSON, HTTP_FORBIDDEN)
+        paused = proactive_settings.change_pause(db, ctx.workspace_id, user_pk, body.paused, actor_ref(ctx))
+    except SQLAlchemyError as failure:
+        return _unavailable(db, locale, "pause write", failure, SETTINGS_UNAVAILABLE)
+    return {PAUSED_KEY: paused}

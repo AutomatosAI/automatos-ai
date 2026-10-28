@@ -14,8 +14,9 @@
 else off. In ``shadow`` today's heartbeats run unchanged and check-ins run beside them; in
 ``live`` check-ins run instead (the bridge, US-C04b).
 
-The runner (US-C03d) reads these at every run start. The settings routes that write the
-workspace switch and the pause are US-C07a's.
+The runner (US-C03d) reads these at every run start. ``GET``/``PUT /api/proactive/settings``
+and ``/api/proactive/me`` read and write the workspace switch and the pause
+(``services.proactive.settings``).
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ __all__ = [
     "SETTINGS_CATEGORY",
     "WORKSPACE_KEY",
     "effective_mode",
+    "enabled_in",
     "person_paused",
     "platform_mode",
     "read_mode",
@@ -77,6 +79,12 @@ def platform_mode() -> str:
     return read_mode(stored if stored not in (None, "") else config.PROACTIVE_MODE_DEFAULT)
 
 
+def enabled_in(settings: Any) -> bool:
+    """Whether a workspace's ``settings`` switch check-ins on: ``settings.proactive.enabled`` is true."""
+    proactive = settings.get(WORKSPACE_KEY) if isinstance(settings, dict) else None
+    return isinstance(proactive, dict) and proactive.get(KEY_ENABLED) is True
+
+
 def workspace_enabled(db: Session, workspace_id: Any) -> bool:
     """Whether the workspace switched check-ins on (``settings.proactive.enabled`` is true).
     A read that fails is off, and logged; the caller's transaction is left usable."""
@@ -88,9 +96,7 @@ def workspace_enabled(db: Session, workspace_id: Any) -> bool:
     except Exception:  # noqa: BLE001 — a read that did not complete fails closed
         logger.exception("[proactive] the workspace switch of %s could not be read: off", workspace_id)
         return False
-    settings = row[0] if row is not None else None
-    proactive = settings.get(WORKSPACE_KEY) if isinstance(settings, dict) else None
-    return isinstance(proactive, dict) and proactive.get(KEY_ENABLED) is True
+    return enabled_in(row[0] if row is not None else None)
 
 
 def effective_mode(db: Session, workspace_id: Any) -> str:

@@ -13,8 +13,8 @@ Two check-ins, each one run with one ``proactive_runs`` row (``services.proactiv
   has no pre-check: its interval is its cost lever (§6.9).
 
 Each first checks, in order, the switches, ``background_allowed``, the day's spend ceiling
-and the caps (``services.proactive.gates``). A refusal writes its run row and makes no
-model call. The turn (``services.proactive.loop``) runs on ``LLMManager(service_name=
+and the workspace's caps (``services.proactive.gates``). A refusal writes its run row and
+makes no model call. The turn (``services.proactive.loop``) runs on ``LLMManager(service_name=
 'heartbeat')``, the platform's ``orchestrator_llm`` model, never the agent's own (K9), as
 one ask in the ``check_in`` lane, which only credits beyond the trial pay for (K14). Its
 suggestions are recorded by ``platform_suggest_next_step``, addressed to the workspace
@@ -172,7 +172,7 @@ def _prepare_agent(db: Session, record: RunRecord, hb_config: Dict[str, Any],
 
     workspace_id, agent_id = record.workspace_id, record.agent_id
     owner = owner_id(db, workspace_id)
-    refusal = (start_refusal(db, workspace_id, owner, now, f"agent {agent_id}'s check-in")
+    refusal = (start_refusal(db, workspace_id, owner, now, f"agent {agent_id}'s check-in", agent_id)
                or held_back(db, workspace_id, agent_id, hb_config, now))
     if refusal is not None:
         return _refused(db, record, refusal)

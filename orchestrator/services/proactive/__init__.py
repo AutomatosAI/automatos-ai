@@ -8,7 +8,8 @@ decide on.
 - :mod:`services.proactive.runner`: the two check-ins, Auto's workspace check-in and an
   agent's, each one run in the read-only lane (§6.2.1, §6.9). It uses
   :mod:`~services.proactive.switches` (the platform mode, the workspace switch, the
-  person's pause), :mod:`~services.proactive.gates` (what refuses a run's start),
+  person's pause), :mod:`~services.proactive.limits` (the workspace's caps over the config
+  defaults, and what they count), :mod:`~services.proactive.gates` (what refuses a run's start),
   :mod:`~services.proactive.runs` (the run rows), :mod:`~services.proactive.prompts`,
   :mod:`~services.proactive.loop` (the tool loop) and :mod:`~services.proactive.reads`
   (the run's read log, which a suggestion's evidence must come from).
@@ -22,5 +23,6 @@ decide on.
 - :mod:`services.proactive.decisions`: a person's Start or Hide of a suggestion (§6.2.5), the
   ticket a Start files in :mod:`~services.proactive.start_ticket`, and what the routes say in
   :mod:`~services.proactive.decision_text`; :mod:`~services.proactive.listing` lists the
-  suggestions and the runs for ``api/proactive.py``.
+  suggestions and the runs for ``api/proactive.py``, and :mod:`~services.proactive.settings`
+  reads and writes the workspace switch, its caps and a person's pause for it (§6.9).
 """

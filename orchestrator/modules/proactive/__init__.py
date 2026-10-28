@@ -7,7 +7,8 @@ these functions decide. Nothing here mutates its arguments.
   run, else the last 24 hours (§6.2.1).
 - :mod:`modules.proactive.dedupe`: subject keys, normalised titles, and the rule that
   a suggestion repeats neither an open one nor one hidden in the last 14 days (§6.2.4).
-- :mod:`modules.proactive.caps`: the §6.9 caps and the checks that refuse past them.
+- :mod:`modules.proactive.caps`: the §6.9 caps and the checks that refuse past them,
+  a check-in's minimum interval among them.
 - :mod:`modules.proactive.streaks`: failing streaks, and the interval that doubles
   from the third failure up to 24 hours (§6.2.2).
 - :mod:`modules.proactive.provenance`: a suggestion cites only reads its own run
@@ -15,7 +16,15 @@ these functions decide. Nothing here mutates its arguments.
 - :mod:`modules.proactive.heartbeats`: which heartbeats become check-ins, an
   agent's ``check_in`` or ``act`` and the orchestrator's proactive levels (K10).
 """
-from modules.proactive.caps import CapRefusal, Caps, clamp_interval, oldest_to_expire, run_refusal, suggestion_refusal
+from modules.proactive.caps import (
+    CapRefusal,
+    Caps,
+    clamp_interval,
+    interval_refusal,
+    oldest_to_expire,
+    run_refusal,
+    suggestion_refusal,
+)
 from modules.proactive.dedupe import (
     Candidate,
     agent_error_key,
@@ -53,6 +62,7 @@ __all__ = [
     "error_class_name",
     "find_duplicate",
     "heartbeat_mode",
+    "interval_refusal",
     "is_due",
     "is_duplicate",
     "last_success_at",

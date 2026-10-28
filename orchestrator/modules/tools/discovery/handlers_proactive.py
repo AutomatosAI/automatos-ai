@@ -10,15 +10,17 @@ It refuses, with a sentence the model reads, a call that:
   its agent) reach it only from the server, through ``check_in_lane.carries_the_check_in``;
 * is not a suggestion: ``suggestion_fields.read_suggestion`` reads every argument;
 * cites a read the run did not make (provenance, ``modules.proactive.provenance_ok``);
-* passes a §6.9 cap: three per run, ten new per person a day, three open per agent
-  (``modules.proactive.suggestion_refusal``, with the §6.9 defaults; a workspace's own caps
-  and the open-per-person expiry are US-C07a's);
+* passes a §6.9 cap: per run, new per person a day, open per agent, by the workspace's own
+  caps over the config defaults (``services.proactive.limits``); caps that are wrong refuse
+  every suggestion;
 * repeats an open suggestion, or one hidden in the last 14 days ("Already suggested: …");
 * proposes a ticket for an agent that is not in the workspace.
 
-The open-row unique index (workspace, person, subject key) settles a race between two
-check-ins: the insert runs in a savepoint, and the loser is told it was already suggested.
-Any other integrity error is raised, and the executor reports the action failed.
+Past ``max_open_per_person`` the person's oldest open suggestions expire to make room, in
+the insert's savepoint, so a lost insert expires nothing. The open-row unique index
+(workspace, person, subject key) settles a race between two check-ins: the insert runs in
+a savepoint, and the loser is told it was already suggested. Any other integrity error is
+raised, and the executor reports the action failed.
 
 On success the handler commits the session it was given, as the other write handlers do.
 """
@@ -34,11 +36,13 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models.proactive import SUGGESTION_HIDDEN, SUGGESTION_OPEN, ProactiveSuggestion
-from modules.proactive import CapRefusal, Candidate, Caps, find_duplicate, provenance_ok, suggestion_refusal
+from core.models.proactive import SUGGESTION_EXPIRED, SUGGESTION_HIDDEN, SUGGESTION_OPEN, ProactiveSuggestion
+from modules.proactive import CapRefusal, Candidate, Caps, find_duplicate, oldest_to_expire, provenance_ok
 from modules.proactive.dedupe import HIDDEN_WINDOW
 from modules.tools.discovery.check_in_lane import CHECK_IN_PARAM
 from modules.tools.discovery.suggestion_fields import PAYLOAD_AGENT, Suggestion, read_suggestion
+from services.proactive.limits import room_refusal, workspace_caps
+from services.proactive.runs import suggestions_made
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +52,6 @@ __all__ = ["suggest_next_step"]
 # check-in, which is its heartbeat converted (source_type 'heartbeat').
 SOURCE_CHECK_IN = "check_in"
 SOURCE_AGENT_CHECK_IN = "heartbeat"
-# "New suggestions per person per day" (§6.9) counts the last 24 hours.
-NEW_PER_DAY_WINDOW = timedelta(hours=24)
 # Open suggestions expire after 7 days (§6.2.4).
 OPEN_LIFETIME = timedelta(days=7)
 
@@ -60,6 +62,7 @@ NO_ADDRESSEE = "This workspace has no owner to suggest to, so nothing was record
 CAPPED = "No more suggestions now: the {cap} cap is {limit}. Record nothing more."
 ALREADY_SUGGESTED = "Already suggested: {title}"
 NO_SUCH_AGENT = "There is no agent {agent_id} in this workspace to give the ticket to."
+CAPS_WRONG = "This workspace's suggestion caps are set wrong, so nothing can be recorded. Record nothing more."
 
 NOT_IN_A_CHECK_IN_CODE = "not_in_a_check_in"
 NOT_A_SUGGESTION_CODE = "not_a_suggestion"
@@ -68,6 +71,7 @@ NO_ADDRESSEE_CODE = "no_addressee"
 CAPPED_CODE = "suggestion_cap"
 ALREADY_SUGGESTED_CODE = "already_suggested"
 NO_SUCH_AGENT_CODE = "no_such_agent"
+CAPS_WRONG_CODE = "caps_wrong"
 
 
 @dataclass(frozen=True)
@@ -112,21 +116,35 @@ def _addressee(db: Session, workspace_id: UUID) -> Optional[int]:
     return int(owner.id) if owner is not None else None
 
 
-def _count(db: Session, *criteria: Any) -> int:
-    return int(db.query(func.count(ProactiveSuggestion.id)).filter(*criteria).scalar() or 0)
+def _caps(db: Session, workspace_id: UUID) -> Optional[Caps]:
+    """The workspace's caps; None when they are wrong (logged)."""
+    try:
+        return workspace_caps(db, workspace_id)
+    except ValueError:
+        logger.exception("[proactive] the caps of workspace %s are wrong: no suggestion recorded", workspace_id)
+        return None
 
 
-def _cap_refusal(db: Session, workspace_id: UUID, user_id: int, run: _Run, now: datetime) -> Optional[CapRefusal]:
+def _cap_refusal(db: Session, workspace_id: UUID, user_id: int, run: _Run, caps: Caps,
+                 now: datetime) -> Optional[CapRefusal]:
     """The §6.9 cap one more suggestion would pass, or None."""
-    in_workspace = ProactiveSuggestion.workspace_id == workspace_id
-    made = _count(db, in_workspace, ProactiveSuggestion.run_id == run.run_id)
-    new_today = _count(db, in_workspace, ProactiveSuggestion.user_id == user_id,
-                       ProactiveSuggestion.created_at >= now - NEW_PER_DAY_WINDOW)
-    open_for_agent = 0 if run.agent_id is None else _count(
-        db, in_workspace, ProactiveSuggestion.source_agent_id == run.agent_id,
-        ProactiveSuggestion.status == SUGGESTION_OPEN)
-    return suggestion_refusal(Caps(), made_this_run=made, new_today_for_person=new_today,
-                              open_for_agent=open_for_agent)
+    return room_refusal(db, workspace_id, user_id, run.agent_id, caps, now,
+                        made_this_run=suggestions_made(db, workspace_id, run.run_id))
+
+
+def _make_room(db: Session, workspace_id: UUID, user_id: int, caps: Caps, now: datetime) -> int:
+    """Expire the person's oldest open suggestions so that one more fits under
+    ``max_open_per_person``; how many expired."""
+    open_rows = db.query(ProactiveSuggestion.id, ProactiveSuggestion.created_at).filter(
+        ProactiveSuggestion.workspace_id == workspace_id, ProactiveSuggestion.user_id == user_id,
+        ProactiveSuggestion.status == SUGGESTION_OPEN).all()
+    expired = [row.id for row in oldest_to_expire(caps, open_rows)]
+    if expired:
+        db.query(ProactiveSuggestion).filter(
+            ProactiveSuggestion.id.in_(expired), ProactiveSuggestion.status == SUGGESTION_OPEN,
+        ).update({ProactiveSuggestion.status: SUGGESTION_EXPIRED, ProactiveSuggestion.expires_at: now},
+                 synchronize_session=False)
+    return len(expired)
 
 
 def _duplicate(db: Session, workspace_id: UUID, user_id: int, suggestion: Suggestion,
@@ -161,9 +179,10 @@ def _unknown_agent(db: Session, workspace_id: UUID, suggestion: Suggestion) -> O
     return None if found else agent_id
 
 
-def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion: Suggestion,
+def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion: Suggestion, caps: Caps,
             now: datetime) -> Optional[ProactiveSuggestion]:
-    """The new open row, committed; None when a concurrent check-in holds its open subject key."""
+    """The new open row, the oldest past the open cap expired, committed; None when a
+    concurrent check-in holds its open subject key."""
     row = ProactiveSuggestion(
         workspace_id=workspace_id, user_id=user_id,
         source_type=SOURCE_CHECK_IN if run.agent_id is None else SOURCE_AGENT_CHECK_IN,
@@ -175,6 +194,7 @@ def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion
     )
     try:
         with db.begin_nested():
+            expired = _make_room(db, workspace_id, user_id, caps, now)
             db.add(row)
             db.flush()
     except IntegrityError:
@@ -183,6 +203,9 @@ def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion
         logger.info("[proactive] run %s: subject already open in workspace %s", run.run_id, workspace_id)
         return None
     db.commit()
+    if expired:
+        logger.info("[proactive] run %s expired %d open suggestion(s) for room in %s", run.run_id, expired,
+                    workspace_id)
     return row
 
 
@@ -192,7 +215,10 @@ def _record(db: Session, workspace_id: UUID, run: _Run, suggestion: Suggestion) 
     user_id = _addressee(db, workspace_id)
     if user_id is None:
         return _refusal(NO_ADDRESSEE, NO_ADDRESSEE_CODE)
-    cap = _cap_refusal(db, workspace_id, user_id, run, now)
+    caps = _caps(db, workspace_id)
+    if caps is None:
+        return _refusal(CAPS_WRONG, CAPS_WRONG_CODE)
+    cap = _cap_refusal(db, workspace_id, user_id, run, caps, now)
     if cap is not None:
         return _refusal(CAPPED.format(cap=cap.cap, limit=cap.limit), CAPPED_CODE)
     duplicate = _duplicate(db, workspace_id, user_id, suggestion, now)
@@ -201,7 +227,7 @@ def _record(db: Session, workspace_id: UUID, run: _Run, suggestion: Suggestion) 
     unknown = _unknown_agent(db, workspace_id, suggestion)
     if unknown is not None:
         return _refusal(NO_SUCH_AGENT.format(agent_id=unknown), NO_SUCH_AGENT_CODE)
-    row = _insert(db, workspace_id, user_id, run, suggestion, now)
+    row = _insert(db, workspace_id, user_id, run, suggestion, caps, now)
     if row is None:
         return _refusal(ALREADY_SUGGESTED.format(title=suggestion.title), ALREADY_SUGGESTED_CODE)
     logger.info("[proactive] run %s suggested %s in workspace %s", run.run_id, row.id, workspace_id)

@@ -7,14 +7,18 @@ that allows nothing.
 
 Each check takes the counts its caller read and returns None when the work may go ahead,
 else a ``CapRefusal`` naming the cap: the runner records its ``outcome`` as the run's, and
-the suggestion tool tells the model which cap it reached.
+the suggestion tool tells the model which cap it reached. ``interval_refusal`` holds a
+check-in to ``min_interval_minutes`` after the last one that ran. How often a heartbeat
+fires is its scheduler's: ``max_interval_minutes`` is the longest a failing streak holds a
+check-in back (``services.proactive.failing_streaks``).
 
 The open-per-person cap is not a refusal: the oldest open suggestions expire to make
-room (``oldest_to_expire``).
+room (``oldest_to_expire``), unless it is 0.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from datetime import datetime, timedelta
 from typing import Any, Iterable, Optional, Tuple
 
 __all__ = [
@@ -22,6 +26,7 @@ __all__ = [
     "CapRefusal",
     "Caps",
     "clamp_interval",
+    "interval_refusal",
     "oldest_to_expire",
     "run_refusal",
     "suggestion_refusal",
@@ -38,6 +43,7 @@ MAX_NEW_PER_PERSON_PER_DAY = 10
 MAX_OPEN_PER_PERSON = 20
 MAX_OPEN_PER_AGENT = 3
 MAX_PUSHES_PER_PERSON_PER_DAY = 2
+NO_GRACE = timedelta(0)
 
 
 @dataclass(frozen=True)
@@ -88,14 +94,29 @@ def run_refusal(caps: Caps, model_runs_today: int) -> Optional[CapRefusal]:
     return _reached(caps, "max_model_runs_per_day", model_runs_today)
 
 
+def interval_refusal(caps: Caps, last_ran_at: Optional[datetime], now: datetime,
+                     grace: timedelta = NO_GRACE) -> Optional[CapRefusal]:
+    """None when a check-in may run ``now``, given when its last run that ran started (None:
+    none has); else the refusal of ``min_interval_minutes``, its count the whole minutes since.
+    ``grace`` is the scheduler's: a fire that close to due is the one due."""
+    if last_ran_at is None or now + grace - last_ran_at >= timedelta(minutes=caps.min_interval_minutes):
+        return None
+    minutes = max(0, int((now - last_ran_at).total_seconds() // 60))
+    return CapRefusal(cap="min_interval_minutes", limit=caps.min_interval_minutes, count=minutes)
+
+
 def suggestion_refusal(caps: Caps, *, made_this_run: int, new_today_for_person: int,
-                       open_for_agent: int) -> Optional[CapRefusal]:
+                       open_for_agent: Optional[int]) -> Optional[CapRefusal]:
     """None when one more suggestion may be made, else the first cap it would pass: per
-    run, then new per person per day, then open per source agent (pass 0 for none)."""
+    run, then new per person per day, then open per source agent (None when there is no
+    source agent, as for Auto's check-in). The open-per-person cap only refuses at 0, where
+    no suggestion may stay open; above it the oldest open ones expire (``oldest_to_expire``)."""
+    if caps.max_open_per_person == 0:
+        return CapRefusal(cap="max_open_per_person", limit=0, count=0)
     checks = (
         ("max_suggestions_per_run", made_this_run),
         ("max_new_per_person_per_day", new_today_for_person),
-        ("max_open_per_agent", open_for_agent),
+        *((("max_open_per_agent", open_for_agent),) if open_for_agent is not None else ()),
     )
     for cap, count in checks:
         refusal = _reached(caps, cap, count)

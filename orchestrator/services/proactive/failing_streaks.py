@@ -13,8 +13,9 @@ and the agent's newest runs before it that failed with the same class, skips pas
   detail and evidence) and makes none. A streak whose card the person hid or started gets
   no other, and neither does one whose card they hid in the last 14 days (§6.2.4).
 * **The slower check-in.** From the third failure in a row, ``held_back`` skips the agent's
-  check-ins until ``next_interval`` (doubling up to 24 hours) has passed since its last run,
-  less the scheduler's few minutes of grace. Each skip is a ``skipped_cap`` run
+  check-ins until ``next_interval`` (doubling up to 24 hours, or the workspace's
+  ``max_interval_minutes`` when that is shorter) has passed since its last run, less the
+  scheduler's few minutes of grace. Each skip is a ``skipped_cap`` run
   (``failing_streak``) with no model call, and the card says how often the agent checks in now.
 * **The reset.** The first run that works ends every streak of the agent: its open cards
   expire, their detail saying the check-ins work again, and with no failure left to count
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
@@ -47,12 +48,19 @@ from core.models.proactive import (
 )
 from modules.proactive.dedupe import HIDDEN_WINDOW, agent_error_key, agent_error_prefix
 from modules.proactive.provenance import MAX_EVIDENCE
-from modules.proactive.streaks import DOUBLING_FROM, consecutive_failures, is_due, next_interval
+from modules.proactive.streaks import (
+    DOUBLING_FROM,
+    MAX_STREAK_INTERVAL_MINUTES,
+    consecutive_failures,
+    is_due,
+    next_interval,
+)
 from modules.proactive.window import SUCCESSFUL_OUTCOMES
 from modules.tools.discovery.handlers_proactive import OPEN_LIFETIME
 from modules.tools.discovery.suggestion_fields import BOARD_TASK, PAYLOAD_AGENT
 from services.proactive.gates import Refusal
-from services.proactive.runs import KIND_AGENT, finished_runs, owner_id
+from services.proactive.limits import workspace_caps
+from services.proactive.runs import KIND_AGENT, SCHEDULER_GRACE, finished_runs, owner_id, ran_at
 from services.proactive.streak_text import streak_detail, streak_title, works_again_detail
 
 logger = logging.getLogger(__name__)
@@ -61,8 +69,8 @@ __all__ = [
     "DEFAULT_INTERVAL_MINUTES",
     "FAILING_STREAK",
     "SOURCE_STREAK",
-    "SCHEDULER_GRACE",
     "base_minutes",
+    "ceiling_minutes",
     "held_back",
     "holds",
     "note_run",
@@ -77,9 +85,6 @@ STREAK_SEVERITY = "today"
 DEFAULT_INTERVAL_MINUTES = 60
 # The finished runs a streak is counted from: the interval reaches its 24 hours long before.
 STREAK_READ_LIMIT = 50
-# The scheduler fires on the clock, and a run starts a moment after its fire (the bridge reads the
-# mode and the active hours first): a tick this close to due is the one due, not the one after it.
-SCHEDULER_GRACE = timedelta(minutes=5)
 RUN_REF = "run"
 # Today's name for an agent whose row is gone (_dispatch_heartbeat_notification).
 UNNAMED_AGENT = "agent-{agent_id}"
@@ -96,6 +101,8 @@ class _Failure:
     error_class: str
     base_minutes: int
     now: datetime
+    # The longest a streak holds the agent back: the workspace's max_interval_minutes, at most 24 hours.
+    ceiling_minutes: int = MAX_STREAK_INTERVAL_MINUTES
 
     @property
     def key(self) -> str:
@@ -116,11 +123,6 @@ def base_minutes(hb_config: Optional[Dict[str, Any]]) -> int:
     return minutes if minutes > 0 else DEFAULT_INTERVAL_MINUTES
 
 
-def _ran_at(run: Any) -> datetime:
-    """When a run started reading (its window's end, set at its start), else when it was written."""
-    return run.window_until or run.created_at
-
-
 def _streak(runs: Sequence[Any], error_class: Optional[str]) -> Tuple[Any, ...]:
     """The newest runs that failed in a row with ``error_class``, newest first."""
     return tuple(runs[:consecutive_failures(runs, error_class or "")])
@@ -130,22 +132,35 @@ def _agent_runs(db: Session, workspace_id: UUID, agent_id: int) -> Tuple[Proacti
     return finished_runs(db, workspace_id, KIND_AGENT, agent_id, STREAK_READ_LIMIT)
 
 
-def holds(runs: Sequence[Any], base: int, now: datetime) -> bool:
+def holds(runs: Sequence[Any], base: int, now: datetime, ceiling: int = MAX_STREAK_INTERVAL_MINUTES) -> bool:
     """Whether an agent's newest finished runs (``outcome``, ``error_class``,
     ``window_until``, ``created_at``; newest first) hold its next check-in back: a streak of
-    three or more failures whose ``next_interval`` has not passed since its last run, less
-    ``SCHEDULER_GRACE``."""
+    three or more failures whose ``next_interval`` (up to ``ceiling`` minutes) has not
+    passed since its last run, less ``SCHEDULER_GRACE``."""
     if not runs or runs[0].outcome != RUN_ERROR:
         return False
     count = len(_streak(runs, runs[0].error_class))
-    return count >= DOUBLING_FROM and not is_due(_ran_at(runs[0]), base, count, now + SCHEDULER_GRACE)
+    return count >= DOUBLING_FROM and not is_due(ran_at(runs[0]), base, count, now + SCHEDULER_GRACE, ceiling)
+
+
+def ceiling_minutes(db: Session, workspace_id: UUID) -> int:
+    """The longest a failing streak holds the workspace's agents back: its
+    ``max_interval_minutes``, at most the PRD's 24 hours. Caps that cannot be read keep
+    the 24 hours, the fewest runs (logged)."""
+    try:
+        with db.begin_nested():
+            return min(workspace_caps(db, workspace_id).max_interval_minutes, MAX_STREAK_INTERVAL_MINUTES)
+    except Exception:  # noqa: BLE001 — the longest hold makes the fewest runs
+        logger.exception("[proactive] the caps of %s could not be read: streaks hold for 24 hours", workspace_id)
+        return MAX_STREAK_INTERVAL_MINUTES
 
 
 def held_back(db: Session, workspace_id: UUID, agent_id: int, hb_config: Optional[Dict[str, Any]],
               now: datetime) -> Optional[Refusal]:
     """``skipped_cap`` (``failing_streak``) while the agent's failing streak holds its
     check-in back, else None to go ahead."""
-    if holds(_agent_runs(db, workspace_id, agent_id), base_minutes(hb_config), now):
+    runs = _agent_runs(db, workspace_id, agent_id)
+    if holds(runs, base_minutes(hb_config), now, ceiling_minutes(db, workspace_id)):
         return Refusal(RUN_SKIPPED_CAP, FAILING_STREAK)
     return None
 
@@ -198,14 +213,14 @@ def _seen_again(card: ProactiveSuggestion, failure: _Failure, streak: Sequence[P
     stays open while the agent fails, and its detail says how long the streak is, read from
     the runs, and how often the agent checks in now."""
     occurrences = int(card.occurrences or 0) + 1
-    count, since = len(streak), _ran_at(streak[-1])
+    count, since = len(streak), ran_at(streak[-1])
     if count >= STREAK_READ_LIMIT:  # the streak reaches past the runs read: its card, made at its start, knows
         count, since = max(count, occurrences), min(since, card.created_at)
     card.occurrences = occurrences
     card.last_seen_at = failure.now
     card.expires_at = failure.now + OPEN_LIFETIME
     card.detail = streak_detail(failure.error_class, count, since, failure.base_minutes,
-                                next_interval(failure.base_minutes, len(streak)))
+                                next_interval(failure.base_minutes, len(streak), failure.ceiling_minutes))
     card.evidence = _evidence(streak)
 
 
@@ -215,8 +230,8 @@ def _add_card(db: Session, failure: _Failure, streak: Sequence[ProactiveRun]) ->
     row = ProactiveSuggestion(
         workspace_id=failure.workspace_id, user_id=failure.user_id, source_type=SOURCE_STREAK,
         source_agent_id=failure.agent_id, run_id=first.id, title=streak_title(failure.name, failure.error_class),
-        detail=streak_detail(failure.error_class, count, _ran_at(first), failure.base_minutes,
-                             next_interval(failure.base_minutes, count)),
+        detail=streak_detail(failure.error_class, count, ran_at(first), failure.base_minutes,
+                             next_interval(failure.base_minutes, count, failure.ceiling_minutes)),
         evidence=_evidence(streak), proposed_action=_fix_it(db, failure.workspace_id), subject_key=failure.key,
         severity=STREAK_SEVERITY, status=SUGGESTION_OPEN, occurrences=count, last_seen_at=failure.now,
         created_at=failure.now, expires_at=failure.now + OPEN_LIFETIME,
@@ -238,7 +253,8 @@ def _note_failure(db: Session, run: Any, workspace_id: UUID, agent_id: int, base
     if name is None or user_id is None or not streak:
         return
     failure = _Failure(workspace_id=workspace_id, user_id=user_id, agent_id=agent_id, name=name,
-                       error_class=str(run.error_class), base_minutes=base, now=now)
+                       error_class=str(run.error_class), base_minutes=base, now=now,
+                       ceiling_minutes=ceiling_minutes(db, workspace_id))
     card = _open_card(db, failure)
     if card is not None:
         _seen_again(card, failure, streak)

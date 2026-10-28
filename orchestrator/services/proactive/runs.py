@@ -45,12 +45,14 @@ __all__ = [
     "MAX_TITLES",
     "MODEL_RUN_WINDOW",
     "RunRecord",
+    "SCHEDULER_GRACE",
     "finished_runs",
     "known_titles",
     "last_success",
     "model_runs_today",
     "owner_id",
     "previous_finished",
+    "ran_at",
     "suggestions_made",
     "write_run",
 ]
@@ -64,6 +66,9 @@ MODEL_RUN_WINDOW = timedelta(hours=24)
 MAX_TITLES = 20
 # The outcomes of a run that read: a skipped run neither counts in a streak nor ends it.
 FINISHED_OUTCOMES = frozenset(SUCCESSFUL_OUTCOMES | {RUN_ERROR})
+# The scheduler fires on the clock, and a run starts a moment after its fire (the bridge reads the
+# mode and the active hours first): a tick this close to due is the one due, not the one after it.
+SCHEDULER_GRACE = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,11 @@ def write_run(db: Session, record: RunRecord) -> ProactiveRun:
     db.add(row)
     db.commit()
     return row
+
+
+def ran_at(run: Any) -> datetime:
+    """When a run started reading (its window's end, set at its start), else when it was written."""
+    return run.window_until or run.created_at
 
 
 def _newest_first() -> Tuple[Any, ...]:
