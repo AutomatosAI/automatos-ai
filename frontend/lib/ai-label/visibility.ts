@@ -10,10 +10,8 @@
  * - it is in the page, and neither its words nor any element around them is `display: none`;
  *   the words are `visibility: visible`; the product of their and their ancestors' opacity is at
  *   least MIN_LABEL_OPACITY;
- * - nothing around the words cuts or repaints them: no `clip-path`, mask or `filter`, no
- *   `content-visibility: hidden`, and no `-webkit-text-stroke` wider than MAX_TEXT_STROKE_PX (a stroke
- *   in the background's colour blots the glyphs while the fill passes), on the words, the label or an
- *   ancestor ('paint');
+ * - nothing around the words cuts or repaints them: no `clip-path`, mask or `filter`, and no
+ *   `content-visibility: hidden`, on the words, the label or an ancestor ('paint');
  * - the font is at least MIN_FONT_SIZE_PX ('font');
  * - the colour the words are filled with (`-webkit-text-fill-color`, else `color`) is not
  *   transparent and has at least MIN_TEXT_CONTRAST against the colour behind them: the first
@@ -22,12 +20,9 @@
  * - no ::first-line or ::first-letter rule reaches the words or an element around them ('paint'),
  *   and, where the browser reports those pseudo-elements' styles, theirs keep the words opaque,
  *   visible and at contrast too ('color'): line-pseudos.ts;
- * - neither the words' element nor the label has a ::before or ::after (any `content` but none or
- *   normal): one of the words' own pseudo-elements hit-tests as the words, so the hit-test below
- *   can't see it drawn over them, and one that adds text changes what the label says ('paint').
- *   Only these two: an ancestor's pseudo-element hit-tests as that ancestor, so the hit-test sees
- *   it, and themes paint the page's own (scan lines on <body>, say). Where the browser doesn't
- *   report pseudo-element styles (CSS.supports), the read is skipped, as in line-pseudos.ts;
+ * - the words' text stroke doesn't blot them, and neither the words' element nor the label has a
+ *   ::before or ::after, read from the rules and, where the browser reports them, the computed
+ *   styles ('paint'): own-paint.ts;
  * - the label's box is at least MIN_LABEL_SIZE_PX each way ('size') and inside the viewport
  *   ('viewport');
  * - the words themselves, measured as a Range, are at least a real line of text (MIN_FONT_SIZE_PX
@@ -52,7 +47,9 @@
  * (docs/theme-host/css-layer-model.md).
  */
 import { canvasGrounds, contrastRatio, isOpaque, over, parseCssColor, type Rgba } from './contrast'
-import { lineRulesReach, lineStylesHide, pseudoStylesReadable } from './line-pseudos'
+import { lineRulesReach, lineStylesHide } from './line-pseudos'
+import { ownPseudosDrawn, strokeHides } from './own-paint'
+import { type StyleRuleRead, readableStyleRules } from './pseudo-rules'
 
 export type AiLabelHiddenReason =
   /** The check itself threw (a theme's code may have patched what it calls): the label counts as hidden. */
@@ -84,8 +81,6 @@ export const MIN_FONT_SIZE_PX = 9
 export const MIN_TEXT_CONTRAST = 3
 /** The narrowest a character is drawn, as a share of the font size, so a squeezed line reads as hidden. */
 export const MIN_GLYPH_WIDTH_EM = 0.3
-/** A text stroke wider than this can blot the glyphs out (in the background's colour). */
-export const MAX_TEXT_STROKE_PX = 0.5
 /** Hit-test points evenly across each line of the words, ends included. */
 export const SAMPLE_POINTS_PER_LINE = 9
 /** And this many more per line, at random places, new each check. */
@@ -94,8 +89,6 @@ export const JITTERED_POINTS_PER_LINE = 2
 const HIDDEN_VISIBILITY = new Set(['hidden', 'collapse'])
 const NO_PAINT_CHANGE = new Set(['', 'none'])
 const PAINT_PROPERTIES = ['clip-path', 'mask-image', '-webkit-mask-image', 'filter'] as const
-const OWN_PSEUDOS = ['::before', '::after'] as const
-const NO_CONTENT = new Set(['', 'none', 'normal'])
 /** Keeps a hit-test point this far inside a line's ends, and its random height inside the line's middle half. */
 const LINE_END_INSET_PX = 2
 const LINE_MIDDLE = { from: 0.25, span: 0.5 }
@@ -131,18 +124,10 @@ function nearestValue(styles: readonly CSSStyleDeclaration[], property: string):
   return styles.map((style) => style.getPropertyValue(property).trim()).find((value) => value !== '') ?? ''
 }
 
-/** The text stroke's width in px: the longhand, else the shorthand's leading length; 0 when there is none. */
-function textStrokePx(style: CSSStyleDeclaration): number {
-  const longhand = Number.parseFloat(style.getPropertyValue('-webkit-text-stroke-width'))
-  const shorthand = Number.parseFloat(style.getPropertyValue('-webkit-text-stroke'))
-  return Math.max(Number.isFinite(longhand) ? longhand : 0, Number.isFinite(shorthand) ? shorthand : 0)
-}
-
 function repainted(style: CSSStyleDeclaration): boolean {
   return (
     PAINT_PROPERTIES.some((property) => !NO_PAINT_CHANGE.has(style.getPropertyValue(property).trim())) ||
-    style.getPropertyValue('content-visibility').trim() === 'hidden' ||
-    textStrokePx(style) > MAX_TEXT_STROKE_PX
+    style.getPropertyValue('content-visibility').trim() === 'hidden'
   )
 }
 
@@ -154,13 +139,15 @@ function hiddenByStyle(styles: readonly CSSStyleDeclaration[]): AiLabelHiddenRea
   return styles.some(repainted) ? 'paint' : null
 }
 
-/** Whether the words' element or the label has a ::before or ::after (see the module's note on why only these). */
-function hiddenByOwnPseudos(label: Element, words: Element, view: Window): AiLabelHiddenReason | null {
-  if (!pseudoStylesReadable(view, '::before')) return null
-  const elements = words === label ? [label] : [words, label]
-  const drawn = (element: Element) =>
-    OWN_PSEUDOS.some((pseudo) => !NO_CONTENT.has(view.getComputedStyle(element, pseudo).content.trim()))
-  return elements.some(drawn) ? 'paint' : null
+/** The words' text stroke, as their element computes it (own-paint.ts). */
+function hiddenByStroke(styles: readonly CSSStyleDeclaration[], grounds: readonly Rgba[], fontSize: number): AiLabelHiddenReason | null {
+  const stroke = {
+    width: nearestValue(styles, '-webkit-text-stroke-width'),
+    shorthand: nearestValue(styles, '-webkit-text-stroke'),
+    color: nearestValue(styles, '-webkit-text-stroke-color'),
+    fill: nearestValue(styles, '-webkit-text-fill-color') || styles[0].color,
+  }
+  return strokeHides(stroke, grounds, fontSize, MIN_TEXT_CONTRAST) ? 'paint' : null
 }
 
 function hiddenByFont(styles: readonly CSSStyleDeclaration[]): AiLabelHiddenReason | null {
@@ -189,8 +176,13 @@ function hiddenByColour(styles: readonly CSSStyleDeclaration[], grounds: readonl
 }
 
 /** What ::first-line and ::first-letter do to the words (line-pseudos.ts). */
-function hiddenByLinePseudos(chain: readonly Element[], grounds: readonly Rgba[], view: Window): AiLabelHiddenReason | null {
-  if (lineRulesReach(chain, view.document)) return 'paint'
+function hiddenByLinePseudos(
+  chain: readonly Element[],
+  grounds: readonly Rgba[],
+  view: Window,
+  rules: readonly StyleRuleRead[],
+): AiLabelHiddenReason | null {
+  if (lineRulesReach(chain, rules)) return 'paint'
   const limits = { minOpacity: MIN_LABEL_OPACITY, minContrast: MIN_TEXT_CONTRAST }
   return lineStylesHide(chain, grounds, view, limits) ? 'color' : null
 }
@@ -321,15 +313,17 @@ export function aiLabelHiddenReason(element: Element | null, view: Window): AiLa
   const chain = selfAndAncestors(words)
   const styles = chain.map((node) => view.getComputedStyle(node))
   const grounds = groundsBehind(styles, view)
+  const fontSize = Number.parseFloat(nearestValue(styles, 'font-size')) || MIN_FONT_SIZE_PX
+  const rules = readableStyleRules(view.document)
   const early =
     hiddenByStyle(styles) ??
     hiddenByFont(styles) ??
     hiddenByColour(styles, grounds) ??
-    hiddenByLinePseudos(chain, grounds ?? [], view) ??
-    hiddenByOwnPseudos(element, words, view) ??
+    hiddenByStroke(styles, grounds ?? [], fontSize) ??
+    hiddenByLinePseudos(chain, grounds ?? [], view, rules) ??
+    (ownPseudosDrawn(element, words, view, rules) ? 'paint' : null) ??
     hiddenByBox(element, view)
   if (early !== null) return early
   const measured = measureWords(words)
-  const fontSize = Number.parseFloat(nearestValue(styles, 'font-size')) || MIN_FONT_SIZE_PX
   return hiddenText(element, words, measured, fontSize, view) ?? hiddenByCover(words, measured)
 }

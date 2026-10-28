@@ -278,7 +278,16 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['a mask', `html.${HOSTILE_CLASS} [role="note"] { mask-image: linear-gradient(transparent, transparent); }`, 'paint'],
   ['a filter on an ancestor', `html.${HOSTILE_CLASS} body { filter: opacity(0); }`, 'paint'],
   ['a tiny font', `html.${HOSTILE_CLASS} [role="note"] { font-size: 4px; }`, 'font'],
-  ['a text stroke that blots the glyphs', `html.${HOSTILE_CLASS} [role="note"] { -webkit-text-stroke-width: 2px; }`, 'paint'],
+  // a 3px stroke in the ground's own colour on 24px type: not thick enough to fill the glyphs, but it blots them
+  [
+    'a text stroke in the colour of the ground',
+    `html.${HOSTILE_CLASS} [role="note"] { font-size: 24px; -webkit-text-stroke-width: 3px; -webkit-text-stroke-color: Canvas; }`,
+    'paint',
+  ],
+  ['a text stroke thick enough to fill the glyphs (0.3em), in any colour', `html.${HOSTILE_CLASS} [role="note"] { font-size: 12px; -webkit-text-stroke-width: 0.3em; -webkit-text-stroke-color: rgb(0, 0, 0); }`, 'paint'],
+  // ::before and ::after of the words or the label, read from the rules (jsdom reports no pseudo-element styles)
+  ['a ::before of the words, by its rule', `html.${HOSTILE_CLASS} [role="note"] span::before { content: ""; position: absolute; inset: 0; }`, 'paint'],
+  ['an :after of the label that adds words, by its rule', `html.${HOSTILE_CLASS} p[role="note"]:after { content: " (not really)"; }`, 'paint'],
   // ::first-line and ::first-letter paint the words without showing in getComputedStyle(element)
   ['a blank first line', `html.${HOSTILE_CLASS} [role="note"]::first-line { color: transparent; }`, 'paint'],
   ['a first letter with no fill', `html.${HOSTILE_CLASS} p[role="note"]::first-letter { -webkit-text-fill-color: transparent; }`, 'paint'],
@@ -425,6 +434,26 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     } finally {
       delete (window as { CSS?: unknown }).CSS
     }
+  })
+
+  it.each([
+    [
+      'a thin outline in a colour that stands out from the ground',
+      `html.${HOSTILE_CLASS} [role="note"] { font-size: 12px; -webkit-text-stroke-width: 1px; -webkit-text-stroke-color: rgb(0, 0, 0); }`,
+    ],
+    [
+      'pseudo-elements that draw nothing, or belong to the page',
+      `html.${HOSTILE_CLASS} *, html.${HOSTILE_CLASS} ::before, html.${HOSTILE_CLASS} ::after { box-sizing: border-box; }\n` +
+        `html.${HOSTILE_CLASS} [role="note"] span::before { color: red; }\n` +
+        `html.${HOSTILE_CLASS} body::before { content: ""; position: fixed; inset: 0; }`,
+    ],
+  ])('reads %s as no harm: the label is seen, with no copy and no warning', (_name, css) => {
+    document.documentElement.classList.add(HOSTILE_CLASS)
+    addThemeSheet(css)
+    renderChat('default')
+    expect(aiLabelHiddenReason(theLabel(), window)).toBeNull()
+    expect(captionHost()).toBeNull()
+    expect(hostWarnings()).toEqual([])
   })
 
   it.each([
