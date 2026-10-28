@@ -2254,6 +2254,9 @@ class Config:
     # A check-in's interval: one sooner than the minimum after the last is refused.
     PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
     PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
+    # its item reads not_checked. At least a tenth of a second.
+    READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
 
     # =============================================================================
     # PRD-251 Socials

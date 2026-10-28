@@ -56,6 +56,10 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # PRD-266 W2 review: POST /api/v1/mobile/devices, one bucket per client IP (an IPv6 /64), the same
     # way as mobile_pair_ip. Each registration can add a push target: a script cannot add thousands.
     "mobile_devices_ip": config.rate_limit_for("mobile_devices_ip", 30, 600),  # 30 registrations per IP per 10 minutes
+    # PRD-268 US-C18: POST /api/readiness/check ("Check again"), one bucket per workspace, counted off
+    # the event loop by api/readiness.py through RateLimitStore. GET /api/readiness answers the last
+    # check while it is younger than this window.
+    "readiness_check": config.rate_limit_for("readiness_check", 3, 60),     # 3 checks per workspace per minute
 }
 
 

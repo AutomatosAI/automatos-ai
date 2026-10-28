@@ -1,5 +1,5 @@
 {
-  "route_count": 992,
+  "route_count": 994,
   "routes": [
     {
       "method": "GET",
@@ -2136,6 +2136,14 @@
     {
       "method": "GET",
       "path": "/api/rag/feedback/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness"
+    },
+    {
+      "method": "POST",
+      "path": "/api/readiness/check"
     },
     {
       "method": "POST",
