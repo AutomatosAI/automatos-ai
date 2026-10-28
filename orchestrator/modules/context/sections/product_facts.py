@@ -47,10 +47,13 @@ HOSTED_EDITION = (
 # PRD-261 A-07d added Appearance (Themes: install, opt in, choose), in both editions.
 # PRD-266 US-005c added Phones & devices (the device list; pairing on a local install in
 # paired mode), in both editions.
+# Voice holds the workspace's own Auto Live switch (real-time voice calls with Auto), in
+# both editions; the platform's own setup (Retell credentials, the platform-wide on/off)
+# is a platform admin's, under System Settings instead.
 # PRD-265 W2 added Billing (plan, credits, checkout, the ledger), in the hosted edition
 # only: the local edition never bills, so there it still has no such tab (#88).
 SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
-                 "Phones & devices", "Socials", "Appearance", "Widget SDK")
+                 "Phones & devices", "Voice", "Socials", "Appearance", "Widget SDK")
 LOCAL_SETTINGS_TABS = ("Profile", "Session mode")
 HOSTED_SETTINGS_TABS = ("Billing",)
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
