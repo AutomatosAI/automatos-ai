@@ -17,6 +17,9 @@ The lane is enforced in depth, failing closed, by two decorators:
   ``platform_execute`` dispatcher) is refused before anything routes it. Composio calls
   never reach the platform executor, so this layer is the one that stops them.
 
+What a check-in is shown matches what it may run: ``offered_in_a_check_in`` is the rule
+the ``read_only`` tool strategy (``ContextMode.CHECK_IN``, US-C02c) loads by.
+
 ``caller_context`` is the plain dict the server builds for a call. Its ``lane`` key is
 new here: ``"check_in"`` marks a check-in's call. With any other value, or none, both
 executors run exactly as they did before the lane existed.
@@ -75,6 +78,24 @@ def is_a_platform_action(tool_name: Any) -> bool:
     return isinstance(tool_name, str) and tool_name.startswith(PLATFORM_PREFIX) and tool_name != PLATFORM_DISPATCHER
 
 
+def offered_in_a_check_in(action: Any) -> bool:
+    """PRD-268 US-C02c: whether a check-in's tool surface (``ContextMode.CHECK_IN``) offers
+    ``action``, a registered definition. It must be a platform action that is positively
+    ``read``, or ``platform_suggest_next_step``; needs no admin; and can run on this server.
+    The surface offers nothing the two decorators below would refuse, so the model is
+    never shown a tool it may not call."""
+    name = getattr(action, "name", None)
+    if not is_a_platform_action(name):
+        return False
+    if getattr(action, "admin_only", False) or getattr(action, "super_admin_only", False):
+        return False
+    if name != SUGGEST_NEXT_STEP and getattr(action, "permission_level", None) != READ_LEVEL:
+        return False
+    from modules.tools.discovery.action_registry import action_is_available
+
+    return action_is_available(action)
+
+
 def reads_only_in_a_check_in(clear: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap ``PlatformActionExecutor.clear``: in a check-in, a call that is not positively
     read (or ``platform_suggest_next_step``) is refused before any other gate. Outside
@@ -117,6 +138,7 @@ __all__ = [
     "in_a_check_in",
     "is_a_platform_action",
     "may_clear_in_a_check_in",
+    "offered_in_a_check_in",
     "platform_actions_only_in_a_check_in",
     "reads_only_in_a_check_in",
 ]

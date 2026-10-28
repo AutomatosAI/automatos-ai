@@ -21,6 +21,7 @@ class ContextMode(str, Enum):
     NL2SQL = "nl2sql"
     COORDINATOR = "coordinator"
     PLANNING = "planning"
+    CHECK_IN = "check_in"
 
 
 # PRD-229: ``ask_orchestrator`` (a worker asks the orchestrator a clarification)
@@ -114,7 +115,7 @@ class ModeConfig:
     """Declarative configuration for a context mode."""
 
     sections: list[str] = field(default_factory=list)
-    tool_loading: str = "none"          # full, filtered, dispatcher_only, none
+    tool_loading: str = "none"          # full, filtered, dispatcher_only, read_only, none
     personality: bool = False
     max_tokens: Optional[int] = None    # None = use model default
 
@@ -243,5 +244,17 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         tool_loading="none",
         personality=False,
         max_tokens=None,
+    ),
+    # personality=False: a check-in (PRD-268 §6.2) is a background turn that looks and
+    # suggests; nobody reads it as a conversation. The lean 12,000-token context (K9) holds
+    # the agent's prompt, its field digest and the task. read_only loads only the read
+    # platform actions plus platform_suggest_next_step: no Composio, plugin, workspace or
+    # sub-agent tools, and no platform_execute dispatcher. The executor refuses the rest
+    # in the lane (modules/tools/discovery/check_in_lane.py).
+    ContextMode.CHECK_IN: ModeConfig(
+        sections=["identity", "field_memory", "datetime_context", "task_context"],
+        tool_loading="read_only",
+        personality=False,
+        max_tokens=12000,
     ),
 }
