@@ -7,8 +7,9 @@ vosso blog", "constrói-se").
 
 Now, when the turn names a locale (``api.chat_models.ChatRequest.locale``, already a checked
 BCP 47 tag), ``StreamingChatService.stream_response_with_agent`` keeps it for the turn and
-``_prepare_messages`` (the ATOM and the full path; a spoken turn and a typed one) ends Auto's
-system prompt with one line naming the language and its variant. The person still decides: the
+``_prepare_messages`` (the ATOM and the full path; a spoken turn and a typed one) adds one line
+naming the language and its variant to Auto's system prompt, after the spoken-output contract
+and before the brand kit's rules, which stay last (service.py). The person still decides: the
 line says to reply in another language when they write or speak in one. Without a locale the
 messages are the very list prepared, so a client that sends none sees no change.
 """
