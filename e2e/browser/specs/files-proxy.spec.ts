@@ -8,14 +8,27 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 // origin, /api/themes/files/<digest>/<path> (frontend/app/api/themes/files/[...path]/route.ts),
 // which forwards to the backend's files route (A-08a). Unlike the other theme specs, nothing is
 // intercepted: fixtures/hello-a08b/build.py builds A-06a's hello-clip package under its own id,
-// it is uploaded to the local backend and opted in to, and the standalone server proxies it.
+// it is uploaded to the local backend and opted in to, and the standalone server proxies it. The
+// package carries two clips of the same source: HEVC (assets/mascot/idle.mp4, Safari's alpha
+// format) and VP9 (assets/mascot/idle-vp9.webm, an extra member, not a declared mascot state).
 //
-// 1. A Range request for the clip comes back 206 with its Content-Range, through the proxy.
-// 2. A <video> on the app's page loads the clip through the proxy, with no failed answer, and
-//    plays it where this browser build decodes the clip. Chromium's media loader asks in ranges,
-//    so there the 206 is required; Playwright's Linux WebKit loads the clip with one plain request
-//    (the CI run saw [0, 200]), so there the Range proof is test 1's explicit request only.
+// 1. A Range request for the HEVC clip comes back 206 with its Content-Range, through the proxy.
+// 2. A <video> on the app's page loads the HEVC clip through the proxy, with no failed answer,
+//    and plays it where this browser build actually decodes it (§"decodable", below).
+//    Chromium's media loader asks in ranges, so there the 206 is required; Playwright's Linux
+//    WebKit loads the clip with one plain request (the CI run saw [0, 200]), so there the Range
+//    proof is test 1's explicit request only.
 // 3. A request made to register a service worker (Service-Worker: script) is refused with 403.
+// 4. A <video> loads the VP9 clip through the proxy and plays it where this build decodes VP9 —
+//    a playback proof that doesn't depend on HEVC, which 1.64.1's WebKit claims it can decode
+//    (canPlayType answers non-empty) but can't actually play (#1363): "decodable" below is never
+//    canPlayType's optimistic non-empty check alone.
+//
+// decodable: MediaCapabilities.decodingInfo() where the browser has it (it was built for exactly
+// this — an honest "can this engine actually decode this stream" answer, not canPlayType's
+// best-effort guess), else canPlayType(...) === 'probably'. A clip whose "decodable" comes back
+// false is recorded as an unproven playback, not a failure: some CI browser builds genuinely
+// can't decode one codec or the other, and that is not what this spec is proving.
 
 const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://localhost:8000'
 const BUILDER = path.resolve(__dirname, '..', 'fixtures', 'hello-a08b', 'build.py')
@@ -23,8 +36,20 @@ const PACKAGE_NAME = 'hello-a08b.autotheme'
 const PACKAGE_TYPE = 'application/zip'
 const CLIP_PATH = 'assets/mascot/idle.mp4'
 const CLIP_TYPE = 'video/mp4'
-// The clip is PRD-260's idle.mp4, HEVC with alpha (Safari's format for it).
+// The clip is PRD-260's idle.mp4, HEVC with alpha (Safari's format for it): 512×512, ~24fps,
+// ~5.04s (read from its moov box — mdhd's timescale/duration, stsd's hvc1 sample entry, stts).
 const CLIP_CODEC = 'video/mp4; codecs="hvc1"'
+const CLIP_WIDTH = 512
+const CLIP_HEIGHT = 512
+const CLIP_FRAMERATE = 24
+const CLIP_BITRATE = 244_865
+// The same clip, VP9: automatos-design-kit's public/auto/idle.webm, same 512×512/~24fps/~5.04s
+// (read from its EBML: Tracks' PixelWidth/PixelHeight, Info's Duration/TimecodeScale). A second,
+// non-HEVC playback proof (#1363) — an extra package member, not a declared mascot state.
+const CLIP2_PATH = 'assets/mascot/idle-vp9.webm'
+const CLIP2_TYPE = 'video/webm'
+const CLIP2_CODEC = 'video/webm; codecs="vp9"'
+const CLIP2_BITRATE = 115_960
 const FIRST_BYTES = 'bytes=0-99'
 const FIRST_BYTES_LENGTH = 100
 const PAGE_PATH = '/chat'
@@ -63,8 +88,8 @@ async function installClip(request: APIRequestContext): Promise<string> {
   return answer.package.digest
 }
 
-function clipUrl(digest: string): string {
-  return `/api/themes/files/${digest}/${CLIP_PATH}`
+function clipUrl(digest: string, clipPath: string = CLIP_PATH): string {
+  return `/api/themes/files/${digest}/${clipPath}`
 }
 
 interface VideoOutcome {
@@ -73,13 +98,43 @@ interface VideoOutcome {
   readonly error: number | null
 }
 
-/** Puts a muted <video> for `src` on the page; whether this build decodes the clip, and whether it played. */
-function playVideo(page: Page, src: string): Promise<VideoOutcome> {
+/** What a browser is asked whether it can actually decode, in MediaCapabilities' own shape. */
+interface ClipProof {
+  readonly codec: string
+  readonly width: number
+  readonly height: number
+  readonly bitrate: number
+  readonly framerate: number
+}
+
+const HEVC_CLIP: ClipProof = {
+  codec: CLIP_CODEC, width: CLIP_WIDTH, height: CLIP_HEIGHT, bitrate: CLIP_BITRATE, framerate: CLIP_FRAMERATE,
+}
+const VP9_CLIP: ClipProof = {
+  codec: CLIP2_CODEC, width: CLIP_WIDTH, height: CLIP_HEIGHT, bitrate: CLIP2_BITRATE, framerate: CLIP_FRAMERATE,
+}
+
+/**
+ * Puts a muted <video> for `src` on the page; whether this build actually decodes `proof`'s
+ * codec, and whether it played. "Actually": MediaCapabilities.decodingInfo() where the browser
+ * has it — the API built for this question — else canPlayType() === 'probably'; never
+ * canPlayType() !== '', whose 'maybe' is WebKit 1.64.1 claiming HEVC it then can't play (#1363).
+ */
+function playVideo(page: Page, src: string, proof: ClipProof): Promise<VideoOutcome> {
   return page.evaluate(
-    ({ src, codec, timeoutMs }) =>
-      new Promise<VideoOutcome>((resolve) => {
-        const video = document.createElement('video')
-        const decodable = video.canPlayType(codec) !== ''
+    async ({ src, proof, timeoutMs }) => {
+      const video = document.createElement('video')
+      const capabilities = navigator.mediaCapabilities
+      const videoConfig = {
+        contentType: proof.codec, width: proof.width, height: proof.height, bitrate: proof.bitrate, framerate: proof.framerate,
+      }
+      const decodable = capabilities
+        ? await capabilities
+            .decodingInfo({ type: 'file', video: videoConfig })
+            .then((result) => result.supported)
+            .catch(() => video.canPlayType(proof.codec) === 'probably')
+        : video.canPlayType(proof.codec) === 'probably'
+      return new Promise<VideoOutcome>((resolve) => {
         const settle = (played: boolean) => resolve({ decodable, played, error: video.error?.code ?? null })
         const timer = window.setTimeout(() => settle(false), timeoutMs)
         video.addEventListener('timeupdate', () => {
@@ -96,8 +151,9 @@ function playVideo(page: Page, src: string): Promise<VideoOutcome> {
         video.src = src
         document.body.append(video)
         video.play().catch(() => undefined)
-      }),
-    { src, codec: CLIP_CODEC, timeoutMs: PLAY_TIMEOUT_MS },
+      })
+    },
+    { src, proof, timeoutMs: PLAY_TIMEOUT_MS },
   )
 }
 
@@ -121,7 +177,7 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
       if (new URL(response.url()).pathname === src) statuses.push(response.status())
     })
     await page.goto(PAGE_PATH)
-    const outcome = await playVideo(page, src)
+    const outcome = await playVideo(page, src, HEVC_CLIP)
     await expect.poll(() => statuses.length, 'the <video> asked the proxy for the clip').toBeGreaterThan(0)
     if (testInfo.project.name === RANGED_MEDIA_PROJECT) {
       await expect.poll(() => statuses).toContain(PARTIAL_CONTENT)
@@ -142,5 +198,20 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
     const digest = await installClip(request)
     const response = await request.get(`/api/themes/files/${digest}/dist/entry.js`, { headers: { 'Service-Worker': 'script' } })
     expect(response.status()).toBe(403)
+  })
+
+  test('plays a VP9 clip through the proxy, proving playback without depending on HEVC', { tag: '@host' }, async ({ page, request }) => {
+    const src = clipUrl(await installClip(request), CLIP2_PATH)
+    const response = await request.get(src)
+    expect(response.ok(), `GET ${src} answered ${response.status()}: ${await response.text()}`).toBe(true)
+    expect(response.headers()['content-type']).toBe(CLIP2_TYPE)
+    await page.goto(PAGE_PATH)
+    const outcome = await playVideo(page, src, VP9_CLIP)
+    if (outcome.decodable) {
+      expect(outcome, 'a browser that decodes VP9 plays the clip through the proxy').toMatchObject({ played: true })
+    } else {
+      // Unproven here, not failed: VP9 isn't decodable in this build; the HEVC test covers 206/Range.
+      test.info().annotations.push({ type: 'unproven', description: `${CLIP2_CODEC} is not decodable in this build` })
+    }
   })
 })

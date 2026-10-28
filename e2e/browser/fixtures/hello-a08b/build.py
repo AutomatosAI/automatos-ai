@@ -7,6 +7,13 @@ other files is refused with a 409. The builder is loaded from its file, as it lo
 bare ``python3`` runs this::
 
     python3 e2e/browser/fixtures/hello-a08b/build.py --out hello-a08b.autotheme
+
+It also carries a second clip, ``assets/mascot/idle-vp9.webm``: the same clip, VP9, from
+``automatos-design-kit``'s ``public/auto/idle.webm`` (copied to ``variants/idle.webm`` next to
+``idle.mp4``). The HEVC clip above only proves the 206/Range path; this one lets the spec prove
+actual playback through the proxy on an engine that doesn't need an HEVC decoder to do it. It is
+an extra package member (``FILE_KINDS``'s ``clip`` kind already allows ``.webm``, PRD-261 §4.2),
+not a declared mascot state, so it carries no mobile-manifest obligation.
 """
 from __future__ import annotations
 
@@ -23,6 +30,7 @@ BUILDER = REPO_ROOT / "orchestrator" / "tests" / "fixtures" / "themes" / "build.
 VARIANT = "hello-clip"
 THEME_ID = "automatos-e2e/hello-a08b"
 THEME_NAME = "Hello clip (A-08b)"
+VP9_CLIP_PATH = "assets/mascot/idle-vp9.webm"
 
 
 def load_builder() -> ModuleType:
@@ -36,11 +44,16 @@ def load_builder() -> ModuleType:
 
 
 def build_clip_package() -> bytes:
-    """The hello-clip package with this fixture's theme id and name."""
+    """The hello-clip package with this fixture's theme id and name, plus the VP9 clip."""
     builder = load_builder()
     manifest = json.loads(builder.hello_members(VARIANT)[builder.MANIFEST])
     renamed = {**manifest, "id": THEME_ID, "name": THEME_NAME}
-    return builder.build_package(VARIANT, replace={builder.MANIFEST: builder.manifest_bytes(renamed)})
+    vp9_clip = (builder.VARIANTS_DIR / "idle.webm").read_bytes()
+    return builder.build_package(
+        VARIANT,
+        replace={builder.MANIFEST: builder.manifest_bytes(renamed)},
+        extra=[(VP9_CLIP_PATH, vp9_clip)],
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
