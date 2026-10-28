@@ -23,19 +23,28 @@ The states, by §6.11.1's table:
 Try again, for a failed row only: a ticket runs again (``retry_ticket``, the board's Run
 now), a Mission is replanned (``replan_mission``, which keeps its finished steps).
 ``rerun_mission`` (a new Mission from the same goal) completes the vocabulary.
+
+US-C17b: the Missions list and the board's ticket reads say the same, from their own status
+(``mission_status``, ``ticket_status``). They read no needs-you kind, with one exception
+each way: a Mission waiting for its plan's approval is a needs-you approval row (needs_you()
+lists every one), and a ticket in Review is working only while its Mission checks it; one
+the owner judges is needs_you()'s to say, so a board read draws nothing for it.
 """
 from __future__ import annotations
 
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional
 
-from services.needs_you import KINDS, OPENS_MISSION
+from core.models.orchestration_enums import RunState
+from core.services.ticket_reasons import MISSION_CHECKING
+from modules.proactive.locale import DEFAULT_LOCALE
+from services.needs_you import KINDS, MISSION_CARD, OPENS_MISSION
 from services.proactive.strings import APPROVAL_PLAN, FAILED_MISSION, STUCK_REASONS, say
 
 __all__ = [
     "BOARD_TASK", "DISPLAY_STATES", "DONE", "FAILED", "GRANT", "MISSION", "NEEDS_YOU", "READY",
     "REPLAN_MISSION", "RERUN_MISSION", "RETRIES", "RETRY_TICKET", "WORKING", "display_state",
-    "needs_you_with_status", "next_step", "retry", "row_status",
+    "mission_status", "needs_you_with_status", "next_step", "retry", "row_status", "ticket_status",
 ]
 
 NEEDS_YOU = "needs_you"
@@ -58,6 +67,10 @@ RETRIES = (RERUN_MISSION, REPLAN_MISSION, RETRY_TICKET)
 
 KIND_STUCK = "stuck"
 KIND_FAILED = "failed"
+KIND_APPROVAL = "approval"
+REVIEW = "review"
+# A Mission's step on the board; a Mission's own card is services.needs_you's MISSION_CARD.
+MISSION_STEP = "orchestration_task"
 # The needs-you kinds that wait for a person; the other one, failed, is failed.
 _ASKS_A_PERSON = frozenset(KINDS) - {KIND_FAILED}
 
@@ -75,7 +88,15 @@ _BY_STATUS: Mapping[str, Mapping[str, str]] = MappingProxyType({
 })
 _RETRY: Mapping[str, str] = MappingProxyType({BOARD_TASK: RETRY_TICKET, MISSION: REPLAN_MISSION})
 # A Mission's own approval and failure say what is done to the Mission.
-_MISSION_SENTENCE: Mapping[str, str] = MappingProxyType({"approval": APPROVAL_PLAN, KIND_FAILED: FAILED_MISSION})
+_MISSION_SENTENCE: Mapping[str, str] = MappingProxyType({KIND_APPROVAL: APPROVAL_PLAN, KIND_FAILED: FAILED_MISSION})
+# The needs-you kind a Mission's state reads as. needs_you() lists every Mission waiting for
+# its plan's approval as an approval row (services/needs_you.py _MISSION_ROWS); a failed
+# Mission is its own card's failed row.
+_MISSION_STATE_KIND: Mapping[str, str] = MappingProxyType({
+    RunState.AWAITING_APPROVAL.value: KIND_APPROVAL, RunState.FAILED.value: KIND_FAILED,
+})
+_NO_STATUS: Mapping[str, Optional[str]] = MappingProxyType(
+    {"display_state": None, "next_step": None, "retry": None})
 
 
 def display_state(source: str, status: Any, kind: Optional[str] = None) -> Optional[str]:
@@ -123,6 +144,37 @@ def row_status(kind: str, row: Mapping[str, Any], locale: str) -> Dict[str, Opti
         "next_step": next_step(locale, kind, source=source, why=row.get("why")),
         "retry": retry(source, None, kind),
     }
+
+
+def mission_status(state: Any, locale: str = DEFAULT_LOCALE) -> Dict[str, Optional[str]]:
+    """The three fields a Mission's row gains from its ``state`` (a string or the enum
+    member): waiting for its plan's approval it needs you, failed it is replanned."""
+    value = getattr(state, "value", state)
+    kind = _MISSION_STATE_KIND.get(value) if isinstance(value, str) else None
+    return {
+        "display_state": display_state(MISSION, value, kind),
+        "next_step": next_step(locale, kind, source=MISSION) if kind else None,
+        "retry": retry(MISSION, value, kind),
+    }
+
+
+def ticket_status(task: Any, review_code: Optional[str], locale: str = DEFAULT_LOCALE) -> Dict[str, Optional[str]]:
+    """The three fields a board ticket gains from its status. ``review_code`` is its
+    ``review_reason``: in Review it is working only while its Mission checks it. A failed
+    Mission card is its Mission's failure (replanned); a failed step is its Mission's to
+    handle (services/needs_you.py), so nothing on the board tries it again."""
+    status = getattr(task, "status", None)
+    if status == REVIEW and review_code != MISSION_CHECKING:
+        return dict(_NO_STATUS)
+    state = display_state(BOARD_TASK, status)
+    if state != FAILED:
+        return {**_NO_STATUS, "display_state": state}
+    source = getattr(task, "source_type", None)
+    if source == MISSION_STEP:
+        return {**_NO_STATUS, "display_state": FAILED}
+    if source == MISSION_CARD and getattr(task, "orchestration_run_id", None):
+        return mission_status(RunState.FAILED, locale)
+    return {"display_state": FAILED, "next_step": next_step(locale, KIND_FAILED), "retry": RETRY_TICKET}
 
 
 def needs_you_with_status(needs: Mapping[str, Any], locale: str) -> Dict[str, Any]:
