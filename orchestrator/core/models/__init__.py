@@ -115,6 +115,7 @@ from . import review_entries  # noqa: F401  # PRD-266 US-012a: a ticket entering
 from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
 from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
+from .proactive import ProactivePersonSettings, ProactiveRun, ProactiveSuggestion  # noqa: F401  # PRD-268 W1: suggestions, runs, person settings
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

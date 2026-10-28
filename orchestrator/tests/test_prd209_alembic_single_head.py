@@ -135,7 +135,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # single-row theme_revocation_sync table the local edition's feed pull writes.
 # 2026-10-24 (PRD-266 W2 Push, US-010b): prd266_w2_push chains onto prd261_revocation_feed —
 # mobile_push_tickets and mobile_digest_posts (new tables only).
-EXPECTED_HEAD = "prd266_w2_push"
+# 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto prd266_w2_push —
+# proactive_suggestions, proactive_runs and proactive_person_settings (new tables only).
+EXPECTED_HEAD = "prd268_w1_proactive"
 
 
 def _literal(node: ast.AST):
