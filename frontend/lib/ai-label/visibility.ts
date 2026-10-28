@@ -17,6 +17,9 @@
  *   transparent and has at least MIN_TEXT_CONTRAST against the colour behind them: the first
  *   opaque `background-color` up the ancestors with the translucent ones in between painted over
  *   it, or the page's own white (and black too, where the root allows a dark scheme) ('color');
+ * - no ::first-line or ::first-letter rule reaches the words or an element around them ('paint'),
+ *   and, where the browser reports those pseudo-elements' styles, theirs keep the words opaque,
+ *   visible and at contrast too ('color'): line-pseudos.ts;
  * - the label's box is at least MIN_LABEL_SIZE_PX each way ('size') and inside the viewport
  *   ('viewport');
  * - the words themselves, measured as a Range, are at least a real line of text (MIN_FONT_SIZE_PX
@@ -24,10 +27,15 @@
  *   inside the label's own box when the label clips its overflow: so `text-indent`, a shrunk or
  *   clipped box and a scale transform all fail ('text');
  * - nothing is drawn over them: at the start, middle and end of each line of the words, the
- *   topmost element is the text element itself ('covered'). The label is `pointer-events: none` (it never takes a
- *   click), which hit-testing skips, so the label and its words take `pointer-events: auto` for the
- *   probe only, synchronously, and get their own value back. A pseudo-element of the label drawn
- *   over its words hits as the label, not the text element, so it fails too.
+ *   topmost element is the text element itself ('covered'). Hit-testing skips anything with
+ *   `pointer-events: none`: the label itself (it never takes a click), and an overlay a theme could
+ *   make click-through to hide behind. So for the probe only, in the same task (nothing paints
+ *   meanwhile), a transient constructed stylesheet makes everything hittable, `*, *::before,
+ *   *::after` with `pointer-events: auto !important` (theme CSS can't be `!important`: the server's
+ *   scope check refuses it), and is taken out in a `finally`; being constructed, it adds no element a
+ *   `:has()` rule could notice. Only an inline `!important` beats it: the host's own protected copy,
+ *   which must not count as a cover. A pseudo-element of the label drawn over its
+ *   words hits as the label, not the text element, so it fails too.
  *
  * Where the browser can't measure the words or hit-test (no Range rects, no elementsFromPoint),
  * the label reads as hidden. Not read: a background image behind the words, a font whose glyphs
@@ -35,8 +43,11 @@
  * (docs/theme-host/css-layer-model.md).
  */
 import { canvasGrounds, contrastRatio, isOpaque, over, parseCssColor, type Rgba } from './contrast'
+import { lineRulesReach, lineStylesHide } from './line-pseudos'
 
 export type AiLabelHiddenReason =
+  /** The check itself threw (a theme's code may have patched what it calls): the label counts as hidden. */
+  | 'unchecked'
   | 'detached'
   | 'display'
   | 'visibility'
@@ -68,7 +79,9 @@ export const MIN_GLYPH_WIDTH_EM = 0.3
 const HIDDEN_VISIBILITY = new Set(['hidden', 'collapse'])
 const NO_PAINT_CHANGE = new Set(['', 'none'])
 const PAINT_PROPERTIES = ['clip-path', 'mask-image', '-webkit-mask-image', 'filter'] as const
-const PROBE_PROPERTY = 'pointer-events'
+/** The transient sheet that makes everything hittable for the moment of the probe. */
+export const AI_LABEL_PROBE_ATTR = 'data-ai-label-probe'
+const PROBE_RULE = '*, *::before, *::after { pointer-events: auto !important; }'
 
 interface Box {
   readonly left: number
@@ -126,12 +139,18 @@ function groundsBehind(styles: readonly CSSStyleDeclaration[], view: Window): re
   return canvasGrounds(mayBeDark).map((page) => layers.reduceRight((ground, layer) => over(layer, ground), page))
 }
 
-function hiddenByColour(styles: readonly CSSStyleDeclaration[], view: Window): AiLabelHiddenReason | null {
+function hiddenByColour(styles: readonly CSSStyleDeclaration[], grounds: readonly Rgba[] | null): AiLabelHiddenReason | null {
   const fill = parseCssColor(nearestValue(styles, '-webkit-text-fill-color') || styles[0].color)
-  const grounds = groundsBehind(styles, view)
   if (fill === null || grounds === null || fill.a === 0) return 'color'
   const faint = grounds.some((ground) => contrastRatio(over(fill, ground), ground) < MIN_TEXT_CONTRAST)
   return faint ? 'color' : null
+}
+
+/** What ::first-line and ::first-letter do to the words (line-pseudos.ts). */
+function hiddenByLinePseudos(chain: readonly Element[], grounds: readonly Rgba[], view: Window): AiLabelHiddenReason | null {
+  if (lineRulesReach(chain, view.document)) return 'paint'
+  const limits = { minOpacity: MIN_LABEL_OPACITY, minContrast: MIN_TEXT_CONTRAST }
+  return lineStylesHide(chain, grounds, view, limits) ? 'color' : null
 }
 
 function insideViewport(box: Box, view: Window): boolean {
@@ -181,19 +200,45 @@ function hiddenText(label: Element, words: Element, measured: Measured | null, f
   return clipsOverflow(view.getComputedStyle(label)) && !inside(box, label.getBoundingClientRect()) ? 'text' : null
 }
 
-/** The elements under (x, y), topmost first, with `probed` taking hits for the moment of the call. */
-function elementsAt(root: Document | ShadowRoot, probed: readonly HTMLElement[], points: ReadonlyArray<readonly [number, number]>) {
-  const saved = probed.map((element) => [element.style.getPropertyValue(PROBE_PROPERTY), element.style.getPropertyPriority(PROBE_PROPERTY)])
-  probed.forEach((element) => element.style.setProperty(PROBE_PROPERTY, 'auto', 'important'))
-  try {
-    return points.map(([x, y]) => root.elementsFromPoint(x, y))
-  } finally {
-    probed.forEach((element, index) => {
-      const [value, priority] = saved[index]
-      if (value === '') element.style.removeProperty(PROBE_PROPERTY)
-      else element.style.setProperty(PROBE_PROPERTY, value, priority)
-    })
+/** Whether the document takes constructed stylesheets (adoptedStyleSheets), which put no element in the page. */
+function adoptsSheets(doc: Document): boolean {
+  const view = doc.defaultView
+  return Array.isArray(doc.adoptedStyleSheets) && typeof view?.CSSStyleSheet === 'function' && 'replaceSync' in view.CSSStyleSheet.prototype
+}
+
+/**
+ * Runs `probe` with everything in the document hittable, then takes the sheet out in the `finally`, all in
+ * this task, so no frame paints with it. A constructed sheet (adoptedStyleSheets) adds no element, so no
+ * theme rule can tell it is there (a `<style>` element could be seen by `:has()`); a browser without them
+ * gets a `<style>` at the end of <html>, outside <head> and <body>, which the label's and the copy's
+ * observers watch.
+ */
+function withEverythingHittable<T>(doc: Document, probe: () => T): T {
+  if (adoptsSheets(doc)) {
+    const sheet = new (doc.defaultView as Window & typeof globalThis).CSSStyleSheet()
+    sheet.replaceSync(PROBE_RULE)
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
+    try {
+      return probe()
+    } finally {
+      doc.adoptedStyleSheets = doc.adoptedStyleSheets.filter((adopted) => adopted !== sheet)
+    }
   }
+  const element = doc.createElement('style')
+  element.setAttribute(AI_LABEL_PROBE_ATTR, '')
+  element.textContent = PROBE_RULE
+  doc.documentElement.appendChild(element)
+  try {
+    return probe()
+  } finally {
+    element.remove()
+  }
+}
+
+/** The elements under each point, topmost first, with everything hittable for the moment of the call. */
+function elementsAt(root: Document | ShadowRoot, points: ReadonlyArray<readonly [number, number]>): Element[][] {
+  const doc = root.ownerDocument ?? (root as Document)
+  return withEverythingHittable(doc, () => points.map(([x, y]) => root.elementsFromPoint(x, y)))
 }
 
 /** The start, middle and end of a line of the words, at its middle height. */
@@ -204,12 +249,11 @@ function samplePoints(line: Box): ReadonlyArray<readonly [number, number]> {
 }
 
 /** Whether anything is drawn over the words at the start, middle or end of any of their lines. */
-function hiddenByCover(label: Element, words: Element, measured: Measured | null): AiLabelHiddenReason | null {
+function hiddenByCover(words: Element, measured: Measured | null): AiLabelHiddenReason | null {
   const root = words.getRootNode() as Document | ShadowRoot
   if (measured === null || typeof root.elementsFromPoint !== 'function') return 'covered'
-  const probed = [label, words].filter((element): element is HTMLElement => 'style' in element)
   const points = measured.lines.flatMap(samplePoints)
-  return elementsAt(root, probed, points).every((hits) => hits[0] === words) ? null : 'covered'
+  return elementsAt(root, points).every((hits) => hits[0] === words) ? null : 'covered'
 }
 
 /** The element that holds the label's words: its text element, or the label itself. */
@@ -221,10 +265,17 @@ function wordsOf(label: Element): Element {
 export function aiLabelHiddenReason(element: Element | null, view: Window): AiLabelHiddenReason | null {
   if (element === null || !element.isConnected) return 'detached'
   const words = wordsOf(element)
-  const styles = selfAndAncestors(words).map((node) => view.getComputedStyle(node))
-  const early = hiddenByStyle(styles) ?? hiddenByFont(styles) ?? hiddenByColour(styles, view) ?? hiddenByBox(element, view)
+  const chain = selfAndAncestors(words)
+  const styles = chain.map((node) => view.getComputedStyle(node))
+  const grounds = groundsBehind(styles, view)
+  const early =
+    hiddenByStyle(styles) ??
+    hiddenByFont(styles) ??
+    hiddenByColour(styles, grounds) ??
+    hiddenByLinePseudos(chain, grounds ?? [], view) ??
+    hiddenByBox(element, view)
   if (early !== null) return early
   const measured = measureWords(words)
   const fontSize = Number.parseFloat(nearestValue(styles, 'font-size')) || MIN_FONT_SIZE_PX
-  return hiddenText(element, words, measured, fontSize, view) ?? hiddenByCover(element, words, measured)
+  return hiddenText(element, words, measured, fontSize, view) ?? hiddenByCover(words, measured)
 }

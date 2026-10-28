@@ -12,9 +12,10 @@
  * - the words' Range box, and its one line: the box of the element the Range starts in, unless a
  *   test says what the browser would measure (`layout.textBox`, for a squeezed or shifted line jsdom
  *   can't lay out);
- * - hit-testing (elementsFromPoint, on a document and on a shadow root): the elements the check's
- *   probe gave `pointer-events: auto !important`, deepest first, under `layout.cover` when a test
- *   draws something over them;
+ * - hit-testing (elementsFromPoint, on a document and on a shadow root): `layout.cover` when a test
+ *   draws something over the words, then the words' element, then the label, skipping, as a browser
+ *   does, any whose computed `pointer-events` is `none` (so the check's transient probe sheet, which
+ *   makes everything hittable, decides whether a click-through cover is seen);
  * - the copy's closed shadow roots, read off a spy on attachShadow (no handle sits on the element);
  * - a popover stand-in (installPopover): showPopover and hidePopover keep a per-element state and
  *   fire `toggle` a microtask later with the state then, as a browser coalesces a hide and a show.
@@ -39,7 +40,7 @@ export interface LabelLayout {
 
 type Hits = (this: Document | ShadowRoot, x: number, y: number) => Element[]
 
-const PROBE = 'pointer-events'
+const WORDS = '[data-ai-label-text]'
 
 function px(value: string, fallback: number): number {
   const parsed = Number.parseFloat(value)
@@ -60,12 +61,11 @@ function boxOf(element: Element, fallback: LayoutBox): DOMRect {
   })
 }
 
-/** The elements the check's probe made hittable, deepest first: the topmost at any point of the words. */
-function probedIn(root: Document | ShadowRoot): Element[] {
-  const probed = Array.from(root.querySelectorAll<HTMLElement>('*')).filter(
-    (element) => element.style.getPropertyValue(PROBE) === 'auto' && element.style.getPropertyPriority(PROBE) === 'important',
-  )
-  return probed.reverse()
+/** What a browser's hit-test would find at any point of the words: the cover, the words, the label, topmost first. */
+function stackIn(root: Document | ShadowRoot, cover: Element | null): Element[] {
+  const words = Array.from(root.querySelectorAll(WORDS))
+  const stack = [cover, ...words.flatMap((word) => [word, word.parentElement])]
+  return stack.filter((element): element is Element => element !== null && window.getComputedStyle(element).pointerEvents !== 'none')
 }
 
 function defineOn(target: object, name: string, value: unknown): () => void {
@@ -83,8 +83,7 @@ export function installLabelLayout(fallback: LayoutBox): { readonly layout: Labe
   })
   vi.spyOn(Element.prototype, 'attachShadow')
   const hits: Hits = function (this: Document | ShadowRoot) {
-    const probed = probedIn(this)
-    return layout.cover ? [layout.cover, ...probed] : probed
+    return stackIn(this, layout.cover)
   }
   const textRect = function (this: Range) {
     const start = this.startContainer

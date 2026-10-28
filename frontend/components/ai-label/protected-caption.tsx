@@ -12,10 +12,12 @@ import {
   partsIntact,
   placeCaption,
 } from './protected-caption-parts'
+import { type CaptionTamper, TamperLog } from './protected-caption-tamper'
 import { RECHECK_INTERVAL_MS } from './use-ai-label-check'
 
 export { AI_LABEL_CAPTION_ATTR, captionPlaceInside }
-export type { CaptionInset, CaptionPlace }
+export type { CaptionInset, CaptionPlace, CaptionTamper }
+export { TAMPER_SUMMARY_MS, aiLabelCopyTamperSummary, aiLabelCopyTamperedWarning } from './protected-caption-tamper'
 
 /**
  * PRD-264 EUAI-11a (EU AI Act Art. 50(1), (5)) — the AI label drawn again in the host's own layer,
@@ -28,37 +30,39 @@ export type { CaptionInset, CaptionPlace }
  * and out of reach of what an ancestor does to its descendants (opacity, filter, transform,
  * clip-path, overflow). Where the browser has no popover, they stay a fixed element.
  *
- * Nothing a theme's code does to the copy lasts:
+ * What a theme's code does to the copy is undone:
  * - removed from <body>, moved, its attributes or inline guard changed, or anything inside its
  *   shadow root changed: a MutationObserver on <body>'s children, the host's attributes and the
- *   whole shadow tree rebuilds it at once, from scratch;
+ *   whole shadow tree rebuilds it from scratch, in the same microtask checkpoint, up to
+ *   MAX_HEALS_PER_WINDOW times a second (more would let a theme's own observer ping-pong with it and
+ *   hang the page);
  * - hidden with hidePopover(): its `toggle` event rebuilds and re-shows it;
  * - covered by a popover, dialog or fullscreen element shown later (the top layer stacks in the
  *   order things enter it): `beforetoggle`, `toggle` (both caught at the document, capture phase)
  *   and `fullscreenchange` raise it again (hidePopover, then showPopover, which puts it last);
- * - and every RECHECK_INTERVAL_MS a watchdog checks it is whole, rebuilds it if not, and raises it,
- *   for whatever no event reports (a dialog opened in a shadow root of the theme's, say).
- * A theme that undoes every repair gets at most MAX_HEALS_PER_WINDOW immediate ones a second; the
- * watchdog repairs the rest, so the page never spins. Each kind of tampering logs one theme-host
- * warning. The shadow root is closed, so `host.shadowRoot` is null to a theme's code; tests reach it
- * by spying on attachShadow, so no handle sits on the element. Code a theme runs before the copy
- * exists (wrapping attachShadow or the popover methods, say) is beyond this: sandboxing a theme's
- * code is not what this does, and the review reads that code (docs/theme-host/css-layer-model.md).
+ * - and a watchdog checks it is whole, rebuilds it if not, and raises it: every RECHECK_INTERVAL_MS
+ *   while nothing happens, and, from the first tampering until QUIET_BEFORE_BACKING_OFF_MS pass with
+ *   none, every animation frame, before paint (requestAnimationFrame: once a frame, never a spin).
+ *
+ * The bound, precisely: while under attack the copy is checked and rebuilt once per frame, just
+ * before that frame paints. Code of the theme's that removes it again after that, in the same frame
+ * (its own MutationObserver, in the microtask checkpoint after our frame callback), can keep it off
+ * that frame: winning that race would mean spinning with the theme's code, which hangs the page. That
+ * code, like code that patches attachShadow, the popover methods or MutationObserver before the copy
+ * exists, is beyond this: sandboxing a theme's code is not what this does, and the review reads that
+ * code (docs/theme-host/css-layer-model.md). Every entry point fails safe: anything that throws is
+ * logged, counted as tampering, and retried the next frame. Each kind of tampering logs one warning,
+ * and while it goes on a count is logged at most every TAMPER_SUMMARY_MS (protected-caption-tamper.ts).
+ * The shadow root is closed, so `host.shadowRoot` is null to a theme's code; tests reach it by spying
+ * on attachShadow, so no handle sits on the element.
  */
 
 const LOG_PREFIX = '[theme-host]'
-/** Immediate repairs allowed in HEAL_WINDOW_MS; past them, the watchdog repairs. */
+/** Immediate repairs allowed in HEAL_WINDOW_MS; past them, the next frame repairs. */
 export const MAX_HEALS_PER_WINDOW = 5
 export const HEAL_WINDOW_MS = 1000
-
-export type CaptionTamper = 'removed' | 'changed' | 'hidden'
-
-const TAMPER_VERB: Readonly<Record<CaptionTamper, string>> = { removed: 'removed', changed: 'changed', hidden: 'hid' }
-
-/** The warning the first tampering of each kind leaves in the console. */
-export function aiLabelCopyTamperedWarning(kind: CaptionTamper): string {
-  return `something in the page ${TAMPER_VERB[kind]} the AI label's protected copy; the host put it back`
-}
+/** After this long with no tampering, the watchdog goes back from every frame to every RECHECK_INTERVAL_MS. */
+export const QUIET_BEFORE_BACKING_OFF_MS = 3000
 
 /** A `toggle` or `beforetoggle` event (ToggleEvent), read without relying on the type existing. */
 type ToggleLike = Event & { readonly newState?: string }
@@ -69,7 +73,7 @@ export interface ProtectedCaption {
 
 /**
  * Shows the words in the browser's top layer, last in it; where it has none, they stay a fixed element.
- * Returns what the browser threw, or null.
+ * Returns what the browser threw, or null: the words stay on screen as a fixed element either way.
  */
 function raiseToTop(caption: HTMLElement): unknown {
   if (typeof caption.showPopover !== 'function') return null
@@ -88,10 +92,13 @@ class CaptionKeeper {
   private observer: MutationObserver | null = null
   private builtListeners: AbortController | null = null
   private readonly listeners = new AbortController()
+  private readonly tampering = new TamperLog()
   private heals: readonly number[] = []
-  private warned: readonly CaptionTamper[] = []
-  private raiseWarned = false
   private timer = 0
+  private frame = 0
+  private lastTamperAt = 0
+  private stopped = false
+  private raiseWarned = false
 
   constructor(
     private readonly doc: Document,
@@ -100,32 +107,48 @@ class CaptionKeeper {
   ) {}
 
   start(): void {
-    this.build()
-    this.listen()
-    this.timer = this.view().setInterval(() => this.tick(), RECHECK_INTERVAL_MS)
+    this.safely(() => this.build())
+    this.safely(() => this.listen())
+    this.safely(() => {
+      this.timer = this.view().setInterval(() => this.safely(() => this.checkAndRepair()), RECHECK_INTERVAL_MS)
+    })
   }
 
   stop(): void {
+    this.stopped = true
     this.view().clearInterval(this.timer)
+    if (this.frame !== 0) this.view().cancelAnimationFrame(this.frame)
     this.listeners.abort()
-    this.teardown()
+    this.safely(() => this.teardown())
   }
 
   private view(): Window {
     return this.doc.defaultView ?? window
   }
 
+  /** Runs one step; anything it throws is logged, counted, and the next frame tries again. */
+  private safely(step: () => void): void {
+    try {
+      step()
+    } catch (error) {
+      this.tampering.note('failed', Date.now(), error)
+      this.watchEveryFrame()
+    }
+  }
+
   private build(): void {
     const parts = buildCaptionParts(this.doc, this.text, this.place())
     const built = new AbortController()
-    parts.caption.addEventListener('toggle', (event) => this.onOwnToggle(event as ToggleLike, parts), { signal: built.signal })
-    const observer = new MutationObserver((records) => this.onMutations(records, parts))
+    this.parts = parts
+    this.builtListeners = built
+    parts.caption.addEventListener('toggle', (event) => this.safely(() => this.onOwnToggle(event as ToggleLike, parts)), {
+      signal: built.signal,
+    })
+    const observer = new MutationObserver((records) => this.safely(() => this.onMutations(records, parts)))
+    this.observer = observer
     observer.observe(this.doc.body, { childList: true })
     observer.observe(parts.host, { attributes: true })
     observer.observe(parts.root, { childList: true, subtree: true, characterData: true, attributes: true })
-    this.parts = parts
-    this.observer = observer
-    this.builtListeners = built
     this.raise()
   }
 
@@ -138,16 +161,17 @@ class CaptionKeeper {
 
   private listen(): void {
     const options = { capture: true, signal: this.listeners.signal }
-    this.doc.addEventListener('beforetoggle', (event) => this.onTopLayerChange(event as ToggleLike, true), options)
-    this.doc.addEventListener('toggle', (event) => this.onTopLayerChange(event as ToggleLike, false), options)
-    this.doc.addEventListener('fullscreenchange', () => this.raise(), options)
-    this.view().addEventListener('resize', () => this.replace(), { signal: this.listeners.signal })
+    const onTopLayer = (before: boolean) => (event: Event) => this.safely(() => this.onTopLayerChange(event as ToggleLike, before))
+    this.doc.addEventListener('beforetoggle', onTopLayer(true), options)
+    this.doc.addEventListener('toggle', onTopLayer(false), options)
+    this.doc.addEventListener('fullscreenchange', () => this.safely(() => this.raise()), options)
+    this.view().addEventListener('resize', () => this.safely(() => this.replace()), { signal: this.listeners.signal })
   }
 
   /** Another element entered the top layer: once it is in, put the words above it. */
   private onTopLayerChange(event: ToggleLike, before: boolean): void {
     if (event.newState !== 'open' || event.target === this.parts?.host) return
-    if (before) queueMicrotask(() => this.raise())
+    if (before) queueMicrotask(() => this.safely(() => this.raise()))
     else this.raise()
   }
 
@@ -161,7 +185,8 @@ class CaptionKeeper {
     else if (records.some((record) => record.target !== this.doc.body)) this.heal('changed')
   }
 
-  private tick(): void {
+  /** The watchdog's step: rebuild what isn't whole, and raise what is. */
+  private checkAndRepair(): void {
     const parts = this.parts
     if (parts === null || !partsIntact(parts, this.doc, this.text)) {
       this.repair(parts?.host.parentNode === this.doc.body ? 'changed' : 'removed')
@@ -170,23 +195,42 @@ class CaptionKeeper {
     this.raise()
   }
 
-  /** A repair the observers or a `toggle` asked for, unless too many came this second (the watchdog takes those). */
+  /** From the first tampering until QUIET_BEFORE_BACKING_OFF_MS pass with none: check and repair every frame. */
+  private watchEveryFrame(): void {
+    if (this.stopped) return
+    this.lastTamperAt = Date.now()
+    if (this.frame === 0) this.frame = this.view().requestAnimationFrame(() => this.onFrame())
+  }
+
+  private onFrame(): void {
+    this.frame = 0
+    this.safely(() => this.checkAndRepair())
+    const underAttack = Date.now() - this.lastTamperAt < QUIET_BEFORE_BACKING_OFF_MS
+    if (!this.stopped && underAttack && this.frame === 0) this.frame = this.view().requestAnimationFrame(() => this.onFrame())
+  }
+
+  /** A repair an observer or a `toggle` asked for; past the per-second allowance, the next frame repairs. */
   private heal(kind: CaptionTamper): void {
     const now = Date.now()
     const recent = this.heals.filter((at) => now - at < HEAL_WINDOW_MS)
-    this.heals = recent.length < MAX_HEALS_PER_WINDOW ? [...recent, now] : recent
-    if (recent.length < MAX_HEALS_PER_WINDOW) this.repair(kind)
+    if (recent.length >= MAX_HEALS_PER_WINDOW) {
+      this.heals = recent
+      this.tampering.note(kind, now)
+      this.watchEveryFrame()
+      return
+    }
+    this.heals = [...recent, now]
+    this.repair(kind)
   }
 
   private repair(kind: CaptionTamper): void {
-    if (!this.warned.includes(kind)) {
-      console.warn(LOG_PREFIX, aiLabelCopyTamperedWarning(kind))
-      this.warned = [...this.warned, kind]
-    }
+    this.tampering.note(kind, Date.now())
+    this.watchEveryFrame()
     this.teardown()
     this.build()
   }
 
+  /** Raises the words; a browser that won't (no top layer for them) leaves them a fixed element, warned once. */
   private raise(): void {
     if (this.parts === null) return
     const error = raiseToTop(this.parts.caption)

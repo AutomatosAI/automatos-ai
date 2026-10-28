@@ -18,8 +18,8 @@ import { watchPage } from '../support/watch'
 // themes/play/src/components/play/chat/message-box.tsx) holds the words, then the host's voice button (the
 // SDK's voice.VoiceButton), then Send, the words and Send each in the SDK's cards.AiLabelFence, which now
 // draws its children alone. While a style keeps the label from being seen, by any of the ways the host's
-// check reads (display, transparent words, a clipped box, an indent off-screen, a clip-path, something drawn
-// over it), the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
+// check reads (display, transparent words, a blank ::first-line or ::first-letter, a clipped box, an indent
+// off-screen, a clip-path, something drawn over it, click-through or not), or its check throws, the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
 // closed shadow root on a guarded element of the host's at the end of <body>, the words a popover in the
 // browser's top layer, and logs a theme-host warning that names how. A second style aimed at that copy,
 // and a popover of the page's shown after it, leave it on screen and on top (support/ai-label-copy.ts reads
@@ -39,6 +39,8 @@ const PLAY_CLASS = /\bplay\b/
 const AI_LABEL = 'Auto is an AI'
 /** components/ai-label/ai-label.tsx AI_LABEL_ATTR. */
 const LABEL_SELECTOR = '[data-ai-label]'
+/** lib/ai-label/visibility.ts AI_LABEL_PROBE_ATTR: the probe's transient sheet, never left on the page. */
+const PROBE_SELECTOR = '[data-ai-label-probe]'
 /** Play's frame: its sidebar (the kit's themes/play/src/components/play/shell/play-sidebar.tsx). */
 const PLAY_FRAME = 'aside[aria-label="Sidebar"]'
 /** A stylesheet that hides the host's label under installed Play's own <html> class, as a hostile theme's would. */
@@ -81,20 +83,26 @@ const HIDING_WAYS: ReadonlyArray<readonly [string, string, string]> = [
   ['a 4 px box that clips its words', `html.play ${LABEL_SELECTOR} { width: 4px !important; height: 4px !important; overflow: hidden !important; }`, 'text'],
   ['words indented off-screen', `html.play ${LABEL_SELECTOR} { text-indent: -9999px !important; }`, 'text'],
   ['a clip-path', `html.play ${LABEL_SELECTOR} { clip-path: inset(50%) !important; }`, 'paint'],
+  ['a blank first line', 'html.play [role="note"]::first-line { color: transparent !important; }', 'paint'],
+  ['a first letter with no fill', 'html.play p[role="note"]::first-letter { -webkit-text-fill-color: transparent !important; }', 'paint'],
 ]
 
-/** Draws an element of the page's over the label's corner, above its z-index; returns what takes it away. */
-async function coverTheLabel(page: Page): Promise<() => Promise<void>> {
-  const cover = await page.evaluateHandle((selector) => {
+/**
+ * Draws an element of the page's over the label's corner, above its z-index, click-through or not (a theme
+ * could make its cover `pointer-events: none` so hit-testing skips it); returns what takes it away.
+ */
+async function coverTheLabel(page: Page, clickThrough: boolean): Promise<() => Promise<void>> {
+  const cover = await page.evaluateHandle(({ selector, through }) => {
     const box = document.querySelector(selector)?.getBoundingClientRect()
     const element = document.createElement('div')
     element.setAttribute('data-test-cover', '')
     const style = `position: fixed; left: ${(box?.left ?? 0) - 8}px; top: ${(box?.top ?? 0) - 8}px;` +
-      ` width: ${(box?.width ?? 0) + 16}px; height: ${(box?.height ?? 0) + 16}px; z-index: 2147483000; background: rgb(250, 0, 0);`
+      ` width: ${(box?.width ?? 0) + 16}px; height: ${(box?.height ?? 0) + 16}px; z-index: 2147483000; background: rgb(250, 0, 0);` +
+      (through ? ' pointer-events: none;' : '')
     element.setAttribute('style', style)
     document.body.appendChild(element)
     return element
-  }, LABEL_SELECTOR)
+  }, { selector: LABEL_SELECTOR, through: clickThrough })
   return async () => {
     await cover.evaluate((element: Element) => element.remove())
   }
@@ -216,11 +224,32 @@ test.describe("PRD-261 A-19e1 — installed Play's /chat carries the host's AI l
       await expect.poll(() => copyState(page), { message: `${name}, taken away` }).toBeNull()
     }
 
-    const uncover = await coverTheLabel(page)
-    await expect.poll(() => copyState(page), { message: 'something drawn over the label' }).toMatchObject(COPY_ON_TOP)
-    await expect.poll(() => warnings.some((warning) => hiddenWarning('covered').test(warning))).toBe(true)
-    await expectChatRuns(page)
-    await uncover()
-    await expect.poll(() => copyState(page), { message: 'the cover taken away' }).toBeNull()
+    for (const clickThrough of [false, true]) {
+      const name = clickThrough ? 'a click-through element drawn over the label' : 'an element drawn over the label'
+      const uncover = await coverTheLabel(page, clickThrough)
+      await expect.poll(() => copyState(page), { message: name }).toMatchObject(COPY_ON_TOP)
+      await expect.poll(() => warnings.some((warning) => hiddenWarning('covered').test(warning))).toBe(true)
+      await expect(page.locator(PROBE_SELECTOR)).toHaveCount(0)
+      await expectChatRuns(page)
+      await uncover()
+      await expect.poll(() => copyState(page), { message: `${name}, taken away` }).toBeNull()
+    }
+
+    // a check that throws (a page script patched getComputedStyle, for the label's elements only, so the rest of
+    // the page keeps working) counts the label as hidden
+    await page.evaluate((selector) => {
+      const real = window.getComputedStyle
+      Object.defineProperty(window, '__realGetComputedStyle', { value: real, configurable: true })
+      window.getComputedStyle = (element: Element, pseudo?: string | null) => {
+        if (element.closest(selector)) throw new Error('getComputedStyle patched by the page')
+        return real.call(window, element, pseudo)
+      }
+    }, LABEL_SELECTOR)
+    await expect.poll(() => copyState(page), { message: 'a check that throws' }).toMatchObject(COPY_ON_TOP)
+    await expect.poll(() => warnings.some((warning) => /the page AI label could not be checked \(unchecked/.test(warning))).toBe(true)
+    await page.evaluate(() => {
+      window.getComputedStyle = (window as unknown as { __realGetComputedStyle: typeof window.getComputedStyle }).__realGetComputedStyle
+    })
+    await expect.poll(() => copyState(page), { message: 'the check restored' }).toBeNull()
   })
 })

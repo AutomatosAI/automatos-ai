@@ -13,7 +13,8 @@
  * The label renders once, after ThemeSlot, outside the theme's page, with role="note" and the
  * same words. Then hostile fixture themes hide it: `display:none`, `visibility:hidden`, `opacity:0`,
  * zero size, an off-screen move, a fade on an ancestor, transparent or faint words (by colour or by
- * `-webkit-text-fill-color`), a clip-path, a mask, a filter on an ancestor, a tiny font, words the
+ * `-webkit-text-fill-color`), a blank ::first-line or ::first-letter, a clip-path, a mask, a filter on an
+ * ancestor, a tiny font, words the
  * browser would lay out squeezed or off-screen, and something drawn over them. Each time the label
  * reports itself hidden, the host draws the same words in its own layer (components/ai-label/
  * protected-caption.tsx: a closed shadow root on an element of the host's at the end of <body>,
@@ -277,6 +278,9 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['a mask', `html.${HOSTILE_CLASS} [role="note"] { mask-image: linear-gradient(transparent, transparent); }`, 'paint'],
   ['a filter on an ancestor', `html.${HOSTILE_CLASS} body { filter: opacity(0); }`, 'paint'],
   ['a tiny font', `html.${HOSTILE_CLASS} [role="note"] { font-size: 4px; }`, 'font'],
+  // ::first-line and ::first-letter paint the words without showing in getComputedStyle(element)
+  ['a blank first line', `html.${HOSTILE_CLASS} [role="note"]::first-line { color: transparent; }`, 'paint'],
+  ['a first letter with no fill', `html.${HOSTILE_CLASS} p[role="note"]::first-letter { -webkit-text-fill-color: transparent; }`, 'paint'],
 ]
 
 describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
@@ -381,8 +385,54 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     expect(caption).toHaveTextContent(AUTO_LABEL)
     expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'covered')]])
     expect(inputOf('theme')).toBeEnabled()
-    // the probe gives the label its own pointer-events back
+    // the probe leaves nothing behind: no inline style on the label, no probe sheet
     expect(theLabel().style.getPropertyValue('pointer-events')).toBe('')
+    expect(document.querySelector('[data-ai-label-probe]')).toBeNull()
+  })
+
+  it('brings the copy for a click-through overlay drawn over the words: pointer-events: none hides nothing from the probe', async () => {
+    renderChat('theme')
+    const overlay = document.body.appendChild(document.createElement('div'))
+    overlay.setAttribute('data-test-overlay', '')
+    layout.cover = overlay
+    try {
+      await hideWith(`html.${HOSTILE_CLASS} [data-test-overlay] { pointer-events: none; }`)
+      expect(window.getComputedStyle(overlay).pointerEvents).toBe('none')
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('covered')
+      expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'covered')]])
+      expect(document.querySelector('[data-ai-label-probe]')).toBeNull()
+      expect(inputOf('theme')).toBeEnabled()
+    } finally {
+      overlay.remove()
+    }
+  })
+
+  it("reads the computed ::first-line where the browser reports it: a transparent first line brings the copy", async () => {
+    const realStyle = window.getComputedStyle.bind(window)
+    const blankLine = document.createElement('div').style
+    blankLine.setProperty('color', 'rgba(0, 0, 0, 0)')
+    Object.defineProperty(window, 'CSS', { value: { supports: () => true }, configurable: true })
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) =>
+      pseudo === '::first-line' && element.hasAttribute('data-ai-label-text') ? blankLine : realStyle(element))
+    try {
+      renderChat('default')
+      expect(await waitFor(theCaption)).toHaveTextContent(AUTO_LABEL)
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('color')
+      expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'color')]])
+    } finally {
+      delete (window as { CSS?: unknown }).CSS
+    }
+  })
+
+  it('treats the label as hidden when its check throws (a getComputedStyle a theme patched), and shows the copy', async () => {
+    const patched = new Error('getComputedStyle patched by a theme')
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(() => {
+      throw patched
+    })
+    render(h(AiLabelGate, { children: h('div', null, 'a chat') }))
+    expect(await waitFor(theCaption)).toHaveTextContent(AUTO_LABEL)
+    expect(useAiLabelStore.getState()).toMatchObject({ hiddenLabels: ['page'], shownLabels: ['page'] })
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'unchecked'), patched]])
   })
 
   it("the SDK's cards.AiLabelFence disables nothing: the fixture theme's own box and Send keep working while the label is hidden", async () => {

@@ -6,7 +6,9 @@ import { PROTECTED_SURFACE_GUARD } from '@/components/theme-host/protected-surfa
  * inside, a manual popover for the browser's top layer.
  *
  * - No selector in a document stylesheet matches inside a shadow root, and the root is closed, so a
- *   theme's code can't reach it through `host.shadowRoot` either.
+ *   theme's code can't reach it through `host.shadowRoot` either. Where attachShadow throws (a theme's
+ *   code may have patched it), the words go in the guarded host itself, still every value `!important`
+ *   inline, which no theme rule can beat, and a warning says so.
  * - The words carry `all: initial` and their own values inline, every one `!important`, so nothing
  *   they would inherit from a theme's <html> or <body> reaches them; they read no custom property
  *   (a theme sets those), so their colours are the system's Canvas and CanvasText. They wrap inside
@@ -36,11 +38,13 @@ export interface CaptionInset {
 
 export interface CaptionParts {
   readonly host: HTMLElement
-  readonly root: ShadowRoot
+  /** The closed shadow root, or the host itself where the browser refused one. */
+  readonly root: ShadowRoot | HTMLElement
   readonly caption: HTMLElement
 }
 
 const IMPORTANT = 'important'
+const LOG_PREFIX = '[theme-host]'
 const EDGES = ['top', 'right', 'bottom', 'left'] as const
 /** Above anything a page stacks, for a browser with no top layer. */
 const TOPMOST_Z_INDEX = '2147483647'
@@ -115,12 +119,22 @@ function captionElement(doc: Document, text: string, place: CaptionPlace): HTMLE
   return caption
 }
 
+/** The host's closed shadow root; the host itself where attachShadow throws. */
+function closedRoot(host: HTMLElement): ShadowRoot | HTMLElement {
+  try {
+    return host.attachShadow({ mode: 'closed' })
+  } catch (error) {
+    console.warn(LOG_PREFIX, "the AI label's copy got no shadow root, so its words sit in its guarded element", error)
+    return host
+  }
+}
+
 /** A fresh host, closed shadow root and words, appended to <body>; nothing shown in the top layer yet. */
 export function buildCaptionParts(doc: Document, text: string, place: CaptionPlace): CaptionParts {
   const host = doc.createElement('div')
   host.setAttribute(AI_LABEL_CAPTION_ATTR, '')
   styleAll(host, HOST_GUARD)
-  const root = host.attachShadow({ mode: 'closed' })
+  const root = closedRoot(host)
   const caption = captionElement(doc, text, place)
   root.appendChild(caption)
   doc.body.appendChild(host)
