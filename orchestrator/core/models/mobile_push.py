@@ -12,7 +12,8 @@
 Why two tables and not an extended one: mobile_devices is one row per device and neither
 Expo's tickets (many per device, kept a day) nor a person's daily digest (one per person
 per local date, unique across workers and replicas) fits a column there; notifications
-has no slot for either. The Alembic revision ``prd266_w2_push`` declares the same names.
+has no slot for either. The Alembic revision ``prd266_w2_push`` declares the same names;
+``prd268_w2_delivery`` widens the push-type CHECK to the fourth type.
 """
 from __future__ import annotations
 
@@ -31,8 +32,9 @@ from sqlalchemy.sql import func
 
 from core.database.base import Base
 
-# The three push types (PRD-266 D22): the only kinds of message a phone is ever sent.
-PUSH_TYPES = ("needs_answer", "review", "auto_message")
+# The four push types (PRD-266 D22; PRD-268 K9 adds suggestion, shipped off): the only
+# kinds of message a phone is ever sent. The revision prd268_w2_delivery widens the CHECK.
+PUSH_TYPES = ("needs_answer", "review", "auto_message", "suggestion")
 
 TICKET_ID_LENGTH = 64  # Expo's ticket ids are UUIDs (36 characters)
 PUSH_TYPE_LENGTH = 16

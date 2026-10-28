@@ -5,7 +5,8 @@ One row per phone (or paired browser) a person uses with one workspace (§4.2). 
 * ``core.models.mobile_devices.MobileDevice`` and the Alembic revision
   ``prd266_mobile_devices`` declare the same columns, in the same order, with the same
   nullability (``install_id`` is null on a pending row), foreign keys (the workspace and
-  the person CASCADE), uniques, CHECKs, defaults and indexes.
+  the person CASCADE), uniques, CHECKs, defaults and indexes. A column a later revision
+  appends (``push_categories``, ``prd268_w2_delivery``, PRD-268 K19) is read from it.
 * ``to_dict()`` never carries a code or token hash, the push key or the push token.
 * The revision chains onto the old head, creates only what is absent (a ``create_all``
   database survives it and gains only a missing index), alters no other table, and its
@@ -32,16 +33,19 @@ from sqlalchemy import text
 ORCH = Path(__file__).resolve().parents[1]
 MIGRATION = ORCH / "alembic" / "versions" / "prd266_mobile_devices.py"
 OLD_HEAD = "clerk_user_relinks_20261019"
+# The later revisions that append a column (ALTER TABLE … ADD COLUMN IF NOT EXISTS), oldest first.
+ADDED_BY = (ORCH / "alembic" / "versions" / "prd268_w2_delivery.py",)
+ADD_COLUMN = re.compile(r"ALTER TABLE mobile_devices ADD COLUMN IF NOT EXISTS ((\w+) [^;\"]+);")
 
 COLUMNS = (
     "id", "workspace_id", "user_id", "kind", "install_id", "name", "platform", "app_version",
     "locale", "timezone", "digest_time", "status", "pairing_code_hash", "pairing_expires_at",
     "token_hash", "token_rotated_at", "prev_token_hash", "prev_token_valid_until",
     "expo_push_token", "push_enabled", "push_disabled_reason", "push_key", "last_seen_at",
-    "paired_at", "revoked_at", "revoked_by", "events", "created_at", "updated_at",
+    "paired_at", "revoked_at", "revoked_by", "events", "created_at", "updated_at", "push_categories",
 )
 NOT_NULL = {"id", "workspace_id", "user_id", "kind", "status", "push_enabled", "events",
-            "created_at", "updated_at"}
+            "created_at", "updated_at", "push_categories"}
 UNIQUES = {
     "uq_mobile_devices_workspace_user_install": ["workspace_id", "user_id", "install_id"],
     "uq_mobile_devices_token_hash": ["token_hash"],
@@ -77,7 +81,9 @@ def _ddl_lines() -> list[str]:
 
 
 def _ddl_columns() -> dict[str, str]:
-    return {line.split()[0]: line for line in _ddl_lines() if not line.startswith("CONSTRAINT")}
+    created = {line.split()[0]: line for line in _ddl_lines() if not line.startswith("CONSTRAINT")}
+    appended = {name: line for path in ADDED_BY for line, name in ADD_COLUMN.findall(path.read_text())}
+    return {**created, **appended}
 
 
 def _statements(step: str) -> list[str]:
