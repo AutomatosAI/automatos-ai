@@ -24,6 +24,12 @@
 ``run_digests`` is async, on the leader's loop; every database step (and the digest's own
 snapshot) runs in a worker thread through ``anyio.to_thread.run_sync``, each on a session of
 its own. It never raises and never logs the digest's text.
+
+``post_now`` is the same digest for one person on request ("Send me today's brief now",
+``POST /api/v1/mobile/digest/now``, ``services.mobile.digest_now``): the same text, posted the
+same way (origin ``daily_digest``, their local date by ``local_today``), with no claim read or
+written, so the scheduled digest still goes out. Their ``daily_digest`` switch is not read: it
+is an explicit ask. It never raises; a failure is logged by its class only.
 """
 from __future__ import annotations
 
@@ -44,7 +50,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.models.core import User
-from core.models.mobile_devices import MobileDeviceStatus
+from core.models.mobile_devices import MobileDevice, MobileDeviceStatus
 from core.models.mobile_push import MobileDigestPost
 from services.chat_messenger import deliver_background_message
 from services.digest_service import generate_digest
@@ -146,7 +152,7 @@ def due_date(zone_name: Optional[str], digest_time: time, now: datetime) -> Opti
     return None
 
 
-def _belongs(db: Session, workspace_id: uuid.UUID, user_id: int) -> bool:
+def belongs(db: Session, workspace_id: uuid.UUID, user_id: int) -> bool:
     """The person still belongs to the workspace (the fan-out's own read of who does)."""
     return bool(recipients(db, workspace_id, AUTO_MESSAGE, user_id))
 
@@ -164,9 +170,33 @@ def due_people(db: Session, now: datetime) -> List[DuePerson]:
     for workspace_id, user_id, zone_name, digest_time in rows:
         local = due_date(zone_name, parse_digest_time(digest_time) or default, now)
         person = DuePerson(uuid.UUID(str(workspace_id)), int(user_id), local) if local else None
-        if person is not None and _belongs(db, person.workspace_id, person.user_id):
+        if person is not None and belongs(db, person.workspace_id, person.user_id):
             due.append(person)
     return sorted(due)
+
+
+def local_today(db: Session, workspace_id: uuid.UUID, user_id: int, now: datetime) -> date:
+    """The person's local date at ``now``: in the zone of the phone their schedule follows, else UTC.
+
+    That phone is ``due_people``'s: their most recently seen active ios/android phone in the
+    workspace with a timezone (``last_seen_at``, then ``created_at``).
+    """
+    zone_name = (
+        db.query(MobileDevice.timezone)
+        .filter(
+            MobileDevice.workspace_id == workspace_id,
+            MobileDevice.user_id == user_id,
+            MobileDevice.status == MobileDeviceStatus.ACTIVE.value,
+            MobileDevice.platform.in_(DIGEST_PLATFORMS),
+            MobileDevice.timezone.isnot(None),
+            MobileDevice.timezone != "",
+        )
+        .order_by(MobileDevice.last_seen_at.desc().nulls_last(), MobileDevice.created_at.desc(), MobileDevice.id)
+        .limit(1)
+        .scalar()
+    )
+    zone = _zone(zone_name) or timezone.utc
+    return _utc(now).astimezone(zone).date()
 
 
 def _claim_filter(person: DuePerson) -> tuple:
@@ -331,6 +361,30 @@ async def run_digests(
     return dict(counts)
 
 
+async def post_now(
+    workspace_id: uuid.UUID, user_id: int, *, now: Optional[datetime] = None,
+    session_factory: Optional[SessionFactory] = None,
+) -> bool:
+    """Today's digest for one person, made and posted as ``run_digests`` does, with no claim.
+
+    Each step runs in a worker thread on a session of its own. Never raises: a failure is
+    logged by its class only (an error's text can carry the workspace's content or the bound
+    parameters), and never the digest's text. True when the post landed.
+    """
+    factory = session_factory or _open_session
+    moment = _utc(now or _now())
+    try:
+        local = await _in_thread(factory, local_today, workspace_id, user_id, moment)
+        brief = await _in_thread(factory, _digest_text, workspace_id)
+        person = DuePerson(workspace_id, user_id, local)
+        posted = bool(brief) and bool(await _in_thread(factory, _post, person, brief))
+    except Exception as failure:  # noqa: BLE001 — logged by class only (docstring); the ask is answered
+        logger.error("Daily digest now: person %s in %s failed (%s)", user_id, workspace_id, type(failure).__name__)
+        return False
+    logger.info("Daily digest now: person %s in %s %s", user_id, workspace_id, POSTED if posted else "not posted")
+    return posted
+
+
 def register(scheduler: Any) -> bool:
     """The digest job on the leader's scheduler; ``False`` when this worker hosts none.
 
@@ -355,11 +409,14 @@ __all__ = [
     "DIGEST_JOB_ID",
     "DIGEST_POSTS_KEEP_DAYS",
     "DuePerson",
+    "belongs",
     "claim",
     "default_digest_time",
     "due_date",
     "due_people",
+    "local_today",
     "parse_digest_time",
+    "post_now",
     "prune",
     "register",
     "release",
