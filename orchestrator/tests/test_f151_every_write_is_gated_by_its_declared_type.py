@@ -152,7 +152,7 @@ def test_every_kind_of_gate_accounts_for_a_write(tmp_path):
         _registration("platform_set_rates", 'permission_level="write",', "super_admin_only=True,"),
         _registration("platform_update_menu", 'permission_level="destructive",'),
         _registration("platform_post_notice", 'permission_level="write",'),
-        _registration("platform_read_menu"),  # read is ActionDefinition's default
+        _registration("platform_read_menu", 'permission_level="read",'),
     ])
     audit = _audit(tmp_path, registrations, allow={"platform_post_notice"},
                    targets='    "platform_update_menu": ("agent", "agent_id"),')

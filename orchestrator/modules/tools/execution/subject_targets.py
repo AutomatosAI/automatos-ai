@@ -120,6 +120,28 @@ def _ticket_called(db: Any, workspace_id: Any, table: str, ident: int) -> Option
     return ticket_label_for(db, workspace_id, ident)
 
 
+# Params that identify WHAT an action will act on, in the order a person reads them. An approval
+# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
+# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
+SUBJECT_PARAMS: Tuple[str, ...] = (
+    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
+    "report_id", "id", "app_name", "query", "playbook_name",
+)
+
+
+def subject_line(params: Dict[str, Any]) -> str:
+    """" on <what this will act on>", or "" when nothing identifies it: the card's subject
+    when no looked-up target names one."""
+    if not isinstance(params, dict):
+        return ""
+    named = [
+        f"{key}={params[key]!r}"
+        for key in SUBJECT_PARAMS
+        if params.get(key) not in (None, "", [], {})
+    ]
+    return f" on {', '.join(named[:3])}" if named else ""
+
+
 def named_subject(found: List[Target]) -> str:
     """ " on 'christmas-box-2026.csv' (document #716)", or "" when nothing is named."""
     parts = [f"'{t.name}' ({t.called})" if t.name else t.called for t in found]

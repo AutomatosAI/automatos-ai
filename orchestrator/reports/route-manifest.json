@@ -1,5 +1,5 @@
 {
-  "route_count": 984,
+  "route_count": 994,
   "routes": [
     {
       "method": "GET",
@@ -2079,6 +2079,38 @@
     },
     {
       "method": "GET",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/suggestions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/suggestions/{suggestion_id}/hide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/suggestions/{suggestion_id}/start"
+    },
+    {
+      "method": "GET",
       "path": "/api/profile"
     },
     {
@@ -2104,6 +2136,14 @@
     {
       "method": "GET",
       "path": "/api/rag/feedback/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness"
+    },
+    {
+      "method": "POST",
+      "path": "/api/readiness/check"
     },
     {
       "method": "POST",

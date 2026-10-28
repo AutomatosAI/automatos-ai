@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -137,6 +137,7 @@ from modules.tools.discovery.handlers_board_task_review import create_board_task
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 US-004: the owner's click
 from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
+from modules.tools.discovery.check_in_lane import carries_the_check_in, reads_only_in_a_check_in  # PRD-268 US-C02b/C03b
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
@@ -213,6 +214,8 @@ from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
     cancel_watch,
 )
 from modules.tools.discovery.handlers_fleet import fleet_status  # PRD-228
+from modules.tools.discovery.handlers_proactive import suggest_next_step  # PRD-268 US-C03b
+from modules.tools.discovery.mission_person import person_for_mission as _person_for_mission  # F166, moved (K3)
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -376,37 +379,6 @@ OPERATOR_CONSENT_ACTIONS = (
 )
 
 
-def _person_for_mission(db, caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
-    """F166: who a mission action is made for, as the mission records it — the
-    chat's Clerk id, or on the local edition (no Clerk id) the person's email, read
-    from the server-threaded ``driving_user_id``. The email is what the local REST
-    API records (``created_by = ctx.user.id``). Never the bare ``users.id``: a digit
-    string in ``created_by`` is already an agent id wherever no person drove the
-    action. A widget turn is made for nobody (F155); an unreadable user is nobody."""
-    from core.security.driving_user import driving_user_id
-    from core.security.surface import widget_turn
-
-    if widget_turn():
-        return None
-    ctx = caller_context if isinstance(caller_context, dict) else {}
-    if ctx.get("user_id"):
-        return str(ctx["user_id"])
-    user = driving_user_id(ctx)
-    if user is None:
-        return None
-    try:
-        from core.models.core import User
-
-        with db.begin_nested():  # a failed lookup never poisons the caller's transaction
-            row = db.query(User.email).filter(User.id == user).first()
-    except Exception:  # noqa: BLE001 — fails closed: nobody, so F036 still leaves it to the owner
-        logger.warning("[PlatformExecutor] no email for driving user %s — the call is made for nobody", user,
-                       exc_info=True)
-        return None
-    email = str(row[0] or "").strip() if row else ""
-    return email or None
-
-
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
     """Resolve the driving user's workspace role, fresh, at the gate.
 
@@ -520,27 +492,6 @@ def _bind_ask_orchestrator_context(
         if val is not None:
             bound[dst] = val
     return bound
-
-
-# Params that identify WHAT an action will act on, in the order a person reads them. An approval
-# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
-# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
-_SUBJECT_PARAMS: Tuple[str, ...] = (
-    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
-    "report_id", "id", "app_name", "query", "playbook_name",
-)
-
-
-def _subject_line(params: Dict[str, Any]) -> str:
-    """" on <what this will act on>", or "" when nothing identifies it."""
-    if not isinstance(params, dict):
-        return ""
-    named = [
-        f"{key}={params[key]!r}"
-        for key in _SUBJECT_PARAMS
-        if params.get(key) not in (None, "", [], {})
-    ]
-    return f" on {', '.join(named[:3])}" if named else ""
 
 
 # F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the full-autonomy dial.
@@ -720,6 +671,7 @@ class PlatformActionExecutor:
             )
             return False
 
+    @reads_only_in_a_check_in  # PRD-268 US-C02b: a check-in clears only what reads, before any gate
     @asks_at_the_confirmation_gate  # PRD-193 S1/S2, last: a grant on this exact call, or the ask
     def clear(
         self,
@@ -866,6 +818,7 @@ class PlatformActionExecutor:
     @answers_the_question_first  # F381 (night 11): a how-to question changes no agent, tool, task or setting
     @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
     @carries_the_session_ticket  # PRD-255 US-012: the session's ticket, server-side, to the tools that write there
+    @carries_the_check_in  # PRD-268 US-C03b: the check-in's run and reads, server-side, to the suggestion tool
     async def execute(
         self,
         action_name: str,
@@ -1443,6 +1396,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_cancel_watch": cancel_watch,
     # PRD-228: live floor read-model in one call
     "platform_fleet_status": fleet_status,
+    "platform_suggest_next_step": suggest_next_step,  # PRD-268 US-C03b: a check-in's one write
     # PRD-163 S1: mission lifecycle control
     "platform_approve_mission": approve_mission,
     "platform_reject_mission": reject_mission,

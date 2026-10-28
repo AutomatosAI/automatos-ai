@@ -16,7 +16,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -55,13 +55,18 @@ _registry_instance: Optional["ActionRegistry"] = None
 
 @dataclass
 class ActionDefinition:
-    """Definition of a platform action that Auto can execute."""
+    """Definition of a platform action that Auto can execute.
+
+    PRD-268 US-C02a: ``permission_level`` has no default. The check-in lane runs only
+    what is labelled read, so every definition states its level, and one that states
+    none is refused when it is built (at registration), naming the action.
+    """
 
     name: str                           # e.g. "platform_list_agents"
     description: str                    # For embedding + LLM tool description
     category: str                       # "agents", "analytics", "recipes", etc.
     parameters: Dict[str, Any]          # OpenAI function parameters schema
-    permission_level: str = "read"      # "read" | "write" | "destructive"
+    permission_level: str               # "read" | "write" | "destructive": always stated
     requires_confirmation: bool = False
     workspace_scoped: bool = True
     admin_only: bool = False
@@ -87,6 +92,20 @@ class ActionDefinition:
     # sentence naming the action it belongs to.
     accepts: Tuple[str, ...] = ()
     misplaced: Dict[str, str] = field(default_factory=dict)
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> "ActionDefinition":
+        """Refuse a definition that states no permission_level, naming the action.
+
+        A copy or an unpickle calls ``__new__`` with no arguments, so only a
+        construction is checked.
+        """
+        level_at = [f.name for f in fields(cls)].index("permission_level")
+        if (args or kwargs) and len(args) <= level_at and "permission_level" not in kwargs:
+            name = kwargs.get("name", args[0] if args else None)
+            raise TypeError(
+                f"ActionDefinition {name!r} states no permission_level: give it read, write or destructive"
+            )
+        return super().__new__(cls)
 
     def is_available(self) -> bool:
         if self.available is None:

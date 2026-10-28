@@ -89,6 +89,7 @@ def _act(name, *, promoted=False, admin_only=False, super_admin_only=False):
         description=_LONG_DESC,
         category="agents",
         parameters=_params(),
+        permission_level="read",
         admin_only=admin_only,
         super_admin_only=super_admin_only,
         promoted=promoted,

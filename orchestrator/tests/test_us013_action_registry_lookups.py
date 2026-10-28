@@ -41,6 +41,7 @@ def _action(name, category, tags=None):
         description=f"{name} description",
         category=category,
         parameters={"type": "object", "properties": {}},
+        permission_level="read",
         tags=tags or [],
     )
 

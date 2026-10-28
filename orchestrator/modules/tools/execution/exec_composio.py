@@ -14,6 +14,22 @@ from modules.tools.registry.tool_registry import ToolSpec
 
 logger = logging.getLogger(__name__)
 
+# PRD-36: the Composio executor class, imported on first use to avoid startup overhead.
+_composio_executor = None
+
+
+def get_composio_executor(db: Any) -> Any:
+    """A Composio executor for ``db``, or None when Composio cannot be imported."""
+    global _composio_executor
+    if _composio_executor is None:
+        try:
+            from core.composio.tool_executor import ComposioToolExecutor
+            _composio_executor = ComposioToolExecutor
+        except ImportError:
+            return None
+    return _composio_executor(db) if _composio_executor else None
+
+
 # Image file extensions to detect in Composio results
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
 _EXT_TO_MIME = {

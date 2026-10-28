@@ -21,49 +21,12 @@ from apscheduler.triggers.cron import CronTrigger
 from core.best_effort import off_loop
 
 from services.credits.asks import runs_as_an_ask
+from services.heartbeats.triage_shadow import (
+    shadow_heartbeat_triage as _shadow_heartbeat_triage,
+)
+from services.proactive.heartbeat_bridge import agent_job, orchestrator_job
 
 logger = logging.getLogger(__name__)
-
-
-def _shadow_heartbeat_triage(
-    *,
-    workspace_id: Any,
-    link_id: Any,
-    agent_id: Any,
-    agent_name: Optional[str],
-    title: str,
-    message: str,
-    status: str,
-    source_type: str,
-    platform_action: str,
-) -> None:
-    """PRD-248 S5 (shadow only): the decision engine says whether the owner
-    should act on this heartbeat today and how severe it is, logged beside the
-    route the platform takes. Lazy, off by default, fail-open."""
-    try:
-        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
-
-        engine = get_decision_engine()
-        if engine.dials().report_triage_mode == MODE_OFF:
-            return
-        engine.shadow(
-            judgements.shadow_report_triage(
-                engine,
-                workspace_id=workspace_id,
-                kind=f"heartbeat:{source_type}",
-                subject_id=link_id,
-                title=title,
-                summary=message,
-                status=status,
-                agent_name=agent_name,
-                agent_id=agent_id,
-                report_type=None,
-                platform_action=platform_action,
-            ),
-            purpose=judgements.PURPOSE_REPORT,
-        )
-    except Exception:  # noqa: BLE001 — never into a heartbeat
-        logger.debug("[decision] heartbeat triage shadow skipped", exc_info=True)
 
 
 def durable_probe_enabled(app_config: Any) -> bool:
@@ -439,7 +402,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._orchestrator_tick,
+            orchestrator_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[workspace_id, hb_config],
@@ -512,7 +475,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._agent_tick,
+            agent_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[agent_id, workspace_id, hb_config],

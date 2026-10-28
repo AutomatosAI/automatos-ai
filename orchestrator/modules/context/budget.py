@@ -210,4 +210,11 @@ DEFAULT_BUDGETS: dict[ContextMode, TokenBudget] = {
         reserved_for_response=0,
         reserved_for_messages=0,
     ),
+    # Check-in (PRD-268 K9): 12,000 tokens of context and at most 800 output tokens a
+    # call. No messages: the runner builds its own turn.
+    ContextMode.CHECK_IN: TokenBudget(
+        total=12_000,
+        reserved_for_response=800,
+        reserved_for_messages=0,
+    ),
 }

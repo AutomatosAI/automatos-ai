@@ -4,6 +4,8 @@ Its columns, its agent's name and icon, (PRD-252 R3) why it waits in Review or
 Blocked, as the codes ``core.services.ticket_reasons`` gives, and (R4) its
 number, #0042 or a mission step's #0051.3. PRE-11 (7 Oct): whether the owner added
 its answer to knowledge (``knowledge_document_id``, services/owner_knowledge.py).
+PRD-268 US-C17b: where it stands, what happens next and what Try again does
+(``display_state``, ``next_step``, ``retry``; services/proactive/display_state.py).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from core.models import Agent
 from core.models.core import BoardTask
 from core.services.ticket_reasons import blocked_code, review_reason
 from services.owner_knowledge import CARD_TAG, with_knowledge_ids
+from services.proactive.display_state import ticket_status
 from services.ticket_numbers import ticket_numbers
 from services.ticket_redo import kept_draft, times_sent_back
 
@@ -22,10 +25,12 @@ from services.ticket_redo import kept_draft, times_sent_back
 def board_dict(task: BoardTask, number: Optional[str] = None) -> Dict[str, Any]:
     """A ticket's columns, its number, why it waits in Review or Blocked, how
     often it was sent back (R2: the review panel suggests Discuss after three),
-    and (F243) the draft a failed redo keeps on the card's face."""
-    return {**task.to_dict(), "number": number, "review_reason": review_reason(task),
+    (F243) the draft a failed redo keeps on the card's face, and (PRD-268 §6.11.1)
+    its status, next step and retry."""
+    reason = review_reason(task)
+    return {**task.to_dict(), "number": number, "review_reason": reason,
             "blocked_code": blocked_code(task), "times_sent_back": times_sent_back(task),
-            "kept_draft": kept_draft(task)}
+            "kept_draft": kept_draft(task), **ticket_status(task, reason)}
 
 
 def enrich_with_agents(tasks: List[BoardTask], db: Session, workspace_id: Any) -> List[Dict[str, Any]]:

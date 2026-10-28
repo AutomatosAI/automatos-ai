@@ -36,8 +36,8 @@ def _registry(*actions):
 
 def _action(name, available=None, promoted=False):
     return ActionDefinition(name=name, description=name, category="t",
-                            parameters={"type": "object", "properties": {}}, promoted=promoted,
-                            available=available)
+                            parameters={"type": "object", "properties": {}}, permission_level="read",
+                            promoted=promoted, available=available)
 
 
 def _enum(registry, **kw):

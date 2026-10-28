@@ -242,7 +242,7 @@ def _corpus(monkeypatch, threads=None):
 
 def _action(name):
     return ActionDefinition(name=name, description=f"{name} does a thing", category="agents",
-                            parameters={"type": "object", "properties": {}})
+                            parameters={"type": "object", "properties": {}}, permission_level="read")
 
 
 def test_warm_loads_the_provider_and_the_corpus_in_a_thread_before_the_build(monkeypatch):

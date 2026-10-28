@@ -270,8 +270,8 @@ def test_hidden_categories_resolve_from_the_workspace_or_its_id(app):
 def _action(name, category, promoted=False):
     return ActionDefinition(
         name=name, description=f"{name.replace('_', ' ')} for the workspace", category=category,
-        parameters={"type": "object", "properties": {}, "required": []}, promoted=promoted,
-        tags=[category], examples=[f"please {name.replace('_', ' ')}"],
+        parameters={"type": "object", "properties": {}, "required": []}, permission_level="read",
+        promoted=promoted, tags=[category], examples=[f"please {name.replace('_', ' ')}"],
     )
 
 

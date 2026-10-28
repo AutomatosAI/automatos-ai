@@ -2244,6 +2244,30 @@ class Config:
     DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
 
     # =============================================================================
+    # PRD-268 Proactive Auto: check-ins that suggest
+    # =============================================================================
+    # K7: the platform mode is off | shadow | live, the ``proactive.mode`` system setting
+    # (services/proactive/switches.py), read strictly. No row takes this default; a value
+    # that is none of the three, or a read that cannot complete, is off.
+    PROACTIVE_MODE_DEFAULT: str = (os.getenv("PROACTIVE_MODE_DEFAULT") or "off").strip().lower()
+    # §6.9: the caps every workspace's check-ins are held to unless its owners or admins set
+    # their own (settings.proactive.caps, services/proactive/limits.py). 0 allows nothing; a
+    # value the caps refuse (a negative one, a minimum interval past the maximum) refuses
+    # every check-in until it is fixed.
+    PROACTIVE_MAX_MODEL_RUNS_PER_DAY: int = int(os.getenv("PROACTIVE_MAX_MODEL_RUNS_PER_DAY", "48"))
+    PROACTIVE_MAX_SUGGESTIONS_PER_RUN: int = int(os.getenv("PROACTIVE_MAX_SUGGESTIONS_PER_RUN", "3"))
+    PROACTIVE_MAX_NEW_PER_PERSON_PER_DAY: int = int(os.getenv("PROACTIVE_MAX_NEW_PER_PERSON_PER_DAY", "10"))
+    # Past this the person's oldest open suggestions expire; nothing is refused.
+    PROACTIVE_MAX_OPEN_PER_PERSON: int = int(os.getenv("PROACTIVE_MAX_OPEN_PER_PERSON", "20"))
+    PROACTIVE_MAX_OPEN_PER_AGENT: int = int(os.getenv("PROACTIVE_MAX_OPEN_PER_AGENT", "3"))
+    # A check-in's interval: one sooner than the minimum after the last is refused.
+    PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
+    PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
+    # its item reads not_checked. At least a tenth of a second.
+    READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
+
+    # =============================================================================
     # PRD-251 Socials
     # =============================================================================
     # Socials is gated two ways (D1): the platform master switch is the
