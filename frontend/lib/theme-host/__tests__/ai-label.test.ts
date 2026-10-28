@@ -278,6 +278,7 @@ const HOSTILE_RULES: ReadonlyArray<readonly [string, string, string]> = [
   ['a mask', `html.${HOSTILE_CLASS} [role="note"] { mask-image: linear-gradient(transparent, transparent); }`, 'paint'],
   ['a filter on an ancestor', `html.${HOSTILE_CLASS} body { filter: opacity(0); }`, 'paint'],
   ['a tiny font', `html.${HOSTILE_CLASS} [role="note"] { font-size: 4px; }`, 'font'],
+  ['a text stroke that blots the glyphs', `html.${HOSTILE_CLASS} [role="note"] { -webkit-text-stroke-width: 2px; }`, 'paint'],
   // ::first-line and ::first-letter paint the words without showing in getComputedStyle(element)
   ['a blank first line', `html.${HOSTILE_CLASS} [role="note"]::first-line { color: transparent; }`, 'paint'],
   ['a first letter with no fill', `html.${HOSTILE_CLASS} p[role="note"]::first-letter { -webkit-text-fill-color: transparent; }`, 'paint'],
@@ -424,6 +425,41 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     } finally {
       delete (window as { CSS?: unknown }).CSS
     }
+  })
+
+  it.each([
+    ['a ::before of the words', '[data-ai-label-text]', '::before'],
+    ['an ::after of the label', '[data-ai-label]', '::after'],
+  ])("brings the copy for %s: it hit-tests as what it belongs to, so its content is what shows it", async (_name, selector, pseudo) => {
+    const realStyle = window.getComputedStyle.bind(window)
+    const drawn = document.createElement('div').style
+    drawn.setProperty('content', '""')
+    Object.defineProperty(window, 'CSS', { value: { supports: () => true }, configurable: true })
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, requested?: string | null) =>
+      requested === pseudo && element.matches(selector) ? drawn : realStyle(element))
+    try {
+      renderChat('default')
+      expect(await waitFor(theCaption)).toHaveTextContent(AUTO_LABEL)
+      expect(aiLabelHiddenReason(theLabel(), window)).toBe('paint')
+      expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'paint')]])
+    } finally {
+      delete (window as { CSS?: unknown }).CSS
+    }
+  })
+
+  it.each([
+    // the words' line in jsdom's layout runs from 880 to 990: the old start, middle and end points were 882, 935 and 988
+    ['a stripe between the start, middle and end of the words', null, (x: number) => x >= 890 && x <= 900],
+    ['a stripe only a random point lands on', 0.05, (x: number) => x >= 886 && x <= 889],
+  ])('brings the copy for %s: more points each line, and two new at random each check', async (_name, random, stripe) => {
+    renderChat('default')
+    expect(captionHost()).toBeNull()
+    layout.cover = theLabel()
+    layout.coverAt = (x) => stripe(x)
+    if (random !== null) vi.spyOn(Math, 'random').mockReturnValue(random)
+    await hideWith(`html.${HOSTILE_CLASS} ${LABEL} { color: rgb(80, 80, 80); }`)
+    expect(hostWarnings()).toEqual([[THEME_HOST_LOG, aiLabelHiddenWarning('page', 'covered')]])
+    expect(inputOf('default')).toBeEnabled()
   })
 
   it('treats the label as hidden when its check throws (a getComputedStyle a theme patched), and shows the copy', async () => {

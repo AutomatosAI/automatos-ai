@@ -34,8 +34,10 @@ export interface LayoutBox {
 export interface LabelLayout {
   /** What a browser would measure for the words, where jsdom can't lay them out; null: the element's box. */
   textBox: LayoutBox | null
-  /** An element drawn over everything at every point; null: nothing is. */
+  /** An element drawn over everything; null: nothing is. */
   cover: Element | null
+  /** Where `cover` is drawn: only at the points this says (a striped overlay); null: at every point. */
+  coverAt: ((x: number, y: number) => boolean) | null
 }
 
 type Hits = (this: Document | ShadowRoot, x: number, y: number) => Element[]
@@ -64,7 +66,7 @@ function boxOf(element: Element, fallback: LayoutBox): DOMRect {
 /** What a browser's hit-test would find at any point of the words: the cover, the words, the label, topmost first. */
 function stackIn(root: Document | ShadowRoot, cover: Element | null): Element[] {
   const words = Array.from(root.querySelectorAll(WORDS))
-  const stack = [cover, ...words.flatMap((word) => [word, word.parentElement])]
+  const stack: Array<Element | null> = [cover, ...words.flatMap((word) => [word, word.parentElement])]
   return stack.filter((element): element is Element => element !== null && window.getComputedStyle(element).pointerEvents !== 'none')
 }
 
@@ -77,13 +79,14 @@ function defineOn(target: object, name: string, value: unknown): () => void {
 
 /** Installs the label's layout with `fallback` as the default box; returns what a test sets, and what undoes it. */
 export function installLabelLayout(fallback: LayoutBox): { readonly layout: LabelLayout; readonly uninstall: () => void } {
-  const layout: LabelLayout = { textBox: null, cover: null }
+  const layout: LabelLayout = { textBox: null, cover: null, coverAt: null }
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     return boxOf(this, fallback)
   })
   vi.spyOn(Element.prototype, 'attachShadow')
-  const hits: Hits = function (this: Document | ShadowRoot) {
-    return stackIn(this, layout.cover)
+  const hits: Hits = function (this: Document | ShadowRoot, x: number, y: number) {
+    const covered = layout.coverAt === null || layout.coverAt(x, y)
+    return stackIn(this, covered ? layout.cover : null)
   }
   const textRect = function (this: Range) {
     const start = this.startContainer

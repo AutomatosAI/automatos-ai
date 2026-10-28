@@ -77,10 +77,13 @@ function lineStyleHides(style: CSSStyleDeclaration, grounds: readonly Rgba[], mi
   })
 }
 
-/** Whether the browser reports ::first-line styles through getComputedStyle (it says so through CSS.supports). */
-function lineStylesReadable(view: Window): boolean {
+/**
+ * Whether the browser reports `pseudo`'s styles through getComputedStyle: every browser that paints it
+ * says so through CSS.supports. A DOM with no CSS namespace (the test runner) can't, and skips the read.
+ */
+export function pseudoStylesReadable(view: Window, pseudo: string): boolean {
   const css = (view as WithCss).CSS
-  return typeof css?.supports === 'function' && css.supports('selector(::first-line)')
+  return typeof css?.supports === 'function' && css.supports(`selector(${pseudo})`)
 }
 
 /** Whether the computed ::first-line or ::first-letter of the words or an element around them hides them. */
@@ -90,7 +93,7 @@ export function lineStylesHide(
   view: Window,
   limits: { readonly minOpacity: number; readonly minContrast: number },
 ): boolean {
-  if (!lineStylesReadable(view)) return false
+  if (!pseudoStylesReadable(view, '::first-line')) return false
   return chain.some((element) =>
     LINE_PSEUDOS.some((pseudo) => lineStyleHides(view.getComputedStyle(element, pseudo), grounds, limits.minOpacity, limits.minContrast)),
   )

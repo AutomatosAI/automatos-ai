@@ -10,8 +10,10 @@
  * - it is in the page, and neither its words nor any element around them is `display: none`;
  *   the words are `visibility: visible`; the product of their and their ancestors' opacity is at
  *   least MIN_LABEL_OPACITY;
- * - nothing around the words cuts or repaints them: no `clip-path`, mask or `filter`, and no
- *   `content-visibility: hidden`, on the words, the label or an ancestor ('paint');
+ * - nothing around the words cuts or repaints them: no `clip-path`, mask or `filter`, no
+ *   `content-visibility: hidden`, and no `-webkit-text-stroke` wider than MAX_TEXT_STROKE_PX (a stroke
+ *   in the background's colour blots the glyphs while the fill passes), on the words, the label or an
+ *   ancestor ('paint');
  * - the font is at least MIN_FONT_SIZE_PX ('font');
  * - the colour the words are filled with (`-webkit-text-fill-color`, else `color`) is not
  *   transparent and has at least MIN_TEXT_CONTRAST against the colour behind them: the first
@@ -20,14 +22,21 @@
  * - no ::first-line or ::first-letter rule reaches the words or an element around them ('paint'),
  *   and, where the browser reports those pseudo-elements' styles, theirs keep the words opaque,
  *   visible and at contrast too ('color'): line-pseudos.ts;
+ * - neither the words' element nor the label has a ::before or ::after (any `content` but none or
+ *   normal): one of the words' own pseudo-elements hit-tests as the words, so the hit-test below
+ *   can't see it drawn over them, and one that adds text changes what the label says ('paint').
+ *   Only these two: an ancestor's pseudo-element hit-tests as that ancestor, so the hit-test sees
+ *   it, and themes paint the page's own (scan lines on <body>, say). Where the browser doesn't
+ *   report pseudo-element styles (CSS.supports), the read is skipped, as in line-pseudos.ts;
  * - the label's box is at least MIN_LABEL_SIZE_PX each way ('size') and inside the viewport
  *   ('viewport');
  * - the words themselves, measured as a Range, are at least a real line of text (MIN_FONT_SIZE_PX
  *   tall, MIN_GLYPH_WIDTH_EM of the font per character wide), wholly inside the viewport, and
  *   inside the label's own box when the label clips its overflow: so `text-indent`, a shrunk or
  *   clipped box and a scale transform all fail ('text');
- * - nothing is drawn over them: at the start, middle and end of each line of the words, the
- *   topmost element is the text element itself ('covered'). Hit-testing skips anything with
+ * - nothing is drawn over them: at SAMPLE_POINTS_PER_LINE points evenly across each line of the words
+ *   and JITTERED_POINTS_PER_LINE more at random, new each check (so a striped overlay can't be laid
+ *   between known points), the topmost element is the text element itself ('covered'). Hit-testing skips anything with
  *   `pointer-events: none`: the label itself (it never takes a click), and an overlay a theme could
  *   make click-through to hide behind. So for the probe only, in the same task (nothing paints
  *   meanwhile), a transient constructed stylesheet makes everything hittable, `*, *::before,
@@ -43,7 +52,7 @@
  * (docs/theme-host/css-layer-model.md).
  */
 import { canvasGrounds, contrastRatio, isOpaque, over, parseCssColor, type Rgba } from './contrast'
-import { lineRulesReach, lineStylesHide } from './line-pseudos'
+import { lineRulesReach, lineStylesHide, pseudoStylesReadable } from './line-pseudos'
 
 export type AiLabelHiddenReason =
   /** The check itself threw (a theme's code may have patched what it calls): the label counts as hidden. */
@@ -75,15 +84,27 @@ export const MIN_FONT_SIZE_PX = 9
 export const MIN_TEXT_CONTRAST = 3
 /** The narrowest a character is drawn, as a share of the font size, so a squeezed line reads as hidden. */
 export const MIN_GLYPH_WIDTH_EM = 0.3
+/** A text stroke wider than this can blot the glyphs out (in the background's colour). */
+export const MAX_TEXT_STROKE_PX = 0.5
+/** Hit-test points evenly across each line of the words, ends included. */
+export const SAMPLE_POINTS_PER_LINE = 9
+/** And this many more per line, at random places, new each check. */
+export const JITTERED_POINTS_PER_LINE = 2
 
 const HIDDEN_VISIBILITY = new Set(['hidden', 'collapse'])
 const NO_PAINT_CHANGE = new Set(['', 'none'])
 const PAINT_PROPERTIES = ['clip-path', 'mask-image', '-webkit-mask-image', 'filter'] as const
+const OWN_PSEUDOS = ['::before', '::after'] as const
+const NO_CONTENT = new Set(['', 'none', 'normal'])
+/** Keeps a hit-test point this far inside a line's ends, and its random height inside the line's middle half. */
+const LINE_END_INSET_PX = 2
+const LINE_MIDDLE = { from: 0.25, span: 0.5 }
 /** The transient sheet that makes everything hittable for the moment of the probe. */
 export const AI_LABEL_PROBE_ATTR = 'data-ai-label-probe'
 const PROBE_RULE = '*, *::before, *::after { pointer-events: auto !important; }'
 
-interface Box {
+/** A box in viewport px, as a browser measures it. */
+export interface Box {
   readonly left: number
   readonly top: number
   readonly right: number
@@ -110,15 +131,36 @@ function nearestValue(styles: readonly CSSStyleDeclaration[], property: string):
   return styles.map((style) => style.getPropertyValue(property).trim()).find((value) => value !== '') ?? ''
 }
 
+/** The text stroke's width in px: the longhand, else the shorthand's leading length; 0 when there is none. */
+function textStrokePx(style: CSSStyleDeclaration): number {
+  const longhand = Number.parseFloat(style.getPropertyValue('-webkit-text-stroke-width'))
+  const shorthand = Number.parseFloat(style.getPropertyValue('-webkit-text-stroke'))
+  return Math.max(Number.isFinite(longhand) ? longhand : 0, Number.isFinite(shorthand) ? shorthand : 0)
+}
+
+function repainted(style: CSSStyleDeclaration): boolean {
+  return (
+    PAINT_PROPERTIES.some((property) => !NO_PAINT_CHANGE.has(style.getPropertyValue(property).trim())) ||
+    style.getPropertyValue('content-visibility').trim() === 'hidden' ||
+    textStrokePx(style) > MAX_TEXT_STROKE_PX
+  )
+}
+
 function hiddenByStyle(styles: readonly CSSStyleDeclaration[]): AiLabelHiddenReason | null {
   if (styles.some((style) => style.display === 'none')) return 'display'
   if (HIDDEN_VISIBILITY.has(styles[0].visibility)) return 'visibility'
   const opacity = styles.reduce((product, style) => product * opacityOf(style), 1)
   if (opacity < MIN_LABEL_OPACITY) return 'opacity'
-  const repainted = (style: CSSStyleDeclaration) =>
-    PAINT_PROPERTIES.some((property) => !NO_PAINT_CHANGE.has(style.getPropertyValue(property).trim())) ||
-    style.getPropertyValue('content-visibility').trim() === 'hidden'
   return styles.some(repainted) ? 'paint' : null
+}
+
+/** Whether the words' element or the label has a ::before or ::after (see the module's note on why only these). */
+function hiddenByOwnPseudos(label: Element, words: Element, view: Window): AiLabelHiddenReason | null {
+  if (!pseudoStylesReadable(view, '::before')) return null
+  const elements = words === label ? [label] : [words, label]
+  const drawn = (element: Element) =>
+    OWN_PSEUDOS.some((pseudo) => !NO_CONTENT.has(view.getComputedStyle(element, pseudo).content.trim()))
+  return elements.some(drawn) ? 'paint' : null
 }
 
 function hiddenByFont(styles: readonly CSSStyleDeclaration[]): AiLabelHiddenReason | null {
@@ -241,18 +283,29 @@ function elementsAt(root: Document | ShadowRoot, points: ReadonlyArray<readonly 
   return withEverythingHittable(doc, () => points.map(([x, y]) => root.elementsFromPoint(x, y)))
 }
 
-/** The start, middle and end of a line of the words, at its middle height. */
-function samplePoints(line: Box): ReadonlyArray<readonly [number, number]> {
-  const inset = Math.min(2, line.width / 4)
-  const y = line.top + line.height / 2
-  return [line.left + inset, line.left + line.width / 2, line.right - inset].map((x) => [x, y] as const)
+/**
+ * SAMPLE_POINTS_PER_LINE points evenly across a line of the words at its middle height, ends included,
+ * and JITTERED_POINTS_PER_LINE more at random across it and inside its middle half: bounded, and new
+ * each check, so no overlay laid out between known points goes unseen for long.
+ */
+export function samplePoints(line: Box, random: () => number = Math.random): ReadonlyArray<readonly [number, number]> {
+  const inset = Math.min(LINE_END_INSET_PX, line.width / 4)
+  const span = line.width - 2 * inset
+  const middle = line.top + line.height / 2
+  const steps = SAMPLE_POINTS_PER_LINE - 1
+  const even = Array.from({ length: SAMPLE_POINTS_PER_LINE }, (_, step) => [line.left + inset + (span * step) / steps, middle] as const)
+  const jittered = Array.from(
+    { length: JITTERED_POINTS_PER_LINE },
+    () => [line.left + inset + span * random(), line.top + line.height * (LINE_MIDDLE.from + LINE_MIDDLE.span * random())] as const,
+  )
+  return [...even, ...jittered]
 }
 
 /** Whether anything is drawn over the words at the start, middle or end of any of their lines. */
 function hiddenByCover(words: Element, measured: Measured | null): AiLabelHiddenReason | null {
   const root = words.getRootNode() as Document | ShadowRoot
   if (measured === null || typeof root.elementsFromPoint !== 'function') return 'covered'
-  const points = measured.lines.flatMap(samplePoints)
+  const points = measured.lines.flatMap((line) => samplePoints(line))
   return elementsAt(root, points).every((hits) => hits[0] === words) ? null : 'covered'
 }
 
@@ -273,6 +326,7 @@ export function aiLabelHiddenReason(element: Element | null, view: Window): AiLa
     hiddenByFont(styles) ??
     hiddenByColour(styles, grounds) ??
     hiddenByLinePseudos(chain, grounds ?? [], view) ??
+    hiddenByOwnPseudos(element, words, view) ??
     hiddenByBox(element, view)
   if (early !== null) return early
   const measured = measureWords(words)

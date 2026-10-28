@@ -18,8 +18,9 @@ import { watchPage } from '../support/watch'
 // themes/play/src/components/play/chat/message-box.tsx) holds the words, then the host's voice button (the
 // SDK's voice.VoiceButton), then Send, the words and Send each in the SDK's cards.AiLabelFence, which now
 // draws its children alone. While a style keeps the label from being seen, by any of the ways the host's
-// check reads (display, transparent words, a blank ::first-line or ::first-letter, a clipped box, an indent
-// off-screen, a clip-path, something drawn over it, click-through or not), or its check throws, the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
+// check reads (display, transparent words, a blank ::first-line or ::first-letter, a ::before of the words, a
+// text stroke, a clipped box, an indent off-screen, a clip-path, something drawn over it, click-through or not),
+// or its check throws, the host draws the same words in its own layer (components/ai-label/protected-caption.tsx): a
 // closed shadow root on a guarded element of the host's at the end of <body>, the words a popover in the
 // browser's top layer, and logs a theme-host warning that names how. A second style aimed at that copy,
 // and a popover of the page's shown after it, leave it on screen and on top (support/ai-label-copy.ts reads
@@ -85,6 +86,12 @@ const HIDING_WAYS: ReadonlyArray<readonly [string, string, string]> = [
   ['a clip-path', `html.play ${LABEL_SELECTOR} { clip-path: inset(50%) !important; }`, 'paint'],
   ['a blank first line', 'html.play [role="note"]::first-line { color: transparent !important; }', 'paint'],
   ['a first letter with no fill', 'html.play p[role="note"]::first-letter { -webkit-text-fill-color: transparent !important; }', 'paint'],
+  [
+    "a ::before of the words drawn over them (it hit-tests as the words)",
+    'html.play [role="note"] span::before { content: "" !important; position: absolute !important; inset: 0 !important; background: Canvas !important; }',
+    'paint',
+  ],
+  ['a text stroke in the ground colour that blots the glyphs', 'html.play [role="note"] { -webkit-text-stroke: 3px Canvas !important; }', 'paint'],
 ]
 
 /**
