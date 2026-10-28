@@ -1,7 +1,8 @@
 """PRD-268 §6.2.3, §6.9, K8, K9 — a check-in's tool loop, in the read-only lane.
 
 The loop of ``HeartbeatService._orchestrator_tick_llm``, bounded for a check-in, and never
-through ``AgentFactory`` (K8), so no Composio, plugin, memory or sub-agent tool can reach it:
+through an agent's own runtime (K8), so no Composio, plugin, memory or sub-agent tool can
+reach it:
 
 * the tools are the ``ContextMode.CHECK_IN`` surface: the platform actions that read the
   workspace and ``platform_suggest_next_step`` (``ToolsSection._load_read_only``);
