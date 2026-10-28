@@ -33,12 +33,14 @@ from sqlalchemy.sql import func
 from core.database.base import Base
 
 # The four push types (PRD-266 D22; PRD-268 K9 adds suggestion, shipped off): the only
-# kinds of message a phone is ever sent. The revision prd268_w2_delivery widens the CHECK.
+# kinds of message a phone is ever sent.
 PUSH_TYPES = ("needs_answer", "review", "auto_message", "suggestion")
 
 TICKET_ID_LENGTH = 64  # Expo's ticket ids are UUIDs (36 characters)
 PUSH_TYPE_LENGTH = 16
 
+# push_type IN ('needs_answer', 'review', 'auto_message', 'suggestion'): the CHECK the revision
+# prd268_w2_delivery adds (tests/test_prd268w2_delivery_migration.py holds the two equal).
 PUSH_TYPE_CHECK = "push_type IN ({})".format(", ".join(f"'{t}'" for t in PUSH_TYPES))
 
 
