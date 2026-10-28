@@ -118,7 +118,7 @@ def _index_with(em, cache, registry):
 
 def _stub_action(name, description, category):
     return ActionDefinition(name=name, description=description, category=category,
-                            parameters={"type": "object", "properties": {}})
+                            parameters={"type": "object", "properties": {}}, permission_level="read")
 
 
 class _StubRegistry:
@@ -154,6 +154,7 @@ def test_build_embedding_text_includes_utterances_and_enums(monkeypatch):
         }},
         examples=["mark task 3 as done"],
         tags=["tasks", "write"],
+        permission_level="write",
     )
     monkeypatch.setattr(
         utterance_corpus, "utterances_for",

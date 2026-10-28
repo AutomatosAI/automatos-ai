@@ -17,6 +17,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
         ),
         category="field",
         promoted=True,
+        permission_level="read",
         parameters={
             "type": "object",
             "properties": {
@@ -52,6 +53,8 @@ def register_field_actions(registry: ActionRegistry) -> None:
         ),
         category="field",
         promoted=True,
+        # PRD-268 US-C02a: the handler writes (field.inject), so a check-in never runs it.
+        permission_level="write",
         parameters={
             "type": "object",
             "properties": {
@@ -90,6 +93,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "Useful for coordinators to decide when enough research has been done."
         ),
         category="field",
+        permission_level="read",
         parameters={
             "type": "object",
             "properties": {},

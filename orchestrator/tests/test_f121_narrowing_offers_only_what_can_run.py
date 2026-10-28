@@ -157,7 +157,8 @@ def test_the_graph_router_drops_a_chain_through_what_cannot_run(unconfigured):
 
 def _action(name, available=None):
     return ActionDefinition(name=name, description=name, category="t",
-                            parameters={"type": "object", "properties": {}}, available=available)
+                            parameters={"type": "object", "properties": {}}, permission_level="read",
+                            available=available)
 
 
 def test_the_unknown_action_error_suggests_only_what_can_run():

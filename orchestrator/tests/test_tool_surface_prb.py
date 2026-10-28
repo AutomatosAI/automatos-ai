@@ -304,15 +304,15 @@ def _registry_with_promoted():
     reg = _fresh_registry()
     reg.register(ActionDefinition(
         name="plain_action", description="plain", category="t",
-        parameters={"type": "object", "properties": {}},
+        parameters={"type": "object", "properties": {}}, permission_level="read",
     ))
     reg.register(ActionDefinition(
         name="promoted_action", description="promoted", category="t",
-        parameters={"type": "object", "properties": {}}, promoted=True,
+        parameters={"type": "object", "properties": {}}, permission_level="read", promoted=True,
     ))
     reg.register(ActionDefinition(
         name="su_promoted_action", description="su", category="t",
-        parameters={"type": "object", "properties": {}}, promoted=True,
+        parameters={"type": "object", "properties": {}}, permission_level="read", promoted=True,
         super_admin_only=True,
     ))
     return reg
