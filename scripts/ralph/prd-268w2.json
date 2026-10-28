@@ -1,0 +1,398 @@
+{
+ "project": "PRD-268 W2 Delivery: Proactive Auto reaches people. The brief on open, suggestions in the Auto thread and on the Command Center, the suggestion push (shipped off), the approval view and rule sentences, SDK 1.3.0 with the default components, status words and readiness on the web (one branch, one PR, one CI run)",
+ "branchName": "feat/prd-268-w2-delivery",
+ "baseBranch": "origin/feat/prd-268-w1-check-ins",
+ "prBase": "feat/prd-268-w1-check-ins (stacked; retargeted to main BEFORE W1's PR merges: K1)",
+ "trackingIssue": "#1359",
+ "prdPullRequest": "#1362 (merged)",
+ "stackedOn": "feat/prd-268-w1-check-ins (PRD-268 W1 Check-ins, tracking issue #1358)",
+ "description": "PRD-268 (docs/PRDS/PRD-268-PROACTIVE-AUTO.md) wave W2: US-C08, C09, C10, C19, C20, C21 and US-W01, W02, W04, W05, re-cut into 24 one-session stories in dependency order. Core and web; ONE Alembic revision (prd268_w2_delivery, chained onto W1's prd268_w1_proactive); no new dependency (the axe AC waits on Gerard, K18); no third-party client. The Go and kit stories (US-G*, US-T01, US-K*) belong to their own repos. Diff base for every check: `bash scripts/ralph/acceptance-prd268w2.sh --print-base`.",
+ "decisions": [
+  "K1 Branch, stack and PR. All work happens on feat/prd-268-w2-delivery in <workspace>/.worktrees/automatos-ai/feat+prd-268-w2-delivery, cut by the runner from origin/feat/prd-268-w1-check-ins: the wave is STACKED on W1. The launcher refuses until scripts/ralph/state/prd268w1.status reads BUILD=COMPLETE and every acceptance criterion of scripts/ralph/prd-268w1.json on origin/feat/prd-268-w1-check-ins carries a DONE or OWNER mark. One PR for the wave (tracking issue #1359) and one CI run at the end. The PR's base is feat/prd-268-w1-check-ins while W1's PR is open, and main once W1's PR has merged and this branch carries its merge commit. THE STACKED-PR TRAP: before W1's PR merges, the owner retargets this PR to main (gh pr edit <W2 PR> --base main), because a squash merge with --delete-branch closes a PR stacked on the deleted branch. After W1 lands, the owner merges origin/main into this branch (a merge, never a rebase or a force-push), re-reads the Alembic head, and re-chains prd268_w2_delivery if main's head is not prd268_w1_proactive (both pins). `launch-268w2.sh --integration-steps` prints the steps.",
+  "K2 Story order is the dependency order (the `priority` field), and each story gets one session. A story never waits on CI. Core comes first: C19, then C10, C08, C09, C20 and C21 (C21 is Wave K's core step 1). The web stories follow (W01, W02, W04, W05) and draw the C21 defaults.",
+  "K3 Files over 800 lines never grow (W1's K3 holds). Measured 28 Oct on main 0786ab346; re-measure on the base (W1's tip). Core: modules/tools/formatting/result_formatter.py 911, modules/tools/discovery/platform_executor.py 1543, api/board_tasks.py 2282, api/approval_grants.py 806, api/chat.py 851, services/activity_service.py 1267, services/heartbeat_service.py 1825, consumers/chatbot/service.py 3068, main.py 1666, core/llm/manager.py 1063. Frontend: components/chatbot/chat.tsx 1619, lib/api-client.ts 4078, app/globals.css 3401. A story that must add lines to one moves at least as many out in the same commit, re-exported where a test imports the name. The exceptions: orchestrator/config.py gains its settings lines; route-manifest.json and config-surface.json gain their entries; app/globals.css gains only the --running token lines, at most 8 (US-C21a).",
+  "K4 Never touch a line inside a function over 50 code lines, or a React component over 150 (scripts/ci/check_changed_code_shape.py; frontend/scripts/check-changed-lines-eslint.js). The decided seams: (1) post_background_message (services/chat_messenger.py:122-229, 76 code lines) is REWRITTEN as a short function over helpers (US-C19b), keeping its name, its keyword arguments and its return. (2) evaluate_board_task_approval (services/board_approval.py:70-165, 80) is REWRITTEN short (US-C20b), keeping its signature, BoardApprovalOutcome and every name tests patch. (3) ToolResultFormatter.format_for_frontend (result_formatter.py:559-822, 183) is never touched: the approval view rides a second decorator beside @carries_the_question. (4) Message (frontend/components/chatbot/message.tsx:50-511) is never touched: message-with-receipts.tsx (42 lines, the PRD-256 seam) draws the brief@1 and suggestion@1 cards. (5) Chat (chat.tsx:87-1619) is never touched: only its import lines change (the MultimodalInput import at :13 and the MissionSuggestionCard import at :54 become wrappers of the same names). (6) useBoardEventStream (hooks/use-board-event-stream.ts:78-170, 72 code lines) is split into module-level helpers until it is at most 50 code lines, in the commit that adds its new branch; its tests stay unchanged. (7) MissionsBody (missions-body.tsx:80-285, 187), ActivityPage (activity-page.tsx:110-325, 178) and BoardCardFace (board-card.tsx:73-146, 59) are never touched: their short sub-components and the import lines are the seams. The gate compares these byte for byte with the base: W1's seven (HeartbeatService._agent_tick, _orchestrator_tick, _orchestrator_tick_llm, _dispatch_heartbeat_notification, _route_heartbeat_to_auto, PlatformActionExecutor.clear and _run_cleared), plus format_for_frontend, bulk_update_preferences (api/notifications.py:422-545, 108) and _board_task_blocked_pending_approval (api/board_tasks.py:1482-1569, 65). message.tsx stays untouched.",
+  "K5 This Mac cannot import the orchestrator. route-manifest.json, config-surface.json and services/themes/data/sdk-surface.json are edited by hand, or with a stdlib-only python snippet, in their generated formats. route-manifest.json: routes sorted by (path, method), route_count equal to the number of routes, json.dumps(..., indent=2, sort_keys=True) + newline. config-surface.json: setting names in sorted position. sdk-surface.json: areas and names sorted, as `test_prd261_sdk_surface_drift.py --write` writes it (never run that script here).",
+  "K6 Exactly one Alembic revision, prd268_w2_delivery, chained onto the base's head (re-read EXPECTED_HEAD in test_prd209_alembic_single_head.py on W1's tip; it is prd268_w1_proactive). It does two things. (a) It widens ck_mobile_push_tickets_push_type to the four push types (DROP CONSTRAINT IF EXISTS, then ADD). (b) It adds mobile_devices.push_categories JSONB NOT NULL DEFAULT '[]' (ADD COLUMN IF NOT EXISTS). Nothing else. The brief's claim keeps mobile_digest_posts as it is (K11), the push cap is counted from bell rows (K9), and the language needs no store (K7). Both head pins move, and the PRD-266 schema pins move with them (K19).",
+  "K7 Language. The PRD's 'I speak' setting is not stored in core, but mobile_devices.locale is (the phone's BCP 47 tag, written at registration). No new store. A brief built at request time (POST /api/proactive/brief/open) takes the body's optional locale (a BCP 47 tag, like ChatRequest.locale), else Accept-Language (W1's K13 chooser), else en. The scheduled digest takes the locale of the phone its schedule follows (due_people's device: _SCHEDULES_SQL gains d.locale), else en. get_brief uses the caller context's language when it has one, else en. Strings exist in en and pt-BR; any other tag falls to its language's table, else en.",
+  "K8 Delivery and the modes (W1's K7). Delivery means the thread post, the bell row and the push. It runs only when effective_mode is live for the workspace; off and shadow deliver nothing. The list routes and the brief read open suggestions in any mode, so in shadow the owner sees what live would deliver. Each suggestion gets one thread post, in its addressee's Auto thread (W1's K11): origin 'suggestion', source.suggestion_id, parts [text, suggestion@1]. It is never announced as auto_message.",
+  "K9 The suggestion push (§6.5.3, §12-Q3, Q7) ships OFF. config SUGGESTION_PUSH_ENABLED = False (config.py, config-surface.json); while it is off no suggestion push is sent and discovery does not list suggestion_push. Only Gerard turns it on, after §12-Q27 (tapping a push doesn't open its ticket on his phone) is fixed and automatos-go's US-G02 ships the category. Each run raises one suggestion_ready event per addressee, and only when all of these hold: the run made a suggestion of severity 'today'; the person isn't in quiet hours (W1's is_person_quiet; the workspace window is the dispatcher's own); and fewer than config PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY (2) suggestion_ready bell rows were written for them since their local midnight. Its push goes only to devices whose push_categories hold 'suggestion'. The body is 'Auto has a suggestion', unless the workspace's settings.push.suggestion_titles is true; then it is the suggestion's title (at most 120 characters). The signed field set and its order are unchanged (question is ''), and the title is never a signed field.",
+  "K10 Approvals (§12-Q17, Q28). Always allow is NOT built: no route, no button, no confirm sheet and no policy write, and answers never holds it (answers = ['refuse', 'allow_once']). The buttons keep today's words exactly: the tool card says 'Approve & run' / 'Deny' and the Mission card 'Approve & run' / 'Reject' (the PRD's 'web Approve / Deny' doesn't match the code). The keys work only while the card has focus: 1 refuses (Deny or Reject), 3 allows once (Approve & run), and 2 does nothing until Always allow ships. Never a document-level listener. The cards stay protected surfaces.",
+  "K11 The brief (§6.4, §6.11.2, FR-10). There is one per person, workspace and local date, claimed in mobile_digest_posts (its primary key) by both the scheduled digest and the on-open route. The message carries source {origin 'daily_digest', local_date, via 'schedule' | 'open'} and parts [text(prose), brief@1]. When the claim is already taken, the route answers the day's message, found by those source fields in the person's Auto thread; if it isn't there yet, it answers posted false, pending true. A build or post that fails releases the claim. A brief posted on open is not announced as auto_message, because opening the app is the person's own action (PRD-266 K11); the scheduled one is, as today. post_now ('Send me today's brief now') posts the same brief with no claim, as today. The text part is Auto's Read, unchanged. Brief@1 adds one field to §6.11.2: spoken (the greeting and the numbered row titles through speechify), the words Listen and get_brief's spoken answer use. Unknown fields are ignored everywhere. The cadence Daily Brief is retired (§12-Q11).",
+  "K12 SDK 1.3.0 (US-C21, Wave K step 1). The area is named proactive. SDK_VERSION goes from 1.2.0 to 1.3.0 everywhere it is pinned: services/themes/contract.py:34, lib/theme-host/shared-modules.json sdkVersion, packages/theme-sdk/package.json, its README's tgz line and index.d.ts's note. THEME_HOST_VERSION stays 1.1.0. The PRD's 'host contract bumps to 1.3.0' doesn't match the code: the host contract is versioned apart (contract.py:29-33), and US-T01 bumps it for skin tokens. useCalibration and useAnswerCalibration are in the surface but stay inert until US-C22 adds their routes (no network call; available false). CalibrationCard and ReplyChips render from props. The kit vendors 1.3.0 in Wave K.",
+  "K13 Status tokens (§6.12.2). --running becomes a real token: Studio light (.studio) 40 20% 36%, Studio dark (.studio.dark) 40 20% 65%, and Classic (:root and .dark) its own --info value, because Classic draws working in info until it gains running. Tailwind gets running: hsl(var(--running)), and .studio-pip.running (globals.css:782) reads it. lookToStudioTokens (frontend/lib/look-kit/studio-tokens.ts) emits --success, --warning, --warn-ink, --info and --running per ground tone, listed in a new exported STUDIO_STATUS_TOKEN_NAMES. The phone's token list (MOBILE_TOKEN_NAMES in contract.py and mobile-manifest.ts, 24 tokens) is unchanged: that is US-T01, gated on §12-Q25. The two parity tests (lib/theme-host/__tests__/mobile-tokens.test.ts:59-63 and :75; lib/look-kit/__tests__/look-kit.test.ts:55) expect the 24 plus STUDIO_STATUS_TOKEN_NAMES, and nothing else in them changes.",
+  "K14 Approvals record (AGENTS.md 'stop and ask first'). Gerard approved PRD-268 on 28 Oct 2026 ('get it all started'; tracking issue #1359). This wave adds a fourth push type, which revises PRD-266 D18 and D22 (shipped off, K9). It changes policy text: a plain rule sentence replaces the raw policy key in board approvals, and who may approve is unchanged. It bumps the SDK contract to 1.3.0, adds a host-owned protected control, widens a CHECK constraint and adds one column; no existing row changes. Build exactly what the ACs say.",
+  "K15 W1's binding decisions hold: K3/K4 code shape, K5 manifests, K7 modes, K8 no AgentFactory in the lane, K11 the addressee is the workspace owner, K12 the Start kinds (board_task and chat; mission and playbook_run answer 409), K13 the language chooser, K14 spend, K15 audit after the commit, K16 build exactly the ACs. W1's contracts are read, never assumed. Every note marked RE-VERIFY after W1 names the W1 story that built its seam. If a contract differs, read it from the code and say what differed in the DONE mark.",
+  "K16 Copy is the server's (§6.11). The greeting, the section labels, the empty line, 'Show N more', the rule sentences, the bell title and the push line each come from a strings table per feature, in en and pt-BR. A test fails when a key is missing in either. Clients draw only DISPLAY_STATE_LABELS (the glyph and word per state, §6.11.1) and their own control labels.",
+  "K17 Web rules (frontend/DESIGN_SYSTEM.md §22, PRD §6.12.4). Tokens only, never hex. studio-eyebrow for labels and studio-pill for statuses. One ink primary per view, never orange (no orange-* class). Newsreader serif only for the brief's greeting. rounded-xl or rounded-2xl, never rounded-3xl. No glass or glow in Studio; Classic renders the same components through its own tokens, with no fork. No status through --accent, and none by colour alone: a glyph and a word every time. Auto's words (brief rows, suggestion text, chips) carry data-ai-generated. The brief card and the suggestion card each show the existing tiny 'Auto is an AI' caption once (Q29); Start and the chips sit outside the fence. Credits show on the web only: 'Start (about N credits)' when est_credits is known. Motion: one entrance per component (fade plus a 4 px rise, 180 ms), and a cross-fade only under reduced motion; nothing loops. Listen never auto-plays (§12-Q12).",
+  "K18 axe (US-C21f) needs @axe-core/playwright, a new npm devDependency in e2e/browser, and that is AGENTS.md 'stop and ask first'. That AC is marked → OWNER until Gerard approves it; the screenshots are still built. No other dependency.",
+  "K19 Pins move with approved changes, as the head pins do. Only literals change, and no test function is removed or loosened. The files: test_prd266_push_payload.py (FIVE gains suggestion_ready; :99-102); test_prd266_push_preferences.py (:255-261: seven switch events, and push_types gains suggestion); test_prd266_push_tables_model.py (PUSH_TYPES gains suggestion; the CHECK is read from prd268_w2_delivery); test_prd266_mobile_devices_model.py (COLUMNS and NOT_NULL gain push_categories, read from prd268_w2_delivery); test_prd266_discovery.py (KNOWN_CAPABILITIES gains brief, suggestions, readiness and suggestion_push); test_prd263_harness_review_cadence.py:47-51 (the retired Daily Brief: a stored daily_brief now adds no block); frontend notification-bell-links.test.ts (the suggestion link type); lib/theme-sdk/__tests__/surface.test.ts (STORY_ID admits US-C21, plus the proactive area). The gate checks that no test count in these files dropped.",
+  "K20 Discovery, which US-G01, G02, G06 and G07 read: brief (US-C10b); suggestions and readiness (US-C08b, a kit addition so the phone can gate on them); suggestion_push (US-C09b, listed only while SUGGESTION_PUSH_ENABLED is on, through CONFIGURED_CAPABILITIES).",
+  "K21 Routes. Every new route is authenticated and workspace-scoped, registered through RouterSpec in orchestrator/router_manifest.py (main.py untouched), and a plain def over the sync session. Every new mutating route carries require_workspace_permission, the authz sweep's class (a) in test_p2w2_authz_boundary_sweep.py. Another workspace's id is 404, never 403. The brief route uses agents:execute, the member-level scope of the digest feedback route.",
+  "K22 Nothing runs on this machine: no pytest, npm, npx, vitest, tsc, next, docker or browser. The build proof before merge is `gh workflow run images.yml --ref feat/prd-268-w2-delivery` (TESTER, ownerTest). Frontend tests are vitest files in __tests__ folders beside their components; the browser lane's specs run in browser-e2e.yml on the PR.",
+  "K23 Out of scope: W3, W4, other repos and gated decisions. That covers follow-ups (US-C11), the reply-chip tool and its storage (US-C12; W2 builds only the ReplyChips default, which renders chips it is given), evals (US-C13), the calibration routes (US-C22), Mission and Playbook proposals, Hide learning and computing est_credits (US-C14, C15), and Telegram and Slack (US-C16). Also every Go and kit story (US-G*, US-T01, US-K*), §12-Q17 Always allow, Q18's seen flag ('Since your last brief' stands in for 'Can wait') and Q20's calendar (no calendar row)."
+ ],
+ "ownerTest": [
+  "TESTER first: no CI lane runs `next build` for this PR. `gh workflow run images.yml --ref feat/prd-268-w2-delivery` builds the images from the tip without publishing; it must be green before the owner checks below.",
+  "Live for Gerard (PRD §10 step 1): set the platform proactive.mode to live, then settings.proactive.enabled on Gerard's workspace and on c1. Open the web: one brief appears in the Auto thread. Reload, and open a second tab: the same message, no second brief. The next scheduled digest on the phone is that day's brief, never a second one.",
+  "A check-in suggestion appears as a card in the Auto thread, pinned above the composer, and in the Command Center's Suggested list (Studio and Classic). Start makes a ticket under 'From suggestions'; Hide takes a reason; the bell row opens the card.",
+  "An approval card shows who asked, the target, the preview and the rule sentence. With the card focused, 1 denies and 3 approves. The button words are unchanged. A blocked board ticket shows the rule sentence.",
+  "Settings → Orchestrator → What Auto depends on. Listen on the brief plays the server voice, and the browser's voice when the server voice is off.",
+  "UI change: attach Studio light, Studio dark and Classic screenshots of the brief card, the suggestion card, the approval card and the settings section to the PR.",
+  "The suggestion push stays OFF (SUGGESTION_PUSH_ENABLED false) until §12-Q27 (the push-tap bug on Gerard's phone) is fixed and automatos-go US-G02 ships. Then Gerard turns it on and checks one push per run and two a day at most.",
+  "K18: approve or refuse @axe-core/playwright for the browser lane's axe check."
+ ],
+ "instructions": "Mark an AC done by appending, outside backticks and exactly as written, `→ DONE — <evidence>`. An AC only the owner can check gets `→ OWNER: <what to check>`.",
+ "userStories": [
+  {
+   "id": "US-C19a",
+   "title": "One migration prd268_w2_delivery: the fourth push type's CHECK, mobile_devices.push_categories, both pins",
+   "priority": 1,
+   "description": "As the platform, I need the push-ticket table to accept a suggestion push, and each phone to say which optional push categories its app registered, so that a suggestion push only reaches an app that can show it (PRD-268 §6.5.3, §6.12.5, K6).",
+   "acceptanceCriteria": [
+    "One revision orchestrator/alembic/versions/prd268_w2_delivery.py (revision 'prd268_w2_delivery', down_revision = the base's head, prd268_w1_proactive on W1's tip). It runs ALTER TABLE mobile_push_tickets DROP CONSTRAINT IF EXISTS ck_mobile_push_tickets_push_type, then ADD CONSTRAINT ck_mobile_push_tickets_push_type CHECK (push_type IN ('needs_answer', 'review', 'auto_message', 'suggestion')), and ALTER TABLE mobile_devices ADD COLUMN IF NOT EXISTS push_categories JSONB NOT NULL DEFAULT '[]'. The downgrade deletes push_type 'suggestion' tickets (transient: a day at most), restores the three-type CHECK and drops the column (IF EXISTS)",
+    "core/models/mobile_push.py PUSH_TYPES gains 'suggestion' (PUSH_TYPE_CHECK follows it). core/models/mobile_devices.py MobileDevice gains push_categories (JSONB, not null, default list, server_default '[]'), and to_dict lists it",
+    "Both head pins moved (K6). The PRD-266 schema pins move per K19 (test_prd266_push_tables_model.py, test_prd266_mobile_devices_model.py), with their test counts unchanged",
+    "New test orchestrator/tests/test_prd268w2_delivery_migration.py: the revision chains onto the base head; the model's CHECK equals the revision's; push_categories is declared the same way on both sides; (realdb) the widened CHECK accepts 'suggestion' and refuses another value, and push_categories defaults to []; upgrading a create_all-built database changes nothing (IF EXISTS / IF NOT EXISTS)"
+   ],
+   "passes": false,
+   "notes": "Shape: alembic/versions/prd266_w2_push.py (a docstring ending Revision ID / Revises / Create Date); its CHECK is at :45. The parity tests that pin the old revision: test_prd266_push_tables_model.py:38, :125-134 and :151-156 (PUSH_TYPES, and the CHECK read from prd266_w2_push.py); test_prd266_mobile_devices_model.py:36-47 (COLUMNS, NOT_NULL). Extend their readers to the newest revision that sets each item (K19). A constant default on ADD COLUMN is metadata-only on Postgres 11+. Re-adding the CHECK scans mobile_push_tickets, which holds a day of tickets at most: say in the revision's docstring why that is safe. RE-VERIFY after W1: W1's head (US-C01). Database review."
+  },
+  {
+   "id": "US-C19b",
+   "title": "Message parts: post_background_message posts structured parts beside its text",
+   "priority": 2,
+   "description": "As a background producer, I need to post a card's data beside Auto's text, so that a client that can draw the card draws it and every other client still reads the text (PRD-268 §6.11.2, US-C19).",
+   "acceptanceCriteria": [
+    "post_background_message (services/chat_messenger.py) is rewritten as a short function (at most 50 code lines) over helpers for the target chat, the source document and the live notice. It keeps its name, every keyword argument and its return (K4). It gains parts: Optional[Sequence[Mapping]] = None, saved after the text part: parts=[{type: 'text', text}, *parts]",
+    "A new module, services/chat_parts.py, holds STRUCTURED_PART_TYPES = ('brief@1', 'suggestion@1') and checked_parts(parts). Each part must be a dict whose type is in the tuple and whose JSON is at most CHAT_PART_MAX_BYTES (a module constant); anything else raises ValueError naming the type, before any write. The text part is still required: an empty text posts nothing, as today",
+    "deliver_background_message passes parts through unchanged. A messenger called without parts writes exactly today's single text part (test)",
+    "New test orchestrator/tests/test_prd268w2_message_parts.py (realdb): a post with a brief@1 part saves [text, brief@1], and its text equals the text given; an unknown part type and an oversized part are refused, with nothing saved; the owner check and the Auto-thread fallback behave as before (another member's chat_id falls back to the caller's Auto thread)"
+   ],
+   "passes": false,
+   "notes": "post_background_message is :122-229 (76 code lines); the save is at :208-214. Before moving a name, grep orchestrator/tests for 'chat_messenger.': every name a test patches stays importable from services.chat_messenger. History already returns parts and source (api/chat.py:722-727), and the web keeps source (lib/chat/api.ts:57-70). Security review: the owner check (P227-RVW-2) must behave exactly as before after the rewrite."
+  },
+  {
+   "id": "US-C19c",
+   "title": "Brief@1: the structured brief, its sections, counts, fold and strings",
+   "priority": 3,
+   "description": "As a person, I want the brief as a card I can act on, and as plain text on any client that can't draw it (PRD-268 §6.11.2, US-C19).",
+   "acceptanceCriteria": [
+    "services/brief/model.py holds the Pydantic models, per §6.11.2 and K11. Brief: v=1, date, greeting, prose, spoken, sections {needs_you, suggestions, today, since, unchecked}, counts {needs_you, suggestions, today, since}, state_hash, generated_at. BriefRow: id, title, why, at?, number?, display_state?, opens? {type ticket | mission | question | chat | deliverable | suggestion | settings, id}, action? {verb start | answer | open | connect | hide, label, done_label?}. Every id is a string, and extra fields are ignored on read",
+    "services/brief/build.py build_brief(db, workspace_id, user_id, local_date, language, *, may_answer) assembles each part. prose: Auto's Read (the text of services/digest_service.generate_digest, unchanged). needs_you: services/needs_you.needs_you(may_answer=…), with W1's display_state and next_step. suggestions: up to 3 open suggestions addressed to the person, each with Start and Hide. today: the activity schedule items on the local date (ActivityService.get_schedule, a 1-day range). since: the person's started suggestions, and the tickets and Missions that finished since their last brief (the previous mobile_digest_posts claim, else 24 h). unchecked: W1's readiness items needed_by 'brief' that are not ready. No second model call: one generate_digest call at most (the test counts llm_usage rows)",
+    "counts.needs_you == needs_you_counts(…)['total'] for the same caller (test). A viewer's brief has no question or approval rows (D16: may_answer False). Each section folds at 5 and never at 6: the tests use 5, 6 and 7 rows; 5 and 6 show whole, and 7 shows 5 and 'Show 2 more'. An empty brief carries the empty sentence",
+    "services/brief/strings.py holds the greeting, the section labels, the empty sentence, 'Show N more' and the row action labels in en and pt-BR, chosen per K7; a test fails when a key is missing in either language. spoken is the greeting plus the numbered row titles through modules/voice/spoken_style.speechify (titles only, never the why)",
+    "New test orchestrator/tests/test_prd268w2_brief_build.py (realdb): every section from seeded rows; the counts; the viewer; the fold; the strings; another workspace's rows never appear"
+   ],
+   "passes": false,
+   "notes": "Sources: services/needs_you.py needs_you :211 and needs_you_counts :204 (may_answer, D16). services/digest_service.py generate_digest :113-142 is async and cached per workspace state; the digest job runs it with asyncio.run in a worker thread (services/mobile/digest.py _digest_text :242-245). services/activity_service.py get_schedule :867: the file is 1267 lines, so call it and never edit it. W1's services/proactive/display_state.py (US-C17a/b) and services/readiness/ (US-C18): RE-VERIFY after W1. Files of 200-400 lines; one small reader per section. Security review: the tenancy of every read; a viewer never sees questions or approvals."
+  },
+  {
+   "id": "US-C19d",
+   "title": "Tool platform_get_brief (3-file pattern): the same Brief@1 in any chat",
+   "priority": 4,
+   "description": "As Auto, I want to answer 'what needs me?', 'brief me' and 'what's on today' from the same object as the route, in any chat, voice and quick ask included (PRD-268 §6.11.2, §6.12.6, US-C19).",
+   "acceptanceCriteria": [
+    "actions_brief.py registers platform_get_brief (permission_level 'read', category proactive, no parameter beyond an optional section). handlers_brief.py answers build_brief for the caller in the caller's workspace, in the language of W1's chooser from the caller context, else en (K7). Both are wired into PLATFORM_HANDLERS and register_all_actions (modules/tools/discovery/platform_actions.py). platform_executor.py does not grow (K3)",
+    "The handler only reads: it never claims, posts or writes, and W1's read-actions sweep test (test_prd268_read_actions_write_nothing.py) covers it with no exception. Its result carries the Brief@1 object and the spoken summary (K11's spoken)",
+    "New test orchestrator/tests/test_prd268w2_get_brief_tool.py: the tool's brief equals build_brief's for the same caller and date (the object the route answers); the action is registered as read; a viewer's call has no question or approval rows"
+   ],
+   "passes": false,
+   "notes": "The README's pattern: modules/tools/README.md:75-91 (actions_<domain>.py, handlers_<domain>.py and a test; this kit's tests live in orchestrator/tests, as W1's do). PLATFORM_HANDLERS is platform_executor.py:1277 (1543 lines): move at least one line out to offset the entry, as W1's US-C03b did, and grep the tests for 'platform_executor.<name>' before moving a name. A read action needs no hierarchy-gate entry (scripts/check_hierarchy_gate.py covers write and destructive only). RE-VERIFY after W1: the lane loads every read action (US-C02c), so check-ins are offered get_brief; that is fine, because it only reads. Security review: the handler's workspace scope and the caller's role."
+  },
+  {
+   "id": "US-C10a",
+   "title": "One brief per person per day: the shared claim, the scheduled digest posts the brief, a failed build releases",
+   "priority": 5,
+   "description": "As a person, I want exactly one brief a day, whichever device or schedule comes first (PRD-268 §6.4, FR-10, K11).",
+   "acceptanceCriteria": [
+    "services/brief/claim.py holds three functions. claim_brief(db, workspace_id, user_id, local_date) is digest.claim's INSERT … ON CONFLICT DO NOTHING on mobile_digest_posts (committed). todays_brief_message(db, workspace_id, user_id, local_date) finds the day's message (the newest) in the person's Auto thread, by source origin 'daily_digest' and local_date. post_brief(db, person, brief, via) posts [text(prose), brief@1] through deliver_background_message, with source {origin 'daily_digest', local_date, via} (K11)",
+    "The scheduled digest (services/mobile/digest.py _post and _serve_workspace) posts the brief (via 'schedule') instead of the bare text, in the language of the phone its schedule follows (_SCHEDULES_SQL gains d.locale; K7). post_now posts the same brief with no claim, as today",
+    "A build or post that fails releases the claim, so the next open or tick tries again (test). OpenDuet never releases it",
+    "A brief posted with via 'open' raises no auto_message (in services/notification_events/auto_message.py, the origin check also reads via); the scheduled one still does (a test for each)",
+    "New test orchestrator/tests/test_prd268w2_brief_claim.py (realdb): 3 devices and 2 tabs claiming the same (workspace, person, local date) post exactly one message; a phone in another timezone, and a DST change, each give one brief per local date; a failed build leaves no claim; the scheduled digest's message carries brief@1, and its text equals Auto's Read"
+   ],
+   "passes": false,
+   "notes": "services/mobile/digest.py: claim :210-220, release :223-226, _post :256-271 (15 code lines), _serve_workspace :321-332, post_now :364-385, _SCHEDULES_SQL :82-96, local_today :178-199. The claim table is unchanged (K6, K11): no message_id or via column, because the message's source carries both. ANNOUNCED_ORIGINS is auto_message.py:47 (daily_digest is never coalesced, :48). The digest's existing tests (test_prd266_digest_job.py, test_prd266_digest_now.py) keep passing, because the text part is still Auto's Read. Database review on the claim's reads; security review on the post path."
+  },
+  {
+   "id": "US-C10b",
+   "title": "POST /api/proactive/brief/open: the brief waiting on open, for web-only people too; discovery brief; the cadence Daily Brief retired",
+   "priority": 6,
+   "description": "As a person on any device, I want the day's brief waiting the first time I open Automatos (PRD-268 §6.4, §12-Q6, Q11, US-C10).",
+   "acceptanceCriteria": [
+    "A new router, orchestrator/api/proactive_brief.py, registered through RouterSpec('api.proactive_brief'): plain def, authenticated and workspace-scoped with require_workspace_permission('agents:execute') (K21). POST /api/proactive/brief/open {local_date, timezone, locale?} claims the day (K11). When the claim is won, it builds, posts and answers {chat_id, message_id, posted: true}. When the claim is taken, it answers the day's message {chat_id, message_id, posted: false}, or {posted: false, pending: true} while the winner is still building",
+    "A local_date more than one day from the server's UTC date, or a timezone that is not an IANA name, is a 422 (tests). A second call from any device or tab answers the same message (test: 3 devices, 2 tabs)",
+    "A person with no phone row gets a brief (test). A viewer gets one without question or approval rows. The per-person block is deterministic: at most one llm_usage row (Auto's Read's own), and none when its cache answers",
+    "Discovery lists brief → ('POST', '/api/proactive/brief/open') (services/mobile/discovery.py CAPABILITY_ROUTES). The route is in route-manifest.json (K5), and test_prd266_discovery.py's KNOWN_CAPABILITIES gains brief (K19)",
+    "The cadence Daily Brief is retired (§12-Q11). core/services/auto_cadence.py loses daily_brief from CADENCE_DEFAULTS, _DAILY_BRIEF, its _PROMPT_MAP entry and the always-on loop's key, so a stored daily_brief setting adds nothing. test_prd263_harness_review_cadence.py:47-51 now asserts that instead (K19)",
+    "New test orchestrator/tests/test_prd268w2_brief_open_route.py (realdb): won, taken and pending; the 422s; web-only; viewer; another workspace's chat is never answered; the manifest entry; plain def; discovery"
+   ],
+   "passes": false,
+   "notes": "The convention for a new router's test is tests/test_prd266_digest_now.py:358-365; the digest feedback route's scope is api/activity.py:96-121 (agents:execute). The build runs in the request's threadpool thread (plain def), and generate_digest runs there under asyncio.run, as digest._digest_text does in its worker thread; never async def over the sync session. auto_cadence.py: CADENCE_DEFAULTS :30-41 (daily_brief :31), _DAILY_BRIEF :48-55, _PROMPT_MAP :124-131, the always-on loop :167. heartbeat_service.py's two build_cadence_block callers (:836, :1098) are untouched. Security review: the date window, tenancy, and posting to the person's own Auto thread only."
+  },
+  {
+   "id": "US-C08a",
+   "title": "Suggestions delivered into the Auto thread, and one suggestion_ready bell row per run",
+   "priority": 7,
+   "description": "As a person, I want each suggestion in my Auto thread as a card I can act on, and one bell row when something needs me today (PRD-268 §6.5.1, US-C08, K8).",
+   "acceptanceCriteria": [
+    "services/proactive/delivery.py deliver_run(db, run_id). When effective_mode is live (K8), each suggestion the run created that is not yet delivered is posted once in its addressee's Auto thread through deliver_background_message, with source {origin 'suggestion', suggestion_id} and parts [text (the title and detail, quoted as data), {type 'suggestion@1', suggestion_id}], and its delivered_at is set. Off and shadow deliver nothing (tests)",
+    "'suggestion' is not in ANNOUNCED_ORIGINS: a delivered suggestion raises no auto_message (test)",
+    "suggestion_ready joins VALID_EVENT_TYPES (core/services/notification_dispatcher.py), in-app by default with no preference row (the dispatcher's own default: DEFAULT_NOTIFICATION_PREFERENCES and test_prd128_default_prefs.py are untouched). deliver_run dispatches one suggestion_ready per addressee per run under K9's rules (a today suggestion, not in quiet hours, under the daily cap). Its title comes from the strings table, its link_type is 'suggestion', and its link_id is the run's newest today suggestion",
+    "The runner calls deliver_run after the run row has committed (W1's services/proactive/runner.py), and the streak path calls it for the streak's first suggestion (US-C05). A delivery failure is logged and never fails the run",
+    "New test orchestrator/tests/test_prd268w2_suggestion_delivery.py (realdb): live delivers one post per suggestion, with the source and the parts; shadow and off post nothing; no auto_message; one bell row for a run with two today suggestions; none for a run with only can_wait ones; none past the cap; the post is never written as the person's own message"
+   ],
+   "passes": false,
+   "notes": "RE-VERIFY after W1: effective_mode (services/proactive/switches.py, US-C07a), is_person_quiet (services/proactive/quiet.py, US-C07b), the end of a run in services/proactive/runner.py (US-C03d), the streak's first suggestion (US-C05), ProactiveSuggestion.delivered_at (US-C01). ANNOUNCED_ORIGINS: services/notification_events/auto_message.py:47. The messenger's parts: US-C19b. The cap counts today's suggestion_ready bell rows for the person since their local midnight (K9; no new column), against config PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY (2, in config-surface.json). Security review: suggestion text is model-written. The post quotes it as data, never as the person's message, never as instructions."
+  },
+  {
+   "id": "US-C08b",
+   "title": "The suggestion_changed live event on create, start, hide and expire; discovery suggestions and readiness",
+   "priority": 8,
+   "description": "As a client, I need to hear when a suggestion changes, so that a card on any device shows its state without a reload (PRD-268 §6.5.2, US-C08).",
+   "acceptanceCriteria": [
+    "services/board_events.py notify_suggestion_event(db, *, workspace_id, suggestion_id, user_id, status) fires pg_notify on the board_events channel with event 'suggestion_changed' (best effort; it never raises). frame_for_payload forwards it as an SSE frame of its own, 'suggestion_changed' (as it does chat_changed), carrying workspace_id, suggestion_id, user_id and status. Other workspaces' payloads are dropped",
+    "It fires on create (delivery, and the streak's first suggestion), on Start, on Hide and on expire (W1's Start and Hide routes, and the streak's 'works again' expiry), after the change commits",
+    "Discovery lists suggestions → ('GET', '/api/proactive/suggestions') and readiness → ('GET', '/api/readiness') (K20), and KNOWN_CAPABILITIES gains both",
+    "New test orchestrator/tests/test_prd268w2_suggestion_events.py: frame_for_payload routes suggestion_changed and drops another workspace's; create, start, hide and expire each notify once (a spy on notify_suggestion_event); a failed NOTIFY changes nothing"
+   ],
+   "passes": false,
+   "notes": "services/board_events.py: notify_chat_event :71-101 is the pattern; frame_for_payload is :216-231 (7 code lines). RE-VERIFY after W1: the Start and Hide service functions behind api/proactive.py (US-C06a), the streak expiry (US-C05) and W1's readiness route (US-C18). Security review: the payload names ids only, never suggestion text; user_id lets clients drop other people's events, as with chat_changed."
+  },
+  {
+   "id": "US-C09a",
+   "title": "The suggestion push type, shipped off: payload, channel, category, titles switch, signature vectors, the fourth switch",
+   "priority": 9,
+   "description": "As a person with the phone, I want a suggestion that needs me today to reach my lock screen, and only once the app can show it (PRD-268 §6.5.3, US-C09, K9).",
+   "acceptanceCriteria": [
+    "In services/push/payload.py: PUSH_TYPE_EVENTS gains suggestion: ('suggestion_ready',); CHANNEL_BY_TYPE gains suggestion: 'suggestions'; GENERIC_LINES gains suggestion_ready: 'Auto has a suggestion'. A suggestion push's category is 'automatos.suggestion' (Start… and Open on the phone, US-G02), at default priority (not PRIORITY_HIGH)",
+    "The body is the generic line unless the workspace's settings.push.suggestion_titles is true; then it is the suggestion's title (at most 120 characters). The signed field set and its order are unchanged (question is '' for a suggestion). tests/fixtures/prd266_push_signature_vectors.json gains a suggestion case whose sig is HMAC-SHA256 over the canonical array (computed with stdlib hmac), so the phone's copy can be extended byte for byte",
+    "config.SUGGESTION_PUSH_ENABLED = False (config.py, config-surface.json; K9). While it is false, eligible_devices returns no device for the suggestion type, and the bell row is still written",
+    "GET /api/notification-preferences lists the fourth switch: push_types gains suggestion, and no row means on, through services/push/preferences.py, which derives it from PUSH_TYPE_EVENTS. bulk_update_preferences is untouched (K4)",
+    "The PRD-266 pins move per K19 (test_prd266_push_payload.py, test_prd266_push_preferences.py), with their test counts unchanged",
+    "New test orchestrator/tests/test_prd268w2_suggestion_push_type.py: a suggestion's payload and message (channel, category, priority, the AI badge in the title); the generic body by default and the title with the switch on; the new vector verifies with verify_signature, and a tampered copy fails; SUGGESTION_PUSH_ENABLED false sends nothing; the preferences GET lists the switch"
+   ],
+   "passes": false,
+   "notes": "payload.py: PUSH_TYPE_EVENTS :41-45, GENERIC_LINES :59-65, OPEN_CATEGORY :81, CHANNEL_BY_TYPE :82-86, SIGNED_TEXT_FIELDS :93-96, build_payload :188-227 (32 code lines), generic_line :274, _category :281, to_message :288-306 (priority :305). preferences.py PUSH_TYPES :37-41. fanout.py eligible_devices :173-187 (14). The migration widened the ticket CHECK (US-C19a). Security review: what a lock screen shows (generic by default), the signature, and no new signed field."
+  },
+  {
+   "id": "US-C09b",
+   "title": "Who a suggestion push reaches: the app's registered category, the daily cap, quiet hours, one per run; discovery suggestion_push",
+   "priority": 10,
+   "description": "As a person, I want at most two suggestion pushes a day, never at night, and only on a phone whose app registered the category (PRD-268 §6.5.3, §6.9, §6.12.5, K9).",
+   "acceptanceCriteria": [
+    "POST /api/v1/mobile/devices (RegisterDeviceRequest, api/mobile_devices.py) accepts an optional push_categories list of the known optional types ('suggestion' only, today; anything else is a 422), stored in mobile_devices.push_categories. Left out, it keeps the stored value, like every optional register field (services/mobile/devices.py REGISTER_COLUMNS). api/mobile_devices.py grows by at most 10 lines",
+    "services/push/suggestion_rules.py holds may_push_suggestion(db, event, now) and the device filter. A suggestion push goes only to devices whose push_categories hold 'suggestion', only while SUGGESTION_PUSH_ENABLED is on, and only for a suggestion of severity 'today' that is still open. eligible_devices applies these for the suggestion type only; the other three types are unchanged (test)",
+    "deliver_run's rules hold end to end: one push per run however many suggestions it made; at most PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY (2) per person per local day; never in the person's quiet hours or the workspace's (the dispatcher's quiet already holds pushes; the person's is W1's is_person_quiet) (tests)",
+    "Discovery lists suggestion_push → ('POST', '/api/v1/mobile/devices') only while SUGGESTION_PUSH_ENABLED is on (CONFIGURED_CAPABILITIES, as with tts), and KNOWN_CAPABILITIES gains it",
+    "New test orchestrator/tests/test_prd268w2_suggestion_push_rules.py (realdb): a device without the category gets nothing; with the category and the switch on, one push per run; the third pushing run of the day pushes nothing; quiet hours push nothing; can_wait pushes nothing; discovery with the switch off and on; registration's push_categories, with a 422 for an unknown one"
+   ],
+   "passes": false,
+   "notes": "fanout.py: _device_filters :146-156 and eligible_devices :173-187; keep both short. api/mobile_devices.py: RegisterDeviceRequest :173-184. PRD-266's W1 kept the file under 400 lines and it is 431 now, so add only the field and its validator. services/mobile/devices.py REGISTER_COLUMNS :76. discovery.py: CAPABILITY_ROUTES :64-72, CONFIGURED_CAPABILITIES :75-77. RE-VERIFY after W1: is_person_quiet (US-C07b). Security review: a person's push reaches only their own devices in this workspace, and a register call can't set another device's categories."
+  },
+  {
+   "id": "US-C20a",
+   "title": "ApprovalView@1 and the rule sentences: the exact action, its target, its preview and the rule that asked",
+   "priority": 11,
+   "description": "As a person, I want to see exactly what Auto will do, to whom, and which of my rules asked, before I allow it (PRD-268 §6.11.4, US-C20).",
+   "acceptanceCriteria": [
+    "modules/policy/rule_sentences.py holds one strings table, in en and pt-BR, with a plain sentence for every rule id: confirm.<risk class> (the confirmation gate's card, by classify_action's risk class); posture.<posture>.<risk class> for every VALID_POSTURES × risk-class pair that routes to ask; approval_policy.<policy> for always_ask, auto_below_budget (over the ceiling) and full_auto (without the autonomy gate). rule_sentence(rule_id, language) never returns machine text. A test covers every pair and fails on a key missing in either language",
+    "modules/tools/formatting/approval_view.py holds an ApprovalView@1 model (grant_id, asked_by {kind auto | agent, name}, action {verb, summary}, target?, preview? {kind text | markdown | diff, body}, rule {id, sentence}, answers, expires_at?), built from a card payload or from a grant row. The target and the preview come from the call's arguments through the card's existing digest (ToolResultFormatter._tool_params_digest and card_digest.shown_on_the_card), never raw params. answers is ['refuse', 'allow_once'] and never holds 'always_allow' (K10)",
+    "A decorator, carries_the_approval_view, stacked on format_for_frontend beside @carries_the_question, adds approval_view to the tool_approval and mission_approval payloads. format_for_frontend's body is byte-identical (K4), and result_formatter.py does not grow (K3)",
+    "GET /api/v1/approval-grants/{grant_id}/view, on a new router api/approval_views.py (RouterSpec, plain def), answers the grant's ApprovalView@1 to the workspace's members who may answer (owner, admin, editor; D16), and 404 for another workspace's grant. It is in the route manifest. api/approval_grants.py (806 lines) is untouched",
+    "New test orchestrator/tests/test_prd268w2_approval_view.py: every rule id has both sentences; a tool card and a Mission card carry approval_view with target, preview and rule; nothing past the digest's cut appears; answers never holds always_allow; the view route's roles and tenancy"
+   ],
+   "passes": false,
+   "notes": "Where the cards come from: the confirmation gate (modules/tools/discovery/confirmation_gate.py _the_cards_ask :93-115: the requires_confirmation flag and the autonomy dial), NOT the posture router (modules/policy/gate.py _route_gate :209-252). That router's reason, 'posture={p} routes {risk} to ask' at :251, blocks with a model message and files no card. The Mission card is result_formatter.py:783-795. Postures: policy_document.py:37-40; risk classes :43-47; classify_action :238-272; approval policies: core/services/approval_policy.py:42-45. The grant's call is in details.params (modules/tools/execution/tool_grants.py _grant_details :209-230). The decorator pattern is modules/tools/formatting/card_digest.py carries_the_question :34-48. result_formatter.py is 911 lines: offset its new import and decorator lines by moving lines out. Security review: the preview is the card's redacted digest, never raw params; the view route's roles and tenancy."
+  },
+  {
+   "id": "US-C20b",
+   "title": "Board approvals say the rule in words: evaluate_board_task_approval rewritten short, blocked-reason.ts shows the sentence",
+   "priority": 12,
+   "description": "As a person, I want a blocked ticket to say which of my rules asked, in words, not a policy key (PRD-268 §6.11.4, US-C20).",
+   "acceptanceCriteria": [
+    "services/board_approval.py evaluate_board_task_approval is rewritten as a short function (at most 50 code lines) over helpers (K4). It keeps its signature, BoardApprovalOutcome and every name tests patch. outcome.reason, and the grant's reason, is the en rule sentence for approval_policy.<policy> (rule_sentences), never the raw key \"board task requires approval under '<policy>' policy\"",
+    "api/board_tasks.py is untouched. Its blocked_reason stays 'Awaiting human approval (grant #N): ' + outcome.reason (:1523-1525), so parseBlockedReason, needs_you's _grant_title and ticket_reasons still read it",
+    "frontend/components/activity/board/blocked-reason.ts returns the sentence after the prefix (BlockedInfo gains sentence), and the ticket shows the sentence, not the raw text. An old raw-key reason still parses its grant id",
+    "New tests: orchestrator/tests/test_prd268w2_board_approval_sentence.py (each policy's reason is its sentence; no reason holds 'policy'; the other outcome fields are unchanged) and frontend/components/activity/board/__tests__/blocked-reason-sentence.test.ts (the sentence, the grant id, an old reason)"
+   ],
+   "passes": false,
+   "notes": "evaluate_board_task_approval is :70-165 (80 code lines), with the raw key at :128. Tests that patch its helpers: test_p2w2_budget_pricing.py:384 (_audit_governance) and test_prd266_review_bell_rows.py:194 (_dispatch_approval_pending). The old literals in tests are inputs (test_f259_*, test_prd252_ticket_reasons.py:70): leave them. _board_task_blocked_pending_approval (board_tasks.py:1482-1569, 65 code lines) stays byte-identical (the gate checks). The ticket's blocked line: components/activity/board/ticket-approvals.tsx and board-task-viewer.tsx read parseBlockedReason. Security review: who may approve is unchanged; only the words change."
+  },
+  {
+   "id": "US-C20c",
+   "title": "The host approval cards show target, preview and rule, with keys 1 and 3 while focused",
+   "priority": 13,
+   "description": "As a person, I want the approval card to show the exact action and the rule that asked, in every theme, and to answer it from the keyboard (PRD-268 §6.11.4, US-C20, K10).",
+   "acceptanceCriteria": [
+    "lib/chat/approvals.ts checks approval_view off the wire: every field is typed, and an id that isn't an id drops the view, never the card. ToolApprovalWidgetData and MissionApprovalWidgetData (components/widgets/types.ts), and the SDK's ToolApprovalData and MissionApprovalData (lib/theme-sdk/host-cards/approvals.tsx), gain approval_view?",
+    "When approval_view is present, ToolApprovalWidget and MissionApprovalWidget render who asked, the action summary, the target, the exact preview and the rule sentence. The rule is read before the buttons: it comes before them in the DOM, and the card's aria-describedby names it. Without a view, the card is exactly today's",
+    "The keys work only while the card, or a control inside it, has focus: 1 refuses (Deny or Reject), 3 allows once (Approve & run), 2 does nothing (K10). The buttons keep today's words, and there is no Always allow anywhere",
+    "The cards stay protected surfaces: components/theme-host/__tests__/protected-surface.test.tsx is extended to the new parts (no theme CSS reaches the rule or the preview)",
+    "New test frontend/components/widgets/__tests__/approval-view.test.tsx: the parts render with a view, and today's card renders without one; keys 1 and 3 work with focus and do nothing without it; the words are unchanged; no 'Always allow' text"
+   ],
+   "passes": false,
+   "notes": "ToolApprovalWidget/index.tsx is 192 lines (ToolApprovalCard about 110, under 150; the buttons at :165-173). MissionApprovalWidget/index.tsx is 220 lines (the buttons at :195-199: 'Approve & run' / Reject). Keep each component at most 150 lines by putting the view's parts in a new components/widgets/approval-view-parts.tsx. lib/chat/approvals.ts is 187 lines; oversightOf is the pattern for a checked sub-object. The Play and HUD themes place these cards, and nothing changes for them beyond the new parts (Wave K vendors the types). Security review: the protected surfaces, the keys scoped to focus, and the preview rendered as text (never innerHTML)."
+  },
+  {
+   "id": "US-C21a",
+   "title": "--running becomes a token, and lookToStudioTokens emits the status tokens per ground tone",
+   "priority": 14,
+   "description": "As a theme author and a person, I need every status colour to be a real token that reads right on every ground, so that status never depends on a literal or on --accent (PRD-268 §6.12.2, US-C21, K13).",
+   "acceptanceCriteria": [
+    "app/globals.css defines --running in .studio (40 20% 36%), in .studio.dark (40 20% 65%), and in Classic's :root and .dark (each its own --info value) (K13). .studio-pip.running (:782) reads hsl(var(--running)). globals.css grows by at most 8 lines (K3)",
+    "tailwind.config.ts gains running: { DEFAULT: 'hsl(var(--running))' } beside success, warning and info",
+    "lookToStudioTokens (frontend/lib/look-kit/studio-tokens.ts) emits --success, --warning, --warn-ink, --info and --running as triplets for every ground, each chosen by the ground's tone (isDarkGround) from Studio's light or dark values. A new exported STUDIO_STATUS_TOKEN_NAMES lists them. MOBILE_TOKEN_NAMES (contract.py and lib/theme-host/mobile-manifest.ts) is unchanged",
+    "The two parity tests move per K13 (mobile-tokens.test.ts:59-63 and :75; look-kit.test.ts:55), with their test counts unchanged",
+    "New test frontend/lib/look-kit/__tests__/status-tokens.test.ts: on Studio light and dark, and on every ground in the core's look catalogue fixture, each status token meets 4.5:1 on background and on card where it is text (warn-ink, success, destructive, info, running) and 3:1 where it is a mark; the tokens follow the ground's tone"
+   ],
+   "passes": false,
+   "notes": "globals.css blocks: :root (Classic light) at about :40, .dark :86, .studio :161 (the status tokens at :221-253: --success :221, --warning :223, --info :225, --warn-ink :253), .studio.dark :285 (:314-337), .studio-pip.running :782, studio-pill :718-738. tailwind.config.ts colours :73-88. studio-tokens.ts :17-35 says the semantic tokens were deliberately NOT set: update that note. The kit's own copy of look-kit (packages/look-kit) is Wave K's. No dark: class with a fixed palette colour (lib/__tests__/dark-variant-tokens.test.ts)."
+  },
+  {
+   "id": "US-C21b",
+   "title": "The web's proactive types and hooks: Brief, Suggestion, Readiness, ApprovalView, Calibration, DisplayState",
+   "priority": 15,
+   "description": "As the web app and a theme, I need one typed source for every proactive shape and one hook per route, so that every surface reads the same data (PRD-268 §6.11, US-C21).",
+   "acceptanceCriteria": [
+    "frontend/lib/proactive/types.ts mirrors the server's shapes: Brief@1 (with spoken), BriefRow, Suggestion (W1's to_dict), Readiness@1, ApprovalView@1, Calibration@1 and DisplayState. frontend/lib/proactive/display-state.ts exports DISPLAY_STATE_LABELS: for each state, its glyph, its word (Studio, Classic, Play), its HUD word, and its colour role and token per §6.11.1 and §6.12.2. Unknown draws nothing",
+    "Hooks, through apiClient only. hooks/use-suggestions.ts: useSuggestions (GET /api/proactive/suggestions?status=open, a 60 s poll, refetched on the window events automatos:suggestion-changed, automatos:chat-changed and automatos:board-changed), and useStartSuggestion and useHideSuggestion (the reason menu's three reasons; both invalidate the list). hooks/use-brief.ts: useBrief (reads the day's brief message) and useOpenBrief (posts the route). hooks/use-readiness.ts: useReadiness and useCheckReadiness, on W1's routes. hooks/use-calibration.ts: useCalibration and useAnswerCalibration, inert (data null, available false; mutate rejects with 'not available on this server' and sends no request; K12)",
+    "New tests: frontend/lib/proactive/__tests__/display-state.test.ts (every state's glyph and word, with §6.11.1's corrections: done is ✓, never —, and readiness ready is ✓) and frontend/hooks/__tests__/use-suggestions.test.tsx (the list; a refetch on each event; the Start and Hide calls and the invalidation; a refused Start keeps the card, with the reason)"
+   ],
+   "passes": false,
+   "notes": "apiClient is the only client: a raw fetch('/api…') is an ESLint error. hooks/use-board-event-stream.ts already dispatches automatos:board-changed and automatos:chat-changed (:125-143); automatos:suggestion-changed arrives in US-W01b. RE-VERIFY after W1: the list, Start and Hide routes and their bodies (US-C06a), readiness (US-C18), and the row fields display_state, next_step and retry (US-C17a/b)."
+  },
+  {
+   "id": "US-C21c",
+   "title": "Default components: StatusLabel, SuggestionCard (card and pinned line), BriefCard",
+   "priority": 16,
+   "description": "As a theme author, I want default components for the status row, the suggestion and the brief, so that my theme gets them without redrawing anything (PRD-268 §6.12.3, US-C21).",
+   "acceptanceCriteria": [
+    "frontend/components/proactive/status-label.tsx shows the glyph and the word (plus ▸ next_step, and Try again when retry), as studio-pill in Studio and with Classic's badge tokens in Classic, never colour alone. Unknown renders nothing",
+    "frontend/components/proactive/suggestion-card.tsx shows 'Auto suggests' (studio-eyebrow), the text in Auto's voice, 'Start does: …', 'about N credits' when est_credits is known (web only), Start (the one ink primary) and Hide, with its reason menu. Its states: open; starting; started ('Started. Auto is on it.' for 4 s); hidden; refused (one line, and the card stays put); expired. It has a pinned one-line variant. Start and Hide are buttons named by the suggestion (\"Start: <title>\")",
+    "frontend/components/proactive/brief-card.tsx shows the date; the greeting, in Newsreader serif (the only serif); the prose inside the card (the text part is not drawn again); the five sections from Brief@1, as title + why rows with row actions as text ('Start →'); 'Show N more' from the server's counts; the empty sentence; thumbs up and down, posting POST /api/activity/digest/feedback with the brief's state_hash; and a slot for Listen (BriefVoice, US-C21d). A pressed row shows '✓ {done_label}' in place, and a row without opens draws no chevron",
+    "Auto's words carry data-ai-generated (the brief rows, the prose, the suggestion text). Each card shows the existing tiny 'Auto is an AI' caption once (Q29). Each renders in Studio light, Studio dark and Classic from tokens (K17)",
+    "New tests frontend/components/proactive/__tests__/status-label.test.tsx, suggestion-card.test.tsx and brief-card.test.tsx: every state and part above; the fold; the feedback call; data-ai-generated on Auto's words and not on the controls; no orange and no hex; each component at most 150 lines"
+   ],
+   "passes": false,
+   "notes": "Studio rules: DESIGN_SYSTEM.md §22 and PRD §6.12.4 (K17). The feedback hook is hooks/use-digest-api.ts useSubmitDigestFeedback (the route: api/activity.py:96-121). For the caption, grep components/ai-label for the 'Auto is an AI' caption the composer fence uses, and reuse it, never as a pill. Motion per K17. Split each card into a file of parts if it nears 150 lines."
+  },
+  {
+   "id": "US-C21d",
+   "title": "Default components: ReadinessList, CalibrationCard, ReplyChips, and the host-owned BriefVoice control",
+   "priority": 17,
+   "description": "As a theme author, I want the remaining defaults, and a host-owned Listen control, so that no theme ever speaks or captures audio itself (PRD-268 §6.12.3, §6.12.6, US-C21).",
+   "acceptanceCriteria": [
+    "frontend/components/proactive/readiness-list.tsx shows each item's label, its detail, and ✓ Ready, ○ Not checked or ◆ Needs setup with the word; the fix as an in-app link; Check again (useCheckReadiness); and 'Checked a moment ago' on a rate-limited answer. Its rows read like 'Calendar: needs setup. Connect calendar.'",
+    "frontend/components/proactive/calibration-card.tsx shows up to 3 lines, each with its source count and Reject; 3 offers; and Sounds right / Something's off. It has an empty state; a rejected line is struck through with 'I'll forget that'; and there are no percentages. reply-chips.tsx shows 2–3 chips of at most 24 characters, under Auto's last message only and gone once a newer message exists; a tap sends the chip's text, and each chip is named 'Reply: <chip>'. Both render from props (K12, K23)",
+    "frontend/components/voice/brief-voice.tsx, BriefVoice: a host-owned control in a new protected surface, 'brief-voice' (ProtectedSurfaceName gains it, like voice-control). Listen speaks the brief's spoken text through the server voice (lib/voice/quick-ask/server-speech.ts, POST /api/voice/speech) and falls back to the browser's speech on a refusal code; Stop stops it. It sets data-voice-speaking while it speaks (the theme's ▸ SPEAKING sync) and never auto-plays; a theme never speaks itself",
+    "Auto's words carry data-ai-generated (the chips, the calibration lines). Each component renders in Studio light, Studio dark and Classic",
+    "New tests frontend/components/proactive/__tests__/readiness-list.test.tsx, calibration-card.test.tsx and reply-chips.test.tsx, and frontend/components/voice/__tests__/brief-voice.test.tsx (the server voice; the fallback on tts_off; Stop; no auto-play; the protected-surface attribute)"
+   ],
+   "passes": false,
+   "notes": "The voice host: components/voice/voice-button.tsx:131 wraps voice-control in ProtectedSurface, and protected-surface.tsx:35 names the surfaces. services/themes/css_scope.py refuses any theme selector that names data-protected-surface (whatever the name), so brief-voice is covered server-side. useVoice().available (lib/theme-sdk/voice.ts:35-42) is the web's microphone and speech availability. Security review: the protected surface; no theme reaches audio."
+  },
+  {
+   "id": "US-C21e",
+   "title": "SDK 1.3.0: the proactive area, the default components as host cards, the d.ts and the version",
+   "priority": 18,
+   "description": "As a theme author, I want hooks and default components for every proactive surface in the SDK, so that my theme gets them and the kit can vendor them once (PRD-268 US-C21, Wave K step 1, K12).",
+   "acceptanceCriteria": [
+    "frontend/lib/theme-sdk/proactive.ts exports useBrief, useReadiness, useCheckReadiness, useSuggestions, useStartSuggestion, useHideSuggestion, useCalibration and useAnswerCalibration. lib/theme-sdk/surface/proactive.json plans them (area proactive, story US-C21, status built), and lib/theme-sdk/index.ts re-exports the area",
+    "The default components BriefCard, SuggestionCard, StatusLabel, ReadinessList, CalibrationCard and ReplyChips are exported through lib/theme-sdk/host-cards/ in the cards area (surface/cards.json), and BriefVoice in the voice area (surface/voice.json). theme re-exports DISPLAY_STATE_LABELS (surface/theme.json). The pages/assignments rows gain display_state, next_step and retry (packages/theme-sdk/areas/pages-assignments.d.ts)",
+    "packages/theme-sdk/areas/proactive.d.ts and the changed area d.ts files are written to match the runtime (types-match-runtime.test.ts holds them), and index.d.ts lists the area. services/themes/data/sdk-surface.json carries the new names (K5), and docs/theme-host/sdk-surface-map.md gains a row per name, like the voice row (:180)",
+    "The SDK is 1.3.0 everywhere it is pinned (K12): contract.py SDK_VERSION, shared-modules.json sdkVersion, packages/theme-sdk/package.json, its README's tgz line and index.d.ts's note. THEME_HOST_VERSION stays 1.1.0. The parity tests (validator-parity.test.ts, test_prd261_theme_package.py) read 1.3.0",
+    "surface.test.ts admits the area (K19: STORY_ID matches US-C21; BUILT_BY_LATER_LANES and AREA_MODULES gain proactive). New test frontend/lib/theme-sdk/__tests__/proactive.test.tsx: each hook and card reaches a theme through '@automatos/theme-sdk' and behaves as the host's own"
+   ],
+   "passes": false,
+   "notes": "The recipe is docs/theme-host/sdk-surface-map.md and PR #1334 (SDK 1.2.0, the voice area). That PR touched contract.py, shared-modules.json, surface/voice.json, lib/theme-sdk/voice.ts, host-cards/voice-button.tsx, index.ts, packages/theme-sdk/{index.d.ts, areas/voice.d.ts, package.json, README.md}, data/sdk-surface.json, surface.test.ts, types-match-runtime.test.ts, validator-parity.test.ts, test_prd261_theme_package.py, and the theme review fixtures (tests/fixtures/themes/cases.json, review-cases.json) for each name a theme may use. surface.test.ts: STORY_ID :27, BUILT_BY_LATER_LANES :30-43, AREA_MODULES :48-66. Wave K step 1's list (PRD §7): lib/theme-sdk/proactive.ts, host-cards/*, surface/*.json, packages/theme-sdk, the shared-modules sdkVersion, contract.py:34, data/sdk-surface.json, sdk-surface-map.md. Security review: the protected surfaces, and what the area lets a theme call (Start goes through the host's route only)."
+  },
+  {
+   "id": "US-C21f",
+   "title": "The browser lane: the proactive defaults in Studio light, Studio dark and Classic",
+   "priority": 19,
+   "description": "As the owner, I want real-browser proof that every default component reads right in every built-in look (PRD-268 US-C21).",
+   "acceptanceCriteria": [
+    "A fixture theme, e2e/browser/fixtures/hello-proactive (theme.json, entry.js, theme.css, README.md and presets/default.look.json, on the hello-a12a pattern), places BriefCard, SuggestionCard, StatusLabel, ReadinessList, CalibrationCard and ReplyChips through '@automatos/theme-sdk' with fixture data. frontend/lib/theme-sdk/__tests__/hello-proactive-fixture.test.ts holds the fixture to the SDK's names",
+    "e2e/browser/specs/proactive-defaults.spec.ts renders each default component under Studio light, Studio dark and Classic (with the backend answers fulfilled, as the lane's other specs do) and attaches a screenshot of each. Auto's words carry data-ai-generated in the DOM",
+    "axe reports no critical issue on each default component. K18: this AC is marked → OWNER (Gerard approves or refuses @axe-core/playwright as an e2e/browser devDependency)",
+    "browser-e2e.yml's path filter already covers e2e/browser/**; nothing else in the workflow changes"
+   ],
+   "passes": false,
+   "notes": "Patterns: specs/host-cards.spec.ts (support/backend-route fulfillBackendJson; support/hello-theme serveInstalledTheme and chooseStyle), fixtures/hello-a12a, and lib/theme-sdk/__tests__/hello-a12a-fixture.test.ts. The lane runs Chromium and WebKit; a WebKit 'internal error' on reload is a Playwright 1.57 flake (rerun it), not app code. e2e/browser/package.json is exact-pinned: no new dependency (K18)."
+  },
+  {
+   "id": "US-W01a",
+   "title": "Suggested on the Command Center (Studio and Classic), the bell link, and 'From suggestions' on the Board",
+   "priority": 20,
+   "description": "As a person, I want the open suggestions beside Auto's Read, a bell row that opens the card, and the work they started on the Board (PRD-268 §6.5.1, US-W01).",
+   "acceptanceCriteria": [
+    "frontend/components/proactive/suggested-list.tsx lists the open suggestions (useSuggestions) as SuggestionCards, each with its title, detail, evidence links that open in the app (a ticket, report, document or run, by its ref), 'Start does: …', 'about N credits' when known, Start, and Hide with the reason menu. Nothing renders when there is none",
+    "frontend/components/proactive/command-center-read.tsx renders AutosRead, then the Suggested list. Studio's SummaryTab (components/command-center/summary-tab.tsx) renders it in AutosRead's place. Classic gets it through activity-page.tsx's import line (:28 becomes import { CommandCenterRead as AutosRead } from '@/components/proactive/command-center-read'); ActivityPage's body is untouched (K4)",
+    "The bell links suggestion_ready rows (link_type 'suggestion') to the card: linkFor gains case 'suggestion' → '/command-center?tab=summary&suggestion=<id>', and the list scrolls to that card and outlines it. notification-bell-links.test.ts names the link type (K19)",
+    "The Board gains 'From suggestions': BoardFilters.from_suggestions, a toggle in BoardFiltersBar, and useBoardTasks keeping the tasks whose source_type is 'suggestion'. useBoardTasks stays at most 50 code lines",
+    "New tests frontend/components/proactive/__tests__/suggested-list.test.tsx (the cards; Start; Hide with a reason; the evidence links; the bell's suggestion param; empty) and frontend/components/activity/board/__tests__/from-suggestions.test.tsx"
+   ],
+   "passes": false,
+   "notes": "summary-tab.tsx: SummaryTab :41-62. activity-page.tsx: the import :28, the mount :266, ActivityPage :110-325 (178 lines: never touch inside it). notification-bell.tsx: linkFor :49-99 (40 code lines). hooks/use-board-tasks.ts: BoardFilters :16-22; useBoardTasks :63-125 (47 code lines); mapTaskToBoardTask keeps source_type (:298). board-filters.tsx is 137 lines, board-view.tsx 136. The evidence refs come from W1's evidence {type, id} (US-C03b): RE-VERIFY their types."
+  },
+  {
+   "id": "US-W01b",
+   "title": "The Auto thread: the suggestion card from suggestion@1, the newest open one pinned above the composer, live state",
+   "priority": 21,
+   "description": "As a person, I want a suggestion in my Auto thread as a live card that survives reload, and the newest one waiting above the composer (PRD-268 §6.5.1, §6.12.4, US-W01).",
+   "acceptanceCriteria": [
+    "message-with-receipts.tsx draws an assistant message's suggestion@1 and brief@1 parts as cards, through a new components/proactive/thread-cards.tsx; the suggestion card takes its live state from useSuggestions by source.suggestion_id, so it survives reload. It hands Message a copy without those parts, and a message with a brief@1 part also drops its text part (the card holds the prose). Unknown part types are still dropped. message.tsx is untouched (K4)",
+    "The newest open suggestion is pinned above the composer in the Auto thread only (chat kind 'auto'). chat.tsx's MultimodalInput import (:13) becomes a wrapper of the same name (components/proactive/composer-with-suggestion.tsx) that renders the pinned line above MultimodalInput; collapsed to one line, it opens the card. Nothing renders in other chats, or when no suggestion is open",
+    "The pinned card hides while a turn's MissionSuggestionCard is unanswered (§6.12.4's one-suggestion-surface rule). chat.tsx's MissionSuggestionCard import (:54) becomes a wrapper that registers the card's open state in components/proactive/mission-suggestion-presence.ts (a useSyncExternalStore store) until it is accepted, dismissed or unmounted",
+    "Live: useBoardEventStream dispatches automatos:suggestion-changed for a suggestion_changed frame. The hook is first split into module-level helpers (lib/live/route-frame.ts, and the read loop) until it is at most 50 code lines (K4); its existing tests are unchanged",
+    "New tests frontend/components/proactive/__tests__/thread-cards.test.tsx, pinned-suggestion.test.tsx (the Auto thread only; hidden while a Mission suggestion is open; Start and Hide from the line) and frontend/lib/live/__tests__/route-frame.test.ts (every frame name routes to its event; board_changed still invalidates)"
+   ],
+   "passes": false,
+   "notes": "chat.tsx: Chat :87-1619 (never touch inside it); the imports :13 (MultimodalInput) and :54 (MissionSuggestionCard); MultimodalInput at :1164, :1263, :1403 and :1573 (the PRD's :1363 is the welcome stack's div); MissionSuggestionCard at :1103 and :1479. History items carry the chat's kind (api/chat.py:690; sidebar-history-item.tsx:72). message-with-receipts.tsx (42 lines) is the PRD-256 precedent for not touching Message. use-board-event-stream.ts: useBoardEventStream :78-170 (72 code lines), connect :97-160, the branches :125-143; its test is components/command-center/__tests__/board-event-stream.test.tsx. mission-suggestion-card.tsx (122 lines): 'No thanks' is local state (:26-31)."
+  },
+  {
+   "id": "US-W02",
+   "title": "Brief on open (web): once per local date, the card in the thread and on the Command Center, thumbs and Listen",
+   "priority": 22,
+   "description": "As a web-only person, I want the day's brief waiting when I open Automatos, and to be able to hear it (PRD-268 §6.4, US-W02).",
+   "acceptanceCriteria": [
+    "A BriefOnOpen component (components/proactive/brief-on-open.tsx), mounted once in components/providers.tsx inside WorkspaceProvider, calls POST /api/proactive/brief/open once per local date per tab when a signed-in workspace loads (local_date and timezone from the browser, locale from the page's language). It never calls without a workspace, and a 4xx is logged once, never retried in a loop",
+    "The brief draws as BriefCard in the Auto thread, from its brief@1 part (US-W01b's thread cards), with thumbs (the existing feedback route, the brief's state_hash) and Listen (BriefVoice: the server voice, the browser's speech on a refusal code, never auto-play)",
+    "When today's brief exists (useBrief), AutosRead on the Command Center shows its rows under the prose, in both shells; without one, the card is exactly today's",
+    "New test frontend/components/proactive/__tests__/brief-on-open.test.tsx: one call per local date across reloads of a tab; a new date calls again; no workspace, no call; the answer opens nothing by itself (no navigation, no sound)"
+   ],
+   "passes": false,
+   "notes": "components/providers.tsx: Providers :90-147 (about 57 code lines). components/activity/autos-read.tsx: AutosRead :39-143 (96 lines, room for a few more). The day's key lives in localStorage, wrapped in try/catch (with storage blocked, it still calls once per load). The server guarantees one brief (US-C10a/b); the client only avoids needless calls."
+  },
+  {
+   "id": "US-W04",
+   "title": "Status vocabulary on the web: glyph + word + next step on needs-you, Missions and board cards, in Studio and Classic",
+   "priority": 23,
+   "description": "As a person, I want every piece of work to say where it stands and what happens next, in the same words everywhere (PRD-268 §6.11.1, US-W04).",
+   "acceptanceCriteria": [
+    "The needs-you widget's rows, the Missions list (Studio's GroupedView and TableView rows in missions-body.tsx; Classic's MissionCard and MissionStatusBadge) and the board cards (CardTopRow or CardFooter) show StatusLabel from each row's display_state, with ▸ next_step, and Try again when retry. Needs-you rows sort first. studio-pill in Studio, Classic's tokens in Classic",
+    "A grep test finds no status shown by colour alone in components/activity and components/missions: every status colour class sits beside a glyph and a word",
+    "The brief's needs-you count equals the Needs-you badge on the same screen: e2e/browser/specs/proactive-needs-you-count.spec.ts (the browser lane, backend answers fulfilled)",
+    "New tests frontend/components/proactive/__tests__/status-vocabulary.test.tsx (each surface draws the glyph, the word and the next step; unknown draws nothing; Try again calls the row's retry) and frontend/components/proactive/__tests__/no-colour-alone.test.ts"
+   ],
+   "passes": false,
+   "notes": "Never touch inside MissionsBody (missions-body.tsx:80-285, 187 lines) or BoardCardFace (board-card.tsx:73-146, 59): the seams are GroupedView :287, TableView :331, CardTopRow :149 and CardFooter :214. MissionCard (mission-card.tsx:27-182) is 138 lines: at most 12 more. needs-you-widget.tsx: Section :163-187; the row builders :70-146. Retry means rerun_mission, replan_mission or retry_ticket, through the existing routes (W1's US-C17). RE-VERIFY after W1: display_state, next_step and retry on GET /api/activity/needs-you, GET /api/missions and the board reads (US-C17a/b)."
+  },
+  {
+   "id": "US-W05",
+   "title": "'What Auto depends on' in Settings → Orchestrator",
+   "priority": 24,
+   "description": "As a person, I want to see what Auto depends on and what it couldn't check, so that a quiet day never hides a broken connection (PRD-268 §6.11.3, US-W05).",
+   "acceptanceCriteria": [
+    "Settings → Orchestrator (components/settings/SettingsPanel.tsx, the orchestrator tab :138-140) gains a 'What Auto depends on' section (components/settings/what-auto-depends-on.tsx). It draws ReadinessList from useReadiness, plus the browser's microphone and speech rows from useVoice().available (the client's rows, never claimed by the server). Check again calls POST /api/readiness/check",
+    "With the calendar not connected, no 'Couldn't check' calendar row appears (§12-Q20: no calendar in v1)",
+    "/settings is host-owned, so the section looks the same under every theme",
+    "New test frontend/components/settings/__tests__/what-auto-depends-on.test.tsx: the server's items; the two client rows; Check again; the rate-limited line; no calendar row"
+   ],
+   "passes": false,
+   "notes": "SettingsPanel :62-194 (103 lines: there is room). RE-VERIFY after W1: GET /api/readiness, POST /api/readiness/check and their item shape (US-C18)."
+  }
+ ]
+}
