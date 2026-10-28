@@ -24,6 +24,8 @@ export interface ChatTurnRequest {
   readonly text: string
   /** The reply is heard, not read. */
   readonly spokenMode: boolean
+  /** The person's language and region (BCP 47, e.g. pt-BR): Auto replies in that variant. Left out when unknown. */
+  readonly locale?: string | null
 }
 
 export interface ChatTurnHandlers {
@@ -57,13 +59,14 @@ const LOG_PREFIX = '[chat-turn]'
 const FINISHED: ChatTurnOutcome = Object.freeze({ kind: 'finished' })
 const ABORTED: ChatTurnOutcome = Object.freeze({ kind: 'aborted' })
 
-/** The JSON body of POST /api/chat for one text turn, as useChat sends it, with spokenMode when asked. */
+/** The JSON body of POST /api/chat for one text turn, as useChat sends it, with spokenMode and locale when given. */
 export function chatTurnBody(request: ChatTurnRequest): Readonly<Record<string, unknown>> {
   return Object.freeze({
     id: request.chatId ?? '',
     message: { role: 'user', parts: [{ type: 'text', text: request.text }] },
     selectedVisibilityType: 'private',
     ...(request.spokenMode ? { spokenMode: true } : {}),
+    ...(request.locale ? { locale: request.locale } : {}),
   })
 }
 
