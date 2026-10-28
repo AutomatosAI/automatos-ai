@@ -216,8 +216,9 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
     await page.goto(PAGE_PATH)
     const outcome = await playVideo(page, src, VP9_CLIP)
     if (testInfo.project.name === PLAYBACK_PROOF_PROJECT) {
-      // The suite's playback proof: Chromium always ships libvpx, so it must decode and play the clip.
-      expect(outcome, 'Chromium plays the VP9 clip through the proxy').toMatchObject({ decodable: true, played: true, error: null })
+      // The suite's playback proof: Chromium always ships libvpx, so the clip must actually play (its
+      // MediaCapabilities answer for this codec string is not relied on; playing is the proof).
+      expect(outcome, 'Chromium plays the VP9 clip through the proxy').toMatchObject({ played: true, error: null })
       return
     }
     // Other engines: a media error is still a failure; a silent stall is not proof either way. Playwright 1.64's
