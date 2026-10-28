@@ -24,6 +24,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.read_only_call import only_reading
+
 logger = logging.getLogger(__name__)
 
 DOCUMENTS_DIR = "documents"
@@ -130,8 +132,9 @@ async def _present(client: Any) -> set:
 async def workspace_copies(workspace_id: Any, document: Any) -> Optional[List[Dict[str, Any]]]:
     """``[{workspace_path, row_count}]`` for a spreadsheet document, its copies
     made from the stored upload where missing; None when it is not a
-    spreadsheet or its upload is gone."""
-    if getattr(document, "file_type", None) not in SPREADSHEET_TYPES:
+    spreadsheet or its upload is gone. PRD-268 P268W1-RVW-1: None in a check-in,
+    which writes nothing to the workspace and runs no code on a copy."""
+    if getattr(document, "file_type", None) not in SPREADSHEET_TYPES or only_reading():
         return None
     stored = Path(str(getattr(document, "file_path", None) or ""))
     if not stored.is_file():

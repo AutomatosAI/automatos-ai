@@ -527,34 +527,10 @@ class RAGService:
             self._track_document_access(chunks, workspace_id)
 
     def _track_document_access(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
-        """Update last_accessed timestamp on documents retrieved via RAG."""
-        try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text
-            doc_ids = set()
-            for chunk in chunks:
-                meta = chunk.get("metadata", {})
-                doc_id = meta.get("document_id") or meta.get("doc_id")
-                if doc_id:
-                    doc_ids.add(str(doc_id))
-            if not doc_ids:
-                return
-            db = SessionLocal()
-            try:
-                db.execute(
-                    text("""
-                        UPDATE documents
-                        SET last_accessed = NOW(),
-                            rag_query_count = COALESCE(rag_query_count, 0) + 1
-                        WHERE id = ANY(CAST(:ids AS int[])) AND workspace_id = CAST(:ws AS uuid)
-                    """),
-                    {"ids": list(doc_ids), "ws": str(workspace_id)},
-                )
-                db.commit()
-            finally:
-                db.close()
-        except Exception as e:
-            logger.debug(f"Document access tracking failed: {e}")
+        """Update last_accessed on documents retrieved via RAG (``access_tracking``); none in a check-in."""
+        from modules.rag.access_tracking import track_document_access
+
+        track_document_access(chunks, workspace_id)
 
     # ------------------------------------------------------------------
     # PRD-179 S4 (F070): rag_feedback → live retrieval ranking

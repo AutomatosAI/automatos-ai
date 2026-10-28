@@ -21,6 +21,9 @@ session opens it.
   The action is ``read`` (it changes nothing the owner or the board sees), so the
   write-action rate limit does not apply: a draw is bounded by that time limit,
   and a session waits for each one. The same page drawn again replaces its picture.
+* **Never in a check-in** (PRD-268 P268W1-RVW-1, K17): the lane trusts the ``read`` label,
+  and the picture is a write. A check-in carries no session ticket, and a call made in
+  ``core.read_only_call.reading_only()`` is refused before anything is drawn.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.read_only_call import only_reading
 from modules.tools.discovery.session_ticket import SESSION_TICKET_PARAM
 
 logger = logging.getLogger(__name__)
@@ -44,6 +48,9 @@ PNG_EXT = ".png"
 # A Deliverable that is already a picture (a social image) is copied as it is.
 COPIED_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
+NOT_IN_A_CHECK_IN = (
+    "render_preview draws a page into a session's folder, and a check-in writes nothing. Nothing was drawn."
+)
 NEEDS_A_SESSION = (
     "render_preview draws a page into your session's folder, so it runs only in a session working a "
     "ticket. Nothing was drawn."
@@ -208,6 +215,8 @@ async def render_preview(db: Session, workspace_id: UUID, params: Dict[str, Any]
     from modules.documents.thumbnails.render import ThumbnailError
     from modules.tools.execution.session_document_folder import write_to_session
 
+    if only_reading():
+        return _failed(NOT_IN_A_CHECK_IN)
     ticket = ticket_of(params)
     if ticket is None:
         return _failed(NEEDS_A_SESSION)
@@ -231,4 +240,4 @@ async def render_preview(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "from_proposal": bool(request.proposal), "note": note}
 
 
-__all__ = ["MAX_PREVIEW_PAGE", "parse_request", "preview_name", "render_preview", "ticket_of"]
+__all__ = ["MAX_PREVIEW_PAGE", "NOT_IN_A_CHECK_IN", "parse_request", "preview_name", "render_preview", "ticket_of"]
