@@ -21,8 +21,13 @@
   looser than ``platform_caps`` is 422 ``caps_looser``, and caps that would not fit together
   422 ``caps_wrong``; nothing is saved. A cap sent as null is back at its default. A change
   is audited.
-* ``GET /me`` and ``PUT /me`` ``{paused}`` — the caller's own "Pause suggestions" in this
-  workspace (any member; no person behind the caller is 403): ``{paused}``. A change is audited.
+* ``GET /me`` and ``PUT /me`` ``{paused?, quiet_start?, quiet_end?, timezone?}`` — the
+  caller's own settings in this workspace (any member; no person behind the caller is 403):
+  "Pause suggestions" and their quiet hours, ``HH:MM`` to ``HH:MM`` in an IANA time zone (the
+  phone's; null is the workspace's), read with the workspace's window
+  (``services.proactive.quiet``). What a ``PUT`` leaves out stays; the two times are sent
+  together, both null to clear them, and never the same. ``{paused, quiet_start, quiet_end,
+  timezone}``. A change is audited.
 
 Another workspace's suggestion is 404. ``via`` says where the person decided (``web``,
 ``go``, ``push``, ``chat``, ``telegram``): left out, ``go`` for a paired device and ``web``
@@ -36,15 +41,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Annotated, Any, Dict, Literal, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from api.mobile_devices import DIGEST_TIME_PATTERN, TimeZoneName
 from core.auth.dependencies import RequestContext
 from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
@@ -81,12 +87,12 @@ CAPS_WRONG = "caps_wrong"
 CAPS_LOOSER = "caps_looser"
 CAPS_STORED_WRONG = "caps_stored_wrong"
 HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_UNPROCESSABLE, HTTP_UNAVAILABLE = 403, 404, 409, 422, 503
-PAUSED_KEY = "paused"
 VIA_WEB, VIA_GO = "web", "go"
 
 SuggestionStatus = Literal["open", "started", "hidden", "expired"]
 Via = Literal["web", "go", "push", "chat", "telegram"]
 HideReason = Literal["not_now", "not_useful", "wrong_agent"]
+QuietTime = Annotated[str, Field(pattern=DIGEST_TIME_PATTERN)]  # HH:MM, 00:00 to 23:59
 
 
 class StartRequest(BaseModel):
@@ -129,12 +135,28 @@ class SettingsRequest(BaseModel):
     caps: Optional[CapsChange] = None
 
 
-class PauseRequest(BaseModel):
-    """``PUT …/me``: pause the caller's suggestions, or resume them."""
+class MeRequest(BaseModel):
+    """``PUT …/me``: the caller's pause and quiet hours to change; what is left out stays."""
 
     model_config = ConfigDict(extra="forbid")
 
-    paused: StrictBool
+    paused: Optional[StrictBool] = None
+    quiet_start: Optional[QuietTime] = None
+    quiet_end: Optional[QuietTime] = None
+    timezone: Optional[TimeZoneName] = None
+
+    @model_validator(mode="after")
+    def _a_whole_change(self) -> "MeRequest":
+        sent = self.model_fields_set
+        if not sent:
+            raise ValueError("send paused, the quiet hours or a timezone")
+        if "paused" in sent and self.paused is None:
+            raise ValueError("paused is true or false")
+        if ("quiet_start" in sent) != ("quiet_end" in sent) or (self.quiet_start is None) != (self.quiet_end is None):
+            raise ValueError("quiet_start and quiet_end are sent together: two times, or both null to clear them")
+        if self.quiet_start is not None and self.quiet_start == self.quiet_end:
+            raise ValueError("quiet hours end at a different time from when they start")
+        return self
 
 
 @dataclass(frozen=True)
@@ -318,7 +340,7 @@ def get_my_settings(
     ctx: RequestContext = Depends(require_workspace_permission(MEMBER_PERMISSION)),
     db: Session = Depends(get_db),
 ) -> Union[Dict[str, Any], JSONResponse]:
-    """The caller's own proactive settings in this workspace: ``{paused}``."""
+    """The caller's own proactive settings in this workspace: ``{paused, quiet_start, quiet_end, timezone}``."""
     locale = request_locale(accept_language)
     if ctx.workspace_id is None:
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
@@ -326,20 +348,20 @@ def get_my_settings(
         user_pk = resolve_user_pk(db, ctx)
         if user_pk is None:
             return _refused(locale, NO_PERSON, HTTP_FORBIDDEN)
-        paused = proactive_settings.read_pause(db, ctx.workspace_id, user_pk)
+        mine = proactive_settings.read_person(db, ctx.workspace_id, user_pk)
     except SQLAlchemyError as failure:
-        return _unavailable(db, locale, "pause read", failure, SETTINGS_UNREADABLE)
-    return {PAUSED_KEY: paused}
+        return _unavailable(db, locale, "person settings read", failure, SETTINGS_UNREADABLE)
+    return mine.to_dict()
 
 
 @router.put("/me", response_model=None)
 def put_my_settings(
-    body: PauseRequest,
+    body: MeRequest,
     accept_language: Optional[str] = Header(None),
     ctx: RequestContext = Depends(require_workspace_permission(MEMBER_PERMISSION)),
     db: Session = Depends(get_db),
 ) -> Union[Dict[str, Any], JSONResponse]:
-    """Pause the caller's suggestions in this workspace, or resume them."""
+    """Pause or resume the caller's suggestions in this workspace, and set or clear their quiet hours."""
     locale = request_locale(accept_language)
     if ctx.workspace_id is None:
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
@@ -347,7 +369,8 @@ def put_my_settings(
         user_pk = resolve_user_pk(db, ctx)
         if user_pk is None:
             return _refused(locale, NO_PERSON, HTTP_FORBIDDEN)
-        paused = proactive_settings.change_pause(db, ctx.workspace_id, user_pk, body.paused, actor_ref(ctx))
+        mine = proactive_settings.change_person(db, ctx.workspace_id, user_pk, body.model_dump(exclude_unset=True),
+                                                actor_ref(ctx))
     except SQLAlchemyError as failure:
-        return _unavailable(db, locale, "pause write", failure, SETTINGS_UNAVAILABLE)
-    return {PAUSED_KEY: paused}
+        return _unavailable(db, locale, "person settings write", failure, SETTINGS_UNAVAILABLE)
+    return mine.to_dict()

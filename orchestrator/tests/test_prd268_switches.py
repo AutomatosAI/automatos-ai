@@ -57,6 +57,7 @@ DEFAULT_CAPS = {"max_model_runs_per_day": 48, "max_suggestions_per_run": 3, "max
                 "max_interval_minutes": 1440}
 DEFAULTS = {"enabled": True, "caps": DEFAULT_CAPS, "platform_caps": DEFAULT_CAPS}
 CONFIG_NAMES = {name: f"PROACTIVE_{name.upper()}" for name in DEFAULT_CAPS}
+NO_QUIET_HOURS = {"quiet_start": None, "quiet_end": None, "timezone": None}
 
 
 @pytest.fixture
@@ -301,10 +302,10 @@ def test_a_settings_read_error_skips_the_run_fail_closed(team, checking, monkeyp
 
 
 def test_a_paused_owner_is_skipped_and_resuming_lets_the_check_in_start(team, checking):
-    assert _as(team, team.owner).put(ME, json={"paused": True}).json() == {"paused": True}
+    assert _as(team, team.owner).put(ME, json={"paused": True}).json() == {"paused": True, **NO_QUIET_HOURS}
     _refused(team, checking, _workspace_check_in(team), "skipped_paused", "paused")
 
-    assert _as(team, team.owner).put(ME, json={"paused": False}).json() == {"paused": False}
+    assert _as(team, team.owner).put(ME, json={"paused": False}).json() == {"paused": False, **NO_QUIET_HOURS}
     assert _goes_ahead(team)
 
 
@@ -570,7 +571,7 @@ def test_the_local_operator_reads_and_changes_the_settings_and_its_own_pause(tea
 
     assert client.get(SETTINGS).json() == DEFAULTS
     assert client.put(SETTINGS, json={"caps": {"max_open_per_agent": 2}}).json()["caps"]["max_open_per_agent"] == 2
-    assert client.put(ME, json={"paused": True}).json() == {"paused": True}
+    assert client.put(ME, json={"paused": True}).json() == {"paused": True, **NO_QUIET_HOURS}
     assert [(action, user_id) for action, user_id, _ in _audit(team, "workspace")] == [
         ("proactive:settings_changed", team.owner.pk)]
     assert [(action, user_id) for action, user_id, _ in _audit(team, "proactive_person_settings")] == [
@@ -656,10 +657,10 @@ def test_any_member_pauses_and_resumes_their_own_suggestions(team, saas, role):
     person = getattr(team, role)
     client = _as(team, person)
 
-    assert client.get(ME).json() == {"paused": False}
-    assert client.put(ME, json={"paused": True}).json() == {"paused": True}
-    assert client.get(ME).json() == {"paused": True}
-    assert client.put(ME, json={"paused": False}).json() == {"paused": False}
+    assert client.get(ME).json() == {"paused": False, **NO_QUIET_HOURS}
+    assert client.put(ME, json={"paused": True}).json() == {"paused": True, **NO_QUIET_HOURS}
+    assert client.get(ME).json() == {"paused": True, **NO_QUIET_HOURS}
+    assert client.put(ME, json={"paused": False}).json() == {"paused": False, **NO_QUIET_HOURS}
 
     rows = team.db.execute(text("SELECT user_id, paused FROM proactive_person_settings "
                                 "WHERE workspace_id = CAST(:w AS uuid)"), {"w": str(team.ws)}).fetchall()

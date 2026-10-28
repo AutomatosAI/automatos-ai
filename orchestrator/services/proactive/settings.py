@@ -6,8 +6,10 @@
   read and change them; a workspace can only tighten the platform's caps. A change locks the
   row, builds a new ``settings`` value (the stored one is never mutated), refuses caps it
   would loosen or leave wrong before anything is written, marks the column modified and commits.
-* **The person's**: ``proactive_person_settings.paused``, a member's own "Pause suggestions"
-  in a workspace, written in one upsert.
+* **The person's**: ``proactive_person_settings``, a member's own in a workspace: ``paused``
+  ("Pause suggestions") and the quiet hours, ``quiet_start``, ``quiet_end`` and ``timezone``
+  (read with the workspace's window by ``services.proactive.quiet.is_person_quiet``). A
+  change writes only what it names, in one upsert, and answers with the row as it then is.
 
 Every change commits, then writes its workspace audit row (K15: ``AuditService.log``
 commits the session it is given, and logs a write that fails without raising).
@@ -15,6 +17,7 @@ commits the session it is given, and logs a write that fails without raising).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import time
 from typing import Any, Dict, Mapping, Optional
 from uuid import UUID
 
@@ -26,19 +29,22 @@ from sqlalchemy.orm.attributes import flag_modified
 from core.models.proactive import ProactivePersonSettings
 from modules.proactive import Caps
 from services.proactive.limits import CAPS_KEY, caps_as_dict, caps_from, default_caps, looser_than_platform
+from services.proactive.quiet import clock, parse_clock
 from services.proactive.switches import KEY_ENABLED, WORKSPACE_KEY, enabled_in
 
 __all__ = [
     "PAUSED_ACTION",
+    "QUIET_ACTION",
     "RESUMED_ACTION",
     "SETTINGS_ACTION",
     "CapsLooser",
     "CapsWrong",
     "NoWorkspace",
+    "PersonSettings",
     "WorkspaceSettings",
-    "change_pause",
+    "change_person",
     "change_workspace",
-    "read_pause",
+    "read_person",
     "read_workspace",
     "with_changes",
 ]
@@ -46,12 +52,16 @@ __all__ = [
 SETTINGS_ACTION = "proactive:settings_changed"
 PAUSED_ACTION = "proactive:paused"
 RESUMED_ACTION = "proactive:resumed"
+QUIET_ACTION = "proactive:quiet_hours_changed"
 WORKSPACE_RESOURCE = "workspace"
 PERSON_RESOURCE = "proactive_person_settings"
 SETTINGS_COLUMN = "settings"
 PLATFORM_CAPS_KEY = "platform_caps"
 # proactive_person_settings' primary key, the upsert's conflict target.
 PERSON_KEY_WORKSPACE, PERSON_KEY_USER = "workspace_id", "user_id"
+PAUSED, QUIET_START, QUIET_END, TIMEZONE = "paused", "quiet_start", "quiet_end", "timezone"
+QUIET_FIELDS = (QUIET_START, QUIET_END, TIMEZONE)
+PERSON_FIELDS = (PAUSED, *QUIET_FIELDS)
 
 
 class NoWorkspace(LookupError):
@@ -68,6 +78,22 @@ class CapsLooser(ValueError):
     def __init__(self, names: Any) -> None:
         super().__init__(", ".join(names))
         self.names = tuple(names)
+
+
+@dataclass(frozen=True)
+class PersonSettings:
+    """A person's own proactive settings in a workspace: the pause and the quiet hours (a
+    time zone of None is the workspace's)."""
+
+    paused: bool = False
+    quiet_start: Optional[time] = None
+    quiet_end: Optional[time] = None
+    timezone: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """``{paused, quiet_start, quiet_end, timezone}``, the times as ``HH:MM``."""
+        return {PAUSED: self.paused, QUIET_START: clock(self.quiet_start), QUIET_END: clock(self.quiet_end),
+                TIMEZONE: self.timezone}
 
 
 @dataclass(frozen=True)
@@ -167,20 +193,56 @@ def change_workspace(db: Session, workspace_id: UUID, enabled: Optional[bool], c
     return after
 
 
-def read_pause(db: Session, workspace_id: UUID, user_id: int) -> bool:
-    """Whether the person paused suggestions in this workspace."""
-    row = db.query(ProactivePersonSettings.paused).filter(
-        ProactivePersonSettings.workspace_id == workspace_id, ProactivePersonSettings.user_id == user_id).first()
-    return bool(row is not None and row[0])
+_PERSON_COLUMNS = (ProactivePersonSettings.paused, ProactivePersonSettings.quiet_start,
+                   ProactivePersonSettings.quiet_end, ProactivePersonSettings.timezone)
 
 
-def change_pause(db: Session, workspace_id: UUID, user_id: int, paused: bool, actor: Any) -> bool:
-    """Pause or resume the person's suggestions in this workspace, commit, then audit."""
-    statement = insert(ProactivePersonSettings).values(workspace_id=workspace_id, user_id=user_id, paused=paused)
-    db.execute(statement.on_conflict_do_update(
+def _person(row: Any) -> PersonSettings:
+    if row is None:
+        return PersonSettings()
+    paused, quiet_start, quiet_end, timezone = row
+    return PersonSettings(paused=bool(paused), quiet_start=quiet_start, quiet_end=quiet_end, timezone=timezone)
+
+
+def read_person(db: Session, workspace_id: UUID, user_id: int) -> PersonSettings:
+    """The person's own settings in this workspace; a person who set none has the defaults."""
+    return _person(db.query(*_PERSON_COLUMNS).filter(
+        ProactivePersonSettings.workspace_id == workspace_id, ProactivePersonSettings.user_id == user_id).first())
+
+
+def _stored(change: Mapping[str, Any]) -> Dict[str, Any]:
+    """The columns a change writes: the quiet times from ``HH:MM``, the rest as given. A name
+    that is not one of ``PERSON_FIELDS`` raises ``ValueError``."""
+    unknown = sorted(set(change) - set(PERSON_FIELDS))
+    if unknown:
+        raise ValueError(f"not a person setting: {', '.join(unknown)}")
+    return {name: parse_clock(value) if name in (QUIET_START, QUIET_END) else value for name, value in change.items()}
+
+
+def _audit_person(db: Session, workspace_id: UUID, user_id: int, change: Mapping[str, Any], after: PersonSettings,
+                  actor: Any) -> None:
+    """One audit row for a pause or a resume, one for a quiet-hours change (K15: after the commit)."""
+    if PAUSED in change:
+        _audit(db, workspace_id, user_id, PAUSED_ACTION if after.paused else RESUMED_ACTION, PERSON_RESOURCE,
+               str(user_id), {"actor": actor, PAUSED: after.paused})
+    quiet = {name: change[name] for name in QUIET_FIELDS if name in change}
+    if quiet:
+        shown = after.to_dict()
+        _audit(db, workspace_id, user_id, QUIET_ACTION, PERSON_RESOURCE, str(user_id),
+               {"actor": actor, "changed": quiet, "quiet_hours": {name: shown[name] for name in QUIET_FIELDS}})
+
+
+def change_person(db: Session, workspace_id: UUID, user_id: int, change: Mapping[str, Any],
+                  actor: Any) -> PersonSettings:
+    """Change the person's own settings in this workspace, commit, then audit. ``change`` names
+    only what changes: ``paused``, and the quiet hours (``quiet_start``/``quiet_end`` as
+    ``HH:MM`` or None, ``timezone`` an IANA name or None); the rest stays."""
+    values = _stored(change)
+    statement = insert(ProactivePersonSettings).values(workspace_id=workspace_id, user_id=user_id, **values)
+    row = db.execute(statement.on_conflict_do_update(
         index_elements=[PERSON_KEY_WORKSPACE, PERSON_KEY_USER],
-        set_={"paused": paused, "updated_at": func.now()}))
+        set_={**values, "updated_at": func.now()}).returning(*_PERSON_COLUMNS)).one()
     db.commit()
-    _audit(db, workspace_id, user_id, PAUSED_ACTION if paused else RESUMED_ACTION, PERSON_RESOURCE, str(user_id),
-           {"actor": actor, "paused": paused})
-    return paused
+    after = _person(row)
+    _audit_person(db, workspace_id, user_id, change, after, actor)
+    return after
