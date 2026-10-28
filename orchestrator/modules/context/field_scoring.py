@@ -49,6 +49,20 @@ def stability_factor(
     return max(0.0, strength) * boost
 
 
+# PRD-108 Hebbian co-access bonus: patterns retrieved together each gain this
+# share of their strength per co-accessed pattern (fire together, wire together).
+CO_ACCESS_BONUS = 0.02
+
+
+def co_accessed_strength(strength: float, accessed: int, reinforce_cap: float) -> float:
+    """A pattern's strength after one read returned *accessed* patterns together:
+    +``CO_ACCESS_BONUS`` per other pattern, capped at ``reinforce_cap`` × strength.
+    A pattern read alone keeps its strength."""
+    if accessed <= 1:
+        return strength
+    return min(strength * (1.0 + CO_ACCESS_BONUS * (accessed - 1)), strength * reinforce_cap)
+
+
 def recency_factor(
     age_hours: float,
     access_count: int,

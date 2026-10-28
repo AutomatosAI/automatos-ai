@@ -100,7 +100,7 @@ def _pack(monkeypatch, mock_db, in_widget_turn):
         recalled.append("history")
         return []
 
-    async def _field(workspace_id, query):
+    async def _field(workspace_id, query, record_access=True):
         recalled.append("field")
         return []
 
