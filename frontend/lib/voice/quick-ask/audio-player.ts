@@ -58,6 +58,21 @@ function started(element: AudioElement): Promise<void> {
   }
 }
 
+/** One clip's listeners: its start and progress reported, its end and its failure as the player decides. */
+function clipListeners(
+  target: AudioElement,
+  events: PlaybackEvents,
+  ended: () => void,
+  fail: (error: unknown) => void,
+): Listeners {
+  return {
+    playing: () => events.onPlaying(),
+    timeupdate: () => events.onProgress(),
+    ended,
+    error: () => fail(target.error),
+  }
+}
+
 export function browserAudioPlayer(
   makeElement: () => AudioElement = () => new Audio(),
   urls: ObjectUrls = URL,
@@ -87,14 +102,10 @@ export function browserAudioPlayer(
     const fail = (error: unknown): void => {
       if (release(url)) events.onFailed(error)
     }
-    const detach = attach(target, {
-      playing: () => events.onPlaying(),
-      timeupdate: () => events.onProgress(),
-      ended: () => {
-        if (release(url)) events.onEnded()
-      },
-      error: () => fail(target.error),
-    })
+    const ended = (): void => {
+      if (release(url)) events.onEnded()
+    }
+    const detach = attach(target, clipListeners(target, events, ended, fail))
     loaded = Object.freeze({ url, detach })
     target.src = url
     void started(target).catch(fail)
