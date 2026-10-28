@@ -14,7 +14,8 @@ served route+method with the authorization facts the sweep asserts on:
   (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)`` /
   ``_require_platform_admin(ctx)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
-  auth-type gate (credentials resolve, the voice mint, the mobile device routes)
+  auth-type gate (credentials resolve, the voice mint, the mobile device routes,
+  digest now)
 
 Usage (from ``orchestrator/``)::
 
@@ -103,6 +104,9 @@ def main() -> None:
                         or "Live voice requires a signed-in user" in src
                         # PRD-266 api/mobile_devices.py: the device routes' person gate.
                         or "caller = _caller(db, ctx" in src
+                        # PRD-266 api/mobile_push.py digest now: the caller's own
+                        # person and membership gate (404 / 403 before anything runs).
+                        or "user_pk = _digest_asker(db, ctx)" in src
                     ),
                 }
             )
