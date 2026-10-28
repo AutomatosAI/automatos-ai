@@ -12,8 +12,10 @@ Two check-ins, each one run with one ``proactive_runs`` row (``services.proactiv
   and it runs the same turn. An agent's work is outside what a signal diff can see, so it
   has no pre-check: its interval is its cost lever (§6.9).
 
-Each first checks, in order, the switches, ``background_allowed``, the day's spend ceiling
-and the workspace's caps (``services.proactive.gates``). A refusal writes its run row and
+Each first lapses the workspace's open suggestions past their 7 days
+(``services.proactive.expiry``), so no cap, dedupe read or prompt counts them, then checks,
+in order, the switches, ``background_allowed``, the day's spend ceiling and the workspace's
+caps (``services.proactive.gates``). A refusal writes its run row and
 makes no model call. The turn (``services.proactive.loop``) runs on ``LLMManager(service_name=
 'heartbeat')``, the platform's ``orchestrator_llm`` model, never the agent's own (K9), as
 one ask in the ``check_in`` lane, which only credits beyond the trial pay for (K14). Its
@@ -44,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from core.models.proactive import RUN_ERROR, RUN_SILENT, RUN_SUGGESTED
 from modules.proactive import check_in_window
+from services.proactive.expiry import expire_lapsed
 from services.proactive.failing_streaks import held_back, note_run
 from services.proactive.failures import failure_class
 from services.proactive.gates import Refusal, start_refusal
@@ -147,6 +150,7 @@ def _errored(db: Session, record: RunRecord, error_class: str) -> CheckInResult:
 def _prepare_workspace(db: Session, record: RunRecord, now: datetime) -> Union[CheckInResult, _Plan]:
     """Auto's check-in up to its model call: refused, silent (no signal), or a plan."""
     workspace_id = record.workspace_id
+    expire_lapsed(db, workspace_id, now)
     owner = owner_id(db, workspace_id)
     refusal = start_refusal(db, workspace_id, owner, now, f"Auto's check-in of workspace {workspace_id}")
     if refusal is not None:
@@ -171,6 +175,7 @@ def _prepare_agent(db: Session, record: RunRecord, hb_config: Dict[str, Any],
     from core.models.core import Agent
 
     workspace_id, agent_id = record.workspace_id, record.agent_id
+    expire_lapsed(db, workspace_id, now)
     owner = owner_id(db, workspace_id)
     refusal = (start_refusal(db, workspace_id, owner, now, f"agent {agent_id}'s check-in", agent_id)
                or held_back(db, workspace_id, agent_id, hb_config, now))

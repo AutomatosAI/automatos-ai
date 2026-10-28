@@ -3,7 +3,9 @@
 * ``GET /suggestions?status=open`` — the suggestions in one state (``open`` by default),
   newest first: an owner or admin sees every person's in the workspace, anyone else only the
   ones addressed to them (W1 addresses every suggestion to the workspace owner, K11). A caller
-  with no person behind it, or none in this workspace, is 403.
+  with no person behind it, or none in this workspace, is 403. An open suggestion past its 7
+  days lapses first, here and in Start and Hide: it lists as ``expired`` and either decision
+  of it is 409 ``expired``.
 * ``POST /suggestions/{suggestion_id}/start`` ``{via?}`` — Start (owners, admins and editors,
   the PRD-266 D16 rule; a viewer is 403): ``{suggestion, opens}``, where ``opens`` is the ticket
   Start filed (``{type: 'board_task', board_task_id}``) or the chat to open
