@@ -7,7 +7,7 @@
 
 **What v2 changes.**
 - It merges the Claude Design handoff (`<workspace>/DUMPING AREA/design_handoff_proactive_auto/`, "the handoff"), which designed the same features for the Play and HUD web themes. Its display contracts become §6.11, corrected where they disagreed with the code.
-- A new §6.12 places every surface in Studio, Classic, Play, HUD and every installed theme, and in Go's three layouts. The MOBILE session agreed the Go placements on 28 Oct.
+- A new §6.12 places every surface in Studio, Classic, Play, HUD and every installed theme, and in Go's three layouts. The MOBILE session agreed the Go placements on 28 Oct. The PLAY session reviewed the kit side the same day; its measurements and file anchors are in §6.12.2, §6.12.4, US-C21, US-T01 and Wave K.
 - The Go placements of §6.5.2 move there: one card above the composer, not a row under the needs strip.
 - The handoff's glyphs are corrected to the app's existing vocabulary, and its fixed Ember colours to look-relative roles.
 - OpenDuet's provenance rule is added (§5.3, §6.2.3).
@@ -573,19 +573,19 @@ Every theme already names its colours with Studio's token names: the web paints 
 
 | Role | Token | Studio light / dark (default look) | Classic | Play (what Ember resolves to) | HUD (any Look) |
 |---|---|---|---|---|---|
-| ◆ needs_you | `warning` (glyph); word in `warn-ink` on light grounds | sand glyph, ink word / sand | amber | ember | accent, plus the one live border |
-| ● working | `running` | warm grey | `info` (Classic has no `running`) | gold | accent |
-| ✓ ready | `success` | olive | green | Auto light | accent |
-| ✓ done | `success` | olive | green | text-2 | text-2 |
-| ✕ failed | `destructive` | burnt orange | red | snag | error (never themeable) |
-| ◆ needs_setup | `info` | navy / steel | blue | ember | accent |
-| ○ not_checked | `muted-foreground` | faded ink | grey | text-3 | text-2 |
+| ◆ needs_you | `warning` on dark grounds; on light grounds glyph **and** word in `warn-ink` (`warning` is 1.58:1 on Studio light and Play Daylight, so it fails as text and as a 3:1 mark) | warn-ink / sand | warn-ink / amber | warn-ink or warning by ground tone | `--hud-accent-text`, plus the one live border |
+| ● working | `running`: a **new real token** (light hsl(40 20% 36%), 5.20:1; dark hsl(40 20% 65%)); today it is only a literal at `globals.css:782` and Tailwind has no such colour | warm grey | `info` until Classic gains `running` | `running` by ground tone | `--hud-accent-text` |
+| ✓ ready | `success`, never on a tinted fill (4.38:1 on `secondary`) | olive | green | `success` by ground tone | `--hud-accent-text` |
+| ✓ done | `success` | olive | green | `success` by ground tone | text-2 |
+| ✕ failed | `destructive` | burnt orange | red | `destructive` | `--hud-error-text` (never themeable) |
+| ◆ needs_setup | `info` | navy / steel | blue | `info` by ground tone | `--hud-accent-text`: ◆ is the "a person must act" glyph, painted in the accent role in `status-glyphs.ts` (the handoff's gold and an earlier text-2 are dropped) |
+| ○ not_checked | `muted-foreground` | faded ink | grey | `muted-foreground` | text-2 |
 
-- **Studio dark** doesn't redefine `--running`; it inherits light's warm grey (40 20% 65%). Measure it on the dark ground, or give dark its own value.
-- **Play** has no fixed palette; it paints Studio's token names from the active look (`lookToStudioTokens`), and its light or dark tone comes from the look's ground, not the phone's setting. The Ember column is for reference only.
-- **HUD keeps its own rule.** Every status uses the accent except failed (error) and quiet states (text-2); the glyph and the WORD carry the meaning (`automatos-go:src/styles/tokens/hud.ts` maps success, warning and running to accent). The needs-you item gets HUD's single live border, so it still stands out at a glance.
-- **Contrast.** Studio's `warning` (sand, 47 73% 56%) is about 1.8:1 on Studio's light cream ground, too low for text and for a 3:1 mark. On light grounds the glyph uses `warning` only at 14 px and above, beside a word in `warn-ink`; the word carries the meaning. Every role's text pair is measured on `background` and `card` in both tones, on the web (core's contrast tests) and in Go's token tests.
-- **Phone skins.** Installed skins today set 24 tokens, none of them a status colour. Under a dark skin the Studio layout keeps Studio's own olive and sand, which nothing measures. Add `--success`, `--warning`, `--running` and `--info` to `MOBILE_TOKEN_NAMES` as **optional** tokens, each falling back to Studio's value, with contrast pairs on `--background` and `--card`. Also add the `--accent`-on-`--background` pair, which PLAY flagged on 24 Oct: Go draws the accent as text (NeedsStrip's "NEEDS YOU") and no pair measures it. This is an additive minor version of the theme contract across core `services/themes/contract.py`, the kit's `mobile-manifest.ts` and check, and Go's `src/styles/themes/paint.ts` (§12-Q25).
+- **No status ever goes through `--accent` on the web.** Under every Play look `--accent` *is* the error colour (`packages/look-kit/src/studio-tokens.ts:192`). Status uses the status tokens only.
+- **Play paints from the look.** `lookToStudioTokens` emits `--destructive`, `--muted-foreground` and `--accent`, but not `success`, `warning`, `info` or `warn-ink` (`studio-tokens.ts:26-28`), so Studio's light or dark values apply by tone. It gains those, plus `running`, **per ground tone**. That fixes Daylight and the phone-skin parity at once (US-T01). Contrast is checked on **every accent × ground combination** the look catalogue allows (Paper included), not only the five presets. On Ember, Obsidian, Aurora and Workshop every role already passes (6.1–11.2:1, PLAY's measurement on 28 Oct).
+- **HUD keeps its own rule.** Every status uses `--hud-accent-text` except failed (`--hud-error-text`) and quiet states (text-2), as `panels.module.css:46-52` does, and Go's `hud.ts` maps the status tokens to the accent. Accent against error is only 1.18:1 on FORGE and 1.03:1 on NOVA, so the glyph and the WORD always carry the meaning. HUD gains a **one-live-border rule**: today the live border is per panel (`panel.tsx:31`), so NEEDS YOU and MISSION can both glow. Only the item that needs the person glows.
+- **Contrast.** Every role's text pair is measured on `background` and `card` in both tones: core's contrast tests on the web, Go's token tests, the kit's `check`.
+- **Phone skins** (US-T01). A skin today sets 24 tokens, and none is a status colour. Under a dark skin the Studio layout keeps Studio's olive, sand and navy, which nothing measures; Go's status words read `--olive`, `--warn-ink` and `--navy`, at 2.43, 3.00 and 1.71:1 on a dark skin. The fix runs through the web first, because every skin token must be one the web paints (`mobile_tokens.py:11-14`), and is specified in US-T01. It matters only for third-party skins: Go reads neither Play's nor HUD's mobile block.
 
 #### 6.12.3 The pattern spec
 
@@ -607,10 +607,10 @@ Motion everywhere: one entrance per component (fade plus 4 px rise, 180 ms); the
 
 | Surface | Studio and Classic (core) | Play (kit, owns `/chat`) | HUD (kit, owns `/chat`) | Other installed themes |
 |---|---|---|---|---|
-| Brief | the `brief@1` part draws a card in the Auto thread (`frontend/components/chatbot/message.tsx:112` maps parts and drops unknown types today, so it gains `brief@1`); `AutosRead` on the Command Center summary gains the structured rows under the prose (both shells already mount it: Studio `summary-tab.tsx`, Classic `activity-page.tsx`) | an Ember card at the top of Chat, mascot `hello` | the first open of the day turns the right column into BRIEFING: numbered rows, built in time with speech. It folds back into the existing TODAY and NEEDS YOU panels after 60 s or any press. The handoff's SPEND panel was never built. | Studio's card in the theme's frame |
-| Suggestion | one card in the stack directly above `MultimodalInput` (`frontend/components/chatbot/chat.tsx:1363`, where `ToolSuggestionBar` and the Mission-mode banner already sit), plus the Command Center's Suggested list beside Auto's Read | an Ember card in the chat footer above `MessageBox` (`themes/play/src/components/play/chat/play-chat-view.tsx`) | a `▸ NEXT` line between the transcript and the waveform in the centre column, with START / HIDE; the NEXT UP panel keeps the schedule (`useActivitySchedule`) | Studio's card |
-| Status rows | needs-you widget, Missions list, board cards: glyph + word + next step | the Missions page is Studio's inside Play's frame (Play doesn't own `/assignments`) | MISSION panel rows | Studio's |
-| Approval | host card, unchanged placement; gains target, preview, rule and keys | placed as a bottom sheet over Chat | docked under the core | host card |
+| Brief | the `brief@1` part draws a card in the Auto thread (`frontend/components/chatbot/message.tsx:112` maps parts and drops unknown types today, so it gains `brief@1`); `AutosRead` on the Command Center summary gains the structured rows under the prose (both shells already mount it: Studio `summary-tab.tsx`, Classic `activity-page.tsx`) | on an empty chat, in `FirstOpenHero`'s place (`play-chat-view.tsx:173-179`, where the hello already plays); in a conversation, the `brief@1` message in the `MessageList`. A card fixed at the head of a conversation would scroll away. | **three columns** (≥ 1180 px of screen, beside the 232 px rail): the right column becomes BRIEFING (numbered rows, built in time with speech), folding back into TODAY and NEEDS YOU after 60 s or any press. There is no SPEND panel; TODAY stands in for it (`today-panel.tsx:7`). **Two columns:** the same, in the column TODAY occupies. **One column and the phone layout** (< 1024 px viewport): the transcript slot, as on Go | Studio's card in the theme's frame |
+| Suggestion | one card in the stack directly above `MultimodalInput` (`frontend/components/chatbot/chat.tsx:1363`, where `ToolSuggestionBar` and the Mission-mode banner already sit), plus the Command Center's Suggested list beside Auto's Read | between `PlayTrialBanner` and `MessageBox` (`play-chat-view.tsx:186-187`). One suggestion surface: while a turn's own Mission suggestion (`PlayMissionSuggestion` in `TurnEnd`, `turn-end.tsx:68`) is unanswered, the pinned card hides. The same rule applies to Studio's `MissionSuggestionCard`. | desktop: a `▸ NEXT` line in `chat-footer.tsx:42`, between `TrialBanner` and `VoiceDeck` (waveform + VoiceButton), above the composer; phone layout: in `phone/status-line.tsx`, never above the controls (Go's 375 × 667 finding). NEXT UP keeps the schedule | Studio's card |
+| Status rows | needs-you widget, Missions list, board cards: glyph + word + next step | the Missions page is Studio's inside Play's frame (Play owns only `/chat` and `/deliverables`) | a **new MISSIONS panel**: the existing MISSION panel shows one mission's steps (`mission-panel.tsx:24-53`), not a list with a state word and a next step | Studio's |
+| Approval | host card, unchanged placement; gains target, preview, rule and keys | inline in Auto's reply, as today (`auto-reply.tsx:115`, `approval-cards.tsx:56`; loose cards in `TurnEnd`, `:229`); the mascot's `listening` while a card waits already exists (`caption.ts:38`). **No web sheet:** an overlay over a protected surface is what theme review flags. The sheet is Go-only. | inline where HUD places host cards today; no overlay | host card |
 | Readiness | Settings → Orchestrator (`frontend/components/settings/SettingsPanel.tsx`), a "What Auto depends on" section; `/settings` is host-owned, so it looks the same under every theme. Plus the brief's "Couldn't check" rows | the Settings section, plus a "What I depend on" card on Chat only when an item the brief needs isn't ready | a SYSTEMS panel from `useReadiness`; there is no THIS MACHINE panel to replace | Settings |
 | Calibration | first chat: three Auto messages + Sounds right / Something's off | Ember bubbles, mascot `hello` | a CALIBRATION panel | Studio's |
 | Reply chips | under Auto's last message | 40 px pills | `SAY "WINDOW"` chips, also tappable | Studio's |
@@ -822,10 +822,13 @@ These stories carry §6.11 and §6.12. W1 holds US-C17 and US-C18; the rest ride
 **Description:** As a theme author, I want hooks and default components for every proactive surface, so my theme gets them without redrawing anything.
 
 **Acceptance Criteria:**
-- [ ] A new SDK area `brief`: `useBrief`, `useReadiness`, `useCheckReadiness`, `useSuggestions`, `useStartSuggestion`, `useHideSuggestion`, `useCalibration`, `useAnswerCalibration`; `pages/assignments` rows gain `display_state`, `next_step`, `retry`; `theme` re-exports `DISPLAY_STATE_LABELS` (glyph and word per state)
+- [ ] A new SDK area **`proactive`**. Not `brief`: that name is already a kit CLI command, `automatos-theme brief`. It holds `useBrief`, `useReadiness`, `useCheckReadiness`, `useSuggestions`, `useStartSuggestion`, `useHideSuggestion`, `useCalibration`, `useAnswerCalibration`; `pages/assignments` rows gain `display_state`, `next_step`, `retry`; `theme` re-exports `DISPLAY_STATE_LABELS` (glyph and word per state)
 - [ ] Default components `BriefCard`, `SuggestionCard`, `StatusLabel`, `ReadinessList`, `CalibrationCard`, `ReplyChips` under `frontend/components/proactive/`, exported through `lib/theme-sdk/host-cards/` and the surface JSON (the recipe in `docs/theme-host/sdk-surface-map.md`); `surface.test.ts` pins the names
 - [ ] Each default component renders in Studio light, Studio dark and Classic; browser-lane screenshots of each; axe reports no critical issue
-- [ ] SDK and host contract versions bump to 1.3.0, and the d.ts files are regenerated for the kit to vendor
+- [ ] A new **host-owned voice control** in the `voice` area, `BriefVoice` (protected like `voice-control`), for Listen and the `▸ SPEAKING` sync. The 1.2.0 area (`VoiceButton`, `useVoice`, `readVoiceLevels`) has nothing that starts a session or reads the brief, and themes never speak.
+- [ ] Every default component marks Auto's words with `data-ai-generated`: brief rows, suggestion text and chips
+- [ ] `--running` becomes a real web token in `globals.css` and Tailwind (light hsl(40 20% 36%), dark hsl(40 20% 65%)), and `lookToStudioTokens` emits `success`, `warning`, `warn-ink`, `info` and `running` per ground tone (`packages/look-kit/src/studio-tokens.ts`, and core's copy)
+- [ ] SDK and host contract versions bump to 1.3.0, and the d.ts files are regenerated for the kit to vendor (step 1 of Wave K's order)
 
 #### US-W04: Status vocabulary on the web
 **Acceptance Criteria:**
@@ -864,27 +867,56 @@ These stories carry §6.11 and §6.12. W1 holds US-C17 and US-C18; the rest ride
 - [ ] HUD uses the sheet only (it draws no thread cards)
 
 #### US-T01: Status colours in phone skins
-**Acceptance Criteria (gated on §12-Q25):**
-- [ ] `--success`, `--warning`, `--running` and `--info` join `MOBILE_TOKEN_NAMES` as optional, each falling back to Studio's value, in core `services/themes/contract.py`, the kit's `mobile-manifest.ts` and Go's `src/styles/themes/paint.ts`
-- [ ] New contrast pairs: each status token on `--background` and `--card` (3:1 for a mark, 4.5:1 where it is text), plus `--accent` on `--background`, in core's `mobile_contrast.py`, the kit's `check/mobile-contrast.ts` and Go's `paint.ts`
-- [ ] The kit's skin designer (`automatos-theme dev` → `/phone`) shows the four tokens
+**Acceptance Criteria (gated on §12-Q25; reworked with PLAY, 28 Oct):**
+- [ ] Web first. Every skin token is one the web paints (`mobile_tokens.py:11-14`), so `--running` is a real web token before it is a skin token (US-C21), and `lookToStudioTokens` emits the status tokens per ground tone.
+- [ ] The mobile token list adds `--success`, `--warning`, `--warn-ink`, `--info` and `--running`. Go's status words also read `--olive` and `--navy`: either they join the list, or Go's words move to the status tokens (US-G05 decides, and records which). Core's parity tests change in the same PR: `mobile-tokens.test.ts:59-63` (the list equals what `lookToStudioTokens` writes), `:75` (the count) and `look-kit.test.ts:55`.
+- [ ] Fallbacks are chosen by the **ground tone** the skin paints, not by the scheme's name. Today a "light" scheme on a dark ground gets Studio Light's navy (1.71:1) and olive (3.59:1); the fix covers Go's `paint.ts` and the kit's `phone-paint.ts:9-11`. A fallback in use is measured, never reported as "not measured" (`check/mobile-contrast.ts:99-103`, `mobile_contrast.py:105`).
+- [ ] New contrast pairs: each status token on `--background` and `--card` (3:1 for a mark, 4.5:1 where it is text), plus `--accent` on `--background`, which PLAY flagged on 24 Oct. They go in core's `mobile_contrast.py`, the kit's `check/mobile-contrast.ts` and Go's `paint.ts`.
+- [ ] Older hosts refuse unknown token names (`mobile-manifest.ts:94`), so each new token carries a minimum host version, and `THEME_HOST_VERSION` bumps (`contract.py:33`)
+- [ ] The kit's harness: the skin designer, contrast panel, export and `automatos-theme skin` follow once re-vendored. The Studio phone preview gains the new states (`src/phone/parts.ts` `PIP_COLOURS` and `TEXT_TONES`; `app/phone/studio/copy.ts` fixtures), mirroring US-G05.
 
 ### Wave K: the kit themes (automatos-design-kit, after SDK 1.3.0 is vendored)
 
-Until the vendored SDK has the new hooks, build against harness fakes for `useBrief`, `useReadiness`, `useSuggestions` and `useCalibration`. Add them where the harness already fakes `useNeedsYou`: `packages/theme-harness/src/host/sample-data.ts` and `src/sdk/index.ts`. One feature per PR, each with harness tests and preview shots. Never redraw `ToolApproval` or `MissionApproval`; place them. Never call speech APIs. Bump `engines.sdk` to `^1.3.0` and add `brief` to `uses`.
+Order (agreed with PLAY, 28 Oct). Each step waits for the one before it:
+1. **Core** (US-C21): `lib/theme-sdk/proactive.ts`, `host-cards/*`, `surface/*.json`, `packages/theme-sdk`, the shared-modules `sdkVersion`, `services/themes/contract.py:34`, `data/sdk-surface.json`, `docs/theme-host/sdk-surface-map.md`.
+2. **Kit vendor PR:** `packages/theme-sdk`, `theme-cli/src/core` and its sha256 rows, `CORE_SHA` (`check/report.ts:29`), and the harness fakes **in the same PR**: `src/sdk/proactive.ts`, `index.ts`, `internal/page-views.ts:38`, `host/sample-data.ts:46`. They can't land earlier: `surface.test.ts:57` requires the fakes to equal the vendored d.ts, `check` errors on a name the SDK doesn't export, and themes type-check against it.
+3. **Play and HUD versions:**
+   - `engines.sdk` `^1.3.0` and `proactive` added to `uses`;
+   - the `package.json` peer, pinned exactly to 1.2.0 today;
+   - HUD's `manifest.test.ts:47,210`, which hard-codes 1.2.0;
+   - CHANGELOGs.
+
+   Each version takes its own review and sign round.
+4. The lockfile dispatch.
+5. Core browser-e2e `KIT_REF` (`:221`) and `PLAY_PACKAGE` (`:224`), only after step 1 is on main, because `^1.3.0` refuses a 1.2.0 host. SaaS runs core with SDK 1.3.0 before either theme installs.
+
+Vendor SDK 1.3.0 **before** the Kit 1.0 freeze (B-07b), or the freeze's surface fixture takes a minor bump.
+
+One feature per PR. Never redraw `ToolApproval` or `MissionApproval`; place them. Never call speech APIs. Brief rows, suggestion text and chips are Auto's words: each carries `data-ai-generated` (pattern: Play `auto-reply.tsx:104`; the fence question is §12-Q29). Acceptance is **harness showcase shots** of the brief, suggestion and approval in both themes at 1440 and at 390, not hand mocks.
 
 #### US-K01: Play
 **Acceptance Criteria:**
-- [ ] The brief card at the top of Chat, the suggestion card in the chat footer above `MessageBox`, reply chips, and the approval host card placed as a bottom sheet with the mascot `listening`, all per §6.12.4
-- [ ] Every colour comes from the active look through Studio's token names. Harness shots on all five presets (Ember, Obsidian, Aurora, Workshop, Daylight) pass `automatos-theme check`, including contrast on Daylight's paper ground.
+- [ ] Placements per §6.12.4:
+  - the brief in `FirstOpenHero`'s place on an empty chat, and as the `brief@1` message in a conversation;
+  - the suggestion card between `PlayTrialBanner` and `MessageBox`, hidden while a turn's `PlayMissionSuggestion` is unanswered;
+  - reply chips;
+  - approvals inline as today (no sheet), with the mascot `listening` while one waits.
+- [ ] Both layouts: at 1440 (sidebar, main column, mascot column) and below 1024 px (Play's phone layout; one breakpoint, `lib/play/phone-layout.ts:15`)
+- [ ] Every colour comes from the active look through Studio's token names, and no status goes through `--accent`. Contrast passes on **every accent × ground combination** the look catalogue allows, Paper included (`automatos-theme check`).
+- [ ] Harness showcase shots of the brief, suggestion and approval at 1440 and 390; Auto's words carry `data-ai-generated`
 - [ ] Calibration bubbles with the mascot `hello` (with US-C22)
 
 #### US-K02: HUD
 **Acceptance Criteria:**
-- [ ] On the first open of the day the right column becomes BRIEFING (numbered rows, `▸ SPEAKING` while the host voice session reads it), folding back into TODAY and NEEDS YOU after 60 s or any press
-- [ ] A `▸ NEXT` line between the transcript and the waveform, with START and HIDE; SAY chips that can be tapped; never spoken
-- [ ] A SYSTEMS panel from `useReadiness`; MISSION panel rows with glyph + WORD + `▸ next_step` and a 3 px rail while working; the needs-you row takes the one live border
-- [ ] Harness shots on all five Looks (ARC, FORGE, GHOST, NOVA, SIGNAL) pass `automatos-theme check`; nothing moves under reduced motion
+- [ ] BRIEFING:
+  - at three columns (≥ 1180 px of screen) it takes the right column, numbered rows, `▸ SPEAKING` while the host voice session reads it (`BriefVoice`), and folds back into TODAY and NEEDS YOU after 60 s or any press;
+  - at two columns (940–1179) it takes TODAY's column;
+  - at one column (under 940) and on the phone layout it takes the transcript slot.
+- [ ] `▸ NEXT` with START and HIDE: desktop in `chat-footer.tsx:42` between `TrialBanner` and `VoiceDeck`; phone in `phone/status-line.tsx`. SAY chips can be tapped. Never spoken.
+- [ ] A new MISSIONS panel (the MISSION panel stays one mission's steps): rows with glyph + WORD + `▸ next_step` and a 3 px rail while working, in `--hud-accent-text` / `--hud-error-text`
+- [ ] A SYSTEMS panel from `useReadiness`
+- [ ] The one-live-border rule: only the item that needs the person glows (today `panel.tsx:31` lets NEEDS YOU and MISSION both glow)
+- [ ] Harness showcase shots at 1440 and 390 on all five Looks (ARC, FORGE, GHOST, NOVA, SIGNAL) pass `automatos-theme check`; nothing moves under reduced motion; Auto's words carry `data-ai-generated`
 
 ### Wave W3 addition: calibration (core, web, Go)
 
@@ -1040,6 +1072,7 @@ W1 and W2 are the minimum that closes the OpenDuet gap and stops the flood. Para
 26. **Calibration confidence.** *Recommendation:* show source counts ("from 6 Deliverables"), never the model's percentages.
 27. **The push-tap bug before a fourth push type.** Tapping a push doesn't open its ticket on Gerard's phone. *Recommendation:* fix it before US-C09 and US-G02.
 28. **Approval words.** *Recommendation:* keep Approve / Deny on the web and "Approve & run" / "Deny" on Go until Always allow ships, then change to Allow once / Always allow / Refuse everywhere at once.
+29. **The AI-label fence and proactive controls.** `AiLabelFence` wraps only the composer. Brief rows, suggestion text and chips carry `data-ai-generated`. Should Start and the chips sit inside the fence, or carry their own small AI caption? *Recommendation:* each carries `data-ai-generated`, with no new caption. The brief card and the suggestion card each show the existing tiny "Auto is an AI" caption once (AI-label minimal rule), and Start and the chips sit outside the fence.
 
 ## Related
 
