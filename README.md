@@ -89,9 +89,9 @@ One workspace and one Auto, with the same agents, Knowledge and Deliverables, wh
 **Automatos Go** is the phone app ([AutomatosAI/automatos-go](https://github.com/AutomatosAI/automatos-go), iOS first, in beta): chat with Auto, the Command Centre, push notifications for a question, an approval or a review that needs you, and hold-to-talk voice in English and Portuguese (Brazil), in three styles: Studio, Play and HUD. By default the app follows the theme you choose in Studio and paints its phone skin: the theme's colours, fonts and mascot.
 
 <p align="center">
-  <img src="docs/assets/showcase/go-play-chat-thinking.jpg" alt="Automatos Go in Play: Auto thinking about a request" width="200">
+  <img src="docs/assets/showcase/go-play-chat-laptop.jpg" alt="Automatos Go in Play: Auto's pick of three light laptops for travel" width="200">
   &nbsp;
-  <img src="docs/assets/showcase/go-play-shelf.jpg" alt="Automatos Go in Play: the shelf of Deliverables" width="200">
+  <img src="docs/assets/showcase/go-play-shelf-blog.jpg" alt="Automatos Go in Play: the shelf, with the blog posts Auto wrote" width="200">
 </p>
 
 **Make your own theme** with the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit) (Apache-2.0): the command line that packs and checks a theme, a browser harness, the guides, and Play and HUD as worked examples. A theme is built against the theme SDK, which Automatos serves at run time (1.2.0; its types install from `https://widgets.automatos.app/theme-sdk/v1/theme-sdk.tgz`), and a version Automatos reviews can carry a signature from the theme-signing key this server ships, checked before it installs. Guides: [themes](docs/themes/_index.md) · [voice](docs/voice/_index.md).
