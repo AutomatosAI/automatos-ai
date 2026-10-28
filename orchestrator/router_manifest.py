@@ -112,6 +112,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.mobile_push"),
     # PRD-266 US-001 (§4.1) -- the discovery document (GET /.well-known/automatos.json).
     RouterSpec("api.well_known"),
+    # PRD-268 W1 -- Proactive Auto: the suggestions (list, Start, Hide) and the check-in
+    # runs (/api/proactive/*).
+    RouterSpec("api.proactive"),
 )
 
 

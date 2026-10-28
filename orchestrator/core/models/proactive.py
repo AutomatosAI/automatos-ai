@@ -228,6 +228,25 @@ class ProactiveRun(Base):
     error_class = Column(String(ERROR_CLASS_LENGTH), nullable=True)
     created_at = _timestamp(nullable=False)
 
+    def to_dict(self) -> dict:
+        """The run as JSON-ready values: ids as strings, times as ISO 8601, cost as a number."""
+        return {
+            "id": str(self.id) if self.id is not None else None,
+            "workspace_id": str(self.workspace_id) if self.workspace_id is not None else None,
+            "agent_id": self.agent_id,
+            "kind": self.kind,
+            "window_since": _iso(self.window_since),
+            "window_until": _iso(self.window_until),
+            "outcome": self.outcome,
+            "signals": list(self.signals or []),
+            "suggestions": self.suggestions,
+            "model": self.model,
+            "tokens": self.tokens,
+            "cost_usd": float(self.cost_usd) if self.cost_usd is not None else None,
+            "error_class": self.error_class,
+            "created_at": _iso(self.created_at),
+        }
+
 
 class ProactivePersonSettings(Base):
     """One person's proactive settings in one workspace: the pause and the quiet hours."""

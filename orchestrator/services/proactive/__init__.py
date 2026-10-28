@@ -19,4 +19,8 @@ decide on.
 - :mod:`services.proactive.heartbeat_bridge`: the jobs the heartbeat scheduler runs, today's
   tick, a check-in or both, by the proactive mode (§6.2.1, K7, K10); a live check-in rings
   the heartbeat bell only through :mod:`~services.proactive.heartbeat_bell`.
+- :mod:`services.proactive.decisions`: a person's Start or Hide of a suggestion (§6.2.5), the
+  ticket a Start files in :mod:`~services.proactive.start_ticket`, and what the routes say in
+  :mod:`~services.proactive.decision_text`; :mod:`~services.proactive.listing` lists the
+  suggestions and the runs for ``api/proactive.py``.
 """
