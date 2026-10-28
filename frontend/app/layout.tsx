@@ -21,21 +21,6 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = {
   title: 'Automatos AI Platform',
   description: 'Automatos Studio: agents, documents, socials and a marketplace on the open-source Automatos OS',
-  // Family favicon set (the compass mark): SVG first, ICO as the universal fallback, and the
-  // Apple touch icon for home-screen pins. The manifest carries the 192/512 PNGs for Android
-  // and PWA install prompts.
-  icons: {
-    icon: [
-      { url: '/favicon.svg', type: 'image/svg+xml' },
-      { url: '/favicon.ico', sizes: 'any' },
-    ],
-    apple: '/apple-touch-icon.png',
-  },
-  manifest: '/site.webmanifest',
-  other: {
-    'msapplication-TileImage': '/tile-256.png',
-    'msapplication-TileColor': '#FF6A02',
-  },
 }
 
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so
@@ -77,6 +62,13 @@ export default async function RootLayout({
             constant script that applies it before first paint. */}
         <ThemeImportMap integrity={boot.integrity} />
         <ThemeBootScripts boot={boot} />
+        {/* The family favicon (the compass mark). Plain links, not metadata.icons: on this
+            force-dynamic layout the metadata route outlined a Suspense boundary into the server
+            HTML (e2e default-build.spec.ts 'in no outlined boundary'). */}
+        <link rel="icon" href="/favicon.ico" sizes="48x48" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body>
         <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined} initialTheme={installedTheme}>
