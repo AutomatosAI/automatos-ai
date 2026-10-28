@@ -286,7 +286,8 @@ def test_start_files_one_ticket_for_the_proposed_agent_and_records_it(team):
     assert (task.created_by_type, task.created_by_id, task.review_mode) == ("user", team.owner.clerk, "human")
     assert response.json()["opens"] == {"type": "board_task", "board_task_id": task.id}
     row = _row(team, sid)
-    assert (row.status, row.started_ref, row.decided_via) == ("started", {"board_task_id": task.id}, "web")
+    assert (row.status, row.started_ref["board_task_id"], row.decided_via) == ("started", task.id, "web")
+    assert set(row.started_ref) == {"board_task_id", "watch_id"}  # the watch: test_prd268_started_watch.py
     assert row.decided_at is not None and response.json()["suggestion"]["status"] == "started"
 
 
@@ -519,6 +520,7 @@ def live(new_session):
     yield team
     sweep = new_session.sweep()
     for statement in ("DELETE FROM audit_logs WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",
+                      "DELETE FROM watches WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",
                       "DELETE FROM board_tasks WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",
                       "DELETE FROM proactive_suggestions WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",
                       "DELETE FROM agents WHERE workspace_id IN (CAST(:a AS uuid), CAST(:b AS uuid))",

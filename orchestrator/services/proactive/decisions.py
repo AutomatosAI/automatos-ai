@@ -14,8 +14,9 @@
 5. One ``UPDATE … WHERE status = 'open' RETURNING`` moves it to ``started`` with
    ``decided_via`` and ``decided_at``. Of two Starts at once, the second waits on the first's
    row lock, then matches nothing, and is refused by the state it finds: one Start wins.
-6. ``board_task``: the ticket (``start_ticket.file_ticket``), and ``started_ref``
-   ``{board_task_id}``; ``chat``: nothing is made, and the answer's ``opens`` is
+6. ``board_task``: the ticket (``start_ticket.file_ticket``), its watch
+   (``start_ticket.watch_ticket``, FR-8), and ``started_ref`` ``{board_task_id, watch_id}``;
+   ``chat``: nothing is made, and the answer's ``opens`` is
    ``{type: 'chat', suggestion_id}`` (the client opens the Auto thread with the suggestion as
    context; its text is never posted as the person's message).
 7. One commit; then the assigned ticket's wake (``start_ticket.wake``; a failed wake is logged
@@ -174,11 +175,13 @@ def _kind(row: ProactiveSuggestion) -> Any:
 
 def _begin(db: Session, row: ProactiveSuggestion, kind: str, decider: Decider,
            locale: str) -> Tuple[Dict[str, Any], Optional[Any]]:
-    """Make what Start does (uncommitted): what the client opens, and the ticket when it is one."""
+    """Make what Start does (uncommitted): what the client opens, and the ticket when it is one,
+    with the ticket's watch recorded beside it in ``started_ref``."""
     if kind == CHAT:
         return {"type": OPENS_CHAT, "suggestion_id": str(row.id)}, None
     task = start_ticket.file_ticket(db, row, decider.created_by, locale)
-    row.started_ref = {"board_task_id": task.id}
+    watch = start_ticket.watch_ticket(db, task, decider.created_by)
+    row.started_ref = {"board_task_id": task.id, "watch_id": str(watch.id)}
     db.flush()
     return {"type": OPENS_BOARD_TASK, "board_task_id": task.id}, task
 
