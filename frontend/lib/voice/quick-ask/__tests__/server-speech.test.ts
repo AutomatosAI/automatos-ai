@@ -1,17 +1,13 @@
 /**
  * Theme voice, web quick-ask — the server voice port (server-speech.ts): pieces play strictly in order with the next
- * one's MP3 asked for while the head plays (exactly one ahead), each piece's start, level and end told; a piece the
- * server can't speak (a refusal, a network error, too slow, audio that won't play) goes to the browser's voice with
- * the same events and the turn drains; tts_off turns the server off for the page session; cancel aborts, stops and
- * silences late callbacks; prime unlocks the audio and primes the browser's voice.
+ * one's MP3 asked for while the head plays (exactly one ahead), each piece's start, level and end told; cancel aborts,
+ * stops and silences late callbacks; prime unlocks the audio and primes the browser's voice; the voice follows the
+ * page's language. When the server voice fails, the rest of the answer goes to the browser's voice:
+ * server-speech-fallback.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/api-client', () => ({ apiClient: {} }))
-
-import { SERVER_VOICE_WAIT_MS } from '@/lib/voice/quick-ask/config'
-import { serverSpeechPort } from '@/lib/voice/quick-ask/server-speech'
-import { createSpeaker } from '@/lib/voice/quick-ask/speaker'
 
 import { flush } from './quick-ask-harness'
 import { serverSpeechSetup, utterance } from './server-speech-fakes'
@@ -85,134 +81,6 @@ describe('the server voice: order and prefetch', () => {
 
     expect(one.onStart).toHaveBeenCalledTimes(1)
     expect(one.onEnd).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('the server voice: the browser’s voice for what the server can’t say', () => {
-  it('speaks a 503 tts_unavailable piece in the browser’s voice; the next waits for it, plays, and the turn drains', async () => {
-    const { port, server, audio, browser, time } = serverSpeechSetup()
-    const onEvent = vi.fn()
-    const speaker = createSpeaker(port, time.clock, onEvent)
-    speaker.speak(['One.', 'Two.'])
-    await flush()
-
-    server.refuse(0, 'tts_unavailable', 503)
-    server.answer(1)
-    await flush()
-    expect(browser.spoken()).toEqual(['One.'])
-    expect(audio.plays).toHaveLength(0)
-    browser.start(0)
-    browser.end(0)
-    await flush()
-    expect(audio.plays).toHaveLength(1)
-    audio.plays[0].events.onPlaying()
-    audio.plays[0].events.onEnded()
-
-    expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
-      { type: 'sentence', text: 'One.' },
-      { type: 'sentence', text: 'Two.' },
-      { type: 'drained' },
-    ])
-    expect(speaker.speaking()).toBe(false)
-  })
-
-  it('after tts_off asks the server nothing more this page session: every piece goes to the browser’s voice', async () => {
-    const { port, server, browser, options } = serverSpeechSetup()
-    port.speak('One.', utterance())
-    await flush()
-    server.refuse(0, 'tts_off', 503)
-    await flush()
-
-    port.speak('Two.', utterance())
-    port.speak('Three.', utterance())
-    // Another engine in the same tab (the same page session) asks nothing either.
-    serverSpeechPort(options).speak('Four.', utterance())
-    await flush()
-
-    expect(browser.spoken()).toEqual(['One.', 'Two.', 'Three.', 'Four.'])
-    expect(server.fetchSpeech).toHaveBeenCalledTimes(1)
-  })
-
-  it('speaks a piece whose request never reached the server in the browser’s voice, and asks again for the next', async () => {
-    const { port, server, browser } = serverSpeechSetup()
-    port.speak('One.', utterance())
-    await flush()
-
-    server.calls[0].reject(new TypeError('Failed to fetch'))
-    await flush()
-    browser.play(0)
-    port.speak('Two.', utterance())
-    await flush()
-
-    expect(browser.spoken()).toEqual(['One.'])
-    expect(server.texts()).toEqual(['One.', 'Two.'])
-  })
-
-  it('gives the head SERVER_VOICE_WAIT_MS for its MP3, then aborts it and the browser’s voice speaks it', async () => {
-    const { port, server, audio, browser, time } = serverSpeechSetup()
-    port.speak('One.', utterance())
-    await flush()
-
-    time.advance(SERVER_VOICE_WAIT_MS - 1)
-    expect(browser.spoken()).toEqual([])
-    time.advance(1)
-    expect(browser.spoken()).toEqual(['One.'])
-    expect(server.calls[0].signal.aborted).toBe(true)
-    server.answer(0)
-    await flush()
-    expect(audio.plays).toHaveLength(0)
-  })
-
-  it('starts the wait only once a piece is due: the next one is fetched while the head plays, however long', async () => {
-    const { port, server, audio, browser, time } = serverSpeechSetup()
-    port.speak('One.', utterance())
-    port.speak('Two.', utterance())
-    await flush()
-    server.answer(0)
-    await flush()
-    audio.plays[0].events.onPlaying()
-
-    time.advance(SERVER_VOICE_WAIT_MS * 2)
-    expect(browser.spoken()).toEqual([])
-    audio.plays[0].events.onEnded()
-    time.advance(SERVER_VOICE_WAIT_MS)
-
-    expect(browser.spoken()).toEqual(['Two.'])
-  })
-
-  it('speaks a piece whose audio fails before it starts in the browser’s voice; after it started, the piece just ends', async () => {
-    const { port, server, audio, browser } = serverSpeechSetup()
-    const one = utterance()
-    const two = utterance()
-    port.speak('One.', one)
-    port.speak('Two.', two)
-    await flush()
-    server.answer(0)
-    server.answer(1)
-    await flush()
-
-    audio.plays[0].events.onFailed(new Error('decode'))
-    expect(browser.spoken()).toEqual(['One.'])
-    browser.play(0)
-    expect([one.onStart.mock.calls.length, one.onEnd.mock.calls.length]).toEqual([1, 1])
-    audio.plays[1].events.onPlaying()
-    audio.plays[1].events.onFailed(new Error('network'))
-
-    expect([two.onStart.mock.calls.length, two.onEnd.mock.calls.length]).toEqual([1, 1])
-    expect(browser.spoken()).toEqual(['One.'])
-  })
-
-  it('ends a piece the server can’t say at once where the browser has no voice', async () => {
-    const { port, server } = serverSpeechSetup({ fallback: null })
-    const one = utterance()
-    port.speak('One.', one)
-    await flush()
-
-    server.refuse(0, 'tts_busy', 429)
-    await flush()
-
-    expect(one.onEnd).toHaveBeenCalledTimes(1)
-    expect(one.onStart).not.toHaveBeenCalled()
   })
 })
 

@@ -1,8 +1,9 @@
 /**
  * Theme voice, web quick-ask: the server voice port's request half (server-speech.ts). A piece's MP3 is asked for in
- * the page session's voice; any answer but audio (a refusal, a network error, a body that isn't audio) puts the piece
- * on the browser's voice, and tts_off turns the server voice off for the page session. The head waits for its MP3
- * SERVER_VOICE_WAIT_MS at most. A late answer for a piece no longer loading (cancelled, timed out) does nothing.
+ * the page session's voice. Any answer but audio (a refusal, a network error, a body that isn't audio), or no MP3
+ * within SERVER_VOICE_WAIT_MS once the piece is due, fails the answer: the piece and the rest of the answer go to the
+ * browser's voice (moves.fail). tts_off also turns the server voice off for the page session. A late answer for a
+ * piece no longer loading (cancelled, failed, timed out) does nothing.
  */
 import { SERVER_VOICE_WAIT_MS } from './config'
 import { find, LOG_PREFIX, settle, update, type SpeechCtx } from './server-speech-ctx'
@@ -27,7 +28,7 @@ async function answerFor(ctx: SpeechCtx, text: string, signal: AbortSignal): Pro
 function arrived(ctx: SpeechCtx, id: number, clip: Blob | null): void {
   const piece = find(ctx, id)
   if (piece?.stage !== 'loading') return
-  if (clip === null) return ctx.moves.toBrowser(id)
+  if (clip === null) return ctx.moves.fail(id)
   settle(ctx, piece)
   update(ctx, id, { stage: 'ready', clip, abort: null, waitTimer: null })
   ctx.moves.pump()
@@ -40,12 +41,12 @@ export function request(ctx: SpeechCtx, piece: Piece): void {
   void answerFor(ctx, piece.text, controller.signal).then((clip) => arrived(ctx, piece.id, clip))
 }
 
-/** The head is due: its MP3 has SERVER_VOICE_WAIT_MS to come, or the browser's voice speaks it. */
+/** The head is due: its MP3 has SERVER_VOICE_WAIT_MS to come, or the browser's voice speaks it and the rest. */
 export function armWait(ctx: SpeechCtx, id: number): void {
   const waited = (): void => {
     if (find(ctx, id)?.stage !== 'loading') return
-    console.warn(LOG_PREFIX, "the server voice was too slow for a sentence; the browser's voice speaks it")
-    ctx.moves.toBrowser(id)
+    console.warn(LOG_PREFIX, 'the server voice was too slow for a sentence')
+    ctx.moves.fail(id)
   }
   update(ctx, id, { waitTimer: ctx.options.clock.setTimeout(waited, SERVER_VOICE_WAIT_MS) })
 }

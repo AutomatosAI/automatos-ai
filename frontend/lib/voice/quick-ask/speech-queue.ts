@@ -1,9 +1,9 @@
 /**
  * Theme voice, web quick-ask: the server voice's queue (server-speech.ts), as pure functions over an immutable list.
- * A piece of Auto's reply goes waiting → loading (its MP3 asked for) → ready → playing, or, when the server can't
- * speak it, → browser → handed (the browser's voice has it). It leaves the queue when it ends. Order is strict: a
- * piece plays only at the head, and goes to the browser's voice only once every piece before it has (the browser
- * keeps its own utterances in order), so two voices never speak at once.
+ * A piece of Auto's reply goes waiting → loading (its MP3 asked for) → ready → playing, or, once the server
+ * voice has failed in this answer, → browser → handed (the browser's voice has it). It leaves the queue when it
+ * ends. Order is strict: a piece plays only at the head, and goes to the browser's voice only once every piece
+ * before it has (the browser keeps its own utterances in order), so two voices never speak at once.
  */
 import { SERVER_SPEECH_PREFETCH_AHEAD } from './config'
 import type { UtteranceEvents } from './speaker'
@@ -42,6 +42,24 @@ export function updatePiece(queue: readonly Piece[], id: number, changes: Partia
 
 export function withoutPiece(queue: readonly Piece[], id: number): readonly Piece[] {
   return Object.freeze(queue.filter((piece) => piece.id !== id))
+}
+
+/** What the server still has of a piece: its request, its MP3, or its audio before it started. */
+const WITH_SERVER: ReadonlySet<PieceStage> = new Set<PieceStage>(['waiting', 'loading', 'ready', 'playing'])
+
+/**
+ * The piece at `from` and every later one the server still has go to the browser's voice: their requests and MP3s
+ * dropped (the caller aborts and clears them first). A piece whose audio already started keeps its stage: it isn't
+ * said twice.
+ */
+export function toBrowserFrom(queue: readonly Piece[], from: number): readonly Piece[] {
+  return Object.freeze(
+    queue.map((piece, index) =>
+      index >= from && WITH_SERVER.has(piece.stage) && !piece.started
+        ? Object.freeze({ ...piece, stage: 'browser' as const, clip: null, abort: null, waitTimer: null })
+        : piece,
+    ),
+  )
 }
 
 /** The head and the SERVER_SPEECH_PREFETCH_AHEAD pieces after it whose MP3 is not asked for yet. */

@@ -1,9 +1,9 @@
 /**
  * Theme voice, web quick-ask: the server voice port's audio half (server-speech.ts). The head's MP3 plays on the
  * player: onStart when the audio starts, onBoundary on its timeupdate (Auto's level moves), onEnd when it ends. Audio
- * that fails before it starts goes to the browser's voice; after it started, the piece just ends (it isn't said
- * twice). A piece for the browser's voice is handed to it with the same events and ends when the browser says so.
- * Events of a piece no longer in the queue (cancelled) do nothing.
+ * that fails fails the answer (moves.fail): the rest of it goes to the browser's voice, this piece too unless its
+ * audio had started (it isn't said twice). A piece for the browser's voice is handed to it with the same events and
+ * ends when the browser says so. Events of a piece no longer in the queue (cancelled) do nothing.
  */
 import { find, LOG_PREFIX, update, type SpeechCtx } from './server-speech-ctx'
 import type { Piece } from './speech-queue'
@@ -25,14 +25,13 @@ function audioFailed(ctx: SpeechCtx, id: number, error: unknown): void {
   const piece = playing(ctx, id)
   if (piece === null) return
   console.warn(LOG_PREFIX, "the server voice's audio did not play", error)
-  if (piece.started) ctx.moves.finish(id)
-  else ctx.moves.toBrowser(id)
+  ctx.moves.fail(id)
 }
 
 /** The ready head plays. */
 export function play(ctx: SpeechCtx, piece: Piece): void {
   const { id, clip, events } = piece
-  if (clip === null) return ctx.moves.toBrowser(id)
+  if (clip === null) return ctx.moves.fail(id)
   update(ctx, id, { stage: 'playing', clip: null })
   try {
     ctx.options.player.play(clip, {

@@ -114,9 +114,13 @@ There is one Live engine per tab, so one Retell session per tab. Every call has 
   characters is spoken in pieces. Each piece is spoken by Auto's server voice
   [frontend/lib/voice/quick-ask/server-speech.ts](../../frontend/lib/voice/quick-ask/server-speech.ts): one MP3 per
   piece from `POST /api/voice/speech` (services/voice-tts), the next one fetched while the current one plays, played
-  on one `<audio>` element that the press unlocks. A piece the server refuses, that fails or that takes over four
-  seconds is spoken by `speechSynthesis` instead; after `tts_off`, or when the server has no voice for the language,
-  `speechSynthesis` speaks every piece and the server is asked nothing more until the page reloads;
+  on one `<audio>` element that the press unlocks. From the first piece the server voice fails (any refusal, a
+  network error, no MP3 within four seconds once the piece is due, audio that won't play), `speechSynthesis` speaks
+  that piece and every later piece of the answer, in order after the pieces before it; the requests in flight are
+  aborted and nothing more is asked for that answer. The answer ends at the next hold or a stop, not when the queue
+  empties (a reply streams sentence by sentence), and the next answer asks the server again. After `tts_off`, or when
+  the server has no voice for the language, `speechSynthesis` speaks every piece and the server is asked nothing more
+  until the page reloads;
 - the AI notice, the backend's greeting, is spoken once per browser tab session before the first reply
   [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts);
 - "Auto, stop" (or "stop", "cancel", "stop it") as the whole utterance stops and sends nothing; a press while Auto

@@ -23,8 +23,11 @@ export interface ServerSpeechOptions {
 export interface QueueMoves {
   /** The piece is over: out of the queue, its end told, and the queue moves on. */
   readonly finish: (id: number) => void
-  /** The server won't speak the piece: the browser's voice will, in its turn. */
-  readonly toBrowser: (id: number) => void
+  /**
+   * The server voice failed the piece: it and every later piece of this answer go to the browser's voice, in their
+   * turn, and no more speech is asked for until the answer is over (the next prime() or cancel()).
+   */
+  readonly fail: (id: number) => void
   /** The MP3s due are asked for, and the head plays, goes to the browser's voice or starts its wait. */
   readonly pump: () => void
 }
@@ -32,7 +35,12 @@ export interface QueueMoves {
 export interface SpeechCtx {
   readonly options: ServerSpeechOptions
   readonly moves: QueueMoves
-  state: { readonly ids: number; readonly queue: readonly Piece[] }
+  state: {
+    readonly ids: number
+    readonly queue: readonly Piece[]
+    /** The server voice failed in this answer: its later pieces go straight to the browser's voice. */
+    readonly answerFailed: boolean
+  }
 }
 
 export const LOG_PREFIX = '[voice]'

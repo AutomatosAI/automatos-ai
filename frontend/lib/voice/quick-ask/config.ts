@@ -31,7 +31,7 @@ export const SERVER_SPEECH_PREFETCH_AHEAD = 1
 
 /**
  * How long the piece due to play next (nothing playing before it) waits for its MP3; then the browser's voice speaks
- * it, and the next piece asks the server again. automatos-go's SERVER_VOICE_WAIT_MS.
+ * it and the rest of the answer, as after any failure of the server voice. automatos-go's SERVER_VOICE_WAIT_MS.
  */
 export const SERVER_VOICE_WAIT_MS = 4_000
 

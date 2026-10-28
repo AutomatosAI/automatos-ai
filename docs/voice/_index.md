@@ -72,8 +72,9 @@ shows them.
 
 Auto speaks in its natural voice, the server voice (see [Languages](#languages)), when the server runs one and it has a
 voice for your browser's language; the next sentence is made while the current one plays. Otherwise your browser's
-own voice speaks. A sentence the server voice can't speak, or doesn't have ready within four seconds, is spoken in the
-browser's voice, and the next sentence tries the server voice again.
+own voice speaks. If the server voice fails on a sentence (it is busy or down, or doesn't have the sentence ready
+within four seconds), your browser's voice speaks that sentence and the rest of the answer, so one answer never
+switches back and forth between two voices. Your next question tries the server voice again.
 
 - **Keyboard and screen readers.** A press that no pointer made (Space or Enter on the focused button, a screen
   reader's activation) works as a toggle: press once to start, again to send.
