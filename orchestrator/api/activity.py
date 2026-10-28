@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -23,9 +23,11 @@ from core.database.database import get_db
 from pydantic import BaseModel
 
 from core.models.core import Agent, BoardTask, DigestFeedback
+from modules.proactive.locale import request_locale
 from services.activity_service import ActivityService
 from services.digest_service import generate_digest
 from services.needs_you import needs_you
+from services.proactive.display_state import needs_you_with_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/activity", tags=["Activity"])
@@ -330,6 +332,7 @@ NEEDS_YOU_NOT_LOADED = "What needs you could not be loaded. Try again shortly."
 def get_needs_you(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    accept_language: Optional[str] = Header(None),
 ):
     """PRD-252 R5: the one Needs-you number and the rows behind it.
 
@@ -337,10 +340,13 @@ def get_needs_you(
     you widget lists ``rows``. Questions and approval grants count only for an
     owner, admin or editor, who can answer them (PRD-266 D16). A failure is a 503 with a
     message, never "nothing needs you" (F207). It has no period (F246): what
-    waits for the owner waits until it is dealt with.
+    waits for the owner waits until it is dealt with. PRD-268 §6.11.1: each row
+    also says where it stands, its next step and what Try again does, in the
+    language ``Accept-Language`` asks for (English by default).
     """
     try:
-        return needs_you(db, ctx.workspace_id, may_answer=may_answer_workspace_questions(db, ctx))
+        found = needs_you(db, ctx.workspace_id, may_answer=may_answer_workspace_questions(db, ctx))
+        return needs_you_with_status(found, request_locale(accept_language))
     except Exception as e:
         logger.exception("Needs-you read failed for workspace %s", ctx.workspace_id)
         raise HTTPException(status_code=503, detail=NEEDS_YOU_NOT_LOADED) from e

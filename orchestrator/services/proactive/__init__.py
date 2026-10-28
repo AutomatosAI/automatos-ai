@@ -25,4 +25,7 @@ decide on.
   :mod:`~services.proactive.decision_text`; :mod:`~services.proactive.listing` lists the
   suggestions and the runs for ``api/proactive.py``, and :mod:`~services.proactive.settings`
   reads and writes the workspace switch, its caps and a person's pause for it (§6.9).
+- :mod:`services.proactive.display_state`: one status vocabulary (§6.11.1): where a row
+  stands, its next step from :mod:`~services.proactive.strings` in the person's language,
+  and what Try again does; the needs-you rows carry them.
 """
