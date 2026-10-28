@@ -80,7 +80,8 @@ describe('release: the words go to Auto as a chat turn with spokenMode', () => {
 
     expect(h.recognition.last().stop).toHaveBeenCalledTimes(1)
     expect(h.chat.sendTurn).toHaveBeenCalledTimes(1)
-    expect(turn.request).toEqual({ chatId: 'c-1', text: ASKED, spokenMode: true })
+    // The page's language travels with the turn (jsdom's navigator.language here).
+    expect(turn.request).toEqual({ chatId: 'c-1', text: ASKED, spokenMode: true, locale: navigator.language })
     expect(h.engine.snapshot()).toMatchObject({ phase: 'thinking', heard: ASKED, micOpen: false, reply: '' })
   })
 
