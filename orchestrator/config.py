@@ -2173,6 +2173,15 @@ class Config:
     VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
         "VOICE_LIVE_SKIP_COMPOSIO", "true"
     ).strip().lower() == "true"
+    # Spoken turns (POST /api/chat with spokenMode, and Auto Live) answer on this model;
+    # typed turns keep the agent's own (consumers/chatbot/spoken_model.py). 28 Oct 2026: a
+    # spoken quick ask took 26-32 s on claude-opus-5-5; the 11 Oct benchmark scored
+    # claude-haiku-5-5 the same at about 3% of the cost. The id is the provider's own (a
+    # direct Anthropic id, never OpenRouter's dotted twin). Empty model or provider = off:
+    # spoken turns use the agent's model too. A workspace that cannot reach it (no key for
+    # the provider, a policy block) answers on the agent's model.
+    SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
+    SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
