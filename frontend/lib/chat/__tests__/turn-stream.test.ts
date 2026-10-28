@@ -55,6 +55,16 @@ describe('chatTurnBody', () => {
     expect(body.id).toBe('')
     expect('spokenMode' in body).toBe(false)
   })
+
+  it('carries the locale when the turn names one, so Auto replies in that variant', () => {
+    expect(chatTurnBody({ ...SPOKEN, locale: 'pt-BR' })).toMatchObject({ spokenMode: true, locale: 'pt-BR' })
+  })
+
+  it('leaves locale out when it is unknown', () => {
+    expect('locale' in chatTurnBody(SPOKEN)).toBe(false)
+    expect('locale' in chatTurnBody({ ...SPOKEN, locale: null })).toBe(false)
+    expect('locale' in chatTurnBody({ ...SPOKEN, locale: '' })).toBe(false)
+  })
 })
 
 describe('parseChatLine', () => {

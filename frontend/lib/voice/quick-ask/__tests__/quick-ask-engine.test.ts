@@ -80,8 +80,17 @@ describe('release: the words go to Auto as a chat turn with spokenMode', () => {
 
     expect(h.recognition.last().stop).toHaveBeenCalledTimes(1)
     expect(h.chat.sendTurn).toHaveBeenCalledTimes(1)
-    expect(turn.request).toEqual({ chatId: 'c-1', text: ASKED, spokenMode: true })
+    // The page's language travels with the turn (jsdom's navigator.language here).
+    expect(turn.request).toEqual({ chatId: 'c-1', text: ASKED, spokenMode: true, locale: navigator.language })
     expect(h.engine.snapshot()).toMatchObject({ phase: 'thinking', heard: ASKED, micOpen: false, reply: '' })
+  })
+
+  it('sends the page’s language with the turn, so Auto answers in that variant', async () => {
+    const h = quickAskHarness({ locale: 'pt-BR' })
+
+    const turn = await ask(h, ASKED)
+
+    expect(turn.request).toEqual({ chatId: 'c-1', text: ASKED, spokenMode: true, locale: 'pt-BR' })
   })
 
   it('adopts the id of the chat a new conversation’s turn creates, and tells the open chat the turn landed', async () => {

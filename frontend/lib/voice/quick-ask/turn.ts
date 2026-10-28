@@ -83,7 +83,8 @@ export function sendTurn(core: Core, text: string): void {
   set(core, { turn })
   dispatch(core, { type: 'sent', text })
   if (current(core, turn.id) === null) return
-  const request = { chatId: get(core).state.view.chatId, text, spokenMode: true }
+  const locale = core.deps.locale
+  const request = { chatId: get(core).state.view.chatId, text, spokenMode: true, ...(locale ? { locale } : {}) }
   void Promise.resolve()
     .then(() => core.deps.sendTurn(request, turnHandlers(core, turn.id), turn.controller.signal))
     .then((outcome) => settle(core, turn.id, outcome))

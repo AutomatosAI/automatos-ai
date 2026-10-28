@@ -29,6 +29,8 @@ export interface QuickAskDeps {
   readonly synthesis: SynthesisPort | null
   /** Sends the heard words as a chat turn with spokenMode and streams the reply back. */
   readonly sendTurn: ChatTurnSender
+  /** The language recognition hears, sent with the turn so Auto replies in that variant (pt-BR, not pt-PT). */
+  readonly locale?: string | null
   /** The chat's Stop: cancels the turn on the server, whichever worker holds it. */
   readonly cancelTurn: (chatId: string) => Promise<unknown>
   /**
@@ -117,6 +119,7 @@ export function browserDeps(): QuickAskDeps {
     recognition: recognitionFactory(),
     synthesis: speechPort(),
     sendTurn: streamChatTurn,
+    locale: pageLanguage(),
     cancelTurn: cancelChatTurn,
     announceTurn,
     clock: SYSTEM_CLOCK,
