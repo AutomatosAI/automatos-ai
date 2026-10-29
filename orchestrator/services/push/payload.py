@@ -10,6 +10,10 @@ number and the workspace's settings, and calls this module once per phone.
   it can be answered from the lock screen; redaction (``redact_questions_enabled``) and every
   other event carry a generic line instead. ``with_redact_questions`` is the switch's writer
   (``PUT /api/v1/mobile/push-settings``, US-014b), so the settings shape lives here only.
+* The fourth push type, ``suggestion`` (PRD-268 §6.5.3, K9; shipped off behind
+  ``config.SUGGESTION_PUSH_ENABLED``, read by the fan-out): its body is the generic line in the
+  phone's language, or the suggestion's title when the workspace shows titles
+  (``suggestion_titles_enabled``). The title is never signed: the signed fields are PRD-266's.
 * ``sign`` / ``verify_signature`` — HMAC-SHA256 with the device's ``push_key`` over
   ``canonical_message``: anyone holding an Expo token can send a push, so the phone acts on a
   notification only when the signature holds and ``iat`` is fresh. automatos-go copies
@@ -31,17 +35,21 @@ from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
 from modules.policy.ai_disclosure import badge_for
+from services.brief.strings import brief_language
 from services.push.sender import PRIORITY_DEFAULT, PRIORITY_HIGH, PushMessage
 
 # ── Which events push (FR-7, K8) ───────────────────────────────────────────
 NEEDS_ANSWER = "needs_answer"
 QUESTION_EVENT = "question_pending"
 REVIEW_EVENT = "review_pending"
+SUGGESTION = "suggestion"
+SUGGESTION_EVENT = "suggestion_ready"
 
 PUSH_TYPE_EVENTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "needs_answer": ("question_pending", "approval_pending", "mission_plan_ready"),
     "review": ("review_pending",),
     "auto_message": ("auto_message",),
+    "suggestion": ("suggestion_ready",),
 })
 PUSH_EVENT_TYPES: frozenset[str] = frozenset(e for events in PUSH_TYPE_EVENTS.values() for e in events)
 _TYPE_BY_EVENT: Mapping[str, str] = MappingProxyType(
@@ -55,13 +63,22 @@ MISSION_PLAN_LINE = "A Mission plan is ready for you"
 REVIEW_LINE = "A ticket is ready for review"
 REVIEW_NUMBERED_LINE = "A ticket is ready for review · {number}"
 AUTO_MESSAGE_LINE = "Auto messaged you"
+SUGGESTION_LINE = "Auto has a suggestion"
 GENERIC_LINES: Mapping[str, str] = MappingProxyType({
     "question_pending": QUESTION_LINE,
     "approval_pending": APPROVAL_LINE,
     "mission_plan_ready": MISSION_PLAN_LINE,
     "review_pending": REVIEW_LINE,
     "auto_message": AUTO_MESSAGE_LINE,
+    "suggestion_ready": SUGGESTION_LINE,
 })
+# K16: a suggestion's line in each language the server writes; the phone's locale chooses (K7).
+SUGGESTION_LINES: Mapping[str, str] = MappingProxyType({
+    "en": SUGGESTION_LINE,
+    "pt-BR": "O Auto tem uma sugestão",
+})
+# A suggestion's title on the lock screen (K9): one line, at most this many characters.
+SUGGESTION_TITLE_MAX_CHARS = 120
 
 PUSH_QUESTION_MAX_CHARS = 500
 PUSH_OPTION_MAX_CHARS = 80
@@ -70,19 +87,24 @@ ELLIPSIS = "…"
 # How much of a question's markdown is read: bounds the regex work on a long question.
 QUESTION_SCAN_MAX_CHARS = 8 * PUSH_QUESTION_MAX_CHARS
 
-# Workspace settings: {"push": {"redact_questions": true}} sends questions generic (US-014b).
+# Workspace settings: {"push": {"redact_questions": true}} sends questions generic (US-014b);
+# {"push": {"suggestion_titles": true}} shows a suggestion's title instead of its generic line (K9).
 PUSH_SETTINGS_KEY = "push"
 REDACT_QUESTIONS_KEY = "redact_questions"
+SUGGESTION_TITLES_KEY = "suggestion_titles"
 
 # ── The Expo message (K9) ──────────────────────────────────────────────────
 SENDER_AUTO = "Auto"
 TITLE_FORMAT = "{sender} · {badge}"
 QUESTION_CATEGORY_FORMAT = "automatos.question.{count}"
 OPEN_CATEGORY = "automatos.open"
+# A suggestion's actions on the phone: Start… and Open (automatos-go US-G02).
+SUGGESTION_CATEGORY = "automatos.suggestion"
 CHANNEL_BY_TYPE: Mapping[str, str] = MappingProxyType({
     "needs_answer": "questions",
     "review": "review",
     "auto_message": "auto",
+    "suggestion": "suggestions",
 })
 
 # ── The signature (K9, v2) ─────────────────────────────────────────────────
@@ -118,14 +140,26 @@ _BLANK_LINES = re.compile(r"\n{3,}")
 
 
 def push_type_for(event_type: Any) -> Optional[str]:
-    """The push type an event raises (needs_answer, review or auto_message); None: it never pushes."""
+    """The push type an event raises (needs_answer, review, auto_message or suggestion); None: it never pushes."""
     return _TYPE_BY_EVENT.get(event_type) if isinstance(event_type, str) else None
+
+
+def _push_setting_on(workspace_settings: Any, key: str) -> bool:
+    """True only when ``settings['push'][key]`` is the boolean true."""
+    push = workspace_settings.get(PUSH_SETTINGS_KEY) if isinstance(workspace_settings, Mapping) else None
+    return isinstance(push, Mapping) and push.get(key) is True
 
 
 def redact_questions_enabled(workspace_settings: Any) -> bool:
     """True when the workspace sends its questions generic: ``settings['push']['redact_questions']``."""
-    push = workspace_settings.get(PUSH_SETTINGS_KEY) if isinstance(workspace_settings, Mapping) else None
-    return isinstance(push, Mapping) and push.get(REDACT_QUESTIONS_KEY) is True
+    return _push_setting_on(workspace_settings, REDACT_QUESTIONS_KEY)
+
+
+def suggestion_titles_enabled(workspace_settings: Any) -> bool:
+    """True when the workspace shows a suggestion's title on the lock screen (K9, off by default):
+    ``settings['push']['suggestion_titles']``. It is its own opt-in, apart from
+    ``redact_questions`` (which covers a question's text only)."""
+    return _push_setting_on(workspace_settings, SUGGESTION_TITLES_KEY)
 
 
 def with_redact_questions(workspace_settings: Any, redact: bool) -> dict[str, Any]:
@@ -271,15 +305,39 @@ def verify_signature(push_key: str, payload: Mapping[str, Any], now: datetime) -
     return hmac.compare_digest(expected, given)
 
 
-def generic_line(event_type: str, ticket_number: Optional[str] = None) -> str:
-    """The line a push shows when it carries no question: one per push event."""
+def generic_line(event_type: str, ticket_number: Optional[str] = None, locale: Optional[str] = None) -> str:
+    """The line a push shows when it carries no question: one per push event. A suggestion's is in
+    the language of ``locale`` (the phone's BCP 47 tag, K7), English when it has no table."""
     if event_type == REVIEW_EVENT and ticket_number:
         return REVIEW_NUMBERED_LINE.format(number=ticket_number)
+    if event_type == SUGGESTION_EVENT:
+        return SUGGESTION_LINES[brief_language(locale)]
     return GENERIC_LINES[event_type]
 
 
+def suggestion_title_line(title: Any) -> Optional[str]:
+    """A suggestion's title as one plain line for the lock screen: marks and control characters
+    dropped, at most SUGGESTION_TITLE_MAX_CHARS with an ellipsis; None when nothing is left."""
+    if not isinstance(title, str):
+        return None
+    printable = "".join(char for char in plain_text(title) if char.isprintable() or char.isspace())
+    line = " ".join(printable.split())
+    if len(line) > SUGGESTION_TITLE_MAX_CHARS:
+        line = line[: SUGGESTION_TITLE_MAX_CHARS - len(ELLIPSIS)].rstrip() + ELLIPSIS
+    return line or None
+
+
+def _body(payload: Mapping[str, Any], event_type: str, suggestion_title: Optional[str], locale: Any) -> str:
+    """The question, else a suggestion's title (a suggestion push only), else the generic line."""
+    title = suggestion_title_line(suggestion_title) if payload.get("type") == SUGGESTION else None
+    return payload.get("question") or title or generic_line(event_type, payload.get("ticket_number"), locale)
+
+
 def _category(payload: Mapping[str, Any]) -> str:
-    """iOS: a question's category names how many options it offers (0 = Reply and Open)."""
+    """iOS: a suggestion offers Start… and Open; a question's category names how many options it
+    offers (0 = Reply and Open); anything else is Open."""
+    if payload.get("type") == SUGGESTION:
+        return SUGGESTION_CATEGORY
     if not payload.get("question"):
         return OPEN_CATEGORY
     return QUESTION_CATEGORY_FORMAT.format(count=len(payload.get("options") or ()))
@@ -287,18 +345,22 @@ def _category(payload: Mapping[str, Any]) -> str:
 
 def to_message(
     device: Any, payload: Mapping[str, Any], *, event_type: str, agent_name: Optional[str] = None,
+    suggestion_title: Optional[str] = None,
 ) -> PushMessage:
     """The Expo message for one phone: ``device`` holds ``expo_push_token`` and ``locale``.
 
     Title "<agent or Auto> · <badge>" (FR-9: the PRD-264 D17 badge for the phone's locale);
-    the body is the question or the generic line; ``data`` is the signed payload.
+    the body is the question, a suggestion's title (``suggestion_title``, which the fan-out
+    reads only when the workspace shows titles), or the generic line; ``data`` is the signed
+    payload, which never holds the title.
     """
     push_type = payload["type"]
     sender = (agent_name or "").strip() or SENDER_AUTO
+    locale = getattr(device, "locale", None)
     return PushMessage(
         to=device.expo_push_token,
-        title=TITLE_FORMAT.format(sender=sender, badge=badge_for(getattr(device, "locale", None))),
-        body=payload.get("question") or generic_line(event_type, payload.get("ticket_number")),
+        title=TITLE_FORMAT.format(sender=sender, badge=badge_for(locale)),
+        body=_body(payload, event_type, suggestion_title, locale),
         data=payload,
         category_id=_category(payload),
         channel_id=CHANNEL_BY_TYPE[push_type],

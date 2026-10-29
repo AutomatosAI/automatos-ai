@@ -15,11 +15,14 @@ those write.
    Expo token and a push key: ``clerk`` rows on SaaS, ``paired`` rows on a local install (§8),
    none at all from a local install until the operator agreed (``consent``, K13), minus the
    people whose push switch for the event is off (K7: a ``notification_preferences`` row with
-   destination ``push``; the person's row wins over the workspace's, no row means on).
+   destination ``push``; the person's row wins over the workspace's, no row means on). The
+   suggestion type reaches no phone at all while ``config.SUGGESTION_PUSH_ENABLED`` is off
+   (PRD-268 K9: it ships off); its bell row is the dispatcher's and is written regardless.
 3. One signed message per phone (``payload.build_payload`` / ``to_message``): a question's
    grant loaded in this workspace only (while it still waits), a review's ticket number,
-   redaction from ``workspace.settings``. The reads then end, so no transaction or
-   connection is held while Expo answers.
+   redaction from ``workspace.settings``, and a suggestion's title only when the workspace
+   shows titles (PRD-268 K9; the person's own open suggestion in this workspace). The reads then
+   end, so no transaction or connection is held while Expo answers.
 4. The sender (``ExpoPushSender`` unless one is given): every accepted ticket is kept in
    ``mobile_push_tickets`` for the receipts job; a DeviceNotRegistered ticket turns that
    phone's push off with the reason and a ``push_failed`` event, and keeps its token (K15),
@@ -50,13 +53,16 @@ from core.models.approval_grants import ApprovalGrant, GrantStatus
 from core.models.core import BoardTask
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
 from core.models.mobile_push import MobilePushTicket
+from core.models.proactive import SUGGESTION_OPEN, ProactiveSuggestion
 from core.models.workspaces import Workspace
 from services.mobile.events import PUSH_FAILED, with_event
 from services.push import consent
 from services.push.payload import (
+    SUGGESTION,
     build_payload,
     push_type_for,
     redact_questions_enabled,
+    suggestion_titles_enabled,
     to_message,
 )
 from services.push.recipients import recipients
@@ -72,6 +78,8 @@ PUSH_DESTINATION = "push"
 GRANT_LINK_TYPES = ("question", "approval_grant")
 # A review's link is the ticket's id (US-012a).
 TICKET_LINK_TYPE = "task"
+# A suggestion's link is the suggestion's id (PRD-268 US-C08a).
+SUGGESTION_LINK_TYPE = "suggestion"
 
 # A person's push switch for one event (K7): theirs, or the workspace's (user_id NULL).
 _PUSH_SWITCHES_SQL = text(
@@ -115,11 +123,13 @@ class PushEvent:
 
 @dataclass(frozen=True)
 class _Context:
-    """What every phone's payload shares: the grant, the ticket's number, redaction."""
+    """What every phone's payload shares: the grant, the ticket's number, redaction, and the
+    suggestion's title when the workspace shows it (never signed)."""
 
     grant: Optional[ApprovalGrant]
     ticket_number: Optional[str]
     redact: bool
+    suggestion_title: Optional[str] = None
 
 
 def _now() -> datetime:
@@ -156,6 +166,11 @@ def _device_filters(workspace_id: Any) -> Tuple[Any, ...]:
     )
 
 
+def _type_pushes(push_type: Optional[str]) -> bool:
+    """A push type that is sent at all: the suggestion type only while its switch is on (K9)."""
+    return push_type is not None and (push_type != SUGGESTION or bool(config.SUGGESTION_PUSH_ENABLED))
+
+
 def _switched_off(db: Session, event: PushEvent, user_ids: Sequence[int]) -> Set[int]:
     """The people whose push switch for this event is off: their own row, else the workspace's."""
     rows = db.execute(_PUSH_SWITCHES_SQL, {
@@ -173,7 +188,7 @@ def _switched_off(db: Session, event: PushEvent, user_ids: Sequence[int]) -> Set
 def eligible_devices(db: Session, event: PushEvent, user_ids: Iterable[int]) -> List[MobileDevice]:
     """The phones of these people in the event's workspace that this event may be pushed to."""
     people = sorted(set(user_ids))
-    if push_type_for(event.event_type) is None or not people or not consent.expo_push_allowed():
+    if not _type_pushes(push_type_for(event.event_type)) or not people or not consent.expo_push_allowed():
         return []
     off = _switched_off(db, event, people)
     reachable = [person for person in people if person not in off]
@@ -213,12 +228,32 @@ def _ticket_number(db: Session, event: PushEvent) -> Optional[str]:
     return ticket_numbers(db, workspace_id, [task]).get(task.id) if task is not None else None
 
 
+def _suggestion_title(db: Session, event: PushEvent, settings: Any) -> Optional[str]:
+    """K9: the suggestion's title, read only when the workspace shows titles, and only the event's
+    own person's suggestion in this workspace while it is still open; None otherwise (the push
+    shows its generic line)."""
+    shows_title = push_type_for(event.event_type) == SUGGESTION and suggestion_titles_enabled(settings)
+    if not shows_title or event.link_type != SUGGESTION_LINK_TYPE or event.user_id is None:
+        return None
+    try:
+        suggestion_id = uuid.UUID(str(event.link_id))
+    except ValueError:
+        return None
+    return db.query(ProactiveSuggestion.title).filter(
+        ProactiveSuggestion.id == suggestion_id,
+        ProactiveSuggestion.workspace_id == _workspace_uuid(event.workspace_id),
+        ProactiveSuggestion.user_id == event.user_id,
+        ProactiveSuggestion.status == SUGGESTION_OPEN,
+    ).scalar()
+
+
 def _context(db: Session, event: PushEvent) -> _Context:
     settings = db.query(Workspace.settings).filter(Workspace.id == _workspace_uuid(event.workspace_id)).scalar()
     return _Context(
         grant=_grant(db, event),
         ticket_number=_ticket_number(db, event),
         redact=redact_questions_enabled(settings),
+        suggestion_title=_suggestion_title(db, event, settings),
     )
 
 
@@ -236,7 +271,8 @@ def _message(device: MobileDevice, event: PushEvent, context: _Context, now: dat
         redact=context.redact,
         now=now,
     )
-    return to_message(device, payload, event_type=event.event_type, agent_name=event.agent_name)
+    return to_message(device, payload, event_type=event.event_type, agent_name=event.agent_name,
+                      suggestion_title=context.suggestion_title)
 
 
 @dataclass(frozen=True)
@@ -409,11 +445,12 @@ def has_eligible_device(db: Session, workspace_id: Any) -> bool:
 
 
 def _worth_handing_over(db: Session, event: PushEvent) -> bool:
-    """A push event, the operator's answer on a local install, and one reachable phone.
+    """A push event whose type is sent at all, the operator's answer on a local install, and one
+    reachable phone.
 
     The EXISTS runs in a savepoint, so a failed read never aborts the caller's transaction.
     """
-    if push_type_for(event.event_type) is None or not consent.expo_push_allowed():
+    if not _type_pushes(push_type_for(event.event_type)) or not consent.expo_push_allowed():
         return False
     with db.begin_nested():
         return has_eligible_device(db, event.workspace_id)

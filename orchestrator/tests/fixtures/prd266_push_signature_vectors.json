@@ -97,6 +97,21 @@
       },
       "message": "[\"v2\",\"needs_answer\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1005\",\"7\",\"question\",\"7\",\"\",\"Publicar às 09:00 — café ☕?\\nLinha \\\"dois\\\"\",[\"Sim\",\"Não\"],1792540800]",
       "sig": "e0e3a50468bb5e8de2a97706037d82110e07d92d8f8dbb0cdca0de8e01442136"
+    },
+    {
+      "name": "suggestion",
+      "payload": {
+        "v": 2,
+        "type": "suggestion",
+        "workspace_id": "5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b",
+        "notification_id": "1006",
+        "link_type": "suggestion",
+        "link_id": "8a4e1f2b-6c3d-4e5f-9a1b-2c3d4e5f6a7b",
+        "iat": 1792540800,
+        "sig": "09cefdab1e1220aff640e4eb474f6e4a50655bdae21ef7e71f2c985b7d2412c3"
+      },
+      "message": "[\"v2\",\"suggestion\",\"5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b\",\"1006\",\"\",\"suggestion\",\"8a4e1f2b-6c3d-4e5f-9a1b-2c3d4e5f6a7b\",\"\",\"\",[],1792540800]",
+      "sig": "09cefdab1e1220aff640e4eb474f6e4a50655bdae21ef7e71f2c985b7d2412c3"
     }
   ],
   "tampered": [

@@ -2267,6 +2267,10 @@ class Config:
     # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
     PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
         0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
+    # K9: the fourth push type, suggestion, ships OFF. While off no suggestion push is sent
+    # (services/push/fanout.py); the bell row is still written. Discovery's suggestion_push
+    # follows it (US-C09b). The owner turns it on after §12-Q27 and the app's category (US-G02).
+    SUGGESTION_PUSH_ENABLED: bool = os.getenv("SUGGESTION_PUSH_ENABLED", "false").lower() in ("true", "1", "yes")
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
