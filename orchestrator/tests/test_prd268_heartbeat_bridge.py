@@ -424,6 +424,13 @@ class FakeLLM:
         return 0.001, "estimate"
 
 
+async def no_delivery(db, run_id):
+    """The runner's delivery, left out: these tests ring and count W1's heartbeat bell only."""
+    from services.proactive.delivery import Delivery
+
+    return Delivery()
+
+
 @pytest.fixture
 def live(shop, monkeypatch):
     """Platform mode live; every session the test's; the model and the context build
@@ -473,6 +480,8 @@ def live(shop, monkeypatch):
     monkeypatch.setattr(ContextService, "build_context", build_context)
     monkeypatch.setattr(runner, "heartbeat_llm", lambda workspace_id, agent_id: rig.llm)
     monkeypatch.setattr(platform_executor, "list_board_tasks", list_tasks)
+    # W2's delivery (the thread post and suggestion_ready) is proven in test_prd268w2_suggestion_delivery.py.
+    monkeypatch.setattr(runner, "deliver_run", no_delivery)
     monkeypatch.setattr(platform_executor.PlatformActionExecutor, "_full_autonomy", lambda self: False)
     monkeypatch.setattr(notification_dispatcher, "NotificationDispatcher", Dispatcher)
     monkeypatch.setattr(heartbeat_report, "auto_create_heartbeat_report", report)

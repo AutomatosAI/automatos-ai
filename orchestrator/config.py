@@ -2263,6 +2263,10 @@ class Config:
     # A check-in's interval: one sooner than the minimum after the last is refused.
     PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
     PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # K9: at most this many suggestion_ready bell rows per person per workspace since their local
+    # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
+    PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
+        0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))

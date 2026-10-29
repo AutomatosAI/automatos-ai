@@ -289,7 +289,7 @@ def _said(read: Mapping[str, Any]) -> bool:
     return bool(str(read.get("text") or "").strip())
 
 
-def _recorded_person(db: Session, user_id: int) -> Optional[str]:
+def recorded_person(db: Session, user_id: int) -> Optional[str]:
     """The person as ``resolve_recorded_person`` reads them: their Clerk id, else their email."""
     row = db.query(User.clerk_user_id, User.email).filter(User.id == user_id).first()
     if row is None:
@@ -319,7 +319,7 @@ def brief_source(local_date: date, via: Optional[str]) -> Dict[str, str]:
 def post_brief_message(db: Session, person: DuePerson, brief: Mapping[str, Any], via: Optional[str]) -> Optional[Any]:
     """Post the brief into the person's Auto thread: ``[text(prose), brief@1]`` with
     ``brief_source``; the saved message, or None when it did not land."""
-    recorded = _recorded_person(db, person.user_id)
+    recorded = recorded_person(db, person.user_id)
     if recorded is None:
         return None
     message = deliver_background_message(
@@ -491,6 +491,7 @@ __all__ = [
     "post_brief_message",
     "post_now",
     "prune",
+    "recorded_person",
     "register",
     "release",
     "run_digests",

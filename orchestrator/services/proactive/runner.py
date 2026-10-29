@@ -30,6 +30,10 @@ with what the turn spent. An agent's check-in also keeps its failing streak
 at its start until its doubled interval has passed, a failure records the streak's one
 card, and a run that works ends the streak. The heartbeat scheduler runs the check-ins
 through ``services.proactive.heartbeat_bridge``.
+
+Once the run's row has committed (and an agent's streak has filed its card), the run's new
+suggestions are delivered (``services.proactive.delivery``): posted in the addressee's Auto
+thread with one bell, in live mode only (K8). A delivery that fails never fails the run.
 """
 from __future__ import annotations
 
@@ -46,6 +50,7 @@ from sqlalchemy.orm import Session
 
 from core.models.proactive import RUN_ERROR, RUN_SILENT, RUN_SUGGESTED
 from modules.proactive import check_in_window
+from services.proactive.delivery import deliver_run
 from services.proactive.expiry import expire_lapsed
 from services.proactive.failing_streaks import held_back, note_run
 from services.proactive.failures import failure_class
@@ -245,22 +250,31 @@ async def _run(db: Session, record: RunRecord, prepare: Callable[[], Union[Check
         return await asyncio.to_thread(_errored, db, record, failure_class(exc))
 
 
+async def _deliver(db: Session, *run_ids: Optional[UUID]) -> None:
+    """Deliver each run's new suggestions once its row has committed (``deliver_run`` never raises)."""
+    for run_id in dict.fromkeys(run_id for run_id in run_ids if run_id is not None):
+        await deliver_run(db, run_id)
+
+
 async def run_workspace_check_in(workspace_id: Any) -> CheckInResult:
-    """Run Auto's workspace check-in once, and record it."""
+    """Run Auto's workspace check-in once, record it, and deliver what it suggested."""
     record = RunRecord(run_id=uuid4(), workspace_id=UUID(str(workspace_id)), kind=KIND_WORKSPACE, outcome=RUN_SILENT)
     now = _now()
     with _session() as db:
-        return await _run(db, record, lambda: _prepare_workspace(db, record, now), now)
+        result = await _run(db, record, lambda: _prepare_workspace(db, record, now), now)
+        await _deliver(db, result.run_id)
+        return result
 
 
 async def run_agent_check_in(agent_id: int, workspace_id: Any, hb_config: Optional[Dict[str, Any]]) -> CheckInResult:
-    """Run ``agent_id``'s check-in once, with its heartbeat config, record it, and keep its
-    failing streak."""
+    """Run ``agent_id``'s check-in once, with its heartbeat config, record it, keep its
+    failing streak, and deliver what it suggested and the streak's card when it filed one."""
     record = RunRecord(run_id=uuid4(), workspace_id=UUID(str(workspace_id)), kind=KIND_AGENT, outcome=RUN_SILENT,
                        agent_id=int(agent_id))
     now = _now()
     heartbeat = dict(hb_config or {})
     with _session() as db:
         result = await _run(db, record, lambda: _prepare_agent(db, record, heartbeat, now), now)
-        await asyncio.to_thread(note_run, db, result, record.workspace_id, record.agent_id, heartbeat, now)
+        card_run = await asyncio.to_thread(note_run, db, result, record.workspace_id, record.agent_id, heartbeat, now)
+        await _deliver(db, result.run_id, card_run)
         return result
