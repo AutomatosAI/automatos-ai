@@ -1,8 +1,9 @@
 """PRD-268 §6.11.2, K7, K16 — what the brief says, from the strings table.
 
 Server copy, never the model's: the greeting, the section labels, the empty sentence, "Show N
-more", the row action labels and each row's reason (``why``), in English and Portuguese
-(Brazil). Clients draw these; they never compose them.
+more", the row action labels, each row's reason (``why``) and the brief route's refusals
+(``open_*``, ``api/proactive_brief.py``), in English and Portuguese (Brazil). Clients draw
+these; they never compose them.
 
 The language (K7): ``brief_language`` reads a BCP 47 tag (the route's ``locale``, a phone's
 ``mobile_devices.locale``, or the locale W1's ``Accept-Language`` chooser gave). A tag with a
@@ -61,6 +62,11 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "since_failed": "Started from a suggestion. It couldn't finish.",
         "since_working": "Started from a suggestion. The work is under way.",
         "since_started": "Started from a suggestion.",
+        "open_no_workspace": "Choose a workspace first.",
+        "open_no_person": "A brief is a person's, and this caller is not one.",
+        "open_not_a_member": "Today's brief is only for the people in this workspace.",
+        "open_out_of_window": "That date is more than a day from today, so there is no brief for it.",
+        "open_unavailable": "Today's brief could not be made right now. Try again in a minute.",
     }),
     "pt-BR": MappingProxyType({
         "greeting_morning": "Bom dia, {name}.",
@@ -95,6 +101,11 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "since_failed": "Começou a partir de uma sugestão. Não deu para terminar.",
         "since_working": "Começou a partir de uma sugestão. O trabalho está em andamento.",
         "since_started": "Começou a partir de uma sugestão.",
+        "open_no_workspace": "Escolha um workspace primeiro.",
+        "open_no_person": "Um resumo é de uma pessoa, e quem chamou não é uma.",
+        "open_not_a_member": "O resumo de hoje é só para as pessoas deste workspace.",
+        "open_out_of_window": "Essa data está a mais de um dia de hoje, então não há resumo para ela.",
+        "open_unavailable": "Não foi possível preparar o resumo de hoje agora. Tente de novo em um minuto.",
     }),
 })
 

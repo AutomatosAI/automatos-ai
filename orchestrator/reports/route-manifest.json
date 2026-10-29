@@ -1,5 +1,5 @@
 {
-  "route_count": 994,
+  "route_count": 995,
   "routes": [
     {
       "method": "GET",
@@ -2076,6 +2076,10 @@
     {
       "method": "POST",
       "path": "/api/policy/{policy_id}/assemble"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/brief/open"
     },
     {
       "method": "GET",

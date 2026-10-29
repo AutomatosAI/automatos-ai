@@ -302,9 +302,9 @@ def _may_answer(db: Session, person: DuePerson) -> bool:
     return person.user_id in recipients(db, person.workspace_id, NEEDS_ANSWER, person.user_id)
 
 
-def brief_of(db: Session, person: DuePerson, read: Mapping[str, Any]) -> Dict[str, Any]:
-    """The person's ``Brief@1`` for their local date over Auto's Read already made (no second
-    model call), in their phone's language and zone (PRD-268 K7)."""
+def brief_of(db: Session, person: DuePerson, read: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """The person's ``Brief@1`` for their local date, in ``person``'s language and zone (PRD-268
+    K7): over Auto's Read already made (no second model call), else made here (the brief on open)."""
     return build_brief(db, person.workspace_id, person.user_id, person.local_date, person.locale,
                        may_answer=_may_answer(db, person), zone=person.zone, digest=read)
 

@@ -115,6 +115,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 W1 -- Proactive Auto: the suggestions (list, Start, Hide) and the check-in
     # runs (/api/proactive/*).
     RouterSpec("api.proactive"),
+    # PRD-268 US-C10b (§6.4) -- the brief on open, once per person per local date
+    # (POST /api/proactive/brief/open).
+    RouterSpec("api.proactive_brief"),
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),

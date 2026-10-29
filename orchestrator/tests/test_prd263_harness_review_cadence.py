@@ -45,9 +45,11 @@ def test_the_template_itself_names_no_day():
 
 
 def test_the_daily_brief_no_longer_promises_auto_applied_changes():
+    # PRD-268 §12-Q11 (K19): the cadence Daily Brief is retired, so a stored daily_brief adds no block.
     block = _block(daily_brief={"enabled": True})
 
-    assert "## Auto Daily Brief" in block
+    assert block == ""
+    assert "## Auto Daily Brief" not in block
     assert "auto-applied" not in block and "HARNESS prescriptions" not in block
 
 

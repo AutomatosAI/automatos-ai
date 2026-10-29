@@ -60,8 +60,10 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # mobile_theme: the member's installed theme as data for the phone (PRD-261 M-04: colours,
 # fonts and mascot files, never code), which the app offers under Studio only when this is listed.
 # tts: Auto's server voice, a sentence of a reply as MP3 (services/voice-tts); the phone speaks
-# with the device's voice without it.
+# with the device's voice without it. brief: the day's brief waiting on open (PRD-268 US-C10b),
+# claimed once per person per local date with the scheduled digest; every device and tab calls it.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "brief": ("POST", "/api/proactive/brief/open"),
     "digest": ("GET", "/api/notification-preferences"),
     "digest_now": ("POST", "/api/v1/mobile/digest/now"),
     "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
