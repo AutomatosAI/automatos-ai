@@ -175,13 +175,13 @@ def due_people(db: Session, now: datetime) -> List[DuePerson]:
     return sorted(due)
 
 
-def local_today(db: Session, workspace_id: uuid.UUID, user_id: int, now: datetime) -> date:
-    """The person's local date at ``now``: in the zone of the phone their schedule follows, else UTC.
+def schedule_zone(db: Session, workspace_id: uuid.UUID, user_id: int) -> Optional[str]:
+    """The timezone of the phone the person's schedule follows, as stored; None without one.
 
     That phone is ``due_people``'s: their most recently seen active ios/android phone in the
     workspace with a timezone (``last_seen_at``, then ``created_at``).
     """
-    zone_name = (
+    return (
         db.query(MobileDevice.timezone)
         .filter(
             MobileDevice.workspace_id == workspace_id,
@@ -195,8 +195,17 @@ def local_today(db: Session, workspace_id: uuid.UUID, user_id: int, now: datetim
         .limit(1)
         .scalar()
     )
-    zone = _zone(zone_name) or timezone.utc
-    return _utc(now).astimezone(zone).date()
+
+
+def date_in_zone(zone_name: Optional[str], now: datetime) -> date:
+    """``now``'s date in the IANA zone ``zone_name``; in UTC when it is missing or not one."""
+    return _utc(now).astimezone(_zone(zone_name) or timezone.utc).date()
+
+
+def local_today(db: Session, workspace_id: uuid.UUID, user_id: int, now: datetime) -> date:
+    """The person's local date at ``now``: in the zone of the phone their schedule follows
+    (``schedule_zone``), else UTC."""
+    return date_in_zone(schedule_zone(db, workspace_id, user_id), now)
 
 
 def _claim_filter(person: DuePerson) -> tuple:
@@ -411,6 +420,7 @@ __all__ = [
     "DuePerson",
     "belongs",
     "claim",
+    "date_in_zone",
     "default_digest_time",
     "due_date",
     "due_people",
@@ -421,4 +431,5 @@ __all__ = [
     "register",
     "release",
     "run_digests",
+    "schedule_zone",
 ]
