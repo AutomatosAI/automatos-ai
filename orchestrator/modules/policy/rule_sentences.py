@@ -32,7 +32,7 @@ from modules.policy.policy_document import (
     RISK_READ,
     STRICT,
 )
-from modules.proactive.locale import DEFAULT_LOCALE, ENGLISH, PORTUGUESE_BRAZIL
+from modules.proactive.locale import DEFAULT_LOCALE
 
 __all__ = [
     "FALLBACK", "RULE_IDS", "STRINGS", "approval_policy_rule", "confirm_rule", "known_rule", "posture_rule",
@@ -110,8 +110,8 @@ _PT_BR = {
 }
 
 STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
-    ENGLISH: MappingProxyType(_EN),
-    PORTUGUESE_BRAZIL: MappingProxyType(_PT_BR),
+    "en": MappingProxyType(_EN),
+    "pt-BR": MappingProxyType(_PT_BR),
 })
 RULE_IDS: Tuple[str, ...] = tuple(key for key in _EN if key != FALLBACK)
 
