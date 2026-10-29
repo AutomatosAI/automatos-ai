@@ -97,6 +97,7 @@ import {
   ToolApproval,
   TrialExhaustedBanner,
   WithdrawOfferCard,
+  type ApprovalViewData,
   type MissionApprovalData,
   type ToolApprovalData,
 } from '../cards'
@@ -163,6 +164,26 @@ describe('PRD-261 A-12a — ToolApproval', () => {
     for (const grantId of [1.5, -3, '12/../deny', null]) {
       expect(() => checkedToolCard({ ...GRANT, grant_id: grantId }), String(grantId)).toThrow(TypeError)
     }
+  })
+})
+
+describe('PRD-268 US-C20c — the approval view through the cards area', () => {
+  const view = (grantId: string): ApprovalViewData => ({
+    grant_id: grantId,
+    asked_by: { kind: 'auto', name: 'Auto' },
+    action: { verb: 'delete', summary: 'Delete the document' },
+    rule: { id: 'confirm.destructive', sentence: "Ask before anything that deletes or can't be undone" },
+    answers: ['refuse', 'allow_once'],
+  })
+
+  it("hands the host's widgets the checked view, and drops a view of another card, never the card", () => {
+    render(<ToolApproval data={{ ...GRANT, approval_view: view('12101') }} />)
+    expect((given('ToolApprovalWidget').data as ToolApprovalData).approval_view).toMatchObject(view('12101'))
+    render(<MissionApproval data={{ ...PLAN, approval_view: view('mission-a12a') }} />)
+    expect((given('MissionApprovalWidget').data as MissionApprovalData).approval_view).toMatchObject(view('mission-a12a'))
+    render(<ToolApproval data={{ ...GRANT, approval_view: view('999') }} />)
+    expect(given('ToolApprovalWidget')).toMatchObject({ id: 'tool-12101' })
+    expect('approval_view' in (given('ToolApprovalWidget').data as ToolApprovalData)).toBe(false)
   })
 })
 

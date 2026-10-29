@@ -1,4 +1,6 @@
 import type {
+  ApprovalAnswer,
+  ApprovalView,
   MissionApprovalTask,
   MissionApprovalWidgetData,
   ToolApprovalWidgetData,
@@ -17,6 +19,10 @@ import type {
  * reply that raised it and whether the owner has answered it or closed it; a
  * card whose reply left the conversation is loose, still open. Pure
  * (lib/chat-controller/approvals.ts holds the cards).
+ *
+ * PRD-268 US-C20c: either card may carry `approval_view` (ApprovalView@1, §6.11.4), the exact
+ * action and the rule that asked. It is checked here too: a view whose fields aren't what they
+ * say, or whose grant_id isn't this card's id, is dropped and the card stays exactly as it was.
  */
 
 /** chat.tsx's widget titles. */
@@ -31,6 +37,10 @@ const GRANT_ID = /^\d{1,15}$/
 /** A Mission id goes into /api/missions/<id>/approve: nothing but an id's own characters. */
 const MISSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 const RISK_TIERS: ReadonlySet<string> = new Set(['monitor', 'human_on_the_loop', 'human_in_the_loop'])
+const ASKERS: ReadonlySet<string> = new Set(['auto', 'agent'])
+const PREVIEW_KINDS: ReadonlySet<string> = new Set(['text', 'markdown', 'diff'])
+/** K10: what a person may answer; any other answer (Always allow included) is dropped. */
+const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['refuse', 'allow_once'])
 
 export type ApprovalCard =
   | { readonly kind: 'tool'; readonly key: string; readonly data: ToolApprovalWidgetData }
@@ -79,6 +89,81 @@ function oversightOf(fields: Fields): Oversight {
   }
 }
 
+function askedByOf(value: unknown): ApprovalView['asked_by'] | null {
+  const fields = recordOf(value)
+  const kind = textOf(fields?.kind)
+  const name = textOf(fields?.name)
+  if (kind === undefined || !ASKERS.has(kind) || name === undefined) return null
+  return { kind: kind as ApprovalView['asked_by']['kind'], name }
+}
+
+function actionOf(value: unknown): ApprovalView['action'] | null {
+  const fields = recordOf(value)
+  const verb = textOf(fields?.verb)
+  const summary = textOf(fields?.summary)
+  return verb !== undefined && summary !== undefined ? { verb, summary } : null
+}
+
+function ruleOf(value: unknown): ApprovalView['rule'] | null {
+  const fields = recordOf(value)
+  const id = textOf(fields?.id)
+  const sentence = textOf(fields?.sentence)
+  return id !== undefined && sentence !== undefined ? { id, sentence } : null
+}
+
+/** The target and the preview are optional: one that isn't what it says is left out, the view kept. */
+function targetOf(value: unknown): Pick<ApprovalView, 'target'> {
+  const fields = recordOf(value)
+  const label = textOf(fields?.label)
+  return label === undefined ? {} : { target: { label, detail: textOf(fields?.detail) } }
+}
+
+function previewOf(value: unknown): Pick<ApprovalView, 'preview'> {
+  const fields = recordOf(value)
+  const kind = textOf(fields?.kind)
+  const body = textOf(fields?.body)
+  if (kind === undefined || !PREVIEW_KINDS.has(kind) || body === undefined) return {}
+  return { preview: { kind: kind as NonNullable<ApprovalView['preview']>['kind'], body } }
+}
+
+function answersOf(value: unknown): ApprovalAnswer[] {
+  const answers = Array.isArray(value) ? value : []
+  return answers.filter((answer): answer is ApprovalAnswer => typeof answer === 'string' && ANSWERS.has(answer))
+}
+
+/**
+ * A card's ApprovalView@1, checked off the wire, or undefined: when it isn't an object, when a part
+ * it needs (who asked, the action, the rule) isn't what it says, or when its grant_id isn't an id or
+ * isn't `cardId` (the card's grant id, or its Mission's id). Never mutates.
+ */
+export function approvalViewOf(value: unknown, cardId: string): ApprovalView | undefined {
+  const fields = recordOf(value)
+  const id = typeof fields?.grant_id === 'number' ? String(fields.grant_id) : textOf(fields?.grant_id)
+  // MISSION_ID admits an id's own characters, a grant id's digits among them.
+  if (fields === null || id === undefined || !MISSION_ID.test(id) || id !== cardId) return undefined
+  const askedBy = askedByOf(fields.asked_by)
+  const action = actionOf(fields.action)
+  const rule = ruleOf(fields.rule)
+  if (askedBy === null || action === null || rule === null) return undefined
+  const expiresAt = textOf(fields.expires_at)
+  return {
+    grant_id: id,
+    asked_by: askedBy,
+    action,
+    ...targetOf(fields.target),
+    ...previewOf(fields.preview),
+    rule,
+    answers: answersOf(fields.answers),
+    ...(expiresAt === undefined ? {} : { expires_at: expiresAt }),
+  }
+}
+
+/** `{ approval_view }` when the card carries a view that checks out, else nothing: today's card. */
+function viewField(value: unknown, cardId: string): { approval_view?: ApprovalView } {
+  const view = approvalViewOf(value, cardId)
+  return view === undefined ? {} : { approval_view: view }
+}
+
 function toolCard(value: unknown): ApprovalCard | null {
   const fields = recordOf(value)
   const grantId = grantIdOf(fields?.grant_id)
@@ -92,6 +177,7 @@ function toolCard(value: unknown): ApprovalCard | null {
     permission_level: textOf(fields.permission_level),
     params: recordOf(fields.params) ?? undefined,
     ...oversightOf(fields),
+    ...viewField(fields.approval_view, String(grantId)),
   }
   return { kind: 'tool', key: `tool-${grantId}`, data }
 }
@@ -127,6 +213,7 @@ function missionCard(value: unknown): ApprovalCard | null {
     cost_ceiling_usd: numberOf(fields.cost_ceiling_usd),
     approval_deadline_at: textOf(fields.approval_deadline_at),
     ...oversightOf(fields),
+    ...viewField(fields.approval_view, missionId),
   }
   return { kind: 'mission', key: `mission-${missionId}`, data }
 }

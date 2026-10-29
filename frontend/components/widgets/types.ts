@@ -61,6 +61,27 @@ export interface MissionApprovalWidgetData {
   risk_class?: string
   oversight_rationale?: string
   requires_approval?: boolean
+  /** PRD-268 US-C20c: the exact action and the rule that held the plan (its grant_id is the mission_id). */
+  approval_view?: ApprovalView
+}
+
+/** PRD-268 §6.11.4 (K10): what a person may answer. Always allow is not built (§12-Q17). */
+export type ApprovalAnswer = 'refuse' | 'allow_once'
+
+/**
+ * PRD-268 §6.11.4: `ApprovalView@1`, the exact action, its target, its preview and the rule that
+ * asked, built by the server (modules/tools/formatting/approval_view.py) and checked off the wire by
+ * lib/chat/approvals.ts (approvalViewOf). The preview is the call's own payload, shown as text.
+ */
+export interface ApprovalView {
+  grant_id: string
+  asked_by: { kind: 'auto' | 'agent'; name: string }
+  action: { verb: string; summary: string }
+  target?: { label: string; detail?: string }
+  preview?: { kind: 'text' | 'markdown' | 'diff'; body: string }
+  rule: { id: string; sentence: string }
+  answers: ApprovalAnswer[]
+  expires_at?: string
 }
 
 /**
@@ -82,6 +103,8 @@ export interface ToolApprovalWidgetData {
   risk_class?: string
   oversight_rationale?: string
   requires_approval?: boolean
+  /** PRD-268 US-C20c: the exact action, its target and preview, and the rule that asked. */
+  approval_view?: ApprovalView
 }
 
 /**

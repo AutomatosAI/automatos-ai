@@ -18,7 +18,9 @@
  */
 export { MissionApproval, ToolApproval } from './host-cards/approvals'
 export type {
+  ApprovalAnswer,
   ApprovalDecision,
+  ApprovalViewData,
   CardOrigin,
   MissionApprovalData,
   MissionApprovalProps,
