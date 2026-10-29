@@ -5,5 +5,7 @@
   action labels and the rows' reasons, in English and Portuguese (Brazil) (K7, K16);
 * ``needs``, ``suggested``, ``today``, ``since`` and ``unchecked``: one small reader per section;
 * ``build``: ``build_brief``, which assembles them with Auto's Read, folds each section and
-  writes the spoken words.
+  writes the spoken words;
+* ``claim``: one brief per person per local date, shared by the scheduled digest and the brief
+  on open (``claim_brief``, ``todays_brief_message``, ``post_brief``).
 """

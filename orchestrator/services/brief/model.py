@@ -33,12 +33,18 @@ from pydantic import BaseModel, ConfigDict
 __all__ = [
     "ACTION_VERBS", "Brief", "BriefAction", "BriefCounts", "BriefLabels", "BriefOpens", "BriefRow",
     "BriefSections", "COUNTED_SECTIONS", "NEEDS_YOU", "OPENS_TYPES", "PART_TYPE", "SECTIONS", "SINCE",
-    "SUGGESTIONS", "TODAY", "UNCHECKED", "VERSION",
+    "SUGGESTIONS", "TODAY", "UNCHECKED", "VERSION", "VIAS", "VIA_OPEN", "VIA_SCHEDULE",
 ]
 
 VERSION = 1
 # The message part the brief is posted as, beside its text (services/chat_parts.py).
 PART_TYPE = "brief@1"
+# How the day's brief came to be posted (K11), kept in its message's source: the scheduled
+# digest, or the first open of the day. Opening the app is the person's own action, so a brief
+# posted on open is never announced as auto_message (services/notification_events/auto_message.py).
+VIA_SCHEDULE = "schedule"
+VIA_OPEN = "open"
+VIAS = (VIA_SCHEDULE, VIA_OPEN)
 
 NEEDS_YOU = "needs_you"
 SUGGESTIONS = "suggestions"
