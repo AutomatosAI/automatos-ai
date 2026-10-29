@@ -84,6 +84,7 @@ from core.security.ip_bucket import ip_rate_bucket
 from core.security.rate_limiter import DEFAULT_LIMITS
 from services.mobile import devices, pairing
 from services.mobile.urls import MobileUrlError
+from services.push.payload import OPTIONAL_PUSH_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,12 @@ def _known_platform(value: str) -> str:
     return value
 
 
+def _known_push_category(value: str) -> str:
+    if value not in OPTIONAL_PUSH_TYPES:
+        raise ValueError(f"push_categories may hold only: {', '.join(OPTIONAL_PUSH_TYPES)}")
+    return value
+
+
 def _iana_zone(value: Optional[str]) -> Optional[str]:
     """An IANA time zone name zoneinfo knows (``Europe/Dublin``), or ``None`` (cleared)."""
     if value is None:
@@ -150,6 +157,7 @@ def _iana_zone(value: Optional[str]) -> Optional[str]:
 
 
 Platform = Annotated[str, AfterValidator(_known_platform)]
+PushCategory = Annotated[str, AfterValidator(_known_push_category)]
 InstallId = Annotated[str, Field(pattern=INSTALL_ID_PATTERN)]
 TimeZoneName = Annotated[str, Field(min_length=1, max_length=TIMEZONE_LENGTH), AfterValidator(_iana_zone)]
 DigestTime = Annotated[str, Field(pattern=DIGEST_TIME_PATTERN)]
@@ -182,6 +190,7 @@ class RegisterDeviceRequest(BaseModel):
                                            pattern=EXPO_PUSH_TOKEN_PATTERN)
     digest_time: Optional[DigestTime] = None
     name: Optional[str] = Field(default=None, min_length=1, max_length=NAME_LENGTH)
+    push_categories: List[PushCategory] = Field(default_factory=list, max_length=len(OPTIONAL_PUSH_TYPES))
 
 
 class UpdateDeviceRequest(BaseModel):

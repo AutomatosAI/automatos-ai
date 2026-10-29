@@ -55,6 +55,9 @@ PUSH_EVENT_TYPES: frozenset[str] = frozenset(e for events in PUSH_TYPE_EVENTS.va
 _TYPE_BY_EVENT: Mapping[str, str] = MappingProxyType(
     {event: push_type for push_type, events in PUSH_TYPE_EVENTS.items() for event in events}
 )
+# The push types a phone gets only once its app registered their category (``push_categories`` on
+# POST /api/v1/mobile/devices, PRD-268 K9): an app that has no actions for one never receives it.
+OPTIONAL_PUSH_TYPES: tuple[str, ...] = (SUGGESTION,)
 
 # ── What a push says ───────────────────────────────────────────────────────
 QUESTION_LINE = "A question needs your answer"

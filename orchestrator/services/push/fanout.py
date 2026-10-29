@@ -16,8 +16,10 @@ those write.
    none at all from a local install until the operator agreed (``consent``, K13), minus the
    people whose push switch for the event is off (K7: a ``notification_preferences`` row with
    destination ``push``; the person's row wins over the workspace's, no row means on). The
-   suggestion type reaches no phone at all while ``config.SUGGESTION_PUSH_ENABLED`` is off
-   (PRD-268 K9: it ships off); its bell row is the dispatcher's and is written regardless.
+   suggestion type (PRD-268 K9, ``services.push.suggestion_rules``) reaches no phone at all while
+   ``config.SUGGESTION_PUSH_ENABLED`` is off (it ships off), nor for a suggestion that is not the
+   event's person's, not for today or no longer open; and only phones whose app registered its
+   category. Its bell row is the dispatcher's and is written regardless.
 3. One signed message per phone (``payload.build_payload`` / ``to_message``): a question's
    grant loaded in this workspace only (while it still waits), a review's ticket number,
    redaction from ``workspace.settings``, and a suggestion's title only when the workspace
@@ -53,7 +55,7 @@ from core.models.approval_grants import ApprovalGrant, GrantStatus
 from core.models.core import BoardTask
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
 from core.models.mobile_push import MobilePushTicket
-from core.models.proactive import SUGGESTION_OPEN, ProactiveSuggestion
+from core.models.proactive import ProactiveSuggestion
 from core.models.workspaces import Workspace
 from services.mobile.events import PUSH_FAILED, with_event
 from services.push import consent
@@ -67,6 +69,13 @@ from services.push.payload import (
 )
 from services.push.recipients import recipients
 from services.push.sender import DEVICE_NOT_REGISTERED, TICKET_OK, PushMessage, PushSender, PushTicket
+from services.push.suggestion_rules import (
+    category_filters,
+    linked_suggestion_id,
+    may_push_suggestion,
+    open_at,
+    suggestion_push_enabled,
+)
 from services.ticket_numbers import ticket_numbers
 
 logger = logging.getLogger(__name__)
@@ -78,8 +87,6 @@ PUSH_DESTINATION = "push"
 GRANT_LINK_TYPES = ("question", "approval_grant")
 # A review's link is the ticket's id (US-012a).
 TICKET_LINK_TYPE = "task"
-# A suggestion's link is the suggestion's id (PRD-268 US-C08a).
-SUGGESTION_LINK_TYPE = "suggestion"
 
 # A person's push switch for one event (K7): theirs, or the workspace's (user_id NULL).
 _PUSH_SWITCHES_SQL = text(
@@ -168,7 +175,15 @@ def _device_filters(workspace_id: Any) -> Tuple[Any, ...]:
 
 def _type_pushes(push_type: Optional[str]) -> bool:
     """A push type that is sent at all: the suggestion type only while its switch is on (K9)."""
-    return push_type is not None and (push_type != SUGGESTION or bool(config.SUGGESTION_PUSH_ENABLED))
+    return push_type is not None and (push_type != SUGGESTION or suggestion_push_enabled())
+
+
+def _event_pushes(db: Session, event: PushEvent) -> bool:
+    """This event's push may go: its type is sent at all, and a suggestion's passes K9's rules now."""
+    push_type = push_type_for(event.event_type)
+    if push_type != SUGGESTION:
+        return _type_pushes(push_type)
+    return may_push_suggestion(db, event, _now())
 
 
 def _switched_off(db: Session, event: PushEvent, user_ids: Sequence[int]) -> Set[int]:
@@ -188,7 +203,7 @@ def _switched_off(db: Session, event: PushEvent, user_ids: Sequence[int]) -> Set
 def eligible_devices(db: Session, event: PushEvent, user_ids: Iterable[int]) -> List[MobileDevice]:
     """The phones of these people in the event's workspace that this event may be pushed to."""
     people = sorted(set(user_ids))
-    if not _type_pushes(push_type_for(event.event_type)) or not people or not consent.expo_push_allowed():
+    if not people or not _event_pushes(db, event) or not consent.expo_push_allowed():
         return []
     off = _switched_off(db, event, people)
     reachable = [person for person in people if person not in off]
@@ -196,7 +211,8 @@ def eligible_devices(db: Session, event: PushEvent, user_ids: Iterable[int]) -> 
         return []
     return (
         db.query(MobileDevice)
-        .filter(*_device_filters(event.workspace_id), MobileDevice.user_id.in_(reachable))
+        .filter(*_device_filters(event.workspace_id), *category_filters(push_type_for(event.event_type)),
+                MobileDevice.user_id.in_(reachable))
         .order_by(MobileDevice.created_at, MobileDevice.id)
         .all()
     )
@@ -233,17 +249,14 @@ def _suggestion_title(db: Session, event: PushEvent, settings: Any) -> Optional[
     own person's suggestion in this workspace while it is still open; None otherwise (the push
     shows its generic line)."""
     shows_title = push_type_for(event.event_type) == SUGGESTION and suggestion_titles_enabled(settings)
-    if not shows_title or event.link_type != SUGGESTION_LINK_TYPE or event.user_id is None:
-        return None
-    try:
-        suggestion_id = uuid.UUID(str(event.link_id))
-    except ValueError:
+    suggestion_id = linked_suggestion_id(event) if shows_title else None
+    if suggestion_id is None:
         return None
     return db.query(ProactiveSuggestion.title).filter(
         ProactiveSuggestion.id == suggestion_id,
         ProactiveSuggestion.workspace_id == _workspace_uuid(event.workspace_id),
         ProactiveSuggestion.user_id == event.user_id,
-        ProactiveSuggestion.status == SUGGESTION_OPEN,
+        *open_at(_now()),
     ).scalar()
 
 

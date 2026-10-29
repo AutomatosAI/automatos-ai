@@ -23,7 +23,11 @@ from an id that does not exist.
   it is ``push_token_in_use`` and nothing changes, so one account never takes another's
   phone; that is decided here, before any write, and the unique index only backs it up
   against a race. The phone's name (its model, from the app) replaces the stored one; a
-  blank name is not written.
+  blank name is not written. ``push_categories`` (the optional push types the app has
+  actions for: PRD-268 K9, a suggestion push reaches only a phone listing ``suggestion``)
+  replaces the stored list (the router lets each known type in once); left out, the stored
+  list stays. Only the caller's own row is ever written, so a registration never sets
+  another phone's categories.
 
   A person holds at most ``MAX_ACTIVE_DEVICES_PER_PERSON`` active devices in a workspace (the
   W2 review: each one is a push target). A Clerk registration that would add one more (a new
@@ -74,7 +78,7 @@ from services.mobile.pairing import DEVICE_TOKEN_BYTES
 PUSH_KEY_BYTES = 32
 # The columns POST /devices writes from its body (install_id names the row, never changes it).
 REGISTER_COLUMNS = (
-    "platform", "app_version", "locale", "timezone", "expo_push_token", "digest_time", "name",
+    "platform", "app_version", "locale", "timezone", "expo_push_token", "digest_time", "name", "push_categories",
 )
 UPDATE_COLUMNS = ("push_enabled", "digest_time", "timezone")
 # DeviceConflict codes, answered as 409 {"code": …}.

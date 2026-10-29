@@ -15,7 +15,8 @@
 * No secret: every config-surface setting named like a secret is given a distinct value and
   none of them appears in the body (the publishable key is the one exception).
 * ``capabilities`` is ``CAPABILITY_ROUTES``'s names once every one that needs setup has it
-  (``tts`` needs ``VOICE_TTS_URL``: ``test_voice_tts_speech.py``), and the live app (a clean subprocess,
+  (``tts`` needs ``VOICE_TTS_URL``: ``test_voice_tts_speech.py``; ``suggestion_push`` needs
+  ``SUGGESTION_PUSH_ENABLED``: ``test_prd268w2_suggestion_push_rules.py``), and the live app (a clean subprocess,
   the ``test_prd261_c1_wire.py`` probe) serves every mapped route, and serves the discovery
   route once, from ``api.well_known``, with no request-context dependency.
 * The route is a plain ``def``, registered by ``RouterSpec``, listed in the route manifest, and
@@ -66,7 +67,7 @@ CLERK_HOST = "clerk.prd266.test"
 PUBLISHABLE_KEY = "pk_live_" + base64.b64encode(f"{CLERK_HOST}$".encode()).decode()
 # The names §4.1 gives capabilities; a build lists the ones it implements.
 KNOWN_CAPABILITIES = {"push", "spoken_mode", "voice_live", "mobile_theme", "report_content", "digest", "digest_now",
-                      "tts", "brief", "suggestions", "readiness"}
+                      "tts", "brief", "suggestions", "readiness", "suggestion_push"}
 SECRET_MARKERS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE", "DSN")
 PUBLIC_KEY_SETTING = "CLERK_PUBLISHABLE_KEY"
 
@@ -302,8 +303,10 @@ def test_no_secret_setting_appears_in_the_body(client, saas, planted_secrets, mo
 @pytest.mark.parametrize("edition", ["saas", "local"])
 def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, monkeypatch, edition):
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
-    # Every capability that needs setup has it: Auto's server voice is configured.
+    # Every capability that needs setup has it: Auto's server voice is configured, and the
+    # suggestion push is switched on.
     monkeypatch.setattr(config, "VOICE_TTS_URL", "http://voice-tts:8100")
+    monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)
 
     capabilities = _document(client)["capabilities"]
 

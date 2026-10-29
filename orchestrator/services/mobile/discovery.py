@@ -21,7 +21,8 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   against the app's routes). The app gates every feature on these names, never on a version.
   A capability that also needs this server set up for it is listed only while it is, read
   from config on every call (``CONFIGURED_CAPABILITIES``): ``tts`` only with ``VOICE_TTS_URL``,
-  so a phone never asks a server with no voice for one.
+  so a phone never asks a server with no voice for one; ``suggestion_push`` only while
+  ``SUGGESTION_PUSH_ENABLED`` is on (PRD-268 K9, K20: it ships off).
 
 Names and capabilities only, never a secret: the publishable key is the one key in the body,
 and it is public by design (the web app ships it in its bundle). A misconfigured address or
@@ -39,6 +40,7 @@ from modules.voice.speech import is_configured as voice_tts_configured
 from services.mobile.remote_access import MODE_PAIRED
 from services.mobile.urls import MobileUrlError, api_url, web_url
 from services.push.consent import expo_push_allowed
+from services.push.suggestion_rules import suggestion_push_enabled
 
 DISCOVERY_SCHEMA = "automatos-discovery/v1"
 SERVER_NAME = "Automatos"
@@ -64,6 +66,8 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # claimed once per person per local date with the scheduled digest; every device and tab calls it.
 # suggestions: Auto's suggestions with Start and Hide (PRD-268 W1), refetched on the live lane's
 # suggestion_changed (US-C08b). readiness: what Auto depends on, with Check again (US-C18).
+# suggestion_push: a today suggestion pushed to a phone that registered the category with
+# push_categories (US-C09b); the app registers it only when this is listed.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "brief": ("POST", "/api/proactive/brief/open"),
     "digest": ("GET", "/api/notification-preferences"),
@@ -72,6 +76,7 @@ CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "push": ("POST", "/api/v1/mobile/devices"),
     "readiness": ("GET", "/api/readiness"),
     "spoken_mode": ("POST", "/api/chat"),
+    "suggestion_push": ("POST", "/api/v1/mobile/devices"),
     "suggestions": ("GET", "/api/proactive/suggestions"),
     "tts": ("POST", "/api/voice/speech"),
     "voice_live": ("POST", "/api/voice/web-call"),
@@ -79,6 +84,7 @@ CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
 # The capabilities this build implements that need the server set up for them, each with the
 # check that says it is. The others are listed whenever this build runs.
 CONFIGURED_CAPABILITIES: Mapping[str, Callable[[], bool]] = MappingProxyType({
+    "suggestion_push": suggestion_push_enabled,
     "tts": voice_tts_configured,
 })
 
