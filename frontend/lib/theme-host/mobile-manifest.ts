@@ -19,7 +19,7 @@
  */
 import { echo, errorIf, hasOwn, isRecord, own, themeError, unknownFieldErrors, type JsonRecord, type ThemeError } from './css-value'
 
-/** The 24 Studio tokens lookToStudioTokens writes as 'H S% L%' triplets (never its eight pre-wrapped aliases). */
+/** The 24 Studio tokens lookToStudioTokens writes as 'H S% L%' triplets, less its status tokens (PRD-268 K13; US-T01) and never its eight pre-wrapped aliases. */
 export const MOBILE_TOKEN_NAMES: readonly string[] = [
   '--background', '--foreground', '--card', '--card-foreground', '--popover', '--popover-foreground',
   '--primary', '--primary-foreground', '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',

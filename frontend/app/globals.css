@@ -61,6 +61,7 @@
     --warning-foreground: 0 0% 10%;
     --info: 217 91% 60%;
     --info-foreground: 0 0% 98%;
+    --running: 217 91% 60%;          /* PRD-268 K13: Classic draws working in its --info */
     --agent: 271 91% 65%;
     --agent-foreground: 0 0% 98%;
 
@@ -132,6 +133,7 @@
     --warning-foreground: 0 0% 10%;
     --info: 217 91% 60%;
     --info-foreground: 0 0% 98%;
+    --running: 217 91% 60%;          /* PRD-268 K13: Classic draws working in its --info */
     --agent: 271 91% 65%;
     --agent-foreground: 0 0% 98%;
 
@@ -181,7 +183,7 @@
     /* Accent — BURNT ORANGE IS CONSEQUENCE (destructive flavour, brand pop) */
     --accent: 15 76% 44%;            /* #c44a1a burnt orange */
     --accent-foreground: 38 50% 96%;
-    --destructive: 15 76% 44%;       /* same colour, consequence semantic */
+    --destructive: 15 76% 42%;       /* the accent a step darker: reads as text on the paper */
     --destructive-foreground: 38 50% 96%;
 
     /* Edges — tan borders */
@@ -224,6 +226,7 @@
     --warning-foreground: 30 12% 9%;
     --info: 213 51% 23%;             /* #1d3658 navy */
     --info-foreground: 38 50% 96%;
+    --running: 40 20% 36%;           /* warm grey: working (PRD-268 K13) */
     --agent: 213 51% 23%;            /* navy (Studio has no purple) */
     --agent-foreground: 38 50% 96%;
 
@@ -317,6 +320,7 @@
     --warning-foreground: 30 12% 9%;
     --info: 213 55% 68%;             /* navy lifted to steel blue */
     --info-foreground: 30 12% 9%;
+    --running: 40 20% 65%;           /* warm grey, lifted */
     --agent: 213 55% 68%;
     --agent-foreground: 30 12% 9%;
     --chart-1: 15 80% 56%;
@@ -779,7 +783,7 @@
   .studio .studio-pip.done    { background: hsl(var(--success)); }      /* ✓ */
   .studio .studio-pip.error   { background: hsl(var(--accent)); }      /* ! */
   .studio .studio-pip.queued  { background: var(--navy); }     /* ↻ */
-  .studio .studio-pip.running { background: hsl(40 20% 65%); }      /* ◐ */
+  .studio .studio-pip.running { background: hsl(var(--running)); }  /* ◐ */
   .studio .studio-pip.pending { background: var(--fg-3); }      /* · */
   .studio .studio-pip.paused  {
     background: hsl(var(--muted)); color: var(--fg-3);
