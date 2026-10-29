@@ -121,6 +121,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),
+    # PRD-268 US-C20a (§6.11.4) -- an approval grant's ApprovalView@1
+    # (GET /api/v1/approval-grants/{grant_id}/view).
+    RouterSpec("api.approval_views"),
 )
 
 
