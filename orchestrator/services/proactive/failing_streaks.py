@@ -19,7 +19,8 @@ and the agent's newest runs before it that failed with the same class, skips pas
   (``failing_streak``) with no model call, and the card says how often the agent checks in now.
 * **The reset.** The first run that works ends every streak of the agent: its open cards
   expire, their detail saying the check-ins work again, and with no failure left to count
-  the interval is the heartbeat's own again.
+  the interval is the heartbeat's own again. Each card it expired is told on the live lane
+  (``suggestion_changed``, ``services.proactive.live``) once that has committed.
 
 Auto's workspace check-in has no agent to key a streak by; its first failure still rings
 the bell (``services.proactive.heartbeat_bell``). Bookkeeping that fails is logged and never
@@ -63,6 +64,7 @@ from modules.tools.discovery.handlers_proactive import OPEN_LIFETIME
 from modules.tools.discovery.suggestion_fields import BOARD_TASK, PAYLOAD_AGENT
 from services.proactive.gates import Refusal
 from services.proactive.limits import workspace_caps
+from services.proactive.live import suggestion_changed
 from services.proactive.runs import KIND_AGENT, SCHEDULER_GRACE, finished_runs, owner_id, ran_at
 from services.proactive.streak_text import streak_detail, streak_title, works_again_detail
 
@@ -274,8 +276,19 @@ def _note_failure(db: Session, run: Any, workspace_id: UUID, agent_id: int, base
     return filed
 
 
+def _end_card(db: Session, card: ProactiveSuggestion, name: str, prefix: str, now: datetime) -> bool:
+    """Expire one open streak card, its detail saying the check-ins work again (uncommitted);
+    False when a decision moved it out of open first."""
+    detail = works_again_detail(name, card.subject_key[len(prefix):], int(card.occurrences or 1))
+    return bool(db.query(ProactiveSuggestion).filter(
+        ProactiveSuggestion.id == card.id, ProactiveSuggestion.status == SUGGESTION_OPEN,
+    ).update({ProactiveSuggestion.status: SUGGESTION_EXPIRED, ProactiveSuggestion.detail: detail,
+              ProactiveSuggestion.expires_at: now}, synchronize_session=False))
+
+
 def _note_success(db: Session, workspace_id: UUID, agent_id: int, now: datetime) -> None:
-    """A run that worked ends the agent's streaks: each open card expires, saying so."""
+    """A run that worked ends the agent's streaks: each open card expires, saying so, and is told
+    on the live lane once that has committed."""
     prefix = agent_error_prefix(agent_id)
     cards = db.query(ProactiveSuggestion).filter(
         ProactiveSuggestion.workspace_id == workspace_id, ProactiveSuggestion.status == SUGGESTION_OPEN,
@@ -284,15 +297,13 @@ def _note_success(db: Session, workspace_id: UUID, agent_id: int, now: datetime)
     if not cards:
         return
     name = _agent_name(db, workspace_id, agent_id) or UNNAMED_AGENT.format(agent_id=agent_id)
-    for card in cards:
-        detail = works_again_detail(name, card.subject_key[len(prefix):], int(card.occurrences or 1))
-        db.query(ProactiveSuggestion).filter(
-            ProactiveSuggestion.id == card.id, ProactiveSuggestion.status == SUGGESTION_OPEN,
-        ).update({ProactiveSuggestion.status: SUGGESTION_EXPIRED, ProactiveSuggestion.detail: detail,
-                  ProactiveSuggestion.expires_at: now}, synchronize_session=False)
+    ended = [(card.id, card.user_id) for card in cards if _end_card(db, card, name, prefix, now)]
     db.commit()
     logger.info("[proactive] agent %s in %s works again: %d streak card(s) expired", agent_id, workspace_id,
-                len(cards))
+                len(ended))
+    for suggestion_id, user_id in ended:
+        suggestion_changed(db, workspace_id=workspace_id, suggestion_id=suggestion_id, user_id=user_id,
+                           status=SUGGESTION_EXPIRED)
 
 
 def note_run(db: Session, run: Any, workspace_id: UUID, agent_id: int, hb_config: Optional[Dict[str, Any]],

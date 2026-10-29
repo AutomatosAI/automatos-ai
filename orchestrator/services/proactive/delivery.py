@@ -13,7 +13,9 @@ list routes and the brief still read the open suggestions.
   suggestion_id}]``. The text quotes the suggestion as data (``services.proactive.delivery_text``);
   the message is Auto's, never the person's. ``suggestion`` is not an announced origin
   (``services.notification_events.auto_message.ANNOUNCED_ORIGINS``): the post raises no
-  ``auto_message``. A post that does not land gives its claim back.
+  ``auto_message``. A post that does not land gives its claim back. A post that lands is the
+  suggestion's ``suggestion_changed`` (status ``open``, ``services.proactive.live``), once it has
+  committed: its create, for a run's suggestions and a failing streak's first card alike.
 * **The bell.** One ``suggestion_ready`` per addressee per run (K9), through
   ``NotificationDispatcher`` (in-app by default; no preference row is written), when the
   suggestions just posted for them hold one of severity ``today``, they are not in quiet hours
@@ -50,6 +52,7 @@ from config import config
 from core.models.proactive import SUGGESTION_OPEN, ProactiveRun, ProactiveSuggestion
 from services.chat_messenger import deliver_background_message
 from services.proactive.delivery_text import bell_copy, thread_text
+from services.proactive.live import suggestion_changed
 from services.proactive.quiet import is_person_quiet, person_timezone
 from services.proactive.switches import MODE_LIVE, effective_mode
 
@@ -198,6 +201,8 @@ def _deliver_card(db: Session, card: _Card, person: _Person, now: datetime) -> b
             return False
         if person.recorded is not None and _post(db, card, person):
             db.commit()  # the open chat's live notice; the message itself is committed already
+            suggestion_changed(db, workspace_id=card.workspace_id, suggestion_id=card.id, user_id=card.user_id,
+                               status=SUGGESTION_OPEN)
             return True
         _release(db, card)
     except Exception:  # noqa: BLE001 — logged; one card that fails never stops the others

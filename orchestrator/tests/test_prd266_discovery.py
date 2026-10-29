@@ -66,7 +66,7 @@ CLERK_HOST = "clerk.prd266.test"
 PUBLISHABLE_KEY = "pk_live_" + base64.b64encode(f"{CLERK_HOST}$".encode()).decode()
 # The names §4.1 gives capabilities; a build lists the ones it implements.
 KNOWN_CAPABILITIES = {"push", "spoken_mode", "voice_live", "mobile_theme", "report_content", "digest", "digest_now",
-                      "tts", "brief"}
+                      "tts", "brief", "suggestions", "readiness"}
 SECRET_MARKERS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE", "DSN")
 PUBLIC_KEY_SETTING = "CLERK_PUBLISHABLE_KEY"
 

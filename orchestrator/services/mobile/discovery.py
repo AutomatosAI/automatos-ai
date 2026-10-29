@@ -62,13 +62,17 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # tts: Auto's server voice, a sentence of a reply as MP3 (services/voice-tts); the phone speaks
 # with the device's voice without it. brief: the day's brief waiting on open (PRD-268 US-C10b),
 # claimed once per person per local date with the scheduled digest; every device and tab calls it.
+# suggestions: Auto's suggestions with Start and Hide (PRD-268 W1), refetched on the live lane's
+# suggestion_changed (US-C08b). readiness: what Auto depends on, with Check again (US-C18).
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "brief": ("POST", "/api/proactive/brief/open"),
     "digest": ("GET", "/api/notification-preferences"),
     "digest_now": ("POST", "/api/v1/mobile/digest/now"),
     "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "push": ("POST", "/api/v1/mobile/devices"),
+    "readiness": ("GET", "/api/readiness"),
     "spoken_mode": ("POST", "/api/chat"),
+    "suggestions": ("GET", "/api/proactive/suggestions"),
     "tts": ("POST", "/api/voice/speech"),
     "voice_live": ("POST", "/api/voice/web-call"),
 })
