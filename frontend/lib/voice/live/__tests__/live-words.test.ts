@@ -44,10 +44,17 @@ describe('liveRefusalSentence', () => {
   const refusal = (body: unknown, message = 'HTTP 403') => Object.assign(new Error(message), { status: 403, body })
 
   it('turns the coded plan refusal into a sentence, never the JSON apiClient put in the message', () => {
-    const detail = { code: 'voice_live_plan_required', message: 'Auto Live is on the Business plan' }
+    const detail = { code: 'voice_live_plan_required', message: "Auto Live isn't on this workspace's plan" }
     const sentence = liveRefusalSentence(refusal({ detail }, JSON.stringify(detail)))
     expect(sentence).toBe(LIVE_REASON_SENTENCES.voice_live_plan_required)
     expect(sentence).not.toMatch(/[{}"]/)
+  })
+
+  it('says a workspace with no credits left must top up (PRD-265 D-6: calls are paid from credits)', () => {
+    const detail = { code: 'credits_exhausted', message: 'Auto Live is paid from your credits.' }
+    const sentence = liveRefusalSentence(Object.assign(new Error(JSON.stringify(detail)), { status: 402, body: { detail } }))
+    expect(sentence).toBe(LIVE_REASON_SENTENCES.credits_exhausted)
+    expect(sentence).toContain('Top up on the Billing tab')
   })
 
   it("uses a coded detail's message when this build doesn't know the code", () => {

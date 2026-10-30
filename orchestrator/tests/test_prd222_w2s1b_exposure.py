@@ -50,14 +50,14 @@ def test_exposure_basic_shows_pro_profile_with_beta_label():
     # basic: nl2sql + team ON ⇒ both nav items visible, same as Pro.
     assert exp["nav"] == {"analytics": True, "team": True}
     assert exp["families"]["codegraph"] is True
-    assert exp["families"]["voice"] is False
+    assert exp["families"]["voice"] is True  # PRD-265 D-6: voice on every plan, paid from credits
 
 
-def test_exposure_pro_shows_analytics_and_team_hides_voice():
+def test_exposure_pro_shows_analytics_team_and_voice():
     exp = pt.exposure_for_plan("pro")
     assert exp["nav"] == {"analytics": True, "team": True}
     assert exp["families"]["codegraph"] is True
-    assert exp["families"]["voice"] is False
+    assert exp["families"]["voice"] is True
     assert exp["marketplace_depth"] == 2
 
 

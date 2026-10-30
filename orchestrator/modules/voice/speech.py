@@ -23,7 +23,9 @@ that names no voice is spoken in ``VOICE_TTS_DEFAULT_VOICE`` only when voice-tts
 voice service retired in #625, which may be no Kokoro voice at all.
 
 No text is ever logged. ``record_usage`` writes one line per answer, and it is the one place
-speech would be metered: no credit is charged for it yet (the owner decides SaaS metering).
+speech would be metered. It charges no credit, by decision (PRD-265 D-6, Gerard, 30 Oct 2026):
+the voice runs on our own server and costs us no more per use than the device's own voice.
+The answer it reads is charged as any chat turn is.
 """
 from __future__ import annotations
 
@@ -140,7 +142,7 @@ def parse_speech(payload: Any) -> SpeechRequest:
 
 @dataclass(frozen=True)
 class SpeechUsage:
-    """One answer, as the usage line (and, later, the meter) records it. Never its text."""
+    """One answer, as the usage line records it. Never its text."""
 
     workspace_id: str
     voice: str
@@ -154,8 +156,8 @@ class SpeechUsage:
 def record_usage(usage: SpeechUsage) -> None:
     """One line per synthesis: the workspace, the voice, the characters and the latency.
 
-    THE metering hook. Speech charges no credit yet; when SaaS meters it, the charge goes
-    here, once per answer, by ``usage.chars`` for ``usage.workspace_id``.
+    Speech is free (PRD-265 D-6). Were that ever to change, the charge would go here, once
+    per answer, by ``usage.chars`` for ``usage.workspace_id``.
     """
     first_ms = round(usage.first_byte_seconds * 1000) if usage.first_byte_seconds is not None else -1
     logger.info(

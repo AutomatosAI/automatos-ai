@@ -10,7 +10,9 @@
 
 /** A live-status reason or a refusal code, in the member's words. */
 export const LIVE_REASON_SENTENCES: Readonly<Record<string, string>> = Object.freeze({
-  voice_live_plan_required: 'Auto Live comes with the Business plan, and this workspace is on another plan.',
+  voice_live_plan_required: "Auto Live isn't on this workspace's plan.",
+  // PRD-265 D-6: a call is paid by the minute from credits; the mint refuses (402) when none are left.
+  credits_exhausted: 'Auto Live is paid from your credits, and this workspace has none left. Top up on the Billing tab, then call again.',
   voice_live_platform_off: 'Auto Live is switched off on this Automatos.',
   voice_live_not_armed: "Auto Live isn't set up yet. An admin can set it up in Settings → System Settings → Voice.",
   voice_live_workspace_off: 'Auto Live is off for this workspace. An admin can turn it on in Settings → Voice → Auto Live.',

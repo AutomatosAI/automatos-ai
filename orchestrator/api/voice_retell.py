@@ -90,8 +90,8 @@ def _require_voice_live_plan(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> None:
-    """PRD-266 D34: on SaaS the mint needs a plan with the voice family; 403
-    ``voice_live_plan_required`` otherwise. The local edition is unrestricted."""
+    """PRD-266 D34 + PRD-265 D-6: on SaaS the mint needs a plan with the voice family (403
+    ``voice_live_plan_required``) and credits to pay for the call (402 ``credits_exhausted``)."""
     try:
         mint.require_voice_live_plan(db, ctx.workspace_id)
     except mint.MintRefused as refused:
