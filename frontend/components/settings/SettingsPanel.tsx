@@ -17,6 +17,7 @@ import { WorkspaceVoiceLiveCard } from './WorkspaceVoiceLiveCard'
 import { AppearanceTab } from './themes/appearance-tab'
 import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { BillingTab } from './billing/billing-tab'
+import { WhatAutoDependsOn } from './what-auto-depends-on'
 import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
@@ -142,8 +143,12 @@ export function SettingsPanel() {
           </TabsContent>
         )}
 
+        {/* PRD-268 US-W05: what Auto depends on, above the orchestrator's settings */}
         <TabsContent value="orchestrator">
-          <SystemLLMSettingsTab />
+          <div className="space-y-6">
+            <WhatAutoDependsOn />
+            <SystemLLMSettingsTab />
+          </div>
         </TabsContent>
 
         {/* Webhooks Tab */}
