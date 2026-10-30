@@ -387,6 +387,11 @@ def _install_target(versions: Sequence[ThemePackage], package_id: Optional[UUID]
     return target
 
 
+def install_target(db: Session, listing_id: str, package_id: Optional[UUID]) -> ThemePackage:
+    """The version ``install_listing`` installs for the listing, refused (404 or 409) as it would refuse it."""
+    return _install_target(_versions_or_404(db, listing_id), package_id)
+
+
 def _installed_refusal(db: Session, install: ThemeInstallation) -> ThemeInstallError:
     """Why a workspace that already runs this theme can't install it again from the listing."""
     package = db.get(ThemePackage, install.package_id)

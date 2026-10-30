@@ -14,8 +14,8 @@ pin its own messages and headers):
   an encoded body is refused, and the declared and the streamed size are capped. Each read times out
   after ``AUTOMATOS_CLOUD_TIMEOUT_SECONDS`` and the whole read after ``DEADLINE_FACTOR`` times that.
 
-Failures raise ``CloudFetchFailed`` with a plain sentence of this module's own, echoing nothing it
-received. ``client_factory`` is the tests' seam (an ``httpx.MockTransport``).
+Failures raise ``CloudFetchFailed`` (``CloudAnswerTooLarge`` past a cap) with a plain sentence of this
+module's own, echoing nothing it received. ``client_factory`` is the tests' seam (an ``httpx.MockTransport``).
 """
 
 from __future__ import annotations
@@ -64,6 +64,10 @@ class CloudFetchFailed(ValueError):
     """A read from Automatos Cloud that failed; the message is plain and echoes nothing it received."""
 
 
+class CloudAnswerTooLarge(CloudFetchFailed):
+    """The answer was over its cap, as declared or as streamed (a package install answers it as refused bytes)."""
+
+
 def timeout_seconds() -> float:
     """``AUTOMATOS_CLOUD_TIMEOUT_SECONDS``: each read of the catalogue or a package (at least one second)."""
     return float(max(1, int(config.AUTOMATOS_CLOUD_TIMEOUT_SECONDS)))
@@ -88,7 +92,7 @@ def _client() -> httpx.Client:
 
 
 def _too_large(max_bytes: int) -> CloudFetchFailed:
-    return CloudFetchFailed(TOO_LARGE.format(kb=max_bytes // KB))
+    return CloudAnswerTooLarge(TOO_LARGE.format(kb=max_bytes // KB))
 
 
 def _read_capped(response: httpx.Response, max_bytes: int, deadline: float) -> bytes:
@@ -141,6 +145,7 @@ def fetch_bytes(
 
 
 __all__ = [
-    "ACCEPT_JSON", "ACCEPT_PACKAGE", "CLOUD_OFF", "ClientFactory", "CloudFetchFailed", "DEADLINE_FACTOR",
+    "ACCEPT_JSON", "ACCEPT_PACKAGE", "CLOUD_OFF", "ClientFactory", "CloudAnswerTooLarge", "CloudFetchFailed",
+    "DEADLINE_FACTOR",
     "USER_AGENT", "checked_origin", "fetch_bytes", "request_headers", "timeout_seconds",
 ]
