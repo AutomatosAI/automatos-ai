@@ -48,8 +48,7 @@ DAILY_DIGEST = "daily_digest"
 # Never 'watcher' or 'mission': each raises its own bell event already (one row per event).
 # Whether watcher and Mission events push to a phone is the owner's decision (K11): not designed here.
 # PRD-268 W3 (K11): a follow-up's one message (services.proactive.follow_up_fire), Auto keeping its word.
-FOLLOW_UP = "follow_up"
-ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST, FOLLOW_UP})
+ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST, "follow_up"})
 NEVER_COALESCED: frozenset[str] = frozenset({DAILY_DIGEST})
 # How a post came to be, when it was the person's own action (PRD-268 K11): a brief on open.
 UNANNOUNCED_VIAS: frozenset[str] = frozenset({VIA_OPEN})
