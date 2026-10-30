@@ -1,9 +1,13 @@
-# PRD-270: Sync with Automatos Cloud — a local install pulls the hosted Marketplace
+# PRD-270: The open Marketplace — anyone can browse it, every local install can sync it
 
-**Status:** Draft for Gerard's review, 30 Oct 2026. Pull only. Publishing from a local install to the Cloud
-Marketplace is a later PRD, after a security review (§3).
+**Status:** Draft for Gerard's review, 30 Oct 2026. Two parts on one public catalogue: (A) the SaaS Marketplace is
+visible to everyone, signed in or not (§5.7); (B) a local install pulls it with **Sync with Automatos Cloud**.
+Pull only. Publishing from a local install to the Cloud Marketplace is a later PRD, after a security review (§3).
 **Why now:** Gerard set up a new self-hosted (VPS) Automatos on 30 Oct: "my marketplace has the defaults, as a open
 source user I think I'd like a button Sync with Automatos cloud, that pulls what's in SaaS … for now have the pull."
+Then: "the marketplace should be visible to everyone … they SHOULD SEE what we offer … but if not logged in and they
+click add to workspace they are taken to the login/signup page … We need to showcase what's in the shop to make
+people come in."
 **Origin:** PRD-233 (29 Aug, owner decision): "Marketplace = two things. The seeded local catalog … offline, no auth,
 stays. The community hub … pulling needs no account and nothing is ever paywalled; publishing needs a free Automatos
 account, and pushes are monitored and approved." The hub is "Planned, not shipped"
@@ -23,6 +27,10 @@ from SaaS, anonymously, and lists it locally. Nothing installs until someone cho
 
 ## 2. Goals
 
+- **Anyone can browse the SaaS Marketplace without an account**: every tab, the Themes storefront with its web and
+  phone screenshots, each item's description. **Add to my workspace** while signed out goes to sign-in / sign-up
+  and, once in, brings the visitor back to that item with the add one click away.
+- Each listing has a shareable link with a preview card (title, description, cover image) when posted anywhere.
 - On a local install, an owner or admin clicks **Sync with Automatos Cloud**; within a few seconds the Themes
   storefront lists every Official theme SaaS lists, tagged **From Automatos Cloud**, with its previews and phone
   screenshots.
@@ -159,7 +167,34 @@ Import writes `owner_type='marketplace'`, `is_approved=true`, `source='cloud'` r
 key", "needs model X"). Before install the user sees the prompt text and the tools and apps the item will use.
 Updates arrive as new versions with an update notice; a sync never overwrites a workspace's installed copy.
 
-### 5.7 Security
+### 5.7 The public Marketplace (SaaS)
+
+The Marketplace is the shop window: a visitor should see what Automatos offers before signing up.
+
+- **Route:** `/marketplace` (and each tab and item link, `/marketplace?tab=themes&item=<id>`) joins `isPublicRoute`
+  in `frontend/middleware.ts` (today's public list at `:11`). A signed-in member sees exactly today's page.
+- **What a visitor sees:** every tab read-only — the Themes storefront (hero, looks, web and phone screenshots,
+  strip), Agents, Playbooks, Packages, Applications, Capabilities, LLMs — and each item's detail. Nothing
+  workspace-scoped: no "In this workspace", no installed list, no update badges, no Publish form, no search of a
+  workspace's own items. A slim header: the Automatos logo, **Sign in**, **Start free**.
+- **Data:** public read endpoints that return catalogue content only, no auth:
+  - themes: the §5.2 catalogue feed and its files route (the same bytes a local install syncs);
+  - the other tabs: `GET /api/public/marketplace/{type}` per tab, the approved `owner_type='marketplace'` rows with
+    only display fields (name, description, category, icon, tags, publisher display name, required apps), never
+    configuration, prompts, steps or ids that a workspace route would take; LLMs: the public catalogue fields.
+  - cached (`Cache-Control: public, max-age=300`), rate-limited per IP, in the route manifest and the authZ sweep as
+    public.
+- **Add to my workspace, signed out:** goes to Clerk's sign-in / sign-up with
+  `redirect_url=/marketplace?tab=<tab>&item=<id>&add=1`. After sign-in (or a new sign-up, which creates the
+  person's first workspace with them as owner), the page opens on that item with the add dialog ready: one click
+  adds it (the normal install, step-up and permission rules unchanged; a member who isn't an admin gets today's
+  "ask an admin" text). Nothing installs without that click.
+- **Sharing:** each item link renders server-side metadata (title, description, `og:image` = the cover) so a link
+  posted in a chat, on LinkedIn or X shows the theme or agent. Images come from the public catalogue files route.
+- **Search engines:** the public pages are indexable (`robots` allows `/marketplace`), with one canonical URL per item.
+- **Local editions:** unchanged (no login exists there); this section is SaaS only.
+
+### 5.8 Security
 
 | Risk | Mitigation |
 |---|---|
@@ -172,6 +207,9 @@ Updates arrive as new versions with an update notice; a sync never overwrites a 
 | Privacy | anonymous GET; no install id; version in the User-Agent only |
 | Overwriting local work | `source='cloud'` rows only; local-origin rows and installed copies are never touched |
 | Revoked content | the existing revocation pull disables it |
+| Public pages leak private data (§5.7) | public endpoints return approved catalogue rows only, display fields only (an allowlist, tested); no workspace, install, user or usage data; publisher shown by display name only |
+| Scraping or load on public endpoints | per-IP rate limit, response caching, page size caps |
+| The `add=1` return link abused | it only opens the add dialog; the install itself is the normal authenticated, permission-checked, step-up route and needs a click |
 
 ## 6. User stories
 
@@ -192,16 +230,32 @@ Updates arrive as new versions with an update notice; a sync never overwrites a 
 - **US-270-06 (docs) — Self-hosting guide.** `self-hosting.md` "community hub" row → Themes shipped, the rest
   planned; `docs/community-marketplace/` gains "Sync with Automatos Cloud".
 
+### Part A: the public Marketplace (SaaS; can run alongside Phase 1, it shares US-270-01/02)
+
+- **US-270-07 (hosted) — Public catalogue reads for every tab.** `GET /api/public/marketplace/{type}` per §5.7;
+  tests: approved marketplace rows only, the display-field allowlist (a test fails if a configuration, prompt,
+  steps, workspace or user field appears), rate limit, cache header, authZ sweep classification.
+- **US-270-08 (web) — `/marketplace` for visitors.** Public route; read-only tabs and storefront from the public
+  endpoints; slim header with Sign in / Start free; no workspace-scoped UI; tests: signed out renders every tab,
+  signed in renders today's page unchanged.
+- **US-270-09 (web) — Add while signed out, resumed after sign-in.** §5.7's `redirect_url` round trip and the add
+  dialog on return; tests: signed out → sign-in URL with the item; signed in with `add=1` → dialog open on that item,
+  nothing installed until the click; a member gets the ask-an-admin text.
+- **US-270-10 (web) — Share cards and indexing.** Per-item metadata and `og:image`, canonical URLs, `robots`.
+
 ### Phase 2: the other types (after Phase 1 merges; one wave)
 
-- **US-270-10** the item bundle format, with fixtures and a parity test. **US-270-11** SaaS exports approved items to
-  the feed. **US-270-12** local import and upsert. **US-270-13** pre-install disclosure (prompt, tools, apps) and
-  update notices. **US-270-14** plugins with their scan report.
+- **US-270-11** the item bundle format, with fixtures and a parity test. **US-270-12** SaaS exports approved items to
+  the feed. **US-270-13** local import and upsert. **US-270-14** pre-install disclosure (prompt, tools, apps) and
+  update notices. **US-270-15** plugins with their scan report.
 
 ## 7. Rollout
 
-Phase 1 ships dark on SaaS (the feed is public but harmless) and on by default on local editions (§8-Q6).
-Gerard's VPS is the first test: Sync, install Arcade, see it update after the next kit merge and Sync.
+Phase 1 and Part A share the public catalogue (US-270-01/02), so they build in one wave: hosted lane (feed, files,
+public reads), local lane (pull, install), web lane (Sync button, public `/marketplace`, sign-in round trip, share
+cards). Gerard's VPS is the first Sync test: Sync, install Arcade, see it update after the next kit merge and Sync.
+The public Marketplace's first test: open `/marketplace` in a private window, browse every tab, click Add on Arcade,
+sign up, land on Arcade with Add ready.
 
 ## 8. Decisions for Gerard (each recommendation stands unless you change it)
 
@@ -215,6 +269,10 @@ Gerard's VPS is the first test: Sync, install Arcade, see it update after the ne
 5. **PRD-233 Q5, the hub's form** — hybrid (rec): official content from GitHub repos through CI (as themes now),
    community content through the SaaS review queue, one public SaaS feed that every install pulls.
 6. **Default** — on for every local install, the button visible (rec); off until an operator sets the URL.
+7. **Where the public Marketplace lives** — the app's own `/marketplace` made public (rec: one codebase, the real
+   storefront, the add flow resumes in place; the product site links to it) vs a copy on the product site.
+8. **After sign-up from Add** — land on the item with the add dialog open (rec) vs land in the Marketplace.
+9. **Which tabs are public** — all of them (rec, "see what we offer") vs Themes, Agents and Playbooks first.
 
 ## 9. Later
 
