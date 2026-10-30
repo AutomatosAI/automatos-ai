@@ -79,15 +79,17 @@ export interface SuggestionActionsProps {
   readonly suggestion: Suggestion
   readonly starting: boolean
   readonly busy: boolean
+  /** Start is the view's one ink primary; false draws it quiet, for a list's other cards. */
+  readonly primary?: boolean
   readonly onStart: () => void
   readonly onHide: (reason?: HideReason) => void
 }
 
 /**
- * Start (the view's one ink primary, with its credits when known) and Hide with its reason menu.
- * Escape closes the menu and puts focus back on Hide.
+ * Start (the view's one ink primary unless `primary` is false, with its credits when known) and Hide with its
+ * reason menu. Escape closes the menu and puts focus back on Hide.
  */
-export function SuggestionActions({ suggestion, starting, busy, onStart, onHide }: SuggestionActionsProps) {
+export function SuggestionActions({ suggestion, starting, busy, primary = true, onStart, onHide }: SuggestionActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const hideButton = useRef<HTMLButtonElement>(null)
   const menuId = useId()
@@ -100,7 +102,14 @@ export function SuggestionActions({ suggestion, starting, busy, onStart, onHide 
   }
   return (
     <div className="flex flex-wrap items-center gap-2" onKeyDown={onKeyDown}>
-      <button type="button" aria-label={startName} aria-busy={starting} disabled={busy} onClick={onStart} className={PRIMARY_BUTTON_CLASS}>
+      <button
+        type="button"
+        aria-label={startName}
+        aria-busy={starting}
+        disabled={busy}
+        onClick={onStart}
+        className={primary ? PRIMARY_BUTTON_CLASS : QUIET_BUTTON_CLASS}
+      >
         Start
         {credits ? <span className="font-normal opacity-80">({credits})</span> : null}
       </button>

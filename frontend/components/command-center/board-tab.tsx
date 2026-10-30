@@ -64,6 +64,7 @@ export function BoardTab() {
   const [search, setSearch] = useState('')
   const [agentFilter, setAgentFilter] = useState<number | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
+  const [fromSuggestions, setFromSuggestions] = useState(false)
   const [openTask, setOpenTask] = useState<BoardTask | null>(null)
   const [focusQuestion, setFocusQuestion] = useState<number | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
@@ -72,6 +73,7 @@ export function BoardTab() {
     agent_id: agentFilter,
     priority: priorityFilter,
     search: search || null,
+    from_suggestions: fromSuggestions,
   })
   const { data: agents } = useAssignableAgents()
   const updateStatus = useUpdateTaskStatus()
@@ -117,6 +119,8 @@ export function BoardTab() {
         agents={agents}
         search={search}
         onSearch={setSearch}
+        fromSuggestions={fromSuggestions}
+        onFromSuggestions={setFromSuggestions}
       />
 
       {isLoading ? (

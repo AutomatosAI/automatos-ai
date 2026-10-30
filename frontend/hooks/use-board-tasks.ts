@@ -19,6 +19,17 @@ export interface BoardFilters {
   type?: string | null
   search?: string | null
   period?: string
+  /** PRD-268 US-W01a: only the tickets a suggestion's Start filed (source_type 'suggestion'). */
+  from_suggestions?: boolean
+}
+
+/** What filed a ticket from a suggestion's Start (orchestrator services/proactive/start_ticket.py SOURCE_SUGGESTION). */
+export const SUGGESTION_SOURCE = 'suggestion'
+
+/** The board's client-side filters: the type (mission, playbook, task) and "From suggestions". */
+export function keptByFilters(task: BoardTask, filters?: BoardFilters): boolean {
+  if (filters?.type && task.type !== filters.type) return false
+  return !filters?.from_suggestions || task.source_type === SUGGESTION_SOURCE
 }
 
 interface BoardResponse {
@@ -100,13 +111,10 @@ export function useBoardTasks(filters?: BoardFilters) {
   // Top-level = tasks without a parent (children nest under their parent card)
   const topLevelTasks = annotatedTasks.filter((t) => !t.parent_task_id)
 
-  // Group into columns (with client-side type filter)
-  const typeFilter = filters?.type ?? null
+  // Group into columns (with the client-side filters)
   const columns: BoardColumn[] = BOARD_COLUMNS.map((col) => {
     const tasks = topLevelTasks.filter((t) => {
-      // Type filter (client-side — mission, playbook, task)
-      if (typeFilter && t.type !== typeFilter) return false
-
+      if (!keptByFilters(t, filters)) return false
       if (col.status === 'done') {
         return t.status === 'done' || t.status === ('completed' as any)
       }

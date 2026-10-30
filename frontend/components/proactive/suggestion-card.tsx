@@ -40,6 +40,11 @@ export interface SuggestionCardProps {
   readonly onStarted?: (answer: StartAnswer) => void
   /** The pinned line's title opens the full card. */
   readonly onOpen?: () => void
+  /**
+   * Start is the view's one ink primary (the default). A surface that lists several cards passes false on all
+   * but one, so its view keeps one primary (US-W01a).
+   */
+  readonly primary?: boolean
   /** What a surface draws under the text, such as the evidence links. */
   readonly children?: ReactNode
   readonly className?: string
@@ -50,6 +55,7 @@ const CLOSED: ReadonlySet<SuggestionPhase> = new Set<SuggestionPhase>(['started'
 interface ShownProps {
   readonly suggestion: Suggestion
   readonly card: SuggestionCardState
+  readonly primary: boolean
   readonly onOpen?: () => void
   readonly children?: ReactNode
   readonly className?: string
@@ -63,16 +69,23 @@ function StartedLine() {
   )
 }
 
-function Actions({ suggestion, card }: Pick<ShownProps, 'suggestion' | 'card'>) {
+function Actions({ suggestion, card, primary }: Pick<ShownProps, 'suggestion' | 'card' | 'primary'>) {
   return (
     <>
-      <SuggestionActions suggestion={suggestion} starting={card.phase === 'starting'} busy={card.busy} onStart={card.start} onHide={card.hide} />
+      <SuggestionActions
+        suggestion={suggestion}
+        starting={card.phase === 'starting'}
+        busy={card.busy}
+        primary={primary}
+        onStart={card.start}
+        onHide={card.hide}
+      />
       <RefusedLine text={card.refused} />
     </>
   )
 }
 
-function FullCard({ suggestion, card, children, className }: ShownProps) {
+function FullCard({ suggestion, card, primary, children, className }: ShownProps) {
   const startDoes = startDoesOf(suggestion.proposed_action)
   return (
     <article
@@ -92,7 +105,7 @@ function FullCard({ suggestion, card, children, className }: ShownProps) {
           </div>
           {children}
           {startDoes ? <p className="text-xs text-muted-foreground">{startDoes}</p> : null}
-          <Actions suggestion={suggestion} card={card} />
+          <Actions suggestion={suggestion} card={card} primary={primary} />
         </>
       )}
       <AiCaption className="block" />
@@ -114,7 +127,7 @@ function PinnedTitle({ title, onOpen }: { readonly title: string; readonly onOpe
   )
 }
 
-function PinnedLine({ suggestion, card, onOpen, className }: ShownProps) {
+function PinnedLine({ suggestion, card, primary, onOpen, className }: ShownProps) {
   return (
     <div
       role="group"
@@ -130,7 +143,7 @@ function PinnedLine({ suggestion, card, onOpen, className }: ShownProps) {
       ) : (
         <>
           <PinnedTitle title={suggestion.title} onOpen={onOpen} />
-          <Actions suggestion={suggestion} card={card} />
+          <Actions suggestion={suggestion} card={card} primary={primary} />
         </>
       )}
       <AiCaption className="shrink-0" />
@@ -139,11 +152,11 @@ function PinnedLine({ suggestion, card, onOpen, className }: ShownProps) {
 }
 
 /** A suggestion with Start and Hide, as a card or as the pinned line. */
-export function SuggestionCard({ suggestion, variant = 'card', via = 'web', onStarted, ...shown }: SuggestionCardProps) {
+export function SuggestionCard({ suggestion, variant = 'card', via = 'web', onStarted, primary = true, ...shown }: SuggestionCardProps) {
   const card = useSuggestionCard(suggestion, via, onStarted)
   if (CLOSED.has(card.phase)) {
     return variant === 'pinned' ? null : <ClosedLine suggestion={suggestion} phase={card.phase as ClosedPhase} />
   }
   const Shown = variant === 'pinned' ? PinnedLine : FullCard
-  return <Shown suggestion={suggestion} card={card} {...shown} />
+  return <Shown suggestion={suggestion} card={card} primary={primary} {...shown} />
 }
