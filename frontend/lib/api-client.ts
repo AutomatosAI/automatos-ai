@@ -1233,16 +1233,24 @@ export interface ThemeReviewReport extends ThemeReviewPackage {
 /** POST …/report-note: the version with the note just stored. */
 export interface ThemeReportNoteResult extends ThemeReviewPackage { reportNote: ThemeReportNote }
 
-/** POST …/approve: the approved version, its signature request and how many installs were offered it. */
+/**
+ * POST …/approve: the approved version, its signature request, how many installs were offered it and
+ * how many of those (the unpinned ones the server could move) now run it (services/themes/auto_update.py).
+ */
 export interface ThemeApprovalResult extends ThemeReviewPackage {
-  signatureRequest: ThemeSignatureRequest; updatesOffered: number
+  signatureRequest: ThemeSignatureRequest; updatesOffered: number; updatesApplied: number
 }
 
 /** POST …/reject: the rejected version and the reason as stored. */
 export interface ThemeRejectionResult extends ThemeReviewPackage { reason: string }
 
-/** POST …/deactivate: the version taken down; its digest has a `disable` revocation. */
-export interface ThemeDeactivationResult extends ThemeReviewPackage { reason: string; revocation: 'disable' }
+/**
+ * POST …/deactivate: the version taken down; its digest has a `disable` revocation, and
+ * `installsRolledBack` installs on it went back to the previous listed version.
+ */
+export interface ThemeDeactivationResult extends ThemeReviewPackage {
+  reason: string; revocation: 'disable'; installsRolledBack: number
+}
 
 /**
  * POST …/signature (signing.py store_signature): stored only once an active Automatos signing key

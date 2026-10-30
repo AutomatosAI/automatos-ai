@@ -249,6 +249,21 @@ describe('the workspace theme settings (A-07e)', () => {
     )
   })
 
+  it('says Marketplace themes update themselves and a pin holds the version', async () => {
+    api.getThemeSettings.mockResolvedValue(
+      themeSettings({
+        pins: [{ installId: INSTALL_ID, themeId: 'acme/hello', version: '1.0.0', pinnedVersion: null, pinnableVersions: ['1.0.0'] }],
+      }),
+    )
+    await renderOwnerTab()
+
+    expect(
+      await screen.findByText(
+        'Marketplace themes update themselves to each new version. A pinned theme stays on that version until it is unpinned.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('changes who may install', async () => {
     api.putThemeSettings.mockResolvedValue(themeSettings({ installRole: 'owner' }))
     await renderOwnerTab()

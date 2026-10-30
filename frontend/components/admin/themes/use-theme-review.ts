@@ -39,9 +39,11 @@ export const themeReviewKeys = {
   reviewPackage: (packageId: string) => ['admin-theme-review-package', packageId] as const,
 }
 
-export const APPROVED = 'Version approved. Its signature request is open below.'
+export const APPROVED =
+  'Version approved. Unpinned installs of an older version move to it. Its signature request is open below.'
 export const REJECTED = 'Version rejected.'
-export const DEACTIVATED = 'Version deactivated: every install falls back to its base on the next load.'
+export const DEACTIVATED =
+  'Version deactivated. Unpinned installs on it go back to the previous listed version, where there is one; the rest fall back to their base on the next load.'
 export const NOTE_SAVED = 'Review note saved.'
 export const SIGNATURE_SAVED = 'Signature stored.'
 

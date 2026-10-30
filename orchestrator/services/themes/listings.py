@@ -29,7 +29,8 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   rollback of a listing install are A-07b's routes; this module only creates the row. An
   install of an older version gets the newest compatible one as its ``pending_package_id``, so
   ``GET /api/themes/installed`` shows the update too; a version approved later is offered to
-  existing installs by ``listing_updates.offer_listed_update``.
+  existing installs by ``listing_updates.offer_listed_update``, and the unpinned ones move to it
+  (``auto_update.apply_listed_update``).
 
 Services raise ``ThemeInstallError`` (status and plain message); nothing here commits.
 """

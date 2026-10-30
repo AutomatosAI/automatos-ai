@@ -18,6 +18,19 @@ export const NEEDS_UPDATE = 'Needs update'
 export const NEEDS_UPDATE_HINT =
   'A core page this theme copies changed in this release. It may look out of date until its author updates it.'
 export const UPDATE_AVAILABLE = 'Update available'
+/**
+ * A Marketplace install that is not pinned moves to each version approved after it by itself, and back
+ * to the previous listed one when its version is taken down (services/themes/auto_update.py). A pin
+ * holds the install on its version: it keeps "Update available" instead.
+ */
+export const UPDATES_ITSELF = 'Updates itself; pin to hold'
+export const UPDATES_ITSELF_HINT =
+  'Each new Marketplace version of this theme replaces this one once it is approved. Pin a version under Pinned versions to keep it.'
+/** The note of the Pinned versions list (theme-pins.tsx). */
+export const PINS_NOTE =
+  'Marketplace themes update themselves to each new version. A pinned theme stays on that version until it is unpinned.'
+/** `InstalledTheme.ownerType` of a version installed from the Marketplace (services/themes/choices.py). */
+const MARKETPLACE_OWNER = 'marketplace'
 export const DEFAULT_BADGE = 'Workspace default'
 export const IN_USE = 'In use'
 export const MEMBERS_SEE_ONLY = 'A workspace owner or admin installs, updates and removes themes.'
@@ -154,6 +167,11 @@ export function signatureWords(verdict: ThemeSignatureVerdict | null | undefined
  */
 export function canBeDefault(install: Pick<InstalledTheme, 'private'>): boolean {
   return !install.private
+}
+
+/** True for a Marketplace install with no pin: the server moves it to each new version by itself. */
+export function updatesItself(install: Pick<InstalledTheme, 'ownerType' | 'pinnedVersion'>): boolean {
+  return install.ownerType === MARKETPLACE_OWNER && !install.pinnedVersion
 }
 
 /** A revocation that stops the theme from running: it can't be chosen. */

@@ -16,7 +16,9 @@ Pins (plan §2.4 W-C1 row, §2.6 C1-wire; Gerard D3, 19 Oct):
 * the review config names are on ``config`` and in ``reports/config-surface.json``, with the
   defaults the lanes read (Q9 off; the LLM chunking of ``llm_stage.py``), and none names a key;
 * the seam: approving a version offers it to the listing installs that run an older one
-  (``listing_updates.offer_listed_update`` called from ``review.approve``).
+  (``listing_updates.offer_listed_update`` called from ``review.approve``) and moves the unpinned
+  ones to it (``auto_update.apply_listed_update``, publish contract D1; the rest of that rule is
+  ``test_prd261_theme_auto_update.py``).
 
 Submit's default review stage (C-02a, wired here) is proven on the route in
 ``test_prd261_theme_submit.py``; ``sdk-surface.json`` against ``frontend/`` in
@@ -368,7 +370,7 @@ def _version(db, version, status):
     return row
 
 
-def test_approving_a_version_offers_it_to_older_listing_installs(db):
+def test_approving_a_version_offers_it_to_older_listing_installs_and_moves_the_unpinned_one(db):
     old = _version(db, "1.0.0", "approved")
     install = ThemeInstallation(workspace_id=uuid.uuid4(), theme_id=PLAY, package_id=old.id)
     db.add(install)
@@ -381,5 +383,6 @@ def test_approving_a_version_offers_it_to_older_listing_installs(db):
     db.commit()
 
     db.refresh(install)
-    assert answer["updatesOffered"] == 1 and answer["status"] == "approved"
-    assert install.pending_package_id == new.id and install.package_id == old.id  # offered, never switched
+    assert answer["updatesOffered"] == 1 and answer["updatesApplied"] == 1 and answer["status"] == "approved"
+    # Offered, then moved by the platform (D1): the old version is the rollback target, the offer is spent.
+    assert (install.package_id, install.previous_package_id, install.pending_package_id) == (new.id, old.id, None)
