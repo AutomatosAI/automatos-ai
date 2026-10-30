@@ -97,6 +97,8 @@ export function SuggestionActions({ suggestion, starting, busy, primary = true, 
   const startName = `Start: ${suggestion.title}${credits ? ` (${credits})` : ''}`
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Escape' || !menuOpen) return
+    // Escape is spent on the menu, so a surface around the card (the pinned card, US-W01b) leaves it alone.
+    event.preventDefault()
     setMenuOpen(false)
     hideButton.current?.focus()
   }
