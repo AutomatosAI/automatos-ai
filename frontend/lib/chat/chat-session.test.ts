@@ -8,6 +8,7 @@ import {
   MAX_TRACKED_THREADS,
   chatSessionKey,
   isChatUnread,
+  isNothingOpen,
   loadChatSession,
   mergeServerSession,
   saveChatSession,
@@ -19,6 +20,7 @@ import {
   withChatTouched,
   withDraft,
   withDraftClosed,
+  withDraftStarted,
   withTabClosed,
   withThreadRead,
   withTitles,
@@ -128,6 +130,27 @@ describe('tabs', () => {
     expect(over.openChatIds).toContain('c0') // the tab the user was just on — protected
     expect(over.openChatIds).not.toContain('c1') // oldest unprotected — evicted
     expect(over.openChatIds[over.openChatIds.length - 1]).toBe('extra')
+  })
+})
+
+describe('a chat the person started (the cold start gives way)', () => {
+  it('typing or sending in the blank chat shown while nothing is open makes it the draft', () => {
+    expect(isNothingOpen(EMPTY_CHAT_SESSION)).toBe(true)
+    const started = withDraftStarted(EMPTY_CHAT_SESSION, NOW)
+    expect(started).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: [], lastActiveAt: NOW })
+    expect(isNothingOpen(started)).toBe(false)
+    expect(sessionTabs(started)).toEqual([{ id: null, isDraft: true }]) // the same one tab on screen
+    expect(EMPTY_CHAT_SESSION.draftOpen).toBe(false) // input untouched
+  })
+
+  it('anything already open stays exactly as it is (same reference)', () => {
+    const inConversation = open(['c1'])
+    expect(isNothingOpen(inConversation)).toBe(false)
+    expect(withDraftStarted(inConversation, NOW + 10)).toBe(inConversation)
+    const drafting = withDraft(inConversation, NOW + 11)
+    expect(withDraftStarted(drafting, NOW + 12)).toBe(drafting)
+    const loneDraft = withDraft(EMPTY_CHAT_SESSION, NOW)
+    expect(withDraftStarted(loneDraft, NOW + 1)).toBe(loneDraft)
   })
 })
 
