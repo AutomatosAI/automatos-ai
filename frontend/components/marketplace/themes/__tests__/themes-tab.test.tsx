@@ -1,6 +1,8 @@
 /**
- * PRD-261 C-04b — the Marketplace's Themes tab: the listing grid, the detail, "Add to my
- * workspace" then "Use this theme", and A-07d's Install theme and installed list reused on it.
+ * PRD-261 C-04b — the Marketplace's Themes tab (the storefront, 30 Oct 2026): the strip of listings,
+ * the detail (the hero's Details), "Add to my workspace" then "Use this theme", Publish theme in its
+ * dialog, and A-07d's Install theme and installed list reused on it. The hero itself, its looks,
+ * its phone frame and the installed rows' View are storefront.test.tsx.
  *
  * `@clerk/nextjs` is A-07d's double (components/settings/themes/__tests__/install-update.test.tsx):
  * it does what Clerk's `createReverificationHandler` does without `onNeedsReverification`, so a
@@ -71,6 +73,7 @@ import {
 } from '../listing-format'
 import { PENDING_REVIEW } from '../publish-result'
 import { PUBLISH_THEME, SUBMIT_FOR_REVIEW } from '../publish-theme'
+import { DETAILS, SUBMIT_PACKAGE } from '../storefront/copy'
 import { MarketplaceThemesTab } from '../tab'
 import { FILES, LISTED_PACKAGE_ID, LISTING_ID, LISTING_INSTALL_ID, listing, listingDetail } from './listing-fixtures'
 
@@ -85,10 +88,16 @@ const INSTALLED_STATE = {
   installId: LISTING_INSTALL_ID, packageId: LISTED_PACKAGE_ID, version: '1.2.0', fromListing: true, updatePackageId: null,
 }
 
+/** The hero opens on the first listing (Aurora); its Details opens C-04b's detail dialog. */
+async function openDetails() {
+  const hero = await screen.findByTestId('storefront-hero')
+  fireEvent.click(within(hero).getByRole('button', { name: DETAILS }))
+  return screen.findByTestId('theme-listing-detail')
+}
+
 async function openAurora() {
   renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
-  fireEvent.click(await screen.findByTestId(`theme-listing-${LISTING_ID}`))
-  const detail = await screen.findByTestId('theme-listing-detail')
+  const detail = await openDetails()
   await within(detail).findByRole('region', { name: 'Versions' }) // the listing has loaded
   return detail
 }
@@ -107,8 +116,8 @@ beforeEach(() => {
   api.putThemeChoice.mockResolvedValue({ choice: LISTING_INSTALL_ID })
 })
 
-describe('the listing grid', () => {
-  it('shows each approved theme with its publisher and version, and no count, rating or price', async () => {
+describe('the strip of listings', () => {
+  it('shows each approved theme with its id (its publisher’s) and version, and no count, rating or price', async () => {
     api.getThemeListings.mockResolvedValue({
       listings: [listing(), listing({ listingId: 'automatos.play', themeId: 'automatos/play', name: 'Play', publisher: { name: 'automatos', official: true } })],
     })
@@ -116,21 +125,22 @@ describe('the listing grid', () => {
 
     const card = await screen.findByTestId(`theme-listing-${LISTING_ID}`)
     expect(within(card).getByText('Aurora')).toBeInTheDocument()
-    expect(within(card).getByText('1.2.0')).toBeInTheDocument()
-    expect(within(card).getByText('acme')).toBeInTheDocument()
+    // The publisher is the theme id's first part (listings.py _publisher).
+    expect(within(card).getByText('acme/aurora · 1.2.0')).toBeInTheDocument()
     expect(within(screen.getByTestId('theme-listing-automatos.play')).getByText('Official')).toBeInTheDocument()
     expect(within(card).queryByText('Free')).not.toBeInTheDocument()
     expect(within(card).queryByText(/install(s|ed) \d|rating|★/i)).not.toBeInTheDocument()
   })
 
   it('filters by the Marketplace search box', async () => {
-    api.getThemeListings.mockResolvedValue({
-      listings: [listing(), listing({ listingId: 'nightco.owl', themeId: 'nightco/owl', name: 'Night Owl', description: null })],
-    })
+    const owl = { listingId: 'nightco.owl', themeId: 'nightco/owl', name: 'Night Owl', description: null }
+    api.getThemeListings.mockResolvedValue({ listings: [listing(), listing(owl)] })
+    api.getThemeListing.mockResolvedValue(listingDetail(owl))
     renderWithQuery(<MarketplaceThemesTab searchQuery="owl" />)
 
     expect(await screen.findByTestId('theme-listing-nightco.owl')).toBeInTheDocument()
     expect(screen.queryByTestId(`theme-listing-${LISTING_ID}`)).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('storefront-hero')).getByTestId('storefront-hero-name')).toHaveTextContent('Night Owl')
   })
 
   it('shows the server’s sentence when the Marketplace refuses', async () => {
@@ -257,9 +267,11 @@ describe('who sees what', () => {
     expect(screen.queryByRole('button', { name: INSTALL_THEME })).not.toBeInTheDocument()
     expect(screen.queryByTestId('install-theme-input')).not.toBeInTheDocument()
 
-    // The grid waits for the theme settings (the marketplace switch), so it can come after the list.
-    fireEvent.click(await screen.findByTestId(`theme-listing-${LISTING_ID}`))
-    const detail = await screen.findByTestId('theme-listing-detail')
+    // The storefront waits for the theme settings (the marketplace switch), so it can come after the list.
+    const hero = await screen.findByTestId('storefront-hero')
+    expect(within(hero).getByText(MANAGERS_ADD)).toBeInTheDocument()
+    expect(within(hero).queryByRole('button', { name: ADD_TO_WORKSPACE })).not.toBeInTheDocument()
+    const detail = await openDetails()
     expect(await within(detail).findByText(MANAGERS_ADD)).toBeInTheDocument()
     expect(within(detail).queryByRole('button', { name: ADD_TO_WORKSPACE })).not.toBeInTheDocument()
     expect(api.installThemeListing).not.toHaveBeenCalled()
@@ -275,12 +287,15 @@ describe('Publish theme on the tab', () => {
     duplicate: false,
   }
 
-  it('every member gets C-01b’s form, and it submits through apiClient.submitTheme', async () => {
+  it('every member gets C-01b’s form from Make your own, and it submits through apiClient.submitTheme', async () => {
     workspace.role = 'member'
     api.submitTheme.mockResolvedValue(SUBMISSION)
     renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
 
-    const publish = await screen.findByRole('region', { name: PUBLISH_THEME })
+    expect(screen.queryByRole('region', { name: PUBLISH_THEME })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: SUBMIT_PACKAGE }))
+    const dialog = await screen.findByTestId('publish-theme-dialog')
+    const publish = within(dialog).getByRole('region', { name: PUBLISH_THEME })
     const file = new File(['zip'], 'hello.autotheme', { type: 'application/zip' })
     fireEvent.change(within(publish).getByTestId('publish-theme-input'), { target: { files: [file] } })
     fireEvent.click(within(publish).getByRole('button', { name: SUBMIT_FOR_REVIEW }))
@@ -291,24 +306,28 @@ describe('Publish theme on the tab', () => {
 })
 
 describe('the Marketplace switch', () => {
-  it('off: no grid, no Publish theme and no listing request; private uploads and the list stay', async () => {
+  it('off: no storefront, no Publish theme and no listing request; private uploads and the list stay', async () => {
     api.getThemeSettings.mockResolvedValue(themeSettings({ marketplace: 'off' }))
     renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
 
     expect(await screen.findByTestId('themes-marketplace-off')).toHaveTextContent(MARKETPLACE_OFF_NOTE)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: PUBLISH_THEME })).not.toBeInTheDocument()
-    expect(screen.queryByTestId('theme-listing-grid')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: SUBMIT_PACKAGE })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('theme-storefront')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('theme-listing-strip')).not.toBeInTheDocument()
     const manage = screen.getByRole('region', { name: INSTALLED_HEADING })
     expect(within(manage).getByRole('button', { name: INSTALL_THEME })).toBeInTheDocument()
     expect(api.getThemeListings).not.toHaveBeenCalled()
   })
 
-  it('on: the grid and Publish theme show, and no off note', async () => {
+  it('on: the storefront and the way to Publish theme show, and no off note', async () => {
     renderWithQuery(<MarketplaceThemesTab searchQuery="" />)
 
     expect(await screen.findByTestId(`theme-listing-${LISTING_ID}`)).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: PUBLISH_THEME })).toBeInTheDocument()
+    expect(screen.getByTestId('storefront-hero')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: SUBMIT_PACKAGE }))
+    expect(await screen.findByRole('region', { name: PUBLISH_THEME })).toBeInTheDocument()
     expect(screen.queryByTestId('themes-marketplace-off')).not.toBeInTheDocument()
   })
 })
