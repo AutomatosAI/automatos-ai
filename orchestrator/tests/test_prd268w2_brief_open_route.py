@@ -20,6 +20,11 @@ Postgres with committing sessions. Proven here:
   refused; a paired device on the local edition opens its own person's brief;
 * a build or post that fails is 503, gives the claim back (the next open posts), and is logged
   by its class only;
+* P268W2-RVW-1: a claim older than ``BRIEF_CLAIM_STALE_SECONDS`` with no message (its claimant
+  died before its post) is taken over by the next open, which posts one brief, and by exactly
+  one of three opens released together; a younger one answers pending; a winner whose day was
+  taken over while it built posts nothing (it answers the taker's message), and its failure
+  gives back nothing;
 * the route is a plain ``def``, gated by ``require_workspace_permission``, registered, in the
   route manifest, and listed in discovery as ``brief``.
 
@@ -609,3 +614,100 @@ def test_the_route_is_a_plain_def_gated_registered_in_the_manifest_and_listed_in
     assert manifest["route_count"] == len(manifest["routes"])
     assert discovery.CAPABILITY_ROUTES["brief"] == ("POST", PATH)
     assert "brief" not in discovery.CONFIGURED_CAPABILITIES  # listed whenever this build runs
+
+
+# --------------------------------------------------------------------------- a stranded claim (P268W2-RVW-1)
+
+
+def _stale_claim(new_session, ws, user_pk, age=None):
+    """A claim on the person's day, ``age`` seconds old (past the setting unless given), with no
+    message: its claimant died between the claim and the post. Its ``posted_at``."""
+    stale = int(config.BRIEF_CLAIM_STALE_SECONDS)
+    with new_session() as s:
+        held = s.execute(text(
+            "INSERT INTO mobile_digest_posts (workspace_id, user_id, local_date, posted_at) "
+            "VALUES (CAST(:w AS uuid), :u, :d, now() - make_interval(secs => :age)) RETURNING posted_at"),
+            {"w": ws, "u": user_pk, "d": TODAY, "age": stale + 60 if age is None else age}).scalar()
+        s.commit()
+    return held
+
+
+def test_an_open_over_a_stale_claim_with_no_message_posts_one_brief(cafe, held, new_session):
+    _stale_claim(new_session, cafe.ws, cafe.ana.pk)
+
+    first = _open(new_session, _ctx(cafe.ana, cafe.ws))
+    again = _open(new_session, _ctx(cafe.ana, cafe.ws))
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert first.json() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": True}
+    assert again.json() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": False}
+    assert brief.source["via"] == VIA_OPEN and brief.user_id == cafe.ana.pk
+    assert _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)] and held.notices == []
+
+
+def test_an_open_over_a_claim_younger_than_the_setting_answers_pending_and_posts_nothing(cafe, held, new_session):
+    _stale_claim(new_session, cafe.ws, cafe.ana.pk, age=int(config.BRIEF_CLAIM_STALE_SECONDS) - 60)
+
+    response = _open(new_session, _ctx(cafe.ana, cafe.ws))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"posted": False, "pending": True}
+    assert _briefs(new_session, cafe.ws) == [] and held.reads == []
+    assert _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]
+
+
+def test_three_openers_released_together_against_one_stale_claim_post_exactly_one_message(cafe, new_session):
+    _stale_claim(new_session, cafe.ws, cafe.ana.pk)
+    ctx = _ctx(cafe.ana, cafe.ws)
+
+    answers = _all_at_once([lambda: _open(new_session, ctx).json() for _ in range(3)])
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert [answer.get("posted") for answer in answers].count(True) == 1
+    for answer in answers:
+        assert answer in ({"chat_id": brief.chat_id, "message_id": brief.id, "posted": answer.get("posted")},
+                          {"posted": False, "pending": True})
+    assert _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]
+
+
+def _taken_over_while_building(cafe, new_session, monkeypatch, failure=None):
+    """The winner's open, whose claim goes stale at once: while it builds, another open takes the
+    day over and posts. ``failure`` is raised in the winner's build after that. The winner's
+    response and the taker's answer."""
+    monkeypatch.setattr(config, "BRIEF_CLAIM_STALE_SECONDS", 0)
+    builds, taker = [], []
+
+    def read_digest(db, workspace_id):
+        builds.append(str(workspace_id))
+        if len(builds) == 1:  # the winner's build; the taker's own build is the second
+            taker.append(on_open.open_brief(new_session(), DuePerson(UUID(cafe.ws), cafe.ana.pk, TODAY, LISBON, "en")))
+            if failure is not None:
+                raise failure
+        return dict(READ)
+
+    monkeypatch.setattr(build, "read_digest", read_digest)
+    return _open(new_session, _ctx(cafe.ana, cafe.ws)), taker[0]
+
+
+def test_a_winner_whose_day_was_taken_over_while_it_built_posts_nothing(cafe, new_session, monkeypatch, caplog):
+    with caplog.at_level(logging.INFO):
+        winner, taker = _taken_over_while_building(cafe, new_session, monkeypatch)
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert taker.to_dict() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": True}
+    assert winner.status_code == 200, winner.text
+    assert winner.json() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": False}
+    assert "LeaseLost" in caplog.text and PROSE not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records if record.name == on_open.__name__)
+    assert _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]
+
+
+def test_a_winner_whose_day_was_taken_over_and_then_fails_gives_back_nothing(cafe, new_session, monkeypatch):
+    winner, taker = _taken_over_while_building(cafe, new_session, monkeypatch, RuntimeError(f"[parameters: {PROSE}]"))
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert winner.status_code == 503
+    assert winner.json() == {"code": "open_unavailable", "detail": say("en", "open_unavailable")}
+    assert taker.to_dict()["message_id"] == brief.id
+    assert _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]  # the taker's claim, never deleted
+

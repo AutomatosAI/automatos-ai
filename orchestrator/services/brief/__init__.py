@@ -7,7 +7,8 @@
 * ``build``: ``build_brief``, which assembles them with Auto's Read, folds each section and
   writes the spoken words;
 * ``claim``: one brief per person per local date, shared by the scheduled digest and the brief
-  on open (``claim_brief``, ``todays_brief_message``, ``post_brief``);
-* ``on_open``: ``open_brief``, the brief on open for one person and local date (the claim won,
-  taken or pending), behind ``POST /api/proactive/brief/open``.
+  on open (``claim_brief``, ``todays_brief_message``, ``post_brief``), the claim a lease on its
+  ``posted_at`` that a stale claim's taker holds next (P268W2-RVW-1);
+* ``on_open``: ``open_brief``, the brief on open for one person and local date (the claim won or
+  taken over, taken, or pending), behind ``POST /api/proactive/brief/open``.
 """

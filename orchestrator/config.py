@@ -2258,6 +2258,17 @@ class Config:
     # "Send me today's brief now" (POST /api/v1/mobile/digest/now): one per person at most this
     # many seconds apart, at least one.
     DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
+    # PRD-268 (P268W2-RVW-1): a brief's claim (mobile_digest_posts.posted_at) older than this many
+    # seconds, with no brief posted for its day, was left by a claimant that died between the claim
+    # and the post; the next open or tick takes it over (services.mobile.digest.take_over). The
+    # build's one model call is Auto's Read (services.digest_service.generate_digest): 180 s per
+    # try on the OpenAI-compatible clients (core/llm/clients/openai_compatible_client.py
+    # DEFAULT_TIMEOUT_SECONDS) with the SDK's two retries, 540 s in all, under this default. The
+    # Anthropic client (the platform default, core/llm/defaults.py) sets no timeout, so its
+    # SDK's own 600 s per try and two retries hold, which this default does not outlast. A
+    # winner still building when its claim is taken over checks the claim before it posts and
+    # posts nothing, so a call that outlasts this costs a second build, never a second brief.
+    BRIEF_CLAIM_STALE_SECONDS: int = max(60, int(os.getenv("BRIEF_CLAIM_STALE_SECONDS", "600")))
 
     # =============================================================================
     # PRD-268 Proactive Auto: check-ins that suggest

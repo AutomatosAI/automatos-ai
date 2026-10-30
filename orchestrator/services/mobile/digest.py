@@ -16,7 +16,12 @@
    (``INSERT … ON CONFLICT DO NOTHING``, committed): a second claim from any tick, worker or
    replica posts nothing. Several phones make one digest. The brief on open
    (``services.brief.claim``, PRD-268 K11) takes the same claim, so a person gets one brief a
-   day, whichever comes first.
+   day, whichever comes first. The claim is a lease on its ``posted_at`` (PRD-268
+   P268W2-RVW-1): a claimant that loses the INSERT while the day's brief is not posted takes a
+   claim older than ``config.BRIEF_CLAIM_STALE_SECONDS`` over (``take_over``, one
+   compare-and-set), so a claimant that died before its post never leaves the day without a
+   brief; and a claimant posts only while the claim is still the one it holds (``still_held``,
+   just before the post), so a takeover never makes a second brief.
 4. The text is ``services.digest_service.generate_digest`` (Auto's Read, cached per workspace
    state; once per workspace per run), booked to the workspace like the Command Center's. The
    brief (``services.brief.build.build_brief``, ``Brief@1``) is built over it for the person, in
@@ -24,8 +29,9 @@
 5. ``deliver_background_message`` posts it as Auto's message in the person's Auto thread:
    ``[text(Auto's Read), brief@1]``, origin ``daily_digest``, its local date and via
    ``schedule``. That raises ``auto_message`` (US-012b; never coalesced), so the phone's push
-   carries it (D24). A build or post that fails releases the claim, so a later tick in the
-   window, or the person's next open, tries again.
+   carries it (D24). A build or post that fails gives back the claim it holds (``release``
+   with its ``posted_at``), so a later tick in the window, or the person's next open, tries
+   again.
 
 ``run_digests`` is async, on the leader's loop; every database step (and the digest's own
 snapshot) runs in a worker thread through ``anyio.to_thread.run_sync``, each on a session of
@@ -49,12 +55,13 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from functools import partial
 from itertools import groupby
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, func, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -125,6 +132,10 @@ class DuePerson:
     local_date: date
     zone: Optional[str] = field(default=None, compare=False)
     locale: Optional[str] = field(default=None, compare=False)
+
+
+class LeaseLost(RuntimeError):
+    """The day's claim was taken over before this claimant's post (P268W2-RVW-1): it posts nothing."""
 
 
 def _now() -> datetime:
@@ -246,22 +257,80 @@ def _claim_filter(person: DuePerson) -> tuple:
     )
 
 
-def claim(db: Session, person: DuePerson) -> bool:
-    """Claim the person's digest for their local date, committed; False when it was claimed already."""
+def lease(db: Session, person: DuePerson) -> Optional[datetime]:
+    """Claim the person's day, committed: the claim's ``posted_at`` (the lease this claimant
+    holds), or None when it was claimed already."""
     statement = (
         pg_insert(MobileDigestPost)
         .values(workspace_id=person.workspace_id, user_id=person.user_id, local_date=person.local_date)
         .on_conflict_do_nothing(index_elements=["workspace_id", "user_id", "local_date"])
-        .returning(MobileDigestPost.user_id)
+        .returning(MobileDigestPost.posted_at)
     )
-    won = db.execute(statement).first() is not None
+    held = db.execute(statement).scalar()
     db.commit()
-    return won
+    return held
 
 
-def release(db: Session, person: DuePerson) -> None:
-    """Give the claim back (the post did not land), committed, so a later tick tries again."""
-    db.query(MobileDigestPost).filter(*_claim_filter(person)).delete(synchronize_session=False)
+def claim(db: Session, person: DuePerson) -> bool:
+    """Claim the person's digest for their local date, committed; False when it was claimed already."""
+    return lease(db, person) is not None
+
+
+def take_over(db: Session, person: DuePerson) -> Optional[datetime]:
+    """Take the person's day over from a claimant that died before its post, committed: one
+    compare-and-set on a claim whose ``posted_at`` is older than ``BRIEF_CLAIM_STALE_SECONDS``.
+
+    The new ``posted_at`` (the lease this claimant now holds) for the one claimant whose UPDATE
+    returns the row; None for every other, and while the claim is fresh. Only a claimant that
+    lost the claim and found no day's message calls it: a posted day's claim goes stale too, so
+    a day whose message is gone (the person deleted it or its thread) is taken over and posted
+    again, once per stale interval at most.
+    """
+    stale = timedelta(seconds=int(config.BRIEF_CLAIM_STALE_SECONDS))
+    statement = (
+        update(MobileDigestPost)
+        .where(*_claim_filter(person), MobileDigestPost.posted_at < func.now() - stale)
+        .values(posted_at=func.now())
+        .returning(MobileDigestPost.posted_at)
+        .execution_options(synchronize_session=False)
+    )
+    held = db.execute(statement).scalar()
+    db.commit()
+    return held
+
+
+def still_held(db: Session, person: DuePerson, held: datetime) -> datetime:
+    """Just before the post: the claim, while its ``posted_at`` is still ``held``, stamped with
+    this moment and committed, so no takeover can land between this look and the post.
+
+    The new ``posted_at`` (the lease now held). Raises ``LeaseLost`` when the day was taken over
+    or given back. A takeover racing it waits on the row and then finds it fresh, or wins first
+    and this look finds a ``posted_at`` that is not ``held``.
+    """
+    statement = (
+        update(MobileDigestPost)
+        .where(*_claim_filter(person), MobileDigestPost.posted_at == held)
+        .values(posted_at=func.clock_timestamp())
+        .returning(MobileDigestPost.posted_at)
+        .execution_options(synchronize_session=False)
+    )
+    stamped = db.execute(statement).scalar()
+    db.commit()
+    if stamped is None:
+        raise LeaseLost("the day's claim was taken over")
+    return stamped
+
+
+def release(db: Session, person: DuePerson, *, held: Optional[datetime] = None) -> None:
+    """Give the claim back (the post did not land), committed, so a later tick tries again.
+
+    With ``held`` (the ``posted_at`` the releaser holds), only while the claim is still that
+    lease: a claimant whose day was taken over never deletes the taker's claim.
+    """
+    query = db.query(MobileDigestPost).filter(*_claim_filter(person))
+    if held is not None:
+        query = query.filter(MobileDigestPost.posted_at == held)
+    query.delete(synchronize_session=False)
     db.commit()
 
 
@@ -320,8 +389,36 @@ def post_brief_message(db: Session, person: DuePerson, brief: Mapping[str, Any],
     """Post the brief into the person's Auto thread: ``[text(prose), brief@1]`` with
     ``brief_source``; the saved message, or None when it did not land."""
     recorded = recorded_person(db, person.user_id)
-    if recorded is None:
-        return None
+    return _deliver(db, person, recorded, brief, via) if recorded is not None else None
+
+
+def post_held_brief(
+    db: Session, person: DuePerson, brief: Mapping[str, Any], via: str, held: datetime,
+) -> Optional[Any]:
+    """``post_brief_message`` while this claimant still holds the day (``still_held``, just before
+    the post): the saved message, or None when it did not land, the claim then given back.
+
+    Raises ``LeaseLost`` when the day was taken over: nothing is posted or given back. A raise
+    before the look leaves the claim at ``held`` for the caller to give back; past it, the claim
+    the look stamped is given back here, on a clean session, whether the delivery raised or did
+    not land.
+    """
+    recorded = recorded_person(db, person.user_id)
+    stamped = still_held(db, person, held)
+    message = None
+    try:
+        message = _deliver(db, person, recorded, brief, via) if recorded is not None else None
+    finally:
+        if message is None:
+            db.rollback()
+            release(db, person, held=stamped)
+    return message
+
+
+def _deliver(
+    db: Session, person: DuePerson, recorded: str, brief: Mapping[str, Any], via: Optional[str],
+) -> Optional[Any]:
+    """``deliver_background_message`` (it never raises) as ``recorded``, then the live notice."""
     message = deliver_background_message(
         db,
         workspace_id=person.workspace_id,
@@ -374,31 +471,56 @@ async def _generated(factory: SessionFactory, workspace_id: uuid.UUID) -> Dict[s
         return {}
 
 
-async def _post_or_release(factory: SessionFactory, person: DuePerson, read: Mapping[str, Any]) -> str:
-    """Build and post one claimed brief; a build or post that does not land gives the claim back."""
+def _hold(db: Session, person: DuePerson) -> Optional[datetime]:
+    """The lease this run holds on the person's day: the claim won, else a stale claim taken over
+    while the day's message is not there; None when another claimant has the day."""
+    held = lease(db, person)
+    if held is not None:
+        return held
+    # services.brief.claim imports this module, so its read is imported here, at first use.
+    from services.brief.claim import todays_brief_message
+
+    posted = todays_brief_message(db, person.workspace_id, person.user_id, person.local_date)
+    return take_over(db, person) if posted is None else None
+
+
+def _post_held(db: Session, person: DuePerson, read: Mapping[str, Any], held: datetime) -> str:
+    """Build the person's brief over Auto's Read and post it via schedule while this run still
+    holds the day: POSTED, or RELEASED when the post did not land (the claim given back)."""
+    brief = brief_of(db, person, read)
+    return POSTED if post_held_brief(db, person, brief, VIA_SCHEDULE, held) is not None else RELEASED
+
+
+async def _post_or_release(factory: SessionFactory, person: DuePerson, read: Mapping[str, Any], held: datetime) -> str:
+    """Build and post one held brief: POSTED; TAKEN when the day was taken over before the post
+    (nothing posted, nothing given back); RELEASED when the build or post did not land (the
+    claim this run holds given back)."""
     try:
-        posted = _said(read) and bool(await _in_thread(factory, _post, person, read, VIA_SCHEDULE))
+        if _said(read):
+            return await _in_thread(factory, _post_held, person, read, held)
+    except LeaseLost as lost:
+        logger.warning("Daily digest: the brief for person %s in %s was taken over (%s)",
+                       person.user_id, person.workspace_id, type(lost).__name__)
+        return TAKEN
     except Exception as failure:  # noqa: BLE001 — logged by class only (docstring); the claim is given back
         logger.error("Daily digest: the brief for person %s in %s failed (%s)",
                      person.user_id, person.workspace_id, type(failure).__name__)
-        posted = False
-    if posted:
-        return POSTED
-    await _in_thread(factory, release, person)
+    await _in_thread(factory, partial(release, held=held), person)
     return RELEASED
 
 
 async def _serve_workspace(factory: SessionFactory, workspace_id: uuid.UUID, people: Sequence[DuePerson]) -> Counter:
-    """Claim and post each due person's brief; Auto's Read is made once, at the first claim won."""
+    """Hold and post each due person's brief; Auto's Read is made once, at the first day held."""
     outcomes: Counter = Counter()
     read: Optional[Dict[str, Any]] = None
     for person in people:
-        if not await _in_thread(factory, claim, person):
+        held = await _in_thread(factory, _hold, person)
+        if held is None:
             outcomes[TAKEN] += 1
             continue
         if read is None:
             read = await _generated(factory, workspace_id)
-        outcomes[await _post_or_release(factory, person, read)] += 1
+        outcomes[await _post_or_release(factory, person, read, held)] += 1
     return outcomes
 
 
@@ -478,6 +600,7 @@ __all__ = [
     "DIGEST_JOB_ID",
     "DIGEST_POSTS_KEEP_DAYS",
     "DuePerson",
+    "LeaseLost",
     "belongs",
     "brief_of",
     "brief_source",
@@ -486,9 +609,11 @@ __all__ = [
     "default_digest_time",
     "due_date",
     "due_people",
+    "lease",
     "parse_digest_time",
     "person_today",
     "post_brief_message",
+    "post_held_brief",
     "post_now",
     "prune",
     "recorded_person",
@@ -496,4 +621,6 @@ __all__ = [
     "release",
     "run_digests",
     "schedule_zone",
+    "still_held",
+    "take_over",
 ]

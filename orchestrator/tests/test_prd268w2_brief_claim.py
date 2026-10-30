@@ -15,7 +15,12 @@ in ``mobile_digest_posts``. Proven here, on Postgres with committing sessions:
 * a brief posted on open raises no ``auto_message``; the scheduled one still does;
 * ``todays_brief_message`` is the newest of the day's messages in the person's own Auto thread
   in the workspace; ``post_brief`` refuses a via that is neither; ``claim_brief`` is the
-  digest's claim; ``due_people`` carries the phone's zone and language without comparing them.
+  digest's claim; ``due_people`` carries the phone's zone and language without comparing them;
+* P268W2-RVW-1, the claim is a lease on its ``posted_at``: a claim older than
+  ``BRIEF_CLAIM_STALE_SECONDS`` with no day's message (its claimant died before its post) is
+  taken over by the next open, or by a tick, which posts it via schedule; a younger one is
+  left alone; a run whose day was taken over while it built posts nothing, and its failure
+  gives back nothing; a release with the lease held deletes only that lease.
 
 Auto's Read is given (``digest.generate_digest`` recorded), the schedule is empty (the
 calendar's own read faked), the readiness check is held as all ready, and ``auto_message``'s
@@ -41,6 +46,7 @@ from sqlalchemy import create_engine, text
 
 from config import config
 from services.brief import claim as brief_claim
+from services.brief import on_open
 from services.brief.model import PART_TYPE, VIA_OPEN, VIA_SCHEDULE
 from services.brief.strings import brief_language, say
 from services.mobile import digest
@@ -461,3 +467,160 @@ def test_due_people_carries_the_phones_zone_and_language_without_comparing_them(
 
     assert (person.zone, person.locale) == (LISBON, "pt-BR")
     assert person == DuePerson(UUID(cafe.ws), cafe.ana, SAT)
+
+
+# --------------------------------------------------------------------------- a stranded claim (P268W2-RVW-1)
+
+
+@pytest.fixture
+def read_given(monkeypatch):
+    """Auto's Read given to the brief on open too (``build.read_digest``), as the schedule's is."""
+    from services.brief import build
+
+    monkeypatch.setattr(build, "read_digest", lambda db, workspace_id: dict(READ))
+
+
+def _ana(cafe):
+    return DuePerson(UUID(cafe.ws), cafe.ana, SAT, LISBON, "en-IE")
+
+
+def _stale_seconds():
+    return int(config.BRIEF_CLAIM_STALE_SECONDS)
+
+
+def _stale_claim(new_session, ws, user_pk, day, age=None):
+    """A claim on the person's day, ``age`` seconds old (past the setting unless given), with no
+    message: its claimant died between the claim and the post. Its ``posted_at``."""
+    with new_session() as s:
+        held = s.execute(text(
+            "INSERT INTO mobile_digest_posts (workspace_id, user_id, local_date, posted_at) "
+            "VALUES (CAST(:w AS uuid), :u, :d, now() - make_interval(secs => :age)) RETURNING posted_at"),
+            {"w": ws, "u": user_pk, "d": day, "age": _stale_seconds() + 60 if age is None else age}).scalar()
+        s.commit()
+    return held
+
+
+def _age(new_session, ws, user_pk, day):
+    """The person's claim made older than the setting."""
+    with new_session() as s:
+        s.execute(text(
+            "UPDATE mobile_digest_posts SET posted_at = now() - make_interval(secs => :age) "
+            "WHERE workspace_id = CAST(:w AS uuid) AND user_id = :u AND local_date = :d"),
+            {"w": ws, "u": user_pk, "d": day, "age": _stale_seconds() + 60})
+        s.commit()
+
+
+def _lease(new_session, ws, user_pk, day):
+    with new_session() as s:
+        return s.execute(text(
+            "SELECT posted_at FROM mobile_digest_posts WHERE workspace_id = CAST(:w AS uuid) AND user_id = :u "
+            "AND local_date = :d"), {"w": ws, "u": user_pk, "d": day}).scalar()
+
+
+def test_a_stale_claim_with_no_message_is_taken_over_by_an_open_and_a_following_tick_posts_nothing_more(
+        cafe, held, read_given, new_session):
+    _phone(new_session, cafe.ws, cafe.ana)
+    left = _stale_claim(new_session, cafe.ws, cafe.ana, SAT)
+
+    opened = on_open.open_brief(new_session(), _ana(cafe), now=T_LISBON_8)
+    counts = _run(new_session, T_LISBON_8 + TICK)
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert opened.to_dict() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": True}
+    assert brief.source["via"] == VIA_OPEN and brief.user_id == cafe.ana
+    assert counts == {"due": 1, "posted": 0, "taken": 1, "released": 0}
+    assert _claims(new_session, cafe.ws) == [(cafe.ana, SAT)] and _lease(new_session, cafe.ws, cafe.ana, SAT) > left
+    assert _told(held, cafe.ws) == []  # posted on open: never announced
+
+
+def test_a_scheduled_tick_over_a_stale_claim_takes_it_over_and_posts_it_via_schedule(cafe, held, new_session):
+    _phone(new_session, cafe.ws, cafe.ana)
+    left = _stale_claim(new_session, cafe.ws, cafe.ana, SAT)
+
+    counts = _run(new_session, T_LISBON_8)
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert counts == {"due": 1, "posted": 1, "taken": 0, "released": 0}
+    assert brief.source["via"] == VIA_SCHEDULE and (brief.kind, brief.user_id) == ("auto", cafe.ana)
+    assert _claims(new_session, cafe.ws) == [(cafe.ana, SAT)] and _lease(new_session, cafe.ws, cafe.ana, SAT) > left
+    assert [notice.chat_id for notice in _told(held, cafe.ws)] == [brief.chat_id]  # scheduled: announced
+
+
+def test_a_tick_over_a_claim_younger_than_the_setting_posts_nothing(cafe, held, new_session):
+    _phone(new_session, cafe.ws, cafe.ana)
+    left = _stale_claim(new_session, cafe.ws, cafe.ana, SAT, age=_stale_seconds() - 60)
+
+    counts = _run(new_session, T_LISBON_8)
+
+    assert counts == {"due": 1, "posted": 0, "taken": 1, "released": 0}
+    assert _briefs(new_session, cafe.ws) == [] and held.reads == []
+    assert _lease(new_session, cafe.ws, cafe.ana, SAT) == left
+
+
+@pytest.mark.parametrize("then", ["posts", "fails"])
+def test_a_run_whose_day_was_taken_over_while_it_built_posts_nothing_and_gives_back_nothing(
+        cafe, held, read_given, new_session, monkeypatch, then):
+    """The run holds the day and is making Auto's Read when its claim goes stale (at once here)
+    and an open takes it over and posts. The run then posts nothing, or fails and gives back
+    nothing: the claim stays the taker's."""
+    _phone(new_session, cafe.ws, cafe.ana)
+    monkeypatch.setattr(config, "BRIEF_CLAIM_STALE_SECONDS", 0)
+    opens = []
+
+    async def generate(db, workspace_id, period="1d", **_):
+        opens.append(await asyncio.to_thread(on_open.open_brief, new_session(), _ana(cafe), T_LISBON_8))
+        if then == "fails":
+            raise RuntimeError("the digest could not be made")
+        return dict(READ)
+
+    monkeypatch.setattr(digest, "generate_digest", generate)
+    counts = _run(new_session, T_LISBON_8)
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert [opened.to_dict() for opened in opens] == [{"chat_id": brief.chat_id, "message_id": brief.id,
+                                                       "posted": True}]
+    assert brief.source["via"] == VIA_OPEN
+    assert counts == {"due": 1, "posted": 0, "taken": int(then == "posts"), "released": int(then == "fails")}
+    assert _claims(new_session, cafe.ws) == [(cafe.ana, SAT)]
+
+
+def test_a_delivery_that_raises_after_the_look_gives_the_stamped_claim_back(cafe, new_session, monkeypatch):
+    """The look before the post re-stamps the claim, so the run's own release (the first stamp)
+    would miss it: the post gives the stamped claim back itself, and the next tick posts."""
+    _phone(new_session, cafe.ws, cafe.ana)
+
+    def broken_delivery(db, **kwargs):
+        raise RuntimeError("the delivery failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(digest, "deliver_background_message", broken_delivery)
+        counts = _run(new_session, T_LISBON_8)
+    assert counts == {"due": 1, "posted": 0, "taken": 0, "released": 1}
+    assert _claims(new_session, cafe.ws) == [] and _briefs(new_session, cafe.ws) == []
+
+    _run(new_session, T_LISBON_8 + TICK)
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert brief.source["via"] == VIA_SCHEDULE and _claims(new_session, cafe.ws) == [(cafe.ana, SAT)]
+
+
+def test_the_lease_is_the_claims_posted_at_and_only_its_holder_posts_or_gives_it_back(cafe, new_session):
+    s = new_session()
+    person = DuePerson(UUID(cafe.ws), cafe.ana, SAT)
+    held = digest.lease(s, person)
+    assert held is not None and digest.lease(s, person) is None
+    assert digest.take_over(s, person) is None  # fresh: nobody takes it over
+
+    _age(new_session, cafe.ws, cafe.ana, SAT)
+    taken = digest.take_over(s, person)
+
+    assert taken is not None and digest.take_over(s, person) is None  # one taker
+    with pytest.raises(digest.LeaseLost):
+        digest.still_held(s, person, held)
+    digest.release(s, person, held=held)
+    assert _claims(new_session, cafe.ws) == [(cafe.ana, SAT)]  # the taker's claim, never the loser's to give back
+    stamped = digest.still_held(s, person, taken)
+    assert stamped >= taken
+    digest.release(s, person, held=stamped)
+    assert _claims(new_session, cafe.ws) == []
+
