@@ -242,7 +242,7 @@ def _comparable(headers: Mapping[str, str]) -> Dict[str, str]:
     return {name.lower(): value for name, value in headers.items() if name.lower() not in PER_FILE_HEADERS}
 
 
-def test_a_jpg_phone_screenshot_is_served_as_image_jpeg_with_a_png_previews_headers(world):
+def test_a_jpg_phone_screenshot_is_served_as_image_jpeg_with_a_png_previews_headers(world):  # noqa: F811 — the imported fixture
     _row(world, "marketplace", status="approved", reviewed=True)
     world.db.commit()
     web, phone_png, phone_jpg = (_file(world, _person("bob"), path) for path in (WEB_PNG, PHONE_PNG, PHONE_JPG))
@@ -263,7 +263,7 @@ def _image_row(path: str) -> Dict[str, object]:
     return {"type": "image/jpeg" if path.endswith(".jpg") else "image/png", "size": 1, "sha256": "34" * 32}
 
 
-def _with_phone(api, listed: Sequence[str] = PHONE, held: Sequence[str] = PHONE):
+def _with_phone(api, listed: Sequence[str] = PHONE, held: Sequence[str] = PHONE):  # noqa: F811 — the imported fixture
     """The listings' Play listing ``listed`` phone screenshots in theme.json, holding the ``held`` ones."""
     row = _listing_package(api.db, phonePreviews=list(listed))
     row.file_manifest = {**row.file_manifest, **{path: _image_row(path) for path in held}}
@@ -271,13 +271,13 @@ def _with_phone(api, listed: Sequence[str] = PHONE, held: Sequence[str] = PHONE)
     return row
 
 
-def _detail(api) -> Dict[str, object]:
+def _detail(api) -> Dict[str, object]:  # noqa: F811 — the imported fixture
     resp = api.client.get(f"/api/marketplace/themes/{PLAY_LISTING}")
     assert resp.status_code == 200, resp.text
     return resp.json()
 
 
-def test_the_cards_phone_cover_is_the_first_phone_screenshot_theme_json_lists(api):
+def test_the_cards_phone_cover_is_the_first_phone_screenshot_theme_json_lists(api):  # noqa: F811 — the imported fixture
     play = _with_phone(api, listed=[PHONE[3], PHONE[1], PHONE[0]])
     card = _listings(api)[PLAY_LISTING]
     assert card["phoneCover"] == module_url(play.digest, PHONE[3])
@@ -285,7 +285,7 @@ def test_the_cards_phone_cover_is_the_first_phone_screenshot_theme_json_lists(ap
     assert _detail(api)["phoneCover"] == card["phoneCover"]
 
 
-def test_the_detail_puts_each_phone_screenshot_under_its_look_by_the_web_previews_rule(api):
+def test_the_detail_puts_each_phone_screenshot_under_its_look_by_the_web_previews_rule(api):  # noqa: F811 — the imported fixture
     play = _with_phone(api)
     url = lambda path: module_url(play.digest, path)  # noqa: E731
     detail = _detail(api)
@@ -300,14 +300,14 @@ def test_the_detail_puts_each_phone_screenshot_under_its_look_by_the_web_preview
     assert detail["otherPreviews"] == [url(PREVIEWS[3])]
 
 
-def test_a_phone_screenshot_the_package_doesnt_hold_is_left_out(api):
+def test_a_phone_screenshot_the_package_doesnt_hold_is_left_out(api):  # noqa: F811 — the imported fixture
     play = _with_phone(api, held=PHONE[1:])
     detail = _detail(api)
     assert detail["phoneCover"] == module_url(play.digest, PHONE[1])
     assert detail["presets"][0]["phonePreviews"] == [{"screen": "chat", "url": module_url(play.digest, PHONE[1])}]
 
 
-def test_a_listing_without_phone_screenshots_answers_as_before_with_empty_phone_fields(api):
+def test_a_listing_without_phone_screenshots_answers_as_before_with_empty_phone_fields(api):  # noqa: F811 — the imported fixture
     play = _listing_package(api.db)
     card, detail = _listings(api)[PLAY_LISTING], _detail(api)
     assert set(card) == CARD_KEYS | {"phoneCover"} and card["phoneCover"] is None
