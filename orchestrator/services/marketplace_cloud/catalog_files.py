@@ -37,11 +37,11 @@ from core.models.themes import ThemePackage
 from services.marketplace_cloud.catalog import catalogued_verdict
 from services.marketplace_cloud.urls import PACKAGE_FILE
 from services.themes import signature_verify
+from services.themes.choices import ThemeInstallError
 from services.themes.listings import (
     PHONE_PREVIEWS, SWITCH_OFF, WEB_PREVIEWS, approved_query, marketplace_switch, preview_paths,
 )
 from services.themes.manifest import PHONE_PREVIEW_PATTERN, PREVIEW_PATTERN
-from services.themes.review import ThemeReviewError
 from services.themes.review_package import PACKAGE_CONTENT_TYPE, UNAVAILABLE, rebuilt_package
 from services.themes.revocations import is_disabled
 from services.themes.serve import (
@@ -135,7 +135,7 @@ def _package_file(package: ThemePackage, read: FileReader) -> CatalogFile:
     """The rebuilt ``.autotheme``; a stored file gone or changed, or a broken file list, serves nothing."""
     try:
         data = rebuilt_package(package, read)
-    except ThemeReviewError as refused:
+    except ThemeInstallError as refused:  # rebuilt_package's ThemeReviewError (409 or 503)
         if refused.status_code == UNAVAILABLE:
             raise CatalogFilesUnavailable(STORAGE_DOWN) from refused
         logger.error(
