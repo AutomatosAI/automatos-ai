@@ -7,19 +7,26 @@ field through ``display_item``, which refuses any key outside the type's allowli
 leave by accident:
 
 * every type: ``key`` (the id the signed-in tab deep-links by: an agent's or a Playbook's catalogue id,
-  a package's slug), ``name``, ``description``, ``category``, ``icon``, ``tags``, ``publisher`` (a
-  display name, never an email: ``publishers.py``) and ``requiredApps`` (lower-case app slugs);
-* a package also its ``members``, each only its ``type`` and ``name``.
+  a package's slug, an application's app slug, a plugin's id, a skill's name, an LLM's route key),
+  ``name``, ``description``, ``category``, ``icon``, ``tags``, ``publisher`` (a display name, never an
+  email: ``publishers.py``) and ``requiredApps`` (lower-case app slugs);
+* a package also its ``members``, each only its ``type`` and ``name``;
+* an application its ``actionCount`` and ``triggerCount``; a plugin its ``version`` and its
+  ``skillsCount``, ``commandsCount``, ``agentsCount`` and ``hooksCount``; a skill its ``version``;
+* an LLM route its ``provider`` (the serving provider's slug, the catalogue's ``provider`` filter),
+  ``vendor``, ``contextWindow``, ``priceTier`` and ``capabilities``, each only its ``name`` and ``rating``.
 
-No workspace, user, owner, install or clone id is on any list. Text is answered as the row holds it,
-trimmed; a list keeps only its non-empty strings, so a malformed JSON column answers nothing rather
-than its raw value.
+No workspace, user, owner, install, clone or connection id is on any list, nor a workspace's connected,
+enabled, installed or key state. Text is answered as the row holds it, trimmed; a list keeps only its
+non-empty strings, so a malformed JSON column answers nothing rather than its raw value; a count is a
+whole number, else 0; an icon given as a URL is answered only when it is ``https``.
 """
 
 from __future__ import annotations
 
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional
+from urllib.parse import urlsplit
 
 MARKETPLACE_OWNER = "marketplace"
 DEFAULT_PUBLISHER = "Automatos"
@@ -31,13 +38,24 @@ AGENT_FIELDS = DISPLAY_FIELDS
 PLAYBOOK_FIELDS = DISPLAY_FIELDS
 PACKAGE_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"members"}
 PACKAGE_MEMBER_FIELDS: FrozenSet[str] = frozenset({"type", "name"})
+APPLICATION_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"actionCount", "triggerCount"}
+PLUGIN_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {
+    "version", "skillsCount", "commandsCount", "agentsCount", "hooksCount",
+}
+SKILL_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"version"}
+LLM_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"provider", "vendor", "contextWindow", "priceTier", "capabilities"}
+LLM_CAPABILITY_FIELDS: FrozenSet[str] = frozenset({"name", "rating"})
+HTTPS = "https"
 
 # The answer around the items, and each type's item and nested allowlists, as the route and its tests read them.
 ANSWER_FIELDS: FrozenSet[str] = frozenset({"type", "items", "limit", "offset", "more"})
-ITEM_FIELDS: Mapping[str, FrozenSet[str]] = MappingProxyType(
-    {"agents": AGENT_FIELDS, "playbooks": PLAYBOOK_FIELDS, "packages": PACKAGE_FIELDS}
+ITEM_FIELDS: Mapping[str, FrozenSet[str]] = MappingProxyType({
+    "agents": AGENT_FIELDS, "playbooks": PLAYBOOK_FIELDS, "packages": PACKAGE_FIELDS,
+    "applications": APPLICATION_FIELDS, "plugins": PLUGIN_FIELDS, "skills": SKILL_FIELDS, "llms": LLM_FIELDS,
+})
+NESTED_FIELDS: Mapping[str, FrozenSet[str]] = MappingProxyType(
+    {"members": PACKAGE_MEMBER_FIELDS, "capabilities": LLM_CAPABILITY_FIELDS}
 )
-NESTED_FIELDS: Mapping[str, FrozenSet[str]] = MappingProxyType({"members": PACKAGE_MEMBER_FIELDS})
 
 
 class FieldNotAllowed(ValueError):
@@ -64,6 +82,25 @@ def strings(value: Any) -> List[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [text for text in (text_or_none(entry) for entry in value) if text is not None]
+
+
+def count_of(value: Any) -> int:
+    """``value`` when it is a whole number above 0, else 0."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def https_url_or_none(value: Any) -> Optional[str]:
+    """``value`` trimmed when it is an ``https`` URL with a host and no user name or password, else ``None``."""
+    text = text_or_none(value)
+    if text is None or any(char.isspace() for char in text):
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:  # an unbalanced IPv6 bracket: not a URL a visitor's page should load
+        return None
+    if parts.scheme != HTTPS or not parts.hostname or "@" in parts.netloc:
+        return None
+    return text
 
 
 def app_slugs(values: Iterable[Any]) -> List[str]:
@@ -97,7 +134,8 @@ def display_item(
 
 
 __all__ = [
-    "AGENT_FIELDS", "ANSWER_FIELDS", "DEFAULT_PUBLISHER", "DISPLAY_FIELDS", "FieldNotAllowed", "ITEM_FIELDS",
-    "MARKETPLACE_OWNER", "NESTED_FIELDS", "PACKAGE_FIELDS", "PACKAGE_MEMBER_FIELDS", "PLAYBOOK_FIELDS",
-    "allowed_item", "app_slugs", "display_item", "strings", "text_or_none",
+    "AGENT_FIELDS", "ANSWER_FIELDS", "APPLICATION_FIELDS", "DEFAULT_PUBLISHER", "DISPLAY_FIELDS", "FieldNotAllowed",
+    "ITEM_FIELDS", "LLM_CAPABILITY_FIELDS", "LLM_FIELDS", "MARKETPLACE_OWNER", "NESTED_FIELDS", "PACKAGE_FIELDS",
+    "PACKAGE_MEMBER_FIELDS", "PLAYBOOK_FIELDS", "PLUGIN_FIELDS", "SKILL_FIELDS",
+    "allowed_item", "app_slugs", "count_of", "display_item", "https_url_or_none", "strings", "text_or_none",
 ]

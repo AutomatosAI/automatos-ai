@@ -1,4 +1,4 @@
-"""PRD-270 US-270-07a (K10) — the public Marketplace reads, by type.
+"""PRD-270 US-270-07a/b (K10) — the public Marketplace reads, by type.
 
 ``reader_for`` names each type's reader, and ``None`` for a type with none (the route's 404).
 ``public_page`` answers one page of a type as ``{type, items, limit, offset, more}``: the reader is
@@ -15,8 +15,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from sqlalchemy.orm import Session
 
 from services.marketplace_public.agents import read_agents
+from services.marketplace_public.applications import read_applications
+from services.marketplace_public.llms import read_llms
 from services.marketplace_public.packages import read_packages
 from services.marketplace_public.playbooks import read_playbooks
+from services.marketplace_public.plugins import read_plugins
+from services.marketplace_public.skills import read_skills
 
 Reader = Callable[[Session, int, int], List[Dict[str, Any]]]
 
@@ -24,6 +28,10 @@ READERS: Mapping[str, Reader] = MappingProxyType({
     "agents": read_agents,
     "playbooks": read_playbooks,
     "packages": read_packages,
+    "applications": read_applications,
+    "plugins": read_plugins,
+    "skills": read_skills,
+    "llms": read_llms,
 })
 
 
