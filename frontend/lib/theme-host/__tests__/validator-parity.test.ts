@@ -19,6 +19,10 @@
  *
  * PRD-261 A-20 (QB-11): htmlClass 'play' is no longer reserved. The corpus gives it to any theme id
  * and still refuses every class the host keeps, and neither contract gives a class to an id.
+ *
+ * The browser's first-paint gate (boot-sanitize.ts, through css-value.ts isBootValue): the prepaintDrops
+ * section's cases give the server reader's verdicts and sentences here too, and the gate's functions and
+ * the longest value equal css_value.py's and contract.py's.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -27,7 +31,8 @@ import { describe, expect, it } from 'vitest'
 import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX } from '../boot-sanitize'
 import { HTML_CLASS_PATTERN } from '../constants'
 import {
-  cssValueProblem, PREPAINT_ERROR_CODES, prepaintErrors, TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, type ThemeError,
+  BOOT_VALUE_FUNCTIONS, bootValueProblem, cssValueProblem, PREPAINT_ERROR_CODES, PREPAINT_VALUE_MAX, prepaintDropErrors,
+  prepaintErrors, TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, type ThemeError,
 } from '../css-value'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
 import {
@@ -78,6 +83,7 @@ interface Corpus {
   readonly lookSchemas: CorpusSection
   readonly looks: CorpusSection
   readonly prepaint: CorpusSection
+  readonly prepaintDrops: CorpusSection
   readonly cssValues: { readonly valid: readonly string[]; readonly invalid: readonly string[] }
 }
 
@@ -187,6 +193,19 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
     if (testCase.messages !== undefined) expect(errors.map((error) => error.message)).toEqual(testCase.messages)
   })
 
+  it.each([...CORPUS.prepaintDrops.cases])('prepaint drops: $name', (testCase) => {
+    const errors = prepaintDropErrors(testCase.document)
+    expectVerdict(errors, testCase.code, PREPAINT_ERROR_CODES)
+    if (testCase.messages !== undefined) expect(errors.map((error) => error.message)).toEqual(testCase.messages)
+  })
+
+  it('pins the sentence of every refused drop case, and has a case the first paint keeps', () => {
+    const refused = CORPUS.prepaintDrops.cases.filter((testCase) => testCase.code !== null)
+    expect(refused.length).toBeGreaterThan(0)
+    refused.forEach((testCase) => expect(testCase.messages?.length, testCase.name).toBeGreaterThan(0))
+    expect(CORPUS.prepaintDrops.cases.some((testCase) => testCase.code === null && 'document' in testCase)).toBe(true)
+  })
+
   it('has a valid tone rule and pins the sentence of each kind of refusal (A-19c)', () => {
     const toneCases = CORPUS.prepaint.cases.filter((testCase) => isToneCase(testCase.document))
     expect(toneCases.some((testCase) => testCase.code === null)).toBe(true)
@@ -213,7 +232,9 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
       expect(() => validateLookSchema(value)).not.toThrow()
       expect(() => validateLook(helloLookSchema(), value)).not.toThrow()
       expect(() => prepaintErrors(value)).not.toThrow()
+      expect(() => prepaintDropErrors(value)).not.toThrow()
       expect(() => cssValueProblem(value)).not.toThrow()
+      expect(() => bootValueProblem(value)).not.toThrow()
     })
   })
 
@@ -237,7 +258,7 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
   })
 
   it('runs every section the browser shares with the server', () => {
-    const sections = [CORPUS.manifests, CORPUS.lookSchemas, CORPUS.looks, CORPUS.prepaint]
+    const sections = [CORPUS.manifests, CORPUS.lookSchemas, CORPUS.looks, CORPUS.prepaint, CORPUS.prepaintDrops]
     sections.forEach((section) => expect(section.cases.length).toBeGreaterThan(0))
     expect(CORPUS.cssValues.valid.length).toBeGreaterThan(0)
     expect(CORPUS.cssValues.invalid.length).toBeGreaterThan(0)
@@ -287,6 +308,13 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESETS_MAX'))).toBe(BOOT_PRESETS_MAX)
     expect(Number(pythonValue(PYTHON.contract, 'BOOT_PRESET_MAX_BYTES'))).toBe(BOOT_PRESET_MAX_BYTES)
     expect([BOOT_PRESETS_MAX, BOOT_PRESET_MAX_BYTES]).toEqual([12, 4096])
+  })
+
+  it("has the same first-paint gate: its functions and the longest prepaint value (boot-sanitize.ts's)", () => {
+    expect(strings('BOOT_VALUE_FUNCTIONS', PYTHON.cssValue)).toEqual([...BOOT_VALUE_FUNCTIONS])
+    expect(Number(pythonValue(PYTHON.contract, 'PREPAINT_VALUE_MAX'))).toBe(PREPAINT_VALUE_MAX)
+    expect(PREPAINT_VALUE_MAX).toBe(200)
+    expect(BOOT_VALUE_FUNCTIONS.has('linear-gradient')).toBe(false)
   })
 
   it('has the same mobile block lists, AA minimums and lowest host (M-01, plan §2.2.11)', () => {

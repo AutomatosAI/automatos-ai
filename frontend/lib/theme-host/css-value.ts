@@ -18,6 +18,13 @@
  * knob must be a choice knob of the table (a key of `knobs`, not a `numeric` rule's knob) and
  * `values` must give every one of its choices 'light' or 'dark', nothing else; otherwise
  * BAD_TONE_RULE, with the sentence the server gives (the corpus pins a few).
+ *
+ * The browser's first paint has its own, smaller gate, kept here as the one TypeScript copy:
+ * boot-sanitize.ts imports `isBootValue`, and css_value.py is its Python twin. Only the functions in
+ * BOOT_VALUE_FUNCTIONS (no gradient, no color-mix()), the characters in BOOT_VALUE_CHARS and at most
+ * PREPAINT_VALUE_MAX UTF-16 units pass it. A value it drops vanishes with no error, and so does every
+ * value built on it with var(), so the server's reader refuses one (`prepaintDropErrors`, BAD_CSS_VALUE,
+ * the sentence the server gives; the corpus's prepaintDrops cases hold both languages to it).
  */
 import { UNSAFE_TEXT } from '@/lib/text/plain-line'
 
@@ -119,7 +126,12 @@ export function errorIf(refused: boolean, code: string, path: string, message: s
 
 export const PREPAINT_ERROR_CODES: readonly string[] = ['BAD_PREPAINT', 'BAD_CSS_VALUE', 'BAD_TONE_RULE']
 export const PREPAINT_PATH = 'boot/prepaint.json'
-const CSS_VALUE_MAX = 200
+/**
+ * contract.py PREPAINT_VALUE_MAX (validator-parity.test.ts holds them equal): the longest prepaint value, the
+ * grammar's cap and the browser's first-paint gate's (boot-sanitize.ts, through bootValueProblem below).
+ */
+export const PREPAINT_VALUE_MAX = 200
+const CSS_VALUE_MAX = PREPAINT_VALUE_MAX
 const MAX_FUNCTION_DEPTH = 4
 const PREPAINT_MAX_ERRORS = 20
 const CUSTOM_PROPERTY_PREFIX = '--'
@@ -338,4 +350,94 @@ export function toneRuleErrors(document: unknown): ThemeError[] {
   if (problem !== null) return [...errors, toneError('.knob', problem)]
   if (!isRecord(values)) return [...errors, toneError('.values', `"values" must map every choice of "${echo(knob)}" to ${TONES_TEXT}`)]
   return [...errors, ...toneValueErrors(knob, choiceKnobs(document)[knob], values)]
+}
+
+// ---------------------------------------------------------------------------
+// The browser's first-paint gate (boot-sanitize.ts) and what it drops: css_value.py, sentence for sentence
+// ---------------------------------------------------------------------------
+
+/** css_value.py BOOT_VALUE_CHARS, BOOT_FUNCTION_NAME and BOOT_VALUE_FUNCTIONS (the functions in its order). */
+export const BOOT_VALUE_CHARS = /^[A-Za-z0-9#%.,()/ +-]+$/
+export const BOOT_FUNCTION_NAME = /([A-Za-z-]+)\(/g
+export const BOOT_VALUE_FUNCTIONS: ReadonlySet<string> = new Set([
+  'rgb', 'rgba', 'hsl', 'hsla', 'var', 'calc', 'min', 'max', 'clamp',
+  'hue-rotate', 'saturate', 'brightness', 'grayscale', 'contrast', 'sepia', 'invert',
+])
+const GRADIENT_SUFFIX = '-gradient'
+const DROPPED = "the browser's first paint drops it, and every value built on it"
+
+/** The first function the gate doesn't run, said as what it is; null when it runs every one. */
+function functionProblem(value: string): string | null {
+  for (const match of value.matchAll(BOOT_FUNCTION_NAME)) {
+    const name = match[1]
+    if (BOOT_VALUE_FUNCTIONS.has(name.toLowerCase())) continue
+    if (name.toLowerCase().endsWith(GRADIENT_SUFFIX)) return `a gradient, ${echo(name)}()`
+    return `a call to ${echo(name)}(), a function the first paint never runs`
+  }
+  return null
+}
+
+/** What `value` is that the browser's first paint drops (boot-sanitize.ts's checks, in its order), or null. */
+export function bootValueProblem(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return 'not text'
+  if (value.length > PREPAINT_VALUE_MAX) return `over ${PREPAINT_VALUE_MAX} characters`
+  const refused = codePoints(value).find((char) => !BOOT_VALUE_CHARS.test(char))
+  if (refused !== undefined) return `text with "${echo(refused)}", a character the first paint refuses`
+  if (value.split('(').length !== value.split(')').length) return "text whose brackets don't pair"
+  return functionProblem(value)
+}
+
+/** True when the browser's first paint keeps `value`: boot-sanitize.ts's gate for every prepaint value. */
+export function isBootValue(value: unknown): value is string {
+  return bootValueProblem(value) === null
+}
+
+/** One cell of the table: its dotted path, the look it paints for and its variables. */
+type Cell = readonly [path: string, look: string, variables: unknown]
+
+/** Every option of every table under `knobs`. */
+function knobCells(document: JsonRecord): Cell[] {
+  const knobs = own(document, 'knobs')
+  if (!isRecord(knobs)) return []
+  return Object.keys(knobs).flatMap((knob) => {
+    const options = knobs[knob]
+    if (!isRecord(options)) return []
+    return Object.keys(options).map((option): Cell => [`knobs.${knob}.${option}`, `${echo(knob)} "${echo(option)}"`, options[option]])
+  })
+}
+
+/** Every cell of one pair table whose two knobs are named. */
+function pairCells(pair: unknown, index: number): Cell[] {
+  if (!isRecord(pair)) return []
+  const [a, b, table] = [own(pair, 'a'), own(pair, 'b'), own(pair, 'table')]
+  if (typeof a !== 'string' || typeof b !== 'string' || !isRecord(table)) return []
+  return Object.keys(table).flatMap((row) => {
+    const columns = table[row]
+    if (!isRecord(columns)) return []
+    const look = (column: string): string => `${echo(a)} "${echo(row)}" and ${echo(b)} "${echo(column)}"`
+    return Object.keys(columns).map((column): Cell => [`pairs[${index}].table.${row}.${column}`, look(column), columns[column]])
+  })
+}
+
+/** A refusal for each variable of one cell whose value the gate drops. */
+function cellDrops([path, look, variables]: Cell): ThemeError[] {
+  if (!isRecord(variables)) return []
+  return Object.keys(variables).flatMap((name) => {
+    const problem = name.startsWith(CUSTOM_PROPERTY_PREFIX) ? bootValueProblem(variables[name]) : null
+    if (problem === null) return []
+    const where = `${PREPAINT_PATH}#${echo(`${path}.${name}`)}`
+    return [themeError('BAD_CSS_VALUE', where, `${where}: ${echo(name)} for ${look} is ${problem}: ${DROPPED}.`)]
+  })
+}
+
+/**
+ * Every value of the table's cells the browser's first paint drops, at most PREPAINT_MAX_ERRORS: the cells
+ * boot-sanitize.ts sanitizeVars reads, each option of each table under `knobs` and each cell of each pair
+ * table. What prepaintErrors refuses is its alone; the server's reader runs this on a table that passed it.
+ */
+export function prepaintDropErrors(document: unknown): ThemeError[] {
+  if (!isRecord(document)) return []
+  const pairs = own(document, 'pairs')
+  const pairList = Array.isArray(pairs) ? pairs.flatMap((pair: unknown, index) => pairCells(pair, index)) : []
+  return [...knobCells(document), ...pairList].flatMap(cellDrops).slice(0, PREPAINT_MAX_ERRORS)
 }

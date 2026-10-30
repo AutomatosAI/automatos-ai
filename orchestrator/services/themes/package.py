@@ -17,7 +17,9 @@ with a code, the path and a plain sentence:
   screenshot, ``assets/previews/phone/<NAME>.png`` or ``.jpg``, starts with its format's magic bytes);
 * a theme.json the manifest check refuses (``services/themes/manifest.py``); a missing entry,
   look schema or preset, or a preset the schema refuses (``look_schema.py``); a prepaint value
-  outside the CSS-value grammar (``css_value.py``); CSS outside the theme's class, with
+  outside the CSS-value grammar (``css_value.py``), or one the browser's first paint would drop, and a
+  look-schema knob the prepaint table never paints, so the browser's looks would leave it out
+  (``first_paint.py``: ``BAD_CSS_VALUE``, ``KNOB_NOT_PAINTED``); CSS outside the theme's class, with
   ``!important`` or ``@import`` (``css_scope.py``); a preview (web or phone), font, wordmark or mobile
   font the manifest names that is not in the package;
 * M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
@@ -49,6 +51,7 @@ from services.themes.contract import (
 from services.themes.css_scope import STYLE_PATH, css_scope_errors
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import digest_of_manifest, file_manifest
+from services.themes.first_paint import KNOB_NOT_PAINTED, first_paint_errors
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
@@ -59,7 +62,7 @@ PACKAGE_ERROR_CODES: Tuple[str, ...] = (
     "PACKAGE_TOO_LARGE", "NOT_A_ZIP", "ZIP64", "TOO_MANY_FILES", "SYMLINK", "UNSAFE_PATH", "DUPLICATE_FILE",
     "ENCRYPTED", "NOT_ALLOWED", "SVG_NOT_ALLOWED", "UNCOMPRESSED_TOO_LARGE", "CORRUPT_FILE", "FILE_TOO_LARGE",
     "ENTRY_TOO_LARGE", "CODE_TOO_LARGE", "CLIP_TOO_LARGE", "BAD_FILE_TYPE", "NOT_UTF8", "BAD_JSON", "MISSING_FILE",
-    "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK", "MOBILE_CANNOT_PAINT",
+    "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK", "MOBILE_CANNOT_PAINT", KNOB_NOT_PAINTED,
 )
 MOBILE_CANNOT_PAINT = "MOBILE_CANNOT_PAINT"
 ENTRY_PATH = "dist/entry.js"
@@ -496,8 +499,9 @@ def _mobile_link_errors(manifest: Mapping[str, Any], files: Mapping[str, ThemeFi
 
 def _content_errors(files: Mapping[str, ThemeFile]) -> Tuple[Optional[Dict[str, Any]], List[ThemeError]]:
     manifest, errors = _manifest(files)
-    _, look_errors = look_file_errors({path: item.data for path, item in files.items()})
-    errors = errors + _code_errors(files) + look_errors + _prepaint_errors(files)
+    data = {path: item.data for path, item in files.items()}
+    schema, look_errors = look_file_errors(data)
+    errors = errors + _code_errors(files) + look_errors + _prepaint_errors(files) + first_paint_errors(schema, data)
     if manifest is not None:
         errors += _manifest_link_errors(manifest, files) + _mobile_link_errors(manifest, files)
     return manifest, errors

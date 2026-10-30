@@ -105,7 +105,8 @@ def _only_error(data: bytes, code: str, path: str) -> str:
 
 
 def _table(knobs: Mapping[str, Any], defaults: Mapping[str, Any], pairs: Sequence[Any] = ()) -> bytes:
-    return json.dumps({"knobs": knobs, "pairs": list(pairs), "defaults": dict(defaults)}).encode("utf-8")
+    """A table over ``knobs`` that also paints the rest of hello's look knobs (``build.hello_prepaint``)."""
+    return json.dumps(build.hello_prepaint(knobs, defaults, pairs)).encode("utf-8")
 
 
 def _looks_package(table: Optional[bytes]) -> bytes:

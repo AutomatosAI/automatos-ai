@@ -164,6 +164,9 @@ TONE_RULE_TONES: Tuple[str, ...] = ("light", "dark")
 # BOOT_PRESET_MAX_BYTES (4 KB). frontend/lib/theme-host/boot-sanitize.ts holds the same two numbers.
 BOOT_PRESETS_MAX = 12
 BOOT_PRESET_MAX_BYTES = 4096
+# The longest prepaint value: the import grammar's cap (css_value.py CSS_VALUE_MAX) and the browser's first-paint
+# gate's (boot-sanitize.ts, which counts UTF-16 units). frontend/lib/theme-host/css-value.ts holds the same number.
+PREPAINT_VALUE_MAX = 200
 
 # ---------------------------------------------------------------------------
 # The error shape every check returns

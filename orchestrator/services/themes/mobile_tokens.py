@@ -51,6 +51,7 @@ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tup
 from services.themes.contract import (
     MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, TONE_RULE_KEY, TONE_RULE_TONES, is_finite_number, js_number,
 )
+from services.themes.css_value import is_boot_value, utf16_length
 
 # hsl.ts TRIPLET and contrast.ts HEX, with ASCII digits ([0-9]: Python's \d also takes other scripts' digits).
 TRIPLET_PATTERN = re.compile(r"([0-9]{1,3}(?:\.[0-9]{1,2})?) ([0-9]{1,3}(?:\.[0-9]{1,2})?)% ([0-9]{1,3}(?:\.[0-9]{1,2})?)%")
@@ -67,23 +68,15 @@ LINEAR_KNEE, LINEAR_SLOPE = 0.04045, 12.92
 GAMMA_OFFSET, GAMMA_SCALE, GAMMA = 0.055, 1.055, 2.4
 RED_WEIGHT, GREEN_WEIGHT, BLUE_WEIGHT = 0.2126, 0.7152, 0.0722
 
-# boot-sanitize.ts: KNOB_NAME, OPTION_KEY_MAX_LENGTH, CSS_VAR_NAME_PATTERN (boot.ts V), the CSS-value
-# gate isCssValue (CSS_VALUE_MAX_LENGTH, CSS_VALUE_CHARS, CSS_FUNCTION_NAME, CSS_VALUE_FUNCTIONS),
-# RGB_LIST, CAP_MIN and CAP_MAX. A JavaScript string's length counts UTF-16 units.
+# boot-sanitize.ts: KNOB_NAME, OPTION_KEY_MAX_LENGTH, CSS_VAR_NAME_PATTERN (boot.ts V), RGB_LIST, CAP_MIN
+# and CAP_MAX. Its CSS-value gate isCssValue is css_value.py's is_boot_value. A JavaScript string's length
+# counts UTF-16 units (css_value.utf16_length).
 KNOB_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
 OPTION_KEY_MAX_LENGTH = 64
 BOOT_VAR_NAME = re.compile(r"--[a-z0-9-]{1,64}")
-BOOT_VALUE_MAX_LENGTH = 200
-BOOT_VALUE_CHARS = re.compile(r"[A-Za-z0-9#%.,()/ +-]+")
-BOOT_FUNCTION_NAME = re.compile(r"([A-Za-z-]+)\(")
-BOOT_VALUE_FUNCTIONS = frozenset({
-    "rgb", "rgba", "hsl", "hsla", "var", "calc", "min", "max", "clamp",
-    "hue-rotate", "saturate", "brightness", "grayscale", "contrast", "sepia", "invert",
-})
 RGB_LIST = re.compile(r"[0-9]{1,3},[0-9]{1,3},[0-9]{1,3}")
 CAP_MIN, CAP_MAX = 0, 1
 NUMERIC_TEMPLATE = "rgba-alpha"
-UTF16_UNIT_BYTES = 2
 
 # The tones, the policy that takes the tone from the look, and the two tokens a ground is read from.
 TONE_LIGHT, TONE_DARK = TONE_RULE_TONES
@@ -196,31 +189,18 @@ def _list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
-def _js_length(text: str) -> int:
-    return len(text.encode("utf-16-le", "surrogatepass")) // UTF16_UNIT_BYTES
-
-
 def _is_knob(name: Any) -> bool:
     return isinstance(name, str) and KNOB_NAME.fullmatch(name) is not None
 
 
-def _boot_value(value: Any) -> bool:
-    """boot-sanitize.ts ``isCssValue``: the boot's own gate, smaller than css_value.py's grammar."""
-    if not isinstance(value, str) or not 0 < _js_length(value) <= BOOT_VALUE_MAX_LENGTH:
-        return False
-    if BOOT_VALUE_CHARS.fullmatch(value) is None or value.count("(") != value.count(")"):
-        return False
-    return all(name.lower() in BOOT_VALUE_FUNCTIONS for name in BOOT_FUNCTION_NAME.findall(value))
-
-
 def _boot_vars(entry: Any) -> Dict[str, str]:
     """``sanitizeVars``: the entry's variables whose name and value the boot passes; never None."""
-    return {name: value for name, value in _object(entry).items() if BOOT_VAR_NAME.fullmatch(name) and _boot_value(value)}
+    return {name: value for name, value in _object(entry).items() if BOOT_VAR_NAME.fullmatch(name) and is_boot_value(value)}
 
 
 def _option_table(table: Any, clean: Callable[[Any], Any]) -> Dict[str, Any]:
     """``sanitizeTable``: keys of 1 to 64 units, each with ``clean``'s value; a None from ``clean`` drops the key."""
-    cleaned = {key: clean(value) for key, value in _object(table).items() if 0 < _js_length(key) <= OPTION_KEY_MAX_LENGTH}
+    cleaned = {key: clean(value) for key, value in _object(table).items() if 0 < utf16_length(key) <= OPTION_KEY_MAX_LENGTH}
     return {key: value for key, value in cleaned.items() if value is not None}
 
 

@@ -84,8 +84,8 @@ the answer:
 
 1. **The table the web gets.** Knobs whose name is a look field (a letter, then letters, digits or
    `_`, at most 32), option keys of 1 to 64 characters, and in each option the variables whose name
-   and value pass the boot's own gate (smaller than the import check's: no `color-mix()` or
-   gradients); pair tables whose two knobs are look fields; numeric rules with every field
+   and value pass the boot's own gate (`css_value.is_boot_value`: no `color-mix()` or gradients; the
+   reader refuses a cell's value it drops, `first_paint.py`); pair tables whose two knobs are look fields; numeric rules with every field
    (`template` `rgba-alpha`, a true/false `integer`, `min` <= `max`, `scale` > 0, `capTable` null or
    two knobs); `defaults` with text or number values. If the defaults don't fit what is left, the
    web drops the whole table and paints nothing from it.

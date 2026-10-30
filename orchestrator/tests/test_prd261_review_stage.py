@@ -114,6 +114,8 @@ LOOK_TABLE = {
             "green": {"--primary": GREEN, "--primary-foreground": WHITE},
         },
     },
+    # radius is painted by a numeric rule, as the reader needs every look knob painted (first_paint.py).
+    "numeric": [build.HELLO_RADIUS_RULE],
     "defaults": {"accent": "blue", "ground": "paper", "radius": 6},
 }
 

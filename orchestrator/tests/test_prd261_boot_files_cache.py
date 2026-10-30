@@ -171,10 +171,7 @@ class _Storage:
 
 
 def _prepaint(colour: str) -> Dict[str, Any]:
-    return {
-        "knobs": {"ground": {"paper": {"--hello-bg": colour}, "ink": {"--hello-bg": "#101010"}}},
-        "pairs": [], "numeric": [], "defaults": {"ground": "paper"},
-    }
+    return build.hello_prepaint({"ground": {"paper": {"--hello-bg": colour}, "ink": {"--hello-bg": "#101010"}}})
 
 
 def _built(colour: str = WHITE) -> Any:

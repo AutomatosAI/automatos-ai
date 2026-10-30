@@ -42,6 +42,16 @@ FILE_MODE = 0o644 << 16
 
 Member = Tuple[Union[str, zipfile.ZipInfo], bytes]
 
+# The reader refuses a look-schema knob the prepaint table never paints (services/themes/first_paint.py:
+# the browser builds a theme's looks from that table alone), so a test's table for the hello package paints
+# hello's three knobs: accent and ground by choice tables, radius by a numeric rule.
+HELLO_ACCENT_TABLE = {"blue": {"--hello-accent": "#2f6fed"}, "green": {"--hello-accent": "#1e7f3c"}}
+HELLO_RADIUS_RULE = {
+    "var": "--hello-glow", "knob": "radius", "min": 0, "max": 16, "integer": True, "scale": 100, "capTable": None,
+    "color": {"knob": "accent", "rgb": {"blue": "47,111,237", "green": "30,127,60"}}, "template": "rgba-alpha",
+}
+HELLO_DEFAULTS = {"accent": "blue", "ground": "paper", "radius": 6}
+
 
 def manifest_bytes(manifest: Mapping[str, Any]) -> bytes:
     """theme.json as the package holds it."""
@@ -57,6 +67,17 @@ def changed_manifest(set_fields: Optional[Mapping[str, Any]] = None, unset: Sequ
     """The hello theme.json with top-level fields set and others removed, as package bytes."""
     merged = {**hello_manifest(), **(set_fields or {})}
     return manifest_bytes({key: value for key, value in merged.items() if key not in unset})
+
+
+def hello_prepaint(
+    knobs: Mapping[str, Any], defaults: Optional[Mapping[str, Any]] = None, pairs: Sequence[Any] = (), **extra: Any,
+) -> Dict[str, Any]:
+    """A prepaint table that paints every knob of hello's look schema: ``knobs`` over an accent table, radius
+    by ``HELLO_RADIUS_RULE``, ``defaults`` over ``HELLO_DEFAULTS``; ``extra`` adds a part (a tone rule)."""
+    return {
+        "knobs": {"accent": HELLO_ACCENT_TABLE, **knobs}, "pairs": list(pairs), "numeric": [HELLO_RADIUS_RULE],
+        "defaults": {**HELLO_DEFAULTS, **(defaults or {})}, **extra,
+    }
 
 
 def _folder_members(folder: Path) -> Dict[str, bytes]:

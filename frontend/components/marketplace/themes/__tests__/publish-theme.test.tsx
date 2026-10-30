@@ -276,6 +276,7 @@ describe('the 400 codes', () => {
     expect(publishErrorGroupOf('LOOK_BAD_VALUE')).toBe('looks')
     expect(publishErrorGroupOf('BAD_KNOB')).toBe('looks')
     expect(publishErrorGroupOf('UNKNOWN_DEFAULT_LOOK')).toBe('looks')
+    expect(publishErrorGroupOf('KNOB_NOT_PAINTED')).toBe('looks')
     expect(publishErrorGroupOf('CODE_TOO_LARGE')).toBe('sizes')
     expect(publishErrorGroupOf('TOO_MANY_FILES')).toBe('sizes')
     expect(publishErrorGroupOf('SYMLINK')).toBe('archive')
