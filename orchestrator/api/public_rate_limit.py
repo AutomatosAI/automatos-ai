@@ -11,7 +11,7 @@ refusal for everyone). Redis unreachable lets the request through and logs it (t
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Mapping, Optional
 
 from fastapi import HTTPException, Request
 
@@ -29,12 +29,16 @@ REFUSAL_HEADERS = {"Cache-Control": "no-store"}
 _rate_store = RateLimitStore()
 
 
-def per_ip_limit(bucket_prefix: str, label: str) -> Callable[[Request], None]:
+def per_ip_limit(
+    bucket_prefix: str, label: str, headers: Optional[Mapping[str, str]] = None,
+) -> Callable[[Request], None]:
     """A dependency that refuses with 429 once this client IP has used the route's requests for the minute.
 
-    ``label`` names the limiter in the store's fail-open ERROR line. The dependency is a plain ``def``:
-    the Redis round trip runs in FastAPI's threadpool, never on the event loop.
+    ``label`` names the limiter in the store's fail-open ERROR line; ``headers`` are the route's own
+    refusal headers, sent on the 429 too (the catalogue files' serving headers). The dependency is a plain
+    ``def``: the Redis round trip runs in FastAPI's threadpool, never on the event loop.
     """
+    refused = {**(headers or {}), **REFUSAL_HEADERS}
 
     def limit(request: Request) -> None:
         allowed, _limit, _remaining, reset_seconds = _rate_store.check(
@@ -44,7 +48,7 @@ def per_ip_limit(bucket_prefix: str, label: str) -> Callable[[Request], None]:
         if not allowed:
             raise HTTPException(
                 status_code=TOO_MANY_REQUESTS, detail=RATE_LIMITED_DETAIL,
-                headers={**REFUSAL_HEADERS, "Retry-After": str(reset_seconds)},
+                headers={**refused, "Retry-After": str(reset_seconds)},
             )
 
     return limit

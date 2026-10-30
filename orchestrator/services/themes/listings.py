@@ -45,7 +45,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from config import config
 from core.models.themes import ThemeInstallation, ThemePackage, ThemePublisher
@@ -127,7 +127,8 @@ def is_compatible(package: ThemePackage) -> bool:
     )
 
 
-def _approved_query(db: Session):
+def approved_query(db: Session) -> Query:
+    """Every approved, reviewed Marketplace version (a ``disable`` is the caller's to check)."""
     return db.query(ThemePackage).filter(
         ThemePackage.owner_type == MARKETPLACE_OWNER,
         ThemePackage.status == APPROVED,
@@ -141,14 +142,14 @@ def _newest_first(rows: Sequence[ThemePackage]) -> List[ThemePackage]:
 
 def listed_versions(db: Session, theme_id: str) -> List[ThemePackage]:
     """The theme's approved versions that no ``disable`` revocation covers, newest first."""
-    rows = _approved_query(db).filter(ThemePackage.theme_id == theme_id).all()
+    rows = approved_query(db).filter(ThemePackage.theme_id == theme_id).all()
     return _newest_first([row for row in rows if not is_disabled(db, row)])
 
 
 def all_listings(db: Session) -> Dict[str, List[ThemePackage]]:
     """``{theme_id: listed versions, newest first}`` over the whole Marketplace, by theme id."""
     grouped: Dict[str, List[ThemePackage]] = {}
-    for row in _approved_query(db).order_by(ThemePackage.theme_id).all():
+    for row in approved_query(db).order_by(ThemePackage.theme_id).all():
         if not is_disabled(db, row):
             grouped.setdefault(row.theme_id, []).append(row)
     return {theme_id: _newest_first(rows) for theme_id, rows in grouped.items()}
@@ -199,7 +200,7 @@ PHONE_PREVIEWS = PreviewKind("phonePreviews", "assets/previews/phone/", "otherPh
 PREVIEW_KINDS: Tuple[PreviewKind, ...] = (WEB_PREVIEWS, PHONE_PREVIEWS)
 
 
-def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
+def preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     """The screenshots theme.json lists under ``kind`` that the package holds, in theme.json's order.
 
     The first one is the cover (``cover_url``). The theme picks its order (Play lists ``ember.png`` first,
@@ -212,7 +213,7 @@ def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
 
 def cover_url(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
     """The files URL of the first screenshot of ``kind`` the package holds, or None."""
-    paths = _preview_paths(package, kind)
+    paths = preview_paths(package, kind)
     return module_url(package.digest, paths[0]) if paths else None
 
 
@@ -237,7 +238,7 @@ def _claimed(
     """``({preset: [{screen, url}]}, [unclaimed url])`` for one list of screenshots, in theme.json's order."""
     owned = [
         (_owner_preset(_stem(path, kind), presets), module_url(package.digest, path))
-        for path in _preview_paths(package, kind)
+        for path in preview_paths(package, kind)
     ]
     claimed = {
         preset: [{"screen": screen, "url": url} for (owner, screen), url in owned if owner == preset]

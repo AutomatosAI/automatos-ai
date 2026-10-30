@@ -134,12 +134,20 @@ def _items(db: Session) -> List[Dict[str, Any]]:
     return [item for item in items if item is not None]
 
 
-def _item(db: Session, package: ThemePackage) -> Optional[Dict[str, Any]]:
-    """One listed version as the catalogue lists it, or None when it is a Sync's row or not signed."""
+def catalogued_verdict(package: ThemePackage) -> Optional[signature_verify.Verdict]:
+    """The verdict that puts a listed version in the catalogue: this edition's own row (``source`` NULL) whose
+    signature an active key verifies. None for a Sync's row or one that isn't signed so (the files route's rule
+    too, ``catalog_files.py``)."""
     if package.source is not None:
         return None
     verdict = signature_verdict(package)
-    if not verdict.verified:
+    return verdict if verdict.verified else None
+
+
+def _item(db: Session, package: ThemePackage) -> Optional[Dict[str, Any]]:
+    """One listed version as the catalogue lists it, or None when it is a Sync's row or not signed."""
+    verdict = catalogued_verdict(package)
+    if verdict is None:
         return None
     manifest = package.manifest or {}
     return {
@@ -229,5 +237,5 @@ def _path_of(url: Optional[str], paths: Mapping[str, str]) -> Optional[str]:
 
 __all__ = [
     "CATALOG_KEPT_SECONDS", "CATALOG_SCHEMA", "CatalogSnapshot", "CatalogUnavailable", "build_catalog",
-    "catalog_max_bytes", "catalog_snapshot", "forget_cached",
+    "catalog_max_bytes", "catalog_snapshot", "catalogued_verdict", "forget_cached",
 ]
