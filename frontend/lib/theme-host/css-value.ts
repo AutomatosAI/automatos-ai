@@ -363,6 +363,9 @@ export const BOOT_VALUE_FUNCTIONS: ReadonlySet<string> = new Set([
   'rgb', 'rgba', 'hsl', 'hsla', 'var', 'calc', 'min', 'max', 'clamp',
   'hue-rotate', 'saturate', 'brightness', 'grayscale', 'contrast', 'sepia', 'invert',
 ])
+/** css_value.py KNOB_NAME (boot-sanitize.ts takes a knob table, a pair's knobs and a numeric rule's knobs by it). */
+export const BOOT_KNOB_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
+const KNOB_NAME_RULE = "a knob's name here is a letter, then up to 31 letters, digits or _"
 const GRADIENT_SUFFIX = '-gradient'
 const DROPPED = "the browser's first paint drops it, and every value built on it"
 
@@ -394,29 +397,20 @@ export function isBootValue(value: unknown): value is string {
 
 /** One cell of the table: its dotted path, the look it paints for and its variables. */
 type Cell = readonly [path: string, look: string, variables: unknown]
+/** What the gate drops with a knob name it refuses. */
+const DROPS_TABLE = "the knob's table and everything it paints"
+const DROPS_PAIR = 'the pair table and everything it paints'
+const DROPS_RULE = 'the rule and what it paints'
 
-/** Every option of every table under `knobs`. */
-function knobCells(document: JsonRecord): Cell[] {
-  const knobs = own(document, 'knobs')
-  if (!isRecord(knobs)) return []
-  return Object.keys(knobs).flatMap((knob) => {
-    const options = knobs[knob]
-    if (!isRecord(options)) return []
-    return Object.keys(options).map((option): Cell => [`knobs.${knob}.${option}`, `${echo(knob)} "${echo(option)}"`, options[option]])
-  })
+/** A name boot-sanitize.ts takes for a knob (BOOT_KNOB_NAME). */
+export function isKnobName(value: unknown): value is string {
+  return typeof value === 'string' && BOOT_KNOB_NAME.test(value)
 }
 
-/** Every cell of one pair table whose two knobs are named. */
-function pairCells(pair: unknown, index: number): Cell[] {
-  if (!isRecord(pair)) return []
-  const [a, b, table] = [own(pair, 'a'), own(pair, 'b'), own(pair, 'table')]
-  if (typeof a !== 'string' || typeof b !== 'string' || !isRecord(table)) return []
-  return Object.keys(table).flatMap((row) => {
-    const columns = table[row]
-    if (!isRecord(columns)) return []
-    const look = (column: string): string => `${echo(a)} "${echo(row)}" and ${echo(b)} "${echo(column)}"`
-    return Object.keys(columns).map((column): Cell => [`pairs[${index}].table.${row}.${column}`, look(column), columns[column]])
-  })
+/** A knob's name the gate refuses at `path`, and what it drops with it. */
+function nameError(path: string, drops: string): ThemeError {
+  const where = `${PREPAINT_PATH}#${echo(path)}`
+  return themeError('BAD_PREPAINT', where, `${where}: ${KNOB_NAME_RULE}, so the browser's first paint drops ${drops}.`)
 }
 
 /** A refusal for each variable of one cell whose value the gate drops. */
@@ -430,14 +424,55 @@ function cellDrops([path, look, variables]: Cell): ThemeError[] {
   })
 }
 
+/** One table under `knobs`: its name when the gate refuses it, else each of its cells' dropped values. */
+function knobErrors(knob: string, options: unknown): ThemeError[] {
+  if (!isKnobName(knob)) return [nameError(`knobs.${knob}`, DROPS_TABLE)]
+  if (!isRecord(options)) return []
+  return Object.keys(options).flatMap((option) => cellDrops([`knobs.${knob}.${option}`, `${echo(knob)} "${echo(option)}"`, options[option]]))
+}
+
+/** One pair table: each of its two knob names the gate refuses, else each of its cells' dropped values. */
+function pairErrors(pair: unknown, index: number): ThemeError[] {
+  if (!isRecord(pair)) return []
+  const [a, b, table] = [own(pair, 'a'), own(pair, 'b'), own(pair, 'table')]
+  const names = (['a', 'b'] as const).filter((side) => !isKnobName(own(pair, side))).map((side) => nameError(`pairs[${index}].${side}`, DROPS_PAIR))
+  if (names.length > 0 || typeof a !== 'string' || typeof b !== 'string' || !isRecord(table)) return names
+  return Object.keys(table).flatMap((row) => {
+    const columns = table[row]
+    if (!isRecord(columns)) return []
+    const look = (column: string): string => `${echo(a)} "${echo(row)}" and ${echo(b)} "${echo(column)}"`
+    return Object.keys(columns).flatMap((column) => cellDrops([`pairs[${index}].table.${row}.${column}`, look(column), columns[column]]))
+  })
+}
+
+/** One numeric rule: each knob it names (its own, its colour's, its cap table's) that the gate refuses. */
+function ruleErrors(rule: unknown, index: number): ThemeError[] {
+  if (!isRecord(rule)) return []
+  const [color, caps] = [own(rule, 'color'), own(rule, 'capTable')]
+  const named: Array<readonly [string, unknown]> = [
+    ['knob', own(rule, 'knob')],
+    ...(isRecord(color) ? [['color.knob', own(color, 'knob')] as const] : []),
+    ...(Array.isArray(caps) ? caps.map((name: unknown, at) => [`capTable[${at}]`, name] as const) : []),
+  ]
+  return named.filter(([, name]) => !isKnobName(name)).map(([field]) => nameError(`numeric[${index}].${field}`, DROPS_RULE))
+}
+
+function listed(document: JsonRecord, key: string): unknown[] {
+  const value = own(document, key)
+  return Array.isArray(value) ? value : []
+}
+
 /**
- * Every value of the table's cells the browser's first paint drops, at most PREPAINT_MAX_ERRORS: the cells
- * boot-sanitize.ts sanitizeVars reads, each option of each table under `knobs` and each cell of each pair
- * table. What prepaintErrors refuses is its alone; the server's reader runs this on a table that passed it.
+ * What the browser's first paint drops of the table, at most PREPAINT_MAX_ERRORS: a table under `knobs`, a pair
+ * table or a numeric rule whose knob name its gate (boot-sanitize.ts sanitizePrepaint) refuses (BAD_PREPAINT),
+ * and each value of a kept knob or pair cell it refuses (BAD_CSS_VALUE), in the table's order. What
+ * prepaintErrors refuses is its alone; the server's reader runs this on a table that passed it.
  */
 export function prepaintDropErrors(document: unknown): ThemeError[] {
   if (!isRecord(document)) return []
-  const pairs = own(document, 'pairs')
-  const pairList = Array.isArray(pairs) ? pairs.flatMap((pair: unknown, index) => pairCells(pair, index)) : []
-  return [...knobCells(document), ...pairList].flatMap(cellDrops).slice(0, PREPAINT_MAX_ERRORS)
+  const knobs = own(document, 'knobs')
+  const tables = isRecord(knobs) ? Object.keys(knobs).flatMap((knob) => knobErrors(knob, knobs[knob])) : []
+  const pairs = listed(document, 'pairs').flatMap((pair, index) => pairErrors(pair, index))
+  const rules = listed(document, 'numeric').flatMap((rule, index) => ruleErrors(rule, index))
+  return [...tables, ...pairs, ...rules].slice(0, PREPAINT_MAX_ERRORS)
 }

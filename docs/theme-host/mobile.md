@@ -23,7 +23,7 @@ foreground; the discovery document lists it as the `mobile_theme` capability). I
 |---|---|
 | `tokens` or `fromLooks` | Exactly one. `fromLooks` is only ever `true`. |
 | `tokens.light`, `tokens.dark` | `light` is required, `dark` optional. Keys are Studio's 24 colour tokens (`MOBILE_TOKEN_NAMES` in `services/themes/contract.py`), spelled with the leading `--`, and must include `--background` and `--foreground`. Each value is `H S% L%` (such as `0 0% 100%`) or `#rrggbb`. |
-| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. Defaults that don't fit the table paint nothing, on the web or the phone, and neither does a Studio token written `#rrggbb` in the table. |
+| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. A Studio token written `#rrggbb` in the table paints nothing, on the web or the phone. Defaults that don't fit the table would paint nothing either, so the reader refuses that table whatever the block (`PREPAINT_DEFAULTS_UNFIT`, [Theme host](_index.md) §1). |
 | `fonts` | Any of `sans`, `serif`, `mono`; each a different `assets/fonts/mobile/<name>.ttf` or `.otf` in the package (one sfnt face, at most 400 KB). |
 | `mascot` | `clips`, `stills` or `none` (absent means `none`). `clips` needs each state of the top-level `mascot.states` to have `assets/mascot/<state>.mp4` and `.png`; `stills` needs the `.png`. |
 | `engines.automatos` | Must not admit a host older than 1.1.0. |

@@ -51,7 +51,7 @@ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tup
 from services.themes.contract import (
     MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, TONE_RULE_KEY, TONE_RULE_TONES, is_finite_number, js_number,
 )
-from services.themes.css_value import is_boot_value, utf16_length
+from services.themes.css_value import is_boot_value, is_knob_name, utf16_length
 
 # hsl.ts TRIPLET and contrast.ts HEX, with ASCII digits ([0-9]: Python's \d also takes other scripts' digits).
 TRIPLET_PATTERN = re.compile(r"([0-9]{1,3}(?:\.[0-9]{1,2})?) ([0-9]{1,3}(?:\.[0-9]{1,2})?)% ([0-9]{1,3}(?:\.[0-9]{1,2})?)%")
@@ -68,10 +68,9 @@ LINEAR_KNEE, LINEAR_SLOPE = 0.04045, 12.92
 GAMMA_OFFSET, GAMMA_SCALE, GAMMA = 0.055, 1.055, 2.4
 RED_WEIGHT, GREEN_WEIGHT, BLUE_WEIGHT = 0.2126, 0.7152, 0.0722
 
-# boot-sanitize.ts: KNOB_NAME, OPTION_KEY_MAX_LENGTH, CSS_VAR_NAME_PATTERN (boot.ts V), RGB_LIST, CAP_MIN
-# and CAP_MAX. Its CSS-value gate isCssValue is css_value.py's is_boot_value. A JavaScript string's length
-# counts UTF-16 units (css_value.utf16_length).
-KNOB_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+# boot-sanitize.ts: OPTION_KEY_MAX_LENGTH, CSS_VAR_NAME_PATTERN (boot.ts V), RGB_LIST, CAP_MIN and CAP_MAX.
+# Its knob names and its CSS-value gate isCssValue are css_value.py's is_knob_name and is_boot_value. A
+# JavaScript string's length counts UTF-16 units (css_value.utf16_length).
 OPTION_KEY_MAX_LENGTH = 64
 BOOT_VAR_NAME = re.compile(r"--[a-z0-9-]{1,64}")
 RGB_LIST = re.compile(r"[0-9]{1,3},[0-9]{1,3},[0-9]{1,3}")
@@ -189,10 +188,6 @@ def _list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
-def _is_knob(name: Any) -> bool:
-    return isinstance(name, str) and KNOB_NAME.fullmatch(name) is not None
-
-
 def _boot_vars(entry: Any) -> Dict[str, str]:
     """``sanitizeVars``: the entry's variables whose name and value the boot passes; never None."""
     return {name: value for name, value in _object(entry).items() if BOOT_VAR_NAME.fullmatch(name) and is_boot_value(value)}
@@ -213,7 +208,7 @@ def _boot_pair(raw: Any) -> Optional[BootPair]:
     """``sanitizePair``: both knobs look fields, the cells' variables gated; None drops the pair."""
     pair = _object(raw)
     first, second = pair.get("a"), pair.get("b")
-    if not (_is_knob(first) and _is_knob(second)):
+    if not (is_knob_name(first) and is_knob_name(second)):
         return None
     return BootPair(first, second, _pair_table(pair.get("table"), _boot_vars))
 
@@ -228,7 +223,7 @@ def _boot_caps(rule: Mapping[str, Any]) -> Optional[BootCaps]:
     if "capTable" in rule and rule["capTable"] is None:
         return NO_CAPS
     knobs = rule.get("capTable")
-    if not isinstance(knobs, list) or len(knobs) != 2 or not all(_is_knob(knob) for knob in knobs):
+    if not isinstance(knobs, list) or len(knobs) != 2 or not all(is_knob_name(knob) for knob in knobs):
         return None
     return BootCaps((knobs[0], knobs[1]), _pair_table(rule.get("caps"), _cap))
 
@@ -243,13 +238,13 @@ def _boot_rule(raw: Any) -> Optional[BootRule]:
     var, knob, integer = rule.get("var"), rule.get("knob"), rule.get("integer")
     if rule.get("template") != NUMERIC_TEMPLATE or not isinstance(integer, bool):
         return None
-    if not isinstance(var, str) or BOOT_VAR_NAME.fullmatch(var) is None or not _is_knob(knob):
+    if not isinstance(var, str) or BOOT_VAR_NAME.fullmatch(var) is None or not is_knob_name(knob):
         return None
     low, high, scale = (js_number(rule.get(field)) for field in ("min", "max", "scale"))
     if low is None or high is None or scale is None or low > high or scale <= 0:
         return None
     caps, color = _boot_caps(rule), _object(rule.get("color"))
-    if caps is None or not _is_knob(color.get("knob")):
+    if caps is None or not is_knob_name(color.get("knob")):
         return None
     return BootRule(var, knob, low, high, integer, color["knob"], _option_table(color.get("rgb"), _rgb), caps)
 
@@ -257,7 +252,7 @@ def _boot_rule(raw: Any) -> Optional[BootRule]:
 def _boot_defaults(defaults: Any) -> Dict[str, Any]:
     """``sanitizeDefaults``: look fields whose value is text or a number JavaScript reads as finite."""
     kept = _object(defaults).items()
-    return {knob: value for knob, value in kept if _is_knob(knob) and (isinstance(value, str) or is_finite_number(value))}
+    return {knob: value for knob, value in kept if is_knob_name(knob) and (isinstance(value, str) or is_finite_number(value))}
 
 
 def _boot_tone(raw: Any, table: BootTable) -> Optional[BootTone]:
@@ -277,7 +272,7 @@ def boot_table(table: Any) -> Optional[BootTable]:
     """The prepaint ``table`` as the boot script gets it, or None when the web paints nothing from it (module docstring)."""
     if not isinstance(table, dict):
         return None
-    knobs = {knob: _option_table(options, _boot_vars) for knob, options in _object(table.get("knobs")).items() if _is_knob(knob)}
+    knobs = {knob: _option_table(options, _boot_vars) for knob, options in _object(table.get("knobs")).items() if is_knob_name(knob)}
     pairs = tuple(pair for pair in map(_boot_pair, _list(table.get("pairs"))) if pair is not None)
     numeric = tuple(rule for rule in map(_boot_rule, _list(table.get("numeric"))) if rule is not None)
     kept = BootTable(knobs, pairs, numeric, _boot_defaults(table.get("defaults")), None)

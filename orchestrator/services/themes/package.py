@@ -17,16 +17,18 @@ with a code, the path and a plain sentence:
   screenshot, ``assets/previews/phone/<NAME>.png`` or ``.jpg``, starts with its format's magic bytes);
 * a theme.json the manifest check refuses (``services/themes/manifest.py``); a missing entry,
   look schema or preset, or a preset the schema refuses (``look_schema.py``); a prepaint value
-  outside the CSS-value grammar (``css_value.py``), or one the browser's first paint would drop, and a
-  look-schema knob the prepaint table never paints, so the browser's looks would leave it out
-  (``first_paint.py``: ``BAD_CSS_VALUE``, ``KNOB_NOT_PAINTED``); CSS outside the theme's class, with
+  outside the CSS-value grammar (``css_value.py``); what the browser's first paint would drop of the
+  table (a knob name, a value: ``BAD_PREPAINT``, ``BAD_CSS_VALUE``), defaults that don't fit what it keeps
+  (``PREPAINT_DEFAULTS_UNFIT``), and a knob the look schema and the kept table don't both name
+  (``KNOB_NOT_PAINTED``, ``KNOB_NOT_IN_SCHEMA``), all in ``first_paint.py``; CSS outside the theme's class, with
   ``!important`` or ``@import`` (``css_scope.py``); a preview (web or phone), font, wordmark or mobile
   font the manifest names that is not in the package;
 * M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
   code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look, painted as
-  the web paints it (``mobile_tokens.paint_look``: nothing when the defaults don't fit the table, and
-  a Studio token only as an ``H S% L%`` triplet, since the web reads them as ``hsl(var(--x))``), gives
-  no ``--background`` or ``--foreground`` (``MOBILE_CANNOT_PAINT``); a ``clips`` or ``stills``
+  the web paints it (``mobile_tokens.paint_look``: a Studio token only as an ``H S% L%`` triplet,
+  since the web reads them as ``hsl(var(--x))``), gives no ``--background`` or ``--foreground``
+  (``MOBILE_CANNOT_PAINT``; defaults that don't fit the table are ``first_paint.py``'s
+  ``PREPAINT_DEFAULTS_UNFIT``, whatever the block); a ``clips`` or ``stills``
   mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``).
 
 The result carries every file with its checked type, the file manifest
@@ -51,7 +53,9 @@ from services.themes.contract import (
 from services.themes.css_scope import STYLE_PATH, css_scope_errors
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import digest_of_manifest, file_manifest
-from services.themes.first_paint import KNOB_NOT_PAINTED, first_paint_errors
+from services.themes.first_paint import (
+    KNOB_NOT_IN_SCHEMA, KNOB_NOT_PAINTED, PREPAINT_DEFAULTS_UNFIT, first_paint_errors,
+)
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
@@ -63,6 +67,7 @@ PACKAGE_ERROR_CODES: Tuple[str, ...] = (
     "ENCRYPTED", "NOT_ALLOWED", "SVG_NOT_ALLOWED", "UNCOMPRESSED_TOO_LARGE", "CORRUPT_FILE", "FILE_TOO_LARGE",
     "ENTRY_TOO_LARGE", "CODE_TOO_LARGE", "CLIP_TOO_LARGE", "BAD_FILE_TYPE", "NOT_UTF8", "BAD_JSON", "MISSING_FILE",
     "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK", "MOBILE_CANNOT_PAINT", KNOB_NOT_PAINTED,
+    KNOB_NOT_IN_SCHEMA, PREPAINT_DEFAULTS_UNFIT,
 )
 MOBILE_CANNOT_PAINT = "MOBILE_CANNOT_PAINT"
 ENTRY_PATH = "dist/entry.js"
@@ -451,23 +456,18 @@ def _paint_errors(block: Mapping[str, Any], files: Mapping[str, ThemeFile]) -> L
             'Add the table, or give "mobile.tokens" instead.'
         ))]
     table, error = parse_json(files[PREPAINT_PATH].data, PREPAINT_PATH)
-    if error is not None or not isinstance(table, dict):
+    # A table whose defaults don't fit what the web keeps of it is refused whole (first_paint.py, PREPAINT_DEFAULTS_UNFIT).
+    if error is not None or not isinstance(table, dict) or boot_table(table) is None:
         return []
-    # No stored look: the web paints the defaults (boot.ts :164), and nothing at all from a table they don't fit.
+    # No stored look: the web paints the defaults (boot.ts :164).
     missing = missing_tokens(paint_look(table, None))
     if not missing:
         return []
-    return [theme_error(MOBILE_CANNOT_PAINT, f"{PREPAINT_PATH}#{PREPAINT_DEFAULTS}", _cannot_paint(table, missing))]
+    return [theme_error(MOBILE_CANNOT_PAINT, f"{PREPAINT_PATH}#{PREPAINT_DEFAULTS}", _cannot_paint(missing))]
 
 
-def _cannot_paint(table: Mapping[str, Any], missing: List[str]) -> str:
-    """Why the defaults paint no phone: they don't fit the table (the web drops it whole), or they lack tokens."""
-    if boot_table(table) is None:
-        return (
-            f'{PREPAINT_PATH}: "{PREPAINT_DEFAULTS}" doesn\'t name an option of every knob table and a cell of every '
-            'pair table, with every number rule\'s value in range, so the web paints nothing from the table and a '
-            'phone can\'t draw the theme. Fix the defaults, or give "mobile.tokens" instead.'
-        )
+def _cannot_paint(missing: List[str]) -> str:
+    """Why the defaults paint no phone: they lack the ground or its text as triplets."""
     return (
         f'{PREPAINT_PATH}: the default look paints no {" or ".join(missing)}, so a phone can\'t draw the theme '
         'from its looks. Give the default choices those tokens as "H S% L%" triplets (the web reads Studio tokens '

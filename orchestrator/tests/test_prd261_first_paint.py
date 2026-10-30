@@ -8,7 +8,11 @@
   (``prepaint_errors``), so a package imported before this check still boots and paints what the browser keeps;
 * a ``looks/schema.json`` knob the kept table never paints: the browser's look spec (looks/spec.ts
   ``lookSpecOf``) has a choice knob for each table under ``knobs`` and a number knob for each numeric rule's
-  knob only, so every look with any other knob fails, the presets included (``KNOB_NOT_PAINTED``).
+  knob only, so every look with any other knob fails, the presets included (``KNOB_NOT_PAINTED``);
+* a knob the kept table paints that the schema lacks: the look spec needs it in every look and no look may
+  carry it (``KNOB_NOT_IN_SCHEMA``);
+* defaults that don't fit what the gate keeps: the browser drops the table whole (``PREPAINT_DEFAULTS_UNFIT``);
+* a knob table, pair table or numeric rule whose knob name the gate refuses: dropped whole (``BAD_PREPAINT``).
 
 The shape is a theme whose first paint lost its gradients and whose looks all failed on a hosted install,
 while every check passed: its cards, band and aura were gradients in the table, and its roundness a number
@@ -27,7 +31,10 @@ if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
 from services.themes import contract, css_value, mobile_tokens  # noqa: E402
-from services.themes.first_paint import KNOB_NOT_PAINTED, first_paint_errors, unpainted_knob_errors  # noqa: E402
+from services.themes.first_paint import (  # noqa: E402
+    KNOB_NOT_IN_SCHEMA, KNOB_NOT_PAINTED, PREPAINT_DEFAULTS_UNFIT, first_paint_errors, first_paint_table_errors, spec_knobs,
+    unknown_knob_errors, unpainted_knob_errors,
+)
 from services.themes.look_schema import validate_look_schema  # noqa: E402
 from services.themes.package import ThemePackageError, read_theme_package  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
@@ -165,3 +172,55 @@ def test_the_reader_takes_a_hello_package_whose_table_paints_every_knob():
     table = build.hello_prepaint({"ground": {"paper": {"--hello-bg": "#f4efe6"}, "ink": {"--hello-bg": "#101418"}}})
     package = read_theme_package(build.build_package(replace={PREPAINT: json.dumps(table).encode("utf-8")}))
     assert PREPAINT in package.files
+
+
+def test_a_knob_the_table_paints_that_the_schema_lacks_is_refused_where_the_table_paints_it():
+    shade = {"light": {"--gloss-shade": "#FFFFFF"}}
+    halo = {**GLOW, "var": "--gloss-halo", "knob": "halo"}
+    table = {**TABLE, "knobs": {**TABLE["knobs"], "shade": shade}, "numeric": [GLOW, halo],
+             "defaults": {**TABLE["defaults"], "shade": "light", "halo": 3}}
+    assert spec_knobs(mobile_tokens.boot_table(table)) == ["palette", "gradient", "shade", "glow", "halo"]
+    errors = unknown_knob_errors(_schema(), table)
+    assert _codes(errors) == [(KNOB_NOT_IN_SCHEMA, f"{PREPAINT}#knobs.shade"), (KNOB_NOT_IN_SCHEMA, f"{PREPAINT}#numeric[1].knob")]
+    assert 'its look spec needs "shade" in every look and no look may carry it' in errors[0]["message"]
+
+
+def test_defaults_that_do_not_fit_what_the_gate_keeps_refuse_the_table_whole():
+    spaced = {**GLOW, "color": {"knob": "palette", "rgb": {"blush": "255, 120, 180", "night": "180, 140, 255"}}}
+    for table in ({**TABLE, "defaults": {**TABLE["defaults"], "palette": "dusk"}}, {**TABLE, "numeric": [spaced]}):
+        assert css_value.prepaint_errors(table) == [] and mobile_tokens.boot_table(table) is None
+        codes = _codes(first_paint_table_errors(_schema(), table))
+        assert codes[-1] == (PREPAINT_DEFAULTS_UNFIT, f"{PREPAINT}#defaults")
+        assert KNOB_NOT_PAINTED not in [code for code, _ in codes]
+
+
+def test_a_knob_name_the_gate_refuses_drops_its_table_pair_or_rule():
+    table = {
+        **TABLE,
+        "knobs": {**TABLE["knobs"], "gloss-tint": {"warm": {"--gloss-tint": "#F4E0C0"}}},
+        "pairs": [{**TABLE["pairs"][0], "b": "2nd"}],
+        "numeric": [{**GLOW, "capTable": ["palette", "x-y"], "caps": {}}],
+    }
+    assert _codes(css_value.prepaint_drop_errors(table)) == [
+        ("BAD_CSS_VALUE", f"{PREPAINT}#knobs.gradient.soft.--gloss-card-hi"),
+        ("BAD_CSS_VALUE", f"{PREPAINT}#knobs.gradient.vivid.--gloss-card-hi"),
+        ("BAD_PREPAINT", f"{PREPAINT}#knobs.gloss-tint"),
+        ("BAD_PREPAINT", f"{PREPAINT}#pairs[0].b"),
+        ("BAD_PREPAINT", f"{PREPAINT}#numeric[0].capTable[1]"),
+    ]
+    assert all(css_value.is_knob_name(name) for name in ("palette", "glow", "my_knob", "Ab9"))
+    assert not any(css_value.is_knob_name(name) for name in ("gloss-tint", "2nd", "x" * 33, None, 7))
+    assert mobile_tokens.is_knob_name is css_value.is_knob_name
+
+
+def test_the_reader_refuses_a_hello_table_with_defaults_it_cannot_fit_or_a_knob_the_schema_lacks():
+    ground = {"paper": {"--hello-bg": "#f4efe6"}, "ink": {"--hello-bg": "#101418"}}
+    unfit = build.hello_prepaint({"ground": ground}, {"ground": "dusk"})
+    extra = build.hello_prepaint({"ground": ground, "shade": {"light": {"--hello-shade": "#ffffff"}}}, {"shade": "light"})
+    for table, expected in ((unfit, (PREPAINT_DEFAULTS_UNFIT, f"{PREPAINT}#defaults")), (extra, (KNOB_NOT_IN_SCHEMA, f"{PREPAINT}#knobs.shade"))):
+        try:
+            read_theme_package(build.build_package(replace={PREPAINT: json.dumps(table).encode("utf-8")}))
+        except ThemePackageError as exc:
+            assert _codes(exc.errors) == [expected]
+        else:
+            raise AssertionError(f"the reader accepted {expected[0]}")

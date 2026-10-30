@@ -22,7 +22,9 @@
  *
  * The browser's first-paint gate (boot-sanitize.ts, through css-value.ts isBootValue): the prepaintDrops
  * section's cases give the server reader's verdicts and sentences here too, and the gate's functions and
- * the longest value equal css_value.py's and contract.py's.
+ * the longest value equal css_value.py's and contract.py's. The firstPaint section's cases give
+ * first_paint.py's verdicts and sentences through first-paint.ts, which asks the browser's own
+ * sanitizePrepaint and lookSpecOf what a theme's table and looks keep.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -34,6 +36,7 @@ import {
   BOOT_VALUE_FUNCTIONS, bootValueProblem, cssValueProblem, PREPAINT_ERROR_CODES, PREPAINT_VALUE_MAX, prepaintDropErrors,
   prepaintErrors, TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, type ThemeError,
 } from '../css-value'
+import { FIRST_PAINT_ERROR_CODES, firstPaintErrors } from '../first-paint'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
 import {
   MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES, MOBILE_MIN_HOST,
@@ -84,6 +87,7 @@ interface Corpus {
   readonly looks: CorpusSection
   readonly prepaint: CorpusSection
   readonly prepaintDrops: CorpusSection
+  readonly firstPaint: CorpusSection
   readonly cssValues: { readonly valid: readonly string[]; readonly invalid: readonly string[] }
 }
 
@@ -199,8 +203,14 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
     if (testCase.messages !== undefined) expect(errors.map((error) => error.message)).toEqual(testCase.messages)
   })
 
+  it.each([...CORPUS.firstPaint.cases])('first paint: $name', (testCase) => {
+    const errors = firstPaintErrors(helloLookSchema(), testCase.document)
+    expectVerdict(errors, testCase.code, FIRST_PAINT_ERROR_CODES)
+    if (testCase.messages !== undefined) expect(errors.map((error) => error.message)).toEqual(testCase.messages)
+  })
+
   it('pins the sentence of every refused drop case, and has a case the first paint keeps', () => {
-    const refused = CORPUS.prepaintDrops.cases.filter((testCase) => testCase.code !== null)
+    const refused = [...CORPUS.prepaintDrops.cases, ...CORPUS.firstPaint.cases].filter((testCase) => testCase.code !== null)
     expect(refused.length).toBeGreaterThan(0)
     refused.forEach((testCase) => expect(testCase.messages?.length, testCase.name).toBeGreaterThan(0))
     expect(CORPUS.prepaintDrops.cases.some((testCase) => testCase.code === null && 'document' in testCase)).toBe(true)
@@ -233,6 +243,7 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
       expect(() => validateLook(helloLookSchema(), value)).not.toThrow()
       expect(() => prepaintErrors(value)).not.toThrow()
       expect(() => prepaintDropErrors(value)).not.toThrow()
+      expect(() => firstPaintErrors(helloLookSchema(), value)).not.toThrow()
       expect(() => cssValueProblem(value)).not.toThrow()
       expect(() => bootValueProblem(value)).not.toThrow()
     })
@@ -258,7 +269,7 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
   })
 
   it('runs every section the browser shares with the server', () => {
-    const sections = [CORPUS.manifests, CORPUS.lookSchemas, CORPUS.looks, CORPUS.prepaint, CORPUS.prepaintDrops]
+    const sections = [CORPUS.manifests, CORPUS.lookSchemas, CORPUS.looks, CORPUS.prepaint, CORPUS.prepaintDrops, CORPUS.firstPaint]
     sections.forEach((section) => expect(section.cases.length).toBeGreaterThan(0))
     expect(CORPUS.cssValues.valid.length).toBeGreaterThan(0)
     expect(CORPUS.cssValues.invalid.length).toBeGreaterThan(0)

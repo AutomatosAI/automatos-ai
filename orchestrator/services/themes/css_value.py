@@ -279,6 +279,10 @@ BOOT_VALUE_FUNCTIONS: Tuple[str, ...] = (
     "rgb", "rgba", "hsl", "hsla", "var", "calc", "min", "max", "clamp",
     "hue-rotate", "saturate", "brightness", "grayscale", "contrast", "sepia", "invert",
 )
+# boot-sanitize.ts KNOB_NAME: a look field's name, which the gate takes a knob table, a pair's knobs and a
+# numeric rule's knobs by (css-value.ts BOOT_KNOB_NAME; mobile_tokens.py keeps the table by it).
+KNOB_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+KNOB_NAME_RULE = "a knob's name here is a letter, then up to 31 letters, digits or _"
 GRADIENT_SUFFIX = "-gradient"
 UTF16_UNIT_BYTES = 2
 DROPPED = "the browser's first paint drops it, and every value built on it"
@@ -320,34 +324,26 @@ def is_boot_value(value: Any) -> bool:
 
 # One cell of the table: its dotted path, the look it paints for and its variables.
 Cell = Tuple[str, str, Any]
+# What the gate drops with a knob name it refuses.
+DROPS_TABLE = "the knob's table and everything it paints"
+DROPS_PAIR = "the pair table and everything it paints"
+DROPS_RULE = "the rule and what it paints"
 
 
-def _knob_cells(document: Dict[str, Any]) -> List[Cell]:
-    """Every option of every table under ``knobs``."""
-    knobs = document.get("knobs")
-    tables = knobs.items() if isinstance(knobs, dict) else ()
-    return [
-        (f"knobs.{knob}.{option}", f'{echo(knob)} "{echo(option)}"', variables)
-        for knob, options in tables if isinstance(options, dict)
-        for option, variables in options.items()
-    ]
+def is_knob_name(value: Any) -> bool:
+    """A name boot-sanitize.ts takes for a knob (``KNOB_NAME``): a letter, then up to 31 letters, digits or ``_``."""
+    return isinstance(value, str) and KNOB_NAME.fullmatch(value) is not None
 
 
-def _pair_cells(index: int, pair: Any) -> List[Cell]:
-    """Every cell of one pair table whose two knobs are named."""
-    if not isinstance(pair, dict) or not isinstance(pair.get("a"), str) or not isinstance(pair.get("b"), str):
-        return []
-    table = pair.get("table")
-    rows = table.items() if isinstance(table, dict) else ()
-    return [
-        (f"pairs[{index}].table.{row}.{column}", f'{echo(pair["a"])} "{echo(row)}" and {echo(pair["b"])} "{echo(column)}"', variables)
-        for row, columns in rows if isinstance(columns, dict)
-        for column, variables in columns.items()
-    ]
+def _name_error(path: str, drops: str) -> ThemeError:
+    """A knob's name the gate refuses at ``path``, and what it drops with it."""
+    where = f"{PREPAINT_PATH}#{echo(path)}"
+    return theme_error("BAD_PREPAINT", where, f"{where}: {KNOB_NAME_RULE}, so the browser's first paint drops {drops}.")
 
 
-def _cell_drops(path: str, look: str, variables: Any) -> List[ThemeError]:
+def _cell_drops(cell: Cell) -> List[ThemeError]:
     """A refusal for each variable of one cell whose value the gate drops."""
+    path, look, variables = cell
     named = variables.items() if isinstance(variables, dict) else ()
     errors: List[ThemeError] = []
     for name, value in named:
@@ -358,16 +354,60 @@ def _cell_drops(path: str, look: str, variables: Any) -> List[ThemeError]:
     return errors
 
 
-def prepaint_drop_errors(document: Any) -> List[ThemeError]:
-    """Every value of the table's cells the browser's first paint drops, at most ``PREPAINT_MAX_ERRORS``.
+def _knob_errors(knob: str, options: Any) -> List[ThemeError]:
+    """One table under ``knobs``: its name when the gate refuses it, else each of its cells' dropped values."""
+    if not is_knob_name(knob):
+        return [_name_error(f"knobs.{knob}", DROPS_TABLE)]
+    cells = options.items() if isinstance(options, dict) else ()
+    return [error for option, variables in cells for error in _cell_drops((f"knobs.{knob}.{option}", f'{echo(knob)} "{echo(option)}"', variables))]
 
-    The cells are the ones boot-sanitize.ts ``sanitizeVars`` reads: each option of each table under
-    ``knobs`` and each cell of each pair table. What ``prepaint_errors`` refuses is its alone; the
-    reader runs this on a table that passed it.
+
+def _pair_errors(index: int, pair: Any) -> List[ThemeError]:
+    """One pair table: each of its two knob names the gate refuses, else each of its cells' dropped values."""
+    if not isinstance(pair, dict):
+        return []
+    names = [_name_error(f"pairs[{index}].{side}", DROPS_PAIR) for side in ("a", "b") if not is_knob_name(pair.get(side))]
+    if names:
+        return names
+    table = pair.get("table")
+    rows = table.items() if isinstance(table, dict) else ()
+    cells = [
+        (f"pairs[{index}].table.{row}.{column}", f'{echo(pair["a"])} "{echo(row)}" and {echo(pair["b"])} "{echo(column)}"', variables)
+        for row, columns in rows if isinstance(columns, dict)
+        for column, variables in columns.items()
+    ]
+    return [error for cell in cells for error in _cell_drops(cell)]
+
+
+def _rule_errors(index: int, rule: Any) -> List[ThemeError]:
+    """One numeric rule: each knob it names (its own, its colour's, its cap table's) that the gate refuses."""
+    if not isinstance(rule, dict):
+        return []
+    color, caps = rule.get("color"), rule.get("capTable")
+    named = [("knob", rule.get("knob"))]
+    named += [("color.knob", color.get("knob"))] if isinstance(color, dict) else []
+    named += [(f"capTable[{at}]", name) for at, name in enumerate(caps)] if isinstance(caps, list) else []
+    return [_name_error(f"numeric[{index}].{field}", DROPS_RULE) for field, name in named if not is_knob_name(name)]
+
+
+def _listed(document: Dict[str, Any], key: str) -> List[Any]:
+    value = document.get(key)
+    return value if isinstance(value, list) else []
+
+
+def prepaint_drop_errors(document: Any) -> List[ThemeError]:
+    """What the browser's first paint drops of the table, at most ``PREPAINT_MAX_ERRORS``.
+
+    Its gate (boot-sanitize.ts ``sanitizePrepaint``) drops a table under ``knobs``, a pair table or a
+    numeric rule whose knob name it refuses (``BAD_PREPAINT``), and each value of a kept knob or pair
+    cell it refuses (``BAD_CSS_VALUE``), in the table's order. What ``prepaint_errors`` refuses is its
+    alone; the reader runs this on a table that passed it.
     """
     if not isinstance(document, dict):
         return []
-    pairs = document.get("pairs")
-    pair_cells = [cell for index, pair in enumerate(pairs) for cell in _pair_cells(index, pair)] if isinstance(pairs, list) else []
-    errors = [error for path, look, variables in _knob_cells(document) + pair_cells for error in _cell_drops(path, look, variables)]
+    knobs = document.get("knobs")
+    tables = knobs.items() if isinstance(knobs, dict) else ()
+    errors = [error for knob, options in tables for error in _knob_errors(knob, options)]
+    errors += [error for index, pair in enumerate(_listed(document, "pairs")) for error in _pair_errors(index, pair)]
+    errors += [error for index, rule in enumerate(_listed(document, "numeric")) for error in _rule_errors(index, rule)]
     return errors[:PREPAINT_MAX_ERRORS]
