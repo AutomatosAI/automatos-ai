@@ -37,6 +37,8 @@ Every check runs before anything is written, in this order:
 
 1. The key matches one of the configured hashes (else 401), and the three settings are set (else 503).
 2. The Marketplace is on (else 403).
+   Only then is the body read: a malformed body, more than three parts or a text part over its cap is 400
+   `PARTS_UNREADABLE`, a missing part 422 `PART_MISSING`.
 3. The package passes the same checks as a submission and ships `source/` (else 422).
 4. Its publisher is one of `THEME_PUBLISH_PUBLISHERS`, and is the service user's or not yet claimed (else 403). Under
    a reserved publisher such as `automatos` the service user submits as an admin would; nowhere else is it an admin.

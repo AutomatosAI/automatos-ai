@@ -85,6 +85,15 @@ def test_a_missing_or_inactive_actor_row_is_503(env, monkeypatch, actor):
     assert hp.nothing_stored(env)
 
 
+def test_an_actor_row_with_a_null_active_flag_is_503(env):
+    session = env.sessions()
+    session.execute(hp.sa.text("UPDATE users SET is_active = NULL WHERE id = :id"), {"id": hp.ACTOR_PK})
+    session.commit()
+    session.close()
+    _not_configured(hp.post(env.client, hp.package()))
+    assert hp.nothing_stored(env)
+
+
 def test_unset_settings_answer_503_before_any_key_check(env, monkeypatch):
     hp.configure(monkeypatch, hashes="")
     _not_configured(hp.post(env.client, hp.package(), key=None))

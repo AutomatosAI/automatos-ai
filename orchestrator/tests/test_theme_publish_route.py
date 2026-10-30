@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+from api.marketplace_themes_publish import SUMMARY_MAX_BYTES
 from core.models.themes import ThemePackage, ThemePublisher, ThemeReviewEvent, ThemeRevocation
 from services.themes import signature_verify
 from tests import helpers_theme_publish as hp
@@ -208,6 +209,21 @@ def test_a_missing_part_is_422(env, missing):
                                files={"package": ("p.autotheme", data, "application/zip")}, data=form)
     detail = hp.refused(response, 422, "PART_MISSING")
     assert detail["errors"][0]["path"] == missing and hp.nothing_stored(env)
+
+
+def _unreadable(env, form):
+    response = env.client.post(hp.THEME_PUBLISH_ROUTE, headers={"Authorization": f"Bearer {hp.KEY}"},
+                               files={"package": ("p.autotheme", hp.package(), "application/zip")}, data=form)
+    hp.refused(response, 400, "PARTS_UNREADABLE")
+    assert hp.nothing_stored(env)
+
+
+def test_a_text_part_over_its_cap_is_400_in_the_endpoint_shape(env):
+    _unreadable(env, {"signature": "{}", "review_summary": "x" * (SUMMARY_MAX_BYTES + 2)})
+
+
+def test_too_many_parts_is_400_in_the_endpoint_shape(env):
+    _unreadable(env, {"signature": "{}", "review_summary": "-", "extra": "-", "more": "-"})
 
 
 def test_a_package_sent_as_a_text_field_is_a_missing_part(env):

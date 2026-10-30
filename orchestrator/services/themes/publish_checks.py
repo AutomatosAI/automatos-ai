@@ -148,9 +148,9 @@ def require_listed(publisher: str, settings: PublishSettings) -> None:
 
 
 def require_actor(db: Session, actor_pk: int) -> None:
-    """503 unless ``THEME_PUBLISH_ACTOR`` names an active ``users`` row."""
+    """503 unless ``THEME_PUBLISH_ACTOR`` names an active ``users`` row (a NULL ``is_active`` is not active)."""
     row = db.execute(_ACTOR_ROW, {"user_id": actor_pk}).fetchone()
-    if row is None or (row[0] is not None and not row[0]):
+    if row is None or not row[0]:
         logger.warning("[Themes] %s names no active users row: theme publishing is off", ACTOR_SETTING)
         raise not_configured(ACTOR_MISSING)
 

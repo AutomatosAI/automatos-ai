@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.admin_themes import SUMMARY_MAX
 from api.marketplace_themes_submit import (
@@ -66,6 +67,8 @@ UTF8_MAX_BYTES_PER_CHAR = 4
 SUMMARY_MAX_BYTES = SUMMARY_MAX * UTF8_MAX_BYTES_PER_CHAR
 PACKAGE_REFUSED_CODE = "PACKAGE_REFUSED"
 PART_MISSING_CODE = "PART_MISSING"
+PARTS_UNREADABLE_CODE = "PARTS_UNREADABLE"
+PARTS_UNREADABLE = "The multipart body couldn't be read: {reason}"
 PACKAGE_REFUSED = "This theme can't be published."
 PART_MISSING = "The publish request needs the multipart parts package (a file), signature and review_summary."
 SUMMARY_UNREADABLE = f"The review summary must be UTF-8 text of at most {SUMMARY_MAX} characters."
@@ -107,12 +110,20 @@ async def _read_part(value: Any, cap: int, text_ok: bool) -> Optional[bytes]:
 
 
 async def publish_parts(request: Request) -> PublishParts:
-    """The multipart body, parsed only now (after the key) and bounded: three parts at most, each read to its cap."""
+    """The multipart body, parsed only now (after the key) and bounded: three parts at most, each read to its cap.
+
+    Starlette answers a malformed body, too many parts or a text part over ``max_part_size`` with its own
+    plain 400; that 400 is answered here in the endpoint's ``{code, message, errors}`` shape instead.
+    """
     limit = len(PARTS)
-    async with request.form(max_files=limit, max_fields=limit, max_part_size=SUMMARY_MAX_BYTES + 1) as form:
-        package = await _read_part(form.get(PACKAGE_PART), cap_bytes("package") + 1, text_ok=False)
-        signature = await _read_part(form.get(SIGNATURE_PART), ENVELOPE_MAX_BYTES + 1, text_ok=True)
-        summary = await _read_part(form.get(SUMMARY_PART), SUMMARY_MAX_BYTES + 1, text_ok=True)
+    try:
+        async with request.form(max_files=limit, max_fields=limit, max_part_size=SUMMARY_MAX_BYTES + 1) as form:
+            package = await _read_part(form.get(PACKAGE_PART), cap_bytes("package") + 1, text_ok=False)
+            signature = await _read_part(form.get(SIGNATURE_PART), ENVELOPE_MAX_BYTES + 1, text_ok=True)
+            summary = await _read_part(form.get(SUMMARY_PART), SUMMARY_MAX_BYTES + 1, text_ok=True)
+    except StarletteHTTPException as unreadable:
+        reason = PARTS_UNREADABLE.format(reason=unreadable.detail)
+        raise _http(PublishRefused(unreadable.status_code, PARTS_UNREADABLE_CODE, reason)) from unreadable
     return PublishParts(package=package, signature=signature, summary=summary)
 
 
