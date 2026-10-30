@@ -5,8 +5,9 @@ US-017a: (c) the embeddings provider, (d) the RAG reranker (Cohere), (e) on a
 local install with session mode on, the CLI each session agent runs on, and
 (f) Retell when the workspace can use Auto Live voice: the platform switch,
 Retell armed, the workspace's own switch and, on saas only, a plan whose
-families allow voice (or a known tier that declares none). The monthly cap is
-not one of them.
+families allow voice (or a known tier that declares none): every default tier
+since PRD-265 D-6, so a tier table that turns voice off is the case left. The
+monthly cap is not one of them.
 
 System settings are a table in each test (both readers of the canonical
 accessor are pointed at it); the workspace and agent rows are real Postgres
@@ -288,9 +289,21 @@ def test_retell_is_not_listed_when_the_workspaces_own_switch_is_off(floor):
 
 
 @pytest.mark.parametrize("plan", ["basic", "pro", None])
-def test_retell_is_not_listed_on_saas_for_a_plan_without_voice(floor, plan):
+def test_retell_is_listed_on_saas_for_every_default_plan(floor, plan):
     _platform_voice(floor)
     _workspace(floor, plan=plan, voice_live=True)
+
+    assert _ids(floor) == ["retell"]
+
+
+def test_retell_is_not_listed_on_saas_for_a_tier_that_turns_voice_off(floor, monkeypatch):
+    import config as config_module
+
+    tiers = {name: dict(tier) for name, tier in config_module.PLAN_TIERS.items()}
+    tiers["pro"]["families"] = {**tiers["pro"]["families"], "voice": False}
+    monkeypatch.setattr(config_module, "PLAN_TIERS", tiers)
+    _platform_voice(floor)
+    _workspace(floor, plan="pro", voice_live=True)
 
     assert _ids(floor) == []
 

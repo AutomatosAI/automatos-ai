@@ -2072,6 +2072,12 @@ class Config:
         os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
     )
     VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
+    # PRD-265 D-6 (Gerard, 30 Oct 2026): an Auto Live call is paid from credits like chat, at what
+    # Retell charges us x CREDITS_MARKUP (modules/voice/live_billing.py). The cost comes on the
+    # call_ended event; when an event carries none, the call's minutes are charged at this rate:
+    # Retell's list price for our voice at its dearest (voice infra $0.055 + an ElevenLabs voice
+    # up to $0.10, retellai.com/pricing, 30 Oct 2026), as the meter does for an unpriced model.
+    VOICE_LIVE_ESTIMATE_USD_PER_MINUTE: float = float(os.getenv("VOICE_LIVE_ESTIMATE_USD_PER_MINUTE", "0.155"))
     # Spoken turns ride a FAST PATH: only this many recent messages feed the
     # prompt (a call is a conversation, not an archive replay) — first-token
     # time is the product in voice.
@@ -2703,7 +2709,9 @@ _PRO_LIMITS: dict = {
     "marketplace_depth": 2,
     "budget_usd": 100,
     "render_minutes_month": 60,
-    "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+    # PRD-265 D-6 (30 Oct 2026): voice on every plan; an Auto Live call is paid by the minute
+    # from credits, so it is the customer's choice (it was Business-only, PRD-266 D34).
+    "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
 }
 
 _PLAN_TIERS_DEFAULTS: dict[str, dict] = {

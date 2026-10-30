@@ -30,6 +30,7 @@ _SOURCE_LABELS = {
     "trial_grant": "Trial credits",
     "trial_reset": "Trial reset",
     "admin_adjust": "Adjustment by Automatos",
+    "voice_live_call": "Auto Live call",
     "stripe_invoice": "Monthly credits",
     "stripe_topup": "Top-up",
     "stripe_refund": "Refund",

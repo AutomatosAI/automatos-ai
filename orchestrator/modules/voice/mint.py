@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from config import config
-from modules.voice import retell_api
+from modules.voice import live_billing, retell_api
 from modules.voice.live_socket import CALL_STATUS_SUPERSEDED, LIVE_CALL_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # never the sentence (the repo's coded-refusal shape: {"code", "message"}).
 VOICE_FAMILY = "voice"
 VOICE_LIVE_PLAN_REQUIRED = "voice_live_plan_required"
-VOICE_LIVE_PLAN_REQUIRED_MESSAGE = "Auto Live is on the Business plan"
+VOICE_LIVE_PLAN_REQUIRED_MESSAGE = "Auto Live isn't on this workspace's plan"
 
 PLATFORM_DISABLED = "Auto Live is switched off platform-wide"
 NOT_ARMED = "Auto Live is not armed — Retell credentials are missing in Settings → System Settings → Voice"
@@ -104,19 +104,27 @@ def plan_allows_voice_live(plan: Optional[str]) -> bool:
 
 def require_voice_live_plan(db: Session, workspace_id: Any) -> None:
     """D34: on SaaS, refuse (403, coded) a workspace whose plan has no voice family
-    (``plan_allows_voice_live``)."""
+    (``plan_allows_voice_live``). Every default tier has it since PRD-265 D-6; the gate stays
+    for a tier table that turns it off. Then D-6: a call is paid by the minute from credits,
+    so a workspace that pays in credits and has none left is refused (402, coded
+    ``credits_exhausted``) before Retell is asked (``live_billing.has_credits``)."""
     if config.IS_LOCAL_EDITION:
         return
     from core.models.workspaces import Workspace
+    from services.credits.routing import CREDITS_EXHAUSTED_CODE
 
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     plan = getattr(workspace, "plan", None)
-    if plan_allows_voice_live(plan):
-        return
-    logger.info("voice_live_mint_denied reason=plan workspace=%s plan=%s", workspace_id, plan)
-    raise MintRefused(
-        403, {"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE}
-    )
+    if not plan_allows_voice_live(plan):
+        logger.info("voice_live_mint_denied reason=plan workspace=%s plan=%s", workspace_id, plan)
+        raise MintRefused(
+            403, {"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE}
+        )
+    if not live_billing.has_credits(db, workspace_id):
+        logger.info("voice_live_mint_denied reason=credits workspace=%s", workspace_id)
+        raise MintRefused(
+            402, {"code": CREDITS_EXHAUSTED_CODE, "message": live_billing.CREDITS_REFUSAL_MESSAGE}
+        )
 
 
 def armed_credentials(ports: MintPorts, workspace_id: Any) -> Any:

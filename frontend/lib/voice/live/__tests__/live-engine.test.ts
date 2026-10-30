@@ -174,7 +174,7 @@ describe('the Live engine — a call from the mint to its end', () => {
 
 describe('the Live engine — every failure is a plain sentence', () => {
   it('the plan refusal (a coded 403) reads as words, never the raw JSON', async () => {
-    const detail = { code: 'voice_live_plan_required', message: 'Auto Live is on the Business plan' }
+    const detail = { code: 'voice_live_plan_required', message: "Auto Live isn't on this workspace's plan" }
     api.request.mockRejectedValue(Object.assign(new Error(JSON.stringify(detail)), { status: 403, body: { detail } }))
     const engine = engineFor()
     await engine.start({ chatId: 'chat-1' })

@@ -10,6 +10,12 @@
 - **P5, payments inside Studio (Gerard, 23 Oct 2026):** "If I ever see a site … that has to go off to Stripe to collect a payment and back again I am running a mile." No hosted Checkout page, no Customer Portal, no emailed Stripe link. The card form is part of Settings → Billing, in our theme: Stripe's secure card fields sit inside our form. Card change, invoices (PDFs served by us), cancel/resume and plan changes are in the same tab. A bank's 3-D Secure check may appear over the page.
 - **P1 re-confirmed 23 Oct 2026 (Gerard):** "we go it alone with Stripe." Clerk's billing docs, re-read that day, still say no 3-D Secure ("payments that require a 3DS challenge will fail"), no tax or VAT, USD only, no refunds.
 
+- **D-6, voice (Gerard, 30 Oct 2026):** "voice should just work like chat or anything they do, it's billed against their credits so their choice to use voice or not." So:
+  - A spoken answer's model calls are charged as a chat turn's are; they always were.
+  - An **Auto Live** call is charged what Retell charges us for it × `CREDITS_MARKUP`. The cost comes from the `call_ended` event's `call_cost.combined_cost`. When an event carries no cost, the minutes are charged at `VOICE_LIVE_ESTIMATE_USD_PER_MINUTE`, 0.155: Retell's list price for our ElevenLabs voice at its dearest. The charge is once per call, and with no credits left a call can't start.
+  - Auto Live is on **every plan**, no longer Business-only: the `voice` family is on in every default tier. The monthly minute cap stays.
+  - **Our own server voice is free:** it costs us no more per use than the device's own voice. Listening is done by the browser or phone, also free.
+
 **W2 build choices (23 Oct 2026):**
 - **Stripe client:** a thin client on `httpx`, which is already a dependency (`services/billing/stripe_api.py`). No new Python package, so the hash-locked `requirements.lock` is unchanged.
 - **API version `2026-09-30.endive`**, on the same release train as the frontend's `@stripe/stripe-js@10` / `@stripe/react-stripe-js@7`: Stripe keys each Stripe.js major to one train.
@@ -94,7 +100,7 @@ Customers on their own keys (the Own keys plan, or any plan after the trial) are
 | Trial | $0 | 500 once, per person | Pro limits | Yes, until credits run out | A ledger grant. The daily global trial cap stays. |
 | Own keys | $9/mo | 0 | **Same as Pro** (decision 6) | **No.** Calls use the customer's keys only; there is no platform fallback for any provider. | Background calls: see D-3. |
 | Pro | $29/mo | 2,000/mo | 5 seats, 20 agents, 60 render min | Yes | Monthly grant spent before top-ups. |
-| Business | $99/mo | 8,000/mo (D-5: Rikki may rebalance) | 25 seats, unlimited agents, 240 render min, voice | Yes | **By invite.** Admin-issued checkout link only. |
+| Business | $99/mo | 8,000/mo (D-5: Rikki may rebalance) | 25 seats, unlimited agents, 240 render min | Yes | **By invite.** Admin-issued checkout link only. Voice is on every plan since D-6 (30 Oct), paid from credits. |
 | Enterprise | Custom | — | — | — | "Coming soon · Contact Automatos". Not sold through Stripe. |
 | Top-up | $10 | 1,000 | — | — | One-off, on any paid plan, valid 12 months. |
 
@@ -342,7 +348,7 @@ Built 23 Oct 2026 on `feat/prd-265-w2`. Code: `services/billing/` (provider inte
 | D-3 | Background and system calls: absorb as overhead, or charge to the customer | **Decided 20 Oct (Gerard): absorb** | Absorbed and recorded as overhead (`bucket = overhead`); margins reviewed after two weeks |
 | D-4 | Terms v2.3 (seller, renewal, cancellation, withdrawal, credit terms) and counsel | Mon 2 Nov | No checkout until reviewed |
 | D-5 | Business credits: keep 8,000 or rebalance (Rikki: fewer credits, more non-token value) | Thu 29 Oct | Keep 8,000 |
-| D-6 | Does voice ship in the beta, and at what per-minute rate | Thu 29 Oct | Voice stays Business-only and unpriced until decided |
+| D-6 | Does voice ship in the beta, and at what per-minute rate | **Decided 30 Oct (Gerard): billed like chat** | Auto Live on every plan at Retell's real cost × markup; our server voice free (see the decisions at the top) |
 | D-7 | Prices shown including or excluding VAT for EU consumers (about $5 difference per Pro sale **[R]**) | Thu 29 Oct | Excluding VAT for business buyers; including for consumers |
 | D-8 | Beta users on their own keys: offered the $9 plan on 9 Nov, or kept free for a period | Fri 6 Nov | Offered, with 30 days free |
 
