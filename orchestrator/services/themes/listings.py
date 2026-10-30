@@ -21,6 +21,11 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   preset's ``phonePreviews``, ``otherPhonePreviews`` and the card's ``phoneCover``; a package without
   them answers ``[]`` and ``null`` there. Every URL is the files route (``serve.module_url``), which
   serves an approved listing's files to any caller (A-08a).
+* **Cloud rows** (PRD-270 K15): a version a Sync with Automatos Cloud wrote (``source`` 'cloud') is listed
+  as any other, and the card says so (``source``). This install may not hold its bytes yet, so its
+  screenshots load from Automatos Cloud (``urls.cloud_file_url``: none while ``AUTOMATOS_CLOUD_URL`` is
+  off), and its readme and changelog are null: the catalogue's files route serves listed screenshots and
+  the package only. ``_file_url`` is that one choice.
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
 * **Official** (QB-21): ``publisher.official`` is true only for a reserved publisher
   (``automatos``, or a ``theme_publishers`` row marked reserved) whose shown version carries a
@@ -48,7 +53,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session
 
 from config import config
-from core.models.themes import ThemeInstallation, ThemePackage, ThemePublisher
+from core.models.themes import THEME_SOURCE_CLOUD, ThemeInstallation, ThemePackage, ThemePublisher
+from services.marketplace_cloud.urls import cloud_file_url
 from services.themes import signature_verify
 from services.themes.choices import (
     CONFLICT,
@@ -182,8 +188,17 @@ def publisher_view(db: Session, theme_id: str, verdict: signature_verify.Verdict
 
 
 def _file_url(package: ThemePackage, path: str) -> Optional[str]:
+    """Where the browser loads ``path`` of the version, by the row's source; None when it doesn't hold it.
+
+    This install's own row: its files route. A Cloud row: Automatos Cloud's files route for a screenshot
+    theme.json lists (None while the setting is off), and None for anything else (K15).
+    """
     listed = package.file_manifest if isinstance(package.file_manifest, dict) else {}
-    return module_url(package.digest, path) if path in listed else None
+    if path not in listed:
+        return None
+    if package.source != THEME_SOURCE_CLOUD:
+        return module_url(package.digest, path)
+    return cloud_file_url(package.digest, path) if _is_screenshot(package, path) else None
 
 
 class PreviewKind(NamedTuple):
@@ -200,6 +215,12 @@ PHONE_PREVIEWS = PreviewKind("phonePreviews", "assets/previews/phone/", "otherPh
 PREVIEW_KINDS: Tuple[PreviewKind, ...] = (WEB_PREVIEWS, PHONE_PREVIEWS)
 
 
+def _is_screenshot(package: ThemePackage, path: str) -> bool:
+    """True when theme.json lists ``path`` under one of the ``PREVIEW_KINDS``."""
+    manifest = package.manifest or {}
+    return any(isinstance(manifest.get(kind.field), list) and path in manifest[kind.field] for kind in PREVIEW_KINDS)
+
+
 def preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     """The screenshots theme.json lists under ``kind`` that the package holds, in theme.json's order.
 
@@ -212,9 +233,9 @@ def preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
 
 
 def cover_url(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
-    """The files URL of the first screenshot of ``kind`` the package holds, or None."""
+    """The URL of the first screenshot of ``kind`` the package holds (``_file_url``), or None."""
     paths = preview_paths(package, kind)
-    return module_url(package.digest, paths[0]) if paths else None
+    return _file_url(package, paths[0]) if paths else None
 
 
 def _stem(path: str, kind: PreviewKind) -> str:
@@ -237,7 +258,7 @@ def _claimed(
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
     """``({preset: [{screen, url}]}, [unclaimed url])`` for one list of screenshots, in theme.json's order."""
     owned = [
-        (_owner_preset(_stem(path, kind), presets), module_url(package.digest, path))
+        (_owner_preset(_stem(path, kind), presets), _file_url(package, path))
         for path in preview_paths(package, kind)
     ]
     claimed = {
@@ -326,6 +347,7 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
         "phoneCover": cover_url(shown, PHONE_PREVIEWS),
         "revoked": revocation_body(revocation_of(db, shown)),
         "installed": installed_state(db, workspace_id, shown.theme_id, latest),
+        "source": shown.source,
     }
 
 

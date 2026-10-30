@@ -289,13 +289,17 @@ same 404.
 
 A card (`services/themes/listings.py`): `listingId`, `themeId`, `name`, `description`, `publisher: {name, official}`,
 `signature: {state, keyId}`, `version`, `packageId`, `compatible`, `uses`, `pricing` (the manifest's label, else
-"Free"), `cover`, `phoneCover`, `revoked` and `installed` (`{installId, packageId, version, fromListing,
-updatePackageId}` or `null`). The card shows the newest version this host can run, else the newest one.
+"Free"), `cover`, `phoneCover`, `revoked`, `installed` (`{installId, packageId, version, fromListing,
+updatePackageId}` or `null`) and `source` (`"cloud"` for a version a Sync with Automatos Cloud wrote, else `null`).
+The card shows the newest version this host can run, else the newest one.
 
 The detail adds `presets` (`[{id, default, previews: [{screen, url}], phonePreviews: [{screen, url}]}]`),
 `otherPreviews`, `otherPhonePreviews`, `readme`, `changelog`, `base`, `tone`, `minWidth`, `pages`, `routes`, `latest`
 and `versions` (each version with `packageId`, `engines`, `compatible`, `revoked`, `signature` and `createdAt`).
-Every URL is a files-route URL. A listing with no listed version is 404 "That theme isn't in the Marketplace."
+Every URL is a files-route URL, except a Cloud version's (`source: "cloud"`): its screenshots load from Automatos
+Cloud (`<AUTOMATOS_CLOUD_URL>/api/marketplace/catalog/files/<digest>/<path>`, none while that setting is empty or not an
+origin), and its `readme` and `changelog` are `null`. A listing with no listed version is 404 "That theme isn't in the
+Marketplace."
 
 Screenshots come from `theme.json`'s `previews` (web, `assets/previews/<name>.png`) and `phonePreviews` (phone,
 `assets/previews/phone/<name>.png` or `.jpg`), up to 24 each (see [The package](_index.md#1-the-package)). One rule

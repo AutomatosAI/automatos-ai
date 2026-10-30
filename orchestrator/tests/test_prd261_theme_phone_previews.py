@@ -310,8 +310,8 @@ def test_a_phone_screenshot_the_package_doesnt_hold_is_left_out(api):  # noqa: F
 def test_a_listing_without_phone_screenshots_answers_as_before_with_empty_phone_fields(api):  # noqa: F811 — the imported fixture
     play = _listing_package(api.db)
     card, detail = _listings(api)[PLAY_LISTING], _detail(api)
-    assert set(card) == CARD_KEYS | {"phoneCover"} and card["phoneCover"] is None
-    assert set(detail) == CARD_KEYS | DETAIL_KEYS | {"phoneCover", "otherPhonePreviews"}
+    assert set(card) == CARD_KEYS | {"phoneCover", "source"} and card["phoneCover"] is None
+    assert set(detail) == CARD_KEYS | DETAIL_KEYS | {"phoneCover", "otherPhonePreviews", "source"}
     assert detail["otherPhonePreviews"] == [] and detail["phoneCover"] is None
     assert [set(preset) for preset in detail["presets"]] == [PRESET_KEYS | {"phonePreviews"}] * 2
     assert [preset["phonePreviews"] for preset in detail["presets"]] == [[], []]
