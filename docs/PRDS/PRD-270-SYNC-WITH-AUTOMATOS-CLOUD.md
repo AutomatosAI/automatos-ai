@@ -1,6 +1,6 @@
 # PRD-270: The open Marketplace — anyone can browse it, every local install can sync it
 
-**Status:** Draft for Gerard's review, 30 Oct 2026. Two parts on one public catalogue: (A) the SaaS Marketplace is
+**Status:** **Approved to build**, 30 Oct 2026 (Gerard: "Ok build PRD and we fire it on a fresh ralph loop"). Every §8 recommendation is the default (his 29 Oct rule). Two parts on one public catalogue: (A) the SaaS Marketplace is
 visible to everyone, signed in or not (§5.7); (B) a local install pulls it with **Sync with Automatos Cloud**.
 Pull only. Publishing from a local install to the Cloud Marketplace is a later PRD, after a security review (§3).
 **Why now:** Gerard set up a new self-hosted (VPS) Automatos on 30 Oct: "my marketplace has the defaults, as a open
