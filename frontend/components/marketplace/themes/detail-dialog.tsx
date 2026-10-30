@@ -15,7 +15,7 @@ import { themeErrorMessage } from '@/lib/theme-host/api'
 
 import { DetailDocs, DetailFacts, DetailPreviews, DetailVersions } from './detail-sections'
 import { AddToWorkspace } from './install-listing'
-import { ListingBadges } from './listing-card'
+import { ListingBadges } from './listing-badges'
 import { LOADING_LISTING, listingName } from './listing-format'
 import { useThemeListing } from './listing-hooks'
 

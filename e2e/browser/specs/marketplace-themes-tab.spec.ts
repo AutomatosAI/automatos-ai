@@ -8,12 +8,13 @@ import { chooseStyle } from '../support/hello-theme'
 // PRD-261 C-04b (@host): the Marketplace's Themes tab, end to end on the local edition, against
 // the real backend and the real files route (no route interception):
 //
-//   /marketplace › Themes → Publish theme: submit hello-c04b.autotheme (C-01b's form, C-01a's
+//   /marketplace (it opens on Themes, the storefront) → Make your own › Submit a theme package for
+//   review → Publish theme: submit hello-c04b.autotheme (C-01b's form in its dialog, C-01a's
 //   route) → approve it (C-03a; the local operator is super_admin and the local edition has no
-//   isolated review stage) → reload › Themes → the listing card → its detail → Add to my
-//   workspace (C-04a, install by reference) → Use this theme → the choice is stored and the page
-//   reloads into the theme → reload again → still active, and the server says the install
-//   references the approved Marketplace package.
+//   isolated review stage) → reload › Themes → the listing's card in the strip puts it in the
+//   hero → Add to my workspace (C-04a, install by reference) → Use this theme → the choice is
+//   stored and the page reloads into the theme → reload again → still active, and the server
+//   says the install references the approved Marketplace package.
 //
 // Approve goes through the API: its page is C-03b's, proved by admin-theme-review.spec.ts. The
 // package has its own theme id (fixtures/hello-c04b/build.py), so no other spec meets its listing
@@ -32,6 +33,7 @@ const THEME_NAME = 'Hello Marketplace (C-04b)'
 const MARKETPLACE_PATH = '/marketplace'
 const SUBMIT_PATH = '/api/marketplace/themes/submit'
 const THEMES_TAB = 'Themes'
+const SUBMIT_PACKAGE = 'Submit a theme package for review'
 const PUBLISH_THEME = 'Publish theme'
 const SUBMIT_FOR_REVIEW = 'Submit for review'
 const STATUS_ATTR = 'data-theme-host'
@@ -67,17 +69,21 @@ function buildPackage(): Buffer {
 
 async function openThemesTab(page: Page): Promise<void> {
   await page.goto(MARKETPLACE_PATH)
-  await page.getByRole('tab', { name: THEMES_TAB }).click()
+  const tab = page.getByRole('tab', { name: THEMES_TAB })
+  await expect(tab).toHaveAttribute('data-state', 'active') // the tab the Marketplace opens on
+  await tab.click()
 }
 
 /**
- * Submits the package through the tab's Publish theme form (201, or 200 with the version held
- * already), waiting out another spec's open submission (its 409 shows as the form's refusal).
- * The answer is read off the form's own request, so the spec approves the package it sent.
+ * Submits the package through the tab's Publish theme form, opened from Make your own (201, or
+ * 200 with the version held already), waiting out another spec's open submission (its 409 shows
+ * as the form's refusal). The answer is read off the form's own request, so the spec approves the
+ * package it sent.
  */
 async function submitThroughTab(page: Page): Promise<Submission> {
   const buffer = buildPackage()
-  const publish = page.getByRole('region', { name: PUBLISH_THEME })
+  await page.getByRole('button', { name: SUBMIT_PACKAGE }).click()
+  const publish = page.getByTestId('publish-theme-dialog').getByRole('region', { name: PUBLISH_THEME })
   const held: { answer?: Submission } = {}
   await expect(async () => {
     const answered = page.waitForResponse((response) =>
@@ -138,14 +144,16 @@ test.describe('Marketplace › Themes', () => {
     expect(submission.package.themeId).toBe(THEME_ID)
     await approve(page.request, submission)
 
-    await openThemesTab(page) // a fresh load, so the grid lists the version just approved
+    await openThemesTab(page) // a fresh load, so the strip lists the version just approved
     const card = page.getByTestId(`theme-listing-${LISTING_ID}`)
     await expect(card).toContainText(THEME_NAME)
     await card.click()
+    await expect(card).toHaveAttribute('aria-pressed', 'true')
 
-    const detail = page.getByTestId('theme-listing-detail')
-    await detail.getByRole('button', { name: 'Add to my workspace' }).click()
-    await detail.getByRole('button', { name: 'Use this theme' }).click()
+    const hero = page.getByTestId('storefront-hero')
+    await expect(hero.getByTestId('storefront-hero-name')).toHaveText(THEME_NAME)
+    await hero.getByRole('button', { name: 'Add to my workspace' }).click()
+    await hero.getByRole('button', { name: 'Use this theme' }).click()
 
     // A reviewed version needs no opt-in: the choice is stored and the page reloads into the theme.
     await expectThemeActive(page)

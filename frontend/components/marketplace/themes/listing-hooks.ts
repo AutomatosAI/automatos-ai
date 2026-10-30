@@ -33,18 +33,21 @@ function useWorkspaceId(): string | null {
   return useWorkspace().workspace?.id ?? null
 }
 
-/** Every approved theme, one card each, with this workspace's install of it. */
-export function useThemeListings() {
+/**
+ * Every approved theme, one card each, with this workspace's install of it. `enabled` false asks
+ * nothing: the Themes tab passes it while the theme settings are loading or the Marketplace is off.
+ */
+export function useThemeListings(enabled = true) {
   const workspaceId = useWorkspaceId()
   return useQuery<ThemeListing[]>({
     queryKey: themeListingKeys.list(workspaceId),
-    enabled: !!workspaceId,
+    enabled: enabled && !!workspaceId,
     queryFn: async () => (await apiClient.getThemeListings()).listings,
     staleTime: LISTING_STALE_MS,
   })
 }
 
-/** One listing's detail; fetched only while a listing is open. */
+/** One listing's detail; fetched only for the listing in the storefront's hero or its open detail. */
 export function useThemeListing(listingId: string | null) {
   const workspaceId = useWorkspaceId()
   return useQuery<ThemeListingDetail>({

@@ -8,8 +8,13 @@ The following files were used as context for generating this page:
 - [frontend/components/marketplace/marketplace-homepage.tsx](../../frontend/components/marketplace/marketplace-homepage.tsx)
 - [frontend/components/marketplace/themes/tab.tsx](../../frontend/components/marketplace/themes/tab.tsx)
 - [frontend/components/marketplace/themes/listing-format.ts](../../frontend/components/marketplace/themes/listing-format.ts)
-- [frontend/components/marketplace/themes/listing-grid.tsx](../../frontend/components/marketplace/themes/listing-grid.tsx)
-- [frontend/components/marketplace/themes/listing-card.tsx](../../frontend/components/marketplace/themes/listing-card.tsx)
+- [frontend/components/marketplace/themes/storefront/storefront.tsx](../../frontend/components/marketplace/themes/storefront/storefront.tsx)
+- [frontend/components/marketplace/themes/storefront/hero.tsx](../../frontend/components/marketplace/themes/storefront/hero.tsx)
+- [frontend/components/marketplace/themes/storefront/storefront-views.ts](../../frontend/components/marketplace/themes/storefront/storefront-views.ts)
+- [frontend/components/marketplace/themes/storefront/strip.tsx](../../frontend/components/marketplace/themes/storefront/strip.tsx)
+- [frontend/components/marketplace/themes/storefront/make-your-own.tsx](../../frontend/components/marketplace/themes/storefront/make-your-own.tsx)
+- [frontend/components/marketplace/themes/storefront/installed-rows.tsx](../../frontend/components/marketplace/themes/storefront/installed-rows.tsx)
+- [frontend/components/marketplace/themes/listing-badges.tsx](../../frontend/components/marketplace/themes/listing-badges.tsx)
 - [frontend/components/marketplace/themes/detail-dialog.tsx](../../frontend/components/marketplace/themes/detail-dialog.tsx)
 - [frontend/components/marketplace/themes/detail-sections.tsx](../../frontend/components/marketplace/themes/detail-sections.tsx)
 - [frontend/components/marketplace/themes/install-listing.tsx](../../frontend/components/marketplace/themes/install-listing.tsx)
@@ -30,9 +35,11 @@ The following files were used as context for generating this page:
 
 </details>
 
-The Marketplace's **Themes** tab lists the themes you can add to a workspace, and is where you submit your own. The tab
-is called Themes. Its lede reads: "Themes change how Automatos looks for you. A person at Automatos reviewed every
-version listed here."
+The Marketplace's **Themes** tab is a storefront of the themes you can add to a workspace, and is where you submit your
+own. It is the first tab, and the Marketplace opens on it (a link with `?tab=`, such as `?tab=tools` or
+`?tab=playbooks`, opens the tab it names). The tab is called Themes. It is headed "Make Automatos yours", and its lede
+reads: "Themes change how Automatos looks on the web and on your phone. Official themes are reviewed and signed by
+Automatos, and they update themselves."
 
 For what a theme is, and how members choose one, see [Themes](../themes/_index.md).
 
@@ -44,10 +51,23 @@ For what a theme is, and how members choose one, see [Themes](../themes/_index.m
 - A version that was withdrawn and turned off is not listed. One withdrawn with a warning is listed, with the reason.
 - A workspace's own uploads are never listed.
 
-## The cards
+## The storefront
 
-Each card shows the theme's first preview as its cover, its name and version, its publisher, its description, up to
-three of the SDK areas it uses, and these badges:
+The **hero** shows one theme at a time, on a blurred backdrop of its current screenshot: its place ("Featured · 1 of
+3"), name, badges, id and version, a warning's reason, description, **Add to my workspace** (or **Use this theme**),
+**Details**, and "Updates itself when a new version is listed · pin it to hold a version". Beside them, its web
+screenshot sits in a browser frame and its Automatos Go screenshot in a phone frame; a theme without phone screenshots
+shows no phone frame. **Previous**, **Next** (they wrap around) and one dot per theme move the hero.
+
+**Looks and screens** lists one chip per look (preset) and screen. Choosing one swaps both screenshots: the web one of
+that look and screen, and its phone one (the look's own for that screen, else the look's first, else the theme's
+first phone screenshot). The chip of the theme's cover comes first.
+
+**All themes** is a strip that slides sideways, one card per theme: its cover with its phone screenshot peeking in,
+its name, badges, two lines of description, and its id and version (the id's first part is the publisher). Choosing a
+card puts it in the hero. The strip ends on **Make your own** (see [Publish theme](#publish-theme)).
+
+The badges, on the hero and the cards:
 
 | Badge | Meaning |
 |---|---|
@@ -56,13 +76,14 @@ three of the SDK areas it uses, and these badges:
 | **Update available** | The workspace runs an older Marketplace version of it. |
 | **Needs a newer Automatos** | No version of this theme runs on this Automatos yet. |
 
-The Marketplace's search box filters the cards: a card stays when its name, id, description, publisher or SDK areas
-hold every word you type. With nothing listed you see "No themes are listed in the Marketplace yet."; with no match,
-"No theme matches your search."
+The Marketplace's search box filters the strip, the dots and the hero: a theme stays when its name, id, description,
+publisher or SDK areas hold every word you type. With nothing listed, the stage says "No themes are listed in the
+Marketplace yet." and invites you to make the first one; with no match, "No theme matches your search.", and the strip
+keeps **Make your own**.
 
-## A theme's page
+## A theme's details
 
-Opening a card shows:
+**Details** on the hero shows:
 
 - its name, version, description and badges, and the reason of a warning;
 - **Add to my workspace**, or **Use this theme** once it is in the workspace;
@@ -81,8 +102,9 @@ Owners and admins add themes, as the workspace's **Who may install themes** allo
 workspace owner or admin adds themes to this workspace." In a workspace where only the owner installs, an admin sees
 "In this workspace only the workspace owner can install themes." in place of the button.
 
-1. Open the theme and click **Add to my workspace**. It adds the newest version your Automatos can run. The button is
-   greyed when there is none: "No version of this theme runs on this Automatos yet."
+1. Put the theme in the hero and click **Add to my workspace** (or do it from its **Details**). It adds the newest
+   version your Automatos can run. The button is greyed when there is none: "No version of this theme runs on this
+   Automatos yet."
 2. On the hosted edition you may be asked to confirm it's you.
 3. You see "Added to this workspace. Each member chooses it for themselves." (or "This version is already in this
    workspace.").
@@ -99,15 +121,18 @@ opt-in, and it can be the workspace default.
   hold**. A pinned install gets **Update available** instead and stays until an owner or admin applies it. See
   [Managing themes](../themes/managing-themes.md#updates).
 
-Below the listings, the tab repeats **Install theme** (for a private upload) and the workspace's installed list, under
-**Installed in this workspace**, with the same actions as **Settings › Appearance › Themes**.
+Below the strip, the tab repeats **Install theme** (for a private upload) and the workspace's installed list, under
+**Installed in this workspace**, with the same actions as **Settings › Appearance › Themes**. Each row shows the cover
+of its theme's listing, when the theme is listed. A private upload of a theme that has an Official listing says
+"Official x.y.z is listed", and **View** puts that listing in the hero.
 
 ---
 
 ## Publish theme
 
-Any member can submit a theme for review: "Submit your theme package for review. Once a person at Automatos approves
-it, every workspace can install it from the Marketplace."
+Any member can submit a theme for review. The strip's last card, **Make your own theme**, links to the Automatos
+Design Kit (**Open the Design Kit**), and **Submit a theme package for review** opens the form: "Submit your theme
+package for review. Once a person at Automatos approves it, every workspace can install it from the Marketplace."
 
 1. Choose the `.autotheme` file and click **Submit for review**. On the hosted edition you may be asked to confirm it's
    you.

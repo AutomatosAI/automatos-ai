@@ -1,18 +1,22 @@
 /**
- * PRD-261 C-04b — the Marketplace homepage gains one tab, "Themes" (Gerard, D3/Q11), after the
- * six it had, and Packages still leads (PRD-230). The Themes tab's content mounts only once it
- * is chosen, so the Marketplace asks for no theme data before then. The other tabs and the
- * homepage's data hooks are doubles: this test is about the tab strip, not their content.
+ * PRD-261 — the Marketplace homepage's tab strip: "Themes" (Gerard, D3/Q11) is the first tab and
+ * the one the Marketplace opens on (the storefront, 30 Oct 2026), before the six it had in their
+ * order (Packages first among them, PRD-230). A tab's content mounts only once it is chosen, so
+ * the Marketplace asks for no package data until Packages is. A `?tab=` link opens the tab it
+ * names. The other tabs and the homepage's data hooks are doubles: this test is about the tab
+ * strip, not their content.
  */
 import type { ReactNode } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const nav = vi.hoisted(() => ({ params: new URLSearchParams() }))
 
 vi.mock('framer-motion', () => ({
   motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> },
 }))
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => nav.params,
   useRouter: () => ({ replace: vi.fn() }),
 }))
 vi.mock('@/lib/api-client', () => ({
@@ -57,7 +61,7 @@ vi.mock('@/components/marketplace/themes/tab', async () => {
 
 import { MarketplaceHomepage } from '../../marketplace-homepage'
 
-const TABS_BEFORE = ['Packages', 'Applications', 'Agents', 'Playbooks', 'LLMs', 'Capabilities']
+const TABS_AFTER_THEMES = ['Packages', 'Applications', 'Agents', 'Playbooks', 'LLMs', 'Capabilities']
 
 function chooseTab(name: string) {
   const tab = screen.getByRole('tab', { name })
@@ -65,25 +69,55 @@ function chooseTab(name: string) {
   fireEvent.click(tab)
 }
 
+beforeEach(() => {
+  nav.params = new URLSearchParams()
+})
+
 describe('the Marketplace’s Themes tab', () => {
-  it('is one more tab after the six it had, named "Themes", and Packages still leads', () => {
+  it('is the first tab, named "Themes", and the Marketplace opens on it', () => {
     render(<MarketplaceHomepage />)
 
     const names = screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())
-    expect(names).toEqual([...TABS_BEFORE, 'Themes'])
+    expect(names).toEqual(['Themes', ...TABS_AFTER_THEMES])
     expect(screen.queryByRole('tab', { name: /skins/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByTestId('themes-tab')).toBeInTheDocument()
+    expect(screen.queryByTestId('packages-tab')).not.toBeInTheDocument()
+  })
+
+  it('opens with the Marketplace’s search', () => {
+    render(<MarketplaceHomepage />)
+    fireEvent.change(screen.getByLabelText('Search the marketplace'), { target: { value: 'aurora' } })
+
+    expect(screen.getByTestId('themes-tab')).toHaveTextContent('search: aurora')
+  })
+
+  it('gives way to Packages when it is chosen', () => {
+    render(<MarketplaceHomepage />)
+
+    chooseTab('Packages')
+
     expect(screen.getByRole('tab', { name: 'Packages' })).toHaveAttribute('data-state', 'active')
     expect(screen.getByTestId('packages-tab')).toBeInTheDocument()
     expect(screen.queryByTestId('themes-tab')).not.toBeInTheDocument()
   })
 
-  it('opens the Themes tab with the Marketplace’s search', () => {
+  it.each([
+    ['tools', 'Applications'],
+    ['playbooks', 'Playbooks'],
+    ['packages', 'Packages'],
+  ])('a ?tab=%s link opens %s', (param, name) => {
+    nav.params = new URLSearchParams({ tab: param })
     render(<MarketplaceHomepage />)
-    fireEvent.change(screen.getByLabelText('Search the marketplace'), { target: { value: 'aurora' } })
 
-    chooseTab('Themes')
+    expect(screen.getByRole('tab', { name })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('data-state', 'inactive')
+  })
+
+  it('an unknown ?tab= opens Themes', () => {
+    nav.params = new URLSearchParams({ tab: 'nothing-here' })
+    render(<MarketplaceHomepage />)
 
     expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('data-state', 'active')
-    expect(screen.getByTestId('themes-tab')).toHaveTextContent('search: aurora')
   })
 })

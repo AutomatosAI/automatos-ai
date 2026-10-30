@@ -8,7 +8,7 @@
  *
  * C-05k: the facts include the shown version's Signature (listings.py `signature`, C-05b), in the
  * words of theme-labels.ts: "Signed by Automatos" only for `verified`. The Official badge is not
- * this: it comes only from `publisher.official` (listing-card.tsx ListingBadges, QB-21).
+ * this: it comes only from `publisher.official` (listing-badges.tsx ListingBadges, QB-21).
  */
 import { SIGNATURE_FACT, signatureWords } from '@/components/settings/themes/theme-labels'
 import { Badge } from '@/components/ui/badge'

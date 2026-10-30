@@ -222,19 +222,30 @@ const TAB_ICONS: Record<string, any> = {
 }
 
 const CATEGORY_TABS = [
+  // PRD-261: the Themes storefront leads the Marketplace, and the Marketplace opens on it (Gerard,
+  // 30 Oct 2026; the tab named "Themes", not "Skins", D3/Q11). Packages follow (PRD-230).
+  { value: THEMES_TAB_VALUE, label: THEMES_TAB_LABEL },
   { value: 'packages', label: 'Packages' },
   { value: 'tools', label: 'Applications' },
   { value: 'agents', label: 'Agents' },
   { value: 'recipes', label: 'Playbooks' },
   { value: 'llms', label: 'LLMs' },
   { value: 'capabilities', label: 'Capabilities' },
-  // PRD-261 C-04b: the Marketplace's Themes tab (Gerard, D3/Q11: "Themes", not "Skins").
-  { value: THEMES_TAB_VALUE, label: THEMES_TAB_LABEL },
 ]
 
+/**
+ * The tab a `?tab=` link names, by its value or its label (`?tab=tools`, `?tab=playbooks`, as the
+ * Tools dashboard and the Playbooks grid link here), else Themes, the tab the Marketplace opens on.
+ */
+function initialMarketplaceTab(param: string | null | undefined): string {
+  const wanted = param?.trim().toLowerCase()
+  const named = CATEGORY_TABS.find((tab) => tab.value === wanted || tab.label.toLowerCase() === wanted)
+  return named?.value ?? THEMES_TAB_VALUE
+}
+
 function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
-  // PRD-230: Packages lead the marketplace — the curated starter teams are the answer.
-  const [selectedTab, setSelectedTab] = useState('packages')
+  const searchParams = useSearchParams()
+  const [selectedTab, setSelectedTab] = useState(() => initialMarketplaceTab(searchParams?.get('tab')))
 
   return (
     <motion.div
@@ -254,6 +265,10 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
             )
           })}
         </TabsList>
+
+        <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
+          <MarketplaceThemesTab searchQuery={searchQuery} />
+        </TabsContent>
 
         <TabsContent value="packages" className="mt-0">
           <MarketplacePackagesTab searchQuery={searchQuery} />
@@ -277,10 +292,6 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
 
         <TabsContent value="capabilities" className="mt-0">
           <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId} />
-        </TabsContent>
-
-        <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
-          <MarketplaceThemesTab searchQuery={searchQuery} />
         </TabsContent>
       </Tabs>
     </motion.div>
