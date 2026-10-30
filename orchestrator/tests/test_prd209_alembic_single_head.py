@@ -140,7 +140,11 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto prd268_w1_proactive —
 # ck_mobile_push_tickets_push_type widens to the suggestion push type, and mobile_devices gains
 # push_categories (JSONB NOT NULL DEFAULT '[]'); no existing row changes.
-EXPECTED_HEAD = "prd268_w2_delivery"
+# 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto prd268_w2_delivery —
+# ck_scheduled_task_deliver_as widens to follow_up, agent_scheduled_tasks gains for_user_id and a
+# partial index, ck_proactive_runs_outcome gains posted, and proactive_calibrations is new; no
+# existing row changes.
+EXPECTED_HEAD = "prd268_w3_follow_ups"
 
 
 def _literal(node: ast.AST):
