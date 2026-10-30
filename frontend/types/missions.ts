@@ -5,6 +5,8 @@
  * and enums in orchestrator/core/models/orchestration_enums.py.
  */
 
+import type { RowStatus } from '@/lib/proactive/types'
+
 // ── Enums (match orchestration_enums.py exactly) ──────────────
 
 export type RunState =
@@ -36,7 +38,8 @@ export type StateType = 'initial' | 'active' | 'blocked' | 'terminal'
 
 // ── API Response Types (match Pydantic models) ────────────────
 
-export interface MissionResponse {
+/** PRD-268 §6.11.1: a run carries where it stands, what happens next and what Try again does (RowStatus). */
+export interface MissionResponse extends RowStatus {
   id: string
   workspace_id: string
   goal: string

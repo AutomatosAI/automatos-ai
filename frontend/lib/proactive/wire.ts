@@ -37,11 +37,13 @@ const ACTION_VERBS: ReadonlySet<string> = new Set(['start', 'answer', 'open', 'c
  * (a browser drops tabs and newlines, so `/\t/host` would be read as `//host`). */
 const APP_PATH = /^\/(?![/\\])[^\u0000-\u001f\u007f\\]*$/
 
-function recordOf(value: unknown): Fields | null {
+/** The value as a JSON object's fields, or null when it is not one. */
+export function recordOf(value: unknown): Fields | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : null
 }
 
-function textOf(value: unknown): string | undefined {
+/** The value when it is text, else undefined. */
+export function textOf(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
@@ -61,7 +63,8 @@ function evidenceOf(value: unknown): EvidenceRef[] {
     .map((ref) => ({ type: ref.type as string, id: ref.id as string }))
 }
 
-function suggestionOf(value: unknown): Suggestion | null {
+/** One suggestion as the list writes it, or null without its id, its title and what Start does. */
+export function suggestionOf(value: unknown): Suggestion | null {
   const fields = recordOf(value)
   const action = recordOf(fields?.proposed_action)
   if (fields === null || !isProactiveId(fields.id) || typeof fields.title !== 'string' || typeof action?.kind !== 'string') {

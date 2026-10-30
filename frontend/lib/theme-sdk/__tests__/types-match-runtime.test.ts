@@ -86,6 +86,7 @@ const AREA_MODULES: Readonly<Record<string, ModuleLoader>> = {
   'pages/command-center': () => import('../pages/command-center'),
   storage: () => import('../storage'),
   voice: () => import('../voice'),
+  proactive: () => import('../proactive'),
 }
 
 const SURFACES: readonly SurfaceFile[] = readdirSync(SURFACE_DIR)

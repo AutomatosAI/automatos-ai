@@ -30,8 +30,9 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # frontend/lib/theme-host/shared-modules.json "hostVersion" and "sdkVersion"; the parity tests on
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
 # Theme voice (C5): the SDK is 1.2.0 for its voice area; the host contract stays 1.1.0.
+# PRD-268 US-C21e (K12): the SDK is 1.3.0 for its proactive area and default components; the host contract stays 1.1.0.
 THEME_HOST_VERSION = "1.1.0"
-SDK_VERSION = "1.2.0"
+SDK_VERSION = "1.3.0"
 
 # PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
 # theme from (services/themes/mobile_manifest.py checks it; frontend/lib/theme-host/mobile-manifest.ts is
