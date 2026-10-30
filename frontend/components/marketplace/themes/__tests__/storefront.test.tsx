@@ -340,6 +340,20 @@ describe('installed in this workspace', () => {
     expect(screen.getByTestId(`theme-listing-${HUD_ID}`)).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('View holds a listing the search hides: the hero shows it while the strip still leaves it out', async () => {
+    serve([listing(), listing(HUD)])
+    api.getInstalledThemes.mockResolvedValue({ installs: [privateHud] })
+    renderWithQuery(<MarketplaceThemesTab searchQuery="aurora" />)
+
+    expect(await heroName()).toHaveTextContent('Aurora')
+    expect(screen.queryByTestId(`theme-listing-${HUD_ID}`)).not.toBeInTheDocument()
+    const row = await screen.findByTestId(`installed-theme-${HUD_INSTALL_ID}`)
+
+    fireEvent.click(within(row).getByRole('button', { name: viewOfficial('HUD') }))
+    expect(await heroName()).toHaveTextContent('HUD')
+    expect(screen.queryByTestId(`theme-listing-${HUD_ID}`)).not.toBeInTheDocument()
+  })
+
   it('no notice for a listing install, or for a private install of a theme with no Official listing', async () => {
     const listed = installRow({ installId: HUD_INSTALL_ID, themeId: 'automatos/hud', name: 'HUD', private: false, reviewed: true, ownerType: 'marketplace' })
     const ownAurora = installRow({ themeId: 'acme/aurora', name: 'Aurora' })
