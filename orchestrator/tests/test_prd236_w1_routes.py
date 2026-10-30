@@ -347,7 +347,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the guard follows it.
     proactive = (versions / "prd268_w1_proactive.py").read_text()
     assert 'down_revision = "prd266_w2_push"' in proactive
-    assert 'EXPECTED_HEAD = "prd268_w1_proactive"' in guard
+    # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
+    # it — theme_packages.source and the single-row marketplace_cloud_sync table; the guard
+    # follows it.
+    cloud_sync = (versions / "prd270_w1_cloud_sync.py").read_text()
+    assert 'down_revision = "prd268_w1_proactive"' in cloud_sync
+    assert 'EXPECTED_HEAD = "prd270_w1_cloud_sync"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

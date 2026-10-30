@@ -37,6 +37,7 @@ from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, in
     THEME_REVOCATION_SYNC_ROW_ID,
     THEME_SCAN_VERDICT_DEFAULT,
     THEME_SCAN_VERDICTS,
+    THEME_SOURCE_CLOUD,
     ThemeChoice,
     ThemeInstallation,
     ThemeLook,
@@ -116,6 +117,7 @@ from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk productio
 from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
 from .proactive import ProactivePersonSettings, ProactiveRun, ProactiveSuggestion  # noqa: F401  # PRD-268 W1: suggestions, runs, person settings
+from .marketplace_cloud import MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync  # noqa: F401  # PRD-270 W1: the Sync's status row
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

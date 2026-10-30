@@ -137,7 +137,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # mobile_push_tickets and mobile_digest_posts (new tables only).
 # 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto prd266_w2_push —
 # proactive_suggestions, proactive_runs and proactive_person_settings (new tables only).
-EXPECTED_HEAD = "prd268_w1_proactive"
+# 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
+# prd268_w1_proactive — theme_packages.source (nullable, a CHECK) and the single-row
+# marketplace_cloud_sync table the local edition's Sync with Automatos Cloud writes.
+EXPECTED_HEAD = "prd270_w1_cloud_sync"
 
 
 def _literal(node: ast.AST):

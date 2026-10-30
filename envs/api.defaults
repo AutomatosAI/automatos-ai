@@ -221,3 +221,15 @@ WATCHER_TICK_SECONDS=30
 THEME_REVOCATIONS_URL=https://api.automatos.app/api/themes/revocations
 # How often, in minutes (the first pull runs a minute after the backend starts).
 # THEME_REVOCATIONS_PULL_MINUTES=60
+
+# -----------------------------------------------------------------------------
+# Automatos Cloud [ACTIVE] — local edition only (PRD-270)
+# -----------------------------------------------------------------------------
+# The Automatos Cloud this install syncs Marketplace themes from (Marketplace →
+# Sync with Automatos Cloud; it runs only when someone presses the button). An
+# origin only: https, or http to a loopback host, no path. Public and
+# unauthenticated: a Sync sends no Authorization, cookie, workspace header or
+# install id, and installs only versions an Automatos key signed. Empty = off
+# (the button and Settings › Automatos Cloud are hidden): set
+# AUTOMATOS_CLOUD_URL= in envs/api.local and restart to switch it off.
+AUTOMATOS_CLOUD_URL=https://api.automatos.app
