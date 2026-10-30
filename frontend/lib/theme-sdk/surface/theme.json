@@ -4,6 +4,7 @@
   "story": "A-10a",
   "status": "built",
   "names": [
+    "DISPLAY_STATE_LABELS",
     "SDK_VERSION",
     "defineTheme"
   ]

@@ -30,13 +30,15 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # frontend/lib/theme-host/shared-modules.json "hostVersion" and "sdkVersion"; the parity tests on
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
 # Theme voice (C5): the SDK is 1.2.0 for its voice area; the host contract stays 1.1.0.
+# PRD-268 US-C21e (K12): the SDK is 1.3.0 for its proactive area and default components; the host contract stays 1.1.0.
 THEME_HOST_VERSION = "1.1.0"
-SDK_VERSION = "1.2.0"
+SDK_VERSION = "1.3.0"
 
 # PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
 # theme from (services/themes/mobile_manifest.py checks it; frontend/lib/theme-host/mobile-manifest.ts is
 # its twin, and validator-parity.test.ts reads every MOBILE_* name below as text). The tokens are the 24
-# Studio tokens lib/look-kit/studio-tokens.ts lookToStudioTokens writes as 'H S% L%' triplets, never its
+# Studio tokens lib/look-kit/studio-tokens.ts lookToStudioTokens writes as 'H S% L%' triplets, less its
+# status tokens (PRD-268 K13: STUDIO_STATUS_TOKEN_NAMES, a skin's from US-T01) and never its
 # eight pre-wrapped aliases; a scheme needs MOBILE_REQUIRED_TOKENS. MOBILE_CONTRAST_PAIRS are
 # (text or mark, fill, kind): a "text" pair is measured against MOBILE_AA_TEXT, a "ui" pair against
 # MOBILE_AA_UI (WCAG 2.x). A theme with a block must not admit a host below MOBILE_MIN_HOST.

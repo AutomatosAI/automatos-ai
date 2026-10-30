@@ -527,7 +527,7 @@ def test_the_post_is_auto_s_read_in_each_persons_auto_thread(db_session, ws, rec
     for post in recorder.posts:
         assert post["workspace_id"] == uuid.UUID(ws)
         assert post["text"] == DIGEST_TEXT
-        assert post["source"] == {"origin": "daily_digest", "local_date": "2026-10-24"}
+        assert post["source"] == {"origin": "daily_digest", "local_date": "2026-10-24", "via": "schedule"}
         assert "chat_id" not in post  # the person's Auto thread
 
 

@@ -58,6 +58,7 @@ vi.mock('../WorkspaceVoiceLiveCard', () => ({ WorkspaceVoiceLiveCard: () => null
 vi.mock('../themes/appearance-tab', () => ({ AppearanceTab: () => null }))
 vi.mock('../phones-devices/phones-devices-tab', () => ({ PhonesDevicesTab: () => null }))
 vi.mock('../billing/billing-tab', () => ({ BillingTab: () => null }))
+vi.mock('../what-auto-depends-on', () => ({ WhatAutoDependsOn: () => null }))  // PRD-268 US-W05
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({

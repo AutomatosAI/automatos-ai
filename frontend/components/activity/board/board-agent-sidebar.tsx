@@ -31,14 +31,16 @@ function getRoleBadge(role: string | undefined): { label: string; color: string 
 /**
  * Working or idle. F244 (night 7): all eight agents read as working while every run
  * failed for the AI credit; an agent that can't run now says so, with why on hover.
+ * PRD-268 US-W04: never by colour alone: the glyph of §6.11.1 (◆ a person must act,
+ * ● in motion, — stopped) beside the word, where a coloured dot stood.
  */
 export function AgentRunState({ agent }: { agent: any }) {
   const cantRun = cantRunLine(agent)
   const isWorking = agent.status === 'active' || agent.last_heartbeat_status === 'working'
-  const dot = cantRun ? 'bg-warning' : isWorking ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground/30'
+  const tone = cantRun ? 'text-warning' : isWorking ? 'text-[hsl(var(--success))]' : 'text-muted-foreground/30'
   return (
     <div className="flex items-center gap-1" title={cantRun ? agent.unavailable : undefined}>
-      <div className={cn('w-1.5 h-1.5 rounded-full', dot)} />
+      <span aria-hidden="true" className={cn('text-[10px] leading-none', tone)}>{cantRun ? '◆' : isWorking ? '●' : '—'}</span>
       <span className={cn('text-[10px] uppercase', cantRun ? 'text-warning' : 'text-muted-foreground')}>
         {cantRun ? "Can't run" : isWorking ? 'Working' : 'Idle'}
       </span>

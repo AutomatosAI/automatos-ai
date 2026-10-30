@@ -7,7 +7,11 @@
  * message. A mission id is one path segment of letters, digits, '-' and '_': a query given a malformed one asks for
  * nothing and says so in `error`, and an action given one throws a TypeError before anything is sent. The hooks
  * need the host's providers above them, as every theme page the host draws has.
+ *
+ * SDK 1.3.0 (PRD-268): a Mission row carries where it stands (`display_state`), what happens next (`next_step`, in the
+ * person's language) and what Try again does (`retry`); the cards area's StatusLabel draws them.
  */
+import type { DisplayState, Retry } from './proactive'
 
 export type MissionRunState =
   | 'pending'
@@ -63,6 +67,12 @@ export interface Mission {
   readonly completed_at: string | null
   readonly created_at: string | null
   readonly updated_at: string | null
+  /** Where the run stands, computed on the server; null when unknown. */
+  readonly display_state?: DisplayState | null
+  /** What happens next, at most 90 characters. */
+  readonly next_step?: string | null
+  /** What Try again does on a failed run. */
+  readonly retry?: Retry | null
 }
 
 /** One of a Mission's tasks. */

@@ -1,5 +1,5 @@
 {
-  "route_count": 995,
+  "route_count": 997,
   "routes": [
     {
       "method": "GET",
@@ -2082,6 +2082,10 @@
       "path": "/api/policy/{policy_id}/assemble"
     },
     {
+      "method": "POST",
+      "path": "/api/proactive/brief/open"
+    },
+    {
       "method": "GET",
       "path": "/api/proactive/me"
     },
@@ -2892,6 +2896,10 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/approval-grants/{grant_id}/view"
     },
     {
       "method": "POST",

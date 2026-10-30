@@ -1,16 +1,17 @@
 // @vitest-environment node
 /**
  * PRD-261 M-01 — the phone's token list is Studio's (PB-34). MOBILE_TOKEN_NAMES (mobile-manifest.ts; the
- * parity test holds contract.py's equal) are exactly the names look-kit's lookToStudioTokens writes as
- * 'H S% L%' triplets, for any theme's catalogue (a made-up one here, no theme's own), and none of the
- * eight aliases it writes pre-wrapped. The manifest's colour check accepts exactly what look-kit's
+ * parity test holds contract.py's equal) and PRD-268's STUDIO_STATUS_TOKEN_NAMES (K13; the phone draws
+ * none of them until US-T01) are exactly the names look-kit's lookToStudioTokens writes as 'H S% L%'
+ * triplets, for any theme's catalogue (a made-up one here, no theme's own), and none of the eight
+ * aliases it writes pre-wrapped. The manifest's colour check accepts exactly what look-kit's
  * parsers read, so a checked block parses on the phone, which vendors look-kit.
  */
 import { describe, expect, it } from 'vitest'
 
 import { parseHex, toHex } from '@/lib/look-kit/contrast'
 import { tripletToHex } from '@/lib/look-kit/hsl'
-import { lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
+import { STUDIO_STATUS_TOKEN_NAMES, lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
 import type { LookCatalogue } from '@/lib/look-kit/types'
 import { MOBILE_CONTRAST_PAIRS, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, isMobileColour } from '../mobile-manifest'
 
@@ -56,11 +57,11 @@ const isTriplet = (value: string): boolean => reads(tripletToHex, value)
 const isHex = (value: string): boolean => reads((hex) => toHex(parseHex(hex)), value)
 const sorted = (names: readonly string[]): string[] => [...names].sort()
 
-describe("PRD-261 M-01 — the mobile token list is the tokens lookToStudioTokens writes as triplets", () => {
+describe("PRD-261 M-01 — the mobile token list and the status tokens are the tokens lookToStudioTokens writes as triplets", () => {
   it.each(LOOKS)('names every token written as a triplet for the $ground ground and the $accent accent', (look) => {
     const tokens = lookToStudioTokens(ZINC, look)
     const triplets = Object.keys(tokens).filter((name) => isTriplet(tokens[name]))
-    expect(sorted(triplets)).toEqual(sorted(MOBILE_TOKEN_NAMES))
+    expect(sorted(triplets)).toEqual(sorted([...MOBILE_TOKEN_NAMES, ...STUDIO_STATUS_TOKEN_NAMES]))
   })
 
   it.each(LOOKS)('leaves out exactly the eight pre-wrapped aliases ($ground, $accent)', (look) => {

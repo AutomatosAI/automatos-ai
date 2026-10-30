@@ -1,7 +1,10 @@
 'use client'
 
 import { StatusBadge, type StatusVariant } from '@/components/shared/status-badge'
-import type { RunState } from '@/types/missions'
+import { RowStatusLabel } from '@/components/proactive/row-status'
+import { missionRetryTarget } from '@/components/proactive/use-row-retry'
+import { displayStateLabel } from '@/lib/proactive/display-state'
+import type { MissionResponse, RunState } from '@/types/missions'
 import { RUN_STATE_CONFIG } from '@/types/missions'
 
 const STATE_TO_VARIANT: Record<RunState, StatusVariant> = {
@@ -33,4 +36,14 @@ export function MissionStatusBadge({ state, size = 'default', className }: Missi
       {config.label}
     </StatusBadge>
   )
+}
+
+/**
+ * PRD-268 US-W04: a Mission card's status. When the server says where the Mission stands, it is drawn in the words
+ * every surface uses (StatusLabel: glyph, word, ▸ next step, Try again, in Classic's badge); otherwise, for a state
+ * the vocabulary leaves unnamed (pending, paused, cancelled), its run state's badge as before.
+ */
+export function MissionRowStatus({ mission, title }: { mission: MissionResponse; title?: string }) {
+  if (displayStateLabel(mission.display_state) === null) return <MissionStatusBadge state={mission.state} size="sm" />
+  return <RowStatusLabel row={mission} target={missionRetryTarget(mission)} title={title ?? mission.goal} />
 }

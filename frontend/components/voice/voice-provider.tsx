@@ -10,23 +10,14 @@
  * available (live-status and the browser), and holds the host while mounted. Nothing here waits on the AI label:
  * voice is never locked on the label's visibility (the product owner's transparency policy, 23 Oct 2026).
  */
-import { type ReactNode, createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react'
 
 import type { VoiceSnapshot, VoiceLevels } from '@/lib/voice/engine'
-import {
-  LIVE_STATUS_CHECKING,
-  type LiveStatusReading,
-  type VoiceAvailability,
-  type VoiceStartMode,
-  readLiveStatus,
-  resolveVoiceMode,
-  voiceAvailability,
-} from '@/lib/voice/host/availability'
+import { type VoiceAvailability, type VoiceStartMode, resolveVoiceMode } from '@/lib/voice/host/availability'
 import { holdVoiceHost, sharedVoiceHost } from '@/lib/voice/host/shared-host'
+import { useVoiceAvailability } from '@/lib/voice/host/use-voice-availability'
 import type { VoiceHost, VoiceHostState } from '@/lib/voice/host/voice-host'
-import { liveCallSupported } from '@/lib/voice/live/devices'
 import type { LiveCallDetails } from '@/lib/voice/live/live-engine'
-import { quickAskSupported } from '@/lib/voice/support'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
 export type { VoiceAvailability, VoiceStartMode } from '@/lib/voice/host/availability'
@@ -70,23 +61,6 @@ const VoiceContext = createContext<VoiceContextValue | null>(null)
 const OUTSIDE_PROVIDER =
   'useHostVoice is called outside VoiceProvider: the provider is mounted around the chat route (app/chat/layout.tsx) and theme routes (app/x/[...path]/page.tsx).'
 
-/** live-status once per mount, and what this browser can do (read after mount: the server has no browser). */
-function useAvailability(): VoiceAvailability {
-  const [reading, setReading] = useState<LiveStatusReading>(LIVE_STATUS_CHECKING)
-  const [browser, setBrowser] = useState({ quick: false, live: false })
-  useEffect(() => {
-    let mounted = true
-    setBrowser({ quick: quickAskSupported(), live: liveCallSupported() })
-    void readLiveStatus().then((next) => {
-      if (mounted) setReading(next)
-    })
-    return () => {
-      mounted = false
-    }
-  }, [])
-  return useMemo(() => voiceAvailability(reading, browser.quick, browser.live), [reading, browser])
-}
-
 /** The session follows the conversation on screen: moving to another one ends it. */
 function useScreenBinding(host: VoiceHost): void {
   const onScreen = useChatSessionStore((s) => s.session.activeChatId)
@@ -105,7 +79,7 @@ export function VoiceProvider({ children, host: given }: VoiceProviderProps) {
   const host = useMemo(() => given ?? sharedVoiceHost(), [given])
   useEffect(() => holdVoiceHost(host), [host])
   useScreenBinding(host)
-  const available = useAvailability()
+  const available = useVoiceAvailability()
   const value = useMemo(() => ({ host, available }), [host, available])
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>
 }

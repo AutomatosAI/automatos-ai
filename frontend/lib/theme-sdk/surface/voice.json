@@ -4,6 +4,7 @@
   "story": "TV-C5",
   "status": "built",
   "names": [
+    "BriefVoice",
     "VoiceButton",
     "readVoiceLevels",
     "useVoice"

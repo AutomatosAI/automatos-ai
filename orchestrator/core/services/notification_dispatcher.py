@@ -117,6 +117,10 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         # (services/push/preferences.py); the digest itself is posted as Auto's message and
         # pushed as auto_message, never raised as an event of its own.
         "daily_digest",
+        # PRD-268 US-C08a (K9): a check-in suggested something for today; one per person per run,
+        # outside quiet hours, under the day's cap (services/proactive/delivery.py). In-app by
+        # default (no preference row), linked to the suggestion.
+        "suggestion_ready",
         "agent_error",
     }
 )

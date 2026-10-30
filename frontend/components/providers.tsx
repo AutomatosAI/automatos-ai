@@ -18,6 +18,7 @@ import { GlobalSearch } from './shared/global-search'
 import { ChooseInstallProvider } from './settings/themes/choose-install'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
+import { BriefOnOpen } from './proactive/brief-on-open'
 import { isSaaS } from '@/lib/auth-edition'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
@@ -136,6 +137,8 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
                 </ThemeHostProvider>
                 <GlobalSearch />
               </ChooseInstallProvider>
+              {/* PRD-268 US-W02: the day's brief, opened once per local date when a signed-in workspace loads. */}
+              <BriefOnOpen />
               <Toaster position="top-right" richColors closeButton />
             </WorkspaceProvider>
           </QueryClientProvider>

@@ -67,6 +67,10 @@ COVERED = {
     ),
     "test_an_sdk_voice_call_declared_in_uses_passes_on_this_hosts_sdk": ("SDK voice calls declared in uses",),
     "test_an_sdk_voice_call_without_voice_in_uses_is_a_warning_listing_it": ("SDK voice calls without voice in uses",),
+    "test_an_sdk_proactive_call_declared_in_uses_passes_on_this_hosts_sdk": ("SDK proactive calls declared in uses",),
+    "test_an_sdk_proactive_call_without_proactive_in_uses_is_a_warning_listing_it": (
+        "SDK proactive calls without proactive in uses",
+    ),
     "test_without_the_sdk_name_list_the_uses_check_is_a_warning": ("a host with no SDK name list",),
     "test_a_clone_of_a_core_page_this_host_changed_is_a_warning_at_cloned_from": (
         "a clone of a core page this host changed",

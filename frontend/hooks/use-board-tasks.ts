@@ -10,6 +10,7 @@ import { apiClient } from '@/lib/api-client'
 import type { BoardTask, BoardStatus, BoardColumn } from '@/types/board'
 import { BOARD_COLUMNS } from '@/types/board'
 import { ticketNumber } from '@/lib/ticket-number'
+import { rowStatusOf } from '@/lib/proactive/row-status'
 
 // ============= TYPES =============
 
@@ -19,6 +20,17 @@ export interface BoardFilters {
   type?: string | null
   search?: string | null
   period?: string
+  /** PRD-268 US-W01a: only the tickets a suggestion's Start filed (source_type 'suggestion'). */
+  from_suggestions?: boolean
+}
+
+/** What filed a ticket from a suggestion's Start (orchestrator services/proactive/start_ticket.py SOURCE_SUGGESTION). */
+export const SUGGESTION_SOURCE = 'suggestion'
+
+/** The board's client-side filters: the type (mission, playbook, task) and "From suggestions". */
+export function keptByFilters(task: BoardTask, filters?: BoardFilters): boolean {
+  if (filters?.type && task.type !== filters.type) return false
+  return !filters?.from_suggestions || task.source_type === SUGGESTION_SOURCE
 }
 
 interface BoardResponse {
@@ -100,13 +112,10 @@ export function useBoardTasks(filters?: BoardFilters) {
   // Top-level = tasks without a parent (children nest under their parent card)
   const topLevelTasks = annotatedTasks.filter((t) => !t.parent_task_id)
 
-  // Group into columns (with client-side type filter)
-  const typeFilter = filters?.type ?? null
+  // Group into columns (with the client-side filters)
   const columns: BoardColumn[] = BOARD_COLUMNS.map((col) => {
     const tasks = topLevelTasks.filter((t) => {
-      // Type filter (client-side — mission, playbook, task)
-      if (typeFilter && t.type !== typeFilter) return false
-
+      if (!keptByFilters(t, filters)) return false
       if (col.status === 'done') {
         return t.status === 'done' || t.status === ('completed' as any)
       }
@@ -300,6 +309,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
     kept_draft: item.kept_draft ?? null,  // F243: a failed redo keeps the draft it corrected
     knowledge_document_id: item.knowledge_document_id ?? null,  // PRE-11: its answer is in Knowledge
+    ...rowStatusOf(item),  // PRD-268 US-W04: display_state, next_step and retry, each checked
   }
 }
 

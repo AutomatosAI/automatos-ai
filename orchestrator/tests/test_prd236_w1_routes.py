@@ -347,7 +347,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the guard follows it.
     proactive = (versions / "prd268_w1_proactive.py").read_text()
     assert 'down_revision = "prd266_w2_push"' in proactive
-    assert 'EXPECTED_HEAD = "prd268_w1_proactive"' in guard
+    # 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto it — the
+    # push-type CHECK widens to suggestion and mobile_devices gains push_categories; the guard
+    # follows it.
+    delivery = (versions / "prd268_w2_delivery.py").read_text()
+    assert 'down_revision = "prd268_w1_proactive"' in delivery
+    assert 'EXPECTED_HEAD = "prd268_w2_delivery"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

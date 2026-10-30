@@ -11,7 +11,8 @@ open suggestions. Every check-in runs it at its start, before its caps and the d
 (``services.proactive.runner``), and so do Start, Hide and the list
 (``services.proactive.decisions``, ``services.proactive.listing``). A lapsed suggestion
 then counts toward no cap, blocks no repeat, lists as ``expired``, and Start or Hide of it
-is refused by its state.
+is refused by its state. Each one that lapsed is told on the live lane (``suggestion_changed``,
+``services.proactive.live``) once the lapse has committed.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from core.models.proactive import SUGGESTION_EXPIRED, SUGGESTION_OPEN, ProactiveSuggestion
+from services.proactive.live import suggestion_changed
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +33,19 @@ __all__ = ["expire_lapsed"]
 
 def expire_lapsed(db: Session, workspace_id: UUID, now: datetime) -> int:
     """Expire the workspace's open suggestions whose ``expires_at`` is at or before ``now``,
-    in one UPDATE, and commit when any lapsed; how many did. A suggestion with no
-    ``expires_at`` never lapses, and no other workspace's row is touched."""
+    in one UPDATE, commit when any lapsed and tell each on the live lane; how many did. A
+    suggestion with no ``expires_at`` never lapses, and no other workspace's row is touched."""
     table = ProactiveSuggestion.__table__
     lapsed = db.execute(
         update(table)
         .where(table.c.workspace_id == workspace_id, table.c.status == SUGGESTION_OPEN, table.c.expires_at <= now)
         .values(status=SUGGESTION_EXPIRED)
-    ).rowcount or 0
+        .returning(table.c.id, table.c.user_id)
+    ).all()
     if lapsed:
         db.commit()
-        logger.info("[proactive] %d open suggestion(s) lapsed in workspace %s", lapsed, workspace_id)
-    return int(lapsed)
+        logger.info("[proactive] %d open suggestion(s) lapsed in workspace %s", len(lapsed), workspace_id)
+    for row in lapsed:
+        suggestion_changed(db, workspace_id=workspace_id, suggestion_id=row.id, user_id=row.user_id,
+                           status=SUGGESTION_EXPIRED)
+    return len(lapsed)

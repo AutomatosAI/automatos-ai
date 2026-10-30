@@ -137,7 +137,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # mobile_push_tickets and mobile_digest_posts (new tables only).
 # 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto prd266_w2_push —
 # proactive_suggestions, proactive_runs and proactive_person_settings (new tables only).
-EXPECTED_HEAD = "prd268_w1_proactive"
+# 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto prd268_w1_proactive —
+# ck_mobile_push_tickets_push_type widens to the suggestion push type, and mobile_devices gains
+# push_categories (JSONB NOT NULL DEFAULT '[]'); no existing row changes.
+EXPECTED_HEAD = "prd268_w2_delivery"
 
 
 def _literal(node: ast.AST):

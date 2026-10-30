@@ -11,14 +11,18 @@
  * - content: FilePreview, MarkdownView, MadeBy;
  * - chrome: HeaderUtilities, TrialExhaustedBanner, FirstRunNudge;
  * - the composer: AiLabelFence, once the host's AI label fence, now its children alone (PRD-264 EUAI-11a);
- * - CorePage: core's own page inside a theme's page.
+ * - CorePage: core's own page inside a theme's page;
+ * - the proactive defaults (SDK 1.3.0, PRD-268 US-C21e): BriefCard, SuggestionCard, StatusLabel, ReadinessList,
+ *   CalibrationCard and ReplyChips, the host's own (components/proactive/*), whose data the proactive area reads.
  *
  * The names are the plan's (surface/cards.json); the types are declared again for themes in
  * packages/theme-sdk/areas/cards.d.ts.
  */
 export { MissionApproval, ToolApproval } from './host-cards/approvals'
 export type {
+  ApprovalAnswer,
   ApprovalDecision,
+  ApprovalViewData,
   CardOrigin,
   MissionApprovalData,
   MissionApprovalProps,
@@ -51,3 +55,14 @@ export type { AiLabelFenceProps, AiLabelId } from './host-cards/ai-label-fence'
 
 export { CorePage } from './host-cards/core-page'
 export type { CorePageProps } from './host-cards/core-page'
+
+export { BriefCard, CalibrationCard, ReadinessList, ReplyChips, StatusLabel, SuggestionCard } from './host-cards/proactive-cards'
+export type {
+  BriefCardProps,
+  CalibrationCardProps,
+  ReadinessListProps,
+  ReplyChipsProps,
+  StatusLabelProps,
+  SuggestionCardProps,
+  SuggestionCardVariant,
+} from './host-cards/proactive-props'

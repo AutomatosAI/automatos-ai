@@ -46,6 +46,16 @@ export function missionHref(missionId: string | number): string {
   return `/missions/${encodeURIComponent(String(missionId))}`
 }
 
+/** The Command Center's summary, where Auto's Read and the Suggested list are (PRD-268 US-W01a). */
+export const SUGGESTED_HREF = '/command-center?tab=summary'
+/** The query parameter that scrolls the Suggested list to one card and outlines it. */
+export const SUGGESTION_PARAM = 'suggestion'
+
+/** One suggestion's card in the Suggested list: what its suggestion_ready bell row opens. */
+export function suggestionHref(suggestionId: string): string {
+  return `/command-center?${new URLSearchParams({ tab: 'summary', [SUGGESTION_PARAM]: suggestionId }).toString()}`
+}
+
 /** The chat. */
 export const CHAT_HREF = '/chat'
 

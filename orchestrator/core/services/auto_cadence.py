@@ -6,7 +6,6 @@ heartbeat prompt. Pure prompt assembly — no new scheduler, no new tables.
 Reads ``workspace.settings.orchestrator.heartbeat.cadence``:
 
     {
-      "daily_brief":        { "enabled": false },
       "weekly_org_review":  { "enabled": false, "day": "mon" },
       "harness_review":     { "enabled": false, "day": "mon" },
       "post_change_validation": { "enabled": false },
@@ -15,6 +14,11 @@ Reads ``workspace.settings.orchestrator.heartbeat.cadence``:
 
 All loops default OFF — workspaces opt in by setting the flag(s). Existing
 heartbeats keep their current behaviour until the user enables a cadence.
+
+PRD-268 §12-Q11 retired the cadence "Daily Brief": the day's brief is the one
+posted into each person's Auto thread (the scheduled digest, or the brief on
+open, ``services.brief``). It has no default here, so a stored setting for it
+is never merged and adds no block.
 
 Day codes follow APScheduler's ``day_of_week`` convention: mon, tue, wed,
 thu, fri, sat, sun. Default for weekly cadences is ``mon``.
@@ -28,7 +32,6 @@ from typing import Any, Dict, Optional
 # ----------------------------------------------------------------- defaults
 
 CADENCE_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "daily_brief": {"enabled": False},
     "weekly_org_review": {"enabled": False, "day": "mon"},
     "harness_review": {"enabled": False, "day": "mon"},
     "post_change_validation": {"enabled": False},
@@ -44,16 +47,6 @@ CADENCE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 # ----------------------------------------------------------------- prompts
 # Kept in this module so the heartbeat prompt builder stays small and so
 # the prompt text itself is reviewable in one place.
-
-_DAILY_BRIEF = """## Auto Daily Brief
-Run through this every tick:
-1. What changed in the last 24h? (`platform_get_activity_feed period=1d`)
-2. What's blocked? (`platform_list_tasks status=blocked`)
-3. What needs my call? (reports with requires_approval=true and not acknowledged; missions with escalation_level >= 2)
-4. What did I handle for the owner? — surface the actions you took on the owner's behalf
-5. What am I watching? — heartbeats with objective_met=False, agents trending toward warning
-Reply with five short lines, one per item. If a section is empty, say "clear"."""
-
 
 _WEEKLY_ORG_REVIEW = """## Weekly Org Review
 Run this when today is the configured weekly review day:
@@ -122,7 +115,6 @@ You manage a team. Today is your review day. Read first, recommend second, never
 
 
 _PROMPT_MAP: Dict[str, str] = {
-    "daily_brief": _DAILY_BRIEF,
     "weekly_org_review": _WEEKLY_ORG_REVIEW,
     "harness_review": _HARNESS_REVIEW,
     "post_change_validation": _POST_CHANGE_VALIDATION,
@@ -152,8 +144,8 @@ def build_cadence_block(
 ) -> str:
     """Return the cadence section for today's tick (empty when nothing fires).
 
-    Always-on loops (daily_brief, post_change_validation, incident_review)
-    fire every tick when enabled. Day-gated loops (weekly_org_review,
+    Always-on loops (post_change_validation, incident_review) fire every
+    tick when enabled. Day-gated loops (weekly_org_review,
     harness_review) fire only when today matches their configured day.
     """
     if now is None:
@@ -164,7 +156,7 @@ def build_cadence_block(
     blocks: list[str] = []
 
     # Always-on cadences
-    for key in ("daily_brief", "post_change_validation", "incident_review"):
+    for key in ("post_change_validation", "incident_review"):
         if cadence[key].get("enabled"):
             blocks.append(_prompt(key, now))
 

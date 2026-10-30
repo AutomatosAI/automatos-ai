@@ -1,0 +1,6 @@
+{
+  "vars": {
+    "--hello-proactive-gap": "16px",
+    "--hello-proactive-width": "640px"
+  }
+}

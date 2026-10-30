@@ -24,16 +24,21 @@ Rules enforced here, once:
 - After a successful post, Auto's own initiative (a watcher, a scheduled
   task, a Mission's narration, the daily digest) tells the chat's owner
   (``auto_message``, PRD-266 US-012b), on a session of its own.
+- A post may carry structured parts (``brief@1``, ``suggestion@1``) after
+  its text part (PRD-268 US-C19b, ``services.chat_parts``); the text part is
+  always first and always required.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from services.chat_parts import checked_parts
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,93 @@ def strip_caller_narration_origin(config: Optional[Dict[str, Any]]) -> Dict[str,
     return {k: v for k, v in (config or {}).items() if k not in _CALLER_ORIGIN_KEYS}
 
 
+def _honoured_chat(db: Session, ws_uuid: uuid.UUID, chat_id: Optional[str],
+                   owner_int_id: Optional[int], clerk_user_id: Optional[str]):
+    """The originating chat when it is valid for this workspace AND owned by the message's
+    owner; None otherwise.
+
+    PRD-227 P227-RVW-2: the workspace filter is cross-tenant-safe but NOT cross-user-safe;
+    without the owner check a caller-supplied chat_id (a mission's origin_chat_id, a
+    suggestion-card chat_id) could target another workspace-member's private chat.
+    """
+    from core.models.core import Chat
+
+    if not chat_id:
+        return None
+    try:
+        candidate = (
+            db.query(Chat)
+            .filter(Chat.id == uuid.UUID(str(chat_id)), Chat.workspace_id == ws_uuid)
+            .first()
+        )
+    except ValueError:
+        candidate = None
+    if candidate is None:
+        logger.warning(
+            "[ChatMessenger] chat_id %s invalid or outside workspace %s — "
+            "falling back to the Auto thread", chat_id, ws_uuid,
+        )
+        return None
+    # No owner to verify against (agent-created scheduled tasks whose origin_chat_id was
+    # server-captured at schedule time — not a caller-controllable cross-user vector): keep
+    # the legacy workspace-only honour so those producers keep delivering.
+    if owner_int_id is None or int(candidate.user_id) == owner_int_id:
+        return candidate
+    logger.warning(
+        "[ChatMessenger] chat_id %s is owned by another user (not "
+        "clerk_user_id=%r) — falling back to the Auto thread",
+        chat_id, clerk_user_id,
+    )
+    return None
+
+
+def _target_chat(db: Session, ws_uuid: uuid.UUID, chat_id: Optional[str],
+                 clerk_user_id: Optional[str]):
+    """The chat a background message lands in: the honoured originating chat, else the
+    owner's Auto thread; None when neither is resolvable. The owner (clerk → int users.id)
+    is resolved once, for the ownership check and the Auto-thread fallback."""
+    owner_int_id = _resolve_user_int_id(db, clerk_user_id)
+    target_chat = _honoured_chat(db, ws_uuid, chat_id, owner_int_id, clerk_user_id)
+    if target_chat is not None:
+        return target_chat
+    if owner_int_id is None:
+        logger.warning(
+            "[ChatMessenger] No valid chat and no resolvable user "
+            "(clerk_user_id=%r) — dropping background message", clerk_user_id,
+        )
+        return None
+    return find_or_create_auto_chat(db, ws_uuid, owner_int_id)
+
+
+def _source_doc(source: Optional[Dict[str, Any]], link_type: Optional[str],
+                link_id: Optional[str]) -> Dict[str, Any]:
+    """Persisted provenance — the badge that survives reload."""
+    source_doc = {
+        "label": BACKGROUND_LABEL,
+        **{k: v for k, v in (source or {}).items() if v is not None},
+    }
+    if link_type is not None:
+        source_doc["link_type"] = link_type
+    if link_id is not None:
+        source_doc["link_id"] = str(link_id)
+    return source_doc
+
+
+def _notify_chat_changed(db: Session, ws_uuid: uuid.UUID, chat) -> None:
+    """Live receive (S7): best-effort NOTIFY on the existing lane."""
+    try:
+        from services.board_events import notify_chat_event
+
+        notify_chat_event(
+            db,
+            workspace_id=ws_uuid,
+            chat_id=str(chat.id),
+            user_id=int(chat.user_id),
+        )
+    except Exception:  # noqa: BLE001 — the NOTIFY is an optimisation
+        logger.debug("[ChatMessenger] chat_changed notify failed", exc_info=True)
+
+
 def post_background_message(
     db: Session,
     *,
@@ -129,103 +221,39 @@ def post_background_message(
     clerk_user_id: Optional[str] = None,
     link_type: Optional[str] = None,
     link_id: Optional[str] = None,
+    parts: Optional[Sequence[Mapping[str, Any]]] = None,
 ):
     """Post one assistant message from a background producer. Raises on
     hard failures (callers wanting fail-soft use ``deliver_background_message``).
 
-    Returns the saved Message, or None when no target is resolvable
-    (no valid chat AND no resolvable user for an Auto thread).
-    """
-    from consumers.chatbot.service import ChatService
-    from core.models.core import Chat
+    ``parts`` (PRD-268 US-C19b) are structured parts saved after the text part
+    (``services.chat_parts``); a refused part raises ValueError before anything
+    is read or written. Without them the message is today's single text part.
 
+    Returns the saved Message, or None when the text is empty or no target is
+    resolvable (no valid chat AND no resolvable user for an Auto thread).
+    """
+    structured = checked_parts(parts)
     if not text or not str(text).strip():
         return None
 
     ws_uuid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(str(workspace_id))
-
-    # 1. Resolve the target chat: the originating chat when it is valid for this
-    #    workspace AND owned by this message's owner, else the owner's Auto thread.
-    #    PRD-227 P227-RVW-2: the workspace filter is cross-tenant-safe but NOT
-    #    cross-user-safe — without the owner check a caller-supplied chat_id (a
-    #    mission's origin_chat_id, a suggestion-card chat_id) could target another
-    #    workspace-member's private chat. Resolve the owner (clerk → int users.id)
-    #    once; reuse it for the ownership check and the Auto-thread fallback.
-    owner_int_id = _resolve_user_int_id(db, clerk_user_id)
-
-    target_chat = None
-    if chat_id:
-        try:
-            candidate = (
-                db.query(Chat)
-                .filter(Chat.id == uuid.UUID(str(chat_id)), Chat.workspace_id == ws_uuid)
-                .first()
-            )
-        except ValueError:
-            candidate = None
-        if candidate is None:
-            logger.warning(
-                "[ChatMessenger] chat_id %s invalid or outside workspace %s — "
-                "falling back to the Auto thread", chat_id, ws_uuid,
-            )
-        elif owner_int_id is None:
-            # No owner to verify against (agent-created scheduled tasks whose
-            # origin_chat_id was server-captured at schedule time — not a
-            # caller-controllable cross-user vector). Keep the legacy
-            # workspace-only honour so those producers keep delivering.
-            target_chat = candidate
-        elif int(candidate.user_id) == owner_int_id:
-            target_chat = candidate
-        else:
-            logger.warning(
-                "[ChatMessenger] chat_id %s is owned by another user (not "
-                "clerk_user_id=%r) — falling back to the Auto thread",
-                chat_id, clerk_user_id,
-            )
-
+    target_chat = _target_chat(db, ws_uuid, chat_id, clerk_user_id)
     if target_chat is None:
-        if owner_int_id is None:
-            logger.warning(
-                "[ChatMessenger] No valid chat and no resolvable user "
-                "(clerk_user_id=%r) — dropping background message", clerk_user_id,
-            )
-            return None
-        target_chat = find_or_create_auto_chat(db, ws_uuid, owner_int_id)
+        return None
 
-    # 2. Persisted provenance — the badge that survives reload.
-    source_doc = {
-        "label": BACKGROUND_LABEL,
-        **{k: v for k, v in (source or {}).items() if v is not None},
-    }
-    if link_type is not None:
-        source_doc["link_type"] = link_type
-    if link_id is not None:
-        source_doc["link_id"] = str(link_id)
+    # Append via the one existing write path (the text part is the in-turn
+    # assistant shape; bumps chat.updated_at → history re-sort ships free via PRD-220).
+    from consumers.chatbot.service import ChatService
 
-    # 3. Append via the one existing write path (parts shape identical to
-    #    the in-turn assistant writes; bumps chat.updated_at → history
-    #    re-sort ships free via PRD-220).
     message = ChatService(db).save_message(
         chat_id=str(target_chat.id),
         role="assistant",
-        parts=[{"type": "text", "text": str(text)}],
+        parts=[{"type": "text", "text": str(text)}, *structured],
         workspace_id=str(ws_uuid),
-        source=source_doc,
+        source=_source_doc(source, link_type, link_id),
     )
-
-    # 4. Live receive (S7): best-effort NOTIFY on the existing lane.
-    try:
-        from services.board_events import notify_chat_event
-
-        notify_chat_event(
-            db,
-            workspace_id=ws_uuid,
-            chat_id=str(target_chat.id),
-            user_id=int(target_chat.user_id),
-        )
-    except Exception:  # noqa: BLE001 — the NOTIFY is an optimisation
-        logger.debug("[ChatMessenger] chat_changed notify failed", exc_info=True)
-
+    _notify_chat_changed(db, ws_uuid, target_chat)
     return message
 
 

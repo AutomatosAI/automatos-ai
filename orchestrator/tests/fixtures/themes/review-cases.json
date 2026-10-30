@@ -350,6 +350,47 @@
       }
     },
     {
+      "name": "SDK proactive calls declared in uses",
+      "manifestSet": {
+        "uses": [
+          "cards",
+          "proactive",
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions } from '@automatos/theme-sdk'\n\nexport const proactive = () => [DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK proactive calls without proactive in uses",
+      "manifestSet": {
+        "uses": [
+          "cards",
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions } from '@automatos/theme-sdk'\n\nexport const proactive = () => [DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
       "name": "a host with no SDK name list",
       "manifestSet": {
         "uses": [

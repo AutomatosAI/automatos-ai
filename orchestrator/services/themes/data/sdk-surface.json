@@ -6,6 +6,8 @@
     ],
     "cards": [
       "AiLabelFence",
+      "BriefCard",
+      "CalibrationCard",
       "CorePage",
       "FilePreview",
       "FirstRunNudge",
@@ -15,6 +17,10 @@
       "MissionApproval",
       "MissionCreatedCard",
       "MissionSuggestionCard",
+      "ReadinessList",
+      "ReplyChips",
+      "StatusLabel",
+      "SuggestionCard",
       "TaskCard",
       "ToolApproval",
       "TrialExhaustedBanner",
@@ -143,6 +149,16 @@
       "useWorkflowPlaybook",
       "useWorkflowPlaybooks"
     ],
+    "proactive": [
+      "useAnswerCalibration",
+      "useBrief",
+      "useCalibration",
+      "useCheckReadiness",
+      "useHideSuggestion",
+      "useReadiness",
+      "useStartSuggestion",
+      "useSuggestions"
+    ],
     "storage": [
       "THEME_STATE_LIMITS",
       "readThemeState",
@@ -152,10 +168,12 @@
       "writeThemeState"
     ],
     "theme": [
+      "DISPLAY_STATE_LABELS",
       "SDK_VERSION",
       "defineTheme"
     ],
     "voice": [
+      "BriefVoice",
       "VoiceButton",
       "readVoiceLevels",
       "useVoice"
