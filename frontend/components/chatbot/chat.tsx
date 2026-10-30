@@ -7,7 +7,7 @@ import { WORKSPACE_ROOT, canvasTitleFor, normalizeCodeRoot } from '@/components/
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useChatWithReceipts as useChat } from '@/lib/chat/use-chat-with-receipts' // PRD-256: + the turn's receipts
+import { useStudioChat as useChat } from '@/lib/chat/use-studio-chat' // PRD-256: + the turn's receipts; PRD-265: + the paused state on load
 import { usePageContext } from '@/lib/page-context'
 import { MessageWithReceipts as Message } from './message-with-receipts' // PRD-256: the receipts above the reply
 import { MultimodalInput } from './multimodal-input' // PRD-264: its box and controls pause while the AI label is hidden; voice never does
