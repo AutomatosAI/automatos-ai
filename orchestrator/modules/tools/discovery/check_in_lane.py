@@ -44,6 +44,11 @@ record of their own as they read (a search's log row, the onboarding funnel's st
 spreadsheet's copy in the workspace, the NL2SQL audit and training rows, a preview's
 picture). ``carries_the_check_in`` runs every check-in call but the suggestion inside
 ``core.read_only_call.reading_only()``, and each of those records is skipped there.
+
+PRD-268 US-C11c (K10, §12-Q9): ``CHAT_ONLY_ACTIONS`` run in a person's own chat only: the
+three follow-up tools and the reply chips. A check-in is neither offered nor cleared them,
+read or not, and a follow-up's own turn runs in this lane, so no follow-up schedules,
+lists or cancels another, and none offers chips.
 """
 from __future__ import annotations
 
@@ -72,6 +77,10 @@ RUN_ID_KEY = "run_id"
 READS_KEY = "check_in_reads"
 AGENT_KEY = "check_in_agent_id"
 CHECK_IN_PARAM = "_check_in"
+# PRD-268 US-C11c (K10): a person's own chat only, never a check-in (or a follow-up's turn).
+CHAT_ONLY_ACTIONS = frozenset({
+    "platform_schedule_follow_up", "platform_list_follow_ups", "platform_cancel_follow_up", "platform_offer_replies",
+})
 
 ExecuteTool = Callable[..., Awaitable[Dict[str, Any]]]
 
@@ -96,8 +105,10 @@ def reads_the_workspace(action: Any) -> bool:
 def may_clear_in_a_check_in(action_name: str) -> bool:
     """Whether a check-in may run ``action_name``: ``platform_suggest_next_step``, or an
     action registered as positively ``read`` that reads inside the platform. Unknown, write
-    and destructive actions are refused, a web read too, and so is one whose definition
-    cannot be read."""
+    and destructive actions are refused, a web read too, a chat-only one (``CHAT_ONLY_ACTIONS``),
+    and one whose definition cannot be read."""
+    if action_name in CHAT_ONLY_ACTIONS:
+        return False
     if action_name == SUGGEST_NEXT_STEP:
         return True
     try:
@@ -120,12 +131,12 @@ def is_a_platform_action(tool_name: Any) -> bool:
 def offered_in_a_check_in(action: Any) -> bool:
     """PRD-268 US-C02c: whether a check-in's tool surface (``ContextMode.CHECK_IN``) offers
     ``action``, a registered definition. It must be a platform action that is positively
-    ``read`` and reads inside the platform, or ``platform_suggest_next_step``; needs no
-    admin; and can run on this server.
+    ``read`` and reads inside the platform, or ``platform_suggest_next_step``; not
+    chat-only (``CHAT_ONLY_ACTIONS``); needs no admin; and can run on this server.
     The surface offers nothing the two decorators below would refuse, so the model is
     never shown a tool it may not call."""
     name = getattr(action, "name", None)
-    if not is_a_platform_action(name):
+    if not is_a_platform_action(name) or name in CHAT_ONLY_ACTIONS:
         return False
     if getattr(action, "admin_only", False) or getattr(action, "super_admin_only", False):
         return False
@@ -211,6 +222,7 @@ def carries_the_check_in(execute: ExecuteTool) -> ExecuteTool:
 
 __all__ = [
     "AGENT_KEY",
+    "CHAT_ONLY_ACTIONS",
     "CHECK_IN_LANE",
     "CHECK_IN_PARAM",
     "CHECK_IN_REFUSAL",
