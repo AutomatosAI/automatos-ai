@@ -152,6 +152,7 @@ accepts only these paths (`FILE_KINDS`):
 | `assets/fonts/<name>.txt` or `.md` | plain text | 256 KB |
 | `assets/mascot/<name>.webm` or `.mp4` | `video/webm`, `video/mp4` | `THEME_MAX_CLIP_KB` (1024 KB) |
 | `assets/mascot/<name>.png`, `assets/brand/<name>.png` or `.webp`, `assets/previews/<name>.png` | `image/png`, `image/webp` | 512 KB |
+| `assets/previews/phone/<name>.png` or `.jpg` | `image/png`, `image/jpeg` | 512 KB |
 | `source/…` (up to seven folders below `source/`; `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.css`, `.json`, `.md`, `.txt`) | plain text | 1 MB per file |
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `LICENSE.md`, `LICENSE.txt` | plain text | 256 KB |
 
@@ -159,6 +160,17 @@ The whole package is at most `THEME_MAX_PACKAGE_MB` (10 MB), holds at most 500 e
 A package must hold `theme.json`, `dist/entry.js`, `looks/schema.json` and at least one preset. Links, absolute
 paths, `..`, backslashes, repeated names, encryption, zip64, any compression but stored or deflated, and SVG files
 are refused. Each image, clip and font must be the format its path says.
+
+**Screenshots.** `theme.json` lists the Marketplace's screenshots of the theme: `previews` for the web
+(`assets/previews/<name>.png`) and `phonePreviews` for the Automatos Go app (`assets/previews/phone/<name>.png` or
+`.jpg`; portrait, about 9:19.5, though no size in pixels is checked). Each list holds up to 24 files
+(`manifest.MAX_PREVIEWS`), every file at most 512 KB (`package.IMAGE_MAX_BYTES`) and the format its extension says,
+read by its first bytes (PNG `89 50 4E 47 0D 0A 1A 0A`, JPEG `FF D8 FF`). A listed file the package lacks is refused
+(`MISSING_FILE`). Screenshots count toward the package cap, and images barely compress: 24 + 24 at 512 KB is 24 MB,
+more than the default 10 MB, so a package with every screenshot at its cap is refused (`PACKAGE_TOO_LARGE`) unless
+`THEME_MAX_PACKAGE_MB` is raised. At about 200 KB a screenshot (a phone JPEG), 24 + 24 is about 9.4 MB, before the
+theme's code, fonts and mascot. The Marketplace files each screenshot under a look by its name
+([API reference](api-reference.md#the-marketplace)).
 
 `theme.json` (schema `automatos-theme/v1`, `services/themes/manifest.py`) is checked field by field; every field the
 schema doesn't name is refused. The server accepts `base` `studio` or `classic` (`contract.THEME_BASES`); the browser
@@ -380,7 +392,8 @@ that feed every `THEME_REVOCATIONS_PULL_MINUTES` (60) while the server's schedul
 `/admin/themes` (`frontend/app/admin/themes/page.tsx`) is the review queue, for platform admins. A reviewer reads the
 scan report, records the kit job's summary, approves or rejects, then hands the signature request to the kit's
 signing workflow and pastes the signature back (`services/themes/review.py`, `signing.py`). An approved version is
-listed on **Marketplace › Themes** (`services/themes/listings.py`). It is **Official** only when its publisher is
+listed on **Marketplace › Themes** (`services/themes/listings.py`), with its web and phone screenshots per look. It
+is **Official** only when its publisher is
 reserved and its signature verifies with an active key. Taking a version down writes a `disable` revocation of its
 digest.
 
