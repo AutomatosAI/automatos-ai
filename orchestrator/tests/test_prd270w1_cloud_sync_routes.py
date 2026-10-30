@@ -14,7 +14,8 @@ the status row swept and put back). Proven:
   sentence, no request sent and nothing recorded;
 * a failing Sync is a 502 with the plain error it recorded, which the status then shows as lastError, the
   previous success kept;
-* a good Sync answers its counts and the status; a second one is unchanged;
+* a good Sync answers its counts, the installs it moved (none here: US-270-04b's tests move them) and
+  the status; a second one is unchanged;
 * a Sync while another runs is 409 (already running) and records nothing;
 * both handlers are plain ``def``s, the edition check is their first dependency and the
   ``workspace:manage`` gate comes after it.
@@ -209,8 +210,9 @@ def test_a_good_sync_answers_its_counts_and_the_status(env):
     answer = env.client.post(SYNC)
     assert answer.status_code == 200
     body = answer.json()
-    assert set(body) == {"counts", "status"}
+    assert set(body) == {"counts", "updatesApplied", "updatesFailed", "status"}
     assert body["counts"] == {**EMPTY, "new": 2}
+    assert (body["updatesApplied"], body["updatesFailed"]) == (0, 0)  # nothing installed: nothing to move
     status = body["status"]
     assert status["enabled"] is True and status["cloudUrl"] == CLOUD and status["lastError"] is None
     assert status["counts"] == body["counts"] and status["generatedAt"] == GENERATED
