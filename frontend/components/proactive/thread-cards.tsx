@@ -12,8 +12,13 @@
  * started here stays in its place for "Started. Auto is on it." (use-suggested-list.ts). Start is never the thread's
  * ink primary: the line pinned above the composer holds it. The suggestion that line shows has its Start and Hide
  * there, so its card here steps aside until the line hides (mission-suggestion-presence.ts).
+ *
+ * US-W02: the brief card has Listen, the host's BriefVoice reading this brief's own `spoken` words (the server voice,
+ * the browser's speech on a refusal code; it never plays until pressed), beside its thumbs (the digest feedback route,
+ * the brief's state_hash).
  */
 import type { ReactNode } from 'react'
+import { BriefVoice } from '@/components/voice/brief-voice'
 import { useSuggestions } from '@/hooks/use-suggestions'
 import type { Brief, Suggestion } from '@/lib/proactive/types'
 import { BriefCard } from './brief-card'
@@ -38,6 +43,11 @@ function Aligned({ children }: { readonly children: ReactNode }) {
   )
 }
 
+/** The brief's card, with Listen reading the brief's own spoken words. */
+function ThreadBrief({ brief }: { readonly brief: Brief }) {
+  return <BriefCard brief={brief} listen={<BriefVoice spoken={brief.spoken} />} />
+}
+
 /**
  * The brief, if any, then each named suggestion that is open (or was just started here) and not pinned above the
  * composer; nothing when none shows.
@@ -54,7 +64,7 @@ function WithSuggestions({ brief, ids }: { readonly brief: Brief | null; readonl
   if (brief === null && cards.length === 0) return null
   return (
     <Aligned>
-      {brief !== null ? <BriefCard brief={brief} /> : null}
+      {brief !== null ? <ThreadBrief brief={brief} /> : null}
       {cards.map((suggestion) => (
         <SuggestionCard key={suggestion.id} suggestion={suggestion} primary={false} onStarted={() => keep(suggestion, 0)} />
       ))}
@@ -68,7 +78,7 @@ export function ThreadCards({ brief, suggestionIds }: ThreadCardsProps) {
   if (brief === null) return null
   return (
     <Aligned>
-      <BriefCard brief={brief} />
+      <ThreadBrief brief={brief} />
     </Aligned>
   )
 }

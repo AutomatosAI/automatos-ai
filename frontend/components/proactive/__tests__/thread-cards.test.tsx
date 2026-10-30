@@ -7,12 +7,17 @@
  * composer (one live Start and Hide per suggestion). `Message` gets a copy without the card parts, and without the text
  * part when the brief card holds the prose; unknown parts still reach it (it drops them); every other message
  * reaches it unchanged.
+ *
+ * US-W02: the thread's brief card has thumbs (the digest feedback route, the brief's state_hash) and Listen (the host's
+ * BriefVoice over this brief's spoken words): nothing plays until Listen is pressed, and a press reads them in the server
+ * voice.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage } from '@/types'
+import type { SynthesisPort } from '@/lib/voice/quick-ask/speaker'
 
 type Mutation = { mutate: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn>; isLoading: boolean; isError: boolean; error: unknown }
 const state = vi.hoisted(() => ({
@@ -27,6 +32,12 @@ vi.mock('@/hooks/use-suggestions', () => ({
   useHideSuggestion: () => state.hide,
 }))
 vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => state.feedback }))
+// Listen's voice: the server-speech fakes, so a press is heard and a mount is seen to ask nothing.
+const speech = vi.hoisted(() => ({ make: null as unknown as () => SynthesisPort }))
+vi.mock('@/lib/voice/quick-ask/deps', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/voice/quick-ask/deps')>()),
+  speechPort: () => speech.make(),
+}))
 // Message as a stand-in that shows the part types and text it was handed.
 vi.mock('@/components/chatbot/message', () => ({
   Message: ({ message }: { message: ChatMessage }) => (
@@ -43,6 +54,9 @@ import { markSuggestionPinned } from '@/components/proactive/mission-suggestion-
 import { ThreadCards } from '@/components/proactive/thread-cards'
 import { STARTED_LINE, STARTED_MS } from '@/components/proactive/use-suggestion-card'
 import { threadPartsOf } from '@/lib/proactive/thread-parts'
+import { LISTEN_TO_THE_BRIEF } from '@/components/voice/brief-voice'
+import { flush } from '@/lib/voice/quick-ask/__tests__/quick-ask-harness'
+import { serverSpeechSetup } from '@/lib/voice/quick-ask/__tests__/server-speech-fakes'
 import type { Brief, Suggestion } from '@/lib/proactive/types'
 import { HEX_COLOUR, MAX_COMPONENT_LINES, ORANGE_CLASS, ROUNDED_3XL, componentSpans, proactiveSource } from './source-rules'
 
@@ -82,6 +96,8 @@ const suggestionMessage = (id = OPEN_ID) =>
 const briefMessage = (part: unknown = { type: 'brief@1', brief: brief() }) =>
   assistant([{ type: 'text', text: 'Two things moved overnight.' }, part], { source: { origin: 'daily_digest', local_date: '2026-10-30' } })
 
+let speechSetup: ReturnType<typeof serverSpeechSetup>
+
 const mutation = (): Mutation => ({ mutate: vi.fn(), reset: vi.fn(), isLoading: false, isError: false, error: null })
 
 function draw(message: ChatMessage) {
@@ -93,6 +109,8 @@ beforeEach(() => {
   state.start = mutation()
   state.hide = mutation()
   state.feedback.mutate.mockReset()
+  speechSetup = serverSpeechSetup()
+  speech.make = vi.fn(() => speechSetup.port)
 })
 
 afterEach(() => {
@@ -237,6 +255,32 @@ describe('the brief card in the Auto thread', () => {
     draw(briefMessage({ type: 'brief@1', brief: { v: 1 } }))
     expect(screen.queryByRole('article', { name: 'Morning, Sam.' })).toBeNull()
     expect(screen.getByTestId('the-message')).toHaveTextContent('Two things moved overnight.')
+  })
+
+  it("rates the brief with the thumbs, keyed by the brief's state_hash", () => {
+    draw(briefMessage())
+    const card = screen.getByRole('article', { name: 'Morning, Sam.' })
+    fireEvent.click(within(card).getByRole('button', { name: 'Helpful' }))
+    expect(state.feedback.mutate).toHaveBeenCalledWith({ state_hash: 'hash-7', rating: 1 }, expect.anything())
+  })
+
+  it('has Listen, outside the AI-generated block, and plays nothing until it is pressed', async () => {
+    draw(briefMessage())
+    const card = screen.getByRole('article', { name: 'Morning, Sam.' })
+    const listen = within(card).getByRole('button', { name: LISTEN_TO_THE_BRIEF })
+    expect(listen).toBeEnabled()
+    expect(screen.getByTestId('ai-generated-message')).not.toContainElement(listen)
+    await act(async () => flush())
+    expect(speech.make).not.toHaveBeenCalled()
+    expect(speechSetup.server.fetchSpeech).not.toHaveBeenCalled()
+    expect(speechSetup.audio.player.play).not.toHaveBeenCalled()
+  })
+
+  it("reads this brief's spoken words in the server voice once Listen is pressed", async () => {
+    draw(briefMessage({ type: 'brief@1', brief: brief({ spoken: 'Morning, Sam. 1. Lisbon flights.' }) }))
+    fireEvent.click(screen.getByRole('button', { name: LISTEN_TO_THE_BRIEF }))
+    await act(async () => flush())
+    expect(speechSetup.server.texts()).toEqual(['Morning, Sam.', '1. Lisbon flights.'])
   })
 })
 
