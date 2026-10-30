@@ -1140,10 +1140,22 @@ export interface ThemeListing {
   compatible: boolean
   uses: string[]; pricing: string; cover: string | null
   revoked: ThemeRevocationState | null; installed: ThemeListingInstall | null
+  /**
+   * The first of theme.json's `phonePreviews` (an Automatos Go screenshot), as a files-route URL; null
+   * or absent for a package without phone screenshots (storefront contract, 30 Oct 2026).
+   */
+  phoneCover?: string | null
 }
 
+/** One screenshot of a preset: its screen (null for the preset's own) and its files-route URL. */
+export interface ThemePreviewShot { screen: string | null; url: string }
+
 /** listings.py previews_by_preset: one preset and its previews (screen null for the preset's own). */
-export interface ThemePresetPreviews { id: string; default: boolean; previews: { screen: string | null; url: string }[] }
+export interface ThemePresetPreviews {
+  id: string; default: boolean; previews: ThemePreviewShot[]
+  /** Its Automatos Go screenshots, matched to the preset by the same rule as `previews`; absent or empty without. */
+  phonePreviews?: ThemePreviewShot[]
+}
 
 /** listings.py _version_entry: one approved version in the detail's versions map. */
 export interface ThemeListingVersion {
@@ -1157,6 +1169,8 @@ export interface ThemeListingVersion {
 /** GET /api/marketplace/themes/{listingId} (listings.py listing_detail). */
 export interface ThemeListingDetail extends ThemeListing {
   presets: ThemePresetPreviews[]; otherPreviews: string[]
+  /** The phone screenshots no preset claims (the meaning of `otherPreviews`); absent or empty without. */
+  otherPhonePreviews?: string[]
   readme: string | null; changelog: string | null
   base: string | null; tone: string | null; minWidth: number | null
   pages: string[]; routes: string[]
