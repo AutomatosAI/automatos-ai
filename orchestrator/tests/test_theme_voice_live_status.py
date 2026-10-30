@@ -3,9 +3,12 @@
 The host voice provider offers Live from this read, so it carries the mint's own gates,
 read without refusing (``modules/voice/availability.py``), in the mint's order:
 
-* the plan (SaaS only, D34): a plan without the voice family is ``available: false``,
-  ``reason: "voice_live_plan_required"`` (the mint's own code); Business is available;
-  the local edition is never plan-gated;
+* the plan (SaaS only, D34): every default tier has the voice family since PRD-265 D-6, so
+  every default plan is available; a tier table that turns it off is ``available: false``,
+  ``reason: "voice_live_plan_required"`` (the mint's own code); the local edition is never
+  plan-gated;
+* then the credits (PRD-265 D-6: a call is paid from credits): none left is
+  ``reason: "credits_exhausted"``, the mint's own code;
 * then the platform switch, the Retell credentials, the workspace's toggle and the
   month's minutes, each with its own code;
 * every gate passing is ``available: true``, ``reason: null``; the settings card's fields
@@ -29,7 +32,7 @@ from fastapi.testclient import TestClient
 import api.voice_retell as vr
 from config import config
 from core.models.workspaces import Workspace
-from modules.voice import availability, live_settings, mint, voice_meter
+from modules.voice import availability, live_billing, live_settings, mint, voice_meter
 from modules.voice.live_settings import RetellCredentials
 from modules.voice.voice_meter import MeterReading
 
@@ -52,10 +55,20 @@ def local(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
 
 
-def _gates(monkeypatch, *, platform=True, creds=ARMED, reading=NOTHING_USED):
+def _gates(monkeypatch, *, platform=True, creds=ARMED, reading=NOTHING_USED, credits=True):
+    monkeypatch.setattr(live_billing, "has_credits", lambda db, workspace_id: credits)
     monkeypatch.setattr(live_settings, "voice_live_enabled", lambda: platform)
     monkeypatch.setattr(live_settings, "retell_credentials", lambda: creds)
     monkeypatch.setattr(voice_meter, "monthly_meter", lambda db, workspace_id: reading)
+
+
+def _voice_off_for(monkeypatch, plan):
+    """A tier table that turns voice off for ``plan``: every default tier has it (PRD-265 D-6)."""
+    import config as config_module
+
+    tiers = {name: dict(tier) for name, tier in config_module.PLAN_TIERS.items()}
+    tiers[plan]["families"] = {**tiers[plan]["families"], "voice": False}
+    monkeypatch.setattr(config_module, "PLAN_TIERS", tiers)
 
 
 def _workspace(plan, *, enabled=True):
@@ -89,12 +102,27 @@ def _status(workspace) -> dict:
 # --------------------------------------------------------------------------- the plan (D34)
 
 
-@pytest.mark.parametrize("plan", ["basic", "pro", None, "no-such-tier"])
-def test_saas_without_the_voice_family_is_unavailable_with_the_mints_code(saas, monkeypatch, plan):
+def test_saas_a_tier_without_the_voice_family_is_unavailable_with_the_mints_code(saas, monkeypatch):
     _gates(monkeypatch)
-    body = _status(_workspace(plan))
+    _voice_off_for(monkeypatch, "pro")
+    body = _status(_workspace("pro"))
     assert body["available"] is False
     assert body["reason"] == mint.VOICE_LIVE_PLAN_REQUIRED == "voice_live_plan_required"
+
+
+@pytest.mark.parametrize("plan", ["basic", "pro", None, "no-such-tier"])
+def test_saas_every_default_plan_is_available(saas, monkeypatch, plan):
+    _gates(monkeypatch)
+    body = _status(_workspace(plan))
+    assert body["available"] is True
+    assert body["reason"] is None
+
+
+def test_saas_no_credits_left_is_unavailable_with_the_mints_code(saas, monkeypatch):
+    _gates(monkeypatch, credits=False)
+    body = _status(_workspace("pro"))
+    assert body["available"] is False
+    assert body["reason"] == availability.LIVE_REASON_NO_CREDITS == "credits_exhausted"
 
 
 def test_saas_business_is_available(saas, monkeypatch):
@@ -110,8 +138,10 @@ def test_the_local_edition_is_never_plan_gated(local, monkeypatch, plan):
     assert _status(_workspace(plan))["available"] is True
 
 
-def test_the_plan_is_the_first_reason_on_saas(saas, monkeypatch):
-    _gates(monkeypatch, platform=False, creds=UNARMED, reading=CAP_USED)
+def test_the_plan_is_the_first_reason_on_saas_then_the_credits(saas, monkeypatch):
+    _gates(monkeypatch, platform=False, creds=UNARMED, reading=CAP_USED, credits=False)
+    assert _status(_workspace("basic", enabled=False))["reason"] == "credits_exhausted"
+    _voice_off_for(monkeypatch, "basic")
     assert _status(_workspace("basic", enabled=False))["reason"] == "voice_live_plan_required"
 
 
@@ -150,15 +180,22 @@ def test_the_route_is_a_plain_def_off_the_event_loop():
 
 
 def test_live_unavailable_reason_follows_the_mints_order():
-    every = dict(plan_allows=True, platform_enabled=True, armed=True, workspace_enabled=True, cap_allows=True)
+    every = dict(plan_allows=True, credits_allow=True, platform_enabled=True, armed=True,
+                 workspace_enabled=True, cap_allows=True)
     assert availability.live_unavailable_reason(availability.LiveGates(**every)) is None
     assert availability.live_unavailable_reason(availability.LiveGates(**{**every, "cap_allows": False})) == (
         availability.LIVE_REASON_CAP_REACHED
+    )
+    no_credits_or_platform = {**every, "credits_allow": False, "platform_enabled": False}
+    assert availability.live_unavailable_reason(availability.LiveGates(**no_credits_or_platform)) == (
+        availability.LIVE_REASON_NO_CREDITS
     )
     nothing = {name: False for name in every}
     assert availability.live_unavailable_reason(availability.LiveGates(**nothing)) == availability.LIVE_REASON_PLAN
 
 
-def test_the_plan_rule_reads_without_refusing(saas):
+def test_the_plan_rule_reads_without_refusing(saas, monkeypatch):
     assert mint.plan_allows_voice_live("business") is True
+    assert mint.plan_allows_voice_live("basic") is True
+    _voice_off_for(monkeypatch, "basic")
     assert mint.plan_allows_voice_live("basic") is False

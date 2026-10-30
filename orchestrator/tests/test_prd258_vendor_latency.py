@@ -132,8 +132,9 @@ def webhook(monkeypatch):
 
     row = SimpleNamespace(
         call_id=_CALL_ID, status="ended", vendor_latency=None,
-        # call_ended folds the lifecycle columns too (_apply_ended reads them)
-        started_at=None, ended_at=None, duration_seconds=None, disconnect_reason=None,
+        # call_ended folds the lifecycle columns too (_apply_ended reads them), and charges the
+        # call's workspace (PRD-265 D-6; none here, so nothing is charged)
+        started_at=None, ended_at=None, duration_seconds=None, disconnect_reason=None, workspace_id=None,
     )
     env = SimpleNamespace(row=row, requests=[], get_call=None, vr=vr)
 

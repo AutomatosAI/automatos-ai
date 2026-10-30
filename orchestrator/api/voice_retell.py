@@ -42,6 +42,7 @@ from modules.voice import (
     arming,
     availability,
     call_events,
+    live_billing,
     live_settings,
     live_socket,
     mint,
@@ -193,7 +194,7 @@ def voice_live_status(
     Never returns credential VALUES — only whether they are present.
     ``viewer_is_admin`` lets the card show the one-click Arm box to the
     people who can actually use it. ``available`` says whether a mint would
-    pass every gate now (the plan included, on SaaS), and ``reason`` names the
+    pass every gate now (the plan and credits included), and ``reason`` names the
     first gate that would refuse (``modules/voice/availability.py``); the host
     voice provider offers Live from it. A plain ``def``: every read here is a
     synchronous database read, so FastAPI runs it in its threadpool.
@@ -210,6 +211,7 @@ def voice_live_status(
     armed = live_settings.retell_credentials().armed
     reason = availability.live_unavailable_reason(availability.LiveGates(
         plan_allows=mint.plan_allows_voice_live(getattr(workspace, "plan", None)),
+        credits_allow=live_billing.has_credits(db, ctx.workspace_id),
         platform_enabled=platform_enabled,
         armed=armed,
         workspace_enabled=ws_voice.enabled,
