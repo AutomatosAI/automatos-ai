@@ -68,6 +68,8 @@ MODEL_RUN_WINDOW = timedelta(hours=24)
 # The open and recently hidden titles a prompt lists, newest first: the open-per-person cap is 20.
 MAX_TITLES = 20
 # The outcomes of a run that read: a skipped run neither counts in a streak nor ends it.
+# A follow-up's 'posted' joins neither set, deliberately: windows and streaks read one kind of
+# check-in at a time, and a follow-up (KIND_FOLLOW_UP) has neither.
 FINISHED_OUTCOMES = frozenset(SUCCESSFUL_OUTCOMES | {RUN_ERROR})
 # The scheduler fires on the clock, and a run starts a moment after its fire (the bridge reads the
 # mode and the active hours first): a tick this close to due is the one due, not the one after it.

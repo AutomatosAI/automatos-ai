@@ -258,9 +258,13 @@ def _ending(db: Session, follow_up: _FollowUp, record: RunRecord, result: LoopRe
     return (RUN_POSTED, None, 0) if _post(db, follow_up, str(result.final_text)) else (RUN_ERROR, NOT_POSTED, 0)
 
 
+def _spent(record: RunRecord, result: LoopResult) -> RunRecord:
+    """The run with what its turn spent, so an error after the model call still names its model."""
+    return replace(record, model=result.model, tokens=result.tokens, cost_usd=result.cost_usd)
+
+
 def _finish(db: Session, follow_up: _FollowUp, record: RunRecord, result: LoopResult) -> CheckInResult:
-    """End the turn and write the run row: what it spent, its suggestions, and how it ended."""
-    record = replace(record, model=result.model, tokens=result.tokens, cost_usd=result.cost_usd)
+    """End the turn and write the run row (``record`` carries its spend): its suggestions, and how it ended."""
     outcome, error_class, made = _ending(db, follow_up, record, result)
     write_run(db, replace(record, outcome=outcome, suggestions=made, error_class=error_class))
     logger.info("[follow-up] %d fired as run %s in %s: %s, $%.4f", follow_up.id, record.run_id,
@@ -269,13 +273,15 @@ def _finish(db: Session, follow_up: _FollowUp, record: RunRecord, result: LoopRe
 
 
 async def _run(db: Session, follow_up: _FollowUp, record: RunRecord, now: datetime) -> CheckInResult:
-    """Prepare, converse and record the follow-up's one turn; any failure is its run's error."""
+    """Prepare, converse and record the follow-up's one turn; any failure is its run's error,
+    keeping what the turn spent once it ran (the model-run cap counts it)."""
     try:
         planned = await asyncio.to_thread(_prepare, db, follow_up, record, now)
         if isinstance(planned, CheckInResult):
             return planned
         record = planned.record
         result = await _converse(db, follow_up, planned)
+        record = _spent(record, result)
         return await asyncio.to_thread(_finish, db, follow_up, record, result)
     except Exception as exc:  # noqa: BLE001 — recorded as the run's error, by its class; never retried
         logger.exception("[follow-up] %d (run %s in %s) failed", follow_up.id, record.run_id, record.workspace_id)

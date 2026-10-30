@@ -192,7 +192,10 @@ def team(engine, new_session, monkeypatch):
         coro.close()
 
     async def deliver(db, run_id):
-        team.delivered.append(run_id)
+        # What another session sees of the run as delivery starts: W2's deliver_run runs after it commits.
+        seen = new_session().execute(text("SELECT outcome FROM proactive_runs WHERE id = CAST(:id AS uuid)"),
+                                     {"id": str(run_id)}).scalar()
+        team.delivered.append((run_id, seen))
 
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(config, "SPEND_CEILING_USD", 0)
@@ -303,7 +306,7 @@ def test_suggested_records_one_suggestion_for_the_person_from_the_follow_up_and_
     [run] = _one(team, "SELECT id, outcome, suggestions FROM proactive_runs WHERE workspace_id = CAST(:w AS uuid)")
     assert (suggestion.user_id, suggestion.source_type, suggestion.source_agent_id) == (team.ana, "follow_up", team.auto)
     assert suggestion.run_id == run.id and (run.outcome, run.suggestions) == ("suggested", 1)
-    assert team.delivered == [run.id]
+    assert team.delivered == [(run.id, "suggested")]  # delivered once, after the run row committed
     assert len(_messages(team, team.chat)) == 2 and team.announced == []
 
 
@@ -331,6 +334,20 @@ def test_a_post_that_does_not_land_is_an_error(team, monkeypatch):
     follow_up_id = _schedule(team)
     _fire(team, follow_up_id)
     assert (_run(team).outcome, _run(team).error_class) == ("error", "not_posted")
+    assert tuple(_row(team, follow_up_id)) == ("completed", 1) and team.registered == []
+
+
+def test_a_failure_writing_the_run_after_the_model_call_keeps_what_it_spent(team, monkeypatch):
+    from services.proactive import follow_up_fire
+
+    def broken(db, record):
+        raise RuntimeError("the run row could not be written")
+
+    monkeypatch.setattr(follow_up_fire, "write_run", broken)
+    follow_up_id = _schedule(team)
+    _fire(team, follow_up_id)
+    run = _run(team)
+    assert (run.outcome, run.error_class, run.model) == ("error", "RuntimeError", MODEL)  # the model-run cap counts it
     assert tuple(_row(team, follow_up_id)) == ("completed", 1) and team.registered == []
 
 
