@@ -66,7 +66,12 @@ function recordOpened(queryClient: QueryClient, workspaceId: string | null, day:
   queryClient.setQueryData(briefQueryKeys.where(workspaceId, day.local_date), ref)
 }
 
-/** The day's brief, or null while no open has answered where it is. */
+/**
+ * The day's brief, or null while no open has answered where it is.
+ *
+ * Where it is starts as this browser's own record, read in place (`initialData`) rather than fetched: a fetch
+ * still in flight when an open answers would land after the open's answer and put the old, empty record back.
+ */
 export function useBrief() {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspaceId()
@@ -75,6 +80,7 @@ export function useBrief() {
   const where = useQuery<BriefMessageRef | null>({
     queryKey: briefQueryKeys.where(workspaceId, localDate),
     queryFn: () => rememberedBrief(workspaceId, localDate),
+    initialData: () => rememberedBrief(workspaceId, localDate),
     staleTime: Infinity,
   })
   const ref = where.data ?? null
