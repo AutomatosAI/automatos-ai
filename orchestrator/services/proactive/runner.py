@@ -76,6 +76,8 @@ __all__ = [
     "CHECK_IN_PURPOSE",
     "CheckInResult",
     "heartbeat_llm",
+    "record_error",
+    "record_refusal",
     "run_agent_check_in",
     "run_workspace_check_in",
 ]
@@ -140,12 +142,13 @@ def heartbeat_llm(workspace_id: UUID, agent_id: Optional[int]) -> Any:
                       request_type=CHECK_IN_PURPOSE)
 
 
-def _refused(db: Session, record: RunRecord, refusal: Refusal) -> CheckInResult:
+def record_refusal(db: Session, record: RunRecord, refusal: Refusal) -> CheckInResult:
+    """The run as refused at its start: its row, outcome and reason, and no model call."""
     write_run(db, replace(record, outcome=refusal.outcome, error_class=refusal.reason))
     return CheckInResult(record.run_id, refusal.outcome, error_class=refusal.reason)
 
 
-def _errored(db: Session, record: RunRecord, error_class: str) -> CheckInResult:
+def record_error(db: Session, record: RunRecord, error_class: str) -> CheckInResult:
     """The run as an error: whatever the failure left open is rolled back first."""
     db.rollback()
     write_run(db, replace(record, outcome=RUN_ERROR, error_class=error_class))
@@ -159,7 +162,7 @@ def _prepare_workspace(db: Session, record: RunRecord, now: datetime) -> Union[C
     owner = owner_id(db, workspace_id)
     refusal = start_refusal(db, workspace_id, owner, now, f"Auto's check-in of workspace {workspace_id}")
     if refusal is not None:
-        return _refused(db, record, refusal)
+        return record_refusal(db, record, refusal)
     since = check_in_window(last_success(db, workspace_id, KIND_WORKSPACE, None), now)
     signals = read_signals(db, workspace_id, since, now)
     record = replace(record, window_since=since, window_until=now,
@@ -185,10 +188,10 @@ def _prepare_agent(db: Session, record: RunRecord, hb_config: Dict[str, Any],
     refusal = (start_refusal(db, workspace_id, owner, now, f"agent {agent_id}'s check-in", agent_id)
                or held_back(db, workspace_id, agent_id, hb_config, now))
     if refusal is not None:
-        return _refused(db, record, refusal)
+        return record_refusal(db, record, refusal)
     agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == workspace_id).first()
     if agent is None:
-        return _errored(db, record, AGENT_NOT_FOUND)
+        return record_error(db, record, AGENT_NOT_FOUND)
     since = check_in_window(last_success(db, workspace_id, KIND_AGENT, agent_id), now)
     open_titles, hidden_titles = known_titles(db, workspace_id, owner, now)
     task = agent_task(hb_config.get("prompt"), since, now, open_titles, hidden_titles)
@@ -247,7 +250,7 @@ async def _run(db: Session, record: RunRecord, prepare: Callable[[], Union[Check
         return await asyncio.to_thread(_finish, db, record, result)
     except Exception as exc:  # noqa: BLE001 — recorded as the run's error, by its class
         logger.exception("[proactive] %s run %s in %s failed", record.kind, record.run_id, record.workspace_id)
-        return await asyncio.to_thread(_errored, db, record, failure_class(exc))
+        return await asyncio.to_thread(record_error, db, record, failure_class(exc))
 
 
 async def _deliver(db: Session, *run_ids: Optional[UUID]) -> None:

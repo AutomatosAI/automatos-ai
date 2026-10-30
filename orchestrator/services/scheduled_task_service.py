@@ -10,7 +10,8 @@ injecting the task description as the opening message — or, for a row with
 ``deliver_as='board_task'`` (the Command Centre calendar's "schedule a board
 task for later", from the board's Create Task dialog or ``platform_schedule_task``),
 files the ticket the row describes on the board, where the dispatcher runs it
-like any other.
+like any other. A person's follow-up (``deliver_as='follow_up'``, PRD-268 W3) fires
+once as one check-in-lane turn (``services.proactive.follow_up_fire``).
 """
 
 import json
@@ -466,7 +467,13 @@ class ScheduledTaskService:
 
     @staticmethod
     async def _deliver(db: Session, task: Any, task_id: int) -> None:
-        """Deliver a fired row: a board ticket the dispatcher runs, or a chat with its agent."""
+        """Deliver a fired row: a board ticket the dispatcher runs, a person's follow-up (one
+        check-in-lane turn, PRD-268 K11), or a chat with its agent."""
+        if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_FOLLOW_UP:
+            from services.proactive.follow_up_fire import fire_follow_up
+
+            await fire_follow_up(db, task, task_id)
+            return
         if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_BOARD_TASK:
             # Board delivery: the ticket goes on the board, the dispatcher runs it.
             ScheduledTaskService._file_board_task(db, task, task_id)

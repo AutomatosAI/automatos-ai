@@ -2,7 +2,8 @@
 
 ``services/chat_messenger.deliver_background_message`` calls :func:`announce` with the message it
 just saved and its producer's ``source``. Only Auto's own initiative is announced
-(``ANNOUNCED_ORIGINS``: a scheduled task, the daily digest), never the echo of what the person
+(``ANNOUNCED_ORIGINS``: a scheduled task, the daily digest, a follow-up that said something,
+PRD-268 W3), never the echo of what the person
 did (a question's answer, a click's result, a brief posted because they opened the app: its
 source's ``via`` is ``open``, PRD-268 K11). A watcher's and a Mission's posts are not announced:
 each already raises its own bell event (``watch_*``, ``mission_*``), so a second row would ring
@@ -46,7 +47,9 @@ DAILY_DIGEST = "daily_digest"
 # Auto's own initiative (K11). Never 'question_answer' or a click's result: the person's own action.
 # Never 'watcher' or 'mission': each raises its own bell event already (one row per event).
 # Whether watcher and Mission events push to a phone is the owner's decision (K11): not designed here.
-ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST})
+# PRD-268 W3 (K11): a follow-up's one message (services.proactive.follow_up_fire), Auto keeping its word.
+FOLLOW_UP = "follow_up"
+ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST, FOLLOW_UP})
 NEVER_COALESCED: frozenset[str] = frozenset({DAILY_DIGEST})
 # How a post came to be, when it was the person's own action (PRD-268 K11): a brief on open.
 UNANNOUNCED_VIAS: frozenset[str] = frozenset({VIA_OPEN})
