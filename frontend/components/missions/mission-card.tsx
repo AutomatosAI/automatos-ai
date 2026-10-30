@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MissionStatusBadge } from './mission-status-badge'
+import { MissionRowStatus } from './mission-status-badge'
 import { cn } from '@/lib/utils'
 import type { MissionResponse, RunState } from '@/types/missions'
 import { DONE_TASK_STATES, TERMINAL_RUN_STATES } from '@/types/missions'
@@ -70,7 +70,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
     >
       {/* Header: status + menu */}
       <div className="flex items-center justify-between">
-        <MissionStatusBadge state={mission.state} size="sm" />
+        <MissionRowStatus mission={mission} />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>

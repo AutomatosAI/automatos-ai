@@ -36,6 +36,7 @@ import { TicketActionsMenu } from '@/components/activity/board/ticket-actions-me
 import { stageReason } from '@/components/activity/board/ticket-stage'
 import { runsInSession, ticketKind } from '@/components/activity/board/ticket-kind'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
+import { RowStatusLabel } from '@/components/proactive/row-status'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
 import { BoardToolbar, type BoardDensity as Density, type BoardMode as Mode } from './board-toolbar'
@@ -179,8 +180,8 @@ function KanbanCard({
   )
 }
 
-/** The card itself; its Draggable hands it the drag props. */
-function KanbanCardFace({
+/** The card itself; its Draggable hands it the drag props. PRD-268 US-W04: it says where the ticket stands. */
+export function KanbanCardFace({
   task,
   density,
   onOpen,
@@ -217,6 +218,7 @@ function KanbanCardFace({
       <div className="ttl">{task.name}</div>
       {/* PRD-252 R3: why it waits in Review or Blocked */}
       {reason && <div className="cc-kb-reason" title={reason.says}>{reason.chip}</div>}
+      <RowStatusLabel row={task} target={{ ticketId: task.id, missionId: task.mission_id }} title={task.name} />
       {!isCompact && task.description && (
         <div className="body">{task.description}</div>
       )}

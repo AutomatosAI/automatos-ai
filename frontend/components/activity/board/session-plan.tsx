@@ -45,6 +45,8 @@ export function SessionPlanPanel({ runtimeRef }: { runtimeRef: Record<string, an
         : 'text-xs space-y-1'}
     >
       <p className={plan.waiting ? 'font-medium' : 'text-muted-foreground'}>
+        {/* PRD-268 US-W04: the warning colour never says it alone: ◆, a person must act. */}
+        {plan.waiting ? <span aria-hidden="true">◆ </span> : null}
         {plan.waiting ? `Waiting for your approval of its plan (round ${plan.round})` : `Its plan (round ${plan.round})`}
         {!plan.waiting && plan.answer ? ` — your answer: ${plan.answer}` : ''}
       </p>

@@ -3,13 +3,16 @@
  * "Task" in UI = "Recipe" in backend. No backend rename.
  */
 
+import type { RowStatus } from '@/lib/proactive/types'
+
 export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'failed' | 'cancelled' | 'closed'
 
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low'
 
 export type ReviewMode = 'human' | 'llm' | 'auto'
 
-export interface BoardTask {
+/** PRD-268 §6.11.1 (US-C17b): a ticket carries where it stands, what happens next and what Try again does (RowStatus). */
+export interface BoardTask extends RowStatus {
   id: string
   type: 'routine' | 'playbook' | 'task' | 'mission'
   name: string

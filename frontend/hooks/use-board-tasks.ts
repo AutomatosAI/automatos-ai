@@ -10,6 +10,7 @@ import { apiClient } from '@/lib/api-client'
 import type { BoardTask, BoardStatus, BoardColumn } from '@/types/board'
 import { BOARD_COLUMNS } from '@/types/board'
 import { ticketNumber } from '@/lib/ticket-number'
+import { rowStatusOf } from '@/lib/proactive/row-status'
 
 // ============= TYPES =============
 
@@ -308,6 +309,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
     kept_draft: item.kept_draft ?? null,  // F243: a failed redo keeps the draft it corrected
     knowledge_document_id: item.knowledge_document_id ?? null,  // PRE-11: its answer is in Knowledge
+    ...rowStatusOf(item),  // PRD-268 US-W04: display_state, next_step and retry, each checked
   }
 }
 

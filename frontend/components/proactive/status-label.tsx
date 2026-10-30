@@ -53,6 +53,8 @@ export interface StatusLabelProps {
   readonly retry?: Retry | null
   /** What Try again runs; without it, Try again is not drawn. */
   readonly onRetry?: (retry: Retry) => void
+  /** A retry is on its way: Try again waits for it, so it is never sent twice (US-W04). */
+  readonly retrying?: boolean
   /** The row's title, which names Try again for a screen reader ("Try again: Lisbon flights"). */
   readonly title?: string
   readonly className?: string
@@ -85,7 +87,7 @@ export function StatePill({ label }: { readonly label: StateLabel }) {
 }
 
 /** The glyph and the word for a row's state, its next step and Try again; nothing for an unknown state. */
-export function StatusLabel({ state, nextStep, retry, onRetry, title, className }: StatusLabelProps) {
+export function StatusLabel({ state, nextStep, retry, onRetry, retrying = false, title, className }: StatusLabelProps) {
   const label = displayStateLabel(state)
   if (label === null) return null
   const canRetry = typeof retry === 'string' && RETRIES.has(retry) && onRetry !== undefined
@@ -102,8 +104,15 @@ export function StatusLabel({ state, nextStep, retry, onRetry, title, className 
         <button
           type="button"
           aria-label={title ? `Try again: ${title}` : 'Try again'}
-          onClick={() => onRetry?.(retry as Retry)}
-          className="rounded-md text-xs font-medium text-foreground underline underline-offset-4 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          disabled={retrying}
+          aria-busy={retrying || undefined}
+          onClick={(event) => {
+            // The row around it may open on a click or a key (a board card, a Mission row): Try again runs alone.
+            event.stopPropagation()
+            onRetry?.(retry as Retry)
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          className="rounded-md text-xs font-medium text-foreground underline underline-offset-4 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
         >
           Try again
         </button>
