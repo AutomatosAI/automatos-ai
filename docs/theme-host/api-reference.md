@@ -285,6 +285,7 @@ same 404.
 | `GET /api/marketplace/themes` | member, marketplace on | none | `{listings: [<card>]}` |
 | `GET /api/marketplace/themes/{listingId}` | member, marketplace on | none | The card plus the detail |
 | `POST /api/marketplace/themes/submit` | member, marketplace on, step-up | Multipart `file` | 201, or 200 when these bytes were submitted already |
+| `POST /api/marketplace/themes/publish` | the theme publish key (`Authorization: Bearer`), marketplace on | Multipart `package`, `signature`, `review_summary` | 200 `published` or `unchanged`; see [The publish endpoint](publish-endpoint.md) |
 
 A card (`services/themes/listings.py`): `listingId`, `themeId`, `name`, `description`, `publisher: {name, official}`,
 `signature: {state, keyId}`, `version`, `packageId`, `compatible`, `uses`, `pricing` (the manifest's label, else

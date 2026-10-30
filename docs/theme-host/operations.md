@@ -87,6 +87,10 @@ Every setting is read from the environment by `orchestrator/config.py`.
 | `THEME_REVOCATIONS_PULL_MINUTES` | `60` | How often the local edition pulls |
 | `THEME_REVOCATIONS_LIFTED_DAYS` | `365` | How long the hosted feed keeps a lifted revocation |
 | `THEME_REVOCATIONS_FEED_MAX_KB` | `1024` | The largest feed either side reads or serves |
+| `THEME_PUBLISH_KEY_SHA256` | unset | The publish key's sha256, two while a rotation runs (see [The publish endpoint](publish-endpoint.md)) |
+| `THEME_PUBLISH_PUBLISHERS` | unset | The publishers the publish key may publish under |
+| `THEME_PUBLISH_ACTOR` | unset | The `users.id` the publish key acts as |
+| `THEME_PUBLISH_PER_DAY` | `10` | Versions the publish key may publish in 24 hours; more is 429 |
 
 A review limit or an AI code read setting of 0 or below falls back to its default (`review_limits.positive_setting`,
 `llm_stage._setting`).
@@ -178,6 +182,9 @@ whole run, from the kit's release to the release's `.sig.json`. The server's sid
    Official.
 7. **Check from another workspace.** Marketplace › Themes shows the theme with the **Official** badge. Add it and use
    it there.
+
+The Design Kit can do steps 2 to 6 on its own when a version bump merges: see
+[The publish endpoint](publish-endpoint.md).
 
 To take a listed version down later, use **Deactivate** (next section).
 
