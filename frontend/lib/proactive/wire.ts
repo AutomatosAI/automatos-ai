@@ -181,7 +181,8 @@ export function briefOfMessages(messages: unknown, ref: BriefMessageRef): Brief 
   return message ? briefOfParts(message.parts) : null
 }
 
-function appPath(href: unknown): href is string {
+/** True for an app path (APP_PATH); a readiness fix links only to one (ReadinessList checks its props too). */
+export function appPath(href: unknown): href is string {
   return typeof href === 'string' && APP_PATH.test(href)
 }
 

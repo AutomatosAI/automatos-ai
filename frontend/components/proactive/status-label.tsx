@@ -14,7 +14,7 @@
  */
 import { StatusBadge, type StatusVariant } from '@/components/shared/status-badge'
 import { useIsStudio } from '@/hooks/use-studio-theme'
-import { NEXT_STEP_GLYPH, displayStateLabel, type StatusRole } from '@/lib/proactive/display-state'
+import { NEXT_STEP_GLYPH, displayStateLabel, type StateLabel, type StatusRole } from '@/lib/proactive/display-state'
 import type { Retry } from '@/lib/proactive/types'
 import { cn } from '@/lib/utils'
 
@@ -58,10 +58,12 @@ export interface StatusLabelProps {
   readonly className?: string
 }
 
-function Pill({ state }: { readonly state: unknown }) {
+/**
+ * A state's glyph and word as a pill: Studio's studio-pill in the role's token, or Classic's status
+ * badge. StatusLabel draws a row's state with it, ReadinessList a readiness item's (US-C21d).
+ */
+export function StatePill({ label }: { readonly label: StateLabel }) {
   const isStudio = useIsStudio()
-  const label = displayStateLabel(state)
-  if (label === null) return null
   const words = (
     <>
       <span aria-hidden="true">{label.glyph}</span>
@@ -84,11 +86,12 @@ function Pill({ state }: { readonly state: unknown }) {
 
 /** The glyph and the word for a row's state, its next step and Try again; nothing for an unknown state. */
 export function StatusLabel({ state, nextStep, retry, onRetry, title, className }: StatusLabelProps) {
-  if (displayStateLabel(state) === null) return null
+  const label = displayStateLabel(state)
+  if (label === null) return null
   const canRetry = typeof retry === 'string' && RETRIES.has(retry) && onRetry !== undefined
   return (
     <span data-display-state={String(state)} className={cn('inline-flex flex-wrap items-center gap-2', className)}>
-      <Pill state={state} />
+      <StatePill label={label} />
       {nextStep ? (
         <span className="text-xs text-muted-foreground">
           <span aria-hidden="true">{NEXT_STEP_GLYPH} </span>

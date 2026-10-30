@@ -23,9 +23,9 @@ export const STOP = 'Stop'
 export const END_CALL = 'End call'
 export const CLOSE_LIVE_VOICE = 'Close live voice'
 
-/** A small labelled control (its icon and its word), the height of the icon buttons beside it. */
-const LABELLED_CONTROL_CLASS = 'h-7 gap-1 rounded-full px-2 text-xs'
-const CONTROL_ICON_CLASS = 'h-3.5 w-3.5'
+/** A small labelled control (its icon and its word), the height of the icon buttons beside it; BriefVoice's Listen too. */
+export const LABELLED_CONTROL_CLASS = 'h-7 gap-1 rounded-full px-2 text-xs'
+export const CONTROL_ICON_CLASS = 'h-3.5 w-3.5'
 
 /** A session's length as m:ss. */
 export function formatDuration(seconds: number): string {

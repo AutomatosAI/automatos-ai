@@ -337,6 +337,7 @@
       { "name": "a protected surface in a nested rule", "css": "html.hello { [data-protected-surface] { display: none; } }", "code": "CSS_UNSCOPED" },
       { "name": "a protected surface inside @media", "css": "@media (min-width: 1px) { html.hello [data-protected-surface-inner] { translate: -9999px; } }", "code": "CSS_UNSCOPED" },
       { "name": "the voice control's protected surface, by name (theme voice)", "css": "html.hello [data-protected-surface=\"voice-control\"] { display: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "the brief's Listen protected surface, by name (PRD-268 US-C21d)", "css": "html.hello [data-protected-surface=\"brief-voice\"] button { visibility: hidden; }", "code": "CSS_UNSCOPED" },
       { "name": "the AI voice caption inside the voice control", "css": "html.hello [data-protected-surface-inner] [role=note] { opacity: 0; }", "code": "CSS_UNSCOPED" },
       { "name": "the protected surface's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-protected-surface\"; }", "code": null },
       { "name": "a rule on the host's AI label (PRD-264 EUAI-11a)", "css": "html.hello [data-ai-label] { display: none; }", "code": "CSS_UNSCOPED" },
