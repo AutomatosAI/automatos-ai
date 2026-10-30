@@ -100,6 +100,8 @@ orchestrator/model_cache/
 *.bak
 *_backup*
 *_copy*
+# A test named for what it proves, not a backup (PRD-268 W3 US-C23: the brief's copy).
+!orchestrator/tests/test_prd268w3_brief_copy.py
 
 # Cache files
 *.cache

@@ -10,8 +10,10 @@ It assembles each part, every read scoped to the caller's workspace:
   ``since``, ``unchecked``), each folded at 5 and never at 6, with the counts exact;
 * ``greeting`` for the person's local hour in ``zone``, by their first name when it is known;
   ``labels`` (the section labels, "Show N more" per folded section, the empty sentence when
-  every section is empty); ``spoken``: the greeting and the numbered row titles, never a
-  row's why, through ``speechify`` (the empty sentence when there are no rows);
+  every section is empty); ``copy`` (US-C23: the same words whatever the rows, "Show {n} more"
+  left for the client to fill), whose labels and empty sentence ``labels`` reuses; ``spoken``: the greeting
+  and the numbered row titles, never a row's why, through ``speechify`` (the empty sentence when
+  there are no rows);
 * ``state_hash`` is Auto's Read's (the thumbs on the card answer it); ``generated_at`` now.
 
 The language (K7) is ``language``'s table (``strings.brief_language``): its own, its
@@ -44,6 +46,7 @@ from services.brief.model import (
     UNCHECKED,
     VERSION,
     Brief,
+    BriefCopy,
     BriefCounts,
     BriefLabels,
     BriefRow,
@@ -58,7 +61,7 @@ from services.brief.today import today_rows
 from services.brief.unchecked import unchecked_rows
 from services.digest_service import generate_digest
 
-__all__ = ["build_brief", "read_digest", "spoken_words"]
+__all__ = ["brief_copy", "build_brief", "read_digest", "spoken_words"]
 
 NAME_CHARS = 40
 # Each section's count as its fold counts it, and its first rows.
@@ -80,18 +83,27 @@ def build_brief(
     listed = {NEEDS_YOU: (needs.seen, needs.rows), **rest}
     folded = {name: fold(rows, count) for name, (count, rows) in listed.items()}
     sections = BriefSections(**{name: rows for name, (rows, _) in folded.items()})
-    empty = None if any(rows for rows, _ in folded.values()) else say(lang, "empty")
+    words = brief_copy(lang)
+    empty = None if any(rows for rows, _ in folded.values()) else words.empty_sentence
     greeted = greeting(lang, _first_name(db, int(user_id)), now.astimezone(tz).hour)
     brief = Brief(
         v=VERSION, date=local_date.isoformat(), greeting=greeted, prose=str(read.get("text") or "").strip(),
         spoken=spoken_words(greeted, sections, empty), sections=sections,
         counts=_counts(listed, needs),
-        labels=BriefLabels(sections={name: say(lang, f"section_{name}") for name in SECTIONS},
+        labels=BriefLabels(sections=dict(words.section_labels),
                            more={name: more(lang, hidden) for name, (_, hidden) in folded.items() if hidden},
                            empty=empty),
-        state_hash=str(read.get("state_hash") or ""), generated_at=now.isoformat(),
+        copy_=words, state_hash=str(read.get("state_hash") or ""), generated_at=now.isoformat(),
     )
     return brief.model_dump(mode="json", exclude_none=True)
+
+
+def brief_copy(language: str) -> BriefCopy:
+    """The card's words in ``language`` whatever its rows (US-C23): every section's label, the
+    empty sentence, and "Show {n} more" unformatted, so a client that folds its own way (a phone
+    showing fewer rows) fills in its own number and composes no words."""
+    return BriefCopy(section_labels={name: say(language, f"section_{name}") for name in SECTIONS},
+                     empty_sentence=say(language, "empty"), show_more_template=say(language, "more"))
 
 
 def read_digest(db: Session, workspace_id: UUID) -> Dict[str, Any]:

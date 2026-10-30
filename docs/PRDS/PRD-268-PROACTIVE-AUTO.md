@@ -472,6 +472,13 @@ type Brief = {
     unchecked: BriefRow[]            // Readiness items the brief depends on that are not `ready`; never hidden
   }
   counts: { needs_you: number; suggestions: number; today: number; since: number }  // exact, even when rows fold
+  spoken: string                     // the greeting and the numbered row titles: what Listen says (W2)
+  labels: { sections: Record<Section, string>; more: Partial<Record<Section, string>>; empty?: string }  // as this brief is folded (W2)
+  copy: {                            // the same words whatever the rows (W3, US-C23), in the person's language
+    section_labels: Record<Section, string>
+    empty_sentence: string
+    show_more_template: string       // "Show {n} more": n is what the client's own fold hides plus the server's (labels.more)
+  }
   state_hash: string
   generated_at: string
 }

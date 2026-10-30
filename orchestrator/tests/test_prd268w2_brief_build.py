@@ -45,7 +45,7 @@ DIGEST = {"text": PROSE, "state_hash": "state-hash-given", "generated_at": NOW.i
 SNAPSHOT = {"counts": {}, "needs_attention": [], "active": [], "recent_completions": [],
             "needs_attention_count": 0, "state_hash": "state-hash-read"}
 SAO_PAULO = "America/Sao_Paulo"
-BRIEF_KEYS = {"v", "date", "greeting", "prose", "spoken", "sections", "counts", "labels", "state_hash",
+BRIEF_KEYS = {"v", "date", "greeting", "prose", "spoken", "sections", "counts", "labels", "copy", "state_hash",
               "generated_at"}
 
 
