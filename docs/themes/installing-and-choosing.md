@@ -132,7 +132,7 @@ The size limits, by default (the server's administrator can change them):
 
 | What | Limit |
 |---|---|
-| The whole package | 10 MB |
+| The whole package | 32 MB |
 | Its code (JavaScript and CSS together) | 3,072 KB |
 | Its entry module | 300 KB |
 | Each mascot clip | 1,024 KB |

@@ -67,7 +67,7 @@ Every setting is read from the environment by `orchestrator/config.py`.
 | `THEMES_PRIVATE_UPLOAD` | `auto` | Private uploads platform-wide: `auto`, `on`, `off` or `admins` (see [below](#switch-private-uploads-and-the-marketplace)) |
 | `THEMES_MARKETPLACE` | `on` | The theme Marketplace: `on` or `off` |
 | `THEMES_ONE_OPEN_SUBMISSION` | `true` | One pending Marketplace submission per author at a time |
-| `THEME_MAX_PACKAGE_MB` | `10` | The `.autotheme` as uploaded |
+| `THEME_MAX_PACKAGE_MB` | `32` | The `.autotheme` as uploaded; the import, submit and publish routes' body limits are this plus 512 KB. Every screenshot a theme may list at its cap (24 web and 24 phone at 512 KB) is 24 MB, which fits beside the code cap. The reader holds the upload in memory, and its files unpack to at most 50 MB whatever this is |
 | `THEME_MAX_CODE_KB` | `3072` | JS plus CSS together |
 | `THEME_MAX_ENTRY_KB` | `300` | `dist/entry.js` |
 | `THEME_MAX_CLIP_KB` | `1024` | Each mascot clip |

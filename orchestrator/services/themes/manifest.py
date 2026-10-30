@@ -10,7 +10,9 @@ Optional: ``description``; ``pages`` (only the Q3 routes, each ``{mode: own|clon
 keepCorePage?, clonedFrom?}``, a clone naming one of its route's ``PAGE_SOURCES`` files and that
 file's sha256; host-owned pages refused); ``routes`` (theme-only pages at ``/x/<route>``);
 ``nav`` (``{id, label, path}``, a ``/x/`` path naming a declared route); ``uses`` (SDK areas);
-``pricing`` (a label only, Q12); ``previews`` and ``fonts`` (package files); ``brand``
+``pricing`` (a label only, Q12); ``previews`` (web screenshots, ``assets/previews/<NAME>.png``),
+``phonePreviews`` (phone screenshots, ``assets/previews/phone/<NAME>.png`` or ``.jpg``), up to
+``MAX_PREVIEWS`` each, and ``fonts`` (package files); ``brand``
 (``{name?, wordmark?}``); ``look`` (the default preset's id); ``mascot`` (``null`` or
 ``{states}``); ``mobile`` (M-01, host 1.1.0: the data a phone draws the theme from, checked by
 ``services/themes/mobile_manifest.py``; its fonts are package files). Every other field is refused.
@@ -42,8 +44,8 @@ REQUIRED_FIELDS: Tuple[str, ...] = (
     "schema", "id", "name", "version", "engines", "base", "htmlClass", "minWidth", "tone", "slots",
 )
 OPTIONAL_FIELDS: Tuple[str, ...] = (
-    "description", "pages", "routes", "nav", "uses", "pricing", "previews", "fonts", "brand", "look", "mascot",
-    "mobile",
+    "description", "pages", "routes", "nav", "uses", "pricing", "previews", "phonePreviews", "fonts", "brand", "look",
+    "mascot", "mobile",
 )
 ENGINE_FIELDS: Tuple[str, ...] = ("automatos", "sdk")
 PAGE_FIELDS: Tuple[str, ...] = ("mode", "keepCorePage", "clonedFrom")
@@ -65,6 +67,7 @@ STATE_PATTERN = re.compile(r"[a-z][a-z0-9-]{0,31}")
 LOOK_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 ASSET_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 PREVIEW_PATTERN = re.compile(rf"assets/previews/{ASSET_NAME}\.png")
+PHONE_PREVIEW_PATTERN = re.compile(rf"assets/previews/phone/{ASSET_NAME}\.(?:png|jpg)")
 FONT_PATTERN = re.compile(rf"assets/fonts/{ASSET_NAME}\.woff2")
 WORDMARK_PATTERN = re.compile(rf"assets/brand/{ASSET_NAME}\.(?:png|webp)")
 X_ROUTE_PREFIX = "/x/"
@@ -78,6 +81,8 @@ MAX_NAV = 16
 MAX_KEEP = 16
 MAX_USES = 64
 MAX_FILES_LISTED = 16
+# The Marketplace storefront shows screenshots per look: web and phone lists hold this many each.
+MAX_PREVIEWS = 24
 MAX_STATES = 32
 
 
@@ -295,11 +300,19 @@ def _mascot_errors(mascot: Any) -> List[ThemeError]:
     return errors
 
 
+# The file lists theme.json names: (field, pattern, the shape a message gives, the most it lists).
+LISTED_FILES: Tuple[Tuple[str, "re.Pattern[str]", str, int], ...] = (
+    ("previews", PREVIEW_PATTERN, "assets/previews/*.png", MAX_PREVIEWS),
+    ("phonePreviews", PHONE_PREVIEW_PATTERN, "assets/previews/phone/*.png or *.jpg", MAX_PREVIEWS),
+    ("fonts", FONT_PATTERN, "assets/fonts/*.woff2", MAX_FILES_LISTED),
+)
+
+
 def _file_list_errors(document: Mapping[str, Any]) -> List[ThemeError]:
     errors: List[ThemeError] = []
-    for field, pattern, shape in (("previews", PREVIEW_PATTERN, "assets/previews/*.png"), ("fonts", FONT_PATTERN, "assets/fonts/*.woff2")):
-        if field in document and not _is_string_list(document[field], pattern, MAX_FILES_LISTED):
-            errors += _error("BAD_ASSET_PATH", field, f'"{field}" must list up to {MAX_FILES_LISTED} different {shape} files.')
+    for field, pattern, shape, most in LISTED_FILES:
+        if field in document and not _is_string_list(document[field], pattern, most):
+            errors += _error("BAD_ASSET_PATH", field, f'"{field}" must list up to {most} different {shape} files.')
     return errors
 
 
@@ -334,7 +347,8 @@ def validate_manifest(document: Any) -> ManifestResult:
 
 
 def referenced_files(manifest: Mapping[str, Any]) -> List[str]:
-    """The package files a checked manifest names: its previews, fonts, wordmark and mobile fonts (M-01)."""
+    """The package files a checked manifest names: its web and phone previews, fonts, wordmark and mobile fonts (M-01)."""
     wordmark = (manifest.get("brand") or {}).get("wordmark")
-    named = [*manifest.get("previews", []), *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
+    previews = [*manifest.get("previews", []), *manifest.get("phonePreviews", [])]
+    named = [*previews, *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
     return [*named, *mobile_font_files(manifest)]

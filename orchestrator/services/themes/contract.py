@@ -143,9 +143,10 @@ class CapSetting(NamedTuple):
     unit: int
 
 
-# PRD §4.2 and Q25: the package as uploaded, JS plus CSS, the entry module, each mascot clip.
+# PRD §4.2 and Q25: the package as uploaded, JS plus CSS, the entry module, each mascot clip. The package
+# cap holds every screenshot a theme may list (24 web and 24 phone at 512 KB, 24 MB) beside its code.
 CAP_SETTINGS: Dict[str, CapSetting] = {
-    "package": CapSetting("THEME_MAX_PACKAGE_MB", 10, MB),
+    "package": CapSetting("THEME_MAX_PACKAGE_MB", 32, MB),
     "code": CapSetting("THEME_MAX_CODE_KB", 3072, KB),
     "entry": CapSetting("THEME_MAX_ENTRY_KB", 300, KB),
     "clip": CapSetting("THEME_MAX_CLIP_KB", 1024, KB),

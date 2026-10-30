@@ -289,13 +289,23 @@ same 404.
 
 A card (`services/themes/listings.py`): `listingId`, `themeId`, `name`, `description`, `publisher: {name, official}`,
 `signature: {state, keyId}`, `version`, `packageId`, `compatible`, `uses`, `pricing` (the manifest's label, else
-"Free"), `cover`, `revoked` and `installed` (`{installId, packageId, version, fromListing, updatePackageId}` or `null`).
-The card shows the newest version this host can run, else the newest one.
+"Free"), `cover`, `phoneCover`, `revoked` and `installed` (`{installId, packageId, version, fromListing,
+updatePackageId}` or `null`). The card shows the newest version this host can run, else the newest one.
 
-The detail adds `presets` (`[{id, default, previews: [{screen, url}]}]`), `otherPreviews`, `readme`, `changelog`,
-`base`, `tone`, `minWidth`, `pages`, `routes`, `latest` and `versions` (each version with `packageId`, `engines`,
-`compatible`, `revoked`, `signature` and `createdAt`). Every URL is a files-route URL. A listing with no listed version
-is 404 "That theme isn't in the Marketplace."
+The detail adds `presets` (`[{id, default, previews: [{screen, url}], phonePreviews: [{screen, url}]}]`),
+`otherPreviews`, `otherPhonePreviews`, `readme`, `changelog`, `base`, `tone`, `minWidth`, `pages`, `routes`, `latest`
+and `versions` (each version with `packageId`, `engines`, `compatible`, `revoked`, `signature` and `createdAt`).
+Every URL is a files-route URL. A listing with no listed version is 404 "That theme isn't in the Marketplace."
+
+Screenshots come from `theme.json`'s `previews` (web, `assets/previews/<name>.png`) and `phonePreviews` (phone,
+`assets/previews/phone/<name>.png` or `.jpg`), up to 24 each (see [The package](_index.md#1-the-package)). One rule
+puts both under a look: a screenshot's name without its folder and extension is `<preset>` (its `screen` is `null`) or
+`<preset>-<screen>`, and when two preset ids match, the longer one wins (`ember-dark-chat` is `ember-dark`'s `chat`,
+not `ember`'s `dark-chat`). Web screenshots fill each preset's `previews`, phone screenshots its `phonePreviews`; one
+no preset claims is in `otherPreviews` or `otherPhonePreviews`. A file `theme.json` lists that the package doesn't
+hold is left out. Each list keeps `theme.json`'s order, and `cover` and `phoneCover` are the first file of each list
+that the package holds (`null` when there is none). A listing without phone screenshots answers `phoneCover: null`, `phonePreviews: []` on
+every preset and `otherPhonePreviews: []`; every other field is as it was.
 
 `POST /api/marketplace/themes/submit` answers `{package: {id, themeId, version, name, digest, ownerType, status,
 reviewed, scanVerdict, scanReport}, duplicate}`, the report without the AI code read.

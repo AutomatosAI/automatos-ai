@@ -399,8 +399,10 @@ def test_the_detail_shows_previews_per_preset_publisher_uses_and_versions(api):
     url = lambda path: module_url(newer.digest, path)  # noqa: E731
     assert detail["presets"] == [
         {"id": "ember", "default": True, "previews": [{"screen": None, "url": url(PREVIEWS[0])},
-                                                     {"screen": "chat", "url": url(PREVIEWS[1])}]},
-        {"id": "ember-dark", "default": False, "previews": [{"screen": "chat", "url": url(PREVIEWS[2])}]},
+                                                     {"screen": "chat", "url": url(PREVIEWS[1])}],
+         "phonePreviews": []},
+        {"id": "ember-dark", "default": False, "previews": [{"screen": "chat", "url": url(PREVIEWS[2])}],
+         "phonePreviews": []},
     ]
     assert detail["otherPreviews"] == [url(PREVIEWS[3])]
     assert detail["readme"] == url("README.md") and detail["changelog"] is None
