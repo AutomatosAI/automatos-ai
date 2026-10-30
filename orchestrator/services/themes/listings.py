@@ -172,7 +172,7 @@ def newer_compatible(versions: Sequence[ThemePackage], package: ThemePackage) ->
 # ---------------------------------------------------------------------------
 
 
-def _publisher(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
+def publisher_view(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
     """The id's publisher; ``official`` only when it is reserved and the shown version's signature verifies."""
     name = publisher_of(theme_id)
     row = db.query(ThemePublisher).filter(ThemePublisher.publisher == name).first()
@@ -202,7 +202,7 @@ PREVIEW_KINDS: Tuple[PreviewKind, ...] = (WEB_PREVIEWS, PHONE_PREVIEWS)
 def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     """The screenshots theme.json lists under ``kind`` that the package holds, in theme.json's order.
 
-    The first one is the cover (``_cover``). The theme picks its order (Play lists ``ember.png`` first,
+    The first one is the cover (``cover_url``). The theme picks its order (Play lists ``ember.png`` first,
     its default look's chat), so it is never re-sorted by name. ``manifest.validate_manifest`` refuses a
     list that names a file twice.
     """
@@ -210,7 +210,7 @@ def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     return [path for path in named if isinstance(path, str) and _file_url(package, path) is not None]
 
 
-def _cover(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
+def cover_url(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
     """The files URL of the first screenshot of ``kind`` the package holds, or None."""
     paths = _preview_paths(package, kind)
     return module_url(package.digest, paths[0]) if paths else None
@@ -262,7 +262,7 @@ def previews_by_preset(package: ThemePackage) -> Dict[str, Any]:
     }
 
 
-def _signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
+def signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
     """The version's signature verdict for a listing. A keys file that does not load fails closed: the
     signature reads ``invalid`` (never Official) and the listings still answer; the paste route keeps
     refusing loudly (C-05b)."""
@@ -279,7 +279,7 @@ def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
         "engines": (package.manifest or {}).get("engines"),
         "compatible": is_compatible(package),
         "revoked": revocation_body(revocation_of(db, package)),
-        "signature": _signature_verdict(package).view(),
+        "signature": signature_verdict(package).view(),
         "createdAt": None if package.created_at is None else package.created_at.isoformat(),
     }
 
@@ -308,21 +308,21 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
     latest = newest_compatible(versions)
     shown = latest or versions[0]
     manifest = shown.manifest or {}
-    verdict = _signature_verdict(shown)
+    verdict = signature_verdict(shown)
     return {
         "listingId": listing_id_of(shown.theme_id),
         "themeId": shown.theme_id,
         "name": manifest.get("name"),
         "description": manifest.get("description"),
-        "publisher": _publisher(db, shown.theme_id, verdict),
+        "publisher": publisher_view(db, shown.theme_id, verdict),
         "signature": verdict.view(),
         "version": shown.version,
         "packageId": str(shown.id),
         "compatible": latest is not None,
         "uses": list(manifest.get("uses") or []),
         "pricing": manifest.get("pricing") or FREE_LABEL,
-        "cover": _cover(shown, WEB_PREVIEWS),
-        "phoneCover": _cover(shown, PHONE_PREVIEWS),
+        "cover": cover_url(shown, WEB_PREVIEWS),
+        "phoneCover": cover_url(shown, PHONE_PREVIEWS),
         "revoked": revocation_body(revocation_of(db, shown)),
         "installed": installed_state(db, workspace_id, shown.theme_id, latest),
     }

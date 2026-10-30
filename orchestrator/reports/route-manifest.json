@@ -1,5 +1,5 @@
 {
-  "route_count": 995,
+  "route_count": 996,
   "routes": [
     {
       "method": "GET",
@@ -1692,6 +1692,10 @@
     {
       "method": "GET",
       "path": "/api/logs/query"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/catalog"
     },
     {
       "method": "GET",

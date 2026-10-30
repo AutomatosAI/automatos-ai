@@ -118,6 +118,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),
+    # PRD-270 US-270-01 -- the hosted catalogue a local install's Sync with Automatos Cloud
+    # reads (GET /api/marketplace/catalog): public, rate-limited per IP, 404 in the local edition.
+    RouterSpec("api.marketplace_catalog"),
 )
 
 
