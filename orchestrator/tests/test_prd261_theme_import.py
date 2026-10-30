@@ -243,7 +243,7 @@ def test_the_scan_report_holds_the_server_checks_and_the_review_stage(env):
     assert checks["sizes"]["status"] == "pass" and checks["sizes"]["entryBytes"] > 0
     assert {name: checks[name]["level"] for name in ("sizes", "cssScope", "looks")} == dict.fromkeys(
         ("sizes", "cssScope", "looks"), "pass")
-    assert checks["sizes"]["limits"] == {"package": 10 * MB, "code": 3072 * 1024, "entry": 300 * 1024, "clip": 1024 * 1024}
+    assert checks["sizes"]["limits"] == {"package": 32 * MB, "code": 3072 * 1024, "entry": 300 * 1024, "clip": 1024 * 1024}
     assert checks["cssScope"] == {"status": "pass", "path": "dist/theme.css", "level": "pass"}
     assert checks["looks"] == {"status": "pass", "presets": ["default", "night"], "level": "pass"}
     assert checks["contrast"]["status"] == "not_run" and checks["contrast"]["reason"] == CONTRAST_NOT_RUN

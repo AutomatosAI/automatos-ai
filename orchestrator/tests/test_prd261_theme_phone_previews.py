@@ -9,7 +9,9 @@ The storefront contract (30 Oct 2026): theme.json's optional ``phonePreviews`` l
   take 24 and refuse 25, fonts still stop at 16;
 * the package reader types them ``image/png`` and ``image/jpeg`` and refuses bytes that aren't the
   format the extension says, a file over 512 KB, a named file the package lacks and a phone file
-  outside its folder or formats; 24 web and 24 phone screenshots read;
+  outside its folder or formats; 24 web and 24 phone screenshots read, and at 512 KB each (stored, as
+  images barely compress) they fit the default package cap of 32 MB, beside the code cap and under the
+  50 MB the files may unpack to;
 * the files route serves a ``.jpg`` as ``image/jpeg``, with the headers a PNG preview gets;
 * the card's ``phoneCover`` is the first phone screenshot theme.json lists that the package holds; the
   detail puts each under its preset by the web previews' rule (``<preset>`` or ``<preset>-<screen>``,
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import os
 import sys
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -42,7 +45,8 @@ from services.themes.manifest import (  # noqa: E402
     MAX_FILES_LISTED, MAX_PREVIEWS, ManifestResult, referenced_files, validate_manifest,
 )
 from services.themes.package import (  # noqa: E402
-    IMAGE_MAX_BYTES, JPEG_SIGNATURE, PNG_SIGNATURE, ThemePackageError, read_theme_package,
+    IMAGE_MAX_BYTES, JPEG_SIGNATURE, PNG_SIGNATURE, UNCOMPRESSED_MAX_BYTES, ThemePackageError, cap_bytes,
+    read_theme_package,
 )
 from services.themes.serve import module_url  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
@@ -54,6 +58,7 @@ from tests.test_prd261_theme_listings import (  # noqa: E402,F401 — `api` is a
 )
 
 KB = 1024
+MB = 1024 * KB
 PNG = PNG_SIGNATURE + bytes(8)
 JPEG = JPEG_SIGNATURE + b"\xe0" + bytes(8)
 WEB_PNG = "assets/previews/default.png"
@@ -206,6 +211,20 @@ def test_24_web_and_24_phone_screenshots_read():
     package = read_theme_package(_phone_package(phone, web=web))
     assert (len(package.manifest["previews"]), len(package.manifest["phonePreviews"])) == (MAX_PREVIEWS, MAX_PREVIEWS)
     assert {package.files[path].content_type for path in phone} == {"image/jpeg"}
+
+
+def test_every_screenshot_at_its_cap_fits_the_default_package_cap():
+    screenshots = 2 * MAX_PREVIEWS * IMAGE_MAX_BYTES
+    assert cap_bytes("package") == 32 * MB
+    assert screenshots + cap_bytes("code") <= cap_bytes("package") < UNCOMPRESSED_MAX_BYTES
+    full = lambda signature: signature + bytes(IMAGE_MAX_BYTES - len(signature))  # noqa: E731
+    web = {f"assets/previews/shot-{n}.png": full(PNG_SIGNATURE) for n in range(MAX_PREVIEWS)}
+    phone = {f"assets/previews/phone/shot-{n}.jpg": full(JPEG_SIGNATURE) for n in range(MAX_PREVIEWS)}
+    manifest = build.changed_manifest({"previews": list(web), "phonePreviews": list(phone)})
+    members = {**build.hello_members(), build.MANIFEST: manifest, **web, **phone}
+    data = build.build_zip(sorted(members.items()), compression=zipfile.ZIP_STORED)
+    assert len(data) > screenshots  # stored, as a real screenshot all but is: a zip barely shrinks an image
+    assert sorted(read_theme_package(data).files) == sorted(members)
 
 
 # ---------------------------------------------------------------------------

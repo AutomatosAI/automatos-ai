@@ -1576,8 +1576,9 @@ class Config:
     THEMES_PRIVATE_UPLOAD: str = (os.getenv("THEMES_PRIVATE_UPLOAD", "auto") or "auto").strip().lower()
     # The theme Marketplace (W-C1 routes read it): on | off.
     THEMES_MARKETPLACE: str = (os.getenv("THEMES_MARKETPLACE", "on") or "on").strip().lower()
-    # The .autotheme as uploaded; main.py sizes the import route's body limit from it.
-    THEME_MAX_PACKAGE_MB: int = int(os.getenv("THEME_MAX_PACKAGE_MB", "10"))
+    # The .autotheme as uploaded; main.py sizes the import, submit and publish routes' body limits from it.
+    # 32 MB: 24 web and 24 phone screenshots at 512 KB each (24 MB), the 3 MB code cap and a mascot fit.
+    THEME_MAX_PACKAGE_MB: int = int(os.getenv("THEME_MAX_PACKAGE_MB", "32"))
     # JS plus CSS, the entry module, and each mascot clip (D1-a: 3 MB, 300 KB, 1 MB).
     THEME_MAX_CODE_KB: int = int(os.getenv("THEME_MAX_CODE_KB", "3072"))
     THEME_MAX_ENTRY_KB: int = int(os.getenv("THEME_MAX_ENTRY_KB", "300"))

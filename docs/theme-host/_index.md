@@ -156,7 +156,7 @@ accepts only these paths (`FILE_KINDS`):
 | `source/…` (up to seven folders below `source/`; `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.css`, `.json`, `.md`, `.txt`) | plain text | 1 MB per file |
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `LICENSE.md`, `LICENSE.txt` | plain text | 256 KB |
 
-The whole package is at most `THEME_MAX_PACKAGE_MB` (10 MB), holds at most 500 entries and unpacks to at most 50 MB.
+The whole package is at most `THEME_MAX_PACKAGE_MB` (32 MB), holds at most 500 entries and unpacks to at most 50 MB.
 A package must hold `theme.json`, `dist/entry.js`, `looks/schema.json` and at least one preset. Links, absolute
 paths, `..`, backslashes, repeated names, encryption, zip64, any compression but stored or deflated, and SVG files
 are refused. Each image, clip and font must be the format its path says.
@@ -167,9 +167,8 @@ are refused. Each image, clip and font must be the format its path says.
 (`manifest.MAX_PREVIEWS`), every file at most 512 KB (`package.IMAGE_MAX_BYTES`) and the format its extension says,
 read by its first bytes (PNG `89 50 4E 47 0D 0A 1A 0A`, JPEG `FF D8 FF`). A listed file the package lacks is refused
 (`MISSING_FILE`). Screenshots count toward the package cap, and images barely compress: 24 + 24 at 512 KB is 24 MB,
-more than the default 10 MB, so a package with every screenshot at its cap is refused (`PACKAGE_TOO_LARGE`) unless
-`THEME_MAX_PACKAGE_MB` is raised. At about 200 KB a screenshot (a phone JPEG), 24 + 24 is about 9.4 MB, before the
-theme's code, fonts and mascot. The Marketplace files each screenshot under a look by its name
+which fits the default 32 MB with the 3 MB code cap and about 5 MB for fonts, mascot and the rest. A package over
+the cap is refused (`PACKAGE_TOO_LARGE`, the route's 413). The Marketplace files each screenshot under a look by its name
 ([API reference](api-reference.md#the-marketplace)).
 
 `theme.json` (schema `automatos-theme/v1`, `services/themes/manifest.py`) is checked field by field; every field the
