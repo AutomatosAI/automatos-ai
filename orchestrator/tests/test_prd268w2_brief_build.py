@@ -14,7 +14,8 @@ each model call books one ``llm_usage`` row, as the real manager does. Proven he
   zone; Since is the person's started suggestions and the tickets and Missions finished since
   their last brief; Couldn't check is the brief's readiness items that are not ready;
 * the counts are exact, and ``counts.needs_you`` is ``needs_you_counts()['total']`` for the same
-  caller; a viewer's brief has no question and no approval grant;
+  caller; a viewer's brief has no question and no approval row, a Mission's plan included
+  (P268W2-RVW-2), and its fold counts only the rows they may see; an owner's still lists both;
 * each section folds at 5 and never at 6 (5, 6 and 7 rows); an empty brief carries the empty
   sentence; ``spoken`` is the greeting and the numbered titles, never a why;
 * the strings have every key in English and Portuguese (Brazil), and K7 chooses the table;
@@ -197,10 +198,11 @@ def floor(engine, new_session):
 
 @pytest.fixture
 def bare(engine, new_session):
-    """A factory of workspaces holding only ``failed`` failed tickets and ``done`` done ones."""
+    """A factory of workspaces holding only ``failed`` failed tickets, ``done`` done ones,
+    ``review`` waiting for review and ``plans`` Missions waiting for their plan's approval."""
     made = NS(workspaces=[], clerks=[])
 
-    def build(failed=0, done=0):
+    def build(failed=0, done=0, review=0, plans=0):
         s = new_session()
         ws = _workspace(s, "prd268w2-brief-bare")
         clerk, pk = _person(s, "bare")
@@ -208,6 +210,10 @@ def bare(engine, new_session):
             _ticket(s, ws, f"Failed run {n}", "failed", done=NOW - timedelta(minutes=n + 1))
         for n in range(done):
             _ticket(s, ws, f"Finished run {n}", "done", done=NOW - timedelta(minutes=n + 1))
+        for n in range(review):
+            _ticket(s, ws, f"Review run {n}", "review", done=NOW - timedelta(minutes=n + 1))
+        for n in range(plans):
+            _run(s, ws, f"Plan goal {n}", "awaiting_approval", "blocked")
         s.commit()
         made.workspaces.append(ws)
         made.clerks.append(clerk)
@@ -527,8 +533,38 @@ def test_a_viewers_brief_has_no_question_and_no_approval_grant(floor, new_sessio
     assert needs_you_counts(new_session(), UUID(floor.ws), may_answer=False)["total"] == brief["counts"]["needs_you"]
     assert not [row for row in rows if row["id"].startswith("question:") or row["opens"]["type"] == "question"]
     assert f"approval:{floor.approval}" not in _ids(brief, "needs_you")
-    # A Mission waiting for its plan's approval is counted for a viewer, as needs_you() counts it (R5).
-    assert [row["id"] for row in rows if row["id"].startswith("approval:")] == [f"approval:{floor.plan}"]
+    # A Mission waiting for its plan's approval is counted for a viewer, as the badge counts it (R5),
+    # but never listed: a viewer can't approve a plan (D16, P268W2-RVW-2).
+    assert not [row["id"] for row in rows if row["id"].startswith(("approval:", "question:"))]
+
+
+def test_an_owners_brief_over_the_same_rows_still_lists_the_plan_and_the_grant(floor, new_session, schedule,
+                                                                                checks):
+    checks(floor.ws)
+    owner = _brief(new_session, floor.ws, floor.pk)
+    viewer = _brief(new_session, floor.ws, floor.pk, may_answer=False)
+    asked = {f"approval:{floor.plan}", f"approval:{floor.approval}", f"question:{floor.question}"}
+
+    assert asked <= set(_ids(owner, "needs_you")) and "Launch the autumn blend" in owner["spoken"]
+    assert set(_ids(viewer, "needs_you")) == set(_ids(owner, "needs_you")) - asked
+    assert "Launch the autumn blend" not in viewer["spoken"]
+    # The badge's numbers: the owner's counts all six; the viewer's leaves out the question and
+    # the grant (needs_you()) but still counts the plan, which the fold never offers them.
+    assert (owner["counts"]["needs_you"], viewer["counts"]["needs_you"]) == (6, 4)
+    assert "needs_you" not in owner["labels"]["more"] and "needs_you" not in viewer["labels"]["more"]
+
+
+def test_a_viewers_fold_counts_only_the_rows_they_may_see(bare, new_session, schedule, checks):
+    ws, pk = bare(review=6, plans=1)
+    checks(ws, ready=True)
+    schedule.items = []
+    brief = _brief(new_session, ws, pk, may_answer=False)
+
+    # Six rows show whole, and "Show N more" never counts the plan left out.
+    assert [row_id.split(":", 1)[0] for row_id in _ids(brief, "needs_you")] == ["review"] * 6
+    assert "needs_you" not in brief["labels"]["more"]
+    assert brief["counts"]["needs_you"] == 7                    # the badge's number still counts the plan
+    assert "Plan goal" not in brief["spoken"] and "Plan goal" not in json.dumps(brief["sections"])
 
 
 @pytest.mark.parametrize("listed, shown, more", [(5, 5, None), (6, 6, None), (7, 5, "Show 2 more")])

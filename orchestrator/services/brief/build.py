@@ -15,10 +15,11 @@ It assembles each part, every read scoped to the caller's workspace:
 * ``state_hash`` is Auto's Read's (the thumbs on the card answer it); ``generated_at`` now.
 
 The language (K7) is ``language``'s table (``strings.brief_language``): its own, its
-language's, else English. ``may_answer`` False (a viewer, PRD-266 D16) leaves questions and
-approval grants out of "Needs you", as the badge does. It runs on a worker thread (a plain
-``def`` route's threadpool, the digest job's ``to_thread``): ``generate_digest`` is a
-coroutine, so it runs on a loop of its own there, as ``services.mobile.digest`` runs it.
+language's, else English. ``may_answer`` False (a viewer, PRD-266 D16) lists no question and no
+approval row in "Needs you", a Mission's plan included (``services.brief.needs``): its count
+stays the badge's, and its fold counts only the rows the viewer may see. It runs on a worker
+thread (a plain ``def`` route's threadpool, the digest job's ``to_thread``): ``generate_digest``
+is a coroutine, so it runs on a loop of its own there, as ``services.mobile.digest`` runs it.
 It writes nothing.
 """
 from __future__ import annotations
@@ -48,7 +49,7 @@ from services.brief.model import (
     BriefRow,
     BriefSections,
 )
-from services.brief.needs import needs_rows
+from services.brief.needs import Needs, needs_rows
 from services.brief.rows import cut, fold
 from services.brief.since import since_rows
 from services.brief.strings import brief_language, greeting, more, say
@@ -60,6 +61,7 @@ from services.digest_service import generate_digest
 __all__ = ["build_brief", "read_digest", "spoken_words"]
 
 NAME_CHARS = 40
+# Each section's count as its fold counts it, and its first rows.
 Listed = Dict[str, Tuple[int, List[BriefRow]]]
 
 
@@ -73,7 +75,9 @@ def build_brief(
     workspace, lang, tz = UUID(str(workspace_id)), brief_language(language), _zone(zone)
     now = datetime.now(timezone.utc)
     read = dict(digest) if digest is not None else read_digest(db, workspace)
-    listed = _sections(db, workspace, int(user_id), local_date, lang, may_answer=may_answer, zone=tz, now=now)
+    needs = needs_rows(db, workspace, lang, may_answer=may_answer)
+    rest = _sections(db, workspace, int(user_id), local_date, lang, zone=tz, now=now)
+    listed = {NEEDS_YOU: (needs.seen, needs.rows), **rest}
     folded = {name: fold(rows, count) for name, (count, rows) in listed.items()}
     sections = BriefSections(**{name: rows for name, (rows, _) in folded.items()})
     empty = None if any(rows for rows, _ in folded.values()) else say(lang, "empty")
@@ -81,7 +85,7 @@ def build_brief(
     brief = Brief(
         v=VERSION, date=local_date.isoformat(), greeting=greeted, prose=str(read.get("text") or "").strip(),
         spoken=spoken_words(greeted, sections, empty), sections=sections,
-        counts=BriefCounts(**{name: listed[name][0] for name in COUNTED_SECTIONS}),
+        counts=_counts(listed, needs),
         labels=BriefLabels(sections={name: say(lang, f"section_{name}") for name in SECTIONS},
                            more={name: more(lang, hidden) for name, (_, hidden) in folded.items() if hidden},
                            empty=empty),
@@ -96,18 +100,22 @@ def read_digest(db: Session, workspace_id: UUID) -> Dict[str, Any]:
 
 
 def _sections(
-    db: Session, workspace_id: UUID, user_id: int, local_date: date, language: str, *,
-    may_answer: bool, zone: tzinfo, now: datetime,
+    db: Session, workspace_id: UUID, user_id: int, local_date: date, language: str, *, zone: tzinfo, now: datetime,
 ) -> Listed:
-    """Each section's count and rows, in the sections' order."""
+    """Each section after Needs you: its count and rows, in the sections' order."""
     unchecked = unchecked_rows(workspace_id, language)
     return {
-        NEEDS_YOU: needs_rows(db, workspace_id, language, may_answer=may_answer),
         SUGGESTIONS: suggestion_rows(db, workspace_id, user_id, language, now),
         TODAY: today_rows(db, workspace_id, local_date, zone, language),
         SINCE: since_rows(db, workspace_id, user_id, local_date, language, now),
         UNCHECKED: (len(unchecked), unchecked),
     }
+
+
+def _counts(listed: Listed, needs: Needs) -> BriefCounts:
+    """Each counted section's exact number; Needs you's is the badge's (``needs_you()``'s total),
+    even where a viewer is shown fewer of its rows."""
+    return BriefCounts(**{**{name: listed[name][0] for name in COUNTED_SECTIONS}, NEEDS_YOU: needs.total})
 
 
 def spoken_words(greeted: str, sections: BriefSections, empty: Optional[str]) -> str:

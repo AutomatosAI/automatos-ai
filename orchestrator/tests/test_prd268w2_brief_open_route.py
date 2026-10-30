@@ -11,8 +11,8 @@ Postgres with committing sessions. Proven here:
 * a ``local_date`` more than a day from the server's UTC date, and a timezone that is not an
   IANA name, are 422 and claim nothing; a body naming anyone or anything else is 422;
 * a person with no phone row gets a brief; a viewer gets one, with no question or approval
-  rows (PRD-266 D16); the brief is in the body's language, else ``Accept-Language``, else
-  English (K7);
+  rows, a Mission's plan included (PRD-266 D16, P268W2-RVW-2), while an owner's lists them;
+  the brief is in the body's language, else ``Accept-Language``, else English (K7);
 * the per-person block makes no model call: Auto's Read books one ``llm_usage`` row at most,
   and none when its cache answers;
 * another workspace's message, and another person's, are never answered; a stranger, a caller
@@ -146,6 +146,17 @@ def _grant(s, ws, kind, subject_id, *, question=None, reason=None):
         {"w": ws, "sid": str(subject_id), "k": kind, "q": question, "r": reason, "at": NOW}).scalar()
 
 
+def _plan(new_session, ws, goal):
+    """A Mission waiting for its plan's approval."""
+    s = new_session()
+    plan = str(s.execute(text(
+        "INSERT INTO orchestration_runs (workspace_id, goal, created_by, state, state_type) "
+        "VALUES (CAST(:w AS uuid), :g, 'owner', 'awaiting_approval', 'blocked') RETURNING id"),
+        {"w": ws, "g": goal}).scalar())
+    s.commit()
+    return plan
+
+
 @pytest.fixture
 def held(monkeypatch):
     """Auto's Read given (each read recorded), no schedule, readiness held as all ready (``hold``
@@ -208,7 +219,7 @@ def cafe(engine, new_session, held):
     yield NS(ws=ws, other=other, ana=ana, bo=bo, cy=cy, kim=kim, review=review, question=question, approval=approval)
     s = new_session.sweep()
     for table in ("llm_usage", "messages", "chats", "mobile_digest_posts", "approval_grants", "board_tasks",
-                  "mobile_devices", "workspace_members"):
+                  "orchestration_runs", "mobile_devices", "workspace_members"):
         s.execute(text(f"DELETE FROM {table} WHERE CAST(workspace_id AS text) IN (:a, :b)"), {"a": ws, "b": other})
     s.execute(text("DELETE FROM workspaces WHERE CAST(id AS text) IN (:a, :b)"), {"a": ws, "b": other})
     s.execute(text("DELETE FROM users WHERE clerk_user_id = ANY(:c)"), {"c": [p.clerk for p in (ana, bo, cy, kim)]})
@@ -459,13 +470,16 @@ def test_a_person_with_no_phone_row_gets_a_brief(cafe, new_session):
 
 
 def test_a_viewer_gets_a_brief_without_question_or_approval_rows(cafe, new_session):
+    plan = _plan(new_session, cafe.ws, "Launch the autumn blend")
     viewer = _open(new_session, _ctx(cafe.cy, cafe.ws))
     owner = _open(new_session, _ctx(cafe.ana, cafe.ws))
 
     assert viewer.status_code == owner.status_code == 200
     cards = {row.user_id: _card(row) for row in _briefs(new_session, cafe.ws)}
-    assert _asks(cards[cafe.cy.pk]) == []
-    assert {f"question:{cafe.question}", f"approval:{cafe.approval}"} <= set(_asks(cards[cafe.ana.pk]))
+    # Not even the Mission's plan: a viewer can't approve it (P268W2-RVW-2), though the badge counts it.
+    assert _asks(cards[cafe.cy.pk]) == [] and "Launch the autumn blend" not in cards[cafe.cy.pk]["spoken"]
+    assert {f"question:{cafe.question}", f"approval:{cafe.approval}", f"approval:{plan}"} <= set(
+        _asks(cards[cafe.ana.pk]))
     ids = [row["id"] for row in cards[cafe.cy.pk]["sections"]["needs_you"]]
     assert f"review:{cafe.review}" in ids  # the ticket waiting for review is the viewer's to see
 
