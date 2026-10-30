@@ -1,7 +1,7 @@
 /**
  * Build-time sources for the Content-Security-Policy in next.config.js: the media origins (F237,
- * below), Clerk's hosts (clerkFrontendApiOrigin and the protection hosts, further down) and
- * Stripe's (PRD-265 W2, at the end).
+ * below), Clerk's hosts (clerkFrontendApiOrigin and the protection hosts, further down), Stripe's
+ * (PRD-265 W2) and Automatos Cloud's images (PRD-270, at the end).
  *
  * F237 (PRD-251B): the origins the browser may load media from. Socials thumbnails and a post's media are presigned links to object storage
  * (a MinIO host locally, AWS S3 in SaaS), so img-src and media-src must allow its public origin.
@@ -86,4 +86,32 @@ function stripeCspFor(edition) {
   return String(edition || '').trim().toLowerCase() === 'local' ? NO_STRIPE : STRIPE_CSP
 }
 
-module.exports = { mediaOrigins, clerkFrontendApiOrigin, CLERK_PROTECT_SOURCE, CLERK_PROTECT_CONNECT_SOURCE, STRIPE_CSP, stripeCspFor }
+/**
+ * PRD-270 K15: a Cloud listing's screenshots load from the catalogue files route of Automatos Cloud
+ * (lib/marketplace/cloud-files.ts names the same origin and path, AUTOMATOS_CLOUD_ORIGIN and
+ * CLOUD_FILES_PATH), or of the API this build talks to (the hosted edition's own catalogue), straight
+ * from the browser; the route serves the bytes itself, never a redirect. img-src names that path on
+ * both origins, not the whole origin; an API origin that is not a bare origin, or is Automatos Cloud's
+ * own, adds nothing.
+ */
+const AUTOMATOS_CLOUD_ORIGIN = 'https://api.automatos.app'
+const CLOUD_FILES_PATH = '/api/marketplace/catalog/files/'
+
+/** img-src's sources for Cloud listings' screenshots, space-separated: Automatos Cloud's files route, then the build's API's. */
+function cloudImageSources(apiOrigin) {
+  const api = String(apiOrigin || '')
+  const origins = ORIGIN.test(api) && api !== AUTOMATOS_CLOUD_ORIGIN ? [AUTOMATOS_CLOUD_ORIGIN, api] : [AUTOMATOS_CLOUD_ORIGIN]
+  return origins.map((origin) => `${origin}${CLOUD_FILES_PATH}`).join(' ')
+}
+
+module.exports = {
+  mediaOrigins,
+  clerkFrontendApiOrigin,
+  CLERK_PROTECT_SOURCE,
+  CLERK_PROTECT_CONNECT_SOURCE,
+  STRIPE_CSP,
+  stripeCspFor,
+  AUTOMATOS_CLOUD_ORIGIN,
+  CLOUD_FILES_PATH,
+  cloudImageSources,
+}

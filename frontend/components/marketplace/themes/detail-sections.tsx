@@ -4,7 +4,8 @@
  * PRD-261 C-04b — the parts of a listing's detail (C-04a `listing_detail`): previews per preset
  * (PRD §7 item 5), what the theme changes (pages, routes, base, tone, minimum width, `uses`), the
  * versions map with which ones this host runs (PRD §4.2) and its README and CHANGELOG. Every URL
- * is the files route on the app's own origin (`themeFileUrl` drops anything else).
+ * is the files route on the app's own origin, or a Cloud listing's catalogue files on Automatos Cloud
+ * (PRD-270 K15; its README and CHANGELOG are null): `themeFileUrl` drops anything else.
  *
  * C-05k: the facts include the shown version's Signature (listings.py `signature`, C-05b), in the
  * words of theme-labels.ts: "Signed by Automatos" only for `verified`. The Official badge is not

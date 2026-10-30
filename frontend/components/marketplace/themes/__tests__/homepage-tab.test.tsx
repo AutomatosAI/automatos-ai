@@ -30,6 +30,7 @@ vi.mock('@/hooks/use-marketplace-api', () => ({
   useToggleFeatured: () => ({ mutate: vi.fn(), isLoading: false }),
 }))
 vi.mock('@/components/analytics/admin-workspace-switcher', () => ({ AdminWorkspaceSwitcher: () => null }))
+vi.mock('@/components/marketplace/cloud/sync-button', () => ({ SyncButton: () => null }))
 vi.mock('@/components/shared', () => ({
   PageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
   SearchInput: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (

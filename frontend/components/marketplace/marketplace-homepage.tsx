@@ -28,6 +28,7 @@ import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { MarketplacePackagesTab } from './marketplace-packages-tab'
 import { MarketplaceThemesTab, THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './themes/tab'
+import { SyncButton } from './cloud/sync-button'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -379,6 +380,7 @@ export function MarketplaceHomepage() {
         lede="Tools, agents, skills, and playbooks shared by the community. Install with one click; everything is sandboxed and reversible."
         actions={
           <>
+            <SyncButton />
             {isAdmin && (
               <AdminWorkspaceSwitcher onWorkspaceChange={handleAdminWorkspaceChange} />
             )}

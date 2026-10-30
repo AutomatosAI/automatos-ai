@@ -1138,7 +1138,7 @@ export interface ThemeListing {
   signature: ThemeSignatureVerdict
   /** This host can run the version shown (the newest compatible one, else the newest). */
   compatible: boolean
-  uses: string[]; pricing: string; cover: string | null
+  uses: string[]; pricing: string; cover: string | null; source?: 'cloud' | null
   revoked: ThemeRevocationState | null; installed: ThemeListingInstall | null
   /**
    * The first of theme.json's `phonePreviews` (an Automatos Go screenshot), as a files-route URL; null

@@ -11,7 +11,8 @@
  * - The view showing the card's cover comes first, so the hero keeps its image when the detail
  *   answers. Before it answers, or with no previews at all, the one view is the cover.
  *
- * Every URL goes through `themeFileUrl`, so nothing here points at another origin.
+ * Every URL goes through `themeFileUrl`, so nothing here points at an origin other than the app's own
+ * or, for a Cloud listing, Automatos Cloud's catalogue files (PRD-270 K15).
  */
 import type { ThemeListing, ThemeListingDetail, ThemePresetPreviews, ThemePreviewShot } from '@/lib/api-client'
 
