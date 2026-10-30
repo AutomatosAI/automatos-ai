@@ -19,15 +19,20 @@ in ``mobile_digest_posts``. Proven here, on Postgres with committing sessions:
 
 Auto's Read is given (``digest.generate_digest`` recorded), the schedule is empty (the
 calendar's own read faked), the readiness check is held as all ready, and ``auto_message``'s
-dispatch is recorded (CI's test database has no ``notifications`` table).
+dispatch is recorded (CI's test database has no ``notifications`` table). CI's test database
+has no ``notification_preferences`` either (no model), and ``due_people`` reads the person's
+``daily_digest`` switch there, so the fixture runs ``prd128_notifications``' own DDL for that
+table, committed, and drops it when it made it.
 """
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace as NS
 from uuid import UUID
 
@@ -49,6 +54,8 @@ SAT = date(2026, 10, 24)
 T_LISBON_8 = datetime(2026, 10, 24, 7, 0, tzinfo=timezone.utc)
 TICK = timedelta(minutes=15)
 CLAIMANTS = 6  # three devices and two tabs opening, and the scheduled digest
+PREFERENCES_REVISION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "prd128_notifications.py"
+PREFERENCES = "notification_preferences"
 
 
 # --------------------------------------------------------------------------- fixtures
@@ -84,6 +91,27 @@ def _workspace(s, name, owner_pk):
     s.execute(text("INSERT INTO workspaces (id, name, owner_id) VALUES (CAST(:id AS uuid), :n, :o)"),
               {"id": ws, "n": name, "o": owner_pk})
     return ws
+
+
+def _preferences_ddl():
+    """``prd128_notifications``' own statements for ``notification_preferences`` (IF NOT EXISTS)."""
+    spec = importlib.util.spec_from_file_location(f"revision_{PREFERENCES_REVISION.stem}", PREFERENCES_REVISION)
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    statements = []
+    revision.op = NS(execute=statements.append)
+    revision.upgrade()
+    return [statement for statement in statements if PREFERENCES in statement]
+
+
+def _made_preferences(s):
+    """Make ``notification_preferences`` as production has it when the database lacks it; True
+    when this call made it (the fixture then drops it)."""
+    if s.execute(text("SELECT to_regclass(:t) IS NOT NULL"), {"t": PREFERENCES}).scalar():
+        return False
+    for statement in _preferences_ddl():
+        s.execute(text(statement))
+    return True
 
 
 @pytest.fixture
@@ -131,8 +159,10 @@ def held(monkeypatch):
 def cafe(engine, new_session, held, monkeypatch):
     """Ana owns the café's workspace and another; Bo is an editor in the café's. No phones yet.
     The schedule serves these two workspaces only: the CI database is shared, and a phone
-    another file left behind is never this file's to post for."""
+    another file left behind is never this file's to post for. The push switches' table is made
+    when missing (no row: every switch is on)."""
     s = new_session()
+    made = _made_preferences(s)
     (ana_clerk, ana), (bo_clerk, bo) = _person(s, "ana", "Ana Silva"), _person(s, "bo", "Bo Lund")
     ws, other = _workspace(s, "prd268w2-brief-claim", ana), _workspace(s, "prd268w2-brief-claim-other", ana)
     s.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
@@ -147,6 +177,8 @@ def cafe(engine, new_session, held, monkeypatch):
     s = new_session.sweep()
     for table in ("messages", "chats", "mobile_digest_posts", "mobile_devices", "workspace_members"):
         s.execute(text(f"DELETE FROM {table} WHERE CAST(workspace_id AS text) IN (:a, :b)"), {"a": ws, "b": other})
+    if made:
+        s.execute(text("DROP TABLE IF EXISTS notification_preferences"))
     s.execute(text("DELETE FROM workspaces WHERE CAST(id AS text) IN (:a, :b)"), {"a": ws, "b": other})
     s.execute(text("DELETE FROM users WHERE clerk_user_id IN (:a, :b)"), {"a": ana_clerk, "b": bo_clerk})
     s.commit()
