@@ -67,8 +67,11 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # suggestions: Auto's suggestions with Start and Hide (PRD-268 W1), refetched on the live lane's
 # suggestion_changed (US-C08b). readiness: what Auto depends on, with Check again (US-C18).
 # suggestion_push: a today suggestion pushed to a phone that registered the category with
-# push_categories (US-C09b); the app registers it only when this is listed.
+# push_categories (US-C09b); the app registers it only when this is listed. approval_view: the
+# ApprovalView@1 by the id a view carries, an approval grant's number or a Mission plan's id
+# (PRD-268 US-C24); the app opens its approval sheet from a card or a push only when this is listed.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "approval_view": ("GET", "/api/v1/approval-grants/{grant_id}/view"),
     "brief": ("POST", "/api/proactive/brief/open"),
     "digest": ("GET", "/api/notification-preferences"),
     "digest_now": ("POST", "/api/v1/mobile/digest/now"),

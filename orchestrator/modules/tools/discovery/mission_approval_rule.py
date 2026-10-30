@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["APPROVAL_POLICY", "names_the_approval_policy"]
+__all__ = ["APPROVAL_POLICY", "names_the_approval_policy", "policy_holding"]
 
 APPROVAL_POLICY = "approval_policy"
 ESTIMATE = "approval_estimated_cost_usd"  # stamped on the run's config when it parks (coordinator_service)
@@ -36,14 +36,19 @@ def names_the_approval_policy(handler: Handler) -> Handler:
         result = await handler(db, workspace_id, params)
         if not (isinstance(result, dict) and result.get("awaiting_approval") and result.get("mission_id")):
             return result
-        try:
-            policy = _holding_policy(db, workspace_id, result["mission_id"])
-        except Exception:
-            logger.exception("[mission_approval_rule] could not read the policy holding mission %s",
-                             result.get("mission_id"))
-            return result
+        policy = policy_holding(db, workspace_id, result["mission_id"])
         return {**result, APPROVAL_POLICY: policy} if policy else result
     return wrapped
+
+
+def policy_holding(db: Session, workspace_id: Any, mission_id: Any) -> Optional[str]:
+    """The approval policy holding the Mission's plan, or None: it would start, it was asked for as a
+    plan only, or the read failed (logged). The card and ``GET /api/v1/approval-grants/{id}/view`` read it."""
+    try:
+        return _holding_policy(db, workspace_id, mission_id)
+    except Exception:
+        logger.exception("[mission_approval_rule] could not read the policy holding mission %s", mission_id)
+        return None
 
 
 def _holding_policy(db: Session, workspace_id: Any, mission_id: Any) -> Optional[str]:
