@@ -384,6 +384,12 @@
       { "name": "a backslash path", "replace": { "dist\\entry.js": "x" }, "code": "UNSAFE_PATH" },
       { "name": "a font that isn't WOFF2", "replace": { "assets/fonts/brand.woff2": "not a font" }, "code": "BAD_FILE_TYPE" },
       { "name": "a clip that isn't MP4", "replace": { "assets/mascot/idle.mp4": "not a video" }, "code": "BAD_FILE_TYPE" },
+      { "name": "phone previews: a screenshot named .png that isn't a PNG", "manifestSet": { "phonePreviews": ["assets/previews/phone/home.png"] }, "replace": { "assets/previews/phone/home.png": "not an image" }, "code": "BAD_FILE_TYPE" },
+      { "name": "phone previews: a screenshot named .jpg that isn't a JPEG", "manifestSet": { "phonePreviews": ["assets/previews/phone/home.jpg"] }, "replace": { "assets/previews/phone/home.jpg": "not an image" }, "code": "BAD_FILE_TYPE" },
+      { "name": "phone previews: a named screenshot that isn't there", "manifestSet": { "phonePreviews": ["assets/previews/phone/home.jpg"] }, "code": "MISSING_FILE" },
+      { "name": "phone previews: a WebP screenshot", "replace": { "assets/previews/phone/home.webp": "RIFF" }, "code": "NOT_ALLOWED" },
+      { "name": "phone previews: a .jpeg screenshot", "replace": { "assets/previews/phone/home.jpeg": "x" }, "code": "NOT_ALLOWED" },
+      { "name": "phone previews: a folder below assets/previews/phone", "replace": { "assets/previews/phone/home/chat.jpg": "x" }, "code": "NOT_ALLOWED" },
 
       { "name": "mobile (M-01; the reader M-02, the kit's port M-06): a tokens block needs no file", "manifestSet": { "engines": { "automatos": "^1.1.0", "sdk": "^1.0.0" }, "mobile": { "tokens": { "light": { "--background": "0 0% 100%", "--foreground": "#14181c" } } } }, "code": null },
       { "name": "mobile: a mobile font the package lacks", "manifestSet": { "engines": { "automatos": "^1.1.0", "sdk": "^1.0.0" }, "mobile": { "tokens": { "light": { "--background": "0 0% 100%", "--foreground": "#14181c" } }, "fonts": { "sans": "assets/fonts/mobile/inter.ttf" } } }, "code": "MISSING_FILE" },

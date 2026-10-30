@@ -13,12 +13,13 @@ with a code, the path and a plain sentence:
 * files that unpack past the package's limits, a file over its own cap (the entry over
   ``THEME_MAX_ENTRY_KB``, a clip over ``THEME_MAX_CLIP_KB``), JS plus CSS over
   ``THEME_MAX_CODE_KB``, bytes that are not what the path says (M-02: a phone's font,
-  ``assets/fonts/mobile/<NAME>.ttf`` or ``.otf``, is one complete sfnt face, ``_sfnt_problem``);
+  ``assets/fonts/mobile/<NAME>.ttf`` or ``.otf``, is one complete sfnt face, ``_sfnt_problem``; a phone
+  screenshot, ``assets/previews/phone/<NAME>.png`` or ``.jpg``, starts with its format's magic bytes);
 * a theme.json the manifest check refuses (``services/themes/manifest.py``); a missing entry,
   look schema or preset, or a preset the schema refuses (``look_schema.py``); a prepaint value
   outside the CSS-value grammar (``css_value.py``); CSS outside the theme's class, with
-  ``!important`` or ``@import`` (``css_scope.py``); a preview, font, wordmark or mobile font the
-  manifest names that is not in the package;
+  ``!important`` or ``@import`` (``css_scope.py``); a preview (web or phone), font, wordmark or mobile
+  font the manifest names that is not in the package;
 * M-02 (host 1.1.0, plan §2.2.11): a ``mobile`` block a phone can't draw without the theme's
   code: ``fromLooks`` with no ``boot/prepaint.json``, or a table whose ``defaults`` look, painted as
   the web paints it (``mobile_tokens.paint_look``: nothing when the defaults don't fit the table, and
@@ -95,6 +96,7 @@ TEXT_TYPE = "text/plain; charset=utf-8"
 CODE_KINDS = frozenset({"entry", "chunk", "style"})
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+JPEG_SIGNATURE = b"\xff\xd8\xff"  # SOI, then the first marker's 0xFF
 WEBM_SIGNATURE = b"\x1a\x45\xdf\xa3"
 
 # M-02: a phone's font is one sfnt face, as the woff2 a browser gets is: TrueType outlines (00 01 00 00, or
@@ -177,6 +179,7 @@ def _sniff(test: Callable[[bytes], bool], what: str) -> Callable[[bytes], Option
 
 
 IS_PNG = _sniff(lambda data: data.startswith(PNG_SIGNATURE), "a PNG image")
+IS_JPEG = _sniff(lambda data: data.startswith(JPEG_SIGNATURE), "a JPEG image")
 IS_WEBP = _sniff(lambda data: data[:4] == b"RIFF" and data[8:12] == b"WEBP", "a WebP image")
 IS_WEBM = _sniff(lambda data: data.startswith(WEBM_SIGNATURE), "a WebM video")
 IS_MP4 = _sniff(lambda data: data[4:8] == b"ftyp", "an MP4 video")
@@ -220,6 +223,8 @@ FILE_KINDS: Tuple[FileKind, ...] = (
     _kind("brand", rf"assets/brand/{NAME}\.png", "image/png", lambda: IMAGE_MAX_BYTES, check=IS_PNG),
     _kind("brand", rf"assets/brand/{NAME}\.webp", "image/webp", lambda: IMAGE_MAX_BYTES, check=IS_WEBP),
     _kind("preview", rf"assets/previews/{NAME}\.png", "image/png", lambda: IMAGE_MAX_BYTES, check=IS_PNG),
+    _kind("phone-preview", rf"assets/previews/phone/{NAME}\.png", "image/png", lambda: IMAGE_MAX_BYTES, check=IS_PNG),
+    _kind("phone-preview", rf"assets/previews/phone/{NAME}\.jpg", "image/jpeg", lambda: IMAGE_MAX_BYTES, check=IS_JPEG),
     _kind("source", rf"source/(?:{NAME}/){{0,7}}{NAME}\.{SOURCE_EXTENSIONS}", TEXT_TYPE, lambda: SOURCE_MAX_BYTES),
     _kind("doc", r"(?:README\.md|CHANGELOG\.md|LICENSE(?:\.md|\.txt)?)", TEXT_TYPE, lambda: TEXT_MAX_BYTES),
 )
