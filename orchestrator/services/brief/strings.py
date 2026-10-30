@@ -2,8 +2,8 @@
 
 Server copy, never the model's: the greeting, the section labels, the empty sentence, "Show N
 more", the row action labels, each row's reason (``why``) and the brief route's refusals
-(``open_*``, ``api/proactive_brief.py``), in English and Portuguese (Brazil). Clients draw
-these; they never compose them.
+(``open_*`` and ``brief_off``, ``api/proactive_brief.py``), in English and Portuguese (Brazil).
+Clients draw these; they never compose them.
 
 The language (K7): ``brief_language`` reads a BCP 47 tag (the route's ``locale``, a phone's
 ``mobile_devices.locale``, or the locale W1's ``Accept-Language`` chooser gave). A tag with a
@@ -67,6 +67,7 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "open_not_a_member": "Today's brief is only for the people in this workspace.",
         "open_out_of_window": "That date is more than a day from today, so there is no brief for it.",
         "open_unavailable": "Today's brief could not be made right now. Try again in a minute.",
+        "brief_off": "The brief on open is not switched on for this workspace.",
     }),
     "pt-BR": MappingProxyType({
         "greeting_morning": "Bom dia, {name}.",
@@ -106,6 +107,7 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "open_not_a_member": "O resumo de hoje é só para as pessoas deste workspace.",
         "open_out_of_window": "Essa data está a mais de um dia de hoje, então não há resumo para ela.",
         "open_unavailable": "Não foi possível preparar o resumo de hoje agora. Tente de novo em um minuto.",
+        "brief_off": "O resumo ao abrir não está ativado neste workspace.",
     }),
 })
 

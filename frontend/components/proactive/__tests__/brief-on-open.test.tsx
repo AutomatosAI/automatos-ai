@@ -2,7 +2,8 @@
  * PRD-268 §6.4, K11 (US-W02) — BriefOnOpen opens the day's brief (POST /api/proactive/brief/open) once per local date
  * when a signed-in workspace loads: one call per date across reloads of a tab, a new date calls again, no workspace
  * no call, a refusal logged once and never asked again in that load, once per load with storage blocked, and the
- * answer opens nothing by itself (no navigation, no sound, nothing drawn). It is mounted once in
+ * answer opens nothing by itself (no navigation, no sound, nothing drawn). A `brief_off` refusal (the workspace's
+ * proactive mode is off, P268W2-RVW-3) logs nothing; any other code logs as before. It is mounted once in
  * components/providers.tsx, inside WorkspaceProvider.
  */
 import { readFileSync } from 'fs'
@@ -60,10 +61,11 @@ const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(r
 /** The bodies each open posted. */
 const opened = () => postMock.mock.calls.filter(([url]) => url === OPEN_PATH).map(([, body]) => body)
 
-/** Each warning BriefOnOpen logged. */
+/** Each warning (or error) BriefOnOpen logged: every line it logs starts with its prefix. */
 const briefWarnings = (warn: MockInstance<typeof console.warn>) => warn.mock.calls.filter(([prefix]) => prefix === '[brief]')
 
-const refusal = (status: number) => Object.assign(new Error('Refused'), { status, body: { code: 'open_out_of_window', detail: 'No.' } })
+const refusal = (status: number, code = 'open_out_of_window') =>
+  Object.assign(new Error('Refused'), { status, body: { code, detail: 'No.' } })
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -181,6 +183,34 @@ describe('BriefOnOpen: refusals and blocked storage', () => {
     await settle()
     expect(briefWarnings(warn)).toEqual([['[brief]', expect.any(String), 403, 'open_out_of_window']])
     expect(opened()).toHaveLength(2)
+  })
+
+  it("logs nothing for brief_off (the workspace's proactive mode is off) and never asks for that day again in that load", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    postMock.mockRejectedValueOnce(refusal(404, 'brief_off'))
+    const view = load()
+    await waitFor(() => expect(opened()).toHaveLength(1))
+    await settle()
+    expect(rememberedBrief('ws-1', TODAY)).toBeNull()
+    workspace.id = 'ws-2'
+    view.again()
+    await waitFor(() => expect(opened()).toHaveLength(2))
+    workspace.id = 'ws-1'
+    view.again()
+    await settle()
+    expect(opened()).toHaveLength(2)
+    expect(briefWarnings(warn)).toEqual([])
+    expect(briefWarnings(error)).toEqual([])
+  })
+
+  it('still logs a 404 with any other code', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    postMock.mockRejectedValueOnce(refusal(404, 'open_no_workspace'))
+    load()
+    await waitFor(() => expect(briefWarnings(warn)).toHaveLength(1))
+    expect(briefWarnings(warn)[0]).toEqual(['[brief]', expect.any(String), 404, 'open_no_workspace'])
   })
 
   it('with storage blocked, still calls once per load', async () => {

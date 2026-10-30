@@ -25,12 +25,17 @@ Postgres with committing sessions. Proven here:
   one of three opens released together; a younger one answers pending; a winner whose day was
   taken over while it built posts nothing (it answers the taker's message), and its failure
   gives back nothing;
+* P268W2-RVW-3, the rollout gate: where the workspace's effective proactive mode is off (the
+  platform mode off, the workspace switch off, or a mode that cannot be read) an open is 404
+  ``brief_off`` and claims, reads and builds nothing; in shadow and live it posts as before;
 * the route is a plain ``def``, gated by ``require_workspace_permission``, registered, in the
   route manifest, and listed in discovery as ``brief``.
 
 Auto's Read is given (``build.read_digest`` recorded) except where the real ``generate_digest``
 runs with the model faked; the schedule is empty, the readiness check held, ``auto_message``'s
-dispatch recorded and the route's clock frozen.
+dispatch recorded and the route's clock frozen. The brief is switched on as W1's tests switch
+check-ins on: the platform ``proactive.mode`` (``held.mode``, live unless a test sets it) where
+the workspace's ``settings.proactive.enabled`` is true, as every workspace here is created.
 """
 from __future__ import annotations
 
@@ -89,6 +94,8 @@ READ = {"text": PROSE, "state_hash": "state-hash-open", "needs_attention_count":
 SNAPSHOT = {"counts": {}, "needs_attention": [], "active": [], "recent_completions": [],
             "needs_attention_count": 0, "state_hash": "state-hash-open-read"}
 REAL_READ_DIGEST = build.read_digest
+PLATFORM_MODE = ("proactive", "mode")  # the system setting services.proactive.switches reads
+SWITCHED_ON = {"proactive": {"enabled": True}}  # a workspace's own switch (settings.proactive.enabled)
 
 
 # --------------------------------------------------------------------------- fixtures
@@ -121,8 +128,9 @@ def _person(s, tag, name):
 
 def _workspace(s, name, owner_pk):
     ws = str(uuid.uuid4())
-    s.execute(text("INSERT INTO workspaces (id, name, owner_id) VALUES (CAST(:id AS uuid), :n, :o)"),
-              {"id": ws, "n": name, "o": owner_pk})
+    s.execute(text("INSERT INTO workspaces (id, name, owner_id, settings) "
+                   "VALUES (CAST(:id AS uuid), :n, :o, CAST(:s AS jsonb))"),
+              {"id": ws, "n": name, "o": owner_pk, "s": json.dumps(SWITCHED_ON)})
     return ws
 
 
@@ -160,9 +168,11 @@ def _plan(new_session, ws, goal):
 @pytest.fixture
 def held(monkeypatch):
     """Auto's Read given (each read recorded), no schedule, readiness held as all ready (``hold``
-    a workspace), every ``auto_message`` notice recorded, and the route's clock at ``NOW``."""
+    a workspace), every ``auto_message`` notice recorded, the route's clock at ``NOW``, and the
+    platform ``proactive.mode`` read as ``mode`` (live; an exception is raised as the read's)."""
     import services.brief.today as today
     import services.readiness.service as readiness
+    from core.llm import manager
     from services.notification_events import auto_message
     from services.readiness import items as i
     from services.readiness.probes import ITEMS
@@ -194,8 +204,19 @@ def held(monkeypatch):
     monkeypatch.setattr(today, "ActivityService", NoSchedule)
     monkeypatch.setattr(readiness, "held", checks)
     monkeypatch.setattr(auto_message, "dispatch_auto_message", told)
+    rig = NS(reads=reads, notices=notices, hold=hold, mode="live")
+    real_setting = manager.read_system_setting
+
+    def setting(category, key):
+        if (category, key) != PLATFORM_MODE:
+            return real_setting(category, key)
+        if isinstance(rig.mode, Exception):
+            raise rig.mode
+        return rig.mode
+
     monkeypatch.setattr(on_open, "_now", lambda: NOW)
-    return NS(reads=reads, notices=notices, hold=hold)
+    monkeypatch.setattr(manager, "read_system_setting", setting)
+    return rig
 
 
 @pytest.fixture
@@ -589,6 +610,48 @@ def test_a_failed_build_or_post_is_503_gives_the_claim_back_and_the_next_open_po
     again = _open(new_session, _ctx(cafe.ana, cafe.ws))
 
     assert again.json()["posted"] is True and _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]
+
+
+# --------------------------------------------------------------------------- the rollout gate (P268W2-RVW-3)
+
+
+def _switch(new_session, ws, settings):
+    with new_session() as s:
+        s.execute(text("UPDATE workspaces SET settings = CAST(:s AS jsonb) WHERE id = CAST(:w AS uuid)"),
+                  {"s": json.dumps(settings), "w": ws})
+        s.commit()
+
+
+@pytest.mark.parametrize("platform,settings", [
+    ("off", SWITCHED_ON), ("live", {}), ("shadow", {"proactive": {"enabled": False}}),
+    (RuntimeError("system_settings unreadable"), SWITCHED_ON),
+], ids=["platform-off", "workspace-never-switched", "workspace-switched-off", "mode-unreadable"])
+def test_where_the_proactive_mode_is_off_an_open_is_404_and_claims_reads_and_builds_nothing(
+        cafe, held, new_session, monkeypatch, platform, settings):
+    built = []
+    monkeypatch.setattr(digest, "build_brief", lambda *args, **kwargs: built.append(args))
+    held.mode = platform
+    _switch(new_session, cafe.ws, settings)
+
+    response = _open(new_session, _ctx(cafe.ana, cafe.ws))
+
+    assert response.status_code == 404, response.text
+    assert response.json() == {"code": "brief_off", "detail": say("en", "brief_off")}
+    assert _claims(new_session, cafe.ws) == [] and _briefs(new_session, cafe.ws) == []
+    assert built == [] and held.reads == []  # never built: no Auto's Read, no model call
+
+
+@pytest.mark.parametrize("mode", ["shadow", "live"])
+def test_in_shadow_and_live_an_open_posts_the_brief_as_before(cafe, held, new_session, mode):
+    held.mode = mode
+
+    first = _open(new_session, _ctx(cafe.ana, cafe.ws))
+    again = _open(new_session, _ctx(cafe.ana, cafe.ws))
+
+    (brief,) = _briefs(new_session, cafe.ws)
+    assert first.json() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": True}
+    assert again.json() == {"chat_id": brief.chat_id, "message_id": brief.id, "posted": False}
+    assert brief.source["via"] == VIA_OPEN and _claims(new_session, cafe.ws) == [(cafe.ana.pk, TODAY)]
 
 
 # --------------------------------------------------------------------------- the rules, the route, discovery

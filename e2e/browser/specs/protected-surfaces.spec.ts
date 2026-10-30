@@ -156,13 +156,14 @@ async function recordDecisions(page: Page, card: CardCase): Promise<string[]> {
 
 /**
  * The precondition, stated: /chat opens on a new chat. A fresh browser's /chat lands on the newest conversation
- * (PRD-237's cold start, app/chat/page.tsx). Since PRD-268 W2 the lane's one shared workspace has one: the first
- * page any spec loads opens the day's brief (BriefOnOpen), which posts it into a new Auto thread, and that thread's
- * brief card carries Listen in the protected surface `brief-voice` (US-C21d). The hostile sheet's `:has` rule
- * takes visibility from every ancestor of any protected surface, so landing there would leave Listen alone on the
- * page, with no composer to ask from, before the turn's card is drawn. Answering the conversation list with none
- * keeps the page as the empty workspace left it. specs/proactive-brief-thread.spec.ts holds the Auto thread itself
- * (its brief card beside the composer) under an installed theme that attacks nothing.
+ * (PRD-237's cold start, app/chat/page.tsx). Since PRD-268 W2 a workspace whose proactive mode is on has one: the
+ * first page any spec loads opens the day's brief (BriefOnOpen), which posts it into a new Auto thread, and that
+ * thread's brief card carries Listen in the protected surface `brief-voice` (US-C21d). The hostile sheet's `:has`
+ * rule takes visibility from every ancestor of any protected surface, so landing there would leave Listen alone on
+ * the page, with no composer to ask from, before the turn's card is drawn. Answering the conversation list with none
+ * keeps the page as the empty workspace left it, whether the lane's mode is on or off (off by default: the open is
+ * refused `brief_off`, P268W2-RVW-3). specs/proactive-brief-thread.spec.ts holds the Auto thread itself (its brief
+ * card beside the composer) under an installed theme that attacks nothing.
  */
 async function startOnANewChat(page: Page): Promise<void> {
   await page.route((url) => url.pathname === CHAT_HISTORY_PATH, (route) => fulfillBackendJson(route, OK, NO_CONVERSATIONS))

@@ -16,6 +16,16 @@ The person is the caller and nobody else: the body names no person, no chat and 
 greeting's clock. ``locale`` (a BCP 47 tag, as ``ChatRequest.locale``; one that is not a tag is
 ignored) is the brief's language, else ``Accept-Language`` (W1's K13 chooser), else English (K7).
 
+The brief on open runs only where the workspace's effective proactive mode is ``shadow`` or
+``live`` (``services.proactive.switches.effective_mode``: the platform ``proactive.mode`` where the
+workspace switched ``settings.proactive.enabled`` on, else off, failing closed). PRD §10 rolls it
+out to chosen workspaces first, paid ones next, never trials, and the local edition stays off
+until its operator switches it on (§12-Q10). Where the mode is off the route answers 404
+``brief_off`` once the caller is known and before the claim: nothing is claimed, no day's message
+is looked up, nothing is built and no model is called. In ``shadow`` and ``live`` it is the same
+brief (K8: the brief reads suggestions in any mode). The scheduled digest and ``post_now`` do not
+read this gate.
+
 Every member may open their brief, a viewer too, whose brief has no question or approval rows
 (PRD-266 D16): ``require_workspace_permission("members:read")``, the scope every workspace role
 holds (``modules/policy/roles.py``), as W1's ``PUT /api/proactive/me`` uses for a member's own
@@ -51,6 +61,7 @@ from modules.proactive.locale import request_locale
 from services.brief import on_open
 from services.brief.strings import brief_language, say
 from services.mobile.digest import DuePerson, belongs
+from services.proactive.switches import MODE_OFF, effective_mode
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +69,8 @@ router = APIRouter(prefix="/api/proactive", tags=["proactive"])
 
 # Every workspace role holds it, a viewer too: the brief is the caller's own (K21, §6.4).
 BRIEF_PERMISSION = "members:read"
+# The workspace's effective proactive mode is off: no brief on open (§10 rollout, K11).
+BRIEF_OFF = "brief_off"
 NO_WORKSPACE = "open_no_workspace"
 NO_PERSON = "open_no_person"
 NOT_A_MEMBER = "open_not_a_member"
@@ -103,6 +116,13 @@ def _person(db: Session, ctx: RequestContext, body: BriefOpenRequest, language: 
     return DuePerson(ctx.workspace_id, user_pk, body.local_date, body.timezone, language)
 
 
+def _switched_on(db: Session, workspace_id: Any) -> None:
+    """The brief on open runs only where the workspace's effective proactive mode is not off
+    (404 ``brief_off`` otherwise); ``effective_mode`` reads an unreadable switch as off."""
+    if effective_mode(db, workspace_id) == MODE_OFF:
+        raise _Refused(BRIEF_OFF, HTTP_NOT_FOUND)
+
+
 @router.post("/brief/open", response_model=None)
 def open_brief(
     body: BriefOpenRequest,
@@ -116,7 +136,9 @@ def open_brief(
     if ctx.workspace_id is None:
         return _refused(said, NO_WORKSPACE, HTTP_NOT_FOUND)
     try:
-        opened = on_open.open_brief(db, _person(db, ctx, body, language))
+        person = _person(db, ctx, body, language)
+        _switched_on(db, ctx.workspace_id)
+        opened = on_open.open_brief(db, person)
     except _Refused as refusal:
         return _refused(said, refusal.code, refusal.status_code)
     except on_open.OutOfWindow:

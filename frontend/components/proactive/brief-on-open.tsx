@@ -14,6 +14,10 @@
  * it asks once per load. Without a workspace it asks nothing. Each open's failure is caught on its own promise, so a
  * workspace switched while an open is in flight still logs that open's failure.
  *
+ * The brief on open runs only where the workspace's proactive mode is on (PRD-268 §10 rollout): elsewhere the open is
+ * refused with 404 `brief_off`, which is the expected answer, not a fault, so it logs nothing and, like any refusal,
+ * is not asked again in that load.
+ *
  * The answer opens nothing by itself: no navigation, no sound, nothing drawn here. The brief draws where it was
  * posted, as its card in the Auto thread (thread-cards.tsx), and under Auto's Read on the Command Center (useBrief).
  */
@@ -25,14 +29,20 @@ import { refusalOf } from '@/lib/proactive/wire'
 
 const LOG_PREFIX = '[brief]'
 const NOT_OPENED = "The day's brief wasn't opened"
+/** The open's refusal where the workspace's proactive mode is off (api/proactive_brief.py BRIEF_OFF). */
+const BRIEF_OFF = 'brief_off'
 
 type Asked = ReadonlySet<string>
 
 const dayKey = (workspaceId: string, localDate: string): string => `${workspaceId}:${localDate}`
 
-/** Logs why the open didn't answer: its status and code, once per workspace and date in a load. */
+/**
+ * Logs why the open didn't answer: its status and code, once per workspace and date in a load. `brief_off` (the
+ * workspace's proactive mode is off) is the expected answer there, so it logs nothing.
+ */
 function logNotOpened(error: unknown): void {
   const refusal = refusalOf(error)
+  if (refusal?.code === BRIEF_OFF) return
   console.warn(LOG_PREFIX, NOT_OPENED, refusal?.status ?? null, refusal?.code ?? refusal?.detail ?? String(error))
 }
 
