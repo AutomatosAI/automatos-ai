@@ -1,5 +1,5 @@
 {
-  "route_count": 994,
+  "route_count": 995,
   "routes": [
     {
       "method": "GET",
@@ -1808,6 +1808,10 @@
     {
       "method": "GET",
       "path": "/api/marketplace/themes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/themes/publish"
     },
     {
       "method": "POST",
