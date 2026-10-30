@@ -84,13 +84,22 @@ export function VoiceProvider({ children, host: given }: VoiceProviderProps) {
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>
 }
 
+/**
+ * Starts a session. One with no conversation named (the one on screen, or a new chat) first tells the session store
+ * the person started a chat: the blank chat shown while nothing is open becomes their draft (PRD-237), so the chat
+ * page's late cold start never moves the screen and ends the call. Anything already open is left as it is.
+ */
+function startVoice(host: VoiceHost, available: VoiceAvailability, options?: HostVoiceStartOptions): Promise<void> {
+  if (!options?.chatId) useChatSessionStore.getState().draftStarted()
+  return host.start(resolveVoiceMode(options?.mode ?? 'auto', available), options?.chatId)
+}
+
 function hostVoiceOf(host: VoiceHost, state: VoiceHostState, available: VoiceAvailability): HostVoice {
   return Object.freeze({
     snapshot: state.snapshot,
     available,
     readLevels: host.readLevels,
-    start: (options?: HostVoiceStartOptions) =>
-      host.start(resolveVoiceMode(options?.mode ?? 'auto', available), options?.chatId),
+    start: (options?: HostVoiceStartOptions) => startVoice(host, available, options),
     release: host.release,
     stop: host.stop,
     live: Object.freeze({ ...state.live, toggleMute: host.toggleMute, pickDevice: host.pickDevice }),
