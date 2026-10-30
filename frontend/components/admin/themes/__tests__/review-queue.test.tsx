@@ -53,7 +53,7 @@ vi.mock('@clerk/nextjs', async () => {
   }
 })
 
-import { DEACTIVATE } from '../deactivate-form'
+import { DEACTIVATE, DEACTIVATE_NOTE } from '../deactivate-form'
 import { NOT_READY, READY } from '../pending-list'
 import { SAVE_NOTE } from '../report-note-form'
 import { APPROVE, REJECT } from '../review-actions'
@@ -341,6 +341,9 @@ describe('after approval', () => {
     api.getThemeReport.mockResolvedValue(reportOf({ status: 'approved', reviewed: true }))
     api.deactivateTheme.mockResolvedValue({})
     await openReport()
+    // The server moves unpinned installs on it back to the previous listed version (auto_update.roll_back_installs).
+    expect(screen.getByText(DEACTIVATE_NOTE)).toBeInTheDocument()
+    expect(DEACTIVATE_NOTE).toContain('goes back to the previous listed version')
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Steals tokens' } })
     fireEvent.click(screen.getByRole('button', { name: DEACTIVATE }))
     await waitFor(() => expect(api.deactivateTheme).toHaveBeenCalledWith(PACKAGE_ID, 'Steals tokens'))

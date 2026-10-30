@@ -91,11 +91,13 @@ Then each member clicks **Use this theme**, here or in **Settings › Appearance
 opt-in, and it can be the workspace default.
 
 - When the workspace already runs the theme, the page shows **In this workspace** with its version. When a newer
-  version is listed: "A newer version is listed: review it under "Installed in this workspace"."
+  version is listed and the install has not moved to it: "A newer version is listed and this install has not moved to
+  it: review it under "Installed in this workspace"."
 - When the workspace runs its own upload of the theme: "This workspace runs its own upload of this theme. Uninstall it
   below to add the Marketplace version."
-- A version approved later is offered to the workspace as **Update available**. Nothing switches until an owner or admin
-  applies it. See [Managing themes](../themes/managing-themes.md#updates).
+- A version approved later updates the install by itself: its row in the installed list says **Updates itself; pin to
+  hold**. A pinned install gets **Update available** instead and stays until an owner or admin applies it. See
+  [Managing themes](../themes/managing-themes.md#updates).
 
 Below the listings, the tab repeats **Install theme** (for a private upload) and the workspace's installed list, under
 **Installed in this workspace**, with the same actions as **Settings › Appearance › Themes**.

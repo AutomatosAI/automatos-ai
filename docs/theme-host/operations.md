@@ -167,7 +167,9 @@ whole run, from the kit's release to the release's `.sig.json`. The server's sid
    skips this step.
 4. **Approve** (`POST …/approve`). Approve opens a signature request. The answer, and the report's Signature section,
    carry it: `{requestId, payload, payloadSha256, algorithm, form, canonical}`. The version is now listed, and
-   workspaces running an older Marketplace version of the theme are offered the update.
+   workspaces running an older Marketplace version of the theme are offered the update. Each of those installs that is
+   not pinned moves to it at once (`updatesApplied` in the answer); one the move refuses keeps the offer, and the
+   server logs why.
 5. **Sign.** Copy the whole request and run the kit's **Theme sign** workflow on `main` with it as its `request`
    input. A required reviewer of `theme-signing` approves the run. Its summary prints the request id, the signature,
    the key id and the envelope.
@@ -193,9 +195,11 @@ A revocation takes effect on each member's next load. Use the revocations panel 
 4. **Revoke.** The same target and level a second time answers the live row already there (200), not a second one.
 
 To **take a Marketplace version off the Marketplace**, use **Deactivate** on its report (`POST …/deactivate`, with a
-reason) rather than a revocation. It sets the version `deactivated`, writes a `disable` of its digest and withdraws the
-update offers its approval made. Lifting a revocation never undoes a deactivation: the last live local disable of a
-deactivated version can't be lifted.
+reason) rather than a revocation. It sets the version `deactivated`, writes a `disable` of its digest, withdraws the
+update offers its approval made and moves each unpinned install that runs it back to the newest listed version below
+it (`installsRolledBack` in the answer). With none listed, those installs stay on it and fall back to their base.
+Lifting a revocation never undoes a deactivation: the last live local disable of a deactivated version can't be
+lifted.
 
 **Lift** a revocation from the panel, then **Confirm lift** (`POST /api/admin/themes/revocations/{revocationId}/lift`). A row written here
 (`local`) can be lifted at any time. A row pulled from the feed (`feed`) is the hosted list's to lift; in the local

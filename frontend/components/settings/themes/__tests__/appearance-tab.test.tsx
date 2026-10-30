@@ -45,7 +45,13 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import { AppearanceTab } from '../appearance-tab'
 import { OPT_IN_CONFIRM } from '../opt-in-dialog'
 import { USE_THEME } from '../installed-row'
-import { MEMBERS_SEE_ONLY, NEEDS_UPDATE, PRIVATE_NOT_REVIEWED, UNREVIEWED_NOT_DEFAULT } from '../theme-labels'
+import {
+  MEMBERS_SEE_ONLY,
+  NEEDS_UPDATE,
+  PRIVATE_NOT_REVIEWED,
+  UNREVIEWED_NOT_DEFAULT,
+  UPDATES_ITSELF_HINT,
+} from '../theme-labels'
 import { INSTALL_ID, OPT_IN_WORDING, PACKAGE_ID, installRow, renderWithQuery, themeSettings } from './theme-fixtures'
 import type { InstalledTheme } from '@/lib/api-client'
 
@@ -122,6 +128,24 @@ describe('labels', () => {
     serve([installRow({ pendingPackageId: 'next', pendingVersion: '1.1.0' })])
     const row = await renderTab('member')
     expect(within(row).getByText('Update available · 1.1.0')).toBeInTheDocument()
+  })
+
+  it('says "Updates itself; pin to hold" on an unpinned Marketplace install only (publish contract D1)', async () => {
+    const listed = { ownerType: 'marketplace', reviewed: true, private: false } as const
+    serve([
+      installRow(listed),
+      installRow({ ...listed, installId: 'pinned-1', themeId: 'acme/pinned', pinnedVersion: '1.0.0' }),
+      installRow({ installId: 'upload-1', themeId: 'acme/upload' }),
+    ])
+    const row = await renderTab('member')
+
+    const badge = within(row).getByTestId('theme-updates-itself')
+    expect(badge).toHaveTextContent('Updates itself; pin to hold')
+    expect(badge).toHaveAttribute('title', UPDATES_ITSELF_HINT)
+    const pinned = screen.getByTestId('installed-theme-pinned-1')
+    expect(within(pinned).queryByTestId('theme-updates-itself')).toBeNull()
+    expect(within(pinned).getByText('Pinned to 1.0.0')).toBeInTheDocument()
+    expect(within(screen.getByTestId('installed-theme-upload-1')).queryByTestId('theme-updates-itself')).toBeNull()
   })
 
   it('marks the theme in use and offers no second choice of it', async () => {

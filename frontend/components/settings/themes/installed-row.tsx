@@ -2,7 +2,8 @@
 
 /**
  * PRD-261 A-07d — one installed theme: its badges (PRD §5: "Private · not reviewed", default,
- * update available, "needs update" for a clone whose core page changed, pinned, revoked), "Use
+ * update available, "needs update" for a clone whose core page changed, pinned, "Updates itself; pin
+ * to hold" for an unpinned Marketplace install (publish contract D1), revoked), "Use
  * this theme" for every member, and the manage actions (default, update, rollback, uninstall)
  * only for `workspace:manage`. The server refuses what the caller may not do; this decides which
  * buttons to show.
@@ -29,11 +30,14 @@ import {
   SIGNED_BY_AUTOMATOS,
   UNREVIEWED_NOT_DEFAULT,
   UPDATE_AVAILABLE,
+  UPDATES_ITSELF,
+  UPDATES_ITSELF_HINT,
   canBeDefault,
   isDisabled,
   isPrivateNotReviewed,
   isSignedByAutomatos,
   themeName,
+  updatesItself,
 } from './theme-labels'
 
 export const USE_THEME = 'Use this theme'
@@ -59,6 +63,11 @@ function RowBadges({ install }: { install: InstalledTheme }) {
         </Badge>
       )}
       {install.pinnedVersion && <Badge variant="outline">Pinned to {install.pinnedVersion}</Badge>}
+      {updatesItself(install) && (
+        <Badge variant="outline" title={UPDATES_ITSELF_HINT} data-testid="theme-updates-itself">
+          {UPDATES_ITSELF}
+        </Badge>
+      )}
     </div>
   )
 }

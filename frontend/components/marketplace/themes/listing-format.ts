@@ -23,7 +23,12 @@ export const NOT_COMPATIBLE = 'Needs a newer Automatos'
 export const NOT_COMPATIBLE_HINT = 'No version of this theme runs on this Automatos yet.'
 export const OWN_UPLOAD_NOTE =
   'This workspace runs its own upload of this theme. Uninstall it below to add the Marketplace version.'
-export const UPDATE_NOTE = 'A newer version is listed: review it under "Installed in this workspace".'
+/**
+ * A listing install with a newer version waiting: it is pinned, it was added at an older version, or the
+ * server could not move it (an unpinned install otherwise updates itself, services/themes/auto_update.py).
+ */
+export const UPDATE_NOTE =
+  'A newer version is listed and this install has not moved to it: review it under "Installed in this workspace".'
 export const MANAGERS_ADD = 'A workspace owner or admin adds themes to this workspace.'
 export const NO_LISTINGS = 'No themes are listed in the Marketplace yet.'
 export const NO_MATCHES = 'No theme matches your search.'
