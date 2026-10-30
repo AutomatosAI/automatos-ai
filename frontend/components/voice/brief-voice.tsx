@@ -6,7 +6,7 @@
  * Core draws all of it, so no theme ever speaks or plays audio itself: Listen reads the brief's `spoken` text (the
  * greeting and the numbered row titles) in Auto's server voice, with the browser's speech for the rest once the server
  * refuses (use-brief-voice.ts), and Stop stops it. Nothing plays until Listen is pressed, whatever a page or a theme
- * does: there is no autoplay prop. While the tab's voice session runs (a hold or a call, voice-provider.tsx) Listen is
+ * does: no prop makes it play on mount. While the tab's voice session runs (a hold or a call, voice-provider.tsx) Listen is
  * held, and a session starting stops a reading. Listen, and while Auto reads the "AI voice assistant" caption and
  * Stop, sit in the protected surface `brief-voice` (the inline !important guard, and the server's CSS scope check
  * refusing any theme selector that names a protected surface), so no theme hides how to stop it by name.
