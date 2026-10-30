@@ -4,8 +4,14 @@
   its ``pending_package_id``, set when a higher version is uploaded or listed), keeps the
   old one as ``previous_package_id`` and keeps every member's looks (they are keyed by
   theme, not package). A private package is a new opt-in by construction: opt-ins are
-  keyed by package. A pinned install (A-07e) refuses any other version.
+  keyed by package. A pinned install (A-07e) refuses any other version. A person applies
+  it through ``POST /api/themes/installs/{id}/update``; the platform applies it itself to an
+  unpinned listing install when a newer Marketplace version is approved
+  (``auto_update.apply_listed_update``, publish contract D1). The install keeps its id.
 * ``rollback`` swaps the current and previous packages.
+* ``move_back {packageId}`` moves the install to an OLDER package of the same theme without making
+  the one it leaves the rollback target: the platform's step back when the version an install runs
+  is taken off the Marketplace (``auto_update.roll_back_installs``). The same refusals hold.
 * ``uninstall`` is soft (``uninstalled_at``), keeps looks, and drops the members' choices
   of it so they see the workspace default.
 * ``compare`` lists the changed files from the two ``file_manifest``s and the scan diff.
@@ -50,6 +56,7 @@ CLOSED_STATUSES = ("rejected", "deactivated")
 OTHER_THEME = "That package is a different theme."
 SAME_VERSION = "The install already runs that version."
 NOT_NEWER = "That version is not newer than the one installed. Use rollback to go back to the previous version."
+NOT_OLDER = "That version is not older than the one installed. Use update to move forward."
 NOT_APPROVED = "That Marketplace version isn't approved yet."
 CLOSED = "That version was rejected or withdrawn."
 NO_PREVIOUS = "There is no earlier version to go back to."
@@ -183,6 +190,25 @@ def apply_update(db: Session, workspace_id: UUID, install_id: UUID, package_id: 
     install.package_id = target.id
     if install.pending_package_id == target.id:
         install.pending_package_id = None
+    db.flush()
+    return install
+
+
+def move_back(db: Session, workspace_id: UUID, install_id: UUID, package_id: UUID) -> ThemeInstallation:
+    """Move the install to an older package; the one it leaves (a version taken off the Marketplace)
+    never becomes the rollback target. ``previous_package_id`` stays, unless it is the package moved
+    to, which clears it; the waiting update stays too. Pin, default and withdrawn code refuse as for
+    an update."""
+    install = active_install(db, workspace_id, install_id)
+    target = _target(db, workspace_id, install, package_id)
+    current = visible_package(db, workspace_id, install.package_id)
+    if version_key(target.version) >= version_key(current.version):
+        raise ThemeInstallError(CONFLICT, NOT_OLDER)
+    _refuse_unusable(target)
+    _check_switch(db, install, target)
+    if install.previous_package_id == target.id:
+        install.previous_package_id = None
+    install.package_id = target.id
     db.flush()
     return install
 
