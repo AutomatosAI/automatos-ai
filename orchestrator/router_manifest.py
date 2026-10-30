@@ -124,6 +124,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-270 US-270-07a -- the public Marketplace reads a visitor browses
     # (GET /api/public/marketplace/{type}): display fields only, rate-limited per IP, 404 locally.
     RouterSpec("api.public_marketplace"),
+    # PRD-270 US-270-03b -- Sync with Automatos Cloud (POST /api/marketplace/cloud-sync) and its
+    # status (GET .../status): local edition only (404 hosted), workspace owners and admins.
+    RouterSpec("api.marketplace_cloud_sync"),
 )
 
 

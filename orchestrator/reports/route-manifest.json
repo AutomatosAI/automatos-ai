@@ -1,5 +1,5 @@
 {
-  "route_count": 998,
+  "route_count": 1000,
   "routes": [
     {
       "method": "GET",
@@ -1700,6 +1700,14 @@
     {
       "method": "GET",
       "path": "/api/marketplace/catalog/files/{digest}/{path:path}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/cloud-sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/status"
     },
     {
       "method": "GET",
