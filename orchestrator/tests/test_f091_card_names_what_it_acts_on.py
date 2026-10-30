@@ -72,7 +72,8 @@ def test_a_scheduled_task_id_is_looked_up_as_a_scheduled_task(db):
     """platform_cancel_scheduled_task's task_id is a schedule, not a ticket."""
     ws = str(uuid4())
     db.execute(text("DROP TABLE IF EXISTS pg_temp.agent_scheduled_tasks"))
-    db.execute(text("CREATE TEMP TABLE agent_scheduled_tasks (id int, workspace_id uuid, description text)"))
+    db.execute(text("CREATE TEMP TABLE agent_scheduled_tasks (id int, workspace_id uuid, description text, "
+                    "deliver_as varchar(20) NOT NULL DEFAULT 'chat')"))
     db.execute(text("INSERT INTO agent_scheduled_tasks VALUES (41, CAST(:ws AS uuid), 'Weekly roast-day reminder')"),
                {"ws": ws})
     found, missing = resolve_targets(db, ws, {"task_id": 41}, "platform_cancel_scheduled_task")
