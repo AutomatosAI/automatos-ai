@@ -50,14 +50,14 @@ export const SCROLL_ON = 'Scroll the themes on'
 
 export const MAKE_YOUR_OWN = 'Make your own theme'
 export const MAKE_YOUR_OWN_BODY =
-  'Design it with the Automatos Design Kit. Your theme installs in your workspace straight away; submit it here and, once reviewed, every workspace can install it.'
+  'Design it with the Automatos Design Kit, for the web and for Automatos Go. Submit it here and, once reviewed, every workspace can install it.'
 export const OPEN_DESIGN_KIT = 'Open the Design Kit'
 export const DESIGN_KIT_URL = 'https://github.com/AutomatosAI/automatos-design-kit'
 export const SUBMIT_PACKAGE = 'Submit a theme package for review'
 
 export const EMPTY_TITLE = 'Be the first theme on the shelf'
 export const EMPTY_BODY =
-  'Design a theme with the Automatos Design Kit for the web and for Automatos Go, install it in your workspace, and submit it here: once reviewed, every workspace can install it.'
+  'Design a theme with the Automatos Design Kit for the web and for Automatos Go, then submit it here: once reviewed, every workspace can install it.'
 
 export const VIEW = 'View'
 
