@@ -59,7 +59,7 @@ Who can do what:
 
 **A theme you added from the Marketplace updates itself.** When a newer version of it is approved, the install moves
 to that version, keeping its looks, its members' choices and its place as the default. Its row shows **Updates itself;
-pin to hold**. To keep the version you have, [pin it](#pin-a-version). If a version you moved to is taken off the
+pin to hold**. To keep the version you have, [pin it](#pin-a-version). If the version it runs is taken off the
 Marketplace, the install goes back to the newest listed version below it (see [Withdrawn themes](#withdrawn-themes)).
 
 Everything else waits as an update until an owner or admin applies it:
