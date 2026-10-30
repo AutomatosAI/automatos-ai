@@ -1624,6 +1624,16 @@ class Config:
     THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
     THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
+    # The theme publish key (POST /api/marketplace/themes/publish, services/themes/publish_key.py): the
+    # Design Kit's publish job lists, approves and signs a version with it. Core holds only the key's
+    # sha256 in lower-case hex (two, comma-separated, while a rotation runs), never the key; the
+    # publishers it may publish under (comma-separated); and the users.id it acts as, a service user
+    # (scripts/theme_publish_actor.py). Any of the three unset: the route answers 503. And the versions
+    # it may publish in a rolling 24 hours (more is 429).
+    THEME_PUBLISH_KEY_SHA256: str = (os.getenv("THEME_PUBLISH_KEY_SHA256", "") or "").strip()
+    THEME_PUBLISH_PUBLISHERS: str = (os.getenv("THEME_PUBLISH_PUBLISHERS", "") or "").strip()
+    THEME_PUBLISH_ACTOR: str = (os.getenv("THEME_PUBLISH_ACTOR", "") or "").strip()
+    THEME_PUBLISH_PER_DAY: int = int(os.getenv("THEME_PUBLISH_PER_DAY", "10"))
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)

@@ -14,7 +14,8 @@ Rules, in the order they are checked:
   :class:`PublisherTaken` (409);
 * Q9, one open submission per author, is the flag ``THEMES_ONE_OPEN_SUBMISSION`` in
   ``config.py`` (on by default, so one author can't queue many paid review stages): when on, an author with a pending
-  submission of other bytes gets a :class:`SubmissionConflict`;
+  submission of other bytes gets a :class:`SubmissionConflict`. It never applies to the theme publish
+  key's service user (``Submitter.one_open_rule`` False), which has its own daily quota;
 * a version the Marketplace already holds with other files, or one not higher than the
   theme's highest submitted version, is a :class:`SubmissionConflict`.
 
@@ -84,10 +85,12 @@ class SavedSubmission(NamedTuple):
 
 
 class Submitter(NamedTuple):
-    """Who submits: their ``users.id`` (None for the local operator) and whether they are a platform admin."""
+    """Who submits: their ``users.id`` (None for the local operator), whether they are a platform admin, and
+    whether Q9 applies to them (False only for the theme publish key's service user, ``publish.py``)."""
 
     user_pk: Optional[int]
     is_admin: bool
+    one_open_rule: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +168,14 @@ def _check_publisher(row: Optional[ThemePublisher], publisher: str, submitter: S
         )
 
 
+def check_publisher(db: Session, publisher: str, submitter: Submitter) -> None:
+    """Raise unless ``submitter`` may submit under ``publisher``; read-only (``claim_publisher`` locks and records it).
+
+    Raises :class:`PublisherReserved` or :class:`PublisherTaken`.
+    """
+    _check_publisher(_publisher_row(db, publisher, lock=False), publisher, submitter)
+
+
 def claim_publisher(db: Session, publisher: str, submitter: Submitter) -> None:
     """Check the caller may submit under ``publisher`` (row locked), recording it for its first submitter.
 
@@ -180,7 +191,7 @@ def claim_publisher(db: Session, publisher: str, submitter: Submitter) -> None:
 
 
 def _check_open_submission(db: Session, submitter: Submitter) -> None:
-    if not one_open_submission():
+    if not submitter.one_open_rule or not one_open_submission():
         return
     open_row = _open_submission(db, submitter.user_pk)
     if open_row is not None:
@@ -212,8 +223,7 @@ def check_submission(db: Session, manifest: Mapping[str, Any], digest: str, subm
     These exact bytes submitted already pass when the caller may submit under their publisher.
     Raises :class:`PublisherReserved` or :class:`SubmissionConflict`.
     """
-    publisher = publisher_of(manifest["id"])
-    _check_publisher(_publisher_row(db, publisher, lock=False), publisher, submitter)
+    check_publisher(db, publisher_of(manifest["id"]), submitter)
     if submission_by_digest(db, digest) is not None:
         return
     _check_open_submission(db, submitter)
@@ -273,13 +283,15 @@ def _commit_after_store(db: Session, store: Callable[[], None]) -> None:
 
 def save_submission(
     db: Session, checked: CheckedThemePackage, submitter: Submitter, prefix: str,
-    report: Dict[str, Any], store: Callable[[], None],
+    report: Dict[str, Any], store: Optional[Callable[[], None]],
 ) -> SavedSubmission:
     """Store a checked package as a pending Marketplace submission with its stage verdict.
 
     ``store`` writes the files once the rows are flushed (a concurrent duplicate is already
-    refused by the unique indexes) and before the commit. Raises :class:`PublisherReserved`
-    or :class:`SubmissionConflict`; the caller rolls back.
+    refused by the unique indexes) and before the commit. ``store`` None (the theme publish
+    endpoint, ``publish.py``): the rows are flushed and nothing is committed; the caller writes the
+    files and commits once its own writes in the same transaction have passed, or rolls back. Raises
+    :class:`PublisherReserved` or :class:`SubmissionConflict`; the caller rolls back.
     """
     existing = submission_by_digest(db, checked.digest)
     if existing is not None:
@@ -293,6 +305,7 @@ def save_submission(
     db.flush()
     db.add_all(_events(row, submitter.user_pk))
     db.flush()
-    _commit_after_store(db, store)
+    if store is not None:
+        _commit_after_store(db, store)
     db.refresh(row)
     return SavedSubmission(row, created=True)
