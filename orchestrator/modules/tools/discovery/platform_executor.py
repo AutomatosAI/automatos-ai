@@ -222,6 +222,8 @@ from modules.tools.discovery.ask_orchestrator_binding import (  # P229-RVW-2, mo
 from modules.tools.discovery.handlers_brief import carries_the_brief_caller, get_brief  # PRD-268 US-C19d
 from modules.tools.discovery.handlers_follow_ups import cancel_follow_up, list_follow_ups, schedule_follow_up  # US-C11c
 from modules.tools.discovery.follow_up_context import carries_the_follow_up  # PRD-268 US-C11c
+from modules.tools.discovery.handlers_replies import offer_replies  # PRD-268 US-C12a
+from services.board_consent import OPERATOR_CONSENT_ACTIONS  # PRD-234 D16, moved (K3)
 from modules.tools.discovery.super_admin_caller import caller_is_super_admin as _caller_is_super_admin  # moved (K3)
 from modules.tools.discovery.handlers_missions import (
     create_mission,
@@ -370,19 +372,6 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
     "platform_my_actions", "platform_browse_memories", "platform_delete_memory", "platform_search_chat_history",  # N14-3/4, N15-4: the asker's chats, clicks, rules
     "platform_get_task",   # N17-6 (F445): the card's send-backs, on the owner's own turn only
-)
-
-
-# PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
-# driving human so the local edition can record consent before dispatch.
-# platform_schedule_task joins them (calendar): a scheduled board ticket is
-# filed at fire time, and the operator who scheduled it is that consent.
-OPERATOR_CONSENT_ACTIONS = (
-    "platform_create_task",
-    "platform_assign_task",
-    "platform_update_task",
-    "platform_update_task_status",
-    "platform_schedule_task",
 )
 
 
@@ -1370,6 +1359,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_schedule_follow_up": schedule_follow_up,  # PRD-268 US-C11c: Auto keeps its word, chat only
     "platform_list_follow_ups": list_follow_ups,  # PRD-268 US-C11c
     "platform_cancel_follow_up": cancel_follow_up,  # PRD-268 US-C11c
+    "platform_offer_replies": offer_replies,  # PRD-268 US-C12a: reply chips, chat only
     # PRD-163 S1: mission lifecycle control
     "platform_approve_mission": approve_mission,
     "platform_reject_mission": reject_mission,

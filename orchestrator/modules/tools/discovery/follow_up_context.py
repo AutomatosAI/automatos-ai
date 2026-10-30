@@ -11,6 +11,9 @@ server-built ``caller_context`` (``consumers.chatbot.service.build_tool_caller_c
 * ``chat_id``: the turn's ``conversation_id``, the chat the follow-up comes back to;
 * ``locale``: the turn's language when the context names one (else English).
 
+PRD-268 US-C12a: ``platform_offer_replies``, the fourth chat-only tool, gets the same facts
+(``CHAT_FACT_ACTIONS``) and reads only the language its refusals are written in.
+
 With the executor's server-minted ``_agent_id`` (``exec_platform``) that is everything the
 handlers trust: a chat id or user id the model sends is a parameter they never read, so a
 follow-up can only be scheduled for the person whose turn it is, in their own chat
@@ -24,14 +27,17 @@ from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
 from core.security.driving_user import driving_user_id
 
 __all__ = [
-    "CANCEL_FOLLOW_UP", "FOLLOW_UP_ACTIONS", "FOLLOW_UP_PARAM", "LIST_FOLLOW_UPS", "SCHEDULE_FOLLOW_UP",
-    "carries_the_follow_up", "follow_up_caller", "follow_up_params",
+    "CANCEL_FOLLOW_UP", "CHAT_FACT_ACTIONS", "FOLLOW_UP_ACTIONS", "FOLLOW_UP_PARAM", "LIST_FOLLOW_UPS",
+    "OFFER_REPLIES", "SCHEDULE_FOLLOW_UP", "carries_the_follow_up", "follow_up_caller", "follow_up_params",
 ]
 
 SCHEDULE_FOLLOW_UP = "platform_schedule_follow_up"
 LIST_FOLLOW_UPS = "platform_list_follow_ups"
 CANCEL_FOLLOW_UP = "platform_cancel_follow_up"
 FOLLOW_UP_ACTIONS = frozenset({SCHEDULE_FOLLOW_UP, LIST_FOLLOW_UPS, CANCEL_FOLLOW_UP})
+# PRD-268 US-C12a: the reply chips get the chat's facts too (their refusals' language).
+OFFER_REPLIES = "platform_offer_replies"
+CHAT_FACT_ACTIONS = FOLLOW_UP_ACTIONS | {OFFER_REPLIES}
 # The server-side parameter that hands the tools their caller; never the model's.
 FOLLOW_UP_PARAM = "_follow_up"
 CONVERSATION_KEY = "conversation_id"
@@ -62,16 +68,17 @@ def follow_up_caller(caller_context: Any) -> Dict[str, Any]:
 
 
 def follow_up_params(action_name: str, params: Any, caller_context: Any) -> Any:
-    """``params`` without a caller-supplied ``_follow_up``; a follow-up tool gets the
-    server's, from ``caller_context``. Only these tools' params are read as JSON text here."""
+    """``params`` without a caller-supplied ``_follow_up``; a follow-up tool, and the reply
+    chips, get the server's, from ``caller_context``. Only these tools' params are read as
+    JSON text here."""
     from modules.tools.execution.params_text import params_object
 
-    if action_name in FOLLOW_UP_ACTIONS:
+    if action_name in CHAT_FACT_ACTIONS:
         params = params_object(params)
     if not isinstance(params, dict):
         return params
     kept = {key: value for key, value in params.items() if key != FOLLOW_UP_PARAM}
-    if action_name not in FOLLOW_UP_ACTIONS:
+    if action_name not in CHAT_FACT_ACTIONS:
         return kept
     return {**kept, FOLLOW_UP_PARAM: follow_up_caller(caller_context)}
 

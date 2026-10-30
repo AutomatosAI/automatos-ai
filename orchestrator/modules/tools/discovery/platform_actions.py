@@ -70,6 +70,7 @@ from .actions_my_actions import register_my_actions_action  # P256-FIX-N14-3 (F4
 from .actions_proactive import register_proactive_actions  # PRD-268 US-C03b: a check-in's one write
 from .actions_brief import register_brief_actions  # PRD-268 US-C19d: the person's brief, in any chat
 from .actions_follow_ups import register_follow_up_actions  # PRD-268 US-C11c: Auto's follow-ups, chat only
+from .actions_replies import register_replies_actions  # PRD-268 US-C12a: reply chips, chat only
 
 
 def _register_documents_actions(registry: ActionRegistry) -> None:
@@ -103,13 +104,14 @@ def _register_marketplace_actions(registry: ActionRegistry) -> None:
 
 def _register_asking_actions(registry: ActionRegistry) -> None:
     """A run reaching a person: asking the owner (PRD-225), asking Auto mid-run (PRD-229), a
-    check-in's suggestion (PRD-268 US-C03b), the person's brief (PRD-268 US-C19d), and Auto's
-    follow-ups (PRD-268 US-C11c)."""
+    check-in's suggestion (PRD-268 US-C03b), the person's brief (PRD-268 US-C19d), Auto's
+    follow-ups (PRD-268 US-C11c), and the answers Auto offers as taps (PRD-268 US-C12a)."""
     register_asks_actions(registry)
     register_clarify_actions(registry)
     register_proactive_actions(registry)
     register_brief_actions(registry)
     register_follow_up_actions(registry)
+    register_replies_actions(registry)
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
