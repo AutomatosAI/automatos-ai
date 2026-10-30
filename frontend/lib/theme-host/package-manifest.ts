@@ -9,6 +9,8 @@
  * the lists below must equal the server's. The host version is `hostVersion` in
  * shared-modules.json (PA-2), next to the SDK's; a theme's `engines` is checked against both.
  * M-01 (host 1.1.0): the optional `mobile` block is checked in `mobile-manifest.ts`, with its own lists.
+ * The storefront (30 Oct 2026): `phonePreviews` lists phone screenshots (`assets/previews/phone/*.png` or
+ * `*.jpg`), and it and `previews` hold up to MAX_PREVIEWS each.
  * Nothing here throws on bad input: every refusal is a ThemeError.
  */
 import { HTML_CLASS_PATTERN, THEME_HOST_VERSION } from './constants'
@@ -72,7 +74,8 @@ const REQUIRED_FIELDS: readonly string[] = [
   'schema', 'id', 'name', 'version', 'engines', 'base', 'htmlClass', 'minWidth', 'tone', 'slots',
 ]
 const OPTIONAL_FIELDS: readonly string[] = [
-  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'fonts', 'brand', 'look', 'mascot', 'mobile',
+  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'phonePreviews', 'fonts', 'brand', 'look',
+  'mascot', 'mobile',
 ]
 const ALL_FIELDS: readonly string[] = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]
 const ENGINE_FIELDS = ['automatos', 'sdk'] as const
@@ -95,6 +98,7 @@ const USES_PATTERN = /^[a-z][A-Za-z0-9.-]{0,63}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const STATE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 const PREVIEW_PATTERN = /^assets\/previews\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.png$/
+const PHONE_PREVIEW_PATTERN = /^assets\/previews\/phone\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|jpg)$/
 const FONT_PATTERN = /^assets\/fonts\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.woff2$/
 const WORDMARK_PATTERN = /^assets\/brand\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|webp)$/
 const X_ROUTE_PREFIX = '/x/'
@@ -108,6 +112,8 @@ export const MAX_NAV = 16
 const MAX_KEEP = 16
 const MAX_USES = 64
 const MAX_FILES_LISTED = 16
+/** The Marketplace storefront shows screenshots per look: web and phone lists hold this many each. */
+const MAX_PREVIEWS = 24
 const MAX_STATES = 32
 
 export interface ThemeNavEntry { readonly id: string; readonly label: string; readonly path: string }
@@ -136,6 +142,7 @@ export interface ThemePackageManifest {
   readonly uses?: readonly string[]
   readonly pricing?: string
   readonly previews?: readonly string[]
+  readonly phonePreviews?: readonly string[]
   readonly fonts?: readonly string[]
   readonly brand?: { readonly name?: string; readonly wordmark?: string }
   readonly look?: string
@@ -355,17 +362,18 @@ function mascotErrors(mascot: unknown): ThemeError[] {
   ]
 }
 
-function listedFileErrors(document: JsonRecord, field: string, pattern: RegExp, shape: string): ThemeError[] {
-  const listOk = !hasOwn(document, field) || isStringList(document[field], pattern, MAX_FILES_LISTED)
-  return errorIf(!listOk, 'BAD_ASSET_PATH', field, `"${field}" must list up to ${MAX_FILES_LISTED} different ${shape} files.`)
+function listedFileErrors(document: JsonRecord, field: string, pattern: RegExp, shape: string, most: number): ThemeError[] {
+  const listOk = !hasOwn(document, field) || isStringList(document[field], pattern, most)
+  return errorIf(!listOk, 'BAD_ASSET_PATH', field, `"${field}" must list up to ${most} different ${shape} files.`)
 }
 
 function extraErrors(document: JsonRecord): ThemeError[] {
   const usesOk = !hasOwn(document, 'uses') || isStringList(document.uses, USES_PATTERN, MAX_USES)
   const lookOk = !hasOwn(document, 'look') || matches(document.look, LOOK_ID_PATTERN)
   return [
-    ...listedFileErrors(document, 'previews', PREVIEW_PATTERN, 'assets/previews/*.png'),
-    ...listedFileErrors(document, 'fonts', FONT_PATTERN, 'assets/fonts/*.woff2'),
+    ...listedFileErrors(document, 'previews', PREVIEW_PATTERN, 'assets/previews/*.png', MAX_PREVIEWS),
+    ...listedFileErrors(document, 'phonePreviews', PHONE_PREVIEW_PATTERN, 'assets/previews/phone/*.png or *.jpg', MAX_PREVIEWS),
+    ...listedFileErrors(document, 'fonts', FONT_PATTERN, 'assets/fonts/*.woff2', MAX_FILES_LISTED),
     ...errorIf(!usesOk, 'BAD_USES', 'uses', `"uses" must list up to ${MAX_USES} different SDK area names.`),
     ...(hasOwn(document, 'pricing') ? textErrors(document.pricing, 'pricing', LABEL_MAX) : []),
     ...errorIf(!lookOk, 'BAD_LOOK_ID', 'look', '"look" must be the id of one of the theme\'s presets.'),
