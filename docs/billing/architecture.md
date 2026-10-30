@@ -58,6 +58,15 @@ Migrations: `prd265_credit_ledger` (W1), `prd265_billing` (W2, already applied i
 6. **Alerts** (`credits/alerts.py`): "running low" at `CREDITS_ALERT_LOW_SHARE` (20%) of the allowance, and "run out" at zero. Each fires once per crossing, through `NotificationDispatcher`.
 7. **The trial** (`credits/trial.py`): 500 credits once per person (keyed on the owner), behind the `TRIAL_ENABLED` kill switch and the `TRIAL_GLOBAL_DAILY_CREDITS` cap.
 8. **Overhead** (`meter.record_overhead`) is rolled up nightly at 03:15 UTC, for margin review.
+9. **Voice (D-6, 30 Oct), charged like chat:**
+   - **Spoken answers:** a spoken turn is a chat turn (`consumers/chatbot/service.py`, the `chat` lane), so its model calls are metered as above.
+   - **Auto Live calls** (`modules/voice/live_billing.py`):
+     - On `call_ended`, `call_events.apply_call_event` charges the call in the same transaction as its `voice_calls` row. The source is `voice_live_call`, keyed on the call id, and it shows as "Auto Live call".
+     - The amount is `credits_for(Retell's call_cost.combined_cost)`. An event with no cost is charged by its minutes at `VOICE_LIVE_ESTIMATE_USD_PER_MINUTE`, with a warning.
+     - The balance alerts run after the commit.
+     - The mint (`mint.require_voice_live_plan`) refuses 402 `credits_exhausted` when `has_credits` is false.
+     - The `voice` family is on in every default tier, so the plan gate only bites when a tier table turns it off.
+   - **Server voice** (`api/voice_speech.py`) is free by decision. `speech.record_usage` is where a charge would go.
 
 ## How Stripe moves plans and credits (W2)
 
@@ -144,13 +153,14 @@ Everything is set in `orchestrator/config.py` and overridable by environment var
 
 - **Stripe:** `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_VERSION`, `STRIPE_PRICE_BASIC/PRO/BUSINESS/TOPUP`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_TOLERANCE_SECONDS`, `STRIPE_TIMEOUT_SECONDS`.
 - **Billing:** `BILLING_OPEN`, `BILLING_WITHDRAWAL_CONSENT_TEXT`, `BILLING_MONTHLY_EXPIRY_GRACE_HOURS`, `BUSINESS_OFFER_DAYS`, `BILLING_FREE_OWNER_EMAILS`.
+- **Voice:** `VOICE_LIVE_ESTIMATE_USD_PER_MINUTE`, used only for an Auto Live event that carries no cost.
 - **Credits and the trial:** `CREDITS_MARKUP`, `CREDITS_METER_INTERVAL_SECONDS`, `CREDITS_ALERT_LOW_SHARE`, `TOPUP_CREDITS` / `TOPUP_PRICE_USD` / `TOPUP_VALID_DAYS`, `TRIAL_ENABLED`, `TRIAL_CREDITS`, `TRIAL_GLOBAL_DAILY_CREDITS`.
 - **Plans:** `AUTOMATOS_PLAN_TIERS_JSON` overrides the tier numbers. Each name must also be listed in `orchestrator/reports/config-surface.json`.
 
 ## Tests
 
 - **Real Postgres:** `test_prd265_credit_ledger_realdb.py`, `test_prd265_asks_realdb.py`, `test_prd265_free_owners_realdb.py` (a free owner with no credits is never charged or paused), and `test_prd265_w2_billing_realdb.py`. The last drives whole Stripe events through to the ledger: renewals, upgrades, top-ups, refunds, disputes, ended plans, retries and the sweep.
-- **Unit and route:** `test_prd265_*.py` and `test_prd265_w2_*.py`. They cover the client, signatures, the translator in both API shapes, checkout params, management calls, service rules, every route's auth and edition, the setup script against a fake Stripe, and the proration share.
+- **Unit and route:** `test_prd265_*.py` and `test_prd265_w2_*.py` (`test_prd265_voice_live_credits.py`: Auto Live charging; `test_prd266_voice_mint.py`: the credit refusal at the mint). They cover the client, signatures, the translator in both API shapes, checkout params, management calls, service rules, every route's auth and edition, the setup script against a fake Stripe, and the proration share.
 - **Frontend:** `frontend/components/settings/billing/__tests__/`, `frontend/hooks/__tests__/use-billing-*.test.tsx`, `frontend/lib/__tests__/{stripe,stripe-csp,stripe-appearance,api-client-blob}.test.ts`. Stripe.js is mocked in `stripe-mocks.tsx`.
 
 ## Traps (each one cost a CI round)

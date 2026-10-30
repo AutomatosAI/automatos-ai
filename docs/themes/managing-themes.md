@@ -25,6 +25,7 @@ The following files were used as context for generating this page:
 - [orchestrator/api/themes_settings.py](../../orchestrator/api/themes_settings.py)
 - [orchestrator/services/themes/updates.py](../../orchestrator/services/themes/updates.py)
 - [orchestrator/services/themes/listing_updates.py](../../orchestrator/services/themes/listing_updates.py)
+- [orchestrator/services/themes/auto_update.py](../../orchestrator/services/themes/auto_update.py)
 - [orchestrator/services/themes/listings.py](../../orchestrator/services/themes/listings.py)
 - [orchestrator/services/themes/records.py](../../orchestrator/services/themes/records.py)
 - [orchestrator/services/themes/settings.py](../../orchestrator/services/themes/settings.py)
@@ -56,11 +57,16 @@ Who can do what:
 
 ## Updates
 
-An install never moves to a new version by itself. A new version waits as an update until an owner or admin applies
-it. Updates come from:
+**A theme you added from the Marketplace updates itself.** When a newer version of it is approved, the install moves
+to that version, keeping its looks, its members' choices and its place as the default. Its row shows **Updates itself;
+pin to hold**. To keep the version you have, [pin it](#pin-a-version). If the version it runs is taken off the
+Marketplace, the install goes back to the newest listed version below it (see [Withdrawn themes](#withdrawn-themes)).
 
-- **an upload** of a higher version of a theme you uploaded before;
-- **the Marketplace**, when a newer version of a theme you added from there is approved.
+Everything else waits as an update until an owner or admin applies it:
+
+- **an upload** of a higher version of a theme you uploaded before (an upload never moves by itself);
+- **a Marketplace version** for a pinned install, for an install added at an older version than the newest, or for one
+  the server could not move.
 
 The theme's row then shows **Update available** and the new version. To apply it:
 
@@ -96,15 +102,17 @@ If the theme moved on while the dialog was open, the dialog shows the server's s
 refreshes. Open **Review update** again to compare what is there now.
 
 When a version is taken off the Marketplace, its offer is replaced by the newest listed version newer than yours, or
-it goes.
+it goes. An install that runs the version taken off goes back to the newest listed version below it, unless it is
+pinned.
 
 ## Pin a version
 
 **Pinned versions**, under the settings, lists each install with **Not pinned** and the versions it can be pinned to:
-its current one, its waiting update and its previous one. "A pinned theme stays on that version until it is
-unpinned."
+its current one, its waiting update and its previous one. "Marketplace themes update themselves to each new version.
+A pinned theme stays on that version until it is unpinned."
 
-- A pinned install shows **Pinned to** *version* on its row.
+- A pinned install shows **Pinned to** *version* on its row, in place of **Updates itself; pin to hold**.
+- A new Marketplace version waits as **Update available**; the server never moves a pinned install by itself.
 - It refuses any update or roll back to another version.
 - Pinning follows **Who may install themes**.
 
@@ -151,6 +159,10 @@ A theme version, or a range of versions, can be withdrawn. Two levels:
 |---|---|
 | **Warning** | The theme still runs, with the notice "This theme is still running, but its maintainer withdrew this version." and the reason. The reason also shows on its row and on its Marketplace card. |
 | **Turned off** | The theme doesn't run. Members on it see its base (Studio or Classic) and the notice "This theme was withdrawn, so it is turned off for now." with the reason. Its **Use this theme** is greyed, the Appearance menu and ⌘K leave it out, it can't be the default, no update or roll back can move to it, and the Marketplace stops listing that version. |
+
+When a Marketplace version is taken off the Marketplace (deactivated), an install of it that is not pinned goes back to
+the newest listed version below it that your Automatos runs, and keeps working. A pinned install, or any install when no
+earlier version is listed, stays on it, turned off as above.
 
 - A version whose stored signature no longer checks out is turned off the same way, with the reason "This theme's
   signature doesn't check out." It comes back once the version is signed again.

@@ -17,10 +17,22 @@ import { themeErrorMessage } from '@/lib/theme-host/api'
 
 import { useChooseInstall } from './choose-install'
 import { InstalledRow } from './installed-row'
+import type { InstalledRowDecoration } from './installed-row'
 import { MEMBERS_SEE_ONLY, NO_INSTALLS } from './theme-labels'
 import { UpdateCompare } from './update-compare'
 
-export function InstalledList({ canManage }: { canManage: boolean }) {
+const STACKED_ROWS = 'space-y-2'
+const UNDECORATED: InstalledRowDecoration = {}
+
+interface InstalledListProps {
+  readonly canManage: boolean
+  /** Per row, the Marketplace storefront's thumbnail and notice (installed-row.tsx); Settings passes none. */
+  readonly decorate?: (install: InstalledTheme) => InstalledRowDecoration
+  /** The rows' layout; stacked unless the caller lays them out (the storefront's grid). */
+  readonly listClassName?: string
+}
+
+export function InstalledList({ canManage, decorate, listClassName = STACKED_ROWS }: InstalledListProps) {
   const installed = useInstalledThemes()
   const active = useActiveThemeChoice()
   const { chooseInstall, choosing } = useChooseInstall()
@@ -35,10 +47,11 @@ export function InstalledList({ canManage }: { canManage: boolean }) {
       {installs.length === 0 ? (
         <p className="text-sm text-muted-foreground">{NO_INSTALLS}</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className={listClassName}>
           {installs.map((install) => (
             <InstalledRow
               key={install.installId}
+              {...(decorate ? decorate(install) : UNDECORATED)}
               install={install}
               canManage={canManage}
               inUse={active.data === install.installId}

@@ -156,6 +156,7 @@ def _call_row(status: str, started_at=None) -> SimpleNamespace:
     return SimpleNamespace(
         status=status, started_at=started_at, ended_at=None,
         duration_seconds=None, disconnect_reason=None, vendor_latency=None,
+        workspace_id=None,  # call_ended charges the call's workspace (PRD-265 D-6); none here
     )
 
 

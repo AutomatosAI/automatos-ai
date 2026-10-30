@@ -4,10 +4,14 @@
 context and the session overridden; Retell answered by a recorded body from
 ``fixtures/voice/``, read by the real ``create_web_call``):
 
-* SaaS: a plan without ``families.voice`` (Basic, Pro, no plan, an unknown plan) is
-  403 ``{"code": "voice_live_plan_required", "message": "Auto Live is on the Business
-  plan"}`` before Retell is asked; Business mints; enterprise declares no families and is
-  unrestricted. The local edition is never plan-gated. The gate is a route dependency.
+* SaaS: every default tier has ``families.voice`` since PRD-265 D-6, so Own keys, Pro,
+  Business, no plan and an unknown plan (the entry tier) all mint; enterprise declares no
+  families and is unrestricted. A tier table that turns voice off is 403 ``{"code":
+  "voice_live_plan_required", "message": "Auto Live isn't on this workspace's plan"}``
+  before Retell is asked. The local edition is never plan-gated. The gate is a route
+  dependency.
+* PRD-265 D-6: a call is paid by the minute from credits, so a workspace with none left is
+  402 ``credits_exhausted`` before Retell is asked (``live_billing.has_credits``).
 * The answer carries Retell's ``transport``, ``url``, ``ice_servers`` and ``expires_at``
   when Retell sends them, nothing else of Retell's body, and omits the ones it does not
   send (the v2 call object carries none); a field of another type is dropped.
@@ -43,7 +47,7 @@ from core.auth.dependencies import RequestContext
 from core.models.core import Chat
 from core.models.voice_calls import VoiceCall
 from core.models.workspaces import Workspace
-from modules.voice import live_settings, mint, retell_api, voice_meter
+from modules.voice import live_billing, live_settings, mint, retell_api, voice_meter
 from modules.voice.live_settings import RetellCredentials
 from modules.voice.voice_meter import MeterReading
 from services import plan_tiers
@@ -56,8 +60,9 @@ CALL_OBJECT_FIXTURE = "retell_create_web_call_call_object.json"
 TRANSPORT_FIELDS = ("transport", "url", "ice_servers", "expires_at")
 MINT = "/api/voice/web-call"
 PLAN_REFUSAL = {
-    "detail": {"code": "voice_live_plan_required", "message": "Auto Live is on the Business plan"}
+    "detail": {"code": "voice_live_plan_required", "message": "Auto Live isn't on this workspace's plan"}
 }
+CREDITS_REFUSAL = {"detail": {"code": "credits_exhausted", "message": live_billing.CREDITS_REFUSAL_MESSAGE}}
 WS = uuid.UUID("6a0f3c1e-2b4d-4e8f-9a1b-266008a00001")
 VOICE_THREAD = uuid.UUID("6a0f3c1e-2b4d-4e8f-9a1b-266008a0c4a7")
 DEVICE_ID = uuid.UUID("6a0f3c1e-2b4d-4e8f-9a1b-266008a0d001")
@@ -89,8 +94,9 @@ def local(monkeypatch):
 
 @pytest.fixture
 def armed(monkeypatch):
-    """Auto Live on, Retell's three credentials present, nothing used this month."""
+    """Auto Live on, Retell's three credentials present, nothing used this month, credits left."""
     monkeypatch.setattr(live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(live_billing, "has_credits", lambda db, workspace_id: True)
     monkeypatch.setattr(
         live_settings, "retell_credentials", lambda: RetellCredentials("key_fx", "sig_fx", "agent_fx")
     )
@@ -186,9 +192,13 @@ def _post(ctx, db) -> httpx.Response:
 # --------------------------------------------------------------------------- the plan (D34)
 
 
-@pytest.mark.parametrize("plan", ["basic", "pro", None, "no-such-tier"])
-def test_saas_without_the_voice_family_is_refused_with_the_code(saas, armed, vendor, plan):
-    db = _db(_workspace(plan))
+def test_saas_a_tier_without_the_voice_family_is_refused_with_the_code(saas, armed, vendor, monkeypatch):
+    import config as config_module
+
+    tiers = {name: dict(tier) for name, tier in config_module.PLAN_TIERS.items()}
+    tiers["pro"]["families"] = {**tiers["pro"]["families"], "voice": False}
+    monkeypatch.setattr(config_module, "PLAN_TIERS", tiers)
+    db = _db(_workspace("pro"))
 
     response = _post(_clerk_ctx(), db)
 
@@ -196,6 +206,34 @@ def test_saas_without_the_voice_family_is_refused_with_the_code(saas, armed, ven
     assert response.json() == PLAN_REFUSAL
     assert vendor["posted"] == []  # refused before Retell is asked
     assert _minted_rows(db) == []
+
+
+@pytest.mark.parametrize("plan", ["basic", "pro", None, "no-such-tier"])
+def test_saas_every_default_plan_may_call_paid_from_credits(saas, armed, vendor, plan):
+    response = _post(_clerk_ctx(), _db(_workspace(plan)))
+
+    assert response.status_code == 200, response.text
+
+
+def test_saas_a_workspace_with_no_credits_left_is_refused_before_retell_is_asked(saas, armed, vendor, monkeypatch):
+    monkeypatch.setattr(live_billing, "has_credits", lambda db, workspace_id: False)
+    db = _db(_workspace("pro"))
+
+    response = _post(_clerk_ctx(), db)
+
+    assert response.status_code == 402
+    assert response.json() == CREDITS_REFUSAL
+    assert vendor["posted"] == []
+    assert _minted_rows(db) == []
+
+
+def test_the_local_edition_never_asks_about_credits(local, armed, vendor, monkeypatch):
+    def no_credit_check(db, workspace_id):
+        raise AssertionError("the local edition is never charged")
+
+    monkeypatch.setattr(live_billing, "has_credits", no_credit_check)
+
+    assert _post(_local_operator_ctx(monkeypatch), _db(_workspace(None))).status_code == 200
 
 
 def test_saas_business_mints_with_retells_transport_fields(saas, armed, vendor):
@@ -237,8 +275,8 @@ def test_the_plan_gate_is_a_dependency_of_the_route():
 
 @pytest.mark.parametrize(
     "plan, expected",
-    [("basic", False), ("pro", False), ("business", True), ("enterprise", True), (None, False),
-     ("no-such-tier", False)],
+    [("basic", True), ("pro", True), ("business", True), ("enterprise", True), (None, True),
+     ("no-such-tier", True)],
 )
 def test_family_enabled_reads_the_exposure_rules(plan, expected):
     assert plan_tiers.family_enabled(plan, "voice", tiers=DEFAULT_TIERS) is expected

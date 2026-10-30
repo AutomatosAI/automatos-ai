@@ -30,7 +30,7 @@ Related:
 |---|---|---|---|---|
 | **Own keys** | $9/month | none | No, only while trial credits last | The same service as Pro (seats, agents, render minutes). The AI runs on the customer's own Anthropic, OpenAI or OpenRouter keys. |
 | **Pro** | $29/month | 2,000 | Yes | |
-| **Business** | $99/month | 8,000 | Yes | **By invite:** a platform admin offers it to one workspace. 25 seats, unlimited agents, voice. |
+| **Business** | $99/month | 8,000 | Yes | **By invite:** a platform admin offers it to one workspace. 25 seats, unlimited agents. |
 | **Enterprise** | Custom | n/a | Yes, on an allowance | "Coming soon". Not sold through Stripe, and its calls are recorded but never blocked. |
 | **Top-up** | $10 | +1,000 | n/a | One-off, valid for 12 months, sold only on a live Pro or Business plan. |
 
@@ -41,7 +41,11 @@ Related:
 
 **What is charged:**
 - Only calls on **Automatos's own AI keys** are charged.
-- These cost nothing: calls on the customer's own keys, free models (NVIDIA), Claude Code / CLI subscription sessions, and the local edition.
+- **Voice is charged like chat** (decision D-6, 30 Oct):
+  - A spoken answer costs what the same typed answer would.
+  - An **Auto Live** call is charged what Retell charges us for it, × the markup, when the call ends: roughly 11–19 credits a minute at Retell's list prices.
+  - Auto Live is on every plan. A workspace with no credits left can't start a call.
+- These cost nothing: calls on the customer's own keys, free models (NVIDIA), Claude Code / CLI subscription sessions, the local edition, our own server voice reading Auto's replies aloud, and the listening (the browser or phone does it).
 - **Our own workspaces never pay.** A workspace whose owner's email is in `BILLING_FREE_OWNER_EMAILS` runs on an allowance on any plan, like Enterprise: its calls are recorded, but never charged or paused.
 - Background platform work (routing, memory, retrieval, checks) is **absorbed**. We record it as overhead for margin review, but never charge the customer for it.
 

@@ -18,8 +18,9 @@ never in the queue and answers 404 here, exactly as a missing row does):
   say ``pass`` (the reproducible build is required, D3); the local edition never has the
   isolated stage, so there the person's approval is the review. Approval sets ``approved``
   and ``reviewed``, offers the version to the listing installs that run an older one
-  (``listing_updates.py``; an install never switches by itself) and records a signature
-  request (``signing.py``); it never signs;
+  (``listing_updates.py``), moves each of those that is not pinned to it
+  (``auto_update.apply_listed_update``, publish contract D1: an install it refuses keeps the
+  offer) and records a signature request (``signing.py``); it never signs;
 * **sign**: stores the signature the kit's sign workflow returned for the open request, only
   when an active Automatos signing key verifies it (``signature_verify``, C-05b); the report's
   ``signatureVerified`` and ``keyId`` are that check on the stored signature. In the local edition
@@ -29,7 +30,9 @@ never in the queue and answers 404 here, exactly as a missing row does):
   ``SigningKeysError``, which the router answers as a 503 with its plain message;
 * **reject** with a reason, for a pending version;
 * **deactivate** an approved version with a reason: status ``deactivated`` and a ``disable``
-  revocation of its digest, so every install falls back to its base on the next load.
+  revocation of its digest. Each unpinned listing install that runs it moves back to the newest
+  listed version below it (``auto_update.roll_back_installs``); any other install of it falls
+  back to its base on the next load.
 
 The Marketplace's auto-publish rule for agents (``api/marketplace.py:798-805``, five approved
 items make an author trusted) never applies to themes: nothing here, or anywhere else, moves a
@@ -49,6 +52,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.models.themes import THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signature_verify, signing
+from services.themes.auto_update import apply_listed_update, roll_back_installs
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
 from services.themes.listing_updates import offer_listed_update, withdraw_offers
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
@@ -303,7 +307,8 @@ def add_report_note(
 
 
 def approve(db: Session, package_id: UUID, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Approve a pending version that passed review, and record its signature request."""
+    """Approve a pending version that passed review, move the unpinned listing installs of an older
+    version to it (the rest keep the offer), and record its signature request."""
     package = queued_package(db, package_id, lock=True)
     note = latest_notes(db, [package.id]).get(package.id)
     refusal = approval_refusal(db, package, note)
@@ -311,11 +316,14 @@ def approve(db: Session, package_id: UUID, actor_pk: Optional[int]) -> Dict[str,
         raise ThemeReviewError(CONFLICT, refusal)
     signing.signing_payload(package)  # refuse before any write when the files can't be signed
     package.status, package.reviewed = STATUS_APPROVED, True
-    _record(db, package, EVENT_APPROVED, STATUS_PENDING, actor_pk,
-            detail={"scanVerdict": package.scan_verdict, "isolatedJob": _note_outcome(note)})
     offered = offer_listed_update(db, package)
+    applied = apply_listed_update(db, package)
+    _record(db, package, EVENT_APPROVED, STATUS_PENDING, actor_pk,
+            detail={"scanVerdict": package.scan_verdict, "isolatedJob": _note_outcome(note),
+                    "updatesOffered": offered, "updatesApplied": applied})
     request = signing.request_signature(db, package, actor_pk)
-    return {**package_summary(package), "signatureRequest": request, "updatesOffered": offered}
+    return {**package_summary(package), "signatureRequest": request, "updatesOffered": offered,
+            "updatesApplied": applied}
 
 
 def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
@@ -345,7 +353,9 @@ def _has_live_disable(db: Session, digest: str) -> bool:
 
 def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
     """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest (unless
-    a live ``local`` one stands) and withdraw the update offers its approval made (``withdraw_offers``).
+    a live ``local`` one stands), withdraw the update offers its approval made (``withdraw_offers``) and
+    move the unpinned listing installs that run it back to the previous listed version
+    (``roll_back_installs``; with none, they stay and fall back to their base on the next load).
     ``revocation_admin.lift_revocation`` refuses to lift the last live ``local`` disable of a
     deactivated version, so the deactivation can't be undone by lifting a revocation."""
     package = queued_package(db, package_id, lock=True)
@@ -357,9 +367,12 @@ def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[in
         db.add(ThemeRevocation(digest=package.digest, level=REVOKE_DISABLE, reason=text, created_by=actor_pk))
     db.flush()
     withdrawn = withdraw_offers(db, package)
+    rolled_back = roll_back_installs(db, package)
     _record(db, package, EVENT_DEACTIVATED, STATUS_APPROVED, actor_pk, reason=text,
-            detail={"revocation": REVOKE_DISABLE, "digest": package.digest, "offersWithdrawn": withdrawn})
-    return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE}
+            detail={"revocation": REVOKE_DISABLE, "digest": package.digest, "offersWithdrawn": withdrawn,
+                    "installsRolledBack": rolled_back})
+    return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE,
+            "installsRolledBack": rolled_back}
 
 
 def _signature_check(db: Session) -> signing.SignatureCheck:

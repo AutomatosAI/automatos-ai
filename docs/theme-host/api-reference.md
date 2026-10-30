@@ -285,6 +285,7 @@ same 404.
 | `GET /api/marketplace/themes` | member, marketplace on | none | `{listings: [<card>]}` |
 | `GET /api/marketplace/themes/{listingId}` | member, marketplace on | none | The card plus the detail |
 | `POST /api/marketplace/themes/submit` | member, marketplace on, step-up | Multipart `file` | 201, or 200 when these bytes were submitted already |
+| `POST /api/marketplace/themes/publish` | the theme publish key (`Authorization: Bearer`), marketplace on | Multipart `package`, `signature`, `review_summary` | 200 `published` or `unchanged`; see [The publish endpoint](publish-endpoint.md) |
 
 A card (`services/themes/listings.py`): `listingId`, `themeId`, `name`, `description`, `publisher: {name, official}`,
 `signature: {state, keyId}`, `version`, `packageId`, `compatible`, `uses`, `pricing` (the manifest's label, else
@@ -344,9 +345,9 @@ that is not a Marketplace submission answers 404, as a missing one does.
 | `GET /api/admin/themes/{packageId}/report` | platform admin | none | The summary plus `manifest`, `scanReport` (whole), `reportNote`, `approval`, `history`, `signatureRequest`, `signatureVerified`, `keyId` |
 | `GET /api/admin/themes/{packageId}/review-package` | platform admin | none | `{url, digest, expiresAt}`: a presigned link to the version's rebuilt package, for 15 minutes |
 | `POST /api/admin/themes/{packageId}/report-note` | platform admin, step-up | `{"summary": "<1 to 20000 characters>", "outcome": "pass" \| "fail"}` | The summary plus `reportNote` |
-| `POST /api/admin/themes/{packageId}/approve` | platform admin, step-up | none | The summary plus `signatureRequest` and `updatesOffered` |
+| `POST /api/admin/themes/{packageId}/approve` | platform admin, step-up | none | The summary plus `signatureRequest`, `updatesOffered` (installs offered it) and `updatesApplied` (the unpinned ones moved to it) |
 | `POST /api/admin/themes/{packageId}/reject` | platform admin | `{"reason": "<1 to 2000 characters>"}` | The summary plus `reason` |
-| `POST /api/admin/themes/{packageId}/deactivate` | platform admin, step-up | `{"reason": "<1 to 2000 characters>"}` | The summary plus `reason` and `revocation: "disable"` |
+| `POST /api/admin/themes/{packageId}/deactivate` | platform admin, step-up | `{"reason": "<1 to 2000 characters>"}` | The summary plus `reason`, `revocation: "disable"` and `installsRolledBack` (the unpinned installs moved back to the previous listed version) |
 | `POST /api/admin/themes/{packageId}/signature` | platform admin, step-up | `{"requestId": "<uuid>", "signature": "<base64>"}` | The summary plus `signature: {requestId, signature, algorithm, verified, keyId}` |
 
 A summary: `id`, `themeId`, `version`, `name`, `publisher`, `digest`, `status`, `reviewed`, `scanVerdict`,

@@ -10,8 +10,9 @@ import { THEME_FILES_PATH } from '@/lib/theme-host/constants'
 export const THEMES_TAB_VALUE = 'themes'
 export const THEMES_TAB_LABEL = 'Themes'
 
+/** The storefront's lede (the approved design, 30 Oct 2026). */
 export const THEMES_TAB_LEDE =
-  'Themes change how Automatos looks for you. A person at Automatos reviewed every version listed here.'
+  'Themes change how Automatos looks on the web and on your phone. Official themes are reviewed and signed by Automatos, and they update themselves.'
 export const ADD_TO_WORKSPACE = 'Add to my workspace'
 export const ADDING = 'Adding…'
 export const ADDED_TO_WORKSPACE = 'Added to this workspace. Each member chooses it for themselves.'
@@ -23,7 +24,12 @@ export const NOT_COMPATIBLE = 'Needs a newer Automatos'
 export const NOT_COMPATIBLE_HINT = 'No version of this theme runs on this Automatos yet.'
 export const OWN_UPLOAD_NOTE =
   'This workspace runs its own upload of this theme. Uninstall it below to add the Marketplace version.'
-export const UPDATE_NOTE = 'A newer version is listed: review it under "Installed in this workspace".'
+/**
+ * A listing install with a newer version waiting: it is pinned, it was added at an older version, or the
+ * server could not move it (an unpinned install otherwise updates itself, services/themes/auto_update.py).
+ */
+export const UPDATE_NOTE =
+  'A newer version is listed and this install has not moved to it: review it under "Installed in this workspace".'
 export const MANAGERS_ADD = 'A workspace owner or admin adds themes to this workspace.'
 export const NO_LISTINGS = 'No themes are listed in the Marketplace yet.'
 export const NO_MATCHES = 'No theme matches your search.'
@@ -34,11 +40,6 @@ export const MARKETPLACE_OFF_NOTE =
 export const MARKETPLACE_SWITCH_OFF = 'off'
 export const LOADING_LISTINGS = 'Loading themes…'
 export const LOADING_LISTING = 'Loading the theme…'
-
-/** The publisher's name as the card shows it. */
-export function publisherLabel(listing: Pick<ThemeListing, 'publisher'>): string {
-  return listing.publisher.name
-}
 
 export function listingName(listing: Pick<ThemeListing, 'name' | 'themeId'>): string {
   return listing.name || listing.themeId

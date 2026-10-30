@@ -45,7 +45,7 @@ def test_plan_card_basic_is_self_serve_and_not_platform_ai():
     assert card == {
         "key": "basic", "name": "Own keys", "price_usd": 9, "monthly_credits": 0,
         "platform_ai": False, "self_serve": True, "coming_soon": False,
-        "seats": 5, "max_agents": 20, "render_minutes_month": 60, "voice": False,
+        "seats": 5, "max_agents": 20, "render_minutes_month": 60, "voice": True,
     }
 
 

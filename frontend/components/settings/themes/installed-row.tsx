@@ -2,7 +2,8 @@
 
 /**
  * PRD-261 A-07d — one installed theme: its badges (PRD §5: "Private · not reviewed", default,
- * update available, "needs update" for a clone whose core page changed, pinned, revoked), "Use
+ * update available, "needs update" for a clone whose core page changed, pinned, "Updates itself; pin
+ * to hold" for an unpinned Marketplace install (publish contract D1), revoked), "Use
  * this theme" for every member, and the manage actions (default, update, rollback, uninstall)
  * only for `workspace:manage`. The server refuses what the caller may not do; this decides which
  * buttons to show.
@@ -14,6 +15,7 @@
  * When it is off, its reason is written beside it, not only in its hover title.
  */
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,11 +31,14 @@ import {
   SIGNED_BY_AUTOMATOS,
   UNREVIEWED_NOT_DEFAULT,
   UPDATE_AVAILABLE,
+  UPDATES_ITSELF,
+  UPDATES_ITSELF_HINT,
   canBeDefault,
   isDisabled,
   isPrivateNotReviewed,
   isSignedByAutomatos,
   themeName,
+  updatesItself,
 } from './theme-labels'
 
 export const USE_THEME = 'Use this theme'
@@ -59,6 +64,11 @@ function RowBadges({ install }: { install: InstalledTheme }) {
         </Badge>
       )}
       {install.pinnedVersion && <Badge variant="outline">Pinned to {install.pinnedVersion}</Badge>}
+      {updatesItself(install) && (
+        <Badge variant="outline" title={UPDATES_ITSELF_HINT} data-testid="theme-updates-itself">
+          {UPDATES_ITSELF}
+        </Badge>
+      )}
     </div>
   )
 }
@@ -124,7 +134,16 @@ function ManageActions({ install, onReviewUpdate }: { install: InstalledTheme; o
   )
 }
 
-interface InstalledRowProps {
+/**
+ * What the Marketplace's Themes storefront adds to a row: a thumbnail before the name, and a notice
+ * under the badges ("Official x.y.z is listed" with its View). Settings passes neither.
+ */
+export interface InstalledRowDecoration {
+  readonly leading?: ReactNode
+  readonly extra?: ReactNode
+}
+
+interface InstalledRowProps extends InstalledRowDecoration {
   readonly install: InstalledTheme
   readonly canManage: boolean
   /** The member's current choice is this install. */
@@ -134,17 +153,22 @@ interface InstalledRowProps {
   readonly onReviewUpdate: (install: InstalledTheme) => void
 }
 
-export function InstalledRow({ install, canManage, inUse, choosing, onUse, onReviewUpdate }: InstalledRowProps) {
+export function InstalledRow(props: InstalledRowProps) {
+  const { install, canManage, inUse, choosing, onUse, onReviewUpdate, leading, extra } = props
   return (
     <li className="space-y-3 rounded-xl border border-border/50 px-4 py-3" data-testid={`installed-theme-${install.installId}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="font-medium text-foreground">
-            {themeName(install)} <span className="text-xs text-muted-foreground">{install.version}</span>
-          </p>
-          <p className="truncate font-mono text-xs text-muted-foreground">{install.themeId}</p>
-          <RowBadges install={install} />
-          {install.revoked && <p className="text-xs text-destructive">{install.revoked.reason}</p>}
+        <div className="flex min-w-0 items-start gap-3">
+          {leading}
+          <div className="min-w-0 space-y-1">
+            <p className="font-medium text-foreground">
+              {themeName(install)} <span className="text-xs text-muted-foreground">{install.version}</span>
+            </p>
+            <p className="truncate font-mono text-xs text-muted-foreground">{install.themeId}</p>
+            <RowBadges install={install} />
+            {install.revoked && <p className="text-xs text-destructive">{install.revoked.reason}</p>}
+            {extra}
+          </div>
         </div>
         {inUse ? (
           <Badge>{IN_USE}</Badge>

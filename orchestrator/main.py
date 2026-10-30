@@ -109,6 +109,9 @@ from api.marketplace_themes_submit import router as marketplace_themes_submit_ro
 from api.marketplace_themes import router as marketplace_themes_router
 from api.admin_themes import router as admin_themes_router
 from services.themes.submissions import THEME_SUBMIT_ROUTE
+# PRD-261: the Design Kit's publish job (its own bearer key, never hybrid; services/themes/publish_key.py).
+from api.marketplace_themes_publish import router as marketplace_themes_publish_router
+from services.themes.publish import THEME_PUBLISH_ROUTE
 # PRD-261 W-C3: theme revocations (the hosted feed, the local edition's sync, the admin's list).
 # The local edition's pull job rides the shared scheduler (services/scheduler.py registers it).
 from api.themes_revocations_feed import router as theme_revocations_feed_router
@@ -1075,6 +1078,8 @@ PATH_BODY_LIMITS = {
     THEME_IMPORT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
     # PRD-261 C-01a: a Marketplace submission is the same .autotheme, under the same cap.
     THEME_SUBMIT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
+    # PRD-261: a publish is the same .autotheme plus its signature envelope (4 KB) and review summary.
+    THEME_PUBLISH_ROUTE: theme_cap_bytes("package") + 512 * 1024,
     # PRD-265 W2: Stripe's webhook carries no Clerk auth (its signature is checked after the
     # body is read), so its body is counted on the wire too.
     STRIPE_WEBHOOK_ROUTE: STRIPE_WEBHOOK_MAX_BYTES,
@@ -1315,6 +1320,7 @@ app.include_router(mobile_theme_router)  # PRD-261 M-04: GET /api/themes/mobile/
 app.include_router(themes_looks_router)  # PRD-261 A-09a: a member's own looks per theme
 app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme settings
 app.include_router(marketplace_themes_submit_router)  # PRD-261 C-01a: POST /api/marketplace/themes/submit
+app.include_router(marketplace_themes_publish_router)  # PRD-261: POST /api/marketplace/themes/publish (publish key)
 app.include_router(marketplace_themes_router)  # PRD-261 C-04a: the Themes tab listings + install by reference
 app.include_router(admin_themes_router)  # PRD-261 C-03a: admin review queue (caller_is_admin in each handler)
 app.include_router(theme_revocations_feed_router)  # PRD-261 C-05g: GET /api/themes/revocations (public, hosted only)

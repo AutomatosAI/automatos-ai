@@ -241,10 +241,23 @@ def test_switching_auto_live_on_adds_retell_and_switching_it_off_removes_it(floo
     assert _current(floor)["ai_providers"] == []
 
 
-def test_a_basic_workspace_with_auto_live_on_never_lists_retell(floor):
-    # A workspace downgraded off the plan that had Auto Live on keeps that switch stored
-    # (the PUT would now refuse re-enabling it on Basic, D34) — Retell must still stay off
-    # the list regardless of what workspace.settings carries.
+def test_a_basic_workspace_with_auto_live_on_lists_retell(floor):
+    # PRD-265 D-6: voice is on every plan (an Auto Live call is paid from credits).
+    _plan(floor, "basic")
+    _platform_voice(floor)
+    _store_voice_live_enabled(floor, True)
+
+    assert _current(floor)["ai_providers"] == [RETELL]
+
+
+def test_a_workspace_whose_tier_turns_voice_off_never_lists_retell(floor, monkeypatch):
+    # A workspace moved onto a tier without voice keeps its Auto Live switch stored (the
+    # PUT would refuse re-enabling it, D34): Retell must still stay off the list.
+    import config as config_module
+
+    tiers = {name: dict(tier) for name, tier in config_module.PLAN_TIERS.items()}
+    tiers["basic"]["families"] = {**tiers["basic"]["families"], "voice": False}
+    monkeypatch.setattr(config_module, "PLAN_TIERS", tiers)
     _plan(floor, "basic")
     _platform_voice(floor)
     _store_voice_live_enabled(floor, True)

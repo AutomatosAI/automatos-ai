@@ -10,7 +10,7 @@ import { SIGNATURE_FACT, SIGNATURE_WORDS, SIGNED_BY_AUTOMATOS } from '@/componen
 import type { ThemeSignatureVerdict } from '@/lib/api-client'
 
 import { DetailFacts } from '../detail-sections'
-import { ListingBadges } from '../listing-card'
+import { ListingBadges } from '../listing-badges'
 import { OFFICIAL_BADGE } from '../listing-format'
 import { UNSIGNED, listing, listingDetail } from './listing-fixtures'
 

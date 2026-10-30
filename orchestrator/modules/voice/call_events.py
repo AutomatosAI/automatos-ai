@@ -11,6 +11,9 @@ Moved out of the route by PRD-258 US-001 (D6: that file never grows).
 PRD-258 US-002: a call's own latency (Retell's p50/p90 per stage) is kept on
 the row as ``vendor_latency``; when ``call_analyzed`` arrives without it, one
 get-call fetches it. A failed fetch is logged and never fails the webhook.
+
+PRD-265 D-6: ``call_ended`` also charges the call to its workspace's credits
+(``live_billing.charge_call``), in the same transaction as the row, once per call.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from modules.voice import live_settings, retell_api
+from modules.voice import live_billing, live_settings, retell_api
 
 logger = logging.getLogger(__name__)
 
@@ -160,11 +163,13 @@ def apply_call_event(db: Session, event: str, call: dict) -> str:
         return "ignored_no_call_id"
 
     row, disposition = _call_row(db, str(call_id), event)
+    charged = 0
     if event == EVENT_CALL_STARTED:
         _apply_started(row, call)
     elif event == EVENT_CALL_ENDED:
         _apply_ended(row, call)
         _apply_latency(row, call)
+        charged = live_billing.charge_call(db, row, call)
     elif event == EVENT_CALL_ANALYZED:
         # Post-call analysis carries no lifecycle change we bill on; only
         # Retell's own latency is kept (PRD-258 US-002).
@@ -174,4 +179,6 @@ def apply_call_event(db: Session, event: str, call: dict) -> str:
         disposition = f"ignored_{event or 'unknown'}"
 
     db.commit()
+    if charged:
+        live_billing.after_charge(db, row.workspace_id)
     return disposition

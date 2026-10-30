@@ -108,6 +108,11 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/shopify/events"),
     ("POST", "/api/shopify/provision"),
     ("POST", "/api/shopify/sync"),
+    # PRD-261 theme publish (api/marketplace_themes_publish.py): the Design Kit's publish job's
+    # bearer key, checked by require_publish_key against THEME_PUBLISH_KEY_SHA256 (sha256 +
+    # hmac.compare_digest, 503 fail-closed while unset), never the shared hybrid dependency; it may
+    # only list, approve and sign versions under THEME_PUBLISH_PUBLISHERS, as THEME_PUBLISH_ACTOR.
+    ("POST", "/api/marketplace/themes/publish"),
     # Widget SDK plane — its own key auth (api/widgets/auth.py widget_auth +
     # require_permission, empty=deny since S1).
     ("POST", "/api/widgets/api/widget/documents/search"),

@@ -81,6 +81,7 @@ server. For what members and workspace admins see, read [Themes](../themes/_inde
 | [API reference](api-reference.md) | Every `/api/themes*` route and every admin theme route: who may call it, what it takes and answers, its errors |
 | [Security model](security-model.md) | Why private code needs an opt-in, the CSS scope, the SDK boundary, the files proxy, step-up, signatures, revocations, safe mode |
 | [Operations](operations.md) | Runbooks: the signing key, an official listing, revoking, the revocation feed, the upload switches, reading a scan report |
+| [The publish endpoint](publish-endpoint.md) | `POST /api/marketplace/themes/publish`: how the Design Kit lists, approves and signs a version with its key; the settings, rotating and revoking the key |
 | [CSS layer model](css-layer-model.md) | Why theme CSS is unlayered, the scope check, how the approval cards and the AI label hold |
 | [Placement slots](placement-reach.md) | The three placement slots and which core pages reach them |
 | [SDK surface map](sdk-surface-map.md) | Every name of `@automatos/theme-sdk`, mapped to the core module it replaces |

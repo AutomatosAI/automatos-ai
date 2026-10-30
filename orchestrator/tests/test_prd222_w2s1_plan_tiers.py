@@ -70,9 +70,10 @@ def test_plan_tiers_numbers_match_strawman(name, price, seats, agents, concurren
 @pytest.mark.parametrize(
     "name,codegraph,nl2sql,team,voice",
     [
-        # Own keys (basic) now matches Pro's families exactly (PRD-265 US-001).
-        ("basic", True, True, True, False),
-        ("pro", True, True, True, False),
+        # Own keys (basic) now matches Pro's families exactly (PRD-265 US-001); voice is on
+        # every plan since PRD-265 D-6 (an Auto Live call is paid by the minute from credits).
+        ("basic", True, True, True, True),
+        ("pro", True, True, True, True),
         ("business", True, True, True, True),
     ],
 )
@@ -114,7 +115,7 @@ def test_enterprise_is_coming_soon_and_not_assignable():
 
 
 def test_env_override_flips_price_and_family_without_redeploy():
-    # basic now carries Pro's families (all True except voice), so flip a
+    # basic now carries Pro's families (all True), so flip a
     # family the override can actually move: turn codegraph OFF and prove the
     # deep-merge still leaves nl2sql (untouched by the override) at its
     # default True — a field flip, not a tier-wide replace.

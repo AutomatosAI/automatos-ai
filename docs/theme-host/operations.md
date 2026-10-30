@@ -87,6 +87,10 @@ Every setting is read from the environment by `orchestrator/config.py`.
 | `THEME_REVOCATIONS_PULL_MINUTES` | `60` | How often the local edition pulls |
 | `THEME_REVOCATIONS_LIFTED_DAYS` | `365` | How long the hosted feed keeps a lifted revocation |
 | `THEME_REVOCATIONS_FEED_MAX_KB` | `1024` | The largest feed either side reads or serves |
+| `THEME_PUBLISH_KEY_SHA256` | unset | The publish key's sha256, two while a rotation runs (see [The publish endpoint](publish-endpoint.md)) |
+| `THEME_PUBLISH_PUBLISHERS` | unset | The publishers the publish key may publish under |
+| `THEME_PUBLISH_ACTOR` | unset | The `users.id` the publish key acts as |
+| `THEME_PUBLISH_PER_DAY` | `10` | Versions the publish key may publish in 24 hours; more is 429 |
 
 A review limit or an AI code read setting of 0 or below falls back to its default (`review_limits.positive_setting`,
 `llm_stage._setting`).
@@ -167,7 +171,9 @@ whole run, from the kit's release to the release's `.sig.json`. The server's sid
    skips this step.
 4. **Approve** (`POST …/approve`). Approve opens a signature request. The answer, and the report's Signature section,
    carry it: `{requestId, payload, payloadSha256, algorithm, form, canonical}`. The version is now listed, and
-   workspaces running an older Marketplace version of the theme are offered the update.
+   workspaces running an older Marketplace version of the theme are offered the update. Each of those installs that is
+   not pinned moves to it at once (`updatesApplied` in the answer); one the move refuses keeps the offer, and the
+   server logs why.
 5. **Sign.** Copy the whole request and run the kit's **Theme sign** workflow on `main` with it as its `request`
    input. A required reviewer of `theme-signing` approves the run. Its summary prints the request id, the signature,
    the key id and the envelope.
@@ -176,6 +182,9 @@ whole run, from the kit's release to the release's `.sig.json`. The server's sid
    Official.
 7. **Check from another workspace.** Marketplace › Themes shows the theme with the **Official** badge. Add it and use
    it there.
+
+The Design Kit can do steps 2 to 6 on its own when a version bump merges: see
+[The publish endpoint](publish-endpoint.md).
 
 To take a listed version down later, use **Deactivate** (next section).
 
@@ -193,9 +202,11 @@ A revocation takes effect on each member's next load. Use the revocations panel 
 4. **Revoke.** The same target and level a second time answers the live row already there (200), not a second one.
 
 To **take a Marketplace version off the Marketplace**, use **Deactivate** on its report (`POST …/deactivate`, with a
-reason) rather than a revocation. It sets the version `deactivated`, writes a `disable` of its digest and withdraws the
-update offers its approval made. Lifting a revocation never undoes a deactivation: the last live local disable of a
-deactivated version can't be lifted.
+reason) rather than a revocation. It sets the version `deactivated`, writes a `disable` of its digest, withdraws the
+update offers its approval made and moves each unpinned install that runs it back to the newest listed version below
+it (`installsRolledBack` in the answer). With none listed, those installs stay on it and fall back to their base.
+Lifting a revocation never undoes a deactivation: the last live local disable of a deactivated version can't be
+lifted.
 
 **Lift** a revocation from the panel, then **Confirm lift** (`POST /api/admin/themes/revocations/{revocationId}/lift`). A row written here
 (`local`) can be lifted at any time. A row pulled from the feed (`feed`) is the hosted list's to lift; in the local
