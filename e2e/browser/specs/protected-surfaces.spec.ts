@@ -14,7 +14,8 @@ import { describeParity, openPlay } from '../support/play-parity'
 //    ancestor), a tool approval card and a Mission approval card are still drawn, on screen, and
 //    their Approve & run button still posts the decision. The cards arrive the way they do in the
 //    app: a chat turn (recorded, fixtures/hello-a12c/chat-turns.json) carries the tool-data that
-//    chat.tsx turns into the widget on the canvas.
+//    chat.tsx turns into the widget on the canvas. Each test starts on a new chat, with no protected
+//    surface on the page until the turn draws its card: see startOnANewChat.
 // 2. Under installed Play (the Design Kit's package, support/play-parity.ts; A-19f4: since W-A8
 //    the only Play), the body takes Play's page background (the kit's
 //    themes/play/src/app/play-theme.css, its `:where(html.play) body` rule), not Studio's
@@ -32,6 +33,8 @@ const A12C_INSTALL_ID = '00000000-0000-4000-8000-0000000a12c0'
 const TURNS_FILE = path.resolve(__dirname, '..', 'fixtures', FIXTURE, 'chat-turns.json')
 const CHAT_PATH = '/chat'
 const CHAT_STREAM_PATH = '/api/chat'
+const CHAT_HISTORY_PATH = '/api/chat/history'
+const NO_CONVERSATIONS: readonly unknown[] = []
 const STATUS_ATTR = 'data-theme-host'
 const THEME_STYLE_LINK = 'link[data-theme-host-style]'
 const FRAME_TEST_ID = 'hello-a12c-frame'
@@ -151,8 +154,23 @@ async function recordDecisions(page: Page, card: CardCase): Promise<string[]> {
   return decided
 }
 
-/** Opens the chat under the hostile theme, once its stylesheet is on the page. */
+/**
+ * The precondition, stated: /chat opens on a new chat. A fresh browser's /chat lands on the newest conversation
+ * (PRD-237's cold start, app/chat/page.tsx). Since PRD-268 W2 the lane's one shared workspace has one: the first
+ * page any spec loads opens the day's brief (BriefOnOpen), which posts it into a new Auto thread, and that thread's
+ * brief card carries Listen in the protected surface `brief-voice` (US-C21d). The hostile sheet's `:has` rule
+ * takes visibility from every ancestor of any protected surface, so landing there would leave Listen alone on the
+ * page, with no composer to ask from, before the turn's card is drawn. Answering the conversation list with none
+ * keeps the page as the empty workspace left it. specs/proactive-brief-thread.spec.ts holds the Auto thread itself
+ * (its brief card beside the composer) under an installed theme that attacks nothing.
+ */
+async function startOnANewChat(page: Page): Promise<void> {
+  await page.route((url) => url.pathname === CHAT_HISTORY_PATH, (route) => fulfillBackendJson(route, OK, NO_CONVERSATIONS))
+}
+
+/** Opens the chat on a new chat under the hostile theme, once its stylesheet is on the page. */
 async function openChatUnderHostileTheme(page: Page): Promise<void> {
+  await startOnANewChat(page)
   const served = await serveInstalledTheme(page, { installId: A12C_INSTALL_ID, fixture: FIXTURE })
   await chooseStyle(page, served.style, APP_URL)
   await page.goto(CHAT_PATH)
