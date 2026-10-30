@@ -21,7 +21,8 @@ vi.mock('@/hooks/use-missions-api', () => ({
 
 import { MissionApprovalWidget } from '@/components/widgets/MissionApprovalWidget'
 import { ToolApprovalWidget } from '@/components/widgets/ToolApprovalWidget'
-import type { ApprovalView, WidgetMetadata } from '@/components/widgets/types'
+import type { WidgetMetadata } from '@/components/widgets/types'
+import type { ApprovalView } from '@/lib/proactive/types'
 
 import {
   guardProtectedElement,

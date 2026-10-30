@@ -1,10 +1,5 @@
-import type {
-  ApprovalAnswer,
-  ApprovalView,
-  MissionApprovalTask,
-  MissionApprovalWidgetData,
-  ToolApprovalWidgetData,
-} from '@/components/widgets/types'
+import type { MissionApprovalTask, MissionApprovalWidgetData, ToolApprovalWidgetData } from '@/components/widgets/types'
+import type { ApprovalAnswer, ApprovalView } from '@/lib/proactive/types'
 
 /**
  * PRD-260 T-005c, PRD-261 A-11a (M28) — the approvals a turn raises, for any

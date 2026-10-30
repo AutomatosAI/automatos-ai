@@ -22,7 +22,7 @@
 import { useId, useMemo, type HTMLAttributes, type KeyboardEvent } from 'react'
 import { Scale } from 'lucide-react'
 import { approvalViewOf } from '@/lib/chat/approvals'
-import type { ApprovalAnswer, ApprovalView } from './types'
+import type { ApprovalAnswer, ApprovalView } from '@/lib/proactive/types'
 
 /** The key that refuses (Deny, Reject) and the key that allows once (Approve & run). */
 export const REFUSE_KEY = '1'

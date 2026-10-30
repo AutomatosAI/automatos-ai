@@ -33,7 +33,8 @@ vi.mock('@/hooks/use-missions-api', () => ({
 import { MissionApprovalWidget } from '../MissionApprovalWidget'
 import { ToolApprovalWidget } from '../ToolApprovalWidget'
 import { ASKED_BY_LABEL } from '../approval-view-parts'
-import type { ApprovalView, MissionApprovalWidgetData, ToolApprovalWidgetData, WidgetMetadata } from '../types'
+import type { MissionApprovalWidgetData, ToolApprovalWidgetData, WidgetMetadata } from '../types'
+import type { ApprovalView } from '@/lib/proactive/types'
 
 const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_send_email' }, createdAt: new Date() }
 const TOOL_TITLE = 'Action approval needed'
