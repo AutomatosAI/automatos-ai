@@ -2,12 +2,14 @@
 
 /**
  * PRD-268 §6.9 — what the "Proactive Auto" section's rows share: a switch row (a label, one line under it and the
- * switch) and the one line a refusal or a failed read shows. Tokens only, so the rows read right in Studio light,
- * Studio dark and Classic, as the readiness section beside them does.
+ * switch), the line saying what Auto is doing here, and the one line a refusal or a failed read shows. Tokens
+ * only, so the rows read right in Studio light, Studio dark and Classic, as the readiness section beside them does.
  */
 import { useId } from 'react'
 import { Switch } from '@/components/ui/switch'
 import { refusedLine } from '@/components/proactive/use-suggestion-card'
+import type { EffectiveMode } from '@/lib/proactive/settings'
+import { modeLine } from './copy'
 
 export interface SwitchRowProps {
   readonly label: string
@@ -41,6 +43,17 @@ export function SwitchRow({ label, detail, checked, disabled, onCheckedChange }:
         onCheckedChange={onCheckedChange}
       />
     </div>
+  )
+}
+
+/** What Auto is doing here, in one line (`modeLine`), or nothing. */
+export function ModeLine({ mode, switchedOn }: { readonly mode: EffectiveMode | null; readonly switchedOn: boolean }) {
+  const line = modeLine(mode, switchedOn)
+  if (line === null) return null
+  return (
+    <p role="status" data-effective-mode={mode ?? undefined} className="text-xs text-foreground">
+      {line}
+    </p>
   )
 }
 

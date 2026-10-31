@@ -8,6 +8,9 @@
  *   is tightened by raising it (services/proactive/limits.py `RAISED_TO_TIGHTEN`); and the shortest interval may not
  *   pass the longest (modules/proactive/caps.py). The server answers 422 `caps_looser` or `caps_wrong` otherwise.
  * - `GET`/`PUT /api/proactive/me` (any member): `{paused, quiet_start, quiet_end, timezone}`, the person's own.
+ * - Both `GET`s also answer `effective_mode` (`off`, `shadow` or `live`), read-only: the platform's mode where the
+ *   workspace switch is on, else off, failing closed (services/proactive/switches.py `effective_mode`). The `PUT`s
+ *   don't, so a write keeps the mode it had unless it flipped the switch, which leaves it unknown until read again.
  * - Anyone else reads the workspace switch from the workspace they already load (GET /api/workspaces/current
  *   answers its `settings`), where `settings.proactive.enabled` is on only when it is exactly true
  *   (services/proactive/switches.py `enabled_in`).
@@ -30,6 +33,10 @@ export const CAP_NAMES = [
 export type CapName = (typeof CAP_NAMES)[number]
 export type ProactiveCaps = Readonly<Record<CapName, number>>
 
+/** The workspace's mode, as both reads answer it. */
+export const EFFECTIVE_MODES = ['off', 'shadow', 'live'] as const
+export type EffectiveMode = (typeof EFFECTIVE_MODES)[number]
+
 /** The one cap a workspace tightens by raising it. */
 const RAISED_TO_TIGHTEN: CapName = 'min_interval_minutes'
 /** A count cap may be 0 (it allows nothing); an interval is at least a minute (`CapsChange`). */
@@ -40,6 +47,8 @@ export interface ProactiveSettings {
   readonly enabled: boolean
   readonly caps: ProactiveCaps
   readonly platform_caps: ProactiveCaps
+  /** Null when the answer carried none (a `PUT`'s) or one this client doesn't know: unknown draws nothing. */
+  readonly effective_mode: EffectiveMode | null
 }
 
 export interface ProactiveMe {
@@ -47,6 +56,7 @@ export interface ProactiveMe {
   readonly quiet_start: string | null
   readonly quiet_end: string | null
   readonly timezone: string | null
+  readonly effective_mode: EffectiveMode | null
 }
 
 /** `PUT /api/proactive/settings`: what is left out stays; a cap sent as null is back at its default. */
@@ -91,6 +101,11 @@ function capsOf(value: unknown): ProactiveCaps | null {
   return Object.freeze(Object.fromEntries(entries) as Record<CapName, number>)
 }
 
+/** The mode an answer carries, or null when it carries none this client knows. */
+export function effectiveModeOf(value: unknown): EffectiveMode | null {
+  return EFFECTIVE_MODES.find((mode) => mode === value) ?? null
+}
+
 /** GET and PUT /api/proactive/settings' answer; anything else is an error, so nothing half-read is drawn. */
 export function proactiveSettingsOf(body: unknown): ProactiveSettings {
   const fields = recordOf(body)
@@ -100,7 +115,7 @@ export function proactiveSettingsOf(body: unknown): ProactiveSettings {
   if (typeof enabled !== 'boolean' || caps === null || platform === null) {
     throw new Error('The Proactive Auto settings came back in a shape Settings cannot read.')
   }
-  return { enabled, caps, platform_caps: platform }
+  return { enabled, caps, platform_caps: platform, effective_mode: effectiveModeOf(fields?.effective_mode) }
 }
 
 /** GET and PUT /api/proactive/me's answer. */
@@ -115,6 +130,7 @@ export function proactiveMeOf(body: unknown): ProactiveMe {
     quiet_start: textOf(fields?.quiet_start) ?? null,
     quiet_end: textOf(fields?.quiet_end) ?? null,
     timezone: textOf(fields?.timezone) ?? null,
+    effective_mode: effectiveModeOf(fields?.effective_mode),
   }
 }
 
@@ -123,7 +139,10 @@ export function workspaceSwitchOf(settings: unknown): boolean {
   return recordOf(recordOf(settings)?.proactive)?.enabled === true
 }
 
-/** The settings with a change applied (a cap sent as null at the platform's): a new object, the old one untouched. */
+/**
+ * The settings with a change applied (a cap sent as null at the platform's): a new object, the old one untouched. A
+ * change that flips the switch leaves the mode unknown until it is read again.
+ */
 export function withChange(settings: ProactiveSettings, change: ProactiveSettingsChange): ProactiveSettings {
   const asked = change.caps ?? {}
   const caps = Object.fromEntries(
@@ -132,7 +151,9 @@ export function withChange(settings: ProactiveSettings, change: ProactiveSetting
       return [name, value === undefined ? settings.caps[name] : value ?? settings.platform_caps[name]]
     }),
   ) as Record<CapName, number>
-  return { ...settings, enabled: change.enabled ?? settings.enabled, caps: Object.freeze(caps) }
+  const enabled = change.enabled ?? settings.enabled
+  const effectiveMode = enabled === settings.enabled ? settings.effective_mode : null
+  return { ...settings, enabled, caps: Object.freeze(caps), effective_mode: effectiveMode }
 }
 
 /** A typed value as a whole number, or null. */

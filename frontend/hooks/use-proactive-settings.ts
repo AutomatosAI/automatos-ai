@@ -11,10 +11,12 @@
  *
  * Both changes are optimistic: the cache shows the change at once, the server's answer replaces it, and a refusal
  * puts back what was there before and reads it again (the mutation's `error` carries the server's sentence,
- * `refusedLine`). A change
- * that lands asks the open suggestions and the day's brief for again, so the Command Center, the pinned card and the
- * thread's cards follow the switch without a reload. The keys carry the workspace, so another workspace's answer is
- * never shown.
+ * `refusedLine`). A change that lands asks the open suggestions and the day's brief for again, so the Command
+ * Center, the pinned card and the thread's cards follow the switch without a reload.
+ *
+ * Both reads answer the workspace's `effective_mode`; a write answers none, so the mode shown stays, and a flip of
+ * the switch reads the settings again for the new one. The keys carry the workspace, so another workspace's answer
+ * is never shown.
  */
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
@@ -25,6 +27,7 @@ import {
   proactiveMeOf,
   proactiveSettingsOf,
   withChange,
+  type EffectiveMode,
   type ProactiveMe,
   type ProactiveMeChange,
   type ProactiveSettings,
@@ -72,6 +75,21 @@ function putBack<T>(queryClient: QueryClient, key: QueryKey, rollback: Rollback<
   void queryClient.invalidateQueries({ queryKey: key })
 }
 
+/**
+ * A write's answer in the cache: a `PUT` answers no `effective_mode`, so the mode already shown stays (a flip of the
+ * switch made it unknown, `withChange`). True when the mode is unknown and must be read again.
+ */
+function keepMode<T extends { readonly effective_mode: EffectiveMode | null }>(
+  queryClient: QueryClient,
+  key: QueryKey,
+  answer: T,
+): boolean {
+  const shown = queryClient.getQueryData<T>(key)
+  const mode = answer.effective_mode ?? shown?.effective_mode ?? null
+  queryClient.setQueryData<T>(key, { ...answer, effective_mode: mode })
+  return mode === null
+}
+
 /** The workspace switch and its caps; `enabled` false asks nothing (a member reads the switch from the workspace). */
 export function useProactiveSettings({ enabled = true }: { readonly enabled?: boolean } = {}) {
   const workspaceId = useWorkspaceId()
@@ -92,7 +110,7 @@ export function useChangeProactiveSettings() {
     onMutate: (change) => showAtOnce<ProactiveSettings>(queryClient, key, (current) => withChange(current, change)),
     onError: (_error, _change, rollback) => putBack(queryClient, key, rollback),
     onSuccess: (settings) => {
-      queryClient.setQueryData(key, settings)
+      if (keepMode(queryClient, key, settings)) void queryClient.invalidateQueries({ queryKey: key })
       refreshProactiveSurfaces(queryClient)
     },
   })
@@ -118,7 +136,7 @@ export function useChangeMyProactiveSettings() {
     onMutate: (change) => showAtOnce<ProactiveMe>(queryClient, key, (current) => ({ ...current, paused: change.paused })),
     onError: (_error, _change, rollback) => putBack(queryClient, key, rollback),
     onSuccess: (mine) => {
-      queryClient.setQueryData(key, mine)
+      keepMode(queryClient, key, mine)
       refreshProactiveSurfaces(queryClient)
     },
   })

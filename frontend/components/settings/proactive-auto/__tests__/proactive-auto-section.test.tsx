@@ -9,6 +9,11 @@
  *   than the longest), and Save sends only the caps that changed.
  * - Pause suggestions writes the person's own settings, PUT /api/proactive/me `{paused}`, for every role.
  * - A refused change goes back to what it was, with the server's sentence.
+ * - One line says what Auto is doing here, from the reads' `effective_mode`: live, shadow, or off while the switch is
+ *   on; nothing when it is off and so is the switch. A flip reads the mode again rather than show the old one.
+ *
+ * The routes are a small fake (`server`): a read answers the state and its mode (the platform's where the switch is
+ * on, else off), and a write applies its body and answers without a mode, as api/proactive.py does.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -34,6 +39,7 @@ import type { CapName } from '@/lib/proactive/settings'
 import {
   ASK_AN_OWNER_OR_ADMIN,
   CAP_COPY,
+  MODE_LINES,
   PAUSE_LABEL,
   PAUSE_LINE,
   RESET_CAPS,
@@ -58,6 +64,8 @@ const PLATFORM = {
   max_interval_minutes: 1440,
 }
 const ME = { paused: false, quiet_start: null, quiet_end: null, timezone: null }
+type CapKey = keyof typeof PLATFORM
+type Mode = 'off' | 'shadow' | 'live'
 
 function settings(enabled: boolean, caps: Partial<typeof PLATFORM> = {}) {
   return { enabled, caps: { ...PLATFORM, ...caps }, platform_caps: PLATFORM }
@@ -83,15 +91,50 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function answer(workspaceSettings: unknown = settings(false), me: unknown = ME) {
+interface FakeServer {
+  platform: Mode
+  settings: ReturnType<typeof settings>
+  me: Record<string, unknown>
+  settingsRefusal: Error | null
+}
+
+interface WriteBody {
+  readonly enabled?: boolean
+  readonly caps?: Readonly<Record<string, number | null>>
+  readonly paused?: boolean
+}
+
+let server: FakeServer
+
+/** The workspace's effective mode: the platform's where the switch is on, else off. */
+const modeOf = (): Mode => (server.settings.enabled ? server.platform : 'off')
+
+/** A PUT as the routes take it: applied, and answered without a mode. */
+function write(path: string, body: WriteBody) {
+  if (path === ME_PATH) {
+    server.me = { ...server.me, ...body }
+    return server.me
+  }
+  const asked = Object.entries(body.caps ?? {}).map(([name, value]) => [name, value ?? PLATFORM[name as CapKey]])
+  server.settingsRefusal = null
+  server.settings = {
+    ...server.settings,
+    enabled: body.enabled ?? server.settings.enabled,
+    caps: { ...server.settings.caps, ...Object.fromEntries(asked) },
+  }
+  return server.settings
+}
+
+function serve() {
   requestMock.mockImplementation(async (path: string) => {
     if (path === SETTINGS_PATH) {
-      if (workspaceSettings instanceof Error) throw workspaceSettings
-      return workspaceSettings
+      if (server.settingsRefusal) throw server.settingsRefusal
+      return { ...server.settings, effective_mode: modeOf() }
     }
-    if (path === ME_PATH) return me
+    if (path === ME_PATH) return { ...server.me, effective_mode: modeOf() }
     throw new Error(`unexpected read of ${path}`)
   })
+  putMock.mockImplementation(async (path: string, body: WriteBody) => write(path, body))
 }
 
 function renderSection() {
@@ -116,14 +159,18 @@ beforeEach(() => {
   requestMock.mockReset()
   putMock.mockReset()
   current.workspace = workspace('owner')
-  answer()
+  server = { platform: 'off', settings: settings(false), me: { ...ME }, settingsRefusal: null }
+  serve()
 })
 
 describe('the workspace switch', () => {
   it.each(['owner', 'admin'])('an %s switches Proactive Auto on: shown at once, then the suggestions and brief refresh', async (role) => {
     current.workspace = workspace(role)
-    const put = deferred<unknown>()
-    putMock.mockReturnValue(put.promise)
+    const gate = deferred<void>()
+    putMock.mockImplementation(async (path: string, body: WriteBody) => {
+      await gate.promise
+      return write(path, body)
+    })
     const { refreshed } = renderSection()
 
     const toggle = await workspaceSwitch()
@@ -136,9 +183,11 @@ describe('the workspace switch', () => {
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
     expect(refreshed(suggestionQueryKeys.all)).toBe(false)
 
-    put.resolve(settings(true))
+    gate.resolve()
     await waitFor(() => expect(refreshed(suggestionQueryKeys.all)).toBe(true))
     expect(refreshed(briefQueryKeys.all)).toBe(true)
+    // The platform is off here, so the mode read again after the flip says so.
+    expect(await screen.findByText(MODE_LINES.offButSwitchedOn)).toBeInTheDocument()
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText(WORKSPACE_ON)).toBeInTheDocument()
     expect(screen.queryByText(ASK_AN_OWNER_OR_ADMIN)).not.toBeInTheDocument()
@@ -146,6 +195,7 @@ describe('the workspace switch', () => {
 
   it.each(['editor', 'viewer', 'member'])('a %s sees it read-only from the workspace, with who can change it', async (role) => {
     current.workspace = workspace(role, { enabled: true })
+    server.settings = settings(true)
     renderSection()
 
     const toggle = await workspaceSwitch()
@@ -246,8 +296,7 @@ describe('the caps', () => {
   })
 
   it('caps stored wrong say so, and putting them back to their defaults sends every cap as null', async () => {
-    answer(refusal(409, 'caps_stored_wrong', "This workspace's caps are stored wrong."))
-    putMock.mockResolvedValue(settings(false))
+    server.settingsRefusal = refusal(409, 'caps_stored_wrong', "This workspace's caps are stored wrong.")
     renderSection()
 
     fireEvent.click(await screen.findByRole('button', { name: RESET_CAPS }))
@@ -279,7 +328,7 @@ describe('Pause suggestions', () => {
 
   it('a refused pause goes back to what it was, with the server’s sentence', async () => {
     const sentence = 'The check-in settings could not be saved right now. Try again in a minute.'
-    answer(settings(false), { ...ME, paused: true })
+    server.me = { ...ME, paused: true }
     const put = deferred<unknown>()
     putMock.mockReturnValue(put.promise)
     renderSection()
@@ -293,5 +342,56 @@ describe('Pause suggestions', () => {
     put.reject(refusal(503, 'settings_unavailable', sentence))
     expect(await screen.findByRole('alert')).toHaveTextContent(sentence)
     expect(pause).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
+describe('the line on what Auto is doing here', () => {
+  const CASES: [Mode, boolean, string | null][] = [
+    ['live', true, MODE_LINES.live],
+    ['shadow', true, MODE_LINES.shadow],
+    ['off', true, MODE_LINES.offButSwitchedOn],
+    ['live', false, null],
+    ['off', false, null],
+  ]
+
+  function expectOnly(line: string | null) {
+    Object.values(MODE_LINES)
+      .filter((other) => other !== line)
+      .forEach((other) => expect(screen.queryByText(other)).not.toBeInTheDocument())
+  }
+
+  it.each(CASES)('an owner, the platform %s and the switch on: %s, reads: %s', async (platform, enabled, line) => {
+    server.platform = platform
+    server.settings = settings(enabled)
+    renderSection()
+
+    await workspaceSwitch()
+    if (line !== null) expect(await screen.findByText(line)).toBeInTheDocument()
+    expectOnly(line)
+  })
+
+  it.each(CASES)('a viewer, the platform %s and the switch on: %s, reads: %s', async (platform, enabled, line) => {
+    current.workspace = workspace('viewer', { enabled })
+    server.platform = platform
+    server.settings = settings(enabled)
+    renderSection()
+
+    await pauseSwitch()
+    if (line !== null) expect(await screen.findByText(line)).toBeInTheDocument()
+    expectOnly(line)
+    expect(requestMock).not.toHaveBeenCalledWith(SETTINGS_PATH)
+  })
+
+  it('an owner who switches it on sees the mode the server reads next', async () => {
+    server.platform = 'shadow'
+    renderSection()
+
+    const toggle = await workspaceSwitch()
+    expectOnly(null)
+    fireEvent.click(toggle)
+
+    expect(await screen.findByText(MODE_LINES.shadow)).toBeInTheDocument()
+    expectOnly(MODE_LINES.shadow)
+    expect(putMock).toHaveBeenCalledWith(SETTINGS_PATH, { enabled: true })
   })
 })

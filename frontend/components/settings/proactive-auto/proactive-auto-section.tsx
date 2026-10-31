@@ -7,10 +7,11 @@
  *   (GET/PUT /api/proactive/settings); everyone else sees the switch read-only with who can change it.
  * - **Pause suggestions**: the signed-in person's own, for every role (GET/PUT /api/proactive/me).
  *
- * Neither route answers the platform's mode (off, shadow or live, a system admin's), so the section says nothing
- * about it. Both editions draw the same section: the switches are workspace data, and only who may edit them
- * depends on the role. /settings is a host-owned route (HOST_OWNED_ROUTES), so it looks the same under every theme,
- * built like "What Auto depends on" beside it.
+ * Both reads answer the workspace's `effective_mode` (the platform's mode where the switch is on, else off, failing
+ * closed), never the platform setting itself; the section draws one line from it. Both editions draw the same
+ * section: the switches are workspace data, and only who may edit them depends on the role. /settings is a
+ * host-owned route (HOST_OWNED_ROUTES), so it looks the same under every theme, built like "What Auto depends on"
+ * beside it.
  */
 import { CARD_CLASS, ENTRANCE_CLASS, Eyebrow, QUIET_BUTTON_CLASS } from '@/components/proactive/card-parts'
 import { type Workspace, useWorkspaceOptional } from '@/components/workspace-provider'
@@ -67,7 +68,7 @@ function ManagedWorkspace() {
   if (settings.data === undefined) return settings.isError ? <ReadFailure error={settings.error} /> : <Loading />
   return (
     <>
-      <ManagedWorkspaceSwitch enabled={settings.data.enabled} />
+      <ManagedWorkspaceSwitch settings={settings.data} />
       <CapsForm settings={settings.data} />
     </>
   )

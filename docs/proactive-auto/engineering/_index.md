@@ -126,7 +126,7 @@ Three facts the theme-host pages don't spell out:
 | `proactive_runs` kept 90 days | No job prunes it. |
 | Hide learning, field-memory writes from Hide reasons, Telegram and Slack, Mission and Playbook proposals | Not built (the PRD's W4). |
 | The agent page shows the heartbeat mode | The mode is in the heartbeat config API (`mode` on `GET`/`PUT /api/heartbeat/agents/{agent_id}/config`); no web control sets it. |
-| Workspace and person switches in Settings | API only: `PUT /api/proactive/settings` and `PUT /api/proactive/me`. No web UI. |
+| Workspace and person switches in Settings | The workspace switch, its caps and Pause suggestions are in Settings → Orchestrator → Proactive Auto (`frontend/components/settings/proactive-auto/`). Quiet hours are API only: `PUT /api/proactive/me`. |
 | Brief rows carry Start, Answer, Open | `Brief@1` rows carry their `action` and `opens`, but the web host passes no row handlers, so the web card draws no row actions and "Show N more" is text. A theme's `cards.BriefCard` can supply them. |
 | Calibration follows the proactive mode | Calibration is gated only by `CALIBRATION_ENABLED`, not by the mode. |
 | The approval view shows its expiry counting down (§6.12.3) | The view carries `expires_at`; the web card doesn't draw it. |

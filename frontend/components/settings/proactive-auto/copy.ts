@@ -3,7 +3,7 @@
  * section beside it keeps its own (components/proactive/readiness-list.tsx). A refusal's sentence is the server's,
  * in the person's language (`refusedLine`), never one of these.
  */
-import type { CapBounds, CapName } from '@/lib/proactive/settings'
+import type { CapBounds, CapName, EffectiveMode } from '@/lib/proactive/settings'
 
 export const PROACTIVE_TITLE = 'Proactive Auto'
 export const PROACTIVE_INTRO =
@@ -14,6 +14,20 @@ export const WORKSPACE_SWITCH_LABEL = 'Proactive Auto for this workspace'
 export const WORKSPACE_ON = 'On for this workspace.'
 export const WORKSPACE_OFF = 'Off for this workspace.'
 export const ASK_AN_OWNER_OR_ADMIN = 'A workspace owner or admin turns Proactive Auto on or off and sets its limits.'
+
+/** What Auto is doing here, from the workspace's `effective_mode` (both settings reads answer it). */
+export const MODE_LINES = Object.freeze({
+  live: 'Auto is checking in and suggesting.',
+  shadow: 'Auto is checking in quietly: suggestions are recorded, but nothing is sent yet.',
+  offButSwitchedOn: "Switched on here, but Proactive Auto isn't running on this server yet.",
+})
+
+/** The one line for the mode, or none: off with the switch off says nothing extra, and an unknown mode draws nothing. */
+export function modeLine(mode: EffectiveMode | null, switchedOn: boolean): string | null {
+  if (mode === 'live') return MODE_LINES.live
+  if (mode === 'shadow') return MODE_LINES.shadow
+  return mode === 'off' && switchedOn ? MODE_LINES.offButSwitchedOn : null
+}
 
 export const LOADING = 'Loading…'
 
