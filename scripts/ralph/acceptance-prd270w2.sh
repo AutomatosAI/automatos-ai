@@ -82,7 +82,10 @@ GROW_OK="$O/config.py $MANIFEST $SURFACE"
 # K29: the pinned tests that move with approved changes; each keeps at least its test count.
 PIN_TESTS="$TESTS/test_prd209_alembic_single_head.py $TESTS/test_prd236_w1_routes.py"
 # K4: the install machinery this wave reuses as it is, never edits.
-INSTALL_MACHINERY="$O/modules/tools/discovery/cascade_installer.py $O/modules/tools/discovery/handlers_marketplace.py $O/modules/tools/discovery/handlers_packages.py $O/services/package_installer.py $O/services/marketplace_packages.py $O/core/services/marketplace_s3.py $O/core/services/plugin_upload_service.py $O/core/services/plugin_security_scanner.py $O/core/services/skill_materializer.py $O/core/models/core.py $O/core/models/marketplace_packages.py $O/core/models/marketplace_plugins.py $O/core/models/personas.py $O/core/seeds"
+# K4 amended 31 Oct 2026 (the night manager, PLAY): cascade_installer.py may carry the two bug fixes W2's first CI
+# found (646d922f6: the composio_connections insert sets created_at; 838abe7ce: entity creation flush-only inside a
+# cascade). The review reads both; every other file here stays untouched.
+INSTALL_MACHINERY="$O/modules/tools/discovery/handlers_marketplace.py $O/modules/tools/discovery/handlers_packages.py $O/services/package_installer.py $O/services/marketplace_packages.py $O/core/services/marketplace_s3.py $O/core/services/plugin_upload_service.py $O/core/services/plugin_security_scanner.py $O/core/services/skill_materializer.py $O/core/models/core.py $O/core/models/marketplace_packages.py $O/core/models/marketplace_plugins.py $O/core/models/personas.py $O/core/seeds"
 MEMBER_ROUTERS="$O/api/marketplace.py $O/api/workflow_recipes.py $O/api/admin_plugins.py $O/api/marketplace_plugins.py $O/api/workspace_plugins.py $O/api/llm_marketplace.py $O/api/composio.py $O/api/workspace_skills.py $O/api/approval_grants.py $O/main.py"
 # K4, K17: the chat install path is gated at confirmation_gate.py only; the executor, the grants and the actions stay.
 CHAT_PATH_UNTOUCHED="$O/modules/tools/discovery/platform_executor.py $O/modules/tools/execution/tool_grants.py $O/modules/tools/discovery/actions_packages.py $O/modules/tools/discovery/actions_marketplace.py"
