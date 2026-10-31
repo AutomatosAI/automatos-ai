@@ -331,7 +331,7 @@ is an installed theme. The load (`frontend/lib/theme-host/sources.ts`, `loader.t
    (`STUDIO_BASE_ONLY`): this host runs only Studio-based themes for now. The server accepts both bases, so a
    `classic` package installs and can be chosen, then fails here with the `manifest` reason ("Its theme.json could
    not be read."), which doesn't count toward the three failures.
-3. The manifest's `engines.sdk` must accept the host's SDK version (1.3.0), or the entry is never requested.
+3. The manifest's `engines.sdk` must accept the host's SDK version (1.4.0), or the entry is never requested.
 4. The browser's own `import()` loads `/api/themes/files/<digest>/dist/entry.js`. Its bare imports (`react`,
    `react-dom`, `@automatos/theme-sdk`) resolve through the import map to the host's own instances under
    `/theme-sdk/v1/` (`shared-modules.json`).
@@ -362,7 +362,9 @@ listed in `frontend/lib/theme-sdk/surface/`: `assets`, `cards`, `chat`, `context
 `navigation`, `notices`, `proactive` (SDK 1.3.0: the brief, readiness, suggestions and calibration; the cards area
 gains their default components, the voice area Listen), `storage`, `theme`, `voice` (SDK 1.2.0: the host's voice
 button, the session and its levels), and the page areas `pages/agents`, `pages/assignments`, `pages/command-center`,
-`pages/documents`, `pages/playbooks`. Every name is in the [SDK surface map](sdk-surface-map.md).
+`pages/documents`, `pages/playbooks`. SDK 1.4.0 adds no area: a chat message's known parts (`knownParts`), the brief
+row Listen is reading, and the brief's thumbs (`proactive.useRateBrief`). Every name is in the
+[SDK surface map](sdk-surface-map.md); what each version added is in `frontend/packages/theme-sdk/CHANGELOG.md`.
 
 ## 8. The look runtime
 
