@@ -63,9 +63,10 @@ serves and the public Marketplace at `/marketplace`.
 There are two places to press it:
 
 - **Marketplace header:** **Sync with Automatos Cloud**, with a status line beside it: "Last synced 2m ago · 3
-  themes", "Not synced yet", or the last error in plain words. While a Sync runs the button shows a spinner; after it,
-  a toast says what it brought, themes and items together ("2 new, 1 updated from Automatos Cloud", or "Nothing new
-  from Automatos Cloud").
+  themes · 2 agents · 1 Playbook" (the themes held here, then the agents, Playbooks, packages and plugins held here,
+  a type with none left out), "Not synced yet", or the last error in plain words. While a Sync runs the button
+  shows a spinner; after it, a toast says what it brought, themes and items together ("2 new, 1 updated from
+  Automatos Cloud", or "Nothing new from Automatos Cloud").
 - **Settings › Automatos Cloud:** the URL in use (read-only), the last success, the last check, the last error, the
   last Sync's counts (new, updated, unchanged, refused; themes and items together), the themes held here from
   Automatos Cloud, **Sync now**, and how to turn it off.

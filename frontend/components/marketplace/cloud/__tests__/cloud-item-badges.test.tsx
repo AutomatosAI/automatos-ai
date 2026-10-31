@@ -240,7 +240,7 @@ describe('after a Sync with Automatos Cloud', () => {
     const status = {
       enabled: true, cloudUrl: 'https://cloud.example.test', lastAttemptAt: null, lastSuccessAt: null,
       lastError: null, generatedAt: null, counts: { new: 1, updated: 0, unchanged: 0, refused: 0 },
-      themes: 0, stale: false,
+      themes: 0, items: { agent: 0, playbook: 0, package: 0, plugin: 0 }, stale: false,
     }
     api.post.mockResolvedValue({ counts: status.counts, updatesApplied: 0, updatesFailed: 0, status })
     const client = renderWithClient(<div data-testid="item"><CloudItemBadges kind="agent" id={7} /></div>)

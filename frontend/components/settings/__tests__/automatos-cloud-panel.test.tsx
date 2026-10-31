@@ -105,6 +105,7 @@ function status(overrides: Partial<CloudSyncStatus> = {}): CloudSyncStatus {
     generatedAt: null,
     counts: { new: 0, updated: 0, unchanged: 0, refused: 0 },
     themes: 0,
+    items: { agent: 0, playbook: 0, package: 0, plugin: 0 },
     stale: true,
     ...overrides,
   }
@@ -176,6 +177,17 @@ describe('the Automatos Cloud panel', () => {
     expect(screen.getByRole('button', { name: 'Sync now' })).toBeEnabled()
     expect(screen.getByTestId('automatos-cloud-url')).toHaveTextContent(CLOUD_URL)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('names the agents, Playbooks, packages and plugins held here, a type with none left out, or none', async () => {
+    api.get.mockResolvedValue(status({ lastSuccessAt: minutesAgo(2), themes: 3, items: { agent: 2, playbook: 0, package: 1, plugin: 1 } }))
+    const { unmount } = render(<QueryClientProvider client={new QueryClient()}><AutomatosCloudPanel /></QueryClientProvider>)
+    expect(await screen.findByTestId('automatos-cloud-items')).toHaveTextContent(/^2 agents, 1 package, 1 plugin$/)
+    unmount()
+
+    api.get.mockResolvedValue(status({ lastSuccessAt: minutesAgo(2), themes: 3 }))
+    renderWithClient(<AutomatosCloudPanel />)
+    expect(await screen.findByTestId('automatos-cloud-items')).toHaveTextContent(/^none$/)
   })
 
   it('Sync now posts once, is disabled with a spinner while it runs, then shows the toast and the new facts', async () => {

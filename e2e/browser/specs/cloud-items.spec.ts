@@ -89,6 +89,7 @@ const NOT_SYNCED = {
   generatedAt: null,
   counts: { new: 0, updated: 0, unchanged: 0, refused: 0 },
   themes: 0,
+  items: { agent: 0, playbook: 0, package: 0, plugin: 0 },
   stale: true,
 }
 

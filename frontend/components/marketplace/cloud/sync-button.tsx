@@ -2,7 +2,7 @@
 
 /**
  * PRD-270 US-270-05a (§5.5, K18) — Sync with Automatos Cloud in the Marketplace header: the button,
- * and beside it the status line ("Last synced 2m ago · 3 themes", or the last error in plain words).
+ * and beside it the status line ("Last synced 2m ago · 3 themes · 2 agents", or the last error in plain words).
  * While a Sync runs the button is disabled and shows a spinner; after it, the toast says what it
  * brought (hooks/use-cloud-sync.ts).
  *
