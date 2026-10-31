@@ -81,6 +81,7 @@ vi.mock('../WorkspaceVoiceLiveCard', () => ({ WorkspaceVoiceLiveCard: () => null
 vi.mock('../themes/appearance-tab', () => ({ AppearanceTab: () => null }))
 vi.mock('../phones-devices/phones-devices-tab', () => ({ PhonesDevicesTab: () => null }))
 vi.mock('../billing/billing-tab', () => ({ BillingTab: () => null }))
+vi.mock('../proactive-auto/proactive-auto-section', () => ({ ProactiveAutoSection: () => null }))  // PRD-268 §6.9
 
 import { cloudSyncKeys } from '@/hooks/use-cloud-sync'
 import type { CloudSyncResult, CloudSyncStatus } from '@/lib/marketplace/cloud-sync'

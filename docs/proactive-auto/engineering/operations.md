@@ -39,7 +39,8 @@ Today's heartbeats keep running unchanged.
    instead set `PROACTIVE_MODE_DEFAULT=shadow` in `envs/api.local` and restart; a stored row wins over it. Workspaces
    are off until their own switch is on, so this alone changes nothing.
 
-2. **The workspace switch.** As an owner or admin of the workspace:
+2. **The workspace switch.** As an owner or admin of the workspace, in **Settings → Orchestrator → Proactive Auto**,
+   or:
 
    ```http
    PUT /api/proactive/settings
