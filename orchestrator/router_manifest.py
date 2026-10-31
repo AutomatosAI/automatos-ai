@@ -127,6 +127,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 US-C20a (§6.11.4) -- an approval grant's ApprovalView@1
     # (GET /api/v1/approval-grants/{grant_id}/view).
     RouterSpec("api.approval_views"),
+    # PRD-268 US-C22b (§6.11.5) -- calibration on day one: consent, the posted card, reject
+    # and accept (/api/auto/calibration*). Ships off (CALIBRATION_ENABLED, K15).
+    RouterSpec("api.auto_calibration"),
 )
 
 

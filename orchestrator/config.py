@@ -2320,6 +2320,10 @@ class Config:
     # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
     PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
     PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
+    # §6.11.5, K15 (W3): calibration on day one (api/auto_calibration.py) ships OFF until §12-Q22
+    # (consent to read the titles of a person's work) is answered. While off, GET answers
+    # available false, every POST is 404 and discovery does not list calibration.
+    CALIBRATION_ENABLED: bool = os.getenv("CALIBRATION_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
     # PRD-251 Socials

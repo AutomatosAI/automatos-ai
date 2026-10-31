@@ -125,7 +125,7 @@ def _auto_threads(new_session, ws):
 def test_the_structured_part_types_are_the_brief_and_the_suggestion():
     from services.chat_parts import STRUCTURED_PART_TYPES
 
-    assert STRUCTURED_PART_TYPES == ("brief@1", "suggestion@1")
+    assert STRUCTURED_PART_TYPES == ("brief@1", "suggestion@1", "calibration@1")  # 2026-10-31: W3's US-C22b
     assert isinstance(CHAT_PART_MAX_BYTES, int) and CHAT_PART_MAX_BYTES > 0
 
 

@@ -4,10 +4,10 @@ Server copy, never the model's, in English and Portuguese (Brazil): the consent 
 default), the source-count words ("from 6 Deliverables"), the three starters (the offers when
 no skill is installed, and with nothing to read), the words an offer names its skill with, and
 the text part's lines (what the posted message says beside its ``calibration@1`` part, for a
-surface that can't draw the card, and for the model's history). The language is W2's K7
-chooser (``services.brief.strings.brief_language``): a tag's own table, else its language's,
-else English. Every key is in both tables (``tests/test_prd268w3_calibration_build.py`` fails
-otherwise).
+surface that can't draw the card, and for the model's history), and the routes' refusals and
+notes, keyed by their code (US-C22b). The language is W2's K7 chooser
+(``services.brief.strings.brief_language``): a tag's own table, else its language's, else English.
+Every key is in both tables (``tests/test_prd268w3_calibration_build.py`` fails otherwise).
 
 A count is a count of sources by kind, in the order each kind first appears, and never a
 percentage (§12-Q26). The text part quotes Auto's lines and offers as plain text
@@ -55,6 +55,18 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "text_no_lines": "I read the titles of your recent work, and nothing in them is clear enough to say back yet.",
         "text_offers": "Things I can do for you:",
         "text_close": "Reject anything that is wrong, or tell me it sounds right.",
+        # The routes' refusals and notes (api/auto_calibration.py), by code.
+        "not_available": "Calibration is not available on this server.",
+        "calibration_no_workspace": "Choose a workspace first.",
+        "calibration_no_person": "Only a signed-in person can answer this.",
+        "calibration_not_a_member": "You are not a member of this workspace.",
+        "already_offered": "Auto has offered you this already.",
+        "calibration_not_found": "That calibration was not found.",
+        "line_not_found": "That line was not found.",
+        "calibration_answered": "You have answered this already.",
+        "calibration_unavailable": "Auto could not do that just now. Try again in a moment.",
+        "memory_unavailable": "Auto could not remember that just now, so nothing changed. Try again in a moment.",
+        "not_stored": "Not kept in memory: it looks like it holds something private, such as a password or a key.",
     }),
     "pt-BR": MappingProxyType({
         "consent": "O Auto lê os títulos do seu trabalho recente para dizer o que sabe.",
@@ -79,6 +91,17 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "text_no_lines": "Li os títulos do seu trabalho recente, e nada neles está claro o bastante para eu dizer ainda.",
         "text_offers": "O que posso fazer por você:",
         "text_close": "Rejeite o que estiver errado, ou diga que está certo.",
+        "not_available": "A calibração não está disponível neste servidor.",
+        "calibration_no_workspace": "Escolha um espaço de trabalho primeiro.",
+        "calibration_no_person": "Só uma pessoa conectada pode responder isto.",
+        "calibration_not_a_member": "Você não é membro deste espaço de trabalho.",
+        "already_offered": "O Auto já ofereceu isto a você.",
+        "calibration_not_found": "Essa calibração não foi encontrada.",
+        "line_not_found": "Essa linha não foi encontrada.",
+        "calibration_answered": "Você já respondeu isto.",
+        "calibration_unavailable": "O Auto não conseguiu fazer isso agora. Tente de novo em instantes.",
+        "memory_unavailable": "O Auto não conseguiu guardar isso agora, então nada mudou. Tente de novo em instantes.",
+        "not_stored": "Não guardado na memória: parece conter algo privado, como uma senha ou uma chave.",
     }),
 })
 

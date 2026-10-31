@@ -1,6 +1,7 @@
 """PRD-268 §6.11.2 (US-C19b): the structured parts a background post carries beside its text.
 
-A producer that has a card's data (the brief, a suggestion) posts it after Auto's text part:
+A producer that has a card's data (the brief, a suggestion, a calibration: W3's US-C22b) posts it
+after Auto's text part:
 ``parts = [{type: 'text', text}, *parts]`` (``services.chat_messenger.post_background_message``).
 A client that can draw the card draws it; every other client, and the model's history
 (``modules.context.sections.conversation._parts_to_text``), reads the text and skips the part.
@@ -14,9 +15,10 @@ import json
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-STRUCTURED_PART_TYPES = ("brief@1", "suggestion@1")
-# A brief is a handful of sections of short rows and a suggestion is one card: 32 KiB holds
-# either many times over, and keeps a runaway producer from bloating messages.parts.
+STRUCTURED_PART_TYPES = ("brief@1", "suggestion@1", "calibration@1")
+# A brief is a handful of sections of short rows, a suggestion is one card and a calibration is
+# three short lines with their sources: 32 KiB holds any of them many times over, and keeps a
+# runaway producer from bloating messages.parts.
 CHAT_PART_MAX_BYTES = 32 * 1024
 # A refused part's type is caller data: the error quotes at most this much of it.
 TYPE_IN_ERROR_MAX_CHARS = 64

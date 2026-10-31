@@ -1,5 +1,5 @@
 {
-  "route_count": 999,
+  "route_count": 1003,
   "routes": [
     {
       "method": "GET",
@@ -632,6 +632,22 @@
     {
       "method": "GET",
       "path": "/api/attachments/{attachment_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/lines/{line_id}/reject"
     },
     {
       "method": "POST",
