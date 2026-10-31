@@ -73,10 +73,7 @@ from services.themes import serve, signature_state, signature_verify  # noqa: E4
 from services.themes.package import read_theme_package  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
-PREPAINT = {
-    "knobs": {"ground": {"paper": {"--hello-bg": "#fafafa"}, "ink": {"--hello-bg": "#101010"}}},
-    "pairs": [], "numeric": [], "defaults": {"ground": "paper"},
-}
+PREPAINT = build.hello_prepaint({"ground": {"paper": {"--hello-bg": "#fafafa"}, "ink": {"--hello-bg": "#101010"}}})
 ENTRY, CLIP, PREPAINT_PATH = "dist/entry.js", "assets/mascot/idle.mp4", "boot/prepaint.json"
 LOOK_SCHEMA_PATH = "looks/schema.json"
 LOOK_STORAGE_FIXTURE = _ORCH / "tests" / "fixtures" / "themes" / "look-storage.json"

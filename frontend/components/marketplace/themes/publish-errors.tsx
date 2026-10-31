@@ -50,8 +50,10 @@ const TOO_LARGE_STATUS = 413
 const CSS_PREFIX = 'CSS_'
 const LOOK_PREFIX = 'LOOK'
 const TOO_LARGE_SUFFIX = '_TOO_LARGE'
+/** KNOB_NOT_PAINTED: a look-schema knob the prepaint table never paints (`services/themes/first_paint.py`). */
 const LOOKS_CODES: ReadonlySet<string> = new Set([
   'BAD_KNOB', 'BAD_LOOK_SCHEMA', 'NO_PRESET', 'PRESET_ID_MISMATCH', 'UNKNOWN_DEFAULT_LOOK', 'TOO_MANY_LOOKS',
+  'KNOB_NOT_PAINTED',
 ])
 const SIZE_CODES: ReadonlySet<string> = new Set(['TOO_MANY_FILES'])
 /** Package codes whose fix is in theme.json: a `mobile` block that cannot paint without code (M-02). */

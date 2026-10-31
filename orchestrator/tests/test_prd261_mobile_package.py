@@ -105,7 +105,8 @@ def _only_error(data: bytes, code: str, path: str) -> str:
 
 
 def _table(knobs: Mapping[str, Any], defaults: Mapping[str, Any], pairs: Sequence[Any] = ()) -> bytes:
-    return json.dumps({"knobs": knobs, "pairs": list(pairs), "defaults": dict(defaults)}).encode("utf-8")
+    """A table over ``knobs`` that also paints the rest of hello's look knobs (``build.hello_prepaint``)."""
+    return json.dumps(build.hello_prepaint(knobs, defaults, pairs)).encode("utf-8")
 
 
 def _looks_package(table: Optional[bytes]) -> bytes:
@@ -249,12 +250,13 @@ ACCENT = {"blue": {"--primary": BLUE}}
          "template": "rgba-alpha", "color": {"knob": "accent", "rgb": {"blue": "47,111,237"}}},
     )),
 ])
-def test_defaults_that_do_not_fit_the_table_paint_nothing_and_cannot_paint(defaults, pairs, numeric):
-    # paper alone paints the ground and its text, but the web paints nothing from a table its defaults don't fit
+def test_defaults_that_do_not_fit_the_table_are_refused_whole_not_as_a_phone_that_cannot_paint(defaults, pairs, numeric):
+    # paper alone paints the ground and its text, but the web paints nothing from a table its defaults don't fit, so
+    # the reader refuses the table itself (first_paint.py), whatever the mobile block says
     table = json.loads(_table({"ground": GROUND, "accent": ACCENT}, defaults, pairs))
     message = _only_error(_looks_package(json.dumps({**table, "numeric": list(numeric)}).encode("utf-8")),
-                          "MOBILE_CANNOT_PAINT", f"{PREPAINT_PATH}#defaults")
-    assert "the web paints nothing from the table" in message and '"mobile.tokens"' in message
+                          "PREPAINT_DEFAULTS_UNFIT", f"{PREPAINT_PATH}#defaults")
+    assert "it drops the whole table: nothing is painted from it and the theme has no looks" in message
 
 
 @pytest.mark.parametrize("table, code", [(b"{", "BAD_JSON"), (b"[]", "BAD_PREPAINT")])

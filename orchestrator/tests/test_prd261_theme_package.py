@@ -28,8 +28,11 @@ if str(ORCH_ROOT) not in sys.path:
 from config import config  # noqa: E402
 from services.themes import contract  # noqa: E402
 from services.themes.css_scope import CSS_ERROR_CODES, MAX_NESTING, css_scope_errors  # noqa: E402
-from services.themes.css_value import PREPAINT_ERROR_CODES, css_value_problem, prepaint_errors  # noqa: E402
+from services.themes.css_value import (  # noqa: E402
+    PREPAINT_ERROR_CODES, css_value_problem, prepaint_drop_errors, prepaint_errors,
+)
 from services.themes.digest import package_digest, sha256_hex  # noqa: E402
+from services.themes.first_paint import FIRST_PAINT_ERROR_CODES, first_paint_table_errors  # noqa: E402
 from services.themes.look_schema import LOOK_ERROR_CODES, validate_look, validate_look_schema  # noqa: E402
 from services.themes.manifest import MANIFEST_ERROR_CODES, validate_manifest  # noqa: E402
 from services.themes.package import PACKAGE_ERROR_CODES, ThemePackageError, read_theme_package  # noqa: E402
@@ -108,7 +111,7 @@ def test_the_corpus_bases_are_the_hello_fixture():
 
 
 def test_every_corpus_code_is_a_known_code():
-    sections = ("manifests", "lookSchemas", "looks", "prepaint", "cssScope", "packages")
+    sections = ("manifests", "lookSchemas", "looks", "prepaint", "prepaintDrops", "firstPaint", "cssScope", "packages")
     codes = {case["code"] for name in sections for case in CASES[name]["cases"]} - {None}
     assert codes <= KNOWN_CODES
 
@@ -164,6 +167,27 @@ def test_every_prepaint_case_gives_its_code(case):
     errors = prepaint_errors(case["document"])
     _assert_verdict(errors, case["code"])
     if "messages" in case:  # A-19c: the tone rule's sentences, the same in both languages
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+@pytest.mark.parametrize("case", CASES["prepaintDrops"]["cases"], ids=_ids(CASES["prepaintDrops"]))
+def test_every_prepaint_drop_case_gives_its_code_and_sentences(case):
+    # The values the browser's first paint drops (boot-sanitize.ts), which the reader refuses (first_paint.py).
+    errors = prepaint_drop_errors(case["document"])
+    _assert_verdict(errors, case["code"])
+    if "messages" in case:
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+@pytest.mark.parametrize("case", CASES["firstPaint"]["cases"], ids=_ids(CASES["firstPaint"]))
+def test_every_first_paint_case_gives_its_code_and_sentences(case):
+    # What the browser keeps of a table, against the looks section's schema (first_paint.py; first-paint.ts its twin).
+    schema, schema_errors = validate_look_schema(CASES["looks"]["schema"])
+    assert schema_errors == []
+    errors = first_paint_table_errors(schema, case["document"])
+    _assert_verdict(errors, case["code"])
+    assert {error["code"] for error in errors} <= set(FIRST_PAINT_ERROR_CODES)
+    if "messages" in case:
         assert [error["message"] for error in errors] == case["messages"]
 
 

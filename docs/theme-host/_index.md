@@ -182,6 +182,31 @@ The reader returns a **file manifest** (`{path: {type, size, sha256}}`) and the 
 the sorted `path\0sha256\n` lines (`services/themes/digest.py`). The digest depends on the files alone, never on
 the zip's order or timestamps. Every later step names the package by it.
 
+**What the browser keeps of the look files.** The browser takes `boot/prepaint.json` through its own gate before it
+paints (`frontend/lib/theme-host/boot-sanitize.ts`, which uses `css-value.ts` `isBootValue`), and the look runtime
+builds the theme's looks from the kept table alone (§8). What the CSS-value grammar accepts but would be lost there
+with no error, the reader refuses (`services/themes/first_paint.py`; `frontend/lib/theme-host/first-paint.ts` is its
+twin over the browser's own `sanitizePrepaint` and `lookSpecOf`):
+
+- A knob or pair cell's value the gate drops, `BAD_CSS_VALUE`: a function other than `rgb`, `rgba`, `hsl`, `hsla`,
+  `var`, `calc`, `min`, `max`, `clamp` and the filters `hue-rotate`, `saturate`, `brightness`, `grayscale`,
+  `contrast`, `sepia`, `invert` (so no gradient and no `color-mix()`), a character outside letters, digits and
+  `# % . , ( ) / + -` and space, or more than 200 characters (`contract.PREPAINT_VALUE_MAX`). Every value built on
+  a dropped one with `var()` is invalid too, so the theme would paint less and nothing would say why. The table
+  holds colours, stops and positions; the theme's CSS composes the gradient from them.
+- A table under `knobs`, a pair table or a numeric rule naming a knob the gate refuses, `BAD_PREPAINT`: a knob's name
+  there is a letter, then up to 31 letters, digits or `_` (the grammar alone also takes `-` and `.`), and the gate
+  drops the whole table, pair or rule.
+- `defaults` that don't fit what the gate keeps, `PREPAINT_DEFAULTS_UNFIT`: an option of every knob table, a cell of
+  every pair table, and for every numeric rule a value in range and a colour it keeps. The browser drops such a
+  table whole, so nothing is painted from it and the theme has no looks. This holds whatever the `mobile` block says.
+- A `looks/schema.json` knob the kept table never paints, `KNOB_NOT_PAINTED`, and a knob the kept table paints that
+  the schema doesn't declare, `KNOB_NOT_IN_SCHEMA`: the look spec has a choice knob for each table under `knobs` and
+  a number knob for each `numeric` rule's knob, nothing else, so either way every look fails, the presets included.
+
+The boot read (`serve.theme_prepaint`) re-checks the table with the grammar only, so a package imported before these
+checks still boots and paints what the browser keeps.
+
 A refusal is a 400 with one `{code, path, message}` per problem (a 413 when the package is over its cap).
 
 ## 2. The review stage
@@ -346,6 +371,9 @@ A look is one set of a theme's knob values, held to its `looks/schema.json`. The
 with looks. It reads the theme's look rules from the boot (the page's, or the one the browser fetched when the page
 got the base boot, section 6), keeps the member's looks for this workspace, paints the
 active look on `<html>`, sets the tone the theme's tone rule gives, and hands the looks to the SDK's `looks` area.
+Its look spec comes from the boot's prepaint table, not from `looks/schema.json` (`looks/spec.ts` `lookSpecOf`): a
+choice knob for each table under `knobs`, a number knob for each `numeric` rule's knob. That is why the reader refuses
+a schema knob the table never paints, and a table knob the schema lacks (§1).
 It also marks reduced motion on `<html>` for the theme's CSS (`looks/motion.ts`): `data-theme-motion` is `reduce` or
 `full`, and `--theme-motion` is `0` or `1`.
 
