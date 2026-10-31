@@ -14,7 +14,8 @@
  * (cloud-item-rows.ts `cloudItemsOf`, which the install gate reads with too, US-270-14d): the badges and
  * the gate never treat an answer they can't read as "no Cloud items". The
  * disclosure dialog reads a disclosure through `cloudDisclosureOf` (US-270-14c), so it never offers Add on
- * an answer it can't show whole. Every text in an answer is the server's, rendered as text (K30).
+ * an answer it can't show whole, and the update notices read the updates through `cloudUpdatesOf`
+ * (US-270-14e). Every text in an answer is the server's, rendered as text (K30).
  */
 import { apiClient } from '@/lib/api-client'
 
@@ -23,6 +24,7 @@ import type { CloudItemKey, CloudItemKind, CloudItems } from './cloud-item-rows'
 
 export const CLOUD_UPDATES_ENDPOINT = `${CLOUD_ITEMS_BASE}/updates`
 export const CLOUD_DISCLOSURE_UNREADABLE = "Couldn't read what this item will use."
+export const CLOUD_UPDATES_UNREADABLE = "Couldn't read the updates from Automatos Cloud."
 
 /** The prompt an agent runs with: its own ('custom'), else its persona's, else none. */
 export interface CloudPrompt {
@@ -184,4 +186,31 @@ export function getCloudDisclosure(kind: CloudItemKind, key: CloudItemKey): Prom
 
 export function getCloudUpdates(): Promise<CloudUpdates> {
   return apiClient.get<CloudUpdates>(CLOUD_UPDATES_ENDPOINT)
+}
+
+/** Each notice's kind and the type of its Cloud row's key: an agent's or a Playbook's id, a plugin's uuid. */
+const UPDATE_KEY_TYPES: Readonly<Record<CloudUpdate['kind'], 'number' | 'string'>> = {
+  agent: 'number',
+  playbook: 'number',
+  plugin: 'string',
+}
+
+function isUpdate(entry: unknown): boolean {
+  if (!isJson(entry) || typeof entry.kind !== 'string') return false
+  if (!Object.prototype.hasOwnProperty.call(UPDATE_KEY_TYPES, entry.kind)) return false
+  const available = entry.available
+  return typeof entry.cloudId === UPDATE_KEY_TYPES[entry.kind as CloudUpdate['kind']]
+    && typeof entry.name === 'string' && Array.isArray(entry.installed)
+    && isJson(available) && typeof available.version === 'string' && typeof available.revision === 'string'
+}
+
+/**
+ * An updates answer as the notices read it (US-270-14e); throws when it isn't a list of notices each carrying
+ * its kind, its Cloud row's key of that kind's type, its name and the version and revision it moved to, so the
+ * notices show nothing rather than a line they can't install or dismiss by.
+ */
+export function cloudUpdatesOf(answer: unknown): CloudUpdates {
+  const readable = isJson(answer) && Array.isArray(answer.updates) && answer.updates.every(isUpdate)
+  if (!readable) throw new Error(CLOUD_UPDATES_UNREADABLE)
+  return answer as unknown as CloudUpdates
 }

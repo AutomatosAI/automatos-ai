@@ -16,14 +16,21 @@
  * reads it afresh (what is here, a model, a skill, an app's connection, can change between two) and never
  * shows an earlier answer while it does; it isn't read again under a reader's eyes, and a failed read, or
  * an answer the dialog can't show whole (`cloudDisclosureOf`), is shown at once, not retried.
+ *
+ * `useCloudUpdates` reads the workspace's update notices (US-270-14e), keyed by the workspace (a switch never
+ * shows another workspace's notices) under the same root, so a Sync reads them again; an answer the notices
+ * can't read whole (`cloudUpdatesOf`) is an error, and they show nothing. `refreshCloudUpdates` reads them
+ * again after an install (the agent and Playbook install hooks call it): a new copy may clear a notice.
  */
 import { useQuery } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
 import { isLocal } from '@/lib/auth-edition'
 import type { CloudItemKey, CloudItemKind, CloudItems } from '@/lib/marketplace/cloud-item-rows'
-import { cloudDisclosureOf, getCloudDisclosure, getCloudItems } from '@/lib/marketplace/cloud-items'
-import type { CloudDisclosure } from '@/lib/marketplace/cloud-items'
+import {
+  cloudDisclosureOf, cloudUpdatesOf, getCloudDisclosure, getCloudItems, getCloudUpdates,
+} from '@/lib/marketplace/cloud-items'
+import type { CloudDisclosure, CloudUpdates } from '@/lib/marketplace/cloud-items'
 
 export const CLOUD_ITEMS_STALE_MS = 60_000
 
@@ -33,6 +40,8 @@ export const cloudItemsKeys = {
   all: CLOUD_ITEMS_ROOT,
   items: () => [...CLOUD_ITEMS_ROOT, 'items'] as const,
   disclosure: (kind: CloudItemKind, key: CloudItemKey) => [...CLOUD_ITEMS_ROOT, 'disclosure', kind, String(key)] as const,
+  updatesRoot: () => [...CLOUD_ITEMS_ROOT, 'updates'] as const,
+  updates: (workspaceId: string | null) => [...CLOUD_ITEMS_ROOT, 'updates', workspaceId] as const,
 }
 
 /** The Cloud agents, Playbooks, packages and plugins this install holds; never asked on the hosted edition. */
@@ -61,4 +70,18 @@ export function useCloudDisclosure(kind: CloudItemKind, key: CloudItemKey) {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
+}
+
+/** The update notices of `workspaceId` (`GET /updates`); never asked on the hosted edition or with no workspace. */
+export function useCloudUpdates(workspaceId: string | null) {
+  return useQuery<CloudUpdates>({
+    queryKey: cloudItemsKeys.updates(workspaceId),
+    enabled: isLocal && !!workspaceId,
+    queryFn: async () => cloudUpdatesOf(await getCloudUpdates()),
+  })
+}
+
+/** Reads the update notices again: after an install, a copy at a Cloud item's current version clears its notice. */
+export function refreshCloudUpdates(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: cloudItemsKeys.updatesRoot() })
 }

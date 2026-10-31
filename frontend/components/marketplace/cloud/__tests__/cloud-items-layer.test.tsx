@@ -25,6 +25,9 @@ vi.mock('@/lib/auth-edition', () => ({
     return !edition.local
   },
 }))
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspace: () => ({ workspace: { id: 'ws-1', name: 'Acme', role: 'member' } }),
+}))
 
 import { apiClient } from '@/lib/api-client'
 import type { AgentDisclosure } from '@/lib/marketplace/cloud-items'
@@ -58,10 +61,11 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-/** The backend: the Cloud items, the agent's disclosure and any install. */
+/** The backend: the Cloud items, the agent's disclosure, no update notices (US-270-14e) and any install. */
 function backend() {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url)
+    if (path.endsWith('/api/marketplace/cloud-sync/updates')) return json({ updates: [] })
     if (path.endsWith('/api/marketplace/cloud-sync/items')) return json(ITEMS)
     if (path.endsWith('/api/marketplace/cloud-sync/items/agent/7/disclosure')) return json(AGENT)
     if (init?.method === 'POST' && path.endsWith('/install')) return json({ success: true, message: 'Added' })

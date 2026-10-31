@@ -103,3 +103,27 @@ export function contentsLine(contents: { skills: number; commands: number; agent
     plural(contents.hooks, 'hook', 'hooks'),
   ].join(' · ')
 }
+
+/** The update notices (update-notices.tsx, US-270-14e). */
+export const UPDATES_LABEL = 'Updates from Automatos Cloud'
+export const REVIEW_NEW_VERSION = 'Review the new version'
+export const REVIEW = 'Review'
+export const DISMISS = 'Dismiss'
+export const PLAYBOOK_COPY_ADDED = 'Playbook added to your workspace'
+export const PLAYBOOK_COPY_FAILED = "Couldn't add the Playbook"
+export const INSTALL_WARNING = 'Warning'
+
+/** A copy of a Cloud agent or Playbook with a newer version on Automatos Cloud. */
+export function newerVersionLine(name: string): string {
+  return `${name} has a newer version on Automatos Cloud. Your copy stays as it is.`
+}
+
+/** A Cloud plugin this workspace enabled, updated in place (it runs the new version by reference, K15). */
+export function pluginUpdatedLine(name: string, version: string): string {
+  return `${name} was updated to ${version} on Automatos Cloud; this workspace now runs it.`
+}
+
+/** A new copy's toast when the install answers no message of its own. */
+export function copyAddedLine(name: string): string {
+  return `A new copy of ${name} was added beside yours.`
+}

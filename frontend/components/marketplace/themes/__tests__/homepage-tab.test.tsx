@@ -24,6 +24,8 @@ vi.mock('@/lib/api-client', () => ({
   getAdminWorkspaceOverride: () => null,
 }))
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
+// The Cloud items layer's update notices (PRD-270 US-270-14e) read the workspace from the provider.
+vi.mock('@/components/workspace-provider', () => ({ useWorkspace: () => ({ workspace: { id: 'ws-1' } }) }))
 vi.mock('@/contexts/role-context', () => ({ useSystemRole: () => ({ isAdmin: false }) }))
 vi.mock('@/hooks/use-marketplace-api', () => ({
   useFeaturedItems: () => ({ data: [], isLoading: false }),

@@ -9,7 +9,8 @@
  * (hooks/use-cloud-items.ts `useCloudDisclosure`, by the key its install takes) and shows its name,
  * publisher, version, when it was synced and both badges, then its sections (disclosure-sections.tsx).
  * "Add to my workspace" is the view's one primary; it calls `onAdd` once per press and stays pressed while
- * the install `onAdd` returns is pending, and Close (or the dialog's own close) calls `onClose`. While it
+ * the install `onAdd` returns is pending, and Close (or the dialog's own close) calls `onClose`. With no
+ * `onAdd` it is a review only, with Close and no Add (an updated plugin's notice, US-270-14e). While it
  * reads, a loading line; a failed read, or an answer it can't show whole (another kind's, or one missing
  * what a section shows), says so and offers no Add. The layer (cloud-items-layer.tsx, US-270-14d) owns what
  * Add and Close do.
@@ -37,8 +38,8 @@ interface CloudDisclosureDialogProps {
   /** The key its install takes: an agent's or a Playbook's id, a package's slug, a plugin's uuid. */
   id: CloudItemKey
   open: boolean
-  /** Called once per press; while a promise it returns is pending, Add stays pressed. */
-  onAdd: () => void | Promise<unknown>
+  /** Called once per press; while a promise it returns is pending, Add stays pressed. None: no Add. */
+  onAdd?: () => void | Promise<unknown>
   onClose: () => void
 }
 
@@ -80,7 +81,7 @@ function DisclosureHead({ disclosure }: { disclosure: CloudDisclosure }) {
   )
 }
 
-function DisclosureBody({ disclosure, onAdd, onClose }: { disclosure: CloudDisclosure } & Omit<StateProps, 'kind' | 'id'>) {
+function AddButton({ onAdd }: { onAdd: () => void | Promise<unknown> }) {
   const [adding, setAdding] = useState(false)
   const add = () => {
     if (adding) return
@@ -90,15 +91,21 @@ function DisclosureBody({ disclosure, onAdd, onClose }: { disclosure: CloudDiscl
     if (settled instanceof Promise) settled.then(() => setAdding(false), () => setAdding(false))
   }
   return (
+    <Button onClick={add} disabled={adding} data-testid="cloud-disclosure-add">
+      <Download className="mr-2 h-4 w-4" aria-hidden />
+      {adding ? ADDING : ADD_TO_WORKSPACE}
+    </Button>
+  )
+}
+
+function DisclosureBody({ disclosure, onAdd, onClose }: { disclosure: CloudDisclosure } & Omit<StateProps, 'kind' | 'id'>) {
+  return (
     <>
       <DisclosureHead disclosure={disclosure} />
       <DisclosureSections disclosure={disclosure} />
       <DialogFooter className="gap-2 border-t border-border/30 pt-4 sm:gap-0">
         <CloseButton onClose={onClose} />
-        <Button onClick={add} disabled={adding} data-testid="cloud-disclosure-add">
-          <Download className="mr-2 h-4 w-4" aria-hidden />
-          {adding ? ADDING : ADD_TO_WORKSPACE}
-        </Button>
+        {onAdd && <AddButton onAdd={onAdd} />}
       </DialogFooter>
     </>
   )
