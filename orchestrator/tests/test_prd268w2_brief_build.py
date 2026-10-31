@@ -10,9 +10,11 @@ each model call books one ``llm_usage`` row, as the real manager does. Proven he
 
 * every section from seeded rows: Needs you is ``needs_you()``'s rows with W1's state and next
   step; Suggested is up to 3 of the person's open suggestions (a lapsed one, another person's
-  and another workspace's left out); Today is the schedule on the local date in the person's
-  zone; Since is the person's started suggestions and the tickets and Missions finished since
-  their last brief; Couldn't check is the brief's readiness items that are not ready;
+  and another workspace's left out), and none while the person has paused suggestions (§6.9:
+  counted 0, folding none, every other section as it was); Today is the schedule on the
+  local date in the person's zone; Since is the person's started suggestions and the tickets
+  and Missions finished since their last brief; Couldn't check is the brief's readiness items
+  that are not ready;
 * the counts are exact, and ``counts.needs_you`` is ``needs_you_counts()['total']`` for the same
   caller; a viewer's brief has no question and no approval row, a Mission's plan included
   (P268W2-RVW-2), and its fold counts only the rows they may see; an owner's still lists both;
@@ -433,6 +435,30 @@ def test_suggested_is_up_to_three_of_the_persons_open_suggestions(floor, new_ses
     assert all(row["action"] == {"verb": "start", "label": "Start", "done_label": "Started"} for row in rows)
     assert rows[0]["why"] == "Why: restock oat milk, as the check-in read it."
     assert brief["counts"]["suggestions"] == 4 and brief["labels"]["more"]["suggestions"] == "Show 1 more"
+
+
+def _pause(new_session, ws, user_pk):
+    s = new_session()
+    s.execute(text("INSERT INTO proactive_person_settings (workspace_id, user_id, paused) "
+                   "VALUES (CAST(:w AS uuid), :u, true)"), {"w": ws, "u": user_pk})
+    s.commit()
+
+
+def test_a_paused_persons_brief_lists_none_of_their_suggestions_and_the_rest_as_it_was(floor, new_session,
+                                                                                        schedule, checks):
+    checks(floor.ws)
+    before = _brief(new_session, floor.ws, floor.pk)
+    _pause(new_session, floor.ws, floor.pk)
+    paused = _brief(new_session, floor.ws, floor.pk)
+
+    assert len(before["sections"]["suggestions"]) == 3 and paused["sections"]["suggestions"] == []
+    assert paused["counts"]["suggestions"] == 0 and "suggestions" not in paused["labels"]["more"]
+    rest = [name for name in SECTIONS if name != "suggestions"]
+    assert {name: paused["sections"][name] for name in rest} == {name: before["sections"][name] for name in rest}
+    assert {k: n for k, n in paused["counts"].items() if k != "suggestions"} == {
+        k: n for k, n in before["counts"].items() if k != "suggestions"}
+    assert paused["prose"] == before["prose"] == PROSE
+    assert "Restock oat milk" in before["spoken"] and "Restock oat milk" not in paused["spoken"]
 
 
 def test_today_is_the_schedule_on_the_local_date_in_the_persons_zone(floor, new_session, schedule, checks):
