@@ -41,6 +41,7 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'social_posted', // PRD-251C US-C403: plan_notify.notify_weekly_note (the weekly note)
   'content_report', // PRD-266 US-016a: services/content_reports/service.py (the owner's notice)
   'chat', // PRD-266 US-012b: services/notification_events/auto_message.py (Auto messaged you)
+  'suggestion', // PRD-268 US-C08a: services/proactive/delivery.py (suggestion_ready)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {

@@ -74,8 +74,11 @@ function pageVoiceSession(): ServerVoiceSession {
   return pageVoice
 }
 
-/** Auto's voice: the server's, with the browser's (when it has one) for every piece the server can't say. */
-function speechPort(): SynthesisPort {
+/**
+ * Auto's voice: the server's, with the browser's (when it has one) for every piece the server can't say. The engine's,
+ * and BriefVoice's Listen (components/voice/use-brief-voice.ts), each a port of its own over the page session's voice.
+ */
+export function speechPort(): SynthesisPort {
   return serverSpeechPort({
     fetchSpeech,
     player: browserAudioPlayer(),

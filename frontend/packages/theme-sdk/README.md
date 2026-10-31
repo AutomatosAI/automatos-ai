@@ -49,7 +49,7 @@ npm install https://widgets.automatos.app/theme-sdk/v1/theme-sdk.tgz
 That is the newest `1.x`. For a lockfile that never changes under you, pin the exact version instead:
 
 ```sh
-npm install https://widgets.automatos.app/theme-sdk/v1.2.0/theme-sdk.tgz
+npm install https://widgets.automatos.app/theme-sdk/v1.3.0/theme-sdk.tgz
 ```
 
 `package-lock.json` records the tarball's integrity hash. The `v1` alias moves when a new `1.x` ships, so a lock

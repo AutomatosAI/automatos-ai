@@ -8,7 +8,10 @@
  * - `VoiceButton`: the button core draws (host-cards/voice-button.tsx), the press and every promise around it (the AI
  *   voice caption and the stop control in a protected surface, the microphone prompt, a failure with Try again);
  * - `useVoice()`: the session as a frozen, theme-neutral snapshot, and `stop()`;
- * - `readVoiceLevels()`: the member's and Auto's levels, 0 to 1, for an animation frame (a waveform, a mascot).
+ * - `readVoiceLevels()`: the member's and Auto's levels, 0 to 1, for an animation frame (a waveform, a mascot);
+ * - `BriefVoice` (SDK 1.3.0, PRD-268 US-C21e): Listen, the host's control that reads the day's brief the host holds
+ *   (host-cards/brief-voice.tsx), in the protected surface `brief-voice`; it never plays until pressed and never reads
+ *   a theme's text.
  *
  * A theme may place, style and animate the button and call stop(). It never captures audio itself (getUserMedia,
  * SpeechRecognition, speechSynthesis: core's review blocks a theme that does, services/themes/audio_capture.py), never
@@ -25,6 +28,7 @@ import { IDLE_VOICE, type VoiceMode, type VoicePhase } from '@/lib/voice/engine'
 
 export { VoiceButton } from './host-cards/voice-button'
 export type { VoiceButtonMode, VoiceButtonPress, VoiceButtonProps, VoiceButtonSize } from './host-cards/voice-button'
+export { BriefVoice } from './host-cards/brief-voice'
 
 /** connecting → listening (the microphone open) → thinking → speaking; ended (a call Auto Live ended), error. */
 export type HostVoicePhase = VoicePhase

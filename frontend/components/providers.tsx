@@ -18,6 +18,7 @@ import { GlobalSearch } from './shared/global-search'
 import { ChooseInstallProvider } from './settings/themes/choose-install'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
+import { BriefOnOpen } from './proactive/brief-on-open'
 import { isSaaS } from '@/lib/auth-edition'
 import { ResumeAfterSignIn } from './auth/resume-after-sign-in'
 
@@ -137,6 +138,8 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
                 </ThemeHostProvider>
                 <GlobalSearch />
               </ChooseInstallProvider>
+              {/* PRD-268 US-W02: the day's brief, opened once per local date when a signed-in workspace loads. */}
+              <BriefOnOpen />
               <Toaster position="top-right" richColors closeButton />
               <ResumeAfterSignIn />
             </WorkspaceProvider>

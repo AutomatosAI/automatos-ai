@@ -6,7 +6,8 @@ Expo's tickets wait in ``mobile_push_tickets`` until the receipts job reads them
 
 * ``core.models.mobile_push`` and the Alembic revision ``prd266_w2_push`` declare the same
   columns, in the same order, with the same nullability, primary keys, foreign keys (the
-  device, the workspace and the person CASCADE), push-type CHECK, defaults and index.
+  device, the workspace and the person CASCADE), defaults and index; the push-type CHECK
+  matches the newest revision that sets it, ``prd268_w2_delivery`` (PRD-268 K19).
 * ``PUSH_TYPES`` is the one list the CHECK is built from.
 * The revision chains onto the old head, creates only what is absent (every CREATE is
   ``IF NOT EXISTS``), alters no other table, and its downgrade drops only these two.
@@ -30,12 +31,14 @@ from sqlalchemy import text
 
 ORCH = Path(__file__).resolve().parents[1]
 MIGRATION = ORCH / "alembic" / "versions" / "prd266_w2_push.py"
+# The newest revision that sets the push-type CHECK: PRD-268 W2 widens it to suggestion (K19).
+CHECK_MIGRATION = ORCH / "alembic" / "versions" / "prd268_w2_delivery.py"
 OLD_HEAD = "prd261_revocation_feed"
 TABLES = ("mobile_push_tickets", "mobile_digest_posts")
 
 TICKET_COLUMNS = ("ticket_id", "device_id", "workspace_id", "push_type", "created_at")
 DIGEST_COLUMNS = ("workspace_id", "user_id", "local_date", "posted_at")
-PUSH_TYPES = ("needs_answer", "review", "auto_message")
+PUSH_TYPES = ("needs_answer", "review", "auto_message", "suggestion")
 TICKET_INDEX = ("ix_mobile_push_tickets_created_at", ["created_at"])
 TICKET_CHECK = "ck_mobile_push_tickets_push_type"
 DAY = date(2026, 10, 24)
@@ -66,8 +69,8 @@ def _ddl_columns(table: str) -> dict[str, str]:
     }
 
 
-def _statements(step: str) -> list[str]:
-    spec = importlib.util.spec_from_file_location(f"prd266_w2_push_{step}", MIGRATION)
+def _statements(step: str, path: Path = MIGRATION) -> list[str]:
+    spec = importlib.util.spec_from_file_location(f"{path.stem}_{step}", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     statements: list[str] = []
@@ -131,7 +134,10 @@ def test_the_push_type_check_is_built_from_push_types_and_matches_the_revision()
     checks = {c.name: str(c.sqltext) for c in _ticket_table().constraints if isinstance(c, CheckConstraint)}
     assert set(checks) == {TICKET_CHECK}
     assert tuple(re.findall(r"'([a-z_]+)'", checks[TICKET_CHECK])) == PUSH_TYPES
-    assert f"CONSTRAINT {TICKET_CHECK} CHECK ({checks[TICKET_CHECK]})" in _ddl_lines("mobile_push_tickets")
+    (created,) = [line for line in _ddl_lines("mobile_push_tickets") if line.startswith(f"CONSTRAINT {TICKET_CHECK} ")]
+    assert tuple(re.findall(r"'([a-z_]+)'", created)) == PUSH_TYPES[:3]  # prd266_w2_push's three
+    newest = f"ADD CONSTRAINT {TICKET_CHECK} CHECK ({checks[TICKET_CHECK]});"
+    assert any(newest in statement for statement in _statements("upgrade", CHECK_MIGRATION))
     assert not [c for c in _digest_table().constraints if isinstance(c, CheckConstraint)]
 
 

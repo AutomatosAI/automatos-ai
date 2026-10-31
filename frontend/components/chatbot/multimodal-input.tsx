@@ -5,8 +5,9 @@
  * the page's AI label beside it is the host's (components/ai-label/ai-label.tsx), and no theme can hide it, so nothing
  * here ever waits on it; the voice button (composer-voice.tsx) has its own caption and spoken notice.
  */
-import { useState, useRef, useEffect, type RefObject } from 'react'
+import { useState, useRef, useEffect, type ChangeEvent, type RefObject } from 'react'
 import { Textarea } from '@/components/ui/textarea'
+import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { Agent } from './agent-selector'
 import type { VisibilityType, AppUsage } from '@/types'
 
@@ -76,6 +77,7 @@ function useTextareaFit(textareaRef: RefObject<HTMLTextAreaElement>, value: stri
 }
 
 export function MultimodalInput({
+  chatId,
   status,
   stop,
   sendMessage,
@@ -112,6 +114,12 @@ export function MultimodalInput({
     }
   }
 
+  // PRD-237: words in a new chat (no id yet) make it the person's draft, so a late cold start never replaces it.
+  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    if (!chatId && e.target.value) useChatSessionStore.getState().draftStarted()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -131,7 +139,7 @@ export function MultimodalInput({
         <Textarea
           ref={textareaRef}
           value={safeInput}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Send a message..."
           className="min-h-[60px] max-h-[200px] w-full resize-none rounded-3xl bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"

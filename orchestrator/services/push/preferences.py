@@ -3,17 +3,19 @@
 A push switch is a ``notification_preferences`` row with destination ``push`` (K7): the
 fan-out reads it at send time (``fanout.eligible_devices``: the person's row, else the
 workspace's), and the dispatcher never delivers it, so a push row never costs the bell row.
-The app has three switches, one per push type, and the daily digest's; ``PUSH_TYPES`` maps
+The app has four switches, one per push type, and the daily digest's; ``PUSH_TYPES`` maps
 each to the events its rows are for, and ``GET /api/notification-preferences`` returns that
 map as ``push_types``:
 
 * ``needs_answer``: question_pending, approval_pending, mission_plan_ready
 * ``review``: review_pending
 * ``auto_message``: auto_message
+* ``suggestion``: suggestion_ready (PRD-268 K9, derived from ``PUSH_TYPE_EVENTS`` like the
+  others; the push itself ships off behind ``config.SUGGESTION_PUSH_ENABLED``)
 * ``digest``: daily_digest, the per-person digest switch (K12). The digest itself is posted
   as Auto's message and pushed as ``auto_message``.
 
-No row means on, so GET shows an enabled ``push`` row for each of those six events that has
+No row means on, so GET shows an enabled ``push`` row for each of those seven events that has
 no push row yet (``with_push_defaults``).
 
 The contract for the app: ``PUT /api/notification-preferences`` replaces ALL of the caller's
@@ -21,7 +23,7 @@ rows for each event_type it names (``bulk_update_preferences``' rule). To change
 the app sends every row GET returned for that event, the push row changed among them, never
 the push row alone: the push row alone deletes the caller's other rows for that event.
 
-A PUT may hold a ``push`` row for those six events only, and a ``daily_digest`` row only as a
+A PUT may hold a ``push`` row for those seven events only, and a ``daily_digest`` row only as a
 push row (``push_row_allowed``; the request model answers 422 otherwise).
 
 Pure: no DB, no config, no logging.
@@ -35,7 +37,7 @@ from services.push.payload import PUSH_EVENT_TYPES, PUSH_TYPE_EVENTS
 
 # K7: the destination that is a push switch, never a delivery.
 PUSH_DESTINATION = "push"
-# K12: the digest's switch, beside the three push types.
+# K12: the digest's switch, beside the four push types.
 DIGEST = "digest"
 DAILY_DIGEST_EVENT = "daily_digest"
 
@@ -43,7 +45,7 @@ PUSH_TYPES: Mapping[str, tuple[str, ...]] = MappingProxyType({
     **PUSH_TYPE_EVENTS,
     DIGEST: (DAILY_DIGEST_EVENT,),
 })
-# Every event a push row may name, in PUSH_TYPES' order: the five push events and the digest.
+# Every event a push row may name, in PUSH_TYPES' order: the six push events and the digest.
 PUSH_SWITCH_EVENTS: tuple[str, ...] = tuple(event for events in PUSH_TYPES.values() for event in events)
 
 PUSH_ROW_REFUSED = (

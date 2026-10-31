@@ -1,0 +1,28 @@
+/* PRD-268 US-C21f: the proactive hello theme's one stylesheet. Every rule sits under
+   html.hello-proactive, the theme's own class. Its ground, ink and rule are the host's own tokens,
+   so the frame follows Studio light and Studio dark as the host's cards do, and its spacing comes
+   from the preset's variables. It styles the theme's own elements only: the host's cards keep the
+   host's look. */
+html.hello-proactive .hello-proactive-frame {
+  min-height: 100vh;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+html.hello-proactive .hello-proactive-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 24px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+html.hello-proactive .hello-proactive-route {
+  display: grid;
+  gap: var(--hello-proactive-gap);
+  max-width: var(--hello-proactive-width);
+  padding: 24px;
+}
+
+html.hello-proactive .hello-proactive-place {
+  padding: 8px;
+}

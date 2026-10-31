@@ -2278,6 +2278,17 @@ class Config:
     # "Send me today's brief now" (POST /api/v1/mobile/digest/now): one per person at most this
     # many seconds apart, at least one.
     DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
+    # PRD-268 (P268W2-RVW-1): a brief's claim (mobile_digest_posts.posted_at) older than this many
+    # seconds, with no brief posted for its day, was left by a claimant that died between the claim
+    # and the post; the next open or tick takes it over (services.mobile.digest.take_over). The
+    # build's one model call is Auto's Read (services.digest_service.generate_digest): 180 s per
+    # try on the OpenAI-compatible clients (core/llm/clients/openai_compatible_client.py
+    # DEFAULT_TIMEOUT_SECONDS) with the SDK's two retries, 540 s in all, under this default. The
+    # Anthropic client (the platform default, core/llm/defaults.py) sets no timeout, so its
+    # SDK's own 600 s per try and two retries hold, which this default does not outlast. A
+    # winner still building when its claim is taken over checks the claim before it posts and
+    # posts nothing, so a call that outlasts this costs a second build, never a second brief.
+    BRIEF_CLAIM_STALE_SECONDS: int = max(60, int(os.getenv("BRIEF_CLAIM_STALE_SECONDS", "600")))
 
     # =============================================================================
     # PRD-268 Proactive Auto: check-ins that suggest
@@ -2299,6 +2310,14 @@ class Config:
     # A check-in's interval: one sooner than the minimum after the last is refused.
     PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
     PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # K9: at most this many suggestion_ready bell rows per person per workspace since their local
+    # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
+    PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
+        0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
+    # K9: the fourth push type, suggestion, ships OFF. While off no suggestion push is sent
+    # (services/push/fanout.py); the bell row is still written. Discovery's suggestion_push
+    # follows it (US-C09b). The owner turns it on after §12-Q27 and the app's category (US-G02).
+    SUGGESTION_PUSH_ENABLED: bool = os.getenv("SUGGESTION_PUSH_ENABLED", "false").lower() in ("true", "1", "yes")
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))

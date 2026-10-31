@@ -18,7 +18,7 @@ import { isMissionTicket } from './ticket-actions'
 import Link from 'next/link'
 import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
-import { parseBlockedReason } from './blocked-reason'
+import { blockedLine } from './blocked-reason'
 import { useGrantApproval } from '@/hooks/use-approval-grants'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -277,7 +277,7 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 
 function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const grantApproval = useGrantApproval()
-  const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  const { grantId, line } = blockedLine(task.blocked_reason)  // PRD-268 US-C20b: the rule, in words
   const reason = stageReason(task)  // PRD-252 R3: what it waits for, in words
   return (
     <div className="space-y-6">
@@ -286,7 +286,7 @@ function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusCha
           <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider">{reason?.chip}</span>
           {grantId ? `Waiting for your approval (grant #${grantId})` : reason?.says}
         </p>
-        {text && <p className="text-xs text-muted-foreground">{text}</p>}
+        {line && <p className="text-xs text-muted-foreground" data-testid="blocked-line">{line}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {grantId && (
             <Button

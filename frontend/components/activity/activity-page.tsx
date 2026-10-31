@@ -25,7 +25,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
-import { AutosRead } from './autos-read'
+// PRD-268 US-W01a: Auto's Read (components/activity/autos-read), then the Suggested list.
+import { CommandCenterRead as AutosRead } from '@/components/proactive/command-center-read'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityFeed } from './activity-feed'

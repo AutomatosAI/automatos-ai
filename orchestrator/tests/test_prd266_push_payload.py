@@ -55,7 +55,8 @@ from services.push.payload import (
 from services.push.sender import PRIORITY_DEFAULT, PRIORITY_HIGH, PushMessage
 
 VECTORS = Path(__file__).resolve().parent / "fixtures" / "prd266_push_signature_vectors.json"
-FIVE = {"question_pending", "approval_pending", "mission_plan_ready", "review_pending", "auto_message"}
+FIVE = {"question_pending", "approval_pending", "mission_plan_ready", "review_pending", "auto_message",
+        "suggestion_ready"}
 PUSH_KEY = "pk-test1"  # under 10 characters: gitleaks' generic-api-key never matches it
 TOKEN = "ExpoTok1"
 WS = uuid.UUID("5b0c4c8e-2f6a-4d3e-9a7b-1c2d3e4f5a6b")
@@ -307,7 +308,7 @@ def test_the_vector_file_is_k9s():
                                  "max_future_seconds": PUSH_SIG_MAX_FUTURE_SECONDS}
     assert (PUSH_SIG_MAX_AGE_SECONDS, PUSH_SIG_MAX_FUTURE_SECONDS) == (604800, 300)
     assert [case["name"] for case in vectors["cases"]] == [
-        "question-with-options", "redacted-question", "review", "auto-message", "unicode-question"]
+        "question-with-options", "redacted-question", "review", "auto-message", "unicode-question", "suggestion"]
     assert len(vectors["tampered"]) == 4
 
 
@@ -333,6 +334,8 @@ def _case_inputs(name: str) -> dict:
         "unicode-question": dict(event_type="question_pending", notification_id=1005, link_type="question",
                                  link_id=7, grant=_grant('Publicar às 09:00 — café ☕?\nLinha "dois"',
                                                          ["Sim", "Não"], 7)),
+        "suggestion": dict(event_type="suggestion_ready", notification_id=1006, link_type="suggestion",
+                           link_id=uuid.UUID("8a4e1f2b-6c3d-4e5f-9a1b-2c3d4e5f6a7b")),
     }[name]
 
 

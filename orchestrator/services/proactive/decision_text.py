@@ -18,7 +18,7 @@ from typing import Any, Iterable, List, Mapping
 from modules.proactive.locale import DEFAULT_LOCALE
 from modules.tools.discovery.suggestion_fields import plain_text
 
-__all__ = ["STRINGS", "say", "ticket_brief"]
+__all__ = ["QUOTE", "STRINGS", "quoted", "say", "ticket_brief"]
 
 QUOTE = "> "
 # An evidence ref's type and id, as far as one quoted line has room for them.
@@ -85,7 +85,7 @@ def say(locale: str, key: str) -> str:
     return STRINGS.get(locale, STRINGS[DEFAULT_LOCALE])[key]
 
 
-def _quoted(text: Any) -> List[str]:
+def quoted(text: Any) -> List[str]:
     """``text`` as quoted lines: plain text, one ``> `` line per line, blank lines dropped."""
     lines = plain_text(text, keep_lines=True).split("\n") if isinstance(text, str) else []
     return [f"{QUOTE}{line}" for line in lines if line]
@@ -100,7 +100,7 @@ def _ref_lines(evidence: Iterable[Any]) -> List[str]:
 def ticket_brief(locale: str, title: str, detail: str, evidence: Iterable[Any]) -> str:
     """A started ticket's description: the person's Start as its instruction, then the
     suggestion and the reads it cites, quoted as data."""
-    lines = [say(locale, "brief_started"), "", say(locale, "brief_quoted"), *_quoted(title), *_quoted(detail)]
+    lines = [say(locale, "brief_started"), "", say(locale, "brief_quoted"), *quoted(title), *quoted(detail)]
     refs = _ref_lines(evidence)
     if refs:
         lines += ["", say(locale, "brief_evidence"), *refs]

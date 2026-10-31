@@ -65,6 +65,7 @@ vi.mock('../phones-devices/phones-devices-tab', () => ({ PhonesDevicesTab: () =>
 vi.mock('../billing/billing-tab', () => ({ BillingTab: () => null }))  // PRD-265 US-011 (hosted only)
 // PRD-270 US-270-05b: the Automatos Cloud tab's own gate is automatos-cloud-panel.test.tsx's
 vi.mock('../automatos-cloud-panel', () => ({ AutomatosCloudPanel: () => null, useHasAutomatosCloudTab: () => false }))
+vi.mock('../what-auto-depends-on', () => ({ WhatAutoDependsOn: () => null }))  // PRD-268 US-W05
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({

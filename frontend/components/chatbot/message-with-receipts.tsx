@@ -12,10 +12,18 @@
  * PRD-264 EUAI-09 (Art. 50(2)): every assistant message is marked machine-readable as
  * AI-generated: `data-ai-generated="true"` on the plain block that holds it (no class, so
  * the list's spacing and the message's own layout are unchanged).
+ *
+ * PRD-268 US-W01b: an assistant message's `brief@1` and `suggestion@1` parts draw as cards under it
+ * (components/proactive/thread-cards.tsx), outside the AI-generated block, so their controls sit outside it and
+ * each card marks Auto's words itself. `Message` gets a copy without those parts, and without the text part when
+ * the brief card holds the prose (lib/proactive/thread-parts.ts). A message with neither renders as before.
  */
+import { useMemo } from 'react'
 import { Message, type MessageProps } from './message'
 import { ReceiptsBlock } from './receipts-block'
 import { receiptsOf } from '@/lib/chat/receipts'
+import { ThreadCards } from '@/components/proactive/thread-cards'
+import { threadPartsOf } from '@/lib/proactive/thread-parts'
 
 function MessageAndReceipts(props: MessageProps) {
   const { message } = props
@@ -33,10 +41,14 @@ function MessageAndReceipts(props: MessageProps) {
 }
 
 export function MessageWithReceipts(props: MessageProps) {
+  const thread = useMemo(() => threadPartsOf(props.message), [props.message])
   if (props.message.role !== 'assistant') return <MessageAndReceipts {...props} />
   return (
-    <div data-ai-generated="true" data-testid="ai-generated-message">
-      <MessageAndReceipts {...props} />
-    </div>
+    <>
+      <div data-ai-generated="true" data-testid="ai-generated-message">
+        <MessageAndReceipts {...props} message={thread.message} />
+      </div>
+      <ThreadCards brief={thread.brief} suggestionIds={thread.suggestionIds} />
+    </>
   )
 }

@@ -10,6 +10,8 @@ event happened, so a member removed (or made a viewer) in between receives nothi
   ``missions:update`` (``modules.policy.roles.workspace_has_permission``).
 * ``auto_message`` goes to the person Auto wrote to, and only while they still belong to the
   workspace; without a named person, to nobody.
+* ``suggestion`` (PRD-268 K9) goes to the person the suggestion is for, by the same rule as
+  ``auto_message``: only while they still belong; without a named person, to nobody.
 
 A workspace's people are its active ``workspace_members`` rows plus ``workspaces.owner_id``
 (always an owner), read by ``users.id`` in one query; a deactivated account receives
@@ -29,12 +31,14 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.workspace_admin import WORKSPACE_ANSWERER_ROLES
 from modules.policy.roles import WorkspaceRole, workspace_has_permission
-from services.push.payload import NEEDS_ANSWER
+from services.push.payload import NEEDS_ANSWER, SUGGESTION
 
 REVIEW = "review"
 AUTO_MESSAGE = "auto_message"
 REVIEW_PERMISSION = "missions:update"
 OWNER_ROLE = WorkspaceRole.OWNER.value
+# The push types for the one person they name: without a person they reach nobody.
+NAMED_PERSON_TYPES = frozenset({AUTO_MESSAGE, SUGGESTION})
 
 # Everyone who belongs to :ws with the role they hold there, or only :uid when it is given.
 # The owner column and the local operator (when :local) count as owners. A deactivated
@@ -74,6 +78,7 @@ ROLE_RULES: Mapping[str, Callable[[str], bool]] = MappingProxyType({
     NEEDS_ANSWER: _answers,
     REVIEW: _reviews,
     AUTO_MESSAGE: _belongs,
+    SUGGESTION: _belongs,
 })
 
 
@@ -97,13 +102,13 @@ def recipients(db: Session, workspace_id: Any, push_type: str, user_id: Optional
     """The ``users.id`` of everyone in the workspace this push type may reach, sorted.
 
     With ``user_id``: that person only, if they still belong and their role allows it.
-    ``auto_message`` without a person, and an unknown push type, reach nobody.
+    ``auto_message`` or ``suggestion`` without a person, and an unknown push type, reach nobody.
     """
     rule = ROLE_RULES.get(push_type)
-    if rule is None or (push_type == AUTO_MESSAGE and user_id is None):
+    if rule is None or (push_type in NAMED_PERSON_TYPES and user_id is None):
         return []
     roles = _roles_by_person(db, workspace_id, user_id)
     return sorted(person for person, held in roles.items() if any(rule(role) for role in held))
 
 
-__all__ = ["AUTO_MESSAGE", "REVIEW", "REVIEW_PERMISSION", "ROLE_RULES", "recipients"]
+__all__ = ["AUTO_MESSAGE", "NAMED_PERSON_TYPES", "REVIEW", "REVIEW_PERMISSION", "ROLE_RULES", "recipients"]

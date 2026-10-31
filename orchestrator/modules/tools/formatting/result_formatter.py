@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from modules.tools.formatting import board_page, document_brand_note, generated_document_summary, tickets_by_number
-from modules.tools.formatting.card_digest import carries_the_question, shown_on_the_card
+from modules.tools.formatting.approval_view import carries_the_approval_view
+from modules.tools.formatting.card_digest import carries_the_question, params_digest
 
 logger = logging.getLogger(__name__)
 
@@ -557,6 +558,7 @@ class ToolResultFormatter:
             }
 
     @staticmethod
+    @carries_the_approval_view  # PRD-268 US-C20a: ApprovalView@1 (target, preview, the rule that asked)
     @carries_the_question  # PRD-256 FX-008: the approval card shows what it approves
     def format_for_frontend(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
         """
@@ -821,25 +823,8 @@ class ToolResultFormatter:
 
         return frontend_data
 
-    @staticmethod
-    def _tool_params_digest(params: Any) -> Dict[str, Any]:
-        """PRD-193 S3: human-readable digest of a gated call's params.
-
-        Server-injected ``_``-prefixed plumbing is dropped; long values are
-        truncated. The approver sees the tool's real arguments (target ids,
-        keys, values) — not a raw JSON dump.
-        """
-        if not isinstance(params, dict):
-            return {}
-        digest: Dict[str, Any] = {}
-        for key, value in params.items():
-            if str(key).startswith("_"):
-                continue
-            if isinstance(value, (int, float, bool)) or value is None:
-                digest[str(key)] = value
-                continue
-            digest[str(key)] = shown_on_the_card(value if isinstance(value, str) else str(value))
-        return digest
+    # PRD-193 S3: the gated call's digest, now in card_digest (the approval view reads it too).
+    _tool_params_digest = staticmethod(params_digest)
     
     @staticmethod
     @document_brand_note.the_documents_brand_check_is_read  # brand kit at generation: banned words, last

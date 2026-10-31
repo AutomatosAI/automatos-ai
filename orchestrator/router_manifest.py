@@ -115,9 +115,15 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 W1 -- Proactive Auto: the suggestions (list, Start, Hide) and the check-in
     # runs (/api/proactive/*).
     RouterSpec("api.proactive"),
+    # PRD-268 US-C10b (§6.4) -- the brief on open, once per person per local date
+    # (POST /api/proactive/brief/open).
+    RouterSpec("api.proactive_brief"),
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),
+    # PRD-268 US-C20a (§6.11.4) -- an approval grant's ApprovalView@1
+    # (GET /api/v1/approval-grants/{grant_id}/view).
+    RouterSpec("api.approval_views"),
     # PRD-270 US-270-01 -- the hosted catalogue a local install's Sync with Automatos Cloud
     # reads (GET /api/marketplace/catalog): public, rate-limited per IP, 404 in the local edition.
     RouterSpec("api.marketplace_catalog"),

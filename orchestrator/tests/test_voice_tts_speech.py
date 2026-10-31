@@ -504,6 +504,7 @@ def test_discovery_lists_tts_only_while_voice_tts_url_is_set(monkeypatch, editio
     monkeypatch.setattr(config, "VOICE_TTS_URL", URL)
     assert "tts" in discovery.offered_capabilities()
     assert discovery.CAPABILITY_ROUTES["tts"] == ("POST", SPEECH)
+    monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)  # the one other capability that needs setup
     assert discovery.offered_capabilities() == sorted(discovery.CAPABILITY_ROUTES)
 
 

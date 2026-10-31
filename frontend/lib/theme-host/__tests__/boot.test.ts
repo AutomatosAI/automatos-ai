@@ -22,8 +22,9 @@ import {
   type ThemeBoot,
   type ThemeTone,
 } from '@/lib/theme-host/boot'
-import { CSS_VAR_NAME_PATTERN, isCssValue, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
+import { CSS_VAR_NAME_PATTERN, sanitizeThemeBoot } from '@/lib/theme-host/boot-sanitize'
 import { HTML_CLASS_PATTERN } from '@/lib/theme-host/constants'
+import { isBootValue } from '@/lib/theme-host/css-value'
 import { bootLookStorage, themeLookKeys } from '@/lib/theme-host/looks/storage'
 import { THEME_TONE_COOKIE, themeToneCookieValue } from '@/lib/theme-host/looks/tone-cookie'
 import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
@@ -114,9 +115,9 @@ describe('PRD-261 A-03 — the gate before a boot is written', () => {
 
   it('drops a prepaint value that fails the CSS-value grammar, and a bad property name', () => {
     const hostile = ['url(https://x.test/a.png)', '</script><!--', 'red;background:url(x)', '"quoted"', 'expression(alert(1))', 'a(b', '!important', '']
-    for (const value of hostile) expect({ value, ok: isCssValue(value) }).toEqual({ value, ok: false })
+    for (const value of hostile) expect({ value, ok: isBootValue(value) }).toEqual({ value, ok: false })
     const fine = ['#FF6A1F', 'rgba(244,238,232,.12)', 'hsl(12 5% 7% / 0.14)', '12 5% 7%', 'var(--theme-font-display),sans-serif', '-.03em', 'hue-rotate(18deg) saturate(1.2)']
-    for (const value of fine) expect({ value, ok: isCssValue(value) }).toEqual({ value, ok: true })
+    for (const value of fine) expect({ value, ok: isBootValue(value) }).toEqual({ value, ok: true })
     const vars = { [SAMPLE_VAR]: '#FF6A1F', '--x-bad': 'url(x)', '--Upper': '#000000', 'color': '#000000' }
     const boot = sanitizeThemeBoot(sampleBoot({ prepaint: { knobs: { tint: { warm: vars } }, pairs: [], numeric: [], defaults: { tint: 'warm' } } }))
     expect(boot.prepaint?.knobs.tint.warm).toEqual({ [SAMPLE_VAR]: '#FF6A1F' })
