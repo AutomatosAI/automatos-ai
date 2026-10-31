@@ -27,9 +27,10 @@ CHIPS_MAX_OUT_OF_LIMITS = 0
 CHIPS_MAX_REPLACED = 0
 CHIPS_MAX_ON_OPEN = 1 / 10
 
-# Spoken brevity, after speechify: words, and nothing a listener should never hear.
+# Spoken brevity, after speechify: words, an answer in every one, and nothing a listener should never hear.
 SPOKEN_MAX_MEDIAN_WORDS = 40
 SPOKEN_MAX_WORDS = 80
+SPOKEN_MAX_SILENT = 0
 
 # One brief: exactly this many per person per local date.
 BRIEFS_PER_PERSON_PER_DATE = 1
@@ -54,8 +55,8 @@ BAR_TEXT: Mapping[str, str] = MappingProxyType({
         f"limits, {CHIPS_MAX_REPLACED} turns where the chips replace the answer, chips on <= "
         f"{CHIPS_MAX_ON_OPEN:.2f} of open questions"),
     "spoken": (
-        f"median <= {SPOKEN_MAX_MEDIAN_WORDS} words, none over {SPOKEN_MAX_WORDS}, no markdown, URL, path "
-        "or id"),
+        f"median <= {SPOKEN_MAX_MEDIAN_WORDS} words, none over {SPOKEN_MAX_WORDS}, {SPOKEN_MAX_SILENT} heard as "
+        "nothing, no markdown, URL, path or id"),
     "one_brief": f"exactly {BRIEFS_PER_PERSON_PER_DATE} brief per person per local date",
     "precision": (
         f"started / decided >= {PRECISION_MIN_STARTED:.2f}, started and passed review >= "

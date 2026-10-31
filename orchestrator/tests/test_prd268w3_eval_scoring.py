@@ -241,6 +241,11 @@ def test_a_spoken_answer_carrying_what_a_listener_must_not_hear_misses(answer, f
     assert score.numbers[found] == 1 and score.verdict == MISS
 
 
+def test_a_spoken_answer_heard_as_nothing_misses():
+    score = score_spoken(["", "I've put it in the chat."])
+    assert score.numbers["silent"] == 1 and score.verdict == MISS
+
+
 def test_plain_spoken_answers_pass():
     answers = ["I've put it in the chat. Want me to run through it?",
                "Vector's been failing since nine, and it's the same key error. I can reconnect it.",

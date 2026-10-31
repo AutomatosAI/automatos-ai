@@ -1,10 +1,12 @@
-"""PRD-268 §6.7 (K14) — what an eval run takes from the platform: its workspace and a tool's schema.
+"""PRD-268 §6.7 (K14) — what an eval run takes from the platform: its workspace, a tool's schema and
+Auto's chat model.
 
 The runners that call the model run on one workspace, ``config.PROACTIVE_EVAL_WORKSPACE_ID``: its
 model settings and credentials answer, and its usage rows record the calls. A tool is offered as
 the platform offers it, its schema read from the action registry, never restated here. Either one
 missing means the eval cannot run (``EvalCannotRun``, the command line's exit 2), said in a message
-that names what to fix.
+that names what to fix. The turns asked of Auto (reply chips, spoken brevity) are asked of Auto's
+own model (``chat_llm``).
 """
 from __future__ import annotations
 
@@ -13,9 +15,15 @@ from uuid import UUID
 
 from config import config
 
-__all__ = ["WORKSPACE_SETTING", "EvalCannotRun", "eval_workspace", "tool_schema"]
+__all__ = ["AUTO_SERVICE", "CHAT_PURPOSE", "WORKSPACE_SETTING", "EvalCannotRun", "chat_llm", "eval_workspace",
+           "tool_schema"]
 
 WORKSPACE_SETTING = "PROACTIVE_EVAL_WORKSPACE_ID"
+# Auto's tier, the platform's orchestrator_llm (core/llm/manager.py SERVICE_CATEGORY_MAP).
+AUTO_SERVICE = "orchestrator"
+# Auto's own chat calls' purpose, customer work (services/credits/classification.py). Written out:
+# tests/test_prd265_call_site_classes.py reads it from this module.
+CHAT_PURPOSE = "orchestrator"
 
 
 class EvalCannotRun(Exception):
@@ -43,3 +51,10 @@ def tool_schema(name: str) -> Dict[str, Any]:
     if action is None:
         raise EvalCannotRun(f"The platform has no action {name}: the eval offers it as the platform does.")
     return action.to_openai_schema()
+
+
+def chat_llm(workspace_id: str) -> Any:
+    """Auto's model: the platform ``orchestrator_llm``, its calls booked as Auto's own."""
+    from core.llm.manager import LLMManager
+
+    return LLMManager(service_name=AUTO_SERVICE, workspace_id=workspace_id, request_type=CHAT_PURPOSE)

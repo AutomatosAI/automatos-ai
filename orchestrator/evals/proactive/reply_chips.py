@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.llm.usage_context import LANE_CHAT
-from evals.proactive.gold import GoldSetUnavailable, read_gold
-from evals.proactive.runtime import eval_workspace, tool_schema
+from evals.proactive.gold import GoldSetUnavailable, conversation, read_gold
+from evals.proactive.runtime import AUTO_SERVICE, CHAT_PURPOSE, chat_llm, eval_workspace, tool_schema
 from evals.proactive.scoring import ChipsTurn, Score, score_reply_chips
 from modules.tools.discovery.handlers_replies import OFFER_REPLIES, REPLIES_PARAM, offer_replies
 from modules.tools.execution.params_text import json_container
@@ -37,18 +37,12 @@ from modules.tools.execution.reply_chips_turn import REPLY_CHIPS
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 from services.credits.asks import ask_scope
 
-__all__ = ["CHAT_PURPOSE", "NAME", "Question", "ask", "chat_llm", "evaluate", "read_questions"]
+__all__ = ["AUTO_SERVICE", "CHAT_PURPOSE", "NAME", "Question", "ask", "chat_llm", "evaluate", "read_questions"]
 
 NAME = "reply_chips"
-# Auto's tier, the platform's orchestrator_llm (core/llm/manager.py SERVICE_CATEGORY_MAP).
-AUTO_SERVICE = "orchestrator"
-# Auto's own chat calls' purpose, customer work (services/credits/classification.py). Written out:
-# tests/test_prd265_call_site_classes.py reads it from this module.
-CHAT_PURPOSE = "orchestrator"
 # The turn's rounds: a choice is a question and its chips, perhaps one correction, then the answer.
 MAX_ROUNDS = 3
 SYSTEM_PROMPT = "You are Auto, the assistant in this Automatos workspace. Answer the person in plain, short sentences."
-ROLES = ("user", "assistant")
 UNKNOWN_TOOL = "There is no tool {name}. Answer the person in words."
 
 
@@ -60,29 +54,11 @@ class Question:
     messages: Tuple[Mapping[str, str], ...]
 
 
-def chat_llm(workspace_id: str) -> Any:
-    """Auto's model: the platform ``orchestrator_llm``, its calls booked as Auto's own."""
-    from core.llm.manager import LLMManager
-
-    return LLMManager(service_name=AUTO_SERVICE, workspace_id=workspace_id, request_type=CHAT_PURPOSE)
-
-
-def _history(case: Mapping[str, Any], number: int) -> Tuple[Mapping[str, str], ...]:
-    history = case.get("history") or []
-    fits = isinstance(history, list) and all(
-        isinstance(m, Mapping) and m.get("role") in ROLES and isinstance(m.get("content"), str) for m in history)
-    if not fits:
-        raise GoldSetUnavailable(f"{NAME} case {number}: history is a list of {{role: user | assistant, content}}.")
-    return tuple({"role": m["role"], "content": m["content"]} for m in history)
-
-
 def _question(case: Mapping[str, Any], number: int) -> Question:
-    choice, said = case.get("choice"), case.get("ask")
+    choice = case.get("choice")
     if not isinstance(choice, bool):
         raise GoldSetUnavailable(f"{NAME} case {number}: choice is true (a choice question) or false (an open one).")
-    if not isinstance(said, str) or not said.strip():
-        raise GoldSetUnavailable(f"{NAME} case {number}: ask is the person's message, as text.")
-    return Question(choice=choice, messages=(*_history(case, number), {"role": "user", "content": said}))
+    return Question(choice=choice, messages=conversation(NAME, case, number))
 
 
 def read_questions() -> List[Question]:

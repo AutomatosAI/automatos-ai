@@ -52,11 +52,13 @@ _ID = re.compile(
 
 @dataclass(frozen=True)
 class Score:
-    """One eval's numbers and whether they clear its bar."""
+    """One eval's numbers and whether they clear its bar; ``audit`` holds the lines a person reads
+    beside them (the spoken answers for §6.7's hand audit, the precision of each workspace)."""
 
     name: str
     numbers: Mapping[str, Any]
     passed: bool
+    audit: Tuple[str, ...] = ()
 
     @property
     def verdict(self) -> str:
@@ -69,8 +71,9 @@ class Score:
         return bars.BAR_TEXT[self.name]
 
     def as_dict(self) -> Dict[str, Any]:
-        """The score as plain data, for ``--json``."""
-        return {"eval": self.name, "bar": self.bar, "numbers": dict(self.numbers), "verdict": self.verdict}
+        """The score as plain data, for ``--json``; ``audit`` only when there is one."""
+        data = {"eval": self.name, "bar": self.bar, "numbers": dict(self.numbers), "verdict": self.verdict}
+        return {**data, "audit": list(self.audit)} if self.audit else data
 
 
 def _score(name: str, numbers: Mapping[str, Any], passed: bool) -> Score:
@@ -225,18 +228,19 @@ def _words(text: str) -> int:
 
 
 def score_spoken(answers: Sequence[str]) -> Score:
-    """Words per answer (after speechify), and the answers that still carry markdown, a URL, a
-    path or an id."""
+    """Words per answer (after speechify), the answers heard as nothing (no words: they would flatter
+    the median), and the answers that still carry markdown, a URL, a path or an id."""
     counts = [_words(answer) for answer in answers]
     median = statistics.median(counts) if counts else None
     longest = max(counts) if counts else None
+    silent = sum(1 for count in counts if count == 0)
     found = {name: sum(1 for answer in answers if pattern.search(str(answer or "")))
              for name, pattern in (("markdown", _MARKDOWN), ("urls", _URL), ("paths", _PATH), ("ids", _ID))}
     passed = (_at_most(median, bars.SPOKEN_MAX_MEDIAN_WORDS) and _at_most(longest, bars.SPOKEN_MAX_WORDS)
-              and not any(found.values()))
+              and silent <= bars.SPOKEN_MAX_SILENT and not any(found.values()))
     return _score("spoken", {
         "answers": len(counts), "median_words": median, "max_words": longest,
-        "over_limit": sum(1 for count in counts if count > bars.SPOKEN_MAX_WORDS), **found,
+        "over_limit": sum(1 for count in counts if count > bars.SPOKEN_MAX_WORDS), "silent": silent, **found,
     }, passed)
 
 

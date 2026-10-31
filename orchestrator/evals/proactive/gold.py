@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Tuple
 
 from config import config
 
-__all__ = ["GOLD_EVALS", "GOLD_SUFFIX", "GoldSetUnavailable", "gold_dir", "read_gold", "repository_root"]
+__all__ = ["GOLD_EVALS", "GOLD_SUFFIX", "GoldSetUnavailable", "conversation", "gold_dir", "read_gold",
+           "repository_root"]
 
 # The evals that read a gold set; precision is live and one brief is driven, so neither has one.
 GOLD_EVALS = ("triage", "silence", "reply_chips", "spoken")
 GOLD_SUFFIX = ".jsonl"
 SETTING = "PROACTIVE_EVAL_GOLD_DIR"
+# Who speaks in a case's history before its ask.
+ROLES = ("user", "assistant")
 
 _HERE = Path(__file__).resolve().parent
 # evals/proactive -> evals -> the orchestrator folder.
@@ -98,3 +101,17 @@ def read_gold(name: str) -> List[Dict[str, Any]]:
     if not cases:
         raise GoldSetUnavailable(f"{path} has no cases.")
     return cases
+
+
+def conversation(name: str, case: Mapping[str, Any], number: int) -> Tuple[Mapping[str, str], ...]:
+    """A case's turn as chat messages: its ``history`` (optional, ``[{role: user | assistant,
+    content}]``), then its ``ask`` as the person's message; refused by number when either is not."""
+    said = case.get("ask")
+    if not isinstance(said, str) or not said.strip():
+        raise GoldSetUnavailable(f"{name} case {number}: ask is the person's message, as text.")
+    history = case.get("history") or []
+    fits = isinstance(history, list) and all(
+        isinstance(m, Mapping) and m.get("role") in ROLES and isinstance(m.get("content"), str) for m in history)
+    if not fits:
+        raise GoldSetUnavailable(f"{name} case {number}: history is a list of {{role: user | assistant, content}}.")
+    return (*({"role": m["role"], "content": m["content"]} for m in history), {"role": "user", "content": said})
