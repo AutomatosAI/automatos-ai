@@ -1,15 +1,12 @@
-'use client'
+/**
+ * PRD-270 US-270-08a — /marketplace, a server component (US-270-10 adds its metadata here).
+ *
+ * Public on SaaS (the middleware lists the exact path); the local edition serves every route.
+ * The client switch decides what renders: a member sees today's page, a signed-out visitor the
+ * read-only storefront.
+ */
+import { MarketplacePage } from '@/components/marketplace/public/marketplace-page'
 
-import { MainLayout } from '@/components/layout/main-layout'
-import { MarketplaceHomepage } from '@/components/marketplace/marketplace-homepage'
-import { usePageAPI } from '@/hooks/use-page-api'
-
-export default function MarketplacePage() {
-  usePageAPI('marketplace')
-
-  return (
-    <MainLayout>
-      <MarketplaceHomepage />
-    </MainLayout>
-  )
+export default function Page() {
+  return <MarketplacePage />
 }
