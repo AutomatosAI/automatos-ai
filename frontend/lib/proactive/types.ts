@@ -7,7 +7,7 @@
  *   GET /api/proactive/suggestions and the answers of Start and Hide (api/proactive.py);
  * - `Readiness` (Readiness@1): services/readiness/contract.py, GET /api/readiness;
  * - `ApprovalView` (ApprovalView@1): modules/tools/formatting/approval_view.py, on the approval cards;
- * - `Calibration` (Calibration@1): §6.11.5. Its routes are US-C22's, so no server answers it yet (K12);
+ * - `Calibration` (Calibration@1): §6.11.5, US-C22's routes (GET and POST /api/auto/calibration), off until CALIBRATION_ENABLED;
  * - `DisplayState`: services/proactive/display_state.py, on needs-you, Mission and board rows.
  *
  * Every id is a string and a field a reader doesn't know is ignored. The words in these shapes are

@@ -24,6 +24,9 @@
  *
  * PRD-268 US-W03b: the follow-ups an assistant message's turn scheduled (its live `followUps`, else its `follow_up@1`
  * parts) go to ThreadCards too, which draws a line for each that the caller's own list holds.
+ *
+ * PRD-268 US-W06: an assistant message's `calibration@1` part goes to ThreadCards as the calibration card, and its text
+ * part steps aside (the card holds the lines: lib/proactive/thread-parts.ts).
  */
 import { useMemo } from 'react'
 import { Message, type MessageProps } from './message'
@@ -33,8 +36,9 @@ import { followUpsOfMessage, replyChipsOfMessage } from '@/lib/chat/turn-parts'
 import type { FollowUpLinesProps } from '@/components/proactive/follow-up-line'
 import { useRenderedMessage } from '@/components/proactive/newest-message'
 import { ThreadCards } from '@/components/proactive/thread-cards'
+import type { ThreadCalibrationProps } from '@/components/proactive/thread-calibration'
 import type { ThreadReplyChipsProps } from '@/components/proactive/thread-reply-chips'
-import { threadPartsOf } from '@/lib/proactive/thread-parts'
+import { threadPartsOf, type ThreadParts } from '@/lib/proactive/thread-parts'
 
 function MessageAndReceipts(props: MessageProps) {
   const { message } = props
@@ -63,6 +67,11 @@ function threadFollowUps({ chatId, message }: MessageProps): FollowUpLinesProps 
   return followUps.length > 0 ? { chatId, followUps } : undefined
 }
 
+/** The calibration a message carries, with its chat; none when it carries none. */
+function threadCalibration({ chatId, isReadonly }: MessageProps, { calibration }: ThreadParts): ThreadCalibrationProps | undefined {
+  return calibration ? { chatId, calibration, isReadonly } : undefined
+}
+
 export function MessageWithReceipts(props: MessageProps) {
   const thread = useMemo(() => threadPartsOf(props.message), [props.message])
   useRenderedMessage(props.chatId, props.message.id)
@@ -77,6 +86,7 @@ export function MessageWithReceipts(props: MessageProps) {
         suggestionIds={thread.suggestionIds}
         replyChips={threadReplyChips(props)}
         followUps={threadFollowUps(props)}
+        calibration={threadCalibration(props, thread)}
       />
     </>
   )

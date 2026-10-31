@@ -7,13 +7,18 @@
  * its text part, because the card holds the prose. A `brief@1` part that isn't a Brief@1 draws no card, so its text
  * stays. Every other part reaches `Message` as it was, which still drops the types it doesn't know. A message with no
  * card part comes back as the same object.
+ *
+ * PRD-268 US-W06: a `calibration@1` part (the calibration Auto posted on the person's Go ahead) is a card too, and,
+ * as with the brief, its text part (the same lines and offers, for a surface that can't draw the card) steps aside
+ * once it is a Calibration@1 (lib/proactive/calibration.ts); `calibration` is set only then.
  */
 import type { ChatMessage } from '@/types'
-import type { Brief } from './types'
+import { CALIBRATION_PART, calibrationOfParts } from './calibration'
+import type { Brief, Calibration } from './types'
 import { BRIEF_PART, SUGGESTION_PART } from './types'
 import { briefOfParts, isProactiveId, recordOf } from './wire'
 
-const CARD_PARTS: ReadonlySet<unknown> = new Set([BRIEF_PART, SUGGESTION_PART])
+const CARD_PARTS: ReadonlySet<unknown> = new Set([BRIEF_PART, SUGGESTION_PART, CALIBRATION_PART])
 const TEXT_PART = 'text'
 
 export interface ThreadParts {
@@ -23,6 +28,8 @@ export interface ThreadParts {
   readonly suggestionIds: readonly string[]
   /** What `Message` draws: the message itself, or a copy without the parts drawn as cards. */
   readonly message: ChatMessage
+  /** The calibration to draw as a card; absent when the message carries none that is one. */
+  readonly calibration?: Calibration
 }
 
 type MessageWithSource = ChatMessage & { source?: unknown; content?: unknown }
@@ -43,11 +50,14 @@ export function threadPartsOf(message: ChatMessage): ThreadParts {
   const parts: readonly unknown[] = message.role === 'assistant' && Array.isArray(message.parts) ? message.parts : []
   if (!parts.some((part) => CARD_PARTS.has(recordOf(part)?.type))) return { brief: null, suggestionIds: [], message }
   const brief = briefOfParts(parts)
+  const calibration = calibrationOfParts(parts)
+  const cardHoldsText = brief !== null || calibration !== null
   const kept = parts.filter((part) => {
     const type = recordOf(part)?.type
-    return !CARD_PARTS.has(type) && !(brief !== null && type === TEXT_PART)
+    return !CARD_PARTS.has(type) && !(cardHoldsText && type === TEXT_PART)
   })
   const copy: MessageWithSource = { ...message, parts: kept as ChatMessage['parts'] }
-  const shown: MessageWithSource = brief !== null && 'content' in message ? { ...copy, content: '' } : copy
-  return { brief, suggestionIds: suggestionIdsOf(parts, (message as MessageWithSource).source), message: shown }
+  const shown: MessageWithSource = cardHoldsText && 'content' in message ? { ...copy, content: '' } : copy
+  const suggestionIds = suggestionIdsOf(parts, (message as MessageWithSource).source)
+  return { brief, suggestionIds, message: shown, ...(calibration !== null ? { calibration } : {}) }
 }

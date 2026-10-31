@@ -12,19 +12,26 @@
  * PRD-268 US-W03a: it also sends each reply chip tapped in its chat (the `automatos:reply-chip` window event,
  * reply-chip-event.ts) through the sendMessage it was given, as the person's own message, and does nothing while a
  * turn is streaming. The box itself is unchanged.
+ *
+ * PRD-268 US-W06: in any chat, while the server offers calibration and the person hasn't answered, the consent line
+ * (calibration-offer.tsx) sits above the composer in the pinned suggestion's place, so one line, and one ink primary,
+ * is above the box at a time; the pinned suggestion is back once the consent line is answered.
  */
 import {
   MultimodalInput as ComposerInput,
   type MultimodalInputProps,
 } from '@/components/chatbot/multimodal-input'
+import { CalibrationOffer, useCalibrationOffered } from './calibration-offer'
 import { PinnedSuggestion } from './pinned-suggestion'
 import { useReplyChipsSent } from './reply-chip-event'
 
 export function MultimodalInput(props: MultimodalInputProps) {
   useReplyChipsSent(props.chatId, props.status, props.sendMessage)
+  const offered = useCalibrationOffered()
   return (
     <>
-      <PinnedSuggestion chatId={props.chatId} />
+      <CalibrationOffer chatId={props.chatId} />
+      {offered ? null : <PinnedSuggestion chatId={props.chatId} />}
       <ComposerInput {...props} />
     </>
   )

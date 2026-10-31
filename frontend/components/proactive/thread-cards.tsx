@@ -22,6 +22,9 @@
  *
  * PRD-268 US-W03b: a message whose turn scheduled follow-ups has a line for each, above its chips
  * (follow-up-line.tsx): "Follow-up at 15:10 · Cancel" while pending, from the caller's own list.
+ *
+ * PRD-268 US-W06: a message that carries the person's calibration (`calibration@1`) has its card, with Reject, Sounds
+ * right and Something's off, and its live state from the server (thread-calibration.tsx).
  */
 import type { ReactNode } from 'react'
 import { BriefVoice } from '@/components/voice/brief-voice'
@@ -31,6 +34,7 @@ import { BriefCard } from './brief-card'
 import { FollowUpLines, type FollowUpLinesProps } from './follow-up-line'
 import { usePinnedSuggestionIds } from './mission-suggestion-presence'
 import { SuggestionCard } from './suggestion-card'
+import { ThreadCalibration, type ThreadCalibrationProps } from './thread-calibration'
 import { ThreadReplyChips, type ThreadReplyChipsProps } from './thread-reply-chips'
 import { useKeptStarted, withKept } from './use-suggested-list'
 
@@ -45,6 +49,8 @@ export interface ThreadCardsProps {
   readonly replyChips?: ThreadReplyChipsProps
   /** US-W03b: the follow-ups the message's turn scheduled, with its chat; none when it scheduled none. */
   readonly followUps?: FollowUpLinesProps
+  /** US-W06: the calibration the message carries, with its chat; none when it carries none. */
+  readonly calibration?: ThreadCalibrationProps
 }
 
 function Aligned({ children }: { readonly children: ReactNode }) {
@@ -95,12 +101,13 @@ function Cards({ brief, suggestionIds }: Pick<ThreadCardsProps, 'brief' | 'sugge
   )
 }
 
-/** A message's cards, its follow-up lines, then its reply chips while it is the chat's newest; nothing when it
- * carries none. */
-export function ThreadCards({ brief, suggestionIds, replyChips, followUps }: ThreadCardsProps) {
+/** A message's cards, its calibration, its follow-up lines, then its reply chips while it is the chat's newest;
+ * nothing when it carries none. */
+export function ThreadCards({ brief, suggestionIds, replyChips, followUps, calibration }: ThreadCardsProps) {
   return (
     <>
       <Cards brief={brief} suggestionIds={suggestionIds} />
+      {calibration ? <ThreadCalibration {...calibration} /> : null}
       {followUps ? <FollowUpLines {...followUps} /> : null}
       {replyChips ? <ThreadReplyChips {...replyChips} /> : null}
     </>

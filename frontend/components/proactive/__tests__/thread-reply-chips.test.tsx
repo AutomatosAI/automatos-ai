@@ -28,6 +28,8 @@ vi.mock('@/components/chatbot/multimodal-input', () => ({
   MultimodalInput: ({ chatId }: { chatId: string }) => <div data-testid="the-composer" data-chat-id={chatId} />,
 }))
 vi.mock('@/components/proactive/pinned-suggestion', () => ({ PinnedSuggestion: () => null }))
+// The consent line above the composer (US-W06) as a stand-in: the server offers no calibration here.
+vi.mock('@/components/proactive/calibration-offer', () => ({ CalibrationOffer: () => null, useCalibrationOffered: () => false }))
 
 import { MessageWithReceipts } from '@/components/chatbot/message-with-receipts'
 import { MultimodalInput } from '@/components/proactive/composer-with-suggestion'

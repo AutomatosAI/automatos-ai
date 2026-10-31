@@ -4,7 +4,8 @@
  *
  * - The SDK module hands a theme the same functions as the area modules, and DISPLAY_STATE_LABELS is the host's table.
  * - Each hook asks the host's endpoint into the host's cache (a theme's read and the host's surfaces share one
- *   answer), hands back a frozen copy, and checks a theme's input before anything is sent; calibration asks nothing.
+ *   answer), hands back a frozen copy, and checks a theme's input before anything is sent; while the server offers
+ *   no calibration (CALIBRATION_ENABLED ships off), calibration reads the host's answer and sends nothing.
  * - Each default component is the host's (its words, its names, its protected surface, its route), with the theme's
  *   props checked: a prop of the wrong kind throws, naming the card and the prop, and what a card hands back is frozen.
  */
@@ -37,7 +38,7 @@ import { SOUNDS_RIGHT } from '@/components/proactive/calibration-card'
 import { REFUSED_FALLBACK } from '@/components/proactive/use-suggestion-card'
 import { LISTEN_TO_THE_BRIEF } from '@/components/voice/brief-voice'
 import { briefQueryKeys } from '@/hooks/use-brief'
-import { CALIBRATION_UNAVAILABLE } from '@/hooks/use-calibration'
+import { CALIBRATION_PATH, CALIBRATION_UNAVAILABLE } from '@/hooks/use-calibration'
 import { readinessQueryKeys } from '@/hooks/use-readiness'
 import { suggestionQueryKeys } from '@/hooks/use-suggestions'
 import { localDateOf } from '@/lib/proactive/brief-day'
@@ -104,6 +105,7 @@ beforeEach(() => {
   requestMock.mockImplementation(async (path: string) => {
     if (path === SUGGESTIONS_PATH) return { suggestions: [SUGGESTION] }
     if (path === READINESS_PATH) return READINESS
+    if (path.startsWith(CALIBRATION_PATH)) return { available: false, offer: false, consent_line: '', status: null, calibration: null, rejected_lines: [], accepted_lines: [] }
     if (path === `/api/chat/${CHAT}/messages`) return [{ id: MESSAGE, parts: [{ type: 'text', text: BRIEF.prose }, { type: 'brief@1', brief: BRIEF }] }]
     throw new Error(`unexpected request ${path}`)
   })
@@ -199,15 +201,16 @@ describe('proactive hooks — the host’s endpoints and cache', () => {
     expect(Object.isFrozen(result.current.data)).toBe(true)
   })
 
-  it('useCalibration and useAnswerCalibration are inert: nothing offered, an answer refused, nothing sent', async () => {
-    const { result } = renderHook(() => ({ read: sdk.useCalibration(), answer: sdk.useAnswerCalibration() }))
+  it('useCalibration and useAnswerCalibration while the server offers none: nothing offered, an answer refused, nothing sent', async () => {
+    const { result } = renderHook(() => ({ read: sdk.useCalibration(), answer: sdk.useAnswerCalibration() }), { wrapper: setup().wrapper })
+    await waitFor(() => expect(result.current.read.isLoading).toBe(false))
     expect(result.current.read).toMatchObject({ data: null, available: false, isLoading: false, error: null })
     expect(result.current.answer.available).toBe(false)
     await expect(result.current.answer.runAsync({ calibration_id: 'cal-1', answer: 'accept' })).rejects.toThrow(CALIBRATION_UNAVAILABLE)
     act(() => result.current.answer.run({ calibration_id: 'cal-1', answer: 'reject', line_id: 'l1' }))
     await waitFor(() => expect(result.current.answer.error).toBe(CALIBRATION_UNAVAILABLE))
     expect(() => result.current.answer.run({ calibration_id: '', answer: 'accept' })).toThrow(/^Automatos theme SDK: useAnswerCalibration/)
-    expect(requestMock).not.toHaveBeenCalled()
+    expect(requestMock.mock.calls.every(([path]) => String(path).startsWith(CALIBRATION_PATH))).toBe(true)
     expect(postMock).not.toHaveBeenCalled()
   })
 })
