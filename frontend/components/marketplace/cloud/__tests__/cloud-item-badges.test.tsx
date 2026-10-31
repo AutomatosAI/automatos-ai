@@ -44,7 +44,7 @@ vi.mock('@clerk/nextjs', () => ({
 import { Dialog } from '@/components/ui/dialog'
 import { cloudItemsKeys } from '@/hooks/use-cloud-items'
 import { useCloudSync } from '@/hooks/use-cloud-sync'
-import type { CloudItems } from '@/lib/marketplace/cloud-items'
+import type { CloudItems } from '@/lib/marketplace/cloud-item-rows'
 
 import { AgentGridCard, AgentListRow } from '../../marketplace-agent-cards'
 import type { MarketplaceAgent } from '../../marketplace-agent-cards'

@@ -29,9 +29,9 @@ vi.mock('@/lib/auth-edition', () => ({
   },
 }))
 
+import type { CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-item-rows'
 import type {
-  AgentDisclosure, CloudDisclosure, CloudItemKey, CloudItemKind, PackageDisclosure, PlaybookDisclosure,
-  PluginDisclosure,
+  AgentDisclosure, CloudDisclosure, PackageDisclosure, PlaybookDisclosure, PluginDisclosure,
 } from '@/lib/marketplace/cloud-items'
 
 import { CloudDisclosureDialog } from '../disclosure-dialog'

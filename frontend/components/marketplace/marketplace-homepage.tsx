@@ -25,6 +25,7 @@ import { CATEGORY_TABS, TAB_ICONS, openedMarketplaceTab } from './category-tabs'
 import { marketplaceLink } from './deep-link/deep-link-params'
 import { MarketplaceDeepLink } from './deep-link/marketplace-deep-link'
 import { SyncButton } from './cloud/sync-button'
+import { CloudItemsLayer } from './cloud/cloud-items-layer'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -387,6 +388,7 @@ export function MarketplaceHomepage() {
       <RecommendationsRail items={recItems} onItemClick={setSelectedItem} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
+      <CloudItemsLayer />
       <MarketplaceCategoryTabs searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
 
       {/* A ?tab=&item=&add=1 link's detail modal, for every tab but Themes (PRD-270 K22) */}

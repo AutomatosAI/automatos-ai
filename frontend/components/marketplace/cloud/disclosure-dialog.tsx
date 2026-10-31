@@ -22,7 +22,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useCloudDisclosure } from '@/hooks/use-cloud-items'
-import type { CloudDisclosure, CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-items'
+import type { CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-item-rows'
+import type { CloudDisclosure } from '@/lib/marketplace/cloud-items'
 
 import { CloudBadgePair } from './cloud-item-badges'
 import { DisclosureSections } from './disclosure-sections'

@@ -7,6 +7,10 @@
  * workspace's, so one cache serves every card; a Sync with Automatos Cloud reads it again
  * (hooks/use-cloud-sync.ts invalidates `cloudItemsKeys.all`).
  *
+ * `fetchCloudItems` is the same list read outside a component, for the install gate (CloudItemsLayer,
+ * US-270-14d): read afresh for every install, since a Sync in another tab can add a Cloud item the cached
+ * list doesn't know yet; installs at the same moment share one read, and the badges get the new list.
+ *
  * `useCloudDisclosure` reads what one Cloud item will use, for the disclosure dialog (US-270-14c), under the
  * same root, so a Sync reads it again too. Nothing of it is kept once its dialog closes, so each opening
  * reads it afresh (what is here, a model, a skill, an app's connection, can change between two) and never
@@ -14,10 +18,12 @@
  * an answer the dialog can't show whole (`cloudDisclosureOf`), is shown at once, not retried.
  */
 import { useQuery } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 
 import { isLocal } from '@/lib/auth-edition'
+import type { CloudItemKey, CloudItemKind, CloudItems } from '@/lib/marketplace/cloud-item-rows'
 import { cloudDisclosureOf, getCloudDisclosure, getCloudItems } from '@/lib/marketplace/cloud-items'
-import type { CloudDisclosure, CloudItemKey, CloudItemKind, CloudItems } from '@/lib/marketplace/cloud-items'
+import type { CloudDisclosure } from '@/lib/marketplace/cloud-items'
 
 export const CLOUD_ITEMS_STALE_MS = 60_000
 
@@ -37,6 +43,11 @@ export function useCloudItems() {
     queryFn: getCloudItems,
     staleTime: CLOUD_ITEMS_STALE_MS,
   })
+}
+
+/** The same Cloud items, read afresh through `queryClient` (a read already under way is shared). */
+export function fetchCloudItems(queryClient: QueryClient): Promise<CloudItems> {
+  return queryClient.fetchQuery<CloudItems>({ queryKey: cloudItemsKeys.items(), queryFn: getCloudItems, staleTime: 0 })
 }
 
 /** What one Cloud item will use (`GET /items/{kind}/{key}/disclosure`); never asked on the hosted edition. */

@@ -14,8 +14,8 @@
 import { Badge } from '@/components/ui/badge'
 import { useCloudItems } from '@/hooks/use-cloud-items'
 import { isLocal } from '@/lib/auth-edition'
-import { isCloudItem } from '@/lib/marketplace/cloud-items'
-import type { CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-items'
+import { isCloudItem } from '@/lib/marketplace/cloud-item-rows'
+import type { CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-item-rows'
 import { cn } from '@/lib/utils'
 
 import { CLOUD_BADGE, REVIEWED_BADGE } from './item-copy'

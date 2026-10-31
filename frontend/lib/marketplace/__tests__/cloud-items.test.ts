@@ -13,17 +13,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
 
-import {
-  CLOUD_ITEMS_ENDPOINT,
-  CLOUD_ITEMS_UNREADABLE,
-  CLOUD_UPDATES_ENDPOINT,
-  cloudItemsOf,
-  getCloudDisclosure,
-  getCloudItems,
-  getCloudUpdates,
-  isCloudItem,
-} from '../cloud-items'
-import type { CloudItems, CloudUpdates } from '../cloud-items'
+import { CLOUD_ITEMS_ENDPOINT, CLOUD_ITEMS_UNREADABLE, cloudItemsOf, isCloudItem } from '../cloud-item-rows'
+import type { CloudItems } from '../cloud-item-rows'
+import { CLOUD_UPDATES_ENDPOINT, getCloudDisclosure, getCloudItems, getCloudUpdates } from '../cloud-items'
+import type { CloudUpdates } from '../cloud-items'
 
 const PLUGIN_ID = '3f2a8c1e-0b4d-4e6f-9a7b-1c2d3e4f5a6b'
 
