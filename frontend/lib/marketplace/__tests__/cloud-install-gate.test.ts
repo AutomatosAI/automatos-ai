@@ -31,6 +31,7 @@ vi.mock('@/lib/auth-edition', () => ({
 }))
 
 import type { CloudInstallCall } from '../cloud-install-call'
+import type { CloudGateClient } from '../cloud-install-gate'
 import type { CloudItems } from '../cloud-item-rows'
 
 type Gate = typeof import('../cloud-install-gate')
@@ -62,6 +63,8 @@ const CLOUD_INSTALLS = [
 
 let gate: Gate
 let client: { get: ReturnType<typeof vi.fn> }
+/** The mock as the gate's CloudGateClient: vi.fn() can't be typed as its generic get<T>. */
+const gateClient = (): CloudGateClient => client as unknown as CloudGateClient
 
 /** An opener whose answer the test gives: `answer(true)` is Add, `answer(false)` is Close. */
 function deferredOpener(items: () => Promise<CloudItems> = async () => ITEMS) {
@@ -96,7 +99,7 @@ describe('a Cloud item install on the local edition', () => {
   it.each(CLOUD_INSTALLS)('waits for the %s disclosure and goes on Add (%s)', async (kind, key, endpoint, options) => {
     const opener = deferredOpener()
 
-    const waiting = gate.cloudInstallGate(endpoint, options as RequestInit, client) as Promise<void>
+    const waiting = gate.cloudInstallGate(endpoint, options as RequestInit, gateClient()) as Promise<void>
 
     expect(waiting).toBeInstanceOf(Promise)
     expect(await settled(waiting)).toBe(false)
@@ -111,7 +114,7 @@ describe('a Cloud item install on the local edition', () => {
     const send = vi.fn()
 
     const request = (async () => {
-      await gate.cloudInstallGate(endpoint, options as RequestInit, client)
+      await gate.cloudInstallGate(endpoint, options as RequestInit, gateClient())
       send()
     })()
     await settled(request)
@@ -137,7 +140,7 @@ describe('a Cloud item install on the local edition', () => {
   ] as const)('reads %s as the same install call', async (_label, endpoint, options, kind, key) => {
     const opener = deferredOpener()
 
-    const waiting = gate.cloudInstallGate(endpoint, options as unknown as RequestInit, client) as Promise<void>
+    const waiting = gate.cloudInstallGate(endpoint, options as unknown as RequestInit, gateClient()) as Promise<void>
     await settled(waiting)
 
     expect(opener.open).toHaveBeenCalledWith({ kind, key })
@@ -150,11 +153,11 @@ describe('what passes', () => {
   it('lets a local item install go without asking', async () => {
     const opener = deferredOpener()
 
-    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)).resolves.toBeUndefined()
-    await expect(gate.cloudInstallGate('/api/marketplace/packages/my-own/install', POST, client)).resolves.toBeUndefined()
+    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())).resolves.toBeUndefined()
+    await expect(gate.cloudInstallGate('/api/marketplace/packages/my-own/install', POST, gateClient())).resolves.toBeUndefined()
     await expect(gate.cloudInstallGate('/api/workspaces/ws-1/plugins', {
       method: 'POST', body: JSON.stringify({ plugin_id: '00000000-0000-4000-8000-000000000000' }),
-    }, client)).resolves.toBeUndefined()
+    }, gateClient())).resolves.toBeUndefined()
 
     expect(opener.open).not.toHaveBeenCalled()
   })
@@ -169,7 +172,7 @@ describe('what passes', () => {
   ] as const)('returns at once for %s, reading nothing', (_label, endpoint, options) => {
     const opener = deferredOpener()
 
-    expect(gate.cloudInstallGate(endpoint, options as RequestInit, client)).toBeUndefined()
+    expect(gate.cloudInstallGate(endpoint, options as RequestInit, gateClient())).toBeUndefined()
     expect(client.get).not.toHaveBeenCalled()
     expect(opener.open).not.toHaveBeenCalled()
   })
@@ -178,7 +181,7 @@ describe('what passes', () => {
     edition.local = false
     const opener = deferredOpener()
 
-    expect(gate.cloudInstallGate(endpoint, options as RequestInit, client)).toBeUndefined()
+    expect(gate.cloudInstallGate(endpoint, options as RequestInit, gateClient())).toBeUndefined()
     expect(client.get).not.toHaveBeenCalled()
     expect(opener.open).not.toHaveBeenCalled()
   })
@@ -186,21 +189,21 @@ describe('what passes', () => {
 
 describe('what refuses', () => {
   it("refuses a Cloud item with no layer to show its disclosure, and lets a local one go", async () => {
-    await expect(gate.cloudInstallGate('/api/marketplace/items/7/install', POST, client)).rejects.toThrow(
+    await expect(gate.cloudInstallGate('/api/marketplace/items/7/install', POST, gateClient())).rejects.toThrow(
       'Open it in the Marketplace to see what it will use, then add it there.',
     )
-    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)).resolves.toBeUndefined()
+    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())).resolves.toBeUndefined()
     expect(client.get).toHaveBeenCalledWith(ITEMS_PATH)
   })
 
   it('refuses when its own read of the Cloud items fails, or answers what it cannot read', async () => {
     client.get.mockRejectedValueOnce(new Error('offline'))
-    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)).rejects.toThrow(
+    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())).rejects.toThrow(
       "Couldn't check where this item comes from. Try again.",
     )
 
     client.get.mockResolvedValueOnce({ agents: 'none' })
-    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)).rejects.toBeInstanceOf(
+    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())).rejects.toBeInstanceOf(
       gate.CloudInstallRefused,
     )
   })
@@ -210,7 +213,7 @@ describe('what refuses', () => {
       throw new Error('offline')
     })
 
-    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)).rejects.toThrow(
+    await expect(gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())).rejects.toThrow(
       "Couldn't check where this item comes from. Try again.",
     )
     expect(opener.open).not.toHaveBeenCalled()
@@ -220,7 +223,7 @@ describe('what refuses', () => {
   it('refuses a plugin call whose body it cannot read', async () => {
     await expect(gate.cloudInstallGate('/api/workspaces/ws-1/plugins', {
       method: 'POST', body: `{"plugin_id": "${PLUGIN_ID}", "n": NaN}`,
-    }, client)).rejects.toThrow("Couldn't check where this item comes from. Try again.")
+    }, gateClient())).rejects.toThrow("Couldn't check where this item comes from. Try again.")
   })
 
   it.each([
@@ -230,7 +233,7 @@ describe('what refuses', () => {
   ] as const)('refuses an install call naming %s, reading nothing', async (_label, endpoint, options) => {
     const opener = deferredOpener()
 
-    await expect(gate.cloudInstallGate(endpoint, options as RequestInit, client)).rejects.toThrow(
+    await expect(gate.cloudInstallGate(endpoint, options as RequestInit, gateClient())).rejects.toThrow(
       "Couldn't check where this item comes from. Try again.",
     )
     expect(opener.open).not.toHaveBeenCalled()
@@ -243,10 +246,10 @@ describe('allowances', () => {
     const opener = deferredOpener()
     gate.allowNext('agent', 7)
 
-    await expect(gate.cloudInstallGate('/api/marketplace/items/7/install', POST, client)).resolves.toBeUndefined()
+    await expect(gate.cloudInstallGate('/api/marketplace/items/7/install', POST, gateClient())).resolves.toBeUndefined()
     expect(opener.open).not.toHaveBeenCalled()
 
-    const again = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, client) as Promise<void>
+    const again = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, gateClient()) as Promise<void>
     await settled(again)
     expect(opener.open).toHaveBeenCalledTimes(1)
     opener.answer(false)
@@ -257,7 +260,7 @@ describe('allowances', () => {
     const opener = deferredOpener()
     gate.allowNext('plugin', PLUGIN_ID.toUpperCase())
 
-    const other = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, client) as Promise<void>
+    const other = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, gateClient()) as Promise<void>
     await settled(other)
     expect(opener.open).toHaveBeenCalledWith({ kind: 'agent', key: 7 })
     opener.answer(true)
@@ -265,7 +268,7 @@ describe('allowances', () => {
 
     await expect(gate.cloudInstallGate('/api/workspaces/ws-1/plugins', {
       method: 'POST', body: { plugin_id: PLUGIN_ID } as unknown as BodyInit,
-    }, client)).resolves.toBeUndefined()
+    }, gateClient())).resolves.toBeUndefined()
     expect(opener.open).toHaveBeenCalledTimes(1)
   })
 
@@ -276,7 +279,7 @@ describe('allowances', () => {
     gate.allowNext('playbook', 12)
     clock.mockReturnValue(now + gate.ALLOWANCE_MS + 1)
 
-    const waiting = gate.cloudInstallGate('/api/workflow-recipes/install/12', POST, client) as Promise<void>
+    const waiting = gate.cloudInstallGate('/api/workflow-recipes/install/12', POST, gateClient()) as Promise<void>
     await settled(waiting)
 
     expect(opener.open).toHaveBeenCalledTimes(1)
@@ -290,27 +293,27 @@ describe('the Cloud items it reads', () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
 
-    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)
-    await gate.cloudInstallGate('/api/marketplace/items/9/install', POST, client)
+    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())
+    await gate.cloudInstallGate('/api/marketplace/items/9/install', POST, gateClient())
     expect(client.get).toHaveBeenCalledTimes(1)
 
     clock.mockReturnValue(now + gate.GATE_ITEMS_CACHE_MS + 1)
-    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)
+    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())
     expect(client.get).toHaveBeenCalledTimes(2)
   })
 
   it("reads through the layer while one is registered, and drops its own read when one comes or goes", async () => {
-    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)
+    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())
     expect(client.get).toHaveBeenCalledTimes(1)
 
     const items = vi.fn(async () => ITEMS)
     const opener = deferredOpener(items)
-    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)
+    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())
     expect(items).toHaveBeenCalledTimes(1)
     expect(client.get).toHaveBeenCalledTimes(1)
 
     opener.unregister()
-    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, client)
+    await gate.cloudInstallGate('/api/marketplace/items/8/install', POST, gateClient())
     expect(client.get).toHaveBeenCalledTimes(2)
   })
 
@@ -319,7 +322,7 @@ describe('the Cloud items it reads', () => {
     const second = deferredOpener()
     first.unregister()
 
-    const waiting = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, client) as Promise<void>
+    const waiting = gate.cloudInstallGate('/api/marketplace/items/7/install', POST, gateClient()) as Promise<void>
     await settled(waiting)
     expect(second.open).toHaveBeenCalledTimes(1)
     expect(first.open).not.toHaveBeenCalled()

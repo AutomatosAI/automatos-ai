@@ -85,11 +85,19 @@ function keyText(kind: CloudItemKind, key: CloudItemKey): string {
   return kind === 'plugin' ? String(key).toLowerCase() : String(key)
 }
 
+/** A listed row of any kind. */
+type CloudItemRow = CloudItems[RowList][number]
+
+/** A listed row's install key: a package's slug, every other kind's id (LISTED's key fields). */
+function rowKey(row: CloudItemRow): CloudItemKey {
+  return 'slug' in row ? row.slug : row.id
+}
+
 /** Whether the row of `kind` with the local `key` is a Cloud item; false while the items aren't read. */
 export function isCloudItem(items: CloudItems | undefined, kind: CloudItemKind, key: CloudItemKey): boolean {
   if (!items) return false
-  const [list, keyField] = LISTED[kind]
+  const [list] = LISTED[kind]
   const wanted = keyText(kind, key)
-  const rows = items[list] as ReadonlyArray<Record<string, CloudItemKey>>
-  return rows.some((row) => keyText(kind, row[keyField]) === wanted)
+  const rows: readonly CloudItemRow[] = items[list]
+  return rows.some((row) => keyText(kind, rowKey(row)) === wanted)
 }
