@@ -71,8 +71,8 @@ SDK, looks and the phone block.
 |---|---|
 | **Studio** | A style built into Automatos. It is the default: you see it until you, or your workspace, choose something else. (Studio here is the name of a style, not Automatos Studio, the hosted app.) |
 | **Classic** | The other style built into Automatos. |
-| **An installed theme** | A theme package (a `.autotheme` file) added to the workspace, from the Marketplace or from a file. No theme is compiled into the app: every theme, Play and HUD included, is installed this way. |
-| **Play** and **HUD** | Two themes made in the Design Kit under the reserved `automatos` publisher (`automatos/play` and `automatos/hud`). The Design Kit's [README](https://github.com/AutomatosAI/automatos-design-kit#readme) says what each one is. To add one, see [Get Play or HUD](installing-and-choosing.md#get-play-or-hud). |
+| **An installed theme** | A theme package (a `.autotheme` file) added to the workspace, from the Marketplace or from a file. No theme is compiled into the app: every theme, Play, HUD, Arcade and Candy included, is installed this way. |
+| **Play**, **HUD**, **Arcade** and **Candy** | Four themes made in the Design Kit under the reserved `automatos` publisher (`automatos/play`, `automatos/hud`, `automatos/arcade` and `automatos/candy`). [Arcade](arcade.md) and [Candy](candy.md) have pages here; the Design Kit's [README](https://github.com/AutomatosAI/automatos-design-kit#readme) says what each one is. To add one, see [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy). |
 
 Each installed theme names the style it is built on, Studio or Classic (its `base`). This release runs only
 Studio-based themes. A Classic-based theme installs and can be chosen, but it doesn't start: you see Studio, with the
@@ -116,7 +116,7 @@ top of the app, next to the notifications bell. A theme's own frame shows the sa
 
 | To do this | Go here |
 |---|---|
-| Get Play or HUD | [Get Play or HUD](installing-and-choosing.md#get-play-or-hud) |
+| Get Play, HUD, Arcade or Candy | [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy) |
 | Switch between Classic, Studio and the installed themes | The **Appearance** menu, under **Style** |
 | Switch by name | ⌘K (Ctrl+K), then the **Themes** group. Type "theme", "style" or "appearance" to list them all. |
 | See the installed themes, opt in and choose one | **Settings › Appearance › Themes** (`/settings?tab=appearance`) |
@@ -131,8 +131,8 @@ top of the app, next to the notifications bell. A theme's own frame shows the sa
 
 Each theme names the narrowest window it draws (its `minWidth`). From that width up the app draws the theme's frame
 and pages; in a narrower window you get Studio's layout instead, and **Make it yours** says it needs a wider window.
-Play (from 1.2.0) and HUD (from 1.0.1) draw from 360 pixels, so a phone's browser gets their phone layouts (see
-[On your phone](on-your-phone.md)).
+Play (from 1.2.0), HUD (from 1.0.1), Arcade and Candy draw from 360 pixels, so a phone's browser gets their phone
+layouts (see [On your phone](on-your-phone.md)).
 **Customise look…** shows in the Appearance menu only while a theme is your style and its layout is showing.
 
 ## The two editions
@@ -151,14 +151,16 @@ a theme and uninstalling one never ask.
 
 ## Pages in this topic
 
-- [Installing and choosing](installing-and-choosing.md): getting Play or HUD, Install theme, the scan report, opting
-  in, choosing, the workspace default and the signature file.
+- [Installing and choosing](installing-and-choosing.md): getting Play, HUD, Arcade or Candy, Install theme, the scan
+  report, opting in, choosing, the workspace default and the signature file.
 - [Looks](looks.md): presets, Make it yours, saving, resetting, deleting and sharing a look, where looks are kept,
   reduced motion.
 - [On your phone](on-your-phone.md): a theme's phone layout in a phone's browser, and its phone skin in Automatos Go.
 - [Managing themes](managing-themes.md): updates (a Marketplace theme updates itself), pins, roll back, uninstall,
   "Needs update", withdrawn themes, safe mode and the workspace's theme settings.
 - [FAQ](faq.md): the questions people ask first.
+- [Arcade](arcade.md) and [Candy](candy.md): two of Automatos's own themes, their pages and looks, on the web and in
+  Automatos Go.
 
 Related:
 

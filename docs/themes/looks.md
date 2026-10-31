@@ -81,13 +81,15 @@ called.
 | Export | Gives the look as a `.look.json` file. |
 | Import | Takes a `.look.json` file or pasted text. It must pass the theme's checks, and it gets a fresh id. A file of 1 MB or more is refused before it is read. |
 
-What Play and HUD show (their look pages are part of each theme, in the
+What Automatos's own themes show (their look pages are part of each theme, in the
 [Design Kit](https://github.com/AutomatosAI/automatos-design-kit)):
 
 | Theme | Its look page |
 |---|---|
 | **Play** | **Make it yours** (`/looks`): an editor with **Save as new look** and **Reset** (back to the picked look's saved values); **This look**, with **Save**, **Rename**, **Duplicate** and **Delete** for one of your looks (a preset can only be duplicated), **Export** and **Copy JSON**; and **Import a look** (paste a look's JSON, or choose a `.json` file). |
 | **HUD** | **Look**, with the look drawer beside a live preview: the looks row (its presets and your looks), the settings, **Save as new look**, **Reset** and **Delete** (for one of your own looks; it asks first); and **Share**, with **Export** and **Import** (paste a look's JSON). |
+| **Arcade** | **Options** (`/looks`): the five settings (palette, scanlines, pixel scale, window, text speed) beside a live preview, the five presets (one per palette, Overworld the default) and your save slots, **Save look**, **Reset**, and export and import of a look file. Its style page is the **Sprite gallery** (`/looks/style`): Auto's twelve states, the colour pairs and the two faces. See [Arcade](arcade.md). |
+| **Candy** | **Your look** (`/looks`, **Look** in Candy's sidebar): the three presets and your own looks, a row per setting (palette, card colours, gradient, roundness, glow, motion), **Save look**, **Reset**, **Export** and **Import**, and a live preview of Auto, three cards and a bubble each way. See [Candy](candy.md#its-looks). |
 
 <table>
   <tr>

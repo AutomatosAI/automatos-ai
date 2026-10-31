@@ -34,13 +34,13 @@ The questions people ask first, with short answers and a link to the full story.
 
 ---
 
-### How do I get Play or HUD?
+### How do I get Play, HUD, Arcade or Candy?
 
 On the hosted edition, add it from **Marketplace › Themes**. On the local edition, an owner or admin can press **Sync
 with Automatos Cloud** in the Marketplace header and then add it from **Marketplace › Themes**, or download the
 theme's `.autotheme` and its `.sig.json` from the Design Kit's
 [releases](https://github.com/AutomatosAI/automatos-design-kit/releases) and install both with **Settings › Appearance
-› Themes › Install theme**. See [Get Play or HUD](installing-and-choosing.md#get-play-or-hud) and
+› Themes › Install theme**. See [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy) and
 [The open Marketplace](../community-marketplace/open-marketplace.md).
 
 ### I chose a theme, but I see Studio. Why?
