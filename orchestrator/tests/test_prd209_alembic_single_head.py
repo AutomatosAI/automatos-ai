@@ -137,8 +137,16 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # mobile_push_tickets and mobile_digest_posts (new tables only).
 # 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto prd266_w2_push —
 # proactive_suggestions, proactive_runs and proactive_person_settings (new tables only).
+# 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto prd268_w1_proactive —
+# ck_mobile_push_tickets_push_type widens to the suggestion push type, and mobile_devices gains
+# push_categories (JSONB NOT NULL DEFAULT '[]'); no existing row changes.
+# 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto prd268_w2_delivery —
+# ck_scheduled_task_deliver_as widens to follow_up, agent_scheduled_tasks gains for_user_id and a
+# partial index, ck_proactive_runs_outcome gains posted, and proactive_calibrations is new; no
+# existing row changes.
 # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
-# prd268_w1_proactive — theme_packages.source (nullable, a CHECK) and the single-row
+# prd268_w3_follow_ups (re-chained from prd268_w1_proactive, then prd268_w2_delivery, as W1 merged
+# main, 31 Oct) — theme_packages.source (nullable, a CHECK) and the single-row
 # marketplace_cloud_sync table the local edition's Sync with Automatos Cloud writes.
 # 2026-10-31 (PRD-270 W2 Cloud bundles, US-270-11a): prd270_w2_cloud_bundles chains onto
 # prd270_w1_cloud_sync — marketplace_cloud_items (a new table only): which local marketplace

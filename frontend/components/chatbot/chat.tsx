@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { useStudioChat as useChat } from '@/lib/chat/use-studio-chat' // PRD-256: + the turn's receipts; PRD-265: + the paused state on load
 import { usePageContext } from '@/lib/page-context'
 import { MessageWithReceipts as Message } from './message-with-receipts' // PRD-256: the receipts above the reply
-import { MultimodalInput } from './multimodal-input' // PRD-264: its box and controls pause while the AI label is hidden; voice never does
+import { MultimodalInput } from '@/components/proactive/composer-with-suggestion' // PRD-264: its box and controls pause while the AI label is hidden; voice never does. PRD-268: + the suggestion pinned above it in the Auto thread
 import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'
@@ -51,7 +51,7 @@ import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
 import { usePinnedAgents } from '@/hooks/use-pinned-agents'
 import { useAgents } from '@/hooks/use-agent-api'
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
-import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
+import { MissionSuggestionCard } from '@/components/proactive/mission-suggestion-with-presence' // PRD-268: the pinned suggestion hides while it is open
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
 // PRD-207 S5: Auto Live — the wave renders as the chat's ambient BACKGROUND

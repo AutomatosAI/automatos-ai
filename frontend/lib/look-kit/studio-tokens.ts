@@ -23,11 +23,13 @@ import { entryOf, type LookCatalogue, type LookGround, type LookPicks } from './
  * Studio's consequence tokens (--accent, --destructive, their foregrounds and
  * the --accent-2 tint) are the catalogue's error colour made readable on the
  * ground, never the look's accent (D-REVIEW F9): Studio draws errors and
- * destructive actions in them. The other semantic tokens (success, warning,
- * info, agent, chart-*, stage-*) are NOT set: the tone follows the ground under
- * a theme with looks (K4), so Studio's own Light or Dark values apply. Pure;
- * split into the ground's tokens and the ground × accent tokens so the
- * pre-paint table stays small.
+ * destructive actions in them. The status tokens (STUDIO_STATUS_TOKEN_NAMES)
+ * are Studio's own Light or Dark values, chosen by the ground's tone (PRD-268
+ * K13), so a status reads the same under every look and never takes the
+ * accent. The other semantic tokens (agent, chart-*, stage-*) are NOT set: the
+ * tone follows the ground under a theme with looks (K4), so Studio's own Light
+ * or Dark values apply. Pure; split into the ground's tokens and the ground ×
+ * accent tokens so the pre-paint table stays small.
  *
  * PRD-261 A-13a — moved from lib/looks/studio-tokens.ts into the core look
  * runtime (PA-9): the catalogue is the theme's, passed in. Studio's token names
@@ -185,7 +187,7 @@ function tintAlpha(catalogue: LookCatalogue, key: string): string {
   return (isDarkGround(catalogue, key) ? ACCENT_TINT_ALPHA_DARK : ACCENT_TINT_ALPHA_LIGHT).toFixed(ALPHA_DECIMALS)
 }
 
-/** --accent and --destructive (one colour in Studio, burnt orange there), their inks and --accent-2. */
+/** --accent and --destructive (one colour under a look; burnt orange in Studio), their inks and --accent-2. */
 function consequenceTokens(catalogue: LookCatalogue, key: string): CssVars {
   const { fill, ink } = studioConsequence(catalogue, key)
   return {
@@ -197,11 +199,43 @@ function consequenceTokens(catalogue: LookCatalogue, key: string): CssVars {
   }
 }
 
+/** PRD-268 K13 (§6.12.2) — the status tokens every look sets, as triplets, from Studio's values for the ground's tone. */
+export const STUDIO_STATUS_TOKEN_NAMES: readonly string[] = ['--success', '--warning', '--warn-ink', '--info', '--running']
+
+/** Studio Light's status values, as globals.css's .studio sets them (status-tokens.test.ts holds the two equal). */
+const STUDIO_STATUS_LIGHT: CssVars = {
+  '--success': '82 30% 33%',
+  '--warning': '47 73% 56%',
+  '--warn-ink': '38 78% 27%',
+  '--info': '213 51% 23%',
+  '--running': '40 20% 36%',
+}
+
+/** Studio Dark's status values, as globals.css's .studio.dark sets them. */
+const STUDIO_STATUS_DARK: CssVars = {
+  '--success': '82 35% 52%',
+  '--warning': '47 70% 60%',
+  '--warn-ink': '47 70% 60%',
+  '--info': '213 55% 68%',
+  '--running': '40 20% 65%',
+}
+
+/** The status tokens for the ground's tone: Studio Dark's on a dark ground, Studio Light's on a light one. */
+function statusTokens(catalogue: LookCatalogue, key: string): CssVars {
+  return isDarkGround(catalogue, key) ? STUDIO_STATUS_DARK : STUDIO_STATUS_LIGHT
+}
+
 /** Studio's tokens that depend only on the ground. */
 export function studioGroundTokens(catalogue: LookCatalogue, key: string): CssVars {
   const palette = groundPalette(catalogue, key)
   const consequence = consequenceTokens(catalogue, key)
-  return { ...fillTokens(palette), ...textTokens(palette), ...aliasTokens(palette), ...consequence }
+  return {
+    ...fillTokens(palette),
+    ...textTokens(palette),
+    ...aliasTokens(palette),
+    ...consequence,
+    ...statusTokens(catalogue, key),
+  }
 }
 
 /**

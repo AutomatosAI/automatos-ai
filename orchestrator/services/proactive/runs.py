@@ -3,7 +3,8 @@
 Every check-in writes one ``proactive_runs`` row, whatever happened: refused at its start
 (``skipped_*``, no model call), ``silent``, ``suggested`` or ``error``. Its ``kind`` says
 which check-in it was: Auto's workspace check-in (``workspace_check_in``, no agent) or an
-agent's (``agent_check_in``).
+agent's (``agent_check_in``). PRD-268 W3: a follow-up firing (``follow_up``, Auto's agent id,
+``services.proactive.follow_up_fire``) writes one too, and may end ``posted``: it said one thing.
 
 ``error_class`` holds what stopped a run: for an ``error`` the error's class (the streak's,
 US-C05, or ``cost_ceiling``); for a skip, the check that refused it (``switched_off``,
@@ -41,6 +42,7 @@ from modules.proactive.window import SUCCESSFUL_OUTCOMES, last_success_at
 __all__ = [
     "FINISHED_OUTCOMES",
     "KIND_AGENT",
+    "KIND_FOLLOW_UP",
     "KIND_WORKSPACE",
     "MAX_TITLES",
     "MODEL_RUN_WINDOW",
@@ -59,12 +61,15 @@ __all__ = [
 
 KIND_WORKSPACE = "workspace_check_in"
 KIND_AGENT = "agent_check_in"
+KIND_FOLLOW_UP = "follow_up"
 # "Check-in runs that reach the model, per workspace per day" (§6.9) counts the last 24 hours,
 # as the suggestion tool counts a person's new suggestions per day.
 MODEL_RUN_WINDOW = timedelta(hours=24)
 # The open and recently hidden titles a prompt lists, newest first: the open-per-person cap is 20.
 MAX_TITLES = 20
 # The outcomes of a run that read: a skipped run neither counts in a streak nor ends it.
+# A follow-up's 'posted' joins neither set, deliberately: windows and streaks read one kind of
+# check-in at a time, and a follow-up (KIND_FOLLOW_UP) has neither.
 FINISHED_OUTCOMES = frozenset(SUCCESSFUL_OUTCOMES | {RUN_ERROR})
 # The scheduler fires on the clock, and a run starts a moment after its fire (the bridge reads the
 # mode and the active hours first): a tick this close to due is the one due, not the one after it.

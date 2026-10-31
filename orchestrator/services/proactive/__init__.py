@@ -17,6 +17,9 @@ decide on.
   a slower check-in from the third failure, the reset (§6.2.2), with
   :mod:`~services.proactive.failures` (the error class) and
   :mod:`~services.proactive.streak_text` (what the card says).
+- :mod:`services.proactive.delivery`: in live mode, a run's new suggestions posted in the
+  addressee's Auto thread and one ``suggestion_ready`` bell per person (§6.5.1, K8, K9), in the
+  words of :mod:`~services.proactive.delivery_text`.
 - :mod:`services.proactive.heartbeat_bridge`: the jobs the heartbeat scheduler runs, today's
   tick, a check-in or both, by the proactive mode (§6.2.1, K7, K10); a live check-in rings
   the heartbeat bell only through :mod:`~services.proactive.heartbeat_bell`.

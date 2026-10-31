@@ -19,7 +19,9 @@ leave by accident:
 No workspace, user, owner, install, clone or connection id is on any list, nor a workspace's connected,
 enabled, installed or key state. Text is answered as the row holds it, trimmed; a list keeps only its
 non-empty strings, so a malformed JSON column answers nothing rather than its raw value; a count is a
-whole number, else 0; an icon given as a URL is answered only when it is ``https``.
+whole number, else 0; an icon a browser reads as a URL (a scheme, ``word:`` included, or scheme-relative:
+``//``, a ``\\`` reading as ``/``, once tabs, newlines and leading control characters are dropped as a
+browser drops them) is answered only when it is ``https``, any other icon (an emoji) as its text.
 """
 
 from __future__ import annotations
@@ -46,6 +48,10 @@ SKILL_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"version"}
 LLM_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"provider", "vendor", "contextWindow", "priceTier", "capabilities"}
 LLM_CAPABILITY_FIELDS: FrozenSet[str] = frozenset({"name", "rating"})
 HTTPS = "https"
+SCHEME_RELATIVE = "//"  # a browser loads it on the page's own scheme, from any host
+# What a browser's URL parser drops before it reads a URL: tab, LF and CR anywhere, C0 controls and spaces in front.
+URL_DROPPED = str.maketrans("", "", "\t\n\r")
+URL_LEADING = "".join(chr(code) for code in range(0x21))
 
 # The answer around the items, and each type's item and nested allowlists, as the route and its tests read them.
 ANSWER_FIELDS: FrozenSet[str] = frozenset({"type", "items", "limit", "offset", "more"})
@@ -103,6 +109,25 @@ def https_url_or_none(value: Any) -> Optional[str]:
     return text
 
 
+def _reads_as_url(text: str) -> bool:
+    """Whether a browser reads ``text`` as a URL: it has a scheme, or starts ``//`` (a ``\\`` reads as ``/``)."""
+    probe = text.translate(URL_DROPPED).lstrip(URL_LEADING).replace("\\", "/")
+    if probe.startswith(SCHEME_RELATIVE):
+        return True
+    try:
+        return bool(urlsplit(probe).scheme)
+    except ValueError:  # an unbalanced IPv6 bracket after ``//``: a URL, which https_url_or_none refuses
+        return True
+
+
+def icon_or_none(value: Any) -> Optional[str]:
+    """An item's icon: a URL only when ``https_url_or_none`` keeps it; any other text (an emoji) trimmed."""
+    text = text_or_none(value)
+    if text is None or not _reads_as_url(text):
+        return text
+    return https_url_or_none(text)
+
+
 def app_slugs(values: Iterable[Any]) -> List[str]:
     """The distinct app slugs among ``values``, lower-case, in first-seen order."""
     return list(dict.fromkeys(text.lower() for text in strings(list(values))))
@@ -128,7 +153,7 @@ def display_item(
     return allowed_item(
         allowed,
         key=str(key), name=text_or_none(name) or "", description=text_or_none(description),
-        category=text_or_none(category), icon=text_or_none(icon), tags=strings(tags), publisher=publisher,
+        category=text_or_none(category), icon=icon_or_none(icon), tags=strings(tags), publisher=publisher,
         requiredApps=app_slugs(required_apps), **extra,
     )
 
@@ -137,5 +162,6 @@ __all__ = [
     "AGENT_FIELDS", "ANSWER_FIELDS", "APPLICATION_FIELDS", "DEFAULT_PUBLISHER", "DISPLAY_FIELDS", "FieldNotAllowed",
     "ITEM_FIELDS", "LLM_CAPABILITY_FIELDS", "LLM_FIELDS", "MARKETPLACE_OWNER", "NESTED_FIELDS", "PACKAGE_FIELDS",
     "PACKAGE_MEMBER_FIELDS", "PLAYBOOK_FIELDS", "PLUGIN_FIELDS", "SKILL_FIELDS",
-    "allowed_item", "app_slugs", "count_of", "display_item", "https_url_or_none", "strings", "text_or_none",
+    "allowed_item", "app_slugs", "count_of", "display_item", "https_url_or_none", "icon_or_none", "strings",
+    "text_or_none",
 ]

@@ -21,12 +21,16 @@ the order of its writes and answers NoSuchKey for a missing object. Proven:
   update naming another theme, a missing package, a local row or another workspace's install fetches nothing;
 * a caller that waited on the same version's download finds it stored; one that waits too long is a 503;
   another version never waits; theme.json sorts after every path a package may hold (written last);
-* the only URL ever requested is the one derived from ``AUTOMATOS_CLOUD_URL`` and the row's digest.
+* the only URL ever requested is the one derived from ``AUTOMATOS_CLOUD_URL`` and the row's digest;
+* the route's session is in no transaction while Automatos Cloud answers an install's or an update's download
+  or the files are stored, and a caller waiting on another download of the version holds none; a caller's
+  transaction that wrote is kept over the download, with a warning (RVW-3).
 """
 from __future__ import annotations
 
 import io
 import json
+import logging
 import threading
 import uuid
 from types import SimpleNamespace
@@ -77,14 +81,18 @@ class _Missing(Exception):
 
 
 class FakeS3:
-    """Objects by key, the order they were written, what was deleted; ``fail_after`` writes, then every write raises."""
+    """Objects by key, the order they were written, what was deleted; ``fail_after`` writes, then every write raises;
+    with ``session`` set, whether it was in a transaction at each write."""
 
     def __init__(self) -> None:
         self.objects, self.order, self.deleted = {}, [], []
         self.fail_after = None
         self.read_error = None
+        self.session, self.in_transaction = None, []
 
     def put_object(self, Bucket, Key, Body, ContentType):  # noqa: N803 (boto3's names)
+        if self.session is not None:
+            self.in_transaction.append(self.session.in_transaction())
         if self.fail_after is not None and len(self.order) >= self.fail_after:
             raise ConnectionError("storage is down")
         self.objects[Key] = (Body, ContentType)
@@ -103,17 +111,21 @@ class FakeS3:
 
 
 class Cloud:
-    """Automatos Cloud as a mock transport: packages by URL, else ``status``; each request recorded."""
+    """Automatos Cloud as a mock transport: packages by URL, else ``status``; each request recorded and, with
+    ``session`` set, whether it was in a transaction when the request was answered."""
 
     def __init__(self) -> None:
         self.requests, self.served = [], {}
         self.status, self.headers, self.body = 200, {}, None
+        self.session, self.in_transaction = None, []
 
     def serve(self, data: bytes) -> None:
         self.served[urls.package_url(CLOUD, read_theme_package(data).digest)] = data
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        if self.session is not None:
+            self.in_transaction.append(self.session.in_transaction())
         body = self.body if self.body is not None else self.served.get(str(request.url), b"")
         return httpx.Response(self.status, content=body, headers=self.headers)
 
@@ -428,6 +440,42 @@ def test_an_update_fetches_only_a_cloud_version_of_the_theme_this_workspaces_ins
     assert [install.package_id for install in _installs(env)] == [local.id]
 
 
+# --------------------------------------------------------------------------- no transaction while Cloud answers
+
+
+def _watch(env):
+    """Record whether the route's session (``get_db`` answers ``env.db``) is in a transaction at each request to
+    Automatos Cloud and each storage write."""
+    env.cloud.session = env.s3.session = env.db
+
+
+def test_no_transaction_is_open_while_automatos_cloud_answers_an_install(env):
+    data = _pkg()
+    row = _row(env, data)
+    env.cloud.serve(data)
+    _watch(env)
+    resp = _install(env)
+    assert resp.status_code == 201, resp.text
+    assert env.cloud.urls == [_derived(row)] and env.cloud.in_transaction == [False]
+    assert env.s3.in_transaction and not any(env.s3.in_transaction)  # nor while its files are stored
+    assert [install.package_id for install in _installs(env)] == [row.id]
+
+
+def test_no_transaction_is_open_while_automatos_cloud_answers_an_update(env):
+    first, newer = _pkg("1.0.0"), _pkg("1.1.0")
+    old = _row(env, first)
+    _store(first)
+    install_id = _install(env, old.id).json()["install"]["installId"]
+    new = _row(env, newer)
+    env.cloud.serve(newer)
+    _watch(env)
+    resp = _update(env, install_id, new.id)
+    assert resp.status_code == 200, resp.text
+    assert env.cloud.urls == [_derived(new)] and env.cloud.in_transaction == [False]
+    assert env.s3.in_transaction and not any(env.s3.in_transaction)
+    assert [(install.package_id, install.previous_package_id) for install in _installs(env)] == [(new.id, old.id)]
+
+
 # --------------------------------------------------------------------------- one download of a version at a time
 
 
@@ -461,6 +509,32 @@ def test_a_caller_that_waits_past_the_other_download_is_answered_503(env, monkey
             cloud_package.ensure_stored(env.db, row)
     assert (busy.value.status_code, busy.value.code) == (503, cloud_package.DOWNLOAD_BUSY)
     assert env.cloud.requests == [] and env.s3.order == []
+
+
+def test_a_caller_waiting_on_the_same_versions_download_holds_no_transaction(env, monkeypatch):
+    row = _row(env, _pkg())
+    monkeypatch.setattr(cloud_package, "wait_seconds", lambda: 0.01)
+    assert row.source == THEME_SOURCE_CLOUD and env.db.in_transaction()  # the caller has read
+    with cloud_package._digest_lock(row.digest):
+        with pytest.raises(cloud_package.CloudPackageError) as busy:
+            cloud_package.ensure_stored(env.db, row)
+        held = env.db.in_transaction()
+    assert busy.value.code == cloud_package.DOWNLOAD_BUSY and held is False
+    assert env.cloud.requests == [] and env.s3.order == []
+
+
+def test_a_caller_whose_transaction_wrote_keeps_it_over_the_download_and_the_log_says_so(env, caplog):
+    data = _pkg()
+    row = _row(env, data)
+    env.cloud.serve(data)
+    env.cloud.session = env.db
+    env.db.execute(sa.text("UPDATE theme_packages SET version = version WHERE id IS NULL"))  # a write: never dropped
+    with caplog.at_level(logging.WARNING, logger=cloud_package.__name__):
+        cloud_package.ensure_stored(env.db, row)
+    assert env.cloud.in_transaction == [True] and env.db.in_transaction()
+    assert env.s3.order[-1] == storage.theme_prefix(THEME, "1.0.0") + "theme.json"  # stored all the same
+    assert "wrote or holds a lock" in caplog.text
+    env.db.rollback()
 
 
 def test_another_versions_download_never_waits_for_this_one(env):

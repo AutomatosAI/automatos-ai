@@ -138,8 +138,9 @@ letter, and never one of the classes core owns on `<html>`: `studio`, `classic`,
 **The first-paint data is checked twice.** `boot/prepaint.json` is held to a small CSS-value grammar on import and
 again on every boot read (`css_value.py`, `serve.theme_prepaint`). The browser applies the boot only after
 `sanitizeThemeBoot` drops any class, custom property name or value outside its own grammar: no `url()`, no `;`, `{`,
-`}`, quotes, `<`, `!` or `@` (`frontend/lib/theme-host/boot-sanitize.ts`). The boot script uses `classList` and
-`style.setProperty` only.
+`}`, quotes, `<`, `!` or `@` (`frontend/lib/theme-host/boot-sanitize.ts`, over `css-value.ts` `isBootValue`). The
+import also refuses a knob or pair cell's value that grammar would drop (`first_paint.py`), so what passes the import
+is what the browser paints. The boot script uses `classList` and `style.setProperty` only.
 
 **Reserved publishers.** A theme id is `publisher/slug`. The publisher `automatos` is reserved
 (`contract.RESERVED_PUBLISHERS`). For Marketplace submissions and the Official badge, a `theme_publishers` row marked

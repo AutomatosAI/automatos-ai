@@ -21,7 +21,9 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   against the app's routes). The app gates every feature on these names, never on a version.
   A capability that also needs this server set up for it is listed only while it is, read
   from config on every call (``CONFIGURED_CAPABILITIES``): ``tts`` only with ``VOICE_TTS_URL``,
-  so a phone never asks a server with no voice for one.
+  so a phone never asks a server with no voice for one; ``suggestion_push`` only while
+  ``SUGGESTION_PUSH_ENABLED`` is on (PRD-268 K9, K20: it ships off); ``calibration`` only while
+  ``CALIBRATION_ENABLED`` is on (PRD-268 K15, K21: it ships off).
 
 Names and capabilities only, never a secret: the publishable key is the one key in the body,
 and it is public by design (the web app ships it in its bundle). A misconfigured address or
@@ -36,9 +38,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from config import config
 from modules.voice.speech import is_configured as voice_tts_configured
+from services.calibration.switch import calibration_enabled
 from services.mobile.remote_access import MODE_PAIRED
 from services.mobile.urls import MobileUrlError, api_url, web_url
 from services.push.consent import expo_push_allowed
+from services.push.suggestion_rules import suggestion_push_enabled
 
 DISCOVERY_SCHEMA = "automatos-discovery/v1"
 SERVER_NAME = "Automatos"
@@ -60,19 +64,36 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # mobile_theme: the member's installed theme as data for the phone (PRD-261 M-04: colours,
 # fonts and mascot files, never code), which the app offers under Studio only when this is listed.
 # tts: Auto's server voice, a sentence of a reply as MP3 (services/voice-tts); the phone speaks
-# with the device's voice without it.
+# with the device's voice without it. brief: the day's brief waiting on open (PRD-268 US-C10b),
+# claimed once per person per local date with the scheduled digest; every device and tab calls it.
+# suggestions: Auto's suggestions with Start and Hide (PRD-268 W1), refetched on the live lane's
+# suggestion_changed (US-C08b). readiness: what Auto depends on, with Check again (US-C18).
+# suggestion_push: a today suggestion pushed to a phone that registered the category with
+# push_categories (US-C09b); the app registers it only when this is listed. approval_view: the
+# ApprovalView@1 by the id a view carries, an approval grant's number or a Mission plan's id
+# (PRD-268 US-C24); the app opens its approval sheet from a card or a push only when this is listed.
+# calibration: Auto says back what it thinks it knows from the titles of the person's recent work,
+# after their consent, once per workspace (PRD-268 US-C22b); listed only while it is switched on.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
+    "approval_view": ("GET", "/api/v1/approval-grants/{grant_id}/view"),
+    "brief": ("POST", "/api/proactive/brief/open"),
+    "calibration": ("POST", "/api/auto/calibration"),
     "digest": ("GET", "/api/notification-preferences"),
     "digest_now": ("POST", "/api/v1/mobile/digest/now"),
     "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "push": ("POST", "/api/v1/mobile/devices"),
+    "readiness": ("GET", "/api/readiness"),
     "spoken_mode": ("POST", "/api/chat"),
+    "suggestion_push": ("POST", "/api/v1/mobile/devices"),
+    "suggestions": ("GET", "/api/proactive/suggestions"),
     "tts": ("POST", "/api/voice/speech"),
     "voice_live": ("POST", "/api/voice/web-call"),
 })
 # The capabilities this build implements that need the server set up for them, each with the
 # check that says it is. The others are listed whenever this build runs.
 CONFIGURED_CAPABILITIES: Mapping[str, Callable[[], bool]] = MappingProxyType({
+    "calibration": calibration_enabled,
+    "suggestion_push": suggestion_push_enabled,
     "tts": voice_tts_configured,
 })
 

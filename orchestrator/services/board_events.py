@@ -15,6 +15,9 @@ the next real event (or the heartbeat) refreshes the client.
 
 The dispatch channel (``board_task_available``) is deliberately separate — it is
 a claimant wakeup for the dispatch loop, not a UI refresh signal.
+
+The same channel carries ``chat_changed`` (PRD-205 S7) and ``suggestion_changed``
+(PRD-268 US-C08); the SSE forwards each under its own name.
 """
 from __future__ import annotations
 
@@ -33,6 +36,10 @@ logger = logging.getLogger(__name__)
 # Clients LISTEN on this channel; every board-task mutation NOTIFYs it. Distinct
 # from the dispatcher's ``board_task_available`` (a claimant wakeup, not a UI ping).
 NOTIFY_CHANNEL = "board_events"
+# PRD-268 US-C08: a suggestion was made, started, hidden or expired.
+SUGGESTION_CHANGED = "suggestion_changed"
+# Events the SSE forwards under their own name; every other one is the board refresh.
+NAMED_EVENTS = frozenset({"chat_changed", SUGGESTION_CHANGED})
 
 
 def notify_board_event(
@@ -98,6 +105,42 @@ def notify_chat_event(
     except Exception:  # noqa: BLE001 - NOTIFY is an optimisation, not a guarantee
         logger.debug(
             "[board_events] pg_notify failed for chat %s", chat_id, exc_info=True
+        )
+
+
+def notify_suggestion_event(
+    db: Session,
+    *,
+    workspace_id,
+    suggestion_id,
+    user_id: int,
+    status: str,
+) -> None:
+    """PRD-268 US-C08: fire ``pg_notify`` when a suggestion changes (made, started,
+    hidden or expired), on the SAME channel, as ``suggestion_changed``. The payload
+    names ids and the new status only, never the suggestion's words; ``user_id``
+    lets a client drop another person's, as with ``chat_changed``. The NOTIFY runs
+    in a savepoint, so one that fails leaves the caller's transaction usable.
+    Best-effort like its siblings: never raises into the caller.
+    """
+    try:
+        payload = json.dumps(
+            {
+                "workspace_id": str(workspace_id),
+                "suggestion_id": str(suggestion_id),
+                "user_id": int(user_id),
+                "status": str(status),
+                "event": SUGGESTION_CHANGED,
+            }
+        )
+        with db.begin_nested():
+            db.execute(
+                text("SELECT pg_notify(:chan, :payload)"),
+                {"chan": NOTIFY_CHANNEL, "payload": payload},
+            )
+    except Exception:  # noqa: BLE001 - NOTIFY is an optimisation, not a guarantee
+        logger.exception(
+            "[board_events] pg_notify failed for suggestion %s", suggestion_id
         )
 
 
@@ -225,9 +268,11 @@ def frame_for_payload(payload: str, workspace_id: str) -> Optional[str]:
     if data is None or data.get("workspace_id") != workspace_id:
         return None
     # PRD-205 S7: chat events keep their name so the client can route them
-    # to the open conversation; everything else stays the board refresh.
-    if data.get("event") == "chat_changed":
-        return _frame("chat_changed", data)
+    # to the open conversation; PRD-268 US-C08: so do suggestion events, so a
+    # card refetches its suggestions. Everything else stays the board refresh.
+    event = data.get("event")
+    if isinstance(event, str) and event in NAMED_EVENTS:
+        return _frame(event, data)
     return _frame("board_changed", data)
 
 

@@ -2,7 +2,9 @@
 
 The one write a check-in makes. It inserts an ``open`` ``proactive_suggestions`` row for
 the workspace owner (K11), the person a suggestion is addressed to, and changes nothing
-else: Start and Hide (US-C06a) are the person's.
+else: Start and Hide (US-C06a) are the person's. PRD-268 US-C11d: a follow-up's turn hands
+over its person too (``_check_in.user_id``, from the server), and its suggestion is
+addressed to them, ``source_type`` 'follow_up' (§12-Q2).
 
 It refuses, with a sentence the model reads, a call that:
 
@@ -52,6 +54,8 @@ __all__ = ["suggest_next_step"]
 # check-in, which is its heartbeat converted (source_type 'heartbeat').
 SOURCE_CHECK_IN = "check_in"
 SOURCE_AGENT_CHECK_IN = "heartbeat"
+# A follow-up's turn (PRD-268 W3, §6.2.4): addressed to the person whose chat scheduled it.
+SOURCE_FOLLOW_UP = "follow_up"
 # Open suggestions expire after 7 days (§6.2.4).
 OPEN_LIFETIME = timedelta(days=7)
 
@@ -76,11 +80,13 @@ CAPS_WRONG_CODE = "caps_wrong"
 
 @dataclass(frozen=True)
 class _Run:
-    """The check-in a call belongs to, as the server handed it over."""
+    """The check-in a call belongs to, as the server handed it over; ``user_id`` is a
+    follow-up's person, None for a check-in."""
 
     run_id: UUID
     reads: Tuple[Any, ...]
     agent_id: Optional[int]
+    user_id: Optional[int] = None
 
 
 def _now() -> datetime:
@@ -91,26 +97,37 @@ def _refusal(error: str, code: str) -> Dict[str, Any]:
     return {"success": False, "error": error, "error_code": code}
 
 
+def _whole(value: Any) -> Optional[int]:
+    """An id handed over as a whole number (or its digits), else None; raises on anything else."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("an id is a whole number")
+    return int(value)
+
+
 def _run_of(check_in: Any) -> Optional[_Run]:
     """The run in ``_check_in``, or None when the call carries no well-formed one."""
     if not isinstance(check_in, dict):
         return None
-    agent_id = check_in.get("agent_id")
     try:
         run_id = UUID(str(check_in.get("run_id")))
-        agent = int(agent_id) if agent_id is not None and not isinstance(agent_id, bool) else None
+        agent, person = _whole(check_in.get("agent_id")), _whole(check_in.get("user_id"))
     except (TypeError, ValueError):
         return None
-    if agent_id is not None and agent is None:
-        return None
-    return _Run(run_id=run_id, reads=tuple(check_in.get("reads") or ()), agent_id=agent)
+    return _Run(run_id=run_id, reads=tuple(check_in.get("reads") or ()), agent_id=agent, user_id=person)
 
 
-def _addressee(db: Session, workspace_id: UUID) -> Optional[int]:
-    """The workspace owner's ``users.id`` (K11), or None."""
+def _addressee(db: Session, workspace_id: UUID, run: _Run) -> Optional[int]:
+    """A follow-up's person while they still belong to the workspace; else the workspace
+    owner's ``users.id`` (K11); or None."""
     from core.models.workspaces import Workspace
     from core.workspaces.owner import workspace_owner
+    from services.push.payload import SUGGESTION
+    from services.push.recipients import recipients
 
+    if run.user_id is not None:
+        return run.user_id if recipients(db, workspace_id, SUGGESTION, run.user_id) else None
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     owner = workspace_owner(db, workspace)
     return int(owner.id) if owner is not None else None
@@ -179,13 +196,20 @@ def _unknown_agent(db: Session, workspace_id: UUID, suggestion: Suggestion) -> O
     return None if found else agent_id
 
 
+def _source_type(run: _Run) -> str:
+    """Where the suggestion came from: a follow-up's turn, Auto's check-in or an agent's."""
+    if run.user_id is not None:
+        return SOURCE_FOLLOW_UP
+    return SOURCE_CHECK_IN if run.agent_id is None else SOURCE_AGENT_CHECK_IN
+
+
 def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion: Suggestion, caps: Caps,
             now: datetime) -> Optional[ProactiveSuggestion]:
     """The new open row, the oldest past the open cap expired, committed; None when a
     concurrent check-in holds its open subject key."""
     row = ProactiveSuggestion(
         workspace_id=workspace_id, user_id=user_id,
-        source_type=SOURCE_CHECK_IN if run.agent_id is None else SOURCE_AGENT_CHECK_IN,
+        source_type=_source_type(run),
         source_agent_id=run.agent_id, run_id=run.run_id,
         title=suggestion.title, detail=suggestion.detail, evidence=[dict(ref) for ref in suggestion.evidence],
         proposed_action={**suggestion.proposed_action, "payload": dict(suggestion.proposed_action["payload"])},
@@ -212,7 +236,7 @@ def _insert(db: Session, workspace_id: UUID, user_id: int, run: _Run, suggestion
 def _record(db: Session, workspace_id: UUID, run: _Run, suggestion: Suggestion) -> Dict[str, Any]:
     """Every check that reads the database, then the insert."""
     now = _now()
-    user_id = _addressee(db, workspace_id)
+    user_id = _addressee(db, workspace_id, run)
     if user_id is None:
         return _refusal(NO_ADDRESSEE, NO_ADDRESSEE_CODE)
     caps = _caps(db, workspace_id)

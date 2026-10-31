@@ -183,6 +183,19 @@ export function withDraft(session: ChatSession, now: number = Date.now()): ChatS
   }
 }
 
+/** No conversation and no draft open: the blank chat a cold start may still replace with the newest conversation. */
+export function isNothingOpen(session: ChatSession): boolean {
+  return session.openChatIds.length === 0 && !session.draftOpen
+}
+
+/**
+ * The person typed or sent in the blank chat shown while nothing is open: it becomes the draft, so a cold start's
+ * late answer never replaces it (only an empty draft gives way). Anything already open: unchanged.
+ */
+export function withDraftStarted(session: ChatSession, now: number = Date.now()): ChatSession {
+  return isNothingOpen(session) ? withDraft(session, now) : session
+}
+
 /** The backend named the conversation (first message of a draft, or a stale id healed). */
 export function withChatIdAssigned(session: ChatSession, chatId: string, now: number = Date.now()): ChatSession {
   return withChatOpened(session, chatId, now)

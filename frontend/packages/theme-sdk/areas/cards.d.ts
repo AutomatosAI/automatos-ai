@@ -5,14 +5,52 @@
  * frame renders HeaderUtilities (PRD §4.4). Each card is the host's own, so its buttons make the host's calls.
  * ToolApproval and MissionApproval are protected surfaces: no theme stylesheet rule can hide them. Each throws
  * when its payload's id is not an id (a grant id is a whole number; a Mission id is letters, digits, - and _).
+ *
+ * SDK 1.3.0 (PRD-268) adds the proactive defaults, the host's own components for the proactive area's data: BriefCard,
+ * SuggestionCard, StatusLabel, ReadinessList, CalibrationCard and ReplyChips. They draw the host's words, glyphs, AI
+ * marks and controls in the look's tokens, and their calls are the host's (Start and Hide, Check again, the brief's
+ * thumbs). Each throws, naming the card and the prop, when a prop is of the wrong kind; a row, an item or a line that
+ * isn't one is left out. What a card hands back (a row, Start's answer, a calibration answer) is a frozen copy.
  */
 import type { ReactElement, ReactNode } from 'react'
+
+import type {
+  Brief,
+  BriefRow,
+  BriefSection,
+  Calibration,
+  CalibrationAnswer,
+  DisplayState,
+  Readiness,
+  ReadinessItem,
+  Retry,
+  StartAnswer,
+  Suggestion,
+} from './proactive'
 
 /** What the owner decided on a tool approval card. */
 export type ApprovalDecision = 'approved' | 'denied'
 
 /** The AI-Act oversight tier a card shows. */
 export type OversightTier = 'monitor' | 'human_on_the_loop' | 'human_in_the_loop'
+
+/** PRD-268 §6.11.4 (K10): what a person may answer on a card. Always allow is not built. */
+export type ApprovalAnswer = 'refuse' | 'allow_once'
+
+/**
+ * PRD-268 §6.11.4: `ApprovalView@1`, the exact action, its target, its preview and the rule that asked. A
+ * card that carries one shows it before its buttons; one whose grant_id is not the card's id is dropped.
+ */
+export interface ApprovalViewData {
+  readonly grant_id: string
+  readonly asked_by: { readonly kind: 'auto' | 'agent'; readonly name: string }
+  readonly action: { readonly verb: string; readonly summary: string }
+  readonly target?: { readonly label: string; readonly detail?: string }
+  readonly preview?: { readonly kind: 'text' | 'markdown' | 'diff'; readonly body: string }
+  readonly rule: { readonly id: string; readonly sentence: string }
+  readonly answers: readonly ApprovalAnswer[]
+  readonly expires_at?: string
+}
 
 /** A confirmation-gated tool call waiting for the owner (the chat's `tool_approval` payload). */
 export interface ToolApprovalData {
@@ -26,6 +64,7 @@ export interface ToolApprovalData {
   readonly risk_class?: string
   readonly oversight_rationale?: string
   readonly requires_approval?: boolean
+  readonly approval_view?: ApprovalViewData
 }
 
 /** One task of a Mission plan. */
@@ -53,6 +92,8 @@ export interface MissionApprovalData {
   readonly risk_class?: string
   readonly oversight_rationale?: string
   readonly requires_approval?: boolean
+  /** Its grant_id is the mission_id. */
+  readonly approval_view?: ApprovalViewData
 }
 
 /** Where a card came from: its badge, its conversation and when it was raised. */
@@ -202,6 +243,81 @@ export interface CorePageProps {
   readonly children?: ReactNode
 }
 
+export interface BriefCardProps {
+  readonly brief: Brief
+  /** Listen (voice.BriefVoice: the brief the host holds) in the card's footer; default true. False when the theme places it itself. */
+  readonly listen?: boolean
+  /**
+   * The thumbs (SDK 1.4.0), showing the person's remembered rating; default true. False when the theme draws its own
+   * with proactive.useRateBrief, so the card draws none.
+   */
+  readonly thumbs?: boolean
+  /** A row's action was pressed: resolve to show "✓ done_label" in place, reject to leave the row as it was. */
+  readonly onAction?: (row: BriefRow, section: BriefSection) => unknown
+  /** A row with somewhere to go was opened; without it no row is a link. */
+  readonly onOpen?: (row: BriefRow, section: BriefSection) => void
+  /** "Show N more" was pressed for a folded section; without it the line is text. */
+  readonly onShowMore?: (section: BriefSection) => void
+  readonly className?: string
+}
+
+export type SuggestionCardVariant = 'card' | 'pinned'
+
+export interface SuggestionCardProps {
+  readonly suggestion: Suggestion
+  /** The card (the default), or the one-line variant pinned above a composer. */
+  readonly variant?: SuggestionCardVariant
+  /** Start was accepted: what it made, for the theme to open. */
+  readonly onStarted?: (answer: StartAnswer) => void
+  /** The pinned line's title opens the full card. */
+  readonly onOpen?: () => void
+  /** What the theme draws under the suggestion's text, such as its evidence. */
+  readonly children?: ReactNode
+  readonly className?: string
+}
+
+export interface StatusLabelProps {
+  /** The row's `display_state`; anything else draws nothing. */
+  readonly state?: DisplayState | null
+  /** The row's `next_step`, drawn after ▸. */
+  readonly nextStep?: string | null
+  readonly retry?: Retry | null
+  /** What Try again runs; without it Try again is not drawn. */
+  readonly onRetry?: (retry: Retry) => void
+  /** The row's title, which names Try again for a screen reader. */
+  readonly title?: string
+  readonly className?: string
+}
+
+export interface ReadinessListProps {
+  /** Readiness@1 as useReadiness read it; null while it loads. */
+  readonly readiness: Readiness | null | undefined
+  /** Why the read failed (useReadiness's error): one line in place of "Checking…". */
+  readonly error?: string | null
+  /** Rows only the browser knows (its microphone, its speech), drawn after the server's. */
+  readonly clientItems?: readonly ReadinessItem[]
+  readonly className?: string
+}
+
+export interface CalibrationCardProps {
+  readonly calibration: Calibration
+  /** Sends an answer (useAnswerCalibration's runAsync); without it Reject and Sounds right are disabled. */
+  readonly onAnswer?: (answer: CalibrationAnswer) => Promise<void> | void
+  /** Something's off: the theme asks the person what is wrong; without it the button is disabled. */
+  readonly onSomethingOff?: () => void
+  readonly className?: string
+}
+
+export interface ReplyChipsProps {
+  /** The answers Auto offered with its message; the host draws two or three of at most 24 characters. */
+  readonly chips: readonly string[]
+  /** True while the message is Auto's last one in the thread. */
+  readonly latest: boolean
+  /** Sends the chip's text as the person's message; a rejected promise gives the chips back. */
+  readonly onReply: (text: string) => void | Promise<unknown>
+  readonly className?: string
+}
+
 /** The host's tool approval card for `data` (a protected surface). */
 export declare function ToolApproval(props: ToolApprovalProps): ReactElement
 
@@ -253,3 +369,28 @@ export declare function AiLabelFence(props: AiLabelFenceProps): ReactElement
 
 /** Core's own page for this route inside the theme's page, or `children` where there is none. */
 export declare function CorePage(props: CorePageProps): ReactElement
+
+/**
+ * The host's brief card: the date, the greeting (the only serif), Auto's Read, the five sections with the server's
+ * labels and counts, "Show N more", the empty sentence, the "Auto is an AI" caption, Listen and the thumbs (the
+ * person's remembered rating; none with `thumbs={false}`).
+ */
+export declare function BriefCard(props: BriefCardProps): ReactElement
+
+/**
+ * The host's suggestion card: "Auto suggests", the text as Auto's words, what Start does, Start (with "about N
+ * credits" once known) and Hide with its reasons, and the "Auto is an AI" caption; or its line pinned above a composer.
+ */
+export declare function SuggestionCard(props: SuggestionCardProps): ReactElement
+
+/** A row's state as a glyph and a word (never colour alone), ▸ its next step, and Try again; nothing for an unknown state. */
+export declare function StatusLabel(props: StatusLabelProps): ReactElement
+
+/** What Auto depends on: each item's state as a glyph and a word, its fix as an in-app link, and Check again. */
+export declare function ReadinessList(props: ReadinessListProps): ReactElement
+
+/** What Auto knows so far, from its props: up to three lines with their source count and Reject, the offers, Sounds right. */
+export declare function CalibrationCard(props: CalibrationCardProps): ReactElement
+
+/** Two or three answers under Auto's last message, gone once a newer one exists; a tap hands its text to `onReply` once. */
+export declare function ReplyChips(props: ReplyChipsProps): ReactElement

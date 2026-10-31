@@ -10,7 +10,8 @@ injecting the task description as the opening message — or, for a row with
 ``deliver_as='board_task'`` (the Command Centre calendar's "schedule a board
 task for later", from the board's Create Task dialog or ``platform_schedule_task``),
 files the ticket the row describes on the board, where the dispatcher runs it
-like any other.
+like any other. A person's follow-up (``deliver_as='follow_up'``, PRD-268 W3) fires
+once as one check-in-lane turn (``services.proactive.follow_up_fire``).
 """
 
 import json
@@ -25,8 +26,8 @@ from sqlalchemy.orm import Session
 from config import config
 from services.schedule_util import next_run as _util_next_run
 from services.scheduled_task_steps import (  # noqa: F401 — DELIVER_* and DELIVERY_MODES are imported from here
-    DELIVER_BOARD_TASK, DELIVER_CHAT, DELIVERY_MODES, count_the_run, one_shot_time, request_error,
-    schedule_error, scheduled_message, skipped_for_credits, tell_the_chat, ticket_for,
+    DELIVER_BOARD_TASK, DELIVER_CHAT, DELIVER_FOLLOW_UP, DELIVERY_MODES, count_the_run, one_shot_time,
+    request_error, schedule_error, scheduled_message, skipped_for_credits, tell_the_chat, ticket_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,55 @@ RECONCILE_INTERVAL_SECONDS = 60
 # being re-added and missed again on every tick.
 ONE_SHOT_MISFIRE_GRACE_SECONDS = 3 * RECONCILE_INTERVAL_SECONDS
 
-# How a fired task is delivered.
+# The workspace's scheduled tasks, newest first; the agent (creator or target) and the
+# status filter only when given. PRD-268 K8: a follow-up (deliver_as :follow_up) is its
+# person's own, so neither the list nor its total carries one.
+_LIST_SQL = text("""
+    SELECT t.*, ca.name AS creator_name, ta.name AS target_name
+    FROM agent_scheduled_tasks t
+    LEFT JOIN agents ca ON ca.id = t.created_by_agent_id
+    LEFT JOIN agents ta ON ta.id = t.target_agent_id
+    WHERE t.workspace_id = :ws_id AND t.deliver_as <> :follow_up
+      AND (CAST(:agent_id AS INTEGER) IS NULL OR t.created_by_agent_id = :agent_id OR t.target_agent_id = :agent_id)
+      AND (CAST(:status AS VARCHAR) IS NULL OR t.status = :status)
+    ORDER BY t.created_at DESC
+    LIMIT :limit OFFSET :offset
+""")
+_COUNT_SQL = text("""
+    SELECT COUNT(*) FROM agent_scheduled_tasks t
+    WHERE t.workspace_id = :ws_id AND t.deliver_as <> :follow_up
+      AND (CAST(:agent_id AS INTEGER) IS NULL OR t.created_by_agent_id = :agent_id OR t.target_agent_id = :agent_id)
+      AND (CAST(:status AS VARCHAR) IS NULL OR t.status = :status)
+""")
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def _task_dict(r: Any) -> Dict[str, Any]:
+    """One listed row, as list_tasks has always answered it."""
+    payload = r.payload if isinstance(getattr(r, "payload", None), dict) else None
+    return {
+        "id": r.id,
+        "task_type": r.task_type,
+        "deliver_as": getattr(r, "deliver_as", None) or DELIVER_CHAT,
+        "title": (payload or {}).get("title"),
+        "payload": payload,
+        "created_by_user_id": getattr(r, "created_by_user_id", None),
+        "description": r.description,
+        "schedule": r.schedule,
+        "status": r.status,
+        "creator_agent": r.creator_name,
+        "target_agent": r.target_name,
+        "run_count": r.run_count,
+        "max_runs": r.max_runs,
+        "next_run_at": _iso(r.next_run_at),
+        "last_run_at": _iso(r.last_run_at),
+        "last_error": r.last_error,
+        "created_at": _iso(r.created_at),
+    }
+
 
 class ScheduledTaskService:
     """Creates, lists, cancels, and executes agent-scheduled tasks."""
@@ -198,14 +247,16 @@ class ScheduledTaskService:
         """Rate limits: per creator agent, or one workspace-wide cap for operator rows;
         and a workspace cap on recurring rows."""
         if created_by_agent_id is not None:
+            # PRD-268 K8: Auto's follow-ups are people's, never its own schedules: none counts here.
             active_count = self.db.execute(
                 text("""
                     SELECT COUNT(*) FROM agent_scheduled_tasks
                     WHERE created_by_agent_id = :agent_id
                       AND workspace_id = :ws_id
                       AND status = 'active'
+                      AND deliver_as <> :follow_up
                 """),
-                {"agent_id": created_by_agent_id, "ws_id": str(self.workspace_id)},
+                {"agent_id": created_by_agent_id, "ws_id": str(self.workspace_id), "follow_up": DELIVER_FOLLOW_UP},
             ).scalar() or 0
             if active_count >= MAX_TASKS_PER_AGENT:
                 return f"Agent has reached the limit of {MAX_TASKS_PER_AGENT} active tasks"
@@ -216,8 +267,9 @@ class ScheduledTaskService:
                     WHERE workspace_id = :ws_id
                       AND created_by_user_id IS NOT NULL
                       AND status = 'active'
+                      AND deliver_as <> :follow_up
                 """),
-                {"ws_id": str(self.workspace_id)},
+                {"ws_id": str(self.workspace_id), "follow_up": DELIVER_FOLLOW_UP},
             ).scalar() or 0
             if operator_count >= MAX_OPERATOR_TASKS_PER_WORKSPACE:
                 return f"Workspace has reached the limit of {MAX_OPERATOR_TASKS_PER_WORKSPACE} active scheduled board tasks"
@@ -232,8 +284,9 @@ class ScheduledTaskService:
                 WHERE workspace_id = :ws_id
                   AND task_type = 'recurring'
                   AND status = 'active'
+                  AND deliver_as <> :follow_up
             """),
-            {"ws_id": str(self.workspace_id)},
+            {"ws_id": str(self.workspace_id), "follow_up": DELIVER_FOLLOW_UP},
         ).scalar() or 0
         if recurring_count >= MAX_RECURRING_PER_WORKSPACE:
             return f"Workspace has reached the limit of {MAX_RECURRING_PER_WORKSPACE} recurring tasks"
@@ -288,65 +341,15 @@ class ScheduledTaskService:
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """List scheduled tasks for the workspace."""
-        conditions = ["t.workspace_id = :ws_id"]
-        params: Dict[str, Any] = {"ws_id": str(self.workspace_id), "limit": limit, "offset": offset}
-
-        if agent_id:
-            conditions.append("(t.created_by_agent_id = :agent_id OR t.target_agent_id = :agent_id)")
-            params["agent_id"] = agent_id
-        if status:
-            conditions.append("t.status = :status")
-            params["status"] = status
-
-        where = " AND ".join(conditions)
-
-        rows = self.db.execute(
-            text(f"""
-                SELECT t.*,
-                       ca.name as creator_name,
-                       ta.name as target_name
-                FROM agent_scheduled_tasks t
-                LEFT JOIN agents ca ON ca.id = t.created_by_agent_id
-                LEFT JOIN agents ta ON ta.id = t.target_agent_id
-                WHERE {where}
-                ORDER BY t.created_at DESC
-                LIMIT :limit OFFSET :offset
-            """),
-            params,
-        ).fetchall()
-
-        total = self.db.execute(
-            text(f"SELECT COUNT(*) FROM agent_scheduled_tasks t WHERE {where}"),
-            params,
-        ).scalar() or 0
-
-        return {
-            "success": True,
-            "tasks": [
-                {
-                    "id": r.id,
-                    "task_type": r.task_type,
-                    "deliver_as": getattr(r, "deliver_as", None) or DELIVER_CHAT,
-                    "title": (r.payload or {}).get("title") if isinstance(getattr(r, "payload", None), dict) else None,
-                    "payload": r.payload if isinstance(getattr(r, "payload", None), dict) else None,
-                    "created_by_user_id": getattr(r, "created_by_user_id", None),
-                    "description": r.description,
-                    "schedule": r.schedule,
-                    "status": r.status,
-                    "creator_agent": r.creator_name,
-                    "target_agent": r.target_name,
-                    "run_count": r.run_count,
-                    "max_runs": r.max_runs,
-                    "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
-                    "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
-                    "last_error": r.last_error,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                }
-                for r in rows
-            ],
-            "total": total,
+        """List scheduled tasks for the workspace. A person's follow-ups (DELIVER_FOLLOW_UP)
+        are theirs alone: neither ``tasks`` nor ``total`` carries one (PRD-268 K8)."""
+        params: Dict[str, Any] = {
+            "ws_id": str(self.workspace_id), "follow_up": DELIVER_FOLLOW_UP,
+            "agent_id": agent_id or None, "status": status or None, "limit": limit, "offset": offset,
         }
+        rows = self.db.execute(_LIST_SQL, params).fetchall()
+        total = self.db.execute(_COUNT_SQL, params).scalar() or 0
+        return {"success": True, "tasks": [_task_dict(r) for r in rows], "total": total}
 
     # ------------------------------------------------------------------
     # Cancel / Pause / Resume
@@ -358,14 +361,16 @@ class ScheduledTaskService:
         if new_status not in valid:
             return {"success": False, "error": f"status must be one of: {', '.join(sorted(valid))}"}
 
+        # PRD-268 K8: a follow-up is its person's own; no generic route or tool pauses,
+        # resumes or cancels it (theirs: services/proactive/follow_ups.py).
         row = self.db.execute(
             text("""
                 UPDATE agent_scheduled_tasks
                 SET status = :status, updated_at = NOW()
-                WHERE id = :id AND workspace_id = :ws_id
+                WHERE id = :id AND workspace_id = :ws_id AND deliver_as <> :follow_up
                 RETURNING id, status
             """),
-            {"id": task_id, "status": new_status, "ws_id": str(self.workspace_id)},
+            {"id": task_id, "status": new_status, "ws_id": str(self.workspace_id), "follow_up": DELIVER_FOLLOW_UP},
         ).fetchone()
 
         if not row:
@@ -462,7 +467,13 @@ class ScheduledTaskService:
 
     @staticmethod
     async def _deliver(db: Session, task: Any, task_id: int) -> None:
-        """Deliver a fired row: a board ticket the dispatcher runs, or a chat with its agent."""
+        """Deliver a fired row: a board ticket the dispatcher runs, a person's follow-up (one
+        check-in-lane turn, PRD-268 K11), or a chat with its agent."""
+        if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_FOLLOW_UP:
+            from services.proactive.follow_up_fire import fire_follow_up
+
+            await fire_follow_up(db, task, task_id)
+            return
         if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_BOARD_TASK:
             # Board delivery: the ticket goes on the board, the dispatcher runs it.
             ScheduledTaskService._file_board_task(db, task, task_id)

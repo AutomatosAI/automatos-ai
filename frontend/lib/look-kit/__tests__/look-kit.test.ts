@@ -5,14 +5,15 @@
  * rules for every theme: Studio's consequence tokens are the error colour, never the accent (F9,
  * P260-FX-17), and the page glow never takes text under AA (M50, P260-FX-18). A made-up theme,
  * "acme", proves it: nothing here is Play's. Every theme sets the same Studio tokens: the 24 the
- * phone draws (M-01's MOBILE_TOKEN_NAMES) and the eight aliases globals.css writes pre-wrapped (PB-38).
+ * phone draws (M-01's MOBILE_TOKEN_NAMES), the five status tokens (PRD-268 K13's STUDIO_STATUS_TOKEN_NAMES)
+ * and the eight aliases globals.css writes pre-wrapped (PB-38).
  */
 import { describe, expect, it } from 'vitest'
 
 import { readableOn } from '@/lib/look-kit/contrast'
 import { GLOW_SCALE, cssVarName, glowVar, lookToCssVars, rgba, safeGlow } from '@/lib/look-kit/css'
 import { hexToTriplet } from '@/lib/look-kit/hsl'
-import { lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
+import { STUDIO_STATUS_TOKEN_NAMES, lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
 import type { LookCatalogue, LookPicks } from '@/lib/look-kit/types'
 import { validateLook, type LookKnobSpec, type LookSpec } from '@/lib/look-kit/validate'
 import { validateLookSchema } from '@/lib/theme-host/look-schema'
@@ -51,8 +52,8 @@ const ACME_VAR = /^--acme-[a-z0-9-]+$/
  * globals.css writes them (studio-tokens.ts aliasTokens and consequenceTokens); the phone draws none of them.
  */
 const STUDIO_ALIAS_TOKEN_NAMES: readonly string[] = ['--paper', '--bg-1', '--bg-2', '--fg', '--fg-2', '--fg-3', '--border-2', '--accent-2']
-/** Every Studio token a theme's look sets: the phone's triplet tokens and the aliases, each once. */
-const STUDIO_TOKEN_NAMES: readonly string[] = [...MOBILE_TOKEN_NAMES, ...STUDIO_ALIAS_TOKEN_NAMES]
+/** Every Studio token a theme's look sets: the phone's triplet tokens, the status tokens and the aliases, each once. */
+const STUDIO_TOKEN_NAMES: readonly string[] = [...MOBILE_TOKEN_NAMES, ...STUDIO_STATUS_TOKEN_NAMES, ...STUDIO_ALIAS_TOKEN_NAMES]
 
 const SPEC: LookSpec = {
   lookSchema: 'acme-look/v2',
@@ -100,7 +101,7 @@ describe("the look runtime paints any theme's catalogue", () => {
     }
   })
 
-  it("sets the same Studio tokens for any theme and look: the phone's triplet tokens and the eight aliases (PB-38)", () => {
+  it("sets the same Studio tokens for any theme and look: the phone's triplet tokens, the status tokens and the eight aliases (PB-38)", () => {
     for (const ground of Object.keys(ACME.grounds)) {
       for (const accent of Object.keys(ACME.accents)) {
         const names = Object.keys(lookToStudioTokens(ACME, { ground, accent }))

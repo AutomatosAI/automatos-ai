@@ -16,13 +16,18 @@ package id, workspace, submitter, scan report, review, install or revocation-adm
 
 theme.json is read once per version and kept in memory, as ``serve.py`` keeps boot files: a stored
 file never changes, and its first read is re-hashed against the file manifest (``serve.verified_file``).
+A build does every database read first, then detaches the listed rows with their loaded columns and ends
+its read transaction, so no pool connection waits while storage gives back a theme.json.
 A keys file that does not load raises ``SigningKeysError``, and a theme.json storage can't give back
 raises ``CatalogUnavailable``: the route answers 503 to both, never a catalogue that silently lists
 less. While ``THEMES_MARKETPLACE`` is off the catalogue lists no item.
 
 The route is public, so it never builds per request: ``catalog_snapshot`` keeps the built catalogue,
 its body and its ETag for ``CATALOG_KEPT_SECONDS`` and builds one at a time, so concurrent callers share
-one build. A build that fails keeps nothing, and the next request tries again.
+one build. While another caller builds, a caller is answered the last snapshot this process holds,
+however old, at once; when it holds none, the caller waits at most ``CATALOG_BUILD_WAIT_SECONDS`` and then
+gets ``CatalogBusy`` (the route's 503 with ``Retry-After``). A build that fails keeps nothing, and the next
+caller that gets the build builds again.
 """
 
 from __future__ import annotations
@@ -32,11 +37,12 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
 from config import config
+from core.database.read_release import release_if_read_only
 from core.models.themes import ThemePackage
 from services.marketplace_bundles.catalog_items import with_items
 from services.marketplace_cloud.urls import catalog_file_path, package_path
@@ -60,9 +66,13 @@ FILE_FIELDS = ("type", "size", "sha256")
 # More versions than a catalogue under its default 1024 KB cap can list (each item is a few KB).
 THEME_JSON_KEPT = 512
 CATALOG_KEPT_SECONDS = 30
+# How long a caller with no snapshot held waits for another caller's build, and the busy 503's Retry-After.
+CATALOG_BUILD_WAIT_SECONDS = 2.0
+CATALOG_BUSY_RETRY_SECONDS = 5
 SNAPSHOT_KEY = "catalog"
 
 UNREADABLE = "The theme.json of a listed theme version can't be read from storage."
+BUILD_BUSY = "Another caller is building the catalogue and no catalogue is held yet."
 
 
 class CatalogSnapshot(NamedTuple):
@@ -85,6 +95,11 @@ class CatalogUnavailable(RuntimeError):
     """Storage could not give back a listed version's theme.json (the route's 503)."""
 
 
+class CatalogBusy(RuntimeError):
+    """Another caller's build held past ``CATALOG_BUILD_WAIT_SECONDS`` and no snapshot is held (the route's 503
+    with ``Retry-After``)."""
+
+
 def catalog_max_bytes() -> int:
     """The largest catalogue the hosted edition serves (``MARKETPLACE_CATALOG_FEED_MAX_KB``)."""
     return int(config.MARKETPLACE_CATALOG_FEED_MAX_KB) * KB
@@ -103,15 +118,30 @@ def _fresh_snapshot() -> Optional[CatalogSnapshot]:
     return held
 
 
+def _took_the_build(held: Optional[CatalogSnapshot]) -> bool:
+    """True when this caller now holds ``_building``. With a snapshot held it never waits (that snapshot is its
+    answer); with none, it waits at most ``CATALOG_BUILD_WAIT_SECONDS``."""
+    if held is not None:
+        return _building.acquire(blocking=False)
+    return _building.acquire(timeout=CATALOG_BUILD_WAIT_SECONDS)
+
+
 def catalog_snapshot(db: Session) -> CatalogSnapshot:
     """The catalogue with its body and ETag, built at most once per ``CATALOG_KEPT_SECONDS`` for every caller.
 
-    Raises what ``build_catalog`` raises; a failed build keeps nothing.
+    While another caller builds, the last snapshot held, however old (a moment-old catalogue beats none), is
+    the answer at once; with none held, ``CatalogBusy`` after at most ``CATALOG_BUILD_WAIT_SECONDS``. Neither
+    reads the database or storage. Raises what ``build_catalog`` raises; a failed build keeps nothing.
     """
     held = _fresh_snapshot()
     if held is not None:
         return held
-    with _building:
+    last = _snapshots.get(SNAPSHOT_KEY)
+    if not _took_the_build(last):
+        if last is None:
+            raise CatalogBusy(BUILD_BUSY)
+        return last
+    try:
         held = _fresh_snapshot()
         if held is not None:
             return held
@@ -119,6 +149,8 @@ def catalog_snapshot(db: Session) -> CatalogSnapshot:
         snapshot = CatalogSnapshot(catalog, feed_bytes(catalog), feed_etag(catalog), time.monotonic())
         _snapshots.put(SNAPSHOT_KEY, snapshot)
         return snapshot
+    finally:
+        _building.release()
 
 
 def build_catalog(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -127,12 +159,41 @@ def build_catalog(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]
     return {"schema": CATALOG_SCHEMA, "generatedAt": moment.isoformat(), "items": _items(db)}
 
 
+# A catalogued version, its verdict and its publisher: everything the database gives an item.
+Catalogued = Tuple[ThemePackage, signature_verify.Verdict, Dict[str, Any]]
+
+
 def _items(db: Session) -> List[Dict[str, Any]]:
+    """Every item: the database read first (``_catalogued``), its transaction ended, then each theme.json read."""
     if marketplace_switch() == SWITCH_OFF:
         return []
     signature_verify.load_keys()  # a keys file that doesn't load is the route's 503, never an empty catalogue
-    items = (_item(db, row) for versions in all_listings(db).values() for row in versions)
-    return [item for item in items if item is not None]
+    catalogued = _catalogued(db)
+    _end_reads(db, [package for package, _verdict, _publisher in catalogued])
+    return [_item(package, verdict, publisher) for package, verdict, publisher in catalogued]
+
+
+def _catalogued(db: Session) -> List[Catalogued]:
+    """Each listed version the catalogue lists (``catalogued_verdict``), by theme id and newest first, with its
+    verdict and publisher: every database read a build does."""
+    rows = [row for versions in all_listings(db).values() for row in versions]
+    verdicts = [(row, catalogued_verdict(row)) for row in rows]
+    return [(row, verdict, publisher_view(db, row.theme_id, verdict)) for row, verdict in verdicts
+            if verdict is not None]
+
+
+def _end_reads(db: Session, packages: Sequence[ThemePackage]) -> None:
+    """Detach ``packages`` with their loaded columns and end ``db``'s read transaction, so its pool connection is
+    back before storage is read. A session holding changes keeps its rows, and a transaction
+    ``release_if_read_only`` won't end (it wrote or holds a lock) is kept; the log says so."""
+    if db.new or db.dirty or db.deleted:
+        logger.warning("Catalogue: built inside a session holding changes, so its transaction is kept over storage")
+        return
+    for package in packages:
+        db.expunge(package)
+    if not release_if_read_only(db) and db.in_transaction():
+        logger.warning("Catalogue: the build's transaction wasn't released (it wrote, locked or isn't tracked), so "
+                       "it is kept over storage")
 
 
 def catalogued_verdict(package: ThemePackage) -> Optional[signature_verify.Verdict]:
@@ -145,11 +206,9 @@ def catalogued_verdict(package: ThemePackage) -> Optional[signature_verify.Verdi
     return verdict if verdict.verified else None
 
 
-def _item(db: Session, package: ThemePackage) -> Optional[Dict[str, Any]]:
-    """One listed version as the catalogue lists it, or None when it is a Sync's row or not signed."""
-    verdict = catalogued_verdict(package)
-    if verdict is None:
-        return None
+def _item(package: ThemePackage, verdict: signature_verify.Verdict, publisher: Dict[str, Any]) -> Dict[str, Any]:
+    """One catalogued version as the catalogue lists it; reads its theme.json (the kept text first), never the
+    database."""
     manifest = package.manifest or {}
     return {
         "type": ITEM_TYPE,
@@ -159,7 +218,7 @@ def _item(db: Session, package: ThemePackage) -> Optional[Dict[str, Any]]:
         "digest": package.digest,
         "name": manifest.get("name"),
         "description": manifest.get("description"),
-        "publisher": publisher_view(db, package.theme_id, verdict),
+        "publisher": publisher,
         "engines": manifest.get("engines"),
         "uses": list(manifest.get("uses") or []),
         "pricing": manifest.get("pricing") or FREE_LABEL,
@@ -237,6 +296,7 @@ def _path_of(url: Optional[str], paths: Mapping[str, str]) -> Optional[str]:
 
 
 __all__ = [
-    "CATALOG_KEPT_SECONDS", "CATALOG_SCHEMA", "CatalogSnapshot", "CatalogUnavailable", "build_catalog",
-    "catalog_max_bytes", "catalog_snapshot", "catalogued_verdict", "forget_cached",
+    "CATALOG_BUILD_WAIT_SECONDS", "CATALOG_BUSY_RETRY_SECONDS", "CATALOG_KEPT_SECONDS", "CATALOG_SCHEMA",
+    "CatalogBusy", "CatalogSnapshot", "CatalogUnavailable", "build_catalog", "catalog_max_bytes",
+    "catalog_snapshot", "catalogued_verdict", "forget_cached",
 ]

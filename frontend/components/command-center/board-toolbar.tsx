@@ -7,6 +7,7 @@
  */
 
 import { Columns, LayoutList, Rows, AlignJustify, Search } from 'lucide-react'
+import { FROM_SUGGESTIONS_LABEL } from '@/components/activity/board/from-suggestions'
 
 export type BoardMode = 'column' | 'lane'
 export type BoardDensity = 'comfortable' | 'compact'
@@ -23,6 +24,9 @@ interface BoardToolbarProps {
   agents: unknown
   search: string
   onSearch: (search: string) => void
+  /** PRD-268 US-W01a: only the tickets a suggestion's Start filed. */
+  fromSuggestions: boolean
+  onFromSuggestions: (on: boolean) => void
 }
 
 const SELECT_STYLE = { height: 28, fontSize: 11.5, paddingRight: 24 } as const
@@ -50,6 +54,17 @@ export function BoardToolbar(props: BoardToolbarProps) {
       </div>
 
       <ToolbarFilters {...props} />
+
+      <div className="cc-seg" role="group" aria-label="Source">
+        <button
+          type="button"
+          aria-pressed={props.fromSuggestions}
+          className={props.fromSuggestions ? 'on' : ''}
+          onClick={() => props.onFromSuggestions(!props.fromSuggestions)}
+        >
+          {FROM_SUGGESTIONS_LABEL}
+        </button>
+      </div>
 
       <div style={{ marginLeft: 'auto' }}>
         <div

@@ -2,8 +2,10 @@
 
 ``services/chat_messenger.deliver_background_message`` calls :func:`announce` with the message it
 just saved and its producer's ``source``. Only Auto's own initiative is announced
-(``ANNOUNCED_ORIGINS``: a scheduled task, the daily digest), never the echo of what the person
-did (a question's answer, a click's result). A watcher's and a Mission's posts are not announced:
+(``ANNOUNCED_ORIGINS``: a scheduled task, the daily digest, a follow-up that said something,
+PRD-268 W3), never the echo of what the person
+did (a question's answer, a click's result, a brief posted because they opened the app: its
+source's ``via`` is ``open``, PRD-268 K11). A watcher's and a Mission's posts are not announced:
 each already raises its own bell event (``watch_*``, ``mission_*``), so a second row would ring
 the same person twice for one event. :func:`announce`
 copies plain values and hands :func:`dispatch_auto_message` to ``send_soon``, which runs it on a
@@ -31,6 +33,7 @@ from sqlalchemy.orm import InstanceState
 
 from core.models.core import Chat, Message
 from core.services.notification_columns import clamp
+from services.brief.model import VIA_OPEN
 from services.notification_events.soon import send_soon
 from services.push.payload import AUTO_MESSAGE_LINE
 
@@ -44,8 +47,11 @@ DAILY_DIGEST = "daily_digest"
 # Auto's own initiative (K11). Never 'question_answer' or a click's result: the person's own action.
 # Never 'watcher' or 'mission': each raises its own bell event already (one row per event).
 # Whether watcher and Mission events push to a phone is the owner's decision (K11): not designed here.
-ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST})
+# PRD-268 W3 (K11): a follow-up's one message (services.proactive.follow_up_fire), Auto keeping its word.
+ANNOUNCED_ORIGINS: frozenset[str] = frozenset({"scheduled_task", DAILY_DIGEST, "follow_up"})
 NEVER_COALESCED: frozenset[str] = frozenset({DAILY_DIGEST})
+# How a post came to be, when it was the person's own action (PRD-268 K11): a brief on open.
+UNANNOUNCED_VIAS: frozenset[str] = frozenset({VIA_OPEN})
 AUTO_MESSAGE_COALESCE_SECONDS = 600
 EXCERPT_MAX_CHARS = 200
 
@@ -86,7 +92,8 @@ def announce(message: Any, source: Optional[Mapping[str, Any]]) -> None:
 def _notice_of(message: Any, source: Optional[Mapping[str, Any]]) -> Optional[AutoMessage]:
     """The notice's plain values, or None when the message is not one to announce."""
     origin = source.get("origin") if isinstance(source, Mapping) else None
-    if origin not in ANNOUNCED_ORIGINS or not _saved(message):
+    via = source.get("via") if isinstance(source, Mapping) else None
+    if origin not in ANNOUNCED_ORIGINS or via in UNANNOUNCED_VIAS or not _saved(message):
         return None
     return AutoMessage(
         workspace_id=str(message.workspace_id),
@@ -183,6 +190,7 @@ __all__ = [
     "ANNOUNCED_ORIGINS",
     "AUTO_MESSAGE_COALESCE_SECONDS",
     "AutoMessage",
+    "UNANNOUNCED_VIAS",
     "announce",
     "dispatch_auto_message",
 ]

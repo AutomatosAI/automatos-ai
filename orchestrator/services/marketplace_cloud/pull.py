@@ -10,7 +10,8 @@ is answered "already running", never queued. It GETs the catalogue (``fetch.py``
   version (``listings.all_listings`` groups versions by theme id);
 * an item whose digest a Marketplace row already holds is ``unchanged``; a version number a Marketplace
   row holds with other bytes is refused, and so is a row a unique index refuses because another Sync or
-  a submission wrote it meanwhile (each write is its own savepoint, so the rest of the Sync goes on);
+  a submission wrote it meanwhile (each write is its own savepoint, so the rest of the Sync goes on; any
+  other integrity error is a bug in the row and fails the Sync);
 * any other item is written as a Cloud row: ``new`` when the theme had no Cloud row before this Sync,
   else ``updated`` (the counts are per version). A Cloud row is an approved, reviewed Marketplace
   version, ``source`` 'cloud', with the checked manifest, file list and signature, the Marketplace
@@ -23,7 +24,8 @@ version the catalogue no longer lists stays, and a revoked one is the revocation
 ``marketplace_cloud_sync`` row records the attempt, the success, the catalogue's ``generatedAt`` and the
 counts. Any failure (the setting, the fetch, a refused catalogue, a keys file that won't load, a database
 error, anything unexpected) rolls every row back and records only ``last_attempt_at`` and ``last_error``:
-the last good Sync stays. Synchronous; it commits.
+the last good Sync stays. Synchronous; it ends the caller's reads before the fetch, so no transaction is
+open while Automatos Cloud answers, and it commits.
 """
 from __future__ import annotations
 
@@ -62,6 +64,7 @@ STALE_AFTER = timedelta(days=7)
 LAST_ERROR_MAX = 500
 NEW, UPDATED, UNCHANGED, REFUSED = "new", "updated", "unchanged", "refused"
 WRITTEN = frozenset({NEW, UPDATED})
+UNIQUE_VIOLATION = "23505"  # Postgres's SQLSTATE for a row a unique index refuses
 
 SYNC_OFF = "Sync with Automatos Cloud runs only on a local install with AUTOMATOS_CLOUD_URL set."
 KEYS_UNREADABLE = "This install's signing keys couldn't be read, so nothing was synced."
@@ -172,11 +175,19 @@ def _cloud_row(item: CheckedItem) -> ThemePackage:
     )
 
 
+def is_unique_violation(error: IntegrityError) -> bool:
+    """Whether a unique index refused the write (psycopg2's ``pgcode``, psycopg's ``sqlstate``), not a CHECK,
+    a NOT NULL or a foreign key."""
+    orig = error.orig
+    return (getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)) == UNIQUE_VIOLATION
+
+
 def write_item(db: Session, item: CheckedItem, at: datetime) -> bool:
     """Write ``item``'s Cloud row and its 'approved' review event in a savepoint (no file is stored).
 
     False, with nothing written, when a unique index refuses the row: another Sync or a submission wrote
-    that version or digest since ``held_state`` read. Any other database error is raised. The caller commits.
+    that version or digest since ``held_state`` read. Any other integrity error (a CHECK, a NOT NULL, a foreign
+    key: a bug in the row this Sync built) and any other database error is raised. The caller commits.
     """
     package = _cloud_row(item)
     try:
@@ -188,7 +199,9 @@ def write_item(db: Session, item: CheckedItem, at: datetime) -> bool:
                 actor_user_id=None, detail=dict(EVENT_DETAIL), created_at=at,
             ))
             db.flush()
-    except IntegrityError:
+    except IntegrityError as refused:
+        if not is_unique_violation(refused):
+            raise
         logger.warning(
             "Automatos Cloud: %s %s was written here meanwhile, so it is refused", item.theme_id, item.version,
         )
@@ -216,13 +229,17 @@ def _record_success(db: Session, catalog: Catalog, counts: SyncCounts, at: datet
 
 
 def apply_catalog(db: Session, catalog: Catalog, at: datetime) -> SyncCounts:
-    """Write every checked item as K14 says and record the success; the caller commits."""
+    """Write every checked item as K14 says and record the success; the caller commits.
+
+    Only an item this Sync wrote is held for the items after it: one a unique index refused stays refused there too.
+    """
     held = held_state(db, catalog.items)
     counts = SyncCounts(refused=len(catalog.refused), skipped=catalog.skipped)
     for item in catalog.items:
         verdict = classify(item, held)
+        if verdict in WRITTEN and not write_item(db, item, at):
+            verdict = REFUSED
         if verdict in WRITTEN:
-            verdict = verdict if write_item(db, item, at) else REFUSED
             held = held.with_item(item)
         counts = counts.plus(verdict)
     _record_success(db, catalog, counts, at)
@@ -248,6 +265,7 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
     attempted_at = datetime.now(timezone.utc)
     try:
         origin = checked_origin(configured_url())
+        db.rollback()  # the route's reads end (nothing is written before here): none is open while Cloud answers
         data = fetch_bytes(catalog_url(origin), feed_max_bytes(), ACCEPT_JSON, client_factory)
         catalog = parse_catalog(data, db)
         counts = apply_catalog(db, catalog, attempted_at)
@@ -268,7 +286,11 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
 
 
 def sync_catalog(db: Session, client_factory: Optional[ClientFactory] = None) -> SyncOutcome:
-    """Fetch, check and write the catalogue in one transaction; any failure writes no listing."""
+    """Fetch, check and write the catalogue in one transaction; any failure writes no listing.
+
+    The Sync owns ``db``'s transaction: whatever the caller left in it is rolled back before the fetch, as on any
+    failure, so the caller hands over a session that has only read.
+    """
     if not sync_enabled():
         return SyncOutcome(ok=False, error=SYNC_OFF, off=True)
     if not _SYNC_LOCK.acquire(blocking=False):
@@ -321,6 +343,6 @@ def sync_status(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
 
 __all__ = [
     "ALREADY_RUNNING", "KEYS_UNREADABLE", "NOT_SAVED", "STALE_AFTER", "SYNC_OFF", "UNEXPECTED", "Held",
-    "SyncCounts", "SyncOutcome", "apply_catalog", "classify", "held_state", "is_stale", "sync_catalog",
-    "sync_enabled", "sync_row", "sync_status", "write_item",
+    "SyncCounts", "SyncOutcome", "UNIQUE_VIOLATION", "apply_catalog", "classify", "held_state", "is_stale",
+    "is_unique_violation", "sync_catalog", "sync_enabled", "sync_row", "sync_status", "write_item",
 ]

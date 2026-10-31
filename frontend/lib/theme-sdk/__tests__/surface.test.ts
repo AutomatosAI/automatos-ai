@@ -25,10 +25,16 @@ const SURFACE_DIR = path.join(SDK_DIR, 'surface')
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
-/** A story id: Phase A's (`A-13c`), the E area's (`E3b`, plan §2.6) or theme voice's core items (`TV-C5`, the voice area). */
-const STORY_ID = /^(?:A-\d+[a-z]?|E\d+[a-z]?|TV-C\d+)$/
+/**
+ * A story id: Phase A's (`A-13c`), the E area's (`E3b`, plan §2.6), theme voice's core items (`TV-C5`, the voice area)
+ * or a PRD's core story (`US-C21`, PRD-268's proactive area).
+ */
+const STORY_ID = /^(?:A-\d+[a-z]?|E\d+[a-z]?|TV-C\d+|US-C\d+)$/
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
-/** The areas built after A-10a: W-A4 (A-11b, A-12a, A-13c), W-A4P (A-12d to A-12h), W-E3 (E3b, storage) and theme voice (TV-C5, voice). */
+/**
+ * The areas built after A-10a: W-A4 (A-11b, A-12a, A-13c), W-A4P (A-12d to A-12h), W-E3 (E3b, storage), theme voice
+ * (TV-C5, voice) and PRD-268 (US-C21, proactive).
+ */
 const BUILT_BY_LATER_LANES = [
   'chat',
   'deliverables',
@@ -42,6 +48,7 @@ const BUILT_BY_LATER_LANES = [
   'pages/command-center',
   'storage',
   'voice',
+  'proactive',
 ]
 /** A stub's body: an area still calling it is not built. */
 const STUB_CALL = /\bnotInThisBuild\(/
@@ -65,6 +72,7 @@ const AREA_MODULES: Readonly<Record<string, ModuleLoader>> = {
   'pages/command-center': () => import('../pages/command-center'),
   storage: () => import('../storage'),
   voice: () => import('../voice'),
+  proactive: () => import('../proactive'),
 }
 
 const SURFACE_FILES = readdirSync(SURFACE_DIR).filter((file) => file.endsWith('.json')).sort()
@@ -116,10 +124,13 @@ describe('PRD-261 A-10a — the surface files', () => {
     expect([...surface.names]).toEqual([...new Set(surface.names)].sort())
   })
 
-  it("reads Phase A's story ids, the E area's and theme voice's, and no other kind", () => {
-    expect(['A-10a', 'A-13c', 'E3b', 'E4', 'TV-C5'].filter((story) => !STORY_ID.test(story))).toEqual([])
-    expect(['B-05a', 'e3b', 'A13c', 'E-3b', 'E3bc', '', 'C5', 'TV-5', 'tv-c5', 'TV-C5a'].filter((story) => STORY_ID.test(story)))
-      .toEqual([])
+  it("reads Phase A's story ids, the E area's, theme voice's and a PRD's core story's, and no other kind", () => {
+    expect(['A-10a', 'A-13c', 'E3b', 'E4', 'TV-C5', 'US-C21'].filter((story) => !STORY_ID.test(story))).toEqual([])
+    expect(
+      ['B-05a', 'e3b', 'A13c', 'E-3b', 'E3bc', '', 'C5', 'TV-5', 'tv-c5', 'TV-C5a', 'US-21', 'us-c21', 'US-W01', 'US-C'].filter(
+        (story) => STORY_ID.test(story),
+      ),
+    ).toEqual([])
   })
 
   it('never plans one name in two areas (export * would drop it)', () => {

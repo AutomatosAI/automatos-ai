@@ -21,14 +21,15 @@
    ``chat``: nothing is made, and the answer's ``opens`` is
    ``{type: 'chat', suggestion_id}`` (the client opens the Auto thread with the suggestion as
    context; its text is never posted as the person's message).
-7. One commit; then the assigned ticket's wake (``start_ticket.wake``; a failed wake is logged
-   and the dispatch loop's poll still finds the ticket) and the audit row.
+7. One commit; then the suggestion's ``suggestion_changed`` live event
+   (``services.proactive.live``), the assigned ticket's wake (``start_ticket.wake``; a failed
+   wake is logged and the dispatch loop's poll still finds the ticket) and the audit row.
 
 **Hide** (``hide``) is never gated: no switch, cap or spend check. The person it is
 addressed to, or (``any_row``) an owner or admin, moves it from open to ``hidden`` with
-``hide_reason``, ``decided_via`` and ``decided_at``; a hidden suggestion hidden again is
-answered as it is. Started or expired (lapsed ones first, as for Start), it is refused by
-its state.
+``hide_reason``, ``decided_via`` and ``decided_at``, then its ``suggestion_changed`` live
+event once that has committed; a hidden suggestion hidden again is answered as it is, and
+tells no one. Started or expired (lapsed ones first, as for Start), it is refused by its state.
 
 Audit rows (``proactive:suggestion_started``, ``proactive:suggestion_hidden``; their details
 say where, by whom as ``user:<id>``, and what) are written after the decision's commit (K15):
@@ -58,6 +59,7 @@ from core.models.proactive import (
 from modules.tools.discovery.suggestion_fields import BOARD_TASK, CHAT
 from services.proactive import start_ticket
 from services.proactive.expiry import expire_lapsed
+from services.proactive.live import suggestion_changed
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +157,11 @@ def _audit(db: Session, row: ProactiveSuggestion, decider: Decider, action: str,
     )
 
 
+def _changed(db: Session, row: ProactiveSuggestion, status: str) -> None:
+    """The committed decision's live event: ids and the new status, never the suggestion's words."""
+    suggestion_changed(db, workspace_id=row.workspace_id, suggestion_id=row.id, user_id=row.user_id, status=status)
+
+
 def _wake(db: Session, task: Any, decider: Decider) -> None:
     """The committed ticket's wake; a failure is logged and costs only dispatch latency, since
     the dispatch loop's poll still finds the ticket, and never undoes the Start or its audit."""
@@ -206,6 +213,7 @@ def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider
     opens, task = _begin(db, row, kind, decider, locale)
     db.commit()
     answer = Started(suggestion=row.to_dict(), opens=opens)
+    _changed(db, row, SUGGESTION_STARTED)
     if task is not None:
         _wake(db, task, decider)
     logger.info("[proactive] suggestion %s started (%s) in workspace %s", row.id, kind, workspace_id)
@@ -234,6 +242,7 @@ def hide(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider,
         raise refusal
     db.commit()
     answer = row.to_dict()
+    _changed(db, row, SUGGESTION_HIDDEN)
     logger.info("[proactive] suggestion %s hidden (%s) in workspace %s", row.id, reason, workspace_id)
     _audit(db, row, decider, HIDDEN_ACTION, {"reason": reason})
     return answer

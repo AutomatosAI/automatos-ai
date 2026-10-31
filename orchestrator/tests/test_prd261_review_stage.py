@@ -114,6 +114,8 @@ LOOK_TABLE = {
             "green": {"--primary": GREEN, "--primary-foreground": WHITE},
         },
     },
+    # radius is painted by a numeric rule, as the reader needs every look knob painted (first_paint.py).
+    "numeric": [build.HELLO_RADIUS_RULE],
     "defaults": {"accent": "blue", "ground": "paper", "radius": 6},
 }
 
@@ -282,6 +284,33 @@ def test_an_sdk_voice_call_without_voice_in_uses_is_a_warning_listing_it():
     assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
     assert uses["undeclaredAreas"] == [VOICE_AREA]
     assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=VOICE_AREA)]
+
+
+PROACTIVE_IMPORT = "defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions"
+PROACTIVE_AREA = "proactive"
+PROACTIVE_NAMES = {"DISPLAY_STATE_LABELS", "BriefCard", "SuggestionCard", "BriefVoice", "useBrief", "useSuggestions"}
+# The proactive area and its default components are SDK 1.3.0's (PRD-268 K12): a theme that uses them asks for it.
+PROACTIVE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.3.0"}
+
+
+def test_an_sdk_proactive_call_declared_in_uses_passes_on_this_hosts_sdk():
+    # PRD-268 US-C21e: the hooks, the default cards, BriefVoice and DISPLAY_STATE_LABELS are names this host exports.
+    uses_declared = ["cards", PROACTIVE_AREA, "theme", "voice"]
+    report = _review_on_this_host(_entry_importing(PROACTIVE_IMPORT), uses=uses_declared, engines=PROACTIVE_ENGINES)
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert PROACTIVE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert PROACTIVE_NAMES <= set(uses["usedNames"])
+
+
+def test_an_sdk_proactive_call_without_proactive_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(PROACTIVE_IMPORT), uses=["cards", "theme", "voice"])
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [PROACTIVE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=PROACTIVE_AREA)]
 
 
 def test_without_the_sdk_name_list_the_uses_check_is_a_warning(monkeypatch):

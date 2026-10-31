@@ -64,7 +64,9 @@ their own modules, so every place that draws them is covered: Studio's canvas an
 today, and a theme page through the SDK cards area once A-12a ships it. The voice button the host
 draws for themes (the SDK's `voice.VoiceButton`, `frontend/components/voice/voice-button.tsx`) puts
 its "AI voice assistant" caption and its stop control (and mute and the device for a call) in one
-too, named `voice-control`, so no theme rule hides them while the microphone is open.
+too, named `voice-control`, so no theme rule hides them while the microphone is open. The brief's
+Listen (`frontend/components/voice/brief-voice.tsx`, PRD-268) is another, named `brief-voice`:
+Listen, and while Auto reads the brief its caption and Stop, so no theme rule hides how to stop it.
 
 The host (`[data-protected-surface]`) and the inner wrapper (`[data-protected-surface-inner]`)
 each carry these declarations inline, each marked `!important`:

@@ -13,6 +13,15 @@
  *   `--voice-button-ring`. A prop of the wrong kind throws, naming the prop.
  * - `useVoice()`: the session as a frozen snapshot, and `stop()`.
  * - `readVoiceLevels()`: the member's and Auto's levels, 0 to 1, read inside an animation frame (never a render).
+ * - `BriefVoice` (SDK 1.3.0): Listen, the host's control that reads the day's brief the host holds in Auto's voice,
+ *   with the "AI voice assistant" caption and Stop while it reads, in a protected surface no theme stylesheet can hide.
+ *   It takes no text: a theme never speaks. It never plays until pressed, it is disabled until the host holds the
+ *   day's brief, and it waits while the tab's voice session runs. Its root (`[data-brief-voice="root"]`) carries
+ *   `data-voice-speaking="true"` while Auto reads, which a theme's speaking line follows. SDK 1.4.0: while Auto reads
+ *   one of the brief's rows, the root also carries `data-voice-row="<index>"`, and `onSpeakingRow` hears the index,
+ *   then null between rows, during the greeting and once the reading ends or stops. The index is the row's place in
+ *   the brief's rows, section by section in the sections' order (needs_you, suggestions, today, since, unchecked):
+ *   the number Auto says, less one.
  *
  * A theme never captures audio itself (getUserMedia, SpeechRecognition, speechSynthesis: the host's review blocks a
  * theme that does), never hides the caption or the stop control, and never rewords the AI notice. Outside the host's
@@ -95,3 +104,15 @@ export declare function readVoiceLevels(): HostVoiceLevels
 
 /** The host's voice button. */
 export declare function VoiceButton(props: VoiceButtonProps): ReactElement
+
+export interface BriefVoiceProps {
+  /**
+   * Hears the brief row Auto starts reading (its index, in the sections' order), and null once it reads none (taken
+   * off the page included), each time that changes (SDK 1.4.0). A value that isn't a function throws, naming the
+   * prop; a handler that throws is logged, and Auto reads on.
+   */
+  readonly onSpeakingRow?: (row: number | null) => void
+}
+
+/** The host's Listen for the day's brief the host holds. */
+export declare function BriefVoice(props?: BriefVoiceProps): ReactElement

@@ -30,6 +30,24 @@ export type ApprovalDecision = 'approved' | 'denied'
 /** The AI-Act oversight tier a card shows (PRD-181 S5). */
 export type OversightTier = 'monitor' | 'human_on_the_loop' | 'human_in_the_loop'
 
+/** PRD-268 §6.11.4 (K10): what a person may answer on a card. Always allow is not built. */
+export type ApprovalAnswer = 'refuse' | 'allow_once'
+
+/**
+ * PRD-268 §6.11.4: `ApprovalView@1`, the exact action, its target, its preview and the rule that asked. A
+ * card that carries one shows it before its buttons; one whose grant_id is not the card's id is dropped.
+ */
+export interface ApprovalViewData {
+  readonly grant_id: string
+  readonly asked_by: { readonly kind: 'auto' | 'agent'; readonly name: string }
+  readonly action: { readonly verb: string; readonly summary: string }
+  readonly target?: { readonly label: string; readonly detail?: string }
+  readonly preview?: { readonly kind: 'text' | 'markdown' | 'diff'; readonly body: string }
+  readonly rule: { readonly id: string; readonly sentence: string }
+  readonly answers: readonly ApprovalAnswer[]
+  readonly expires_at?: string
+}
+
 /** A confirmation-gated tool call waiting for the owner (the chat's `tool_approval` payload). */
 export interface ToolApprovalData {
   readonly grant_id: number
@@ -42,6 +60,7 @@ export interface ToolApprovalData {
   readonly risk_class?: string
   readonly oversight_rationale?: string
   readonly requires_approval?: boolean
+  readonly approval_view?: ApprovalViewData
 }
 
 /** One task of a Mission plan. */
@@ -69,6 +88,8 @@ export interface MissionApprovalData {
   readonly risk_class?: string
   readonly oversight_rationale?: string
   readonly requires_approval?: boolean
+  /** Its grant_id is the mission_id. */
+  readonly approval_view?: ApprovalViewData
 }
 
 /** Where a card came from: its badge, its conversation and when it was raised. */

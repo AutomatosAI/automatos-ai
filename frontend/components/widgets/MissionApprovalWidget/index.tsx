@@ -18,6 +18,10 @@
  * review rule (docs/theme-host/css-layer-model.md): a generic selector such as
  * `button` that matches the card's elements without naming the card, a rule on
  * an ancestor, an element drawn over the card, and a theme's code in the page.
+ *
+ * PRD-268 US-C20c: a plan that carries `approval_view` also shows who asked, the goal, its number,
+ * the steps and the approval policy that held it, before the buttons, and answers keys 1 (Reject)
+ * and 3 (Approve & run) while the card has focus (approval-view-parts.tsx). Without one it is today's.
  */
 
 import { useState } from 'react'
@@ -26,13 +30,15 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ApprovalViewParts, useApprovalCardBody } from '../approval-view-parts'
+import { MISSION_APPROVAL_TITLE } from '@/lib/chat/approvals'
 import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useCountdown } from '@/hooks/use-countdown'
 import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalTask, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { roleEdit, withPlanPicks } from './role-edit'
+import { MissionTaskList } from './task-list'
 import { toast } from 'sonner'
-
 
 /** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
 export function MissionApprovalWidget(props: WidgetBaseProps<MissionApprovalWidgetData>) {
@@ -103,9 +109,16 @@ function MissionApprovalCard({
     }
   }
 
+  const heading = title || MISSION_APPROVAL_TITLE
+  const card = useApprovalCardBody(data.approval_view, data.mission_id, heading, {
+    refuse: handleReject,
+    allowOnce: handleApprove,
+    disabled: busy || done !== null,
+  })
+
   return (
     <WidgetBase
-      title={title || 'Mission plan — approval needed'}
+      title={heading}
       icon={<ClipboardCheck className="h-4 w-4" />}
       metadata={metadata}
       isActive={isActive}
@@ -115,7 +128,7 @@ function MissionApprovalCard({
       onMaximize={onMaximize}
       onRefresh={onRefresh}
     >
-      <div className="flex flex-col gap-3 p-3">
+      <div {...card.body}>
         <div>
           <p className="text-sm font-medium">{data.goal}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -141,45 +154,7 @@ function MissionApprovalCard({
           <OversightNote tier={data.risk_tier} riskClass={data.risk_class} rationale={data.oversight_rationale} />
         )}
 
-        {tasks.length > 0 && (
-          <ol className="space-y-1 max-h-48 overflow-y-auto">
-            {tasks.map((t, i) => {
-              const seq = t.sequence ?? i + 1
-              const role = t.agent_role || ''
-              return (
-                <li key={i} className="text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground w-5 shrink-0">{seq}.</span>
-                    <span className="flex-1 truncate">{t.title}</span>
-                    <input
-                      type="text"
-                      aria-label={`Agent for task ${seq}`}
-                      defaultValue={role}
-                      disabled={busy || done !== null}
-                      placeholder="agent"
-                      onBlur={(e) => commitRole(t, seq, e.target.value, role)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                      }}
-                      className="w-24 shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground outline-none focus:border-primary focus:text-foreground disabled:opacity-50"
-                    />
-                  </div>
-                  {/* PRD-164 S2: who would run this task and why (match preview) */}
-                  {t.match_agent && (
-                    <p
-                      className="ml-7 mt-0.5 truncate text-[10px] text-muted-foreground"
-                      title={t.match_reason || undefined}
-                    >
-                      → {t.match_agent}
-                      {t.match_is_override ? ' (your pick)' : ''}
-                      {t.match_reason ? ` — ${t.match_reason}` : ''}
-                    </p>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
-        )}
+        <MissionTaskList tasks={tasks} disabled={busy || done !== null} onCommitRole={commitRole} />
 
         {countdown !== null && !done && (
           <div className="flex items-center gap-1.5 text-xs text-amber-600">
@@ -188,14 +163,16 @@ function MissionApprovalCard({
           </div>
         )}
 
+        {card.view && <ApprovalViewParts view={card.view} ruleId={card.ruleId} />}
+
         {done ? (
           <p className="text-sm text-muted-foreground">Plan {done}.</p>
         ) : (
           <div className="flex gap-2">
-            <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1">
+            <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1" {...card.allowOnceKey}>
               <Check className="h-4 w-4 mr-1" /> {approve.isLoading ? 'Starting…' : 'Approve & run'}
             </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={handleReject}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={handleReject} {...card.refuseKey}>
               <X className="h-4 w-4 mr-1" /> Reject
             </Button>
           </div>

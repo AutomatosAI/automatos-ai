@@ -252,12 +252,13 @@ def test_get_with_no_rows_shows_the_six_push_rows_on_and_the_push_types_map(ws, 
 
     body = _get(make_client(ctx))
 
-    assert len(PUSH_SWITCH_EVENTS) == 6
+    assert len(PUSH_SWITCH_EVENTS) == 7
     assert _switches(body) == dict.fromkeys(PUSH_SWITCH_EVENTS, True)
     assert body["push_types"] == {
         "needs_answer": ["question_pending", "approval_pending", "mission_plan_ready"],
         "review": ["review_pending"],
         "auto_message": ["auto_message"],
+        "suggestion": ["suggestion_ready"],
         "digest": ["daily_digest"],
     }
     assert {key: tuple(events) for key, events in body["push_types"].items() if key != "digest"} == dict(PUSH_TYPE_EVENTS)

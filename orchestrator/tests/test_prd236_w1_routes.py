@@ -347,11 +347,21 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the guard follows it.
     proactive = (versions / "prd268_w1_proactive.py").read_text()
     assert 'down_revision = "prd266_w2_push"' in proactive
-    # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
-    # it — theme_packages.source and the single-row marketplace_cloud_sync table; the guard
+    # 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto it — the
+    # push-type CHECK widens to suggestion and mobile_devices gains push_categories; the guard
     # follows it.
+    delivery = (versions / "prd268_w2_delivery.py").read_text()
+    assert 'down_revision = "prd268_w1_proactive"' in delivery
+    # 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto it — the
+    # deliver_as CHECK widens to follow_up, agent_scheduled_tasks gains for_user_id, the outcome
+    # CHECK gains posted and proactive_calibrations is new.
+    follow_ups = (versions / "prd268_w3_follow_ups.py").read_text()
+    assert 'down_revision = "prd268_w2_delivery"' in follow_ups
+    # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
+    # it (re-chained from prd268_w1_proactive, then prd268_w2_delivery, as W1 merged main, 31 Oct)
+    # — theme_packages.source and the single-row marketplace_cloud_sync table; the guard follows it.
     cloud_sync = (versions / "prd270_w1_cloud_sync.py").read_text()
-    assert 'down_revision = "prd268_w1_proactive"' in cloud_sync
+    assert 'down_revision = "prd268_w3_follow_ups"' in cloud_sync
     # 2026-10-31 (PRD-270 W2 Cloud bundles, US-270-11a): prd270_w2_cloud_bundles chains onto
     # it — marketplace_cloud_items, a new table only; the guard follows it.
     cloud_bundles = (versions / "prd270_w2_cloud_bundles.py").read_text()

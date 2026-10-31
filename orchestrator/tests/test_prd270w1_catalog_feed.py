@@ -21,6 +21,10 @@ per-IP limit runs the real ``RateLimitStore`` over a fake Redis. Pins:
   theme.json is read once per version; one build serves every caller for ``CATALOG_KEPT_SECONDS``
   (the other tests keep nothing, so each request builds); 429 with ``Retry-After`` over the per-IP
   limit, in the route's own bucket; the switch off lists no item;
+* a build reads every theme.json with no transaction open; while another caller builds, a caller gets
+  the last snapshot held, however old, at once, or with none held ``CatalogBusy`` within
+  ``CATALOG_BUILD_WAIT_SECONDS``, reading neither the database nor storage; the route answers that 503
+  with ``Retry-After``;
 * the route is in the route manifest and mounted through ``RouterSpec``; a plain ``def`` with no
   request-context or workspace-permission dependency.
 """
@@ -30,6 +34,7 @@ import base64
 import inspect
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -76,6 +81,8 @@ ITEM_KEYS = {
     "otherPhonePreviews",
 }
 PRESET_KEYS = {"id", "default", "previews", "phonePreviews"}
+# The build wait the bounded-wait tests use, the margin a caller may take past it, and how long a held read waits.
+BUILD_WAIT_SECONDS, WAIT_MARGIN_SECONDS, HOLD_LIMIT_SECONDS = 0.2, 1.0, 10.0
 
 
 class _CountingS3(hp.FakeS3):
@@ -393,3 +400,122 @@ def test_the_route_is_public_a_plain_def_in_the_manifest_and_mounted_by_router_s
     manifest = json.loads((ORCH / "reports" / "route-manifest.json").read_text(encoding="utf-8"))
     assert {"method": "GET", "path": CATALOG} in manifest["routes"]
     assert RouterSpec("api.marketplace_catalog") in MANIFEST_ROUTERS
+
+
+# ---------------------------------------------------------------------------
+# No caller waits on storage or another's build without a bound (P270W1-RVW-6)
+# ---------------------------------------------------------------------------
+
+
+class _Reader:
+    """``catalog.read_stored_file`` wrapped: records ``session.in_transaction()`` on every read and, when
+    ``hold`` is set, waits inside the read (``entered`` set) until the test sets ``released``."""
+
+    def __init__(self, session, hold=False) -> None:
+        self.session, self.hold, self.seen = session, hold, []
+        self.entered, self.released = threading.Event(), threading.Event()
+
+    def __call__(self, prefix, path):
+        self.seen.append(self.session.in_transaction())
+        if self.hold:
+            self.entered.set()
+            self.released.wait(HOLD_LIMIT_SECONDS)
+        return serve.read_stored_file(prefix, path)
+
+
+class _NoDatabase:
+    """A session that fails any use: a caller answered without a build never reads the database."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"the database was read ({name})")
+
+
+def _on_thread(call) -> SimpleNamespace:
+    """``call()`` on a started daemon thread: its ``result``, or what it ``raised``, once ``thread`` is done."""
+    outcome = SimpleNamespace(result=None, raised=None)
+
+    def run():
+        try:
+            outcome.result = call()
+        except Exception as error:  # noqa: BLE001 — the test reads what it raised
+            outcome.raised = error
+
+    outcome.thread = threading.Thread(target=run, daemon=True)
+    outcome.thread.start()
+    return outcome
+
+
+def _second_caller_while_a_build_is_held(cat, reader) -> SimpleNamespace:
+    """With one build held inside its theme.json read, a second ``catalog_snapshot`` on another thread, given
+    ``BUILD_WAIT_SECONDS`` plus the margin to answer; the held build is let go afterwards and finishes."""
+    builder = _on_thread(lambda: catalog.catalog_snapshot(cat.db))
+    try:
+        assert reader.entered.wait(HOLD_LIMIT_SECONDS)
+        second = _on_thread(lambda: catalog.catalog_snapshot(_NoDatabase()))
+        second.thread.join(BUILD_WAIT_SECONDS + WAIT_MARGIN_SECONDS)
+        second.answered_in_time, second.reads = not second.thread.is_alive(), len(reader.seen)
+    finally:
+        reader.released.set()
+        builder.thread.join(HOLD_LIMIT_SECONDS)
+    assert builder.raised is None and not builder.thread.is_alive()
+    second.builder = builder
+    return second
+
+
+def test_a_cold_build_reads_every_listed_theme_json_with_no_transaction_open(cat, monkeypatch):
+    _row(cat.db)
+    _row(cat.db, version="1.1.0")
+    _row(cat.db, theme_id=INK)
+    reader = _Reader(cat.db)
+    monkeypatch.setattr(catalog, "read_stored_file", reader)
+    items = _catalog(cat)["items"]
+    assert [(item["id"], item["version"]) for item in items] == [(INK, "1.0.0"), (ARCADE, "1.1.0"), (ARCADE, "1.0.0")]
+    assert reader.seen == [False, False, False]
+    assert [item["publisher"] for item in items] == [  # read before the transaction ended
+        {"name": "acme", "official": False}, {"name": "automatos", "official": True},
+        {"name": "automatos", "official": True},
+    ]
+
+
+def test_a_caller_past_the_build_wait_with_no_snapshot_held_is_busy_and_reads_nothing(cat, monkeypatch):
+    monkeypatch.setattr(catalog, "CATALOG_BUILD_WAIT_SECONDS", BUILD_WAIT_SECONDS)
+    _row(cat.db)
+    reader = _Reader(cat.db, hold=True)
+    monkeypatch.setattr(catalog, "read_stored_file", reader)
+    second = _second_caller_while_a_build_is_held(cat, reader)
+    assert second.answered_in_time and isinstance(second.raised, catalog.CatalogBusy)
+    assert second.reads == 1  # the held build's own read: the busy caller read nothing from storage
+    assert len(second.builder.result.catalog["items"]) == 1
+
+
+def test_a_caller_while_another_builds_gets_the_last_snapshot_held_however_old_without_waiting(cat, monkeypatch):
+    monkeypatch.setattr(catalog, "CATALOG_BUILD_WAIT_SECONDS", HOLD_LIMIT_SECONDS)  # answered well inside it
+    _row(cat.db)
+    old = catalog.catalog_snapshot(cat.db)  # kept 0 s (the fixture): expired at once
+    _row(cat.db, version="1.1.0")  # the next build reads the new version's theme.json
+    reader = _Reader(cat.db, hold=True)
+    monkeypatch.setattr(catalog, "read_stored_file", reader)
+    second = _second_caller_while_a_build_is_held(cat, reader)
+    assert second.answered_in_time and second.raised is None and second.reads == 1
+    assert (second.result.body, second.result.etag) == (old.body, old.etag) and len(old.catalog["items"]) == 1
+    built = second.builder.result
+    assert len(built.catalog["items"]) == 2 and built.etag != old.etag
+
+
+def test_a_busy_build_is_a_logged_503_with_retry_after_and_no_store(cat, monkeypatch, caplog):
+    monkeypatch.setattr(catalog, "CATALOG_BUILD_WAIT_SECONDS", BUILD_WAIT_SECONDS)
+    _row(cat.db)
+    reader = _Reader(cat.db)
+    monkeypatch.setattr(catalog, "read_stored_file", reader)
+    assert catalog._building.acquire(timeout=HOLD_LIMIT_SECONDS)  # another caller's build, never finishing
+    try:
+        with caplog.at_level(logging.WARNING, logger=catalog_api.__name__):
+            resp = cat.client.get(CATALOG)
+    finally:
+        catalog._building.release()
+    assert resp.status_code == 503 and resp.json()["detail"] == catalog_api.CATALOG_BUSY
+    assert resp.headers["retry-after"] == str(catalog.CATALOG_BUSY_RETRY_SECONDS)
+    assert resp.headers["cache-control"] == "no-store" and "etag" not in resp.headers
+    assert any("outlasted the wait" in record.getMessage() for record in caplog.records)
+    assert reader.seen == [] and not cat.db.in_transaction()  # neither storage nor the database read for it
+    assert len(_catalog(cat)["items"]) == 1  # the build free again: the next caller builds

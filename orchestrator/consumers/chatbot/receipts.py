@@ -27,7 +27,9 @@ The wiring is decorators on the turn's seams, so the turn's own long functions a
 DELEGATE turn), ``its_reads_are_receipted`` (retrieval first), ``the_loop_writes_receipts``
 (the tool loop), ``notes_the_answering_model`` (the answer's additions) and
 ``saves_the_turns_receipts`` (the saved parts). The turn's state is a few context variables,
-set once per turn and never mutated.
+set once per turn and never mutated. PRD-268 US-C12c: the same seams carry the turn's parts
+(``consumers/chatbot/turn_parts.py``: its reply chips and the follow-ups it scheduled), set from
+the loop's final chunk, sent on one frame beside the receipts and saved after the text part.
 
 US-002, one honesty rule, from the receipts alone. FX-006: a claim is decided per claim
 (``claims_backed``): a report of work done (``COMPLETED_ACTION``, one generic pattern) with no done
@@ -53,6 +55,7 @@ from consumers.chatbot.claims_backed import (
 )
 from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
 from consumers.chatbot.claims_not_reports import AUTOMATIC_READS  # the folded read's action (N15-1 reads it too)
+from consumers.chatbot.turn_parts import turn_parts, turn_parts_frames  # PRD-268 US-C12c
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, GIVEN_AGAIN, NOT_A_STANDING_RULE, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID,
     STEPS_CHECKED, STEPS_UNCHECKED, answers_in, done_effects,
@@ -460,6 +463,7 @@ _MODEL: ContextVar[Optional[str]] = ContextVar("receipts_model", default=None)
 _SENT: ContextVar[bool] = ContextVar("receipts_sent", default=False)
 _ABOVE: ContextVar[Optional[List[str]]] = ContextVar("receipts_above", default=None)
 _VISITOR: ContextVar[bool] = ContextVar("receipts_visitor", default=False)
+_PARTS: ContextVar[Tuple[Dict[str, Any], ...]] = ContextVar("receipts_turn_parts", default=())  # PRD-268 US-C12c
 
 Stream = Callable[..., AsyncGenerator[Any, None]]
 Additions = Callable[[Any, Any], List[str]]
@@ -490,15 +494,15 @@ def says_nothing_was_done(answer: str) -> bool:
 
 def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
                  above: Sequence[str] = ()) -> Tuple[str, ...]:
-    """The turn's frame, the first time it is asked for. A public widget visitor is sent none
-    (F155: a visitor sees no internals); the receipts are still saved with the message."""
+    """The turn's frame, the first time it is asked for, then its parts' (PRD-268 US-C12c). A public
+    widget visitor is sent none (F155: a visitor sees no internals); both are still saved with the message."""
     handler = getattr(chat, "streaming_handler", None)
     if _SENT.get() or handler is None:
         return ()
     _SENT.set(True)
     if getattr(chat, "widget_mode", False):
         return ()
-    return receipts_frames(handler, receipts, model, above)
+    return (*receipts_frames(handler, receipts, model, above), *turn_parts_frames(handler, _PARTS.get()))
 
 
 def writes_its_receipts(turn: Stream) -> Stream:
@@ -507,7 +511,8 @@ def writes_its_receipts(turn: Stream) -> Stream:
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for var, fresh in ((_IN_TURN, True), (_PREFETCHED, ()), (_LOOP, None), (_MODEL, None), (_SENT, False),
-                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False))), (READS_SAID, "")):
+                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False))), (READS_SAID, ""),
+                           (_PARTS, ())):
             var.set(fresh)
         handler = getattr(chat, "streaming_handler", None)
         finish = handler.format_aisdk_finish() if handler is not None else None
@@ -545,7 +550,8 @@ def the_loop_writes_receipts(loop: Stream) -> Stream:
     built from its own tracker (the first one made while it runs) and its frame goes out,
     before the answer's additions, with the lines above the answer (US-002). An answer that
     came back empty is forced once more by the turn: its frame then goes out before the finish.
-    P256-FIX-N17-5: the loop's executor is told whether the turn read before it (``prefetched``)."""
+    P256-FIX-N17-5: the loop's executor is told whether the turn read before it (``prefetched``).
+    PRD-268 US-C12c: the turn's parts are built from the same tracker and the loop's answer."""
     @functools.wraps(loop)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         made: List[Any] = []
@@ -557,6 +563,7 @@ def the_loop_writes_receipts(loop: Stream) -> Stream:
                 if final is not None:
                     receipts = build_receipts(made[0] if made else None, kwargs.get("prefetched") or ())
                     _LOOP.set(receipts)
+                    _PARTS.set(turn_parts(final, made[0] if made else None))
                     answer = getattr(final, "content", None)
                     frames = _frames_once(chat, receipts, model_of(final), _settle_above(receipts, answer)) \
                         if answer else ()
@@ -594,13 +601,15 @@ def the_answer_takes_the_receipts(answer_additions: Additions) -> Additions:
 
 def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
     """Wrap ``narration.reply_parts``: the message a chat turn saves carries its receipts, and
-    its answer starts with the lines the receipts put above it (US-002)."""
+    its answer starts with the lines the receipts put above it (US-002). PRD-268 US-C12c: the
+    turn's parts follow its text part."""
     @functools.wraps(reply_parts)
     def wrapped(reasoning: str, narration: str, answer: str,
                 receipts: Optional[List[Receipt]] = None) -> List[Dict[str, Any]]:
         if receipts is not None:
             return reply_parts(reasoning, narration, answer, receipts)
-        return reply_parts(reasoning, narration, with_lines_above(answer, _ABOVE.get() or ()), current_receipts())
+        saved = reply_parts(reasoning, narration, with_lines_above(answer, _ABOVE.get() or ()), current_receipts())
+        return [*saved, *_PARTS.get()] if _IN_TURN.get() else saved
     return wrapped
 
 

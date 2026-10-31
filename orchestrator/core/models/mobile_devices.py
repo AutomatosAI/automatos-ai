@@ -19,7 +19,8 @@ Why a table, and not ``cli_hosts`` (CLAUDE.md "no new tables" rule): ``cli_hosts
 registers CLI runtimes (capabilities, heartbeats, terminals, sessions, local only); a
 phone carries a person, push credentials and digest preferences, and mixing the two
 lifecycles would make every query branch on kind. The Alembic revision
-``prd266_mobile_devices`` declares the same names.
+``prd266_mobile_devices`` declares the same names; ``prd268_w2_delivery`` adds
+``push_categories``.
 """
 from __future__ import annotations
 
@@ -166,6 +167,9 @@ class MobileDevice(Base):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+    # The optional push categories the app registered (PRD-268 §6.12.5): a suggestion push
+    # goes only to a device listing 'suggestion'. Last, as prd268_w2_delivery appends it.
+    push_categories = Column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
 
     def to_dict(self) -> dict:
         """The device as the API shows it: never a hash, the push key or the push token."""
@@ -187,6 +191,7 @@ class MobileDevice(Base):
             "push_registered": bool(self.expo_push_token),
             "push_enabled": bool(self.push_enabled),
             "push_disabled_reason": self.push_disabled_reason,
+            "push_categories": list(self.push_categories or []),
             "last_seen_at": _iso(self.last_seen_at),
             "paired_at": _iso(self.paired_at),
             "revoked_at": _iso(self.revoked_at),

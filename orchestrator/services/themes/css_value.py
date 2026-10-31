@@ -20,6 +20,16 @@ PRD-261 A-19c (host 1.1.0): a table may carry a tone rule, ``tone: {knob, values
 not a ``numeric`` rule's knob) and ``values`` must give every one of its choices ``light`` or
 ``dark``, nothing else; otherwise the table is refused with ``BAD_TONE_RULE`` and a plain
 sentence, the same one the TypeScript twin gives (the corpus pins a few).
+
+The browser's first paint has its own, smaller gate (``frontend/lib/theme-host/boot-sanitize.ts``
+``isCssValue``): only the functions in ``BOOT_VALUE_FUNCTIONS``, so no gradient and no ``color-mix()``,
+only the characters in ``BOOT_VALUE_CHARS``, at most ``PREPAINT_VALUE_MAX`` UTF-16 units. A value it
+drops vanishes without an error, and so does every value built on it with ``var()``, so the reader
+refuses one (:func:`prepaint_drop_errors`, ``BAD_CSS_VALUE``). The gate lives here alone:
+``mobile_tokens.py`` paints a look through it, and ``css-value.ts`` is the one TypeScript copy, which
+``boot-sanitize.ts`` imports (the corpus's ``prepaintDrops`` cases hold the two to the same verdicts).
+The boot read (``serve.theme_prepaint``) keeps to ``prepaint_errors``, so a package imported before
+the gate was checked still boots, painting what the browser keeps.
 """
 
 from __future__ import annotations
@@ -28,12 +38,13 @@ import re
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from services.themes.contract import (
-    TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, ThemeError, echo, is_finite_number, theme_error,
+    PREPAINT_VALUE_MAX, TONE_RULE_FIELDS, TONE_RULE_KEY, TONE_RULE_TONES, ThemeError, echo, is_finite_number,
+    theme_error,
 )
 
 PREPAINT_ERROR_CODES = ("BAD_PREPAINT", "BAD_CSS_VALUE", "BAD_TONE_RULE")
 TONE_RULE_CODE = "BAD_TONE_RULE"
-CSS_VALUE_MAX = 200
+CSS_VALUE_MAX = PREPAINT_VALUE_MAX
 MAX_FUNCTION_DEPTH = 4
 CUSTOM_PROPERTY_PATTERN = re.compile(r"--[a-z][a-z0-9-]{1,63}")
 # What a prepaint table may name besides custom properties: knob keys, table names, templates.
@@ -252,3 +263,151 @@ def tone_rule_errors(document: Any) -> List[ThemeError]:
     if not isinstance(values, dict):
         return errors + [_tone_error(".values", f'"values" must map every choice of "{echo(knob)}" to "light" or "dark"')]
     return errors + _tone_value_errors(knob, _choice_knobs(document)[knob], values)
+
+
+# ---------------------------------------------------------------------------
+# The browser's first-paint gate (boot-sanitize.ts isCssValue) and what it drops
+# ---------------------------------------------------------------------------
+
+# boot-sanitize.ts's gate, smaller than the grammar above: these characters, balanced parentheses and
+# these functions only. css-value.ts holds the same three as BOOT_VALUE_CHARS, BOOT_FUNCTION_NAME and
+# BOOT_VALUE_FUNCTIONS (validator-parity.test.ts holds the functions equal, in this order, and the corpus's
+# prepaintDrops cases the verdicts). A JavaScript string's length counts UTF-16 units.
+BOOT_VALUE_CHARS = re.compile(r"[A-Za-z0-9#%.,()/ +-]+")
+BOOT_FUNCTION_NAME = re.compile(r"([A-Za-z-]+)\(")
+BOOT_VALUE_FUNCTIONS: Tuple[str, ...] = (
+    "rgb", "rgba", "hsl", "hsla", "var", "calc", "min", "max", "clamp",
+    "hue-rotate", "saturate", "brightness", "grayscale", "contrast", "sepia", "invert",
+)
+# boot-sanitize.ts KNOB_NAME: a look field's name, which the gate takes a knob table, a pair's knobs and a
+# numeric rule's knobs by (css-value.ts BOOT_KNOB_NAME; mobile_tokens.py keeps the table by it).
+KNOB_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+KNOB_NAME_RULE = "a knob's name here is a letter, then up to 31 letters, digits or _"
+GRADIENT_SUFFIX = "-gradient"
+UTF16_UNIT_BYTES = 2
+DROPPED = "the browser's first paint drops it, and every value built on it"
+
+
+def utf16_length(text: str) -> int:
+    """``text``'s length as JavaScript counts it, in UTF-16 units."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // UTF16_UNIT_BYTES
+
+
+def _function_problem(value: str) -> Optional[str]:
+    """The first function the gate doesn't run, said as what it is; None when it runs every one."""
+    for name in BOOT_FUNCTION_NAME.findall(value):
+        if name.lower() not in BOOT_VALUE_FUNCTIONS:
+            if name.lower().endswith(GRADIENT_SUFFIX):
+                return f"a gradient, {echo(name)}()"
+            return f"a call to {echo(name)}(), a function the first paint never runs"
+    return None
+
+
+def boot_value_problem(value: Any) -> Optional[str]:
+    """What ``value`` is that boot-sanitize.ts ``isCssValue`` drops (its checks in its order), or None when it keeps it."""
+    if not isinstance(value, str) or not value:
+        return "not text"
+    if utf16_length(value) > PREPAINT_VALUE_MAX:
+        return f"over {PREPAINT_VALUE_MAX} characters"
+    refused = next((char for char in value if BOOT_VALUE_CHARS.fullmatch(char) is None), None)
+    if refused is not None:
+        return f'text with "{echo(refused)}", a character the first paint refuses'
+    if value.count("(") != value.count(")"):
+        return "text whose brackets don't pair"
+    return _function_problem(value)
+
+
+def is_boot_value(value: Any) -> bool:
+    """True when the browser's first paint keeps ``value`` (boot-sanitize.ts ``isCssValue``)."""
+    return boot_value_problem(value) is None
+
+
+# One cell of the table: its dotted path, the look it paints for and its variables.
+Cell = Tuple[str, str, Any]
+# What the gate drops with a knob name it refuses.
+DROPS_TABLE = "the knob's table and everything it paints"
+DROPS_PAIR = "the pair table and everything it paints"
+DROPS_RULE = "the rule and what it paints"
+
+
+def is_knob_name(value: Any) -> bool:
+    """A name boot-sanitize.ts takes for a knob (``KNOB_NAME``): a letter, then up to 31 letters, digits or ``_``."""
+    return isinstance(value, str) and KNOB_NAME.fullmatch(value) is not None
+
+
+def _name_error(path: str, drops: str) -> ThemeError:
+    """A knob's name the gate refuses at ``path``, and what it drops with it."""
+    where = f"{PREPAINT_PATH}#{echo(path)}"
+    return theme_error("BAD_PREPAINT", where, f"{where}: {KNOB_NAME_RULE}, so the browser's first paint drops {drops}.")
+
+
+def _cell_drops(cell: Cell) -> List[ThemeError]:
+    """A refusal for each variable of one cell whose value the gate drops."""
+    path, look, variables = cell
+    named = variables.items() if isinstance(variables, dict) else ()
+    errors: List[ThemeError] = []
+    for name, value in named:
+        problem = boot_value_problem(value) if name.startswith("--") else None
+        if problem is not None:
+            where = f"{PREPAINT_PATH}#{echo(f'{path}.{name}')}"
+            errors.append(theme_error("BAD_CSS_VALUE", where, f"{where}: {echo(name)} for {look} is {problem}: {DROPPED}."))
+    return errors
+
+
+def _knob_errors(knob: str, options: Any) -> List[ThemeError]:
+    """One table under ``knobs``: its name when the gate refuses it, else each of its cells' dropped values."""
+    if not is_knob_name(knob):
+        return [_name_error(f"knobs.{knob}", DROPS_TABLE)]
+    cells = options.items() if isinstance(options, dict) else ()
+    return [error for option, variables in cells for error in _cell_drops((f"knobs.{knob}.{option}", f'{echo(knob)} "{echo(option)}"', variables))]
+
+
+def _pair_errors(index: int, pair: Any) -> List[ThemeError]:
+    """One pair table: each of its two knob names the gate refuses, else each of its cells' dropped values."""
+    if not isinstance(pair, dict):
+        return []
+    names = [_name_error(f"pairs[{index}].{side}", DROPS_PAIR) for side in ("a", "b") if not is_knob_name(pair.get(side))]
+    if names:
+        return names
+    table = pair.get("table")
+    rows = table.items() if isinstance(table, dict) else ()
+    cells = [
+        (f"pairs[{index}].table.{row}.{column}", f'{echo(pair["a"])} "{echo(row)}" and {echo(pair["b"])} "{echo(column)}"', variables)
+        for row, columns in rows if isinstance(columns, dict)
+        for column, variables in columns.items()
+    ]
+    return [error for cell in cells for error in _cell_drops(cell)]
+
+
+def _rule_errors(index: int, rule: Any) -> List[ThemeError]:
+    """One numeric rule: each knob it names (its own, its colour's, its cap table's) that the gate refuses."""
+    if not isinstance(rule, dict):
+        return []
+    color, caps = rule.get("color"), rule.get("capTable")
+    named = [("knob", rule.get("knob"))]
+    named += [("color.knob", color.get("knob"))] if isinstance(color, dict) else []
+    named += [(f"capTable[{at}]", name) for at, name in enumerate(caps)] if isinstance(caps, list) else []
+    return [_name_error(f"numeric[{index}].{field}", DROPS_RULE) for field, name in named if not is_knob_name(name)]
+
+
+def _listed(document: Dict[str, Any], key: str) -> List[Any]:
+    value = document.get(key)
+    return value if isinstance(value, list) else []
+
+
+def prepaint_drop_errors(document: Any) -> List[ThemeError]:
+    """What the browser's first paint drops of the table, at most ``PREPAINT_MAX_ERRORS``.
+
+    Its gate (boot-sanitize.ts ``sanitizePrepaint``) drops a table under ``knobs``, a pair table or a
+    numeric rule whose knob name it refuses (``BAD_PREPAINT``), and each value of a kept knob or pair
+    cell it refuses (``BAD_CSS_VALUE``), in the table's order. What ``prepaint_errors`` refuses is its
+    alone; the reader runs this on a table that passed it.
+    """
+    if not isinstance(document, dict):
+        return []
+    knobs = document.get("knobs")
+    tables = knobs.items() if isinstance(knobs, dict) else ()
+    errors = [error for knob, options in tables for error in _knob_errors(knob, options)]
+    errors += [error for index, pair in enumerate(_listed(document, "pairs")) for error in _pair_errors(index, pair)]
+    errors += [error for index, rule in enumerate(_listed(document, "numeric")) for error in _rule_errors(index, rule)]
+    return errors[:PREPAINT_MAX_ERRORS]

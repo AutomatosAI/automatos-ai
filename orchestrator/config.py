@@ -2287,6 +2287,17 @@ class Config:
     # "Send me today's brief now" (POST /api/v1/mobile/digest/now): one per person at most this
     # many seconds apart, at least one.
     DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
+    # PRD-268 (P268W2-RVW-1): a brief's claim (mobile_digest_posts.posted_at) older than this many
+    # seconds, with no brief posted for its day, was left by a claimant that died between the claim
+    # and the post; the next open or tick takes it over (services.mobile.digest.take_over). The
+    # build's one model call is Auto's Read (services.digest_service.generate_digest): 180 s per
+    # try on the OpenAI-compatible clients (core/llm/clients/openai_compatible_client.py
+    # DEFAULT_TIMEOUT_SECONDS) with the SDK's two retries, 540 s in all, under this default. The
+    # Anthropic client (the platform default, core/llm/defaults.py) sets no timeout, so its
+    # SDK's own 600 s per try and two retries hold, which this default does not outlast. A
+    # winner still building when its claim is taken over checks the claim before it posts and
+    # posts nothing, so a call that outlasts this costs a second build, never a second brief.
+    BRIEF_CLAIM_STALE_SECONDS: int = max(60, int(os.getenv("BRIEF_CLAIM_STALE_SECONDS", "600")))
 
     # =============================================================================
     # PRD-268 Proactive Auto: check-ins that suggest
@@ -2308,9 +2319,39 @@ class Config:
     # A check-in's interval: one sooner than the minimum after the last is refused.
     PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
     PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # K9: at most this many suggestion_ready bell rows per person per workspace since their local
+    # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
+    PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
+        0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
+    # K9: the fourth push type, suggestion, ships OFF. While off no suggestion push is sent
+    # (services/push/fanout.py); the bell row is still written. Discovery's suggestion_push
+    # follows it (US-C09b). The owner turns it on after §12-Q27 and the app's category (US-G02).
+    SUGGESTION_PUSH_ENABLED: bool = os.getenv("SUGGESTION_PUSH_ENABLED", "false").lower() in ("true", "1", "yes")
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
+    # §6.3, K9 (W3): the follow-up caps (modules/proactive/follow_up_caps.py). A follow-up is at
+    # least MIN_MINUTES and at most MAX_DAYS away; pending and per day count one person's
+    # follow-ups from Auto, per workspace per day the workspace's; a day is the last 24 hours.
+    PROACTIVE_FOLLOW_UP_MIN_MINUTES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MIN_MINUTES", "10"))
+    PROACTIVE_FOLLOW_UP_MAX_DAYS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_DAYS", "7"))
+    PROACTIVE_FOLLOW_UP_MAX_PENDING: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PENDING", "5"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_DAY: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_DAY", "20"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY: int = int(
+        os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY", "100"))
+    # A firing quotes the origin chat's last this-many messages; a reason is at most this long.
+    PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES", "5"))
+    PROACTIVE_FOLLOW_UP_REASON_CHARS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_REASON_CHARS", "500"))
+    # §6.7, K14 (W3): the proactive evals (orchestrator/evals/proactive/), run by hand by the
+    # owner, never by CI. GOLD_DIR is a folder OUTSIDE the repository holding one <eval>.jsonl per
+    # eval (public repo: gold sets are never committed); empty, missing or inside the repository is
+    # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
+    PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
+    PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
+    # §6.11.5, K15 (W3): calibration on day one (api/auto_calibration.py) ships OFF until §12-Q22
+    # (consent to read the titles of a person's work) is answered. While off, GET answers
+    # available false, every POST is 404 and discovery does not list calibration.
+    CALIBRATION_ENABLED: bool = os.getenv("CALIBRATION_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
     # PRD-251 Socials

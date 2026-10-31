@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { TicketActionsMenu } from './ticket-actions-menu'
 import { stageReason } from './ticket-stage'
 import { runsInSession, ticketKind } from './ticket-kind'
+import { RowStatusLabel } from '@/components/proactive/row-status'
 
 interface BoardCardProps {
   task: BoardTask
@@ -210,38 +211,44 @@ function CardTags({ tags }: { tags: string[] }) {
   )
 }
 
-/** Footer: agent, SLA and how long ago it started (or finished). */
+/**
+ * Footer: (PRD-268 US-W04) where the ticket stands, what happens next and Try again, then the agent, SLA and how
+ * long ago it started (or finished).
+ */
 function CardFooter({ task }: { task: BoardTask }) {
   const since = task.started_at || task.completed_at
   const timeAgo = since ? formatDistanceToNow(new Date(since), { addSuffix: false }) : null
   return (
-    <div className="flex items-center justify-between mt-1">
-      <div className="flex items-center gap-1.5 min-w-0">
-        {task.assignee ? (
-          <>
-            {task.assignee.agent_icon ? (
-              <PremiumIcon name={task.assignee.agent_icon} size={14} className="shrink-0" />
-            ) : (
-              <Bot className="w-3.5 h-3.5 text-primary shrink-0" />
-            )}
-            <span className="text-[10px] text-muted-foreground truncate">
-              {task.assignee.agent_name}
-            </span>
-          </>
-        ) : (
-          <span className="text-[10px] text-muted-foreground/50">Unassigned</span>
-        )}
-      </div>
+    <>
+      <RowStatusLabel row={task} target={{ ticketId: task.id, missionId: task.mission_id }} title={task.name} className="mb-1" />
+      <div className="flex items-center justify-between mt-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {task.assignee ? (
+            <>
+              {task.assignee.agent_icon ? (
+                <PremiumIcon name={task.assignee.agent_icon} size={14} className="shrink-0" />
+              ) : (
+                <Bot className="w-3.5 h-3.5 text-primary shrink-0" />
+              )}
+              <span className="text-[10px] text-muted-foreground truncate">
+                {task.assignee.agent_name}
+              </span>
+            </>
+          ) : (
+            <span className="text-[10px] text-muted-foreground/50">Unassigned</span>
+          )}
+        </div>
 
-      <div className="flex items-center gap-2">
-        {task.sla_deadline && task.status !== 'done' && (
-          <SlaIndicator deadline={task.sla_deadline} />
-        )}
-        {timeAgo && (
-          <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {task.sla_deadline && task.status !== 'done' && (
+            <SlaIndicator deadline={task.sla_deadline} />
+          )}
+          {timeAgo && (
+            <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 

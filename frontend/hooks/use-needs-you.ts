@@ -11,6 +11,7 @@
 import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import type { RowStatus } from '@/lib/proactive/types'
 
 /** F246: why a ticket is stuck (services/needs_you.py STUCK_*). F293: a step that failed its
  * mission's check, and a mission paused at its budget or when the AI credit ran out. */
@@ -20,8 +21,9 @@ export type StuckWhy =
 /** F293: what a row opens: the ticket in the board's viewer, or its mission. */
 export type NeedsYouOpens = 'ticket' | 'mission'
 
-/** A ticket in Review, a stuck one, or one that failed. */
-export interface NeedsYouTicketRow {
+/** A ticket in Review, a stuck one, or one that failed. PRD-268 US-C17a: each row says where it stands, what
+ * happens next and what Try again does (RowStatus). */
+export interface NeedsYouTicketRow extends RowStatus {
   ticket_id: number
   /** PRD-252 R4: #0042 (a mission step's: #0051.3) */
   number?: string | null
@@ -39,8 +41,8 @@ export interface NeedsYouTicketRow {
   why?: StuckWhy
 }
 
-/** An open question, an approval grant, or a mission waiting for its plan's approval. */
-export interface NeedsYouAskRow {
+/** An open question, an approval grant, or a mission waiting for its plan's approval (with its RowStatus). */
+export interface NeedsYouAskRow extends RowStatus {
   source: 'grant' | 'mission'
   id: string
   /** A question's words; an approval's ticket title (F274), or what it is for. */

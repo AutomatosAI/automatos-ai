@@ -285,7 +285,7 @@ Auto can say "I'll check again at 15:10" and does.
 Today the digest is pushed at a chosen time to people with a phone (`mobile/digest.py:73-90`). This adds "waiting on open" for everyone and keeps one brief per person per day.
 
 - **Claim:** reuse `mobile_digest_posts`, already unique on (workspace, person, local date) (`mobile/digest.py:180-190`), adding `message_id` and `via` (`schedule` or `open`). The scheduled digest and the on-open brief share the claim: whichever comes first posts, the other returns the same message.
-- **Route:** `POST /api/proactive/brief/open {local_date, timezone}`. The client calls it once per local date when the web app loads or the phone comes to the foreground. The server checks `local_date` is within one day of UTC (as OpenDuet does). Claim won: build, post into the Auto thread (origin `daily_digest`), return `{chat_id, message_id, posted: true}`. Claim taken: return the existing message.
+- **Route:** `POST /api/proactive/brief/open {local_date, timezone}`. The client calls it once per local date when the web app loads or the phone comes to the foreground. The server checks `local_date` is within one day of UTC (as OpenDuet does). Claim won: build, post into the Auto thread (origin `daily_digest`), return `{chat_id, message_id, posted: true}`. Claim taken: return the existing message. The brief on open runs only where the workspace's effective proactive mode (W1's `effective_mode`: the platform mode where the workspace switch is on, else off) is shadow or live, as §10 rolls it out (elsewhere the route answers 404 `brief_off` before any claim or build), and the scheduled digest is unchanged.
 - **Content:** Auto's Read (cached per workspace state, `digest_service.py:113-142`, unchanged), then a deterministic per-person block with no second model call: "3 things need you" with the needs-you link, up to 3 open suggestions as Start/Hide cards, and what yesterday's started suggestions became (Ready for review, Resolved, Failed).
 - **Feedback:** the thumbs up/down that Auto's Read has on the web (`api/activity.py:91-121`) is offered on the brief card everywhere.
 - **Spoken:** a "Listen" button sends the brief's text, passed through `speechify` (`modules/voice/spoken_style.py`), to `POST /api/voice/speech`. On a refusal code (voice off), the client falls back to device speech (`automatos-go:src/voice/speech/speaker.ts`; the browser's speech synthesis on the web). Never auto-play (§12-Q12). Go plays server audio on build 13, in the voice for the person's language (#25/#26).
@@ -472,8 +472,8 @@ type Brief = {
     unchecked: BriefRow[]            // Readiness items the brief depends on that are not `ready`; never hidden
   }
   counts: { needs_you: number; suggestions: number; today: number; since: number }  // exact, even when rows fold
-  state_hash: string
-  generated_at: string
+  copy: { section_labels: Record<Section, string>; empty_sentence: string; show_more_template: string }  // W3 US-C23: every word whatever the rows; n in "Show {n} more" is the client's own fold plus the server's (labels.more: counts.needs_you is the badge's)
+  state_hash: string; generated_at: string
 }
 type BriefRow = {
   id: string; title: string; why: string; at?: string; number?: string     // "#0419"
@@ -510,11 +510,11 @@ type ReadinessItem = {
 
 #### 6.11.4 `ApprovalView@1`: the exact action and the rule that asked
 
-Anything that sends, pays, signs, deletes or publishes pauses on the host's protected approval card (`ToolApproval`, `MissionApproval`; `frontend/lib/theme-sdk/host-cards/approvals.tsx`). This extends what the card shows; themes still place it and never redraw it, so every theme gets it at once.
+Anything that sends, pays, signs, deletes or publishes pauses on the host's protected approval card (`ToolApproval`, `MissionApproval`; `frontend/lib/theme-sdk/host-cards/approvals.tsx`). This extends what the card shows; themes still place it and never redraw it, so every theme gets it at once. **Opening a view by its id** (US-C24): `GET /api/v1/approval-grants/{grant_id}/view` takes the `grant_id` the view carries, an approval grant's id or, for a Mission plan (which has no grant row), the Mission's id; it offers answers only while the grant or the plan waits, a plan's answers go to `POST /api/missions/{id}/approve` and `/reject`, and discovery lists the route as `approval_view`.
 
 ```ts
 type ApprovalView = {
-  grant_id: string
+  grant_id: string                                       // a grant's id, or a Mission plan's id
   asked_by: { kind: 'auto' | 'agent'; name: string }
   action: { verb: 'send' | 'pay' | 'sign' | 'delete' | 'publish' | 'run' | string; summary: string }
   target?: { label: string; detail?: string }            // "Aisha Rahman · WhatsApp"

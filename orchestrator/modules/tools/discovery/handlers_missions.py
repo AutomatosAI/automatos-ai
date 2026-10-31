@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.mission_asks import asks_as_the_owner_says
 from modules.tools.discovery.card_numbers import says_the_mission_cards
+from modules.tools.discovery.mission_approval_rule import names_the_approval_policy
 from modules.tools.discovery.mission_refs import DECIDES, READS, RUNS, takes_card_numbers
 from modules.tools.discovery.mission_step_verdicts import APPROVES, REJECTS, decided_on_the_step, with_the_check_said
 from modules.tools.discovery.plan_edits import reads_the_plan_edits
@@ -137,6 +138,7 @@ def _create_reply_message(run: Any, task_count: int) -> str:
     return f"Mission {run.id} created with {task_count} task(s) (state: {run.state})."
 
 
+@names_the_approval_policy  # PRD-268 US-C20a: the card says which policy held the plan
 @asks_as_the_owner_says  # F262 (7b): wait_for_me, steps and tags are the mission's settings
 @says_the_mission_cards  # F241: each mission's card, by number
 async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

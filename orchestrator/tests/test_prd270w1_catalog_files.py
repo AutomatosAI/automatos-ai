@@ -20,6 +20,9 @@ does (``NoSuchKey``). The per-IP limit runs the real ``RateLimitStore`` over a f
 * a stored file gone or changed serves no package and no screenshot (404, logged); storage down and a keys
   file that doesn't load are 503; ``Service-Worker: script`` is 403; the local edition is 404 before the
   limit counts; 429 with ``Retry-After`` in the route's own bucket;
+* storage is read with the route's session holding no transaction, for a package and a screenshot; with
+  every rebuild slot taken a package is 503 with ``Retry-After`` (logged as a warning) and storage is never
+  read, while a screenshot and a 304 still answer; a rebuild gives its slot back, served or refused;
 * the route is in the route manifest, a plain ``def`` with no request-context or permission dependency.
 """
 from __future__ import annotations
@@ -114,7 +117,7 @@ def cat(monkeypatch, tmp_path):
     app.include_router(catalog_api.router)
     app.dependency_overrides[get_db] = lambda: session
     try:
-        yield SimpleNamespace(db=session, s3=s3, redis=redis, client=TestClient(app), tmp=tmp_path)
+        yield SimpleNamespace(db=session, s3=s3, redis=redis, client=TestClient(app), tmp=tmp_path, app=app)
     finally:
         catalog.forget_cached()
         session.close()
@@ -160,6 +163,28 @@ def _assert_refused(resp, status: int) -> None:
     for name, value in SERVING_HEADERS.items():
         assert resp.headers[name] == value, name
     assert resp.headers["cache-control"] == "no-store" and "etag" not in resp.headers
+
+
+def _recording_reader(cat) -> list:
+    """Install a reader over the fake S3 that records, on every call, whether the route's session (the test's
+    overridden ``get_db``) holds a transaction; the list it fills is returned."""
+    seen = []
+
+    def read(storage_prefix: str, path: str):
+        seen.append(cat.db.in_transaction())
+        return serve.read_stored_file(storage_prefix, path)
+
+    cat.app.dependency_overrides[get_theme_file_reader] = lambda: read
+    return seen
+
+
+def _slots_free() -> bool:
+    """True when every rebuild slot can be taken now (each taken one is given straight back)."""
+    taken = [catalog_files.REBUILD_SLOTS.acquire(blocking=False) for _ in range(catalog_files.CATALOG_PACKAGE_REBUILDS)]
+    for held in taken:
+        if held:
+            catalog_files.REBUILD_SLOTS.release()
+    return all(taken)
 
 
 def _calls(dependant):
@@ -333,6 +358,59 @@ def test_a_keys_file_that_does_not_load_is_a_503(cat, monkeypatch):
     resp = cat.client.get(_url(row, PACKAGE))
     _assert_refused(resp, 503)
     assert resp.json()["detail"] == catalog_api.FILES_DOWN
+
+
+# ---------------------------------------------------------------------------
+# What a request may hold: no connection over storage, a bounded number of rebuilds
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", [PACKAGE, PHONE])
+def test_storage_is_read_with_no_transaction_open(cat, path):
+    row = _row(cat.db)
+    url = _url(row, path)
+    seen = _recording_reader(cat)
+    assert cat.client.get(url).status_code == 200
+    assert seen and not any(seen), seen  # every read, every file of the package included
+
+
+def test_with_every_rebuild_slot_taken_a_package_is_a_503_and_storage_is_never_read(cat, monkeypatch, caplog):
+    row = _row(cat.db)
+    package_url, phone_url = _url(row, PACKAGE), _url(row, PHONE)
+    seen = _recording_reader(cat)
+    monkeypatch.setattr(catalog_files, "REBUILD_SLOT_WAIT_SECONDS", 0.01)
+    taken = [catalog_files.REBUILD_SLOTS.acquire(blocking=False) for _ in range(catalog_files.CATALOG_PACKAGE_REBUILDS)]
+    try:
+        assert all(taken)
+        with caplog.at_level(logging.WARNING, logger=catalog_api.__name__):
+            refused = cat.client.get(package_url)
+        assert seen == []
+        assert cat.client.get(package_url, headers={"If-None-Match": f'"{row.digest}"'}).status_code == 304
+        assert cat.client.get(phone_url).status_code == 200
+    finally:
+        for held in taken:
+            if held:
+                catalog_files.REBUILD_SLOTS.release()
+    _assert_refused(refused, 503)
+    assert refused.json()["detail"] == catalog_api.FILES_BUSY
+    assert refused.headers["retry-after"] == str(catalog_files.REBUILD_RETRY_SECONDS)
+    assert any(record.levelno == logging.WARNING and "rebuild slot" in record.getMessage() for record in caplog.records)
+    assert seen == [False]  # the screenshot's one read; the package's request read nothing
+    assert cat.client.get(package_url).status_code == 200
+
+
+def test_a_rebuild_gives_its_slot_back_served_or_refused(cat):
+    row = _row(cat.db)
+    package_url = _url(row, PACKAGE)
+    for _ in range(catalog_files.CATALOG_PACKAGE_REBUILDS + 1):
+        assert cat.client.get(package_url).status_code == 200
+    assert _slots_free()
+    cat.s3.down = True
+    _assert_refused(cat.client.get(package_url), 503)
+    cat.s3.down = False
+    del cat.s3.objects[storage.theme_key(row.storage_prefix, build.ENTRY)]
+    _assert_refused(cat.client.get(package_url), 404)
+    assert _slots_free()
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,12 @@
  * F274: every row is named by its ticket's number, an approval by the ticket it
  * lets go ahead. The steps a mission left open when it ended are one decision,
  * the mission's, so they are one row that names each step and opens the mission.
+ *
+ * PRD-268 US-W04: each row also says where it stands, in the words every surface
+ * uses (◆ Needs you, ✕ Couldn't finish), what happens next and, on a failed row,
+ * Try again, from the row's own fields (RowStatusLabel). The families run in the
+ * order the owner acts on them, so the rows that need the owner come before the
+ * failed ones.
  */
 import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, CircleSlash, ClipboardCheck, HelpCircle, Loader2, ShieldCheck, XCircle } from 'lucide-react'
@@ -28,6 +34,9 @@ import { AUTO_NOW_LINKS, questionPreview } from '@/components/chatbot/auto-now-r
 import { cn } from '@/lib/utils'
 import { QUESTIONS_HREF, missionHref, ticketHref } from '@/lib/ticket-links'
 import { numberedTitle } from '@/components/activity/board/ticket-kind'
+import { RowStatusLabel } from '@/components/proactive/row-status'
+import type { RetryTarget } from '@/components/proactive/use-row-retry'
+import type { RowStatus } from '@/lib/proactive/types'
 
 export function formatAge(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -62,15 +71,23 @@ interface ShownRow {
   href: string
   title: string
   meta: string
+  /** PRD-268 US-W04: the row's status fields, as the endpoint sent them. */
+  status: RowStatus
+  /** What the row's Try again acts on. */
+  target: RetryTarget
 }
 
 const by = (who: string | null, at: string | null) => [who ?? 'An agent', at && `${formatAge(at)} ago`].filter(Boolean).join(' · ')
+// A failed ticket runs again; a failed mission card (its decision is the mission's) is replanned.
+const ticketTarget = (r: NeedsYouTicketRow): RetryTarget => ({ ticketId: r.ticket_id, missionId: r.mission_id })
+const askTarget = (r: NeedsYouAskRow): RetryTarget => ({ ticketId: r.ticket_id, missionId: r.source === 'mission' ? r.id : r.mission_id ?? null })
 
 // PRD-252 R4: a ticket is named by its number and title, so two alike can be told apart.
 function ticketRows(rows: NeedsYouTicketRow[]): ShownRow[] {
   return rows.map((r) => ({
     key: `t${r.ticket_id}`, href: ticketRowHref(r),
     title: numberedTitle(r.number, r.title ?? `Ticket ${r.ticket_id}`), meta: by(r.agent_name, r.at),
+    status: r, target: ticketTarget(r),
   }))
 }
 
@@ -104,6 +121,7 @@ function missionStepsRow(steps: NeedsYouTicketRow[]): ShownRow {
     key: `m${first.mission_id}`, href: ticketRowHref(first),
     title: numberedTitle(first.mission_number, first.mission_title ?? 'A mission'),
     meta: `${steps.length} steps left open when it ended${numbers.length ? `: ${numbers.join(', ')}` : ''}`,
+    status: first, target: ticketTarget(first),
   }
 }
 
@@ -121,6 +139,7 @@ function questionRows(rows: NeedsYouAskRow[]): ShownRow[] {
   return rows.map((r) => ({
     key: `${r.source}${r.id}`, href: askRowHref(r, QUESTIONS_HREF),
     title: questionPreview(r.title ?? ''), meta: [r.number, by(r.agent_name, r.at)].filter(Boolean).join(' · '),
+    status: r, target: askTarget(r),
   }))
 }
 
@@ -131,6 +150,7 @@ function approvalRows(rows: NeedsYouAskRow[]): ShownRow[] {
     key: `${r.source}${r.id}`, href: askRowHref(r, AUTO_NOW_LINKS.governance),
     title: numberedTitle(r.number, r.title ?? (r.source === 'mission' ? 'A mission plan' : 'An approval')),
     meta: r.source === 'mission' ? `Mission plan${r.at ? ` · waiting ${formatAge(r.at)}` : ''}` : by(r.agent_name, r.at),
+    status: r, target: askTarget(r),
   }))
 }
 
@@ -160,6 +180,22 @@ export function families(data: NeedsYou): Family[] {
 const rowClass = 'block w-full rounded-lg border border-border/50 bg-muted/30 p-2 text-left transition-colors hover:bg-muted/60'
 const linkClass = 'text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline'
 
+/** A row opens the thing itself; its status, next step and Try again sit under it, outside the link. */
+function NeedsYouRow({ row, icon: Icon }: { row: ShownRow; icon: LucideIcon }) {
+  return (
+    <div className={rowClass}>
+      <Link href={row.href as any} className="block">
+        <div className="flex items-start gap-2">
+          <Icon className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
+          <span className="text-xs leading-snug line-clamp-2 flex-1">{row.title}</span>
+        </div>
+        {row.meta && <div className="pl-5 text-[10px] text-muted-foreground">{row.meta}</div>}
+      </Link>
+      <RowStatusLabel row={row.status} target={row.target} title={row.title} className="mt-1 pl-5" />
+    </div>
+  )
+}
+
 function Section({ family }: { family: Family }) {
   const { title, href, icon: Icon, count, listed, rows } = family
   if (count === 0) return null
@@ -172,15 +208,7 @@ function Section({ family }: { family: Family }) {
         </p>
         <Link href={href as any} className={linkClass}>All →</Link>
       </div>
-      {rows.map((row) => (
-        <Link key={row.key} href={row.href as any} className={rowClass}>
-          <div className="flex items-start gap-2">
-            <Icon className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
-            <span className="text-xs leading-snug line-clamp-2 flex-1">{row.title}</span>
-          </div>
-          {row.meta && <div className="pl-5 text-[10px] text-muted-foreground">{row.meta}</div>}
-        </Link>
-      ))}
+      {rows.map((row) => <NeedsYouRow key={row.key} row={row} icon={Icon} />)}
       {more > 0 && <Link href={href as any} className={cn(linkClass, 'block')}>{more} more →</Link>}
     </div>
   )

@@ -9,16 +9,21 @@
   signals, suggestion count, model, tokens and cost.
 * ``ProactivePersonSettings`` — one row per workspace and person: the pause and the
   quiet hours. The primary key (workspace_id, user_id) is the unique.
+* ``ProactiveCalibration`` — one row per workspace and person (§6.11.5): what Auto said it
+  knows, the lines the person rejected and accepted, and the message it was posted as.
+  The unique (workspace_id, user_id) is the offered-once claim.
 
 ``user_id`` and the agent ids are plain integers, not foreign keys: the run audit and a
 decided suggestion outlive the agent or person they name. JSON columns are
 ``JSON().with_variant(JSONB(), "postgresql")`` and ids the portable ``Uuid``, so the
-tables also build under SQLite in the unit tests. The Alembic revision
-``prd268_w1_proactive`` declares the same names, and
-``tests/test_prd268_proactive_models.py`` holds the two together.
+tables also build under SQLite in the unit tests. The Alembic revisions
+``prd268_w1_proactive`` and ``prd268_w3_follow_ups`` (the posted outcome, the calibrations)
+declare the same names, and ``tests/test_prd268_proactive_models.py`` and
+``tests/test_prd268w3_migration.py`` hold the two together.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
@@ -34,6 +39,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Time,
+    UniqueConstraint,
     Uuid,
     false,
     text,
@@ -47,6 +53,7 @@ __all__ = [
     "ProactiveSuggestion",
     "ProactiveRun",
     "ProactivePersonSettings",
+    "ProactiveCalibration",
     "SUGGESTION_STATUSES",
     "SUGGESTION_OPEN",
     "SUGGESTION_STARTED",
@@ -61,6 +68,11 @@ __all__ = [
     "RUN_SKIPPED_CREDITS",
     "RUN_SKIPPED_PAUSED",
     "RUN_SKIPPED_OFF",
+    "RUN_POSTED",
+    "CALIBRATION_STATUSES",
+    "CALIBRATION_DECLINED",
+    "CALIBRATION_OPEN",
+    "CALIBRATION_ANSWERED",
 ]
 
 # A suggestion's life: open until the person starts or hides it, or it expires.
@@ -70,7 +82,8 @@ SUGGESTION_HIDDEN = "hidden"
 SUGGESTION_EXPIRED = "expired"
 SUGGESTION_STATUSES = (SUGGESTION_OPEN, SUGGESTION_STARTED, SUGGESTION_HIDDEN, SUGGESTION_EXPIRED)
 
-# How a run ended: it found nothing, filed suggestions, failed, or was refused before any model call.
+# How a run ended: it found nothing, filed suggestions, failed, or was refused before any model call;
+# a follow-up that said something is posted (PRD-268 W3, K11).
 RUN_SILENT = "silent"
 RUN_SUGGESTED = "suggested"
 RUN_ERROR = "error"
@@ -79,10 +92,18 @@ RUN_SKIPPED_CAP = "skipped_cap"
 RUN_SKIPPED_CREDITS = "skipped_credits"
 RUN_SKIPPED_PAUSED = "skipped_paused"
 RUN_SKIPPED_OFF = "skipped_off"
+RUN_POSTED = "posted"
 RUN_OUTCOMES = (
     RUN_SILENT, RUN_SUGGESTED, RUN_ERROR, RUN_SKIPPED_QUIET,
-    RUN_SKIPPED_CAP, RUN_SKIPPED_CREDITS, RUN_SKIPPED_PAUSED, RUN_SKIPPED_OFF,
+    RUN_SKIPPED_CAP, RUN_SKIPPED_CREDITS, RUN_SKIPPED_PAUSED, RUN_SKIPPED_OFF, RUN_POSTED,
 )
+
+# A calibration (§6.11.5): declined at the consent line, open once posted, answered once the
+# person has accepted or rejected its lines.
+CALIBRATION_DECLINED = "declined"
+CALIBRATION_OPEN = "open"
+CALIBRATION_ANSWERED = "answered"
+CALIBRATION_STATUSES = (CALIBRATION_DECLINED, CALIBRATION_OPEN, CALIBRATION_ANSWERED)
 
 # The severities triage gives a suggestion (§6.7); a check-in that gives none files can_wait.
 SEVERITY_DEFAULT = "can_wait"
@@ -262,3 +283,48 @@ class ProactivePersonSettings(Base):
     quiet_end = Column(Time, nullable=True)
     timezone = Column(String(TIMEZONE_LENGTH), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ProactiveCalibration(Base):
+    """One person's calibration in one workspace: what Auto said it knows and what the person made of it."""
+
+    __tablename__ = "proactive_calibrations"
+    __table_args__ = (
+        CheckConstraint(_in_list("status", CALIBRATION_STATUSES), name="ck_proactive_calibrations_status"),
+        UniqueConstraint("workspace_id", "user_id", name="uq_proactive_calibrations_person"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = _workspace_column()
+    # users.id, resolved with core.auth.principal.resolve_user_pk.
+    user_id = Column(Integer, nullable=False)
+    status = Column(String(SHORT_LENGTH), nullable=False, server_default=CALIBRATION_OPEN)
+    # {lines: [{id, text, sources}], offers, empty}: what was posted, never a percentage.
+    calibration = Column(_json_type(), nullable=False, default=dict, server_default="{}")
+    # The line ids the person rejected and accepted.
+    rejected_lines = Column(_json_type(), nullable=False, default=list, server_default="[]")
+    accepted_lines = Column(_json_type(), nullable=False, default=list, server_default="[]")
+    # The chat and the Auto message it was posted as.
+    chat_id = Column(Uuid(as_uuid=True), nullable=True)
+    message_id = Column(Uuid(as_uuid=True), nullable=True)
+    consented_at = _timestamp()
+    decided_at = _timestamp()
+    created_at = _timestamp(nullable=False)
+
+    def to_dict(self) -> dict:
+        """The calibration as JSON-ready values: ids as strings, times as ISO 8601, JSON as deep copies."""
+        return {
+            "id": str(self.id) if self.id is not None else None,
+            "workspace_id": str(self.workspace_id) if self.workspace_id is not None else None,
+            "user_id": self.user_id,
+            "status": self.status,
+            "calibration": deepcopy(dict(self.calibration or {})),
+            "rejected_lines": list(self.rejected_lines or []),
+            "accepted_lines": list(self.accepted_lines or []),
+            "chat_id": str(self.chat_id) if self.chat_id is not None else None,
+            "message_id": str(self.message_id) if self.message_id is not None else None,
+            "consented_at": _iso(self.consented_at),
+            "decided_at": _iso(self.decided_at),
+            "created_at": _iso(self.created_at),
+        }

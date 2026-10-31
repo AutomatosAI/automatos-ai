@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
-import type { ChatSession } from '@/lib/chat/chat-session'
+import { isNothingOpen } from '@/lib/chat/chat-session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { Chat, ChatMessage } from '@/types'
 
@@ -102,11 +102,6 @@ function useDraftLink(
 
   const takeDraft = useCallback(() => setDraft(null), [])
   return { draft, takeDraft, held: text !== null, pending: text !== null && activeChatId !== null }
-}
-
-/** No conversation and no new chat open in the session. */
-function isNothingOpen(session: ChatSession): boolean {
-  return session.openChatIds.length === 0 && !session.draftOpen
 }
 
 /**

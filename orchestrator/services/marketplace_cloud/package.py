@@ -27,20 +27,26 @@ and while the Sync is off on this install, 502 when Automatos Cloud can't be rea
 200, 503 when storage or the signing keys file fails. Messages are plain and name only the row's theme and
 version. One download of a version at a time per process: a second caller waits (at most ``wait_seconds``,
 past the fetch's own deadline, else 503), then finds the files stored; other versions never wait for it.
-Synchronous and blocking (plain-``def`` routes only); it reads the database and never writes it. The
-caller's read transaction stays open while Automatos Cloud answers, which the fetch's deadline bounds.
+Synchronous and blocking (plain-``def`` routes only); it reads the database and never writes it. No
+transaction is held while it waits for that lock, asks Automatos Cloud or stores the files: the row's columns
+are taken first (``CloudVersion``) and the caller's read transaction is ended (``release_if_read_only``: one
+that wrote or locked is kept as it is, with a warning), as is the signature check's read before the files are
+stored; the
+caller reads its rows again afterwards, as the install and update routes and the post-Sync update do.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional, Union
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.database.read_release import release_if_read_only
 from core.models.themes import THEME_SOURCE_CLOUD, ThemePackage
 from services.marketplace_cloud.fetch import (
     ACCEPT_PACKAGE, DEADLINE_FACTOR, ClientFactory, CloudAnswerTooLarge, CloudFetchFailed, checked_origin,
@@ -103,6 +109,40 @@ class CloudPackageError(ThemeInstallError):
         self.code = code
 
 
+class CloudVersion(NamedTuple):
+    """The columns of a Cloud row that the download, its checks and the write read (``serve.verified_file`` and
+    ``signature_verify.package_verdict`` read them by name), taken before the caller's read transaction ends so
+    the row is never read again while Automatos Cloud answers."""
+
+    id: UUID
+    theme_id: str
+    version: str
+    digest: str
+    file_manifest: Any
+    signature: Optional[str]
+    storage_prefix: str
+
+
+Version = Union[ThemePackage, CloudVersion]
+
+
+def _cloud_version(package: ThemePackage) -> CloudVersion:
+    return CloudVersion(
+        id=package.id, theme_id=package.theme_id, version=package.version, digest=package.digest,
+        file_manifest=copy.deepcopy(package.file_manifest), signature=package.signature,
+        storage_prefix=package.storage_prefix,
+    )
+
+
+def _end_caller_reads(db: Session, version: CloudVersion) -> None:
+    """End the caller's read transaction; one that wrote or holds a lock is kept, and the log says so."""
+    if not release_if_read_only(db) and db.in_transaction():
+        logger.warning(
+            "Automatos Cloud: %s %s is fetched inside its caller's transaction, which wrote or holds a lock",
+            version.theme_id, version.version,
+        )
+
+
 def is_cloud(package: Any) -> bool:
     """True for a Marketplace row a Sync with Automatos Cloud wrote."""
     return getattr(package, "source", None) == THEME_SOURCE_CLOUD
@@ -119,11 +159,11 @@ def _digest_lock(digest: str) -> threading.Lock:
         return _DIGEST_LOCKS.setdefault(digest, threading.Lock())
 
 
-def _named(template: str, package: ThemePackage, **extra: Any) -> str:
+def _named(template: str, package: CloudVersion, **extra: Any) -> str:
     return template.format(theme=echo(package.theme_id), version=echo(package.version), **extra)
 
 
-def is_stored(package: ThemePackage) -> bool:
+def is_stored(package: Version) -> bool:
     """True when the row's theme.json is in storage and hashes to its file list (it is the last file written)."""
     try:
         verified_file(package, MANIFEST_PATH, read_stored_file)
@@ -134,7 +174,7 @@ def is_stored(package: ThemePackage) -> bool:
     return True
 
 
-def _download(package: ThemePackage, client_factory: Optional[ClientFactory]) -> bytes:
+def _download(package: CloudVersion, client_factory: Optional[ClientFactory]) -> bytes:
     """The package's bytes from the URL derived from the setting and the row's digest, capped."""
     if not sync_enabled():
         raise CloudPackageError(CONFLICT, CLOUD_OFF, _named(OFF, package))
@@ -154,7 +194,7 @@ def _download(package: ThemePackage, client_factory: Optional[ClientFactory]) ->
         raise CloudPackageError(BAD_GATEWAY, CLOUD_UNREACHABLE, message) from failed
 
 
-def _read(package: ThemePackage, data: bytes) -> CheckedThemePackage:
+def _read(package: CloudVersion, data: bytes) -> CheckedThemePackage:
     """The downloaded package, read and held to the row: its id and version, then its digest and file list."""
     try:
         checked = read_theme_package(data)
@@ -174,7 +214,7 @@ def _read(package: ThemePackage, data: bytes) -> CheckedThemePackage:
     return checked
 
 
-def row_envelope(package: ThemePackage) -> bytes:
+def row_envelope(package: Version) -> bytes:
     """The ``.sig.json`` the row's signature is: its key id is the one the stored signature verifies with
     (none when no key does, which the envelope's form then refuses)."""
     verdict = signature_verify.package_verdict(package)
@@ -184,7 +224,7 @@ def row_envelope(package: ThemePackage) -> bytes:
     }).encode("utf-8")
 
 
-def _check_signature(db: Session, package: ThemePackage, checked: CheckedThemePackage) -> None:
+def _check_signature(db: Session, package: CloudVersion, checked: CheckedThemePackage) -> None:
     """``check_upload_signature`` on the downloaded files with the row's envelope, or a refusal."""
     try:
         check_upload_signature(db, checked, row_envelope(package))
@@ -198,7 +238,7 @@ def _check_signature(db: Session, package: ThemePackage, checked: CheckedThemePa
         raise CloudPackageError(UNAVAILABLE, SIGNING_KEYS_UNREADABLE, KEYS_UNREADABLE) from bad
 
 
-def _store(package: ThemePackage, checked: CheckedThemePackage) -> None:
+def _store(package: CloudVersion, checked: CheckedThemePackage) -> None:
     try:
         storage.write_theme_files(package.storage_prefix, checked.files)
     except Exception as failed:  # S3 or MinIO, or an unusable prefix: write_theme_files removed what it wrote
@@ -210,20 +250,25 @@ def _store(package: ThemePackage, checked: CheckedThemePackage) -> None:
 def ensure_stored(db: Session, package: ThemePackage, client_factory: Optional[ClientFactory] = None) -> None:
     """Fetch, check and store a Cloud row's files before it installs; nothing for any other row or one stored.
 
+    The row's columns are taken and the caller's read transaction ended before the wait and the download, and
+    the check's read before the write, so the caller reads its rows again afterwards.
     ``CloudPackageError`` with nothing stored when the bytes are refused, Cloud fails or storage fails.
     """
     if not is_cloud(package) or is_stored(package):
         return
-    lock = _digest_lock(package.digest)
+    version = _cloud_version(package)
+    _end_caller_reads(db, version)
+    lock = _digest_lock(version.digest)
     if not lock.acquire(timeout=wait_seconds()):
-        raise CloudPackageError(UNAVAILABLE, DOWNLOAD_BUSY, _named(BUSY, package))
+        raise CloudPackageError(UNAVAILABLE, DOWNLOAD_BUSY, _named(BUSY, version))
     try:
-        if is_stored(package):  # another request stored it while this one waited
+        if is_stored(version):  # another request stored it while this one waited
             return
-        logger.info("Automatos Cloud: fetching %s %s, not stored here yet", package.theme_id, package.version)
-        checked = _read(package, _download(package, client_factory))
-        _check_signature(db, package, checked)
-        _store(package, checked)
+        logger.info("Automatos Cloud: fetching %s %s, not stored here yet", version.theme_id, version.version)
+        checked = _read(version, _download(version, client_factory))
+        _check_signature(db, version, checked)
+        release_if_read_only(db)
+        _store(version, checked)
     finally:
         lock.release()
 
@@ -247,6 +292,6 @@ def ensure_stored_for_update(db: Session, workspace_id: UUID, install_id: UUID, 
 
 __all__ = [
     "CLOUD_OFF", "CLOUD_UNREACHABLE", "DIGEST_MISMATCH", "DOWNLOAD_BUSY", "OTHER_THEME", "PACKAGE_REFUSED",
-    "PACKAGE_TOO_LARGE", "SIGNING_KEYS_UNREADABLE", "STORAGE_UNAVAILABLE", "CloudPackageError", "ensure_stored",
-    "ensure_stored_for_update", "is_cloud", "is_stored", "row_envelope", "wait_seconds",
+    "PACKAGE_TOO_LARGE", "SIGNING_KEYS_UNREADABLE", "STORAGE_UNAVAILABLE", "CloudPackageError", "CloudVersion",
+    "ensure_stored", "ensure_stored_for_update", "is_cloud", "is_stored", "row_envelope", "wait_seconds",
 ]

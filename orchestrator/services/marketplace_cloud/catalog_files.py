@@ -21,15 +21,23 @@ A keys file that doesn't load raises ``SigningKeysError``, and storage that fail
 :class:`CatalogFilesUnavailable` (both the route's 503).
 
 The route asks in two steps: ``served_version`` (the database only) and then ``read_catalog_file``
-(storage). Between them it compares ``If-None-Match`` with ``listed_sha256``, the hash the ETag names,
-known before any read, so a client that holds the bytes gets its 304 without a single storage read or a
-rebuild. Blocking (S3): plain-``def`` routes only.
+(storage), and ends its read transaction between them, so no pool connection waits on storage. Between
+them it also compares ``If-None-Match`` with ``listed_sha256``, the hash the ETag names, known before any
+read, so a client that holds the bytes gets its 304 without a single storage read or a rebuild.
+
+A rebuild reads every stored file of the version and deflates them, up to ``THEME_MAX_PACKAGE_MB``, holding
+a multiple of that in memory while it runs, on a public route. This process runs at most
+``CATALOG_PACKAGE_REBUILDS`` at once: a request that gets no slot within ``REBUILD_SLOT_WAIT_SECONDS``
+is :class:`CatalogFilesBusy` (the route's 503 with ``Retry-After``), and storage is never read for it.
+Screenshots take no slot: each is one stored object. Blocking (S3): plain-``def`` routes only.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import FrozenSet, Mapping, NamedTuple, Optional, Pattern
+import threading
+from contextlib import contextmanager
+from typing import FrozenSet, Iterator, Mapping, NamedTuple, Optional, Pattern
 
 from sqlalchemy.orm import Session
 
@@ -52,6 +60,12 @@ logger = logging.getLogger(__name__)
 
 NOT_SERVED = "That file isn't served by the Automatos Cloud catalogue."
 STORAGE_DOWN = "Theme storage is unavailable."
+REBUILDS_BUSY = "Every package rebuild slot is taken."
+# Package rebuilds this process runs at once, how long a request waits for a slot, and the 503's Retry-After.
+CATALOG_PACKAGE_REBUILDS = 2
+REBUILD_SLOT_WAIT_SECONDS = 1.0
+REBUILD_RETRY_SECONDS = 5
+REBUILD_SLOTS = threading.BoundedSemaphore(CATALOG_PACKAGE_REBUILDS)
 # Each screenshot list, and the paths theme.json allows in it.
 SCREENSHOT_PATTERNS: Mapping[str, Pattern[str]] = {
     WEB_PREVIEWS.field: PREVIEW_PATTERN, PHONE_PREVIEWS.field: PHONE_PREVIEW_PATTERN,
@@ -72,6 +86,10 @@ class CatalogFileMissing(LookupError):
 
 class CatalogFilesUnavailable(RuntimeError):
     """Object storage failed for a reason other than a missing object (the route's 503)."""
+
+
+class CatalogFilesBusy(RuntimeError):
+    """No package rebuild slot came free within ``REBUILD_SLOT_WAIT_SECONDS`` (the route's 503 with Retry-After)."""
 
 
 def catalogued_version(db: Session, digest: str) -> Optional[ThemePackage]:
@@ -131,22 +149,37 @@ def read_catalog_file(package: ThemePackage, path: str, read: FileReader = read_
     return CatalogFile(data, content_type, sha256)
 
 
-def _package_file(package: ThemePackage, read: FileReader) -> CatalogFile:
-    """The rebuilt ``.autotheme``; a stored file gone or changed, or a broken file list, serves nothing."""
+@contextmanager
+def _rebuild_slot() -> Iterator[None]:
+    """One of this process's ``CATALOG_PACKAGE_REBUILDS`` slots, given back on the way out; :class:`CatalogFilesBusy`
+    when none comes free within ``REBUILD_SLOT_WAIT_SECONDS``."""
+    if not REBUILD_SLOTS.acquire(timeout=REBUILD_SLOT_WAIT_SECONDS):
+        raise CatalogFilesBusy(REBUILDS_BUSY)
     try:
-        data = rebuilt_package(package, read)
-    except ThemeInstallError as refused:  # rebuilt_package's ThemeReviewError (409 or 503)
-        if refused.status_code == UNAVAILABLE:
-            raise CatalogFilesUnavailable(STORAGE_DOWN) from refused
-        logger.error(
-            "Catalogue files: the package of %s %s (digest %s) can't be rebuilt: %s",
-            package.theme_id, package.version, package.digest, refused.message,
-        )
-        raise CatalogFileMissing(NOT_SERVED) from refused
+        yield
+    finally:
+        REBUILD_SLOTS.release()
+
+
+def _package_file(package: ThemePackage, read: FileReader) -> CatalogFile:
+    """The rebuilt ``.autotheme``, in a rebuild slot; a stored file gone or changed, or a broken file list, serves
+    nothing."""
+    with _rebuild_slot():
+        try:
+            data = rebuilt_package(package, read)
+        except ThemeInstallError as refused:  # rebuilt_package's ThemeReviewError (409 or 503)
+            if refused.status_code == UNAVAILABLE:
+                raise CatalogFilesUnavailable(STORAGE_DOWN) from refused
+            logger.error(
+                "Catalogue files: the package of %s %s (digest %s) can't be rebuilt: %s",
+                package.theme_id, package.version, package.digest, refused.message,
+            )
+            raise CatalogFileMissing(NOT_SERVED) from refused
     return CatalogFile(data, PACKAGE_CONTENT_TYPE, package.digest)
 
 
 __all__ = [
-    "CatalogFile", "CatalogFileMissing", "CatalogFilesUnavailable", "catalogued_version", "listed_sha256",
-    "listed_screenshots", "read_catalog_file", "served_version",
+    "CATALOG_PACKAGE_REBUILDS", "REBUILD_RETRY_SECONDS", "CatalogFile", "CatalogFileMissing", "CatalogFilesBusy",
+    "CatalogFilesUnavailable", "catalogued_version", "listed_sha256", "listed_screenshots", "read_catalog_file",
+    "served_version",
 ]

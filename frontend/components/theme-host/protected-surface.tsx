@@ -7,6 +7,8 @@ import type { ReactNode } from 'react'
  * (a tool approval, a Mission plan approval), whatever a theme's stylesheet says. Theme voice: the
  * voice button's control (`voice-control`: the "AI voice assistant" caption and the stop control,
  * components/voice/voice-button.tsx) is one too, so no theme hides them while the microphone is open.
+ * PRD-268 US-C21d: so is the brief's Listen (`brief-voice`: Listen, and while Auto reads the brief the
+ * caption and Stop, components/voice/brief-voice.tsx), so no theme hides how to stop it speaking.
  *
  * Theme CSS stays unlayered (docs/theme-host/css-layer-model.md), so the cards are protected by
  * placement, not by a cascade layer. Two elements wrap the card: the host (`data-protected-surface`)
@@ -32,7 +34,7 @@ export const PROTECTED_SURFACE_ATTR = 'data-protected-surface'
 export const PROTECTED_SURFACE_INNER_ATTR = 'data-protected-surface-inner'
 
 /** The cards a theme may never hide. */
-export type ProtectedSurfaceName = 'tool-approval' | 'mission-approval' | 'voice-control'
+export type ProtectedSurfaceName = 'tool-approval' | 'mission-approval' | 'voice-control' | 'brief-voice'
 
 const IMPORTANT = 'important'
 /** Both wrappers fill their parent, so the card's own `h-full` keeps working inside them. */

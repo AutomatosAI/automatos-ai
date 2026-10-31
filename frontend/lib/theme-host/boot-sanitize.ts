@@ -1,13 +1,15 @@
 /**
  * PRD-261 A-03 — the gate every theme boot passes before it is written into the page. A class
  * that fails HTML_CLASS_PATTERN, a custom property name that fails CSS_VAR_NAME_PATTERN and a
- * value that fails the CSS-value grammar below are dropped, never written; a prepaint table
+ * value that fails the first paint's CSS-value grammar are dropped, never written; a prepaint table
  * whose default look no longer fits what is left is dropped whole. The boot script
  * (THEME_BOOT_SCRIPT) applies what passes with classList and style.setProperty only.
  *
- * The grammar is deliberately small: the characters colours, lengths, numbers, font stacks and
- * filter lists need, and only the functions in CSS_VALUE_FUNCTIONS, so no url(), image() or
- * expression() and no ';', '{', '}', quote, '<', '!' or '@' can reach a declaration.
+ * The grammar is deliberately small (css-value.ts `isBootValue`, its one copy, which the server's
+ * reader holds every prepaint value to as well, so a value dropped here is refused on upload): the
+ * characters colours, lengths, numbers, font stacks and filter lists need (BOOT_VALUE_CHARS), and
+ * only the functions in BOOT_VALUE_FUNCTIONS, so no url(), image() or expression(), no gradient, and
+ * no ';', '{', '}', quote, '<', '!' or '@' can reach a declaration.
  *
  * An installed theme's registry entry data (W-A6b) passes installed-entry.ts's own check.
  *
@@ -20,6 +22,7 @@
 import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 
 import { HTML_CLASS_PATTERN } from './constants'
+import { BOOT_KNOB_NAME, isBootValue } from './css-value'
 import { sanitizeIntegrity } from './import-map'
 import { sanitizeInstalledEntry } from './installed-entry'
 import type { ThemeTonePolicy } from './registry-types'
@@ -40,16 +43,6 @@ import type {
 
 /** A custom property the boot may set: lower-case letters, digits and hyphens after '--'. */
 export const CSS_VAR_NAME_PATTERN = /^--[a-z0-9-]{1,64}$/
-export const CSS_VALUE_MAX_LENGTH = 200
-const CSS_VALUE_CHARS = /^[A-Za-z0-9#%.,()/ +-]+$/
-const CSS_FUNCTION_NAME = /([A-Za-z-]+)\(/g
-/** The only functions a prepaint value may call. */
-export const CSS_VALUE_FUNCTIONS: ReadonlySet<string> = new Set([
-  'rgb', 'rgba', 'hsl', 'hsla', 'var', 'calc', 'min', 'max', 'clamp',
-  'hue-rotate', 'saturate', 'brightness', 'grayscale', 'contrast', 'sepia', 'invert',
-])
-/** A look's field name, and a key of one of its tables. */
-const KNOB_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
 const OPTION_KEY_MAX_LENGTH = 64
 const RGB_LIST = /^\d{1,3},\d{1,3},\d{1,3}$/
 /**
@@ -88,15 +81,6 @@ export function isThemeClass(name: unknown): name is string {
   return typeof name === 'string' && HTML_CLASS_PATTERN.test(name)
 }
 
-/** The CSS-value grammar: allowed characters, balanced parentheses, allowed functions only. */
-export function isCssValue(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > CSS_VALUE_MAX_LENGTH) return false
-  if (!CSS_VALUE_CHARS.test(value)) return false
-  if (value.split('(').length !== value.split(')').length) return false
-  const names = Array.from(value.matchAll(CSS_FUNCTION_NAME), (match) => match[1].toLowerCase())
-  return names.every((name) => CSS_VALUE_FUNCTIONS.has(name))
-}
-
 export function sanitizeClasses(classes: unknown): readonly string[] {
   if (!Array.isArray(classes)) return []
   return classes.filter(isThemeClass).filter((name, index, names) => names.indexOf(name) === index)
@@ -106,7 +90,7 @@ export function sanitizeVars(vars: unknown): PrepaintVars {
   if (!isRecord(vars)) return {}
   return Object.fromEntries(
     Object.entries(vars).filter(
-      (entry): entry is [string, string] => CSS_VAR_NAME_PATTERN.test(entry[0]) && isCssValue(entry[1]),
+      (entry): entry is [string, string] => CSS_VAR_NAME_PATTERN.test(entry[0]) && isBootValue(entry[1]),
     ),
   )
 }
@@ -132,7 +116,7 @@ function sanitizePairTable<V>(table: unknown, clean: (value: unknown) => V | nul
 
 function sanitizePair(pair: unknown): PrepaintPair | null {
   if (!isRecord(pair) || typeof pair.a !== 'string' || typeof pair.b !== 'string') return null
-  if (!KNOB_NAME.test(pair.a) || !KNOB_NAME.test(pair.b)) return null
+  if (!BOOT_KNOB_NAME.test(pair.a) || !BOOT_KNOB_NAME.test(pair.b)) return null
   return { a: pair.a, b: pair.b, table: sanitizePairTable(pair.table, sanitizeVars) }
 }
 
@@ -141,12 +125,12 @@ function sanitizeCapTable(rule: UnknownRecord): Pick<PrepaintNumericRule, 'capTa
   const pair = rule.capTable
   if (!Array.isArray(pair) || pair.length !== 2) return null
   const [a, b] = pair
-  if (typeof a !== 'string' || typeof b !== 'string' || !KNOB_NAME.test(a) || !KNOB_NAME.test(b)) return null
+  if (typeof a !== 'string' || typeof b !== 'string' || !BOOT_KNOB_NAME.test(a) || !BOOT_KNOB_NAME.test(b)) return null
   return { capTable: [a, b], caps: sanitizePairTable(rule.caps, sanitizeCap) }
 }
 
 function sanitizeColor(color: unknown): PrepaintNumericRule['color'] | null {
-  if (!isRecord(color) || typeof color.knob !== 'string' || !KNOB_NAME.test(color.knob)) return null
+  if (!isRecord(color) || typeof color.knob !== 'string' || !BOOT_KNOB_NAME.test(color.knob)) return null
   const rgb = sanitizeTable(color.rgb, (value) => (typeof value === 'string' && RGB_LIST.test(value) ? value : null))
   return { knob: color.knob, rgb }
 }
@@ -154,7 +138,7 @@ function sanitizeColor(color: unknown): PrepaintNumericRule['color'] | null {
 function sanitizeNumericRule(rule: unknown): PrepaintNumericRule | null {
   if (!isRecord(rule) || rule.template !== 'rgba-alpha' || typeof rule.integer !== 'boolean') return null
   if (typeof rule.var !== 'string' || !CSS_VAR_NAME_PATTERN.test(rule.var)) return null
-  if (typeof rule.knob !== 'string' || !KNOB_NAME.test(rule.knob)) return null
+  if (typeof rule.knob !== 'string' || !BOOT_KNOB_NAME.test(rule.knob)) return null
   const { min, max, scale } = rule
   if (!isFiniteNumber(min) || !isFiniteNumber(max) || !isFiniteNumber(scale) || min > max || scale <= 0) return null
   const caps = sanitizeCapTable(rule)
@@ -189,7 +173,7 @@ function sanitizeDefaults(defaults: unknown): Readonly<Record<string, string | n
   if (!isRecord(defaults)) return {}
   return Object.fromEntries(
     Object.entries(defaults).filter(
-      (entry): entry is [string, string | number] => KNOB_NAME.test(entry[0]) && (typeof entry[1] === 'string' || isFiniteNumber(entry[1])),
+      (entry): entry is [string, string | number] => BOOT_KNOB_NAME.test(entry[0]) && (typeof entry[1] === 'string' || isFiniteNumber(entry[1])),
     ),
   )
 }
@@ -218,7 +202,7 @@ export function sanitizePrepaint(prepaint: unknown): PrepaintTable | null {
   if (!isRecord(prepaint)) return null
   const knobs = Object.fromEntries(
     Object.entries(isRecord(prepaint.knobs) ? prepaint.knobs : {})
-      .filter(([knob]) => KNOB_NAME.test(knob))
+      .filter(([knob]) => BOOT_KNOB_NAME.test(knob))
       .map(([knob, options]) => [knob, sanitizeTable(options, sanitizeVars)] as const),
   )
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])

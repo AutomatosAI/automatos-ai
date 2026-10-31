@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { request: api.request } }))
 
 import { VoiceProvider, useHostVoice, useOptionalHostVoice } from '@/components/voice/voice-provider'
+import { EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { VoiceHost, type VoiceHostDeps } from '@/lib/voice/host/voice-host'
 import { LIVE_REASON_SENTENCES } from '@/lib/voice/live/refusal'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -121,6 +122,24 @@ describe('VoiceProvider — a session', () => {
     act(() => live.emit({ phase: 'listening', chatId: 'voice-thread-1' }))
     expect(useChatSessionStore.getState().session.activeChatId).toBe('voice-thread-1')
     expect(live.stop).not.toHaveBeenCalled()
+  })
+
+  it("a session on the blank chat a cold start may still replace makes it the member's draft first (PRD-237)", async () => {
+    act(() => useChatSessionStore.setState({ session: EMPTY_CHAT_SESSION }))
+    const { wrapper, live } = setup()
+    const { result } = renderHook(() => useHostVoice(), { wrapper })
+    await act(() => result.current.start({ mode: 'live' }))
+    expect(live.start).toHaveBeenCalledWith({ chatId: null })
+    expect(useChatSessionStore.getState().session).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: [] })
+  })
+
+  it('a session on a conversation already open leaves the session as it is', async () => {
+    const before = useChatSessionStore.getState().session
+    const { wrapper, live } = setup()
+    const { result } = renderHook(() => useHostVoice(), { wrapper })
+    await act(() => result.current.start({ mode: 'live' }))
+    expect(live.start).toHaveBeenCalledWith({ chatId: 'chat-1' })
+    expect(useChatSessionStore.getState().session).toBe(before)
   })
 
   it('hands the levels getter and the controls through; the view is frozen', async () => {

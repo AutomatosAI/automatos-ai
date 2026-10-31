@@ -16,7 +16,8 @@
 
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { AutosRead } from '@/components/activity/autos-read'
+// PRD-268 US-W01a: Auto's Read (components/activity/autos-read), then the Suggested list.
+import { CommandCenterRead as AutosRead } from '@/components/proactive/command-center-read'
 
 const CommandCentreDashboard = dynamic(
   () =>

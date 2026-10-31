@@ -18,6 +18,7 @@ import { AppearanceTab } from './themes/appearance-tab'
 import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { BillingTab } from './billing/billing-tab'
 import { AutomatosCloudPanel, useHasAutomatosCloudTab } from './automatos-cloud-panel'
+import { WhatAutoDependsOn } from './what-auto-depends-on'
 import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
@@ -89,10 +90,11 @@ export function SettingsPanel() {
     { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
-    ...(hasCloudTab ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
+    ...(isLocal ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
-  const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
+  const tabs = (isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs)
+    .filter((tab) => tab.value !== 'automatos-cloud' || hasCloudTab)
   const [activeTab, setActiveTab] = useSettingsTab(tabs, isAdmin ? 'system-settings' : 'orchestrator')
 
   return (
@@ -149,8 +151,12 @@ export function SettingsPanel() {
           </TabsContent>
         )}
 
+        {/* PRD-268 US-W05: what Auto depends on, above the orchestrator's settings */}
         <TabsContent value="orchestrator">
-          <SystemLLMSettingsTab />
+          <div className="space-y-6">
+            <WhatAutoDependsOn />
+            <SystemLLMSettingsTab />
+          </div>
         </TabsContent>
 
         {/* Webhooks Tab */}

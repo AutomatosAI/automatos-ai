@@ -15,6 +15,10 @@ The per-IP limit runs the real ``RateLimitStore`` over a fake Redis. Proven here
   spelling; no value of a column off the list (each holds a marker) reaches the body;
 * the publisher is the original creator's name, else ``Automatos`` (no name, a name that is an email,
   no creator, ``Agent.created_by``), and no creator's email appears anywhere in the body;
+* an icon a browser reads as a URL (a scheme, or ``//``, ``\\`` read as ``/``, tabs, newlines and leading
+  control characters dropped) is answered only when it is ``https`` (P270W1-RVW-2): an agent's or a
+  Playbook's ``http:``, ``javascript:``, ``data:`` or scheme-relative icon is ``null``, an ``https`` one
+  and an emoji or plain icon name are answered as given;
 * required apps: an agent's enabled tool assignments, a Playbook's required tools, a package's
   required connects, as distinct lower-case slugs; a package's members only their type and name (never
   their ref);
@@ -70,6 +74,13 @@ FORBIDDEN = {
     "created_by_user_id", "original_creator_id", "cloned_from_id", "public_id", "email",
 }
 PAGE_LIMIT, MAX_PAGES = 100, 100
+HTTPS_ICON = "https://cdn.example/x.png"
+# A stored icon -> the public answer's: a URL only when it is https, any other text as given.
+STORED_ICONS = {
+    "http://cdn.example/x.png": None, "javascript:alert(1)": None, "//cdn.example/x.png": None,
+    "\\\\cdn.example/x.png": None, "data:image/svg+xml,<svg/>": None, HTTPS_ICON: HTTPS_ICON,
+    "🧭": "🧭", "rocket": "rocket",
+}
 
 
 @pytest.fixture(scope="module")
@@ -114,7 +125,7 @@ def _user(shop, name=None, label="creator"):
     return user
 
 
-def _agent(shop, name, approved=True, owner="marketplace", creator=None, installs=TOP, tools=()):
+def _agent(shop, name, approved=True, owner="marketplace", creator=None, installs=TOP, tools=(), icon="🧭"):
     """An agent whose every column off the allowlist holds the marker; ``tools`` are (tool_id, enabled)."""
     workspace_id = _workspace(shop) if owner == "workspace" else None
     agent = Agent(
@@ -123,7 +134,7 @@ def _agent(shop, name, approved=True, owner="marketplace", creator=None, install
         custom_persona_prompt=f"{MARK}-persona", created_by=f"{MARK}-created-by@prd270.test",
         owner_type=owner, owner_id=f"{MARK}-owner", workspace_id=workspace_id, is_approved=approved,
         original_creator_id=None if creator is None else creator.id, install_count=installs,
-        marketplace_category="sales", marketplace_icon="🧭", tags=["outbound", "", 7],
+        marketplace_category="sales", marketplace_icon=icon, tags=["outbound", "", 7],
     )
     shop.db.add(agent)
     shop.db.flush()
@@ -140,7 +151,7 @@ def _workspace(shop):
     return ws
 
 
-def _playbook(shop, name, approved=True, owner="marketplace", creator=None, tools=("GMAIL",)):
+def _playbook(shop, name, approved=True, owner="marketplace", creator=None, tools=("GMAIL",), icon=None):
     workspace_id = _workspace(shop) if owner == "workspace" else None
     playbook = WorkflowRecipe(
         template_id=f"prd270-{uuid.uuid4().hex[:10]}", name=f"{name} {shop.tag}", description=f"{name}, weekly.",
@@ -150,7 +161,7 @@ def _playbook(shop, name, approved=True, owner="marketplace", creator=None, tool
         outputs={f"{MARK}-output": {}}, execution_config={"mode": f"{MARK}-execution"},
         schedule_config={"cron": f"{MARK}-schedule"}, template_definition={"config": f"{MARK}-definition"},
         learning_data={"note": f"{MARK}-learning"}, required_tools=list(tools), install_count=TOP,
-        marketplace_category="operations", tags=["weekly"],
+        marketplace_category="operations", marketplace_icon=icon, tags=["weekly"],
     )
     shop.db.add(playbook)
     shop.db.flush()
@@ -295,6 +306,29 @@ def test_required_apps_are_distinct_lower_case_slugs_and_members_only_their_type
     assert listed["members"] == [{"type": "agent", "name": "Store Ops"}, {"type": "playbook", "name": None}]
     assert "store-ops" not in json.dumps(listed) and "weekly-numbers" not in json.dumps(listed)
     assert listed["tags"] == ["shopify"] and listed["category"] is None and listed["icon"] is None
+
+
+def test_an_agent_s_or_a_playbook_s_icon_is_answered_as_a_url_only_when_it_is_https(shop):
+    agents = {icon: _agent(shop, f"Icon {rank}", icon=icon) for rank, icon in enumerate(STORED_ICONS)}
+    playbooks = {icon: _playbook(shop, f"Icon {rank}", icon=icon) for rank, icon in enumerate(STORED_ICONS)}
+    listed_agents, listed_playbooks = _by_key(shop, "agents"), _by_key(shop, "playbooks")
+    for stored, answered in STORED_ICONS.items():
+        assert listed_agents[str(agents[stored].id)]["icon"] == answered, stored
+        assert listed_playbooks[str(playbooks[stored].id)]["icon"] == answered, stored
+
+
+@pytest.mark.parametrize("stored, answered", [
+    *STORED_ICONS.items(),
+    ("JavaScript:alert(1)", None), ("/\\cdn.example/x.png", None), ("http://[::1/x.png", None),
+    ("https://user:pw@cdn.example/x.png", None), ("https://cdn.example/a b.png", None), ("https:/x.png", None),
+    ("java\tscript:alert(1)", None), ("\x01javascript:alert(1)", None), ("/\t/cdn.example/x.png", None),
+    ("/\n/cdn.example/x.png", None), ("\\\r\\cdn.example/x.png", None), ("\x01//cdn.example/x.png", None),
+    ("\x01\\/cdn.example/x.png", None), (f"  {HTTPS_ICON} ", HTTPS_ICON), (" 🧭 ", "🧭"),
+    ("", None), (None, None), (7, None),
+])
+def test_the_icon_mapper_keeps_a_url_only_when_it_is_https_and_any_other_icon_as_its_text(stored, answered):
+    assert fields.icon_or_none(stored) == answered
+    assert fields.display_item(fields.AGENT_FIELDS, key=1, name="Closer", icon=stored)["icon"] == answered
 
 
 def test_the_socials_package_is_listed_as_a_brand_new_workspace_is_shown_it(shop, monkeypatch):

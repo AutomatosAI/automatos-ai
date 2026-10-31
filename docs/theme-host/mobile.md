@@ -23,7 +23,7 @@ foreground; the discovery document lists it as the `mobile_theme` capability). I
 |---|---|
 | `tokens` or `fromLooks` | Exactly one. `fromLooks` is only ever `true`. |
 | `tokens.light`, `tokens.dark` | `light` is required, `dark` optional. Keys are Studio's 24 colour tokens (`MOBILE_TOKEN_NAMES` in `services/themes/contract.py`), spelled with the leading `--`, and must include `--background` and `--foreground`. Each value is `H S% L%` (such as `0 0% 100%`) or `#rrggbb`. |
-| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. Defaults that don't fit the table paint nothing, on the web or the phone, and neither does a Studio token written `#rrggbb` in the table. |
+| `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. A Studio token written `#rrggbb` in the table paints nothing, on the web or the phone. Defaults that don't fit the table would paint nothing either, so the reader refuses that table whatever the block (`PREPAINT_DEFAULTS_UNFIT`, [Theme host](_index.md) §1). |
 | `fonts` | Any of `sans`, `serif`, `mono`; each a different `assets/fonts/mobile/<name>.ttf` or `.otf` in the package (one sfnt face, at most 400 KB). |
 | `mascot` | `clips`, `stills` or `none` (absent means `none`). `clips` needs each state of the top-level `mascot.states` to have `assets/mascot/<state>.mp4` and `.png`; `stills` needs the `.png`. |
 | `engines.automatos` | Must not admit a host older than 1.1.0. |
@@ -84,8 +84,8 @@ the answer:
 
 1. **The table the web gets.** Knobs whose name is a look field (a letter, then letters, digits or
    `_`, at most 32), option keys of 1 to 64 characters, and in each option the variables whose name
-   and value pass the boot's own gate (smaller than the import check's: no `color-mix()` or
-   gradients); pair tables whose two knobs are look fields; numeric rules with every field
+   and value pass the boot's own gate (`css_value.is_boot_value`: no `color-mix()` or gradients; the
+   reader refuses a cell's value it drops, `first_paint.py`); pair tables whose two knobs are look fields; numeric rules with every field
    (`template` `rgba-alpha`, a true/false `integer`, `min` <= `max`, `scale` > 0, `capTable` null or
    two knobs); `defaults` with text or number values. If the defaults don't fit what is left, the
    web drops the whole table and paints nothing from it.
