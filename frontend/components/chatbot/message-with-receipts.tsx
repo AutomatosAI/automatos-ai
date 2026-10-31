@@ -21,12 +21,16 @@
  * PRD-268 US-W03a: each message rendered here is registered as its chat's newest until a newer one renders
  * (components/proactive/newest-message.ts), and an assistant message's reply chips (lib/chat/turn-parts.ts) go to
  * ThreadCards, which draws them while it is the newest. A read-only chat has no composer to send them, so no chips.
+ *
+ * PRD-268 US-W03b: the follow-ups an assistant message's turn scheduled (its live `followUps`, else its `follow_up@1`
+ * parts) go to ThreadCards too, which draws a line for each that the caller's own list holds.
  */
 import { useMemo } from 'react'
 import { Message, type MessageProps } from './message'
 import { ReceiptsBlock } from './receipts-block'
 import { receiptsOf } from '@/lib/chat/receipts'
-import { replyChipsOfMessage } from '@/lib/chat/turn-parts'
+import { followUpsOfMessage, replyChipsOfMessage } from '@/lib/chat/turn-parts'
+import type { FollowUpLinesProps } from '@/components/proactive/follow-up-line'
 import { useRenderedMessage } from '@/components/proactive/newest-message'
 import { ThreadCards } from '@/components/proactive/thread-cards'
 import type { ThreadReplyChipsProps } from '@/components/proactive/thread-reply-chips'
@@ -53,6 +57,12 @@ function threadReplyChips({ chatId, message, isReadonly }: MessageProps): Thread
   return chips ? { chatId, messageId: message.id, chips } : undefined
 }
 
+/** The follow-ups a message's turn scheduled, with its chat; none when it scheduled none. */
+function threadFollowUps({ chatId, message }: MessageProps): FollowUpLinesProps | undefined {
+  const followUps = followUpsOfMessage(message)
+  return followUps.length > 0 ? { chatId, followUps } : undefined
+}
+
 export function MessageWithReceipts(props: MessageProps) {
   const thread = useMemo(() => threadPartsOf(props.message), [props.message])
   useRenderedMessage(props.chatId, props.message.id)
@@ -62,7 +72,12 @@ export function MessageWithReceipts(props: MessageProps) {
       <div data-ai-generated="true" data-testid="ai-generated-message">
         <MessageAndReceipts {...props} message={thread.message} />
       </div>
-      <ThreadCards brief={thread.brief} suggestionIds={thread.suggestionIds} replyChips={threadReplyChips(props)} />
+      <ThreadCards
+        brief={thread.brief}
+        suggestionIds={thread.suggestionIds}
+        replyChips={threadReplyChips(props)}
+        followUps={threadFollowUps(props)}
+      />
     </>
   )
 }

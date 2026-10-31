@@ -19,12 +19,16 @@
  *
  * PRD-268 US-W03a: a message that offers reply chips has them last, while it is the chat's newest message
  * (thread-reply-chips.tsx); a tap sends one as the person's message.
+ *
+ * PRD-268 US-W03b: a message whose turn scheduled follow-ups has a line for each, above its chips
+ * (follow-up-line.tsx): "Follow-up at 15:10 · Cancel" while pending, from the caller's own list.
  */
 import type { ReactNode } from 'react'
 import { BriefVoice } from '@/components/voice/brief-voice'
 import { useSuggestions } from '@/hooks/use-suggestions'
 import type { Brief, Suggestion } from '@/lib/proactive/types'
 import { BriefCard } from './brief-card'
+import { FollowUpLines, type FollowUpLinesProps } from './follow-up-line'
 import { usePinnedSuggestionIds } from './mission-suggestion-presence'
 import { SuggestionCard } from './suggestion-card'
 import { ThreadReplyChips, type ThreadReplyChipsProps } from './thread-reply-chips'
@@ -39,6 +43,8 @@ export interface ThreadCardsProps {
   readonly suggestionIds: readonly string[]
   /** US-W03a: the reply chips the message offers, with its chat and its id; none on a read-only chat. */
   readonly replyChips?: ThreadReplyChipsProps
+  /** US-W03b: the follow-ups the message's turn scheduled, with its chat; none when it scheduled none. */
+  readonly followUps?: FollowUpLinesProps
 }
 
 function Aligned({ children }: { readonly children: ReactNode }) {
@@ -89,11 +95,13 @@ function Cards({ brief, suggestionIds }: Pick<ThreadCardsProps, 'brief' | 'sugge
   )
 }
 
-/** A message's cards, then its reply chips while it is the chat's newest; nothing when it carries none. */
-export function ThreadCards({ brief, suggestionIds, replyChips }: ThreadCardsProps) {
+/** A message's cards, its follow-up lines, then its reply chips while it is the chat's newest; nothing when it
+ * carries none. */
+export function ThreadCards({ brief, suggestionIds, replyChips, followUps }: ThreadCardsProps) {
   return (
     <>
       <Cards brief={brief} suggestionIds={suggestionIds} />
+      {followUps ? <FollowUpLines {...followUps} /> : null}
       {replyChips ? <ThreadReplyChips {...replyChips} /> : null}
     </>
   )
