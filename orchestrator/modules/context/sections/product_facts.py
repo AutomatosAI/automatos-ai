@@ -52,9 +52,14 @@ HOSTED_EDITION = (
 # is a platform admin's, under System Settings instead.
 # PRD-265 W2 added Billing (plan, credits, checkout, the ledger), in the hosted edition
 # only: the local edition never bills, so there it still has no such tab (#88).
+# PRD-270 US-270-05b added Automatos Cloud (where Marketplace themes sync from, the last Sync,
+# Sync now), in the local edition only and only while the Sync is on: AUTOMATOS_CLOUD_URL=
+# (empty) hides it, so Auto names it only then.
 SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
                  "Phones & devices", "Voice", "Socials", "Appearance", "Widget SDK")
-LOCAL_SETTINGS_TABS = ("Profile", "Session mode")
+LOCAL_LEADING_TABS = ("Profile", "Session mode")
+CLOUD_SYNC_TAB = "Automatos Cloud"
+LOCAL_SETTINGS_TABS = (*LOCAL_LEADING_TABS, CLOUD_SYNC_TAB)
 HOSTED_SETTINGS_TABS = ("Billing",)
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
 HOSTED_NO_SUCH_TAB = ("There is no Plans or Team Management tab: the plan, the credits and payments "
@@ -70,12 +75,18 @@ _HELPERS = (
 )
 
 
+def local_settings_tabs(cloud_sync_on: bool) -> tuple[str, ...]:
+    """The local edition's tabs: its own two, the shared ones, then Automatos Cloud while the Sync is on."""
+    return (*LOCAL_LEADING_TABS, *SETTINGS_TABS, *((CLOUD_SYNC_TAB,) if cloud_sync_on else ()))
+
+
 def edition_facts() -> str:
     """What this install is, and the Settings tabs it has."""
     from config import config
 
     local = config.IS_LOCAL_EDITION
-    tabs = (*LOCAL_SETTINGS_TABS, *SETTINGS_TABS) if local else (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
+    cloud_sync_on = bool(str(config.AUTOMATOS_CLOUD_URL or "").strip())
+    tabs = local_settings_tabs(cloud_sync_on) if local else (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
     edition = LOCAL_EDITION if local else HOSTED_EDITION
     no_such = NO_SUCH_TAB if local else HOSTED_NO_SUCH_TAB
     return f"{edition} Settings has these tabs: {', '.join(tabs)}. {no_such}"

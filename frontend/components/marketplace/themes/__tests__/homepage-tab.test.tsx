@@ -7,10 +7,13 @@
  * strip, not their content.
  */
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const nav = vi.hoisted(() => ({ params: new URLSearchParams() }))
+// One answer for every render, as react-query's is: a fresh `[]` each render re-runs the homepage's
+// recommendations effect (its dependency) without end, and an awaiting test never finished.
+const featured = vi.hoisted(() => ({ data: [], isLoading: false }))
 
 vi.mock('framer-motion', () => ({
   motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> },
@@ -26,7 +29,7 @@ vi.mock('@/lib/api-client', () => ({
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 vi.mock('@/contexts/role-context', () => ({ useSystemRole: () => ({ isAdmin: false }) }))
 vi.mock('@/hooks/use-marketplace-api', () => ({
-  useFeaturedItems: () => ({ data: [], isLoading: false }),
+  useFeaturedItems: () => featured,
   useToggleFeatured: () => ({ mutate: vi.fn(), isLoading: false }),
 }))
 vi.mock('@/components/analytics/admin-workspace-switcher', () => ({ AdminWorkspaceSwitcher: () => null }))
@@ -134,11 +137,12 @@ describe('the Marketplace’s Themes tab', () => {
     expect(screen.getByRole('tab', { name })).toHaveAttribute('data-state', 'active')
   })
 
-  it('a skill’s ?item= link opens Capabilities › Skills with the search set to its name', async () => {
+  // render's act flushes the link's effect and the search it sets before it returns.
+  it('a skill’s ?item= link opens Capabilities › Skills with the search set to its name', () => {
     nav.params = new URLSearchParams({ tab: 'skills', item: 'pdf-tools', add: '1' })
     render(<MarketplaceHomepage />)
 
     expect(screen.getByRole('tab', { name: 'Skills' })).toHaveAttribute('data-state', 'active')
-    await waitFor(() => expect(screen.getByLabelText('Search the marketplace')).toHaveValue('pdf-tools'))
+    expect(screen.getByLabelText('Search the marketplace')).toHaveValue('pdf-tools')
   })
 })

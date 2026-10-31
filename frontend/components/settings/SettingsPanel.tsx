@@ -90,10 +90,11 @@ export function SettingsPanel() {
     { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
-    ...(hasCloudTab ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
+    ...(isLocal ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
-  const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
+  const tabs = (isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs)
+    .filter((tab) => tab.value !== 'automatos-cloud' || hasCloudTab)
   const [activeTab, setActiveTab] = useSettingsTab(tabs, isAdmin ? 'system-settings' : 'orchestrator')
 
   return (
