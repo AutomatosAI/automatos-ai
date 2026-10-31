@@ -19,7 +19,13 @@ seed commits (releasing its savepoint), so the route's own rollback never takes 
 * the local edition is 404 before the limit counts; 429 with ``Retry-After`` in the route's own bucket;
 * a slug or version off the bundle format's patterns is 404 before the export is read; a database failure
   is a logged 503; the route ends its read transaction before storage is read;
-* the route is a plain ``def`` with no request-context or permission dependency, in the route manifest.
+* the route is a plain ``def`` with no request-context or permission dependency, in the route manifest;
+* a version's zip is built once and kept (``plugin_packages``, P270W2-RVW-4): a repeat request and a matching
+  If-None-Match read nothing from storage; with every build slot held a request is 503 with Retry-After,
+  SERVING_HEADERS and no-store, storage never read, while a kept zip is still served; a request for a version
+  another request is building waits for that build and serves it, never building it too, and one that waits
+  past the limit is busy; a refusal is kept a minute, then tried again; a row moved to another scan, export or
+  version is built again.
 
 Without a database: ``plugin_zip`` (sorted, dated 1980-01-01, deflated, fixed attributes: the same files give
 the same bytes whatever their order), ``stored_plugin_files`` (raw reads page by page, folder markers
@@ -34,8 +40,10 @@ import inspect
 import io
 import json
 import logging
+import threading
 import uuid
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -55,15 +63,16 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.storage import StorageNotConfigured
 from router_manifest import MANIFEST_ROUTERS, RouterSpec
-from services.marketplace_bundles import plugin_files
+from services.marketplace_bundles import plugin_files, plugin_packages
 from services.marketplace_bundles.catalog_paths import plugin_package_path
 from services.marketplace_bundles.export_plugins import exported_plugins
 from services.marketplace_bundles.plugin_files import (
     PluginFilesRefused, PluginFilesUnavailable, StoredPlugin, checked_files, plugin_prefix, plugin_zip,
     stored_plugin_files,
 )
+from services.marketplace_bundles.plugin_packages import PluginBuildsBusy, SoleBuilds, kept_package
 from tests.test_prd264_content_provenance import _FakeRedis
-from tests.test_prd270w2_export_more import _plugin
+from tests.test_prd270w2_export_more import _plugin, _scan
 
 ORCH = Path(__file__).resolve().parents[1]
 ROUTE = "/api/marketplace/catalog/plugins/{slug}/{version}/package.zip"
@@ -178,6 +187,14 @@ def bucket(monkeypatch):
     fake = _Bucket()
     monkeypatch.setattr(plugin_files, "get_s3_client", lambda: fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def _no_kept_packages():
+    """Every test starts and ends with no zip or refusal kept in the process."""
+    plugin_packages.clear_kept()
+    yield
+    plugin_packages.clear_kept()
 
 
 # --- the zip and the stored files, without a database ------------------------------------------------
@@ -419,6 +436,134 @@ def test_the_route_is_public_a_plain_def_in_the_manifest_and_mounted_by_router_s
     assert plugin_package_path("test-kit", "1.0.0") == ROUTE.format(slug="test-kit", version="1.0.0")
 
 
+# --- the kept zip and the build slots (P270W2-RVW-4) -------------------------------------------------
+
+
+@contextmanager
+def _every_slot_held():
+    slots = plugin_packages.BUILD_SLOTS
+    taken = [slots.acquire(blocking=False) for _ in range(plugin_packages.PLUGIN_PACKAGE_BUILDS)]
+    try:
+        assert all(taken)
+        yield
+    finally:
+        for held in taken:
+            if held:
+                slots.release()
+
+
+def _storage_reads(bucket):
+    return len(bucket.listed), len(bucket.read)
+
+
+def test_a_repeat_request_and_a_matching_etag_read_nothing_from_storage(served, monkeypatch):
+    row = _row()._replace(revision="a" * 64)
+    served.bucket.put(row.s3_path, _files(row.slug, row.version))
+    monkeypatch.setattr(items_api, "exported_plugin", lambda db, slug, version: row)
+    path = plugin_package_path(row.slug, row.version)
+    first = served.client.get(path)
+    assert first.status_code == 200, first.text
+    built = _storage_reads(served.bucket)
+    assert all(built)
+    again = served.client.get(path)
+    matched = served.client.get(path, headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 200 and again.content == first.content
+    assert again.headers["etag"] == first.headers["etag"]
+    assert matched.status_code == 304 and matched.content == b"" and matched.headers["etag"] == first.headers["etag"]
+    assert _storage_reads(served.bucket) == built
+
+
+def test_with_every_build_slot_held_a_package_is_a_503_and_storage_is_never_read(served, monkeypatch, caplog):
+    row, kept = _row(), _row("test-kept")
+    for plugin in (row, kept):
+        served.bucket.put(plugin.s3_path, _files(plugin.slug, plugin.version))
+    rows = {row.slug: row, kept.slug: kept}
+    monkeypatch.setattr(items_api, "exported_plugin", lambda db, slug, version: rows[slug])
+    assert served.client.get(plugin_package_path(kept.slug, kept.version)).status_code == 200
+    built = _storage_reads(served.bucket)
+    monkeypatch.setattr(plugin_packages, "BUILD_SLOT_WAIT_SECONDS", 0.01)
+    with _every_slot_held(), caplog.at_level(logging.WARNING, logger=items_api.__name__):
+        refused = served.client.get(plugin_package_path(row.slug, row.version))
+        still_kept = served.client.get(plugin_package_path(kept.slug, kept.version))
+    _assert_refused(refused, 503, items_api.PLUGINS_BUSY)
+    assert refused.headers["retry-after"] == str(plugin_packages.BUILD_RETRY_SECONDS)
+    assert still_kept.status_code == 200  # a kept zip takes no slot
+    assert _storage_reads(served.bucket) == built
+    assert any(record.levelno == logging.WARNING and "did not start" in record.getMessage()
+               for record in caplog.records)
+    assert served.client.get(plugin_package_path(row.slug, row.version)).status_code == 200
+
+
+class _WatchedBuilds(SoleBuilds):
+    """SoleBuilds that says when a second request asks for a version."""
+
+    def __init__(self):
+        super().__init__()
+        self.asked, self.second_asks = 0, threading.Event()
+
+    @contextmanager
+    def of(self, key, wait_seconds):
+        self.asked += 1
+        if self.asked > 1:
+            self.second_asks.set()
+        with super().of(key, wait_seconds):
+            yield
+
+
+def test_a_request_for_a_version_another_is_building_serves_that_build(bucket, monkeypatch):
+    row = _row()
+    bucket.put(row.s3_path, _files(row.slug, row.version))
+    builds, building, finish = _WatchedBuilds(), threading.Event(), threading.Event()
+    real, built, waited, answers = plugin_packages.built_package, [], [], []
+
+    def slow(plugin):
+        built.append(plugin)
+        building.set()
+        waited.append(finish.wait(5))
+        return real(plugin)
+
+    monkeypatch.setattr(plugin_packages, "_sole_builds", builds)
+    monkeypatch.setattr(plugin_packages, "BUILD_SLOT_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr(plugin_packages, "built_package", slow)
+    first = threading.Thread(target=lambda: answers.append(kept_package(row)))
+    first.start()
+    assert building.wait(5)
+    second = threading.Thread(target=lambda: answers.append(kept_package(row)))
+    second.start()
+    assert builds.second_asks.wait(5)  # the second request is past the kept check, waiting on the version
+    finish.set()
+    first.join(5)
+    second.join(5)
+    assert waited == [True] and len(built) == 1  # two free slots, one build
+    assert len(answers) == 2 and answers[0] is not None and answers[0] == answers[1]
+
+
+def test_a_request_that_waits_past_the_limit_for_another_s_build_is_busy():
+    builds, row = SoleBuilds(), _row()
+    with builds.of(row, 0.01):
+        with pytest.raises(PluginBuildsBusy):
+            with builds.of(row, 0.01):
+                pass
+        with builds.of(_row("test-other"), 0.01):  # another version is not held up
+            pass
+    with builds.of(row, 0.01):  # given back on the way out
+        pass
+
+
+def test_a_refusal_is_kept_a_minute_then_files_put_right_are_served(bucket, monkeypatch, caplog):
+    row, files = _row(), _files("test-kit", "1.0.0")
+    bucket.put(row.s3_path, {path: data for path, data in files.items() if path != "manifest.json"})
+    with caplog.at_level(logging.ERROR, logger=plugin_files.__name__):
+        assert kept_package(row) is None
+    refused = _storage_reads(bucket)
+    bucket.put(row.s3_path, files)
+    assert kept_package(row) is None and _storage_reads(bucket) == refused
+    assert sum(plugin_files.__name__ == record.name for record in caplog.records) == 1
+    monkeypatch.setattr(plugin_packages, "REFUSAL_KEPT_SECONDS", 0.0)
+    package = kept_package(row)
+    assert package is not None and _unzipped(package.data)[0] == files
+
+
 # --- the route over Postgres ---------------------------------------------------------------------------
 
 
@@ -532,3 +677,32 @@ def test_storage_that_fails_is_a_logged_503_with_the_serving_headers(hosted, cap
     _assert_refused(resp, 503, items_api.PLUGINS_DOWN)
     assert any(record.exc_info and record.name == plugin_files.__name__ for record in caplog.records)
     assert any(record.name == items_api.__name__ for record in caplog.records)
+
+
+def _exported_revision(hosted, plugin):
+    return exported_plugins(hosted.db, slug=plugin.slug)[0].revision
+
+
+def test_a_plugin_moved_to_another_scan_export_or_version_is_built_again(hosted):
+    plugin = _seeded(hosted)
+    _stored(hosted, plugin)
+    first = _get(hosted, plugin)
+    assert first.status_code == 200, first.text
+    once = len(hosted.bucket.read)
+    assert once and _get(hosted, plugin).content == first.content and len(hosted.bucket.read) == once
+    revision = _exported_revision(hosted, plugin)
+    plugin.security_scan_id = _scan(hosted, plugin.slug, plugin.version).id  # the same report, another scan
+    hosted.db.commit()
+    assert _exported_revision(hosted, plugin) == revision
+    assert _get(hosted, plugin).status_code == 200 and len(hosted.bucket.read) == 2 * once
+    plugin.description = "Another description of the package test."
+    hosted.db.commit()
+    assert _exported_revision(hosted, plugin) != revision
+    assert _get(hosted, plugin).status_code == 200 and len(hosted.bucket.read) == 3 * once
+    plugin.version, plugin.s3_path = "2.0.0", plugin_prefix(plugin.slug, "2.0.0")
+    plugin.security_scan_id = _scan(hosted, plugin.slug, "2.0.0").id
+    hosted.db.commit()
+    files = _stored(hosted, plugin)
+    moved = _get(hosted, plugin)
+    assert moved.status_code == 200 and _unzipped(moved.content)[0] == files
+    assert len(hosted.bucket.read) == 3 * once + len(files)

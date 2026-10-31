@@ -467,6 +467,10 @@ files can be read without an account; a bundle carries no email address, id, cre
 
 - cached (`Cache-Control: public, max-age=300` with an ETag for the catalogue; a file, a bundle or a plugin package
   never changes under its address, so each is cached as immutable, with an ETag);
+- a plugin's zip is built once per version, export and scan, and kept, so a repeat request reads nothing from
+  storage (a zip that can't be served is tried again after a minute). One request builds a version at a time,
+  each server process runs two builds at a time, and a request whose build doesn't start within a second is 503
+  with `Retry-After`;
 - rate-limited per client IP and per route: `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` reads a minute on each (120 by
   default), over it 429;
 - the catalogue is capped at `MARKETPLACE_CATALOG_FEED_MAX_KB` (1024 by default). A larger one is a logged 503,

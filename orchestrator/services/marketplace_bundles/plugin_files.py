@@ -25,8 +25,10 @@ it from the path it builds itself (``catalog_paths.plugin_package_path``) and ch
 
 Files that can't be served (over the cap, an unsafe path, no or another manifest, a prefix not the
 plugin's) raise :class:`PluginFilesRefused`: ``built_package`` logs it and answers None, the route's 404.
-Storage that fails raises :class:`PluginFilesUnavailable` (logged), the route's 503. The zip is built on
-every read, like W1's rebuilt theme package (``catalog_files.py``). Blocking (S3): plain-``def`` routes only.
+Storage that fails raises :class:`PluginFilesUnavailable` (logged), the route's 503.
+
+The route serves the zip through ``plugin_packages.kept_package``, which builds it here once per
+:class:`StoredPlugin` and keeps it (P270W2-RVW-4). Blocking (S3): plain-``def`` routes only.
 """
 from __future__ import annotations
 
@@ -69,11 +71,15 @@ class PluginFilesUnavailable(RuntimeError):
 
 
 class StoredPlugin(NamedTuple):
-    """The exported plugin's slug and version, and the prefix its row says its files are under."""
+    """The exported plugin's slug and version, and the prefix its row says its files are under; with the
+    export's revision of its bundle and the id of the scan its row names: the key ``plugin_packages`` keeps
+    its zip under, so a changed export, another version or another scan builds anew."""
 
     slug: str
     version: str
     s3_path: Optional[str]
+    revision: str = ""
+    scan_id: Optional[Any] = None
 
 
 class PluginPackage(NamedTuple):
@@ -100,12 +106,15 @@ def exported_plugin(db: Session, slug: str, version: str) -> Optional[StoredPlug
     if not listed:
         return None
     row = (
-        db.query(MarketplacePlugin.slug, MarketplacePlugin.version, MarketplacePlugin.s3_path)
+        db.query(MarketplacePlugin.slug, MarketplacePlugin.version, MarketplacePlugin.s3_path,
+                 MarketplacePlugin.security_scan_id)
         .filter(MarketplacePlugin.id.in_(tuple(listed[0].entry.row_ids)), MarketplacePlugin.slug == slug,
                 MarketplacePlugin.version == version)
         .first()
     )
-    return None if row is None else StoredPlugin(row.slug, row.version, row.s3_path)
+    if row is None:
+        return None
+    return StoredPlugin(row.slug, row.version, row.s3_path, listed[0].revision, row.security_scan_id)
 
 
 def built_package(plugin: StoredPlugin) -> Optional[PluginPackage]:

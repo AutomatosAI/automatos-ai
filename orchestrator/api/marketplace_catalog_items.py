@@ -12,7 +12,12 @@ at that version (approved, active, its scan safe) whose manifest.json names both
 pending, unsafe or inactive plugin, another version, an unknown slug, files that can't be served (logged),
 a slug or version off the bundle format's patterns (checked before the database). The route reads the
 row, then ends its read transaction, then reads storage, so no pooled connection waits on S3. Its ETag is
-the zip's sha256, the zip's bytes depending on the files alone.
+the zip's sha256, the zip's bytes depending on the files alone. A version's zip is built once and kept
+(``plugin_packages.kept_package``, keyed by the export's revision and scan too; a refusal kept a minute): a
+repeat request, and a matching ``If-None-Match``, read nothing from storage. One request builds a version
+at a time, in one of the process's ``plugin_packages.PLUGIN_PACKAGE_BUILDS`` slots, as W1's package rebuilds
+do: a wait for either past the short limit is 503 with ``Retry-After`` (logged as a warning), storage never
+read.
 
 Both copy the rules of W1's catalogue files route (``api/marketplace_catalog.py``):
 
@@ -22,9 +27,12 @@ Both copy the rules of W1's catalogue files route (``api/marketplace_catalog.py`
   refusal ``no-store``;
 * ``Cache-Control: public, max-age=<THEME_FILE_CACHE_SECONDS>, immutable`` and a strong ETag with 304:
   ``"<revision>"`` for a bundle, named by its own sha256, so it never changes; the zip's sha256 for a plugin
-  package, so a version whose stored files were rewritten (``harvest_plugins --repair-s3``) has another;
+  package, so a version whose stored files were rewritten (``harvest_plugins --repair-s3``) has another once
+  its zip is built again (a kept zip is served until it is dropped or the process restarts; a rescan names
+  another scan and builds anew);
 * each route its own per-IP bucket (``api/public_rate_limit.py``): over it is 429 with ``Retry-After``;
-* 503, logged, when the database can't give the listing back or storage fails.
+* 503, logged, when the database can't give the listing back or storage fails, or when a plugin package's
+  build doesn't start within the wait (with ``Retry-After``).
 
 Public by design: no credentials and no workspace, so nothing in it depends on the caller. A plain ``def``:
 the session is synchronous. Registered through ``RouterSpec`` (``router_manifest.py``) and listed in
@@ -49,8 +57,9 @@ from core.database.database import get_db
 from services.marketplace_bundles.catalog_items import bundle_bytes_for
 from services.marketplace_bundles.catalog_paths import BUNDLES_ROUTE, PLUGIN_PACKAGE_FILE, PLUGINS_ROUTE
 from services.marketplace_bundles.plugin_files import (
-    PluginFilesUnavailable, PluginPackage, StoredPlugin, built_package, exported_plugin,
+    PluginFilesUnavailable, PluginPackage, StoredPlugin, exported_plugin,
 )
+from services.marketplace_bundles.plugin_packages import BUILD_RETRY_SECONDS, PluginBuildsBusy, kept_package
 from services.marketplace_bundles.schema import PLUGIN_SLUG_PATTERN, REVISION_PATTERN, VERSION_PATTERN
 from services.themes.revocation_feed import etag_matches
 from services.themes.serve import file_cache_seconds
@@ -71,13 +80,15 @@ BUNDLE_NOT_LISTED = "That bundle isn't in the Automatos Cloud catalogue."
 BUNDLES_DOWN = "Automatos Cloud bundles can't be read right now. Try again in a moment."
 PLUGIN_NOT_LISTED = "That plugin package isn't in the Automatos Cloud catalogue."
 PLUGINS_DOWN = "Automatos Cloud plugin packages can't be read right now. Try again in a moment."
+PLUGINS_BUSY = "Automatos Cloud is busy preparing other plugin packages. Try again in a moment."
 _REVISION = re.compile(REVISION_PATTERN)
 _PLUGIN_SLUG = re.compile(PLUGIN_SLUG_PATTERN)
 _VERSION = re.compile(VERSION_PATTERN)
 
 
-def _refusal(status_code: int, detail: str) -> HTTPException:
-    return HTTPException(status_code=status_code, detail=detail, headers={**BUNDLE_REFUSAL_HEADERS})
+def _refusal(status_code: int, detail: str, retry_after: Optional[int] = None) -> HTTPException:
+    retry = {} if retry_after is None else {"Retry-After": str(retry_after)}
+    return HTTPException(status_code=status_code, detail=detail, headers={**BUNDLE_REFUSAL_HEADERS, **retry})
 
 
 def require_hosted_bundles() -> None:
@@ -141,9 +152,15 @@ def _exported(db: Session, slug: str, version: str) -> Optional[StoredPlugin]:
 
 
 def _built(plugin: StoredPlugin) -> Optional[PluginPackage]:
-    """The plugin's zip, None when its files can't be served; 503 when storage fails (logged)."""
+    """The plugin's zip (kept after its first build), None when its files can't be served; 503 when storage
+    fails (logged), or with ``Retry-After`` when its build doesn't start within the wait (logged as a
+    warning)."""
     try:
-        return built_package(plugin)
+        return kept_package(plugin)
+    except PluginBuildsBusy as busy:
+        logger.warning("marketplace catalogue plugins: the package build of %s %s did not start within the wait",
+                       plugin.slug, plugin.version)
+        raise _refusal(SERVICE_UNAVAILABLE, PLUGINS_BUSY, BUILD_RETRY_SECONDS) from busy
     except PluginFilesUnavailable as down:  # plugin_files logged the storage failure
         logger.error("marketplace catalogue plugins: storage failed for %s %s", plugin.slug, plugin.version)
         raise _refusal(SERVICE_UNAVAILABLE, PLUGINS_DOWN) from down
@@ -159,8 +176,8 @@ def get_catalog_plugin_package(
     db: Session = Depends(get_db),
 ) -> Response:
     """An exported plugin's zip (200), or 304 when ``If-None-Match`` names its ETag; 404 in the local
-    edition and for any plugin or version the export doesn't list; 503 when the database or storage fails;
-    429 over the per-IP limit."""
+    edition and for any plugin or version the export doesn't list; 503 when the database or storage fails,
+    or the build doesn't start within the wait; 429 over the per-IP limit."""
     plugin = _exported(db, slug, version)
     db.rollback()  # the read is over: the pooled connection goes back before the storage reads
     package = None if plugin is None else _built(plugin)
