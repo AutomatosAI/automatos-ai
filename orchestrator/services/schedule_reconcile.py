@@ -100,4 +100,7 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
     from services.mobile import digest as daily_digest
 
     daily_digest.register(scheduler)  # PRD-266 US-013: the daily digest is posted on the leader
+    from services.proactive import retention as proactive_retention
+
+    proactive_retention.register(scheduler)  # PRD-268 §6.2: proactive_runs keeps 90 days, pruned on the leader
     return True
