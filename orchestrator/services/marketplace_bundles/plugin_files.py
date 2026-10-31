@@ -230,10 +230,20 @@ def _relative(key: str, prefix: str) -> Optional[str]:
     path = key[len(prefix):]
     if not path or path.endswith(FOLDER_MARK):
         return None
-    parts = pathlib.PurePosixPath(path)
-    if parts.is_absolute() or PARENT_PART in parts.parts or str(parts) != path or _UNSAFE_CHARACTERS.search(path):
+    if not is_safe_path(path):
         raise PluginFilesRefused("a stored file has an unsafe path")
     return path
+
+
+def is_safe_path(path: str) -> bool:
+    """Whether ``path`` is a plugin file's path as an upload stores it: relative, naming a file ('.' names
+    none), never climbing with '..', in its normal form ('./a' and 'a//b' are not) and with no backslash or
+    control character (the local Sync holds a downloaded package's files to it too, US-270-15a)."""
+    parts = pathlib.PurePosixPath(path)
+    return not (
+        parts.is_absolute() or not parts.name or PARENT_PART in parts.parts or str(parts) != path
+        or _UNSAFE_CHARACTERS.search(path)
+    )
 
 
 def _read(client: Any, key: str, room: int) -> bytes:
@@ -251,6 +261,6 @@ def _read(client: Any, key: str, room: int) -> bytes:
 
 __all__ = [
     "PluginFilesRefused", "PluginFilesUnavailable", "PluginPackage", "StoredPlugin", "built_package",
-    "checked_files", "exported_plugin", "plugin_files_max_bytes", "plugin_prefix", "plugin_zip",
+    "checked_files", "exported_plugin", "is_safe_path", "plugin_files_max_bytes", "plugin_prefix", "plugin_zip",
     "stored_plugin_files",
 ]
