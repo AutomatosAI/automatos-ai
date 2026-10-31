@@ -2,9 +2,16 @@
 
 The Sync's plugin pass (US-270-13d runs it after W1's theme pass and before the item pass, so an agent's
 plugins and their skills exist first). ``import_plugins`` reads the catalogue's plugin entries: one a
-``marketplace_cloud_items`` mapping holds at the same revision is unchanged; of the new or changed ones,
-the first ``AUTOMATOS_CLOUD_PLUGINS_PER_SYNC`` by name are imported and the rest wait for the next Sync.
-Each is imported on its own, in K15's order, and nothing is stored until every check has passed:
+``marketplace_cloud_items`` mapping holds at the same revision is unchanged. Every new or changed one has
+its bundle fetched and its slug checked (steps 1 and 2) BEFORE the cap (P270W2-RVW-2), on every Sync, as the
+item pass reads every new or changed item's bundle (each capped at ``AUTOMATOS_CLOUD_BUNDLE_MAX_KB``, the
+catalogue at W1's ``feed.CATALOG_MAX_ITEMS``): a plugin they refuse is counted refused and takes none of the
+``AUTOMATOS_CLOUD_PLUGINS_PER_SYNC`` places, which bound package downloads only. Of those that pass, the
+first by name download their packages now and the rest wait for the next Sync (``plugins.waiting`` counts
+only them); a plugin whose package was refused in this process at its revision comes after every one not yet
+tried (``refused_before``), so a package refused once never holds a place again ahead of a plugin not yet
+tried. A cap of 0 downloads none and requests nothing: every new or changed plugin waits. Each is imported
+on its own, in K15's order, and nothing is stored until every check has passed:
 
 1. its bundle (``items_feed.fetch_bundles``: the derived URL, the revision, the strict validator);
 2. its slug: a plugin row without this item's mapping that holds it refuses the item (that row is never
@@ -61,7 +68,9 @@ import zipfile
 import zlib
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Mapping, NamedTuple, Optional, Tuple
+from typing import (
+    Any, Awaitable, Callable, Dict, FrozenSet, Iterable, Iterator, List, Mapping, NamedTuple, Optional, Tuple,
+)
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -84,6 +93,7 @@ from services.marketplace_cloud.fetch import (
 )
 from services.marketplace_cloud.pull import NEW, REFUSED, UPDATED, SyncCounts
 from services.marketplace_cloud.urls import configured_url
+from services.themes.bounded_cache import BoundedCache
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +149,13 @@ NOT_SAVED = "It couldn't be saved."
 ROW_GONE = "The plugin this install held for it is gone or has moved."
 
 RunAsync = Callable[[Awaitable[Any]], Any]
+Identity = Tuple[str, str]  # a plugin entry's (externalId, revision)
+
+# Each plugin this process refused once it held a place, at its revision: ordered after the plugins not yet
+# tried (P270W2-RVW-2). Kept only while the entry stays new or changed; a restart forgets. W1's one-Sync lock
+# serialises the passes that read and replace it.
+REFUSED_KEY = "refused"
+_refused_here: BoundedCache[FrozenSet[Identity]] = BoundedCache(1)
 
 
 class PluginRefused(ValueError):
@@ -170,6 +187,13 @@ class Target(NamedTuple):
     previous_version: Optional[str] = None
 
 
+class Targeted(NamedTuple):
+    """A fetched plugin whose slug check passed, with what its import writes: decided before the cap."""
+
+    fetched: FetchedBundle
+    target: Target
+
+
 class CheckedPlugin(NamedTuple):
     """A plugin whose bundle, slug, package, manifest and static scan all passed: ready to store."""
 
@@ -193,15 +217,51 @@ class CheckedPlugin(NamedTuple):
 
 
 def plugins_per_sync() -> int:
-    """The new or changed plugins one Sync imports (``AUTOMATOS_CLOUD_PLUGINS_PER_SYNC``)."""
+    """The new or changed plugins whose packages one Sync downloads (``AUTOMATOS_CLOUD_PLUGINS_PER_SYNC``)."""
     return max(0, int(config.AUTOMATOS_CLOUD_PLUGINS_PER_SYNC))
 
 
+def identity(entry: CatalogEntry) -> Identity:
+    """The entry's (externalId, revision): what a refusal here is remembered by."""
+    return entry.external_id, entry.revision
+
+
+def refused_before() -> FrozenSet[Identity]:
+    """The plugins this process refused once they held a place, each at the revision it was refused at."""
+    return _refused_here.get(REFUSED_KEY) or frozenset()
+
+
+def forget_refused() -> None:
+    """Forget every refusal this process remembers (tests; a restart does the same)."""
+    _refused_here.clear()
+
+
+def remember_refused(changed: Iterable[CatalogEntry], refused: Iterable[CatalogEntry]) -> None:
+    """Remember ``refused`` at their revisions, with each refusal already remembered whose entry is still in
+    ``changed`` (one imported since, gone from the catalogue or at a new revision is forgotten)."""
+    still = frozenset(identity(entry) for entry in changed)
+    _refused_here.put(REFUSED_KEY, (refused_before() & still) | frozenset(identity(entry) for entry in refused))
+
+
+def place_order(entry: CatalogEntry, refused: FrozenSet[Identity]) -> Tuple[bool, str, str]:
+    """Where ``entry`` comes for a place: by name (then externalId), after every other when ``refused`` holds it
+    at its revision."""
+    return identity(entry) in refused, entry.name.casefold(), entry.external_id
+
+
 def chosen_entries(
-    entries: Iterable[CatalogEntry], top: int,
+    entries: Iterable[CatalogEntry], top: int, refused: FrozenSet[Identity] = frozenset(),
 ) -> Tuple[Tuple[CatalogEntry, ...], Tuple[CatalogEntry, ...]]:
-    """``entries`` by name (then externalId): the first ``top`` to import now, and the rest, which wait."""
-    ordered = tuple(sorted(entries, key=lambda entry: (entry.name.casefold(), entry.external_id)))
+    """``entries`` in ``place_order``: the first ``top`` to import now, and the rest, which wait."""
+    ordered = tuple(sorted(entries, key=lambda entry: place_order(entry, refused)))
+    return ordered[:top], ordered[top:]
+
+
+def chosen_plugins(
+    targeted: Iterable[Targeted], top: int, refused: FrozenSet[Identity],
+) -> Tuple[Tuple[Targeted, ...], Tuple[Targeted, ...]]:
+    """``targeted`` in ``place_order``: the first ``top`` to download now, and the rest, which wait."""
+    ordered = tuple(sorted(targeted, key=lambda one: place_order(one.fetched.entry, refused)))
     return ordered[:top], ordered[top:]
 
 
@@ -210,40 +270,64 @@ def import_plugins(
 ) -> PluginPass:
     """Import the catalogue's new and changed plugins, each checked, stored and committed on its own (K15).
 
-    ``entries`` are the catalogue's listed entries of every type; only plugins are read. A refusal counts
-    that plugin refused and the next is imported.
+    ``entries`` are the catalogue's listed entries of every type; only plugins are read. Every new or changed
+    plugin's bundle and slug are checked before the cap; a refusal counts that plugin refused and the next is
+    imported.
     """
     plugins = tuple(entry for entry in entries if entry.type == ITEM_TYPE)
     changed = changed_entries(db, plugins)
     db.rollback()  # the mappings' read ends before any fetch
-    chosen, waiting = chosen_entries(changed, plugins_per_sync())
-    counts = SyncCounts(unchanged=len(plugins) - len(changed))
-    if not chosen:
-        return PluginPass(counts, len(waiting))
+    counts, top = SyncCounts(unchanged=len(plugins) - len(changed)), plugins_per_sync()
+    if not changed or top == 0:  # 0 downloads none: nothing is requested, and every changed plugin waits
+        return PluginPass(counts, len(changed))
     try:
         origin = checked_origin(configured_url())
     except CloudFetchFailed as off:
         logger.warning("Automatos Cloud: %s", NO_ORIGIN.format(reason=off))
-        return PluginPass(replace(counts, refused=len(chosen)), len(waiting))
-    fetched = fetch_bundles(chosen, client_factory)
+        return PluginPass(replace(counts, refused=len(changed)), 0)
+    fetched = fetch_bundles(changed, client_factory)
+    targeted = targeted_plugins(db, fetched.bundles)
+    chosen, waiting = chosen_plugins(targeted, top, refused_before())
     seams = Seams(origin, client_factory, run_async, MarketplaceS3Service())
-    counts = replace(counts, refused=len(fetched.refused))
-    for one in fetched.bundles:
-        counts = counts.plus(import_plugin(db, one, seams))
+    verdicts = tuple((one.fetched.entry, import_plugin(db, one, seams)) for one in chosen)
+    remember_refused(changed, (entry for entry, verdict in verdicts if verdict == REFUSED))
+    counts = replace(counts, refused=len(fetched.refused) + len(fetched.bundles) - len(targeted))
+    for _, verdict in verdicts:
+        counts = counts.plus(verdict)
     logger.info("Automatos Cloud plugins: %s, %d waiting", counts.view(), len(waiting))
     return PluginPass(counts, len(waiting))
 
 
-def import_plugin(db: Session, fetched: FetchedBundle, seams: Seams) -> str:
-    """One plugin, checked then stored and committed: ``new`` or ``updated``, else ``refused`` (logged)."""
+def targeted_plugins(db: Session, bundles: Iterable[FetchedBundle]) -> Tuple[Targeted, ...]:
+    """Each fetched plugin whose slug check passes (K15's step 2), with its target; one it refuses is logged
+    and left out, so it takes no place under the cap."""
+    targeted = (_targeted(db, fetched) for fetched in bundles)
+    return tuple(one for one in targeted if one is not None)
+
+
+def _targeted(db: Session, fetched: FetchedBundle) -> Optional[Targeted]:
     try:
-        checked = checked_plugin(db, fetched, seams)
+        slug, version = fetched.bundle[ITEM_TYPE]["slug"], fetched.bundle["version"]
+        return Targeted(fetched, held_target(db, fetched.entry, slug, version))
     except PluginRefused as refused:
         _log_refused(fetched.entry, refused)
+    except Exception:  # anything unforeseen refuses this plugin only, as in its checks: the pass goes on
+        db.rollback()
+        logger.exception("Automatos Cloud: plugin %s couldn't be checked", fetched.entry.external_id)
+    return None
+
+
+def import_plugin(db: Session, one: Targeted, seams: Seams) -> str:
+    """One plugin, checked then stored and committed: ``new`` or ``updated``, else ``refused`` (logged)."""
+    entry = one.fetched.entry
+    try:
+        checked = checked_plugin(db, one, seams)
+    except PluginRefused as refused:
+        _log_refused(entry, refused)
         return REFUSED
     except Exception:  # anything unforeseen refuses this plugin only: nothing is stored yet, the pass goes on
         db.rollback()
-        logger.exception("Automatos Cloud: plugin %s couldn't be checked", fetched.entry.external_id)
+        logger.exception("Automatos Cloud: plugin %s couldn't be checked", entry.external_id)
         return REFUSED
     return _stored(db, checked, seams)
 
@@ -255,12 +339,12 @@ def _log_refused(entry: CatalogEntry, refused: PluginRefused) -> None:
 # --------------------------------------------------------------------------- the checks
 
 
-def checked_plugin(db: Session, fetched: FetchedBundle, seams: Seams) -> CheckedPlugin:
-    """K15's checks of one fetched bundle, in order, before anything is stored; ``PluginRefused`` on the first
-    that fails."""
+def checked_plugin(db: Session, one: Targeted, seams: Seams) -> CheckedPlugin:
+    """K15's checks of one fetched bundle after its slug check (``targeted_plugins``), in order, before anything
+    is stored; ``PluginRefused`` on the first that fails."""
+    fetched, target = one
     bundle = fetched.bundle
     slug, version = bundle[ITEM_TYPE]["slug"], bundle["version"]
-    target = held_target(db, fetched.entry, slug, version)
     data = _package(seams, slug, version)
     files = package_files(data)
     try:
@@ -594,8 +678,9 @@ def _materialize(db: Session, plugin_id: UUID, run_async: RunAsync) -> None:
 __all__ = [
     "CLOUD_ACTOR", "HISTORY_ACTION", "MAX_COMPRESSION_RATIO", "MAX_FILE_COUNT", "MAX_FILE_UNCOMPRESSED_SIZE",
     "MAX_SCAN_FINDINGS", "MAX_SCANNED_LINE", "MAX_TOTAL_UNCOMPRESSED_SIZE", "SCAN_CHUNK_LINES", "SOURCE_TYPE",
-    "CheckedPlugin", "PluginPass", "PluginRefused", "RunAsync", "Seams", "Target", "check_member",
-    "checked_members", "checked_plugin", "chosen_entries", "committed_rows", "held_target", "history_row",
-    "import_plugin", "import_plugins", "local_scan", "package_files", "plugins_per_sync", "row_fields",
-    "scan_row", "target_of", "text_files",
+    "CheckedPlugin", "Identity", "PluginPass", "PluginRefused", "RunAsync", "Seams", "Target", "Targeted",
+    "check_member", "checked_members", "checked_plugin", "chosen_entries", "chosen_plugins", "committed_rows",
+    "forget_refused", "held_target", "history_row", "identity", "import_plugin", "import_plugins", "local_scan",
+    "package_files", "place_order", "plugins_per_sync", "refused_before", "remember_refused", "row_fields",
+    "scan_row", "target_of", "targeted_plugins", "text_files",
 ]

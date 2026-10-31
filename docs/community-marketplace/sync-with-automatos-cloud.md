@@ -288,9 +288,13 @@ What a Sync never touches:
 
 ### Plugins
 
-Plugins have their own pass, one plugin at a time, each saved on its own. A Sync downloads at most
+Plugins have their own pass, one plugin at a time, each saved on its own. A Sync downloads the packages of at most
 `AUTOMATOS_CLOUD_PLUGINS_PER_SYNC` new or changed plugins (5 by default, by name); the rest wait for the next Sync,
-and the Sync's answer counts them in `plugins.waiting`.
+and the Sync's answer counts them in `plugins.waiting`. Every new or changed plugin's bundle and slug are checked
+first, on every Sync (steps 1 and 2 below), so a plugin refused there never takes one of those places, and
+`plugins.waiting` counts only plugins that passed them. A plugin whose package this install refused is downloaded
+again only after every plugin not yet tried, until its bundle changes or the backend process restarts. `0`
+downloads no plugin and requests nothing: every new or changed plugin waits.
 
 Nothing of a plugin is stored until every check has passed:
 

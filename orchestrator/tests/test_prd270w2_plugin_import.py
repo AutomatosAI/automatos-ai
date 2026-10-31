@@ -19,8 +19,9 @@ Postgres:
   are removed (the next Sync imports it); a writer that committed the same slug meanwhile keeps its files;
 * a slug a row without a mapping holds is refused before its package is fetched, and that row and its files
   stay as they were; a changed revision at the same plugin version is refused; the same revision is unchanged
-  and fetches nothing; the sixth plugin by name waits and is never fetched; rows that change while a plugin is
-  checked refuse it before anything is stored;
+  and fetches nothing; the sixth plugin by name waits, its bundle read (its slug checked before the cap,
+  P270W2-RVW-2) and its package never fetched; rows that change while a plugin is checked refuse it before
+  anything is stored;
 * a newer version moves the same row and keeps its enablements, its old files removed; a failed update keeps
   the row and its files at the old version; an update whose row moved meanwhile is refused; an update keeps a
   local deactivation and makes no skill; a mapped item whose bundle names another slug is refused; a
@@ -292,7 +293,7 @@ def _scalar_row(new_session, slug):
     return row
 
 
-def test_the_sixth_plugin_by_name_waits_and_is_never_fetched(cloud, bucket, made, new_session):
+def test_the_sixth_plugin_by_name_waits_and_its_package_is_never_fetched(cloud, bucket, made, new_session):
     served = {}
     for letter in "FBDACE":
         slug = made.slug()
@@ -300,7 +301,8 @@ def test_the_sixth_plugin_by_name_waits_and_is_never_fetched(cloud, bucket, made
     imported = _import(new_session, cloud, *(entry for _, entry in served.values()))
     assert imported.counts.view() == {"new": 5, "updated": 0, "unchanged": 0, "refused": 0} and imported.waiting == 1
     waiting_slug, waiting_entry = served["F"]
-    assert not any(waiting_slug in url or waiting_entry.revision in url for url in cloud.urls())
+    named = [url for url in cloud.urls() if waiting_slug in url or waiting_entry.revision in url]
+    assert named == [BUNDLES + waiting_entry.revision]  # its slug checked before the cap; no package fetched
     assert _rows(new_session, waiting_slug) == NO_ROWS
     assert all(_rows(new_session, served[letter][0])["marketplace_plugins"] == 1 for letter in "ABCDE")
 

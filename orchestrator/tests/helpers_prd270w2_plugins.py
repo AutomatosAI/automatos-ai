@@ -19,7 +19,7 @@ import httpx
 
 from config import config
 from core.services import marketplace_s3, plugin_security_scanner
-from services.marketplace_bundles import items_feed
+from services.marketplace_bundles import items_feed, plugin_import
 from services.marketplace_bundles.canonical import canonical_bytes
 from services.marketplace_bundles.catalog_items import entry_of
 from services.marketplace_bundles.catalog_paths import plugin_package_path
@@ -193,7 +193,9 @@ def refuse_models(monkeypatch):
 
 
 def cloud_settings(monkeypatch):
-    """The local edition syncing from ``CLOUD``, with the wave's default caps; Automatos Cloud, mocked."""
+    """The local edition syncing from ``CLOUD``, with the wave's default caps and no plugin refusal remembered
+    from an earlier test; Automatos Cloud, mocked."""
+    plugin_import.forget_refused()
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(config, "AUTOMATOS_CLOUD_URL", CLOUD)
     monkeypatch.setattr(config, "AUTOMATOS_CLOUD_BUNDLE_MAX_KB", 256)

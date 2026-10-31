@@ -227,7 +227,8 @@ def test_anything_unforeseen_in_the_checks_refuses_that_plugin_only(monkeypatch)
     monkeypatch.setattr(plugin_import, "checked_plugin", broken)
     entry = items_feed.CatalogEntry("plugin", "0" * 32, "1.0.0", "a" * 64, "Test Kit")
     rows = _Rows()
-    verdict = plugin_import.import_plugin(rows, items_feed.FetchedBundle(entry, bundle_of("test-kit")), _seams())
+    one = plugin_import.Targeted(items_feed.FetchedBundle(entry, bundle_of("test-kit")), plugin_import.Target("new"))
+    verdict = plugin_import.import_plugin(rows, one, _seams())
     assert verdict == "refused" and rows.rollbacks == 1
 
 
