@@ -32,10 +32,13 @@ model and the memory service are fakes (``tests/helpers_calibration_fakes.py``).
 * the four routes are plain ``def``s, the POSTs gated by ``require_workspace_permission``,
   registered through ``RouterSpec`` and in the route manifest.
 
-The ``v_workspace_outputs`` view is migration-managed and CI's create_all database has none: each
-request's session makes a TEMP view over ``deliverables`` (as ``test_prd268w3_calibration_build.py``
-does), which lives on its pooled connection until the module's engine is disposed. Every request
-runs on its own committing session, and each test sweeps its own rows.
+The ``v_workspace_outputs`` view is migration-managed and CI's create_all database has none: every
+connection the module's engine opens makes a TEMP view over ``deliverables`` (as
+``test_prd268w3_calibration_build.py`` does), committed, so it lives on that pooled connection until
+the engine is disposed. A request's session moves to another pooled connection after each commit
+(the claim commits before the build reads), so the view must be on every one of them, not only on
+the connection a request began on. Every request runs on its own committing session, and each test
+sweeps its own rows.
 """
 from __future__ import annotations
 
@@ -67,7 +70,7 @@ if str(ORCH) not in sys.path:
 import pytest  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy import create_engine, event, text  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
 import tests.conftest as _conftest  # noqa: E402
@@ -108,12 +111,23 @@ SEEDED = {"v": 1, "lines": [{"id": i, "text": t, "sources": [SOURCE]} for i, t i
 # --------------------------------------------------------------------------- fixtures
 
 
+def _outputs_view_on(dbapi_connection, _record):
+    """The TEMP view on each new connection, committed (a rollback would take it back)."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(OUTPUTS_VIEW)
+    finally:
+        cursor.close()
+    dbapi_connection.commit()
+
+
 @pytest.fixture(scope="module")
 def engine():
     from core.database.database import get_database_url
 
     try:
         eng = create_engine(get_database_url(), pool_pre_ping=True)
+        event.listen(eng, "connect", _outputs_view_on)
         with eng.connect() as c:
             c.execute(text("SELECT kind, widget_key_id FROM chats LIMIT 1"))
             c.execute(text("SELECT source FROM messages LIMIT 1"))
@@ -233,17 +247,11 @@ def _ctx(person, ws, role="user") -> RequestContext:
     return RequestContext(workspace_id=UUID(ws) if ws else None, user=user, auth_type="clerk")
 
 
-def _session(world):
-    s = world.new_session()
-    s.execute(text(OUTPUTS_VIEW))
-    return s
-
-
 def _client(world, ctx) -> TestClient:
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[get_request_context_hybrid] = lambda: ctx
-    app.dependency_overrides[get_db] = lambda: _session(world)
+    app.dependency_overrides[get_db] = lambda: world.new_session()
     return TestClient(app)
 
 

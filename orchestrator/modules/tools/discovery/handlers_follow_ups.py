@@ -255,8 +255,8 @@ def _cancel(db: Session, workspace_id: UUID, params: Mapping[str, Any], follow_u
     refusal = _who_refusal(db, workspace_id, caller, params.get("_agent_id"))
     if refusal is not None:
         return _refused(locale, refusal)
-    outcome, _ = follow_ups.cancel_follow_up(db, workspace_id, int(caller["user_id"]), follow_up_id)
-    if outcome != follow_ups.CANCELLED:
+    outcome, cancelled = follow_ups.cancel_follow_up(db, workspace_id, int(caller["user_id"]), follow_up_id)
+    if cancelled is None:  # CANCELLED with nothing cancelled now: already cancelled (follow_ups._not_cancelled)
         code = ALREADY.get(outcome, follow_ups.NOT_FOUND)
         return _refused(locale, code, follow_up_id=follow_up_id)
     return {"success": True, "follow_up_id": follow_up_id, "status": follow_ups.CANCELLED,

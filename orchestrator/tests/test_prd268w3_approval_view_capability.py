@@ -294,10 +294,11 @@ def test_a_viewer_is_refused_a_mission_plans_view(db_session, ws):
 
 def test_a_grant_still_resolves_by_its_number(db_session, ws):
     from core.models.approval_grants import ApprovalGrant
+    from modules.policy.policy_document import RISK_EXTERNAL  # the class the gate stores (tool_grants.py)
 
     grant = ApprovalGrant(workspace_id=ws, status="pending", kind="approval", subject_type="tool_call",
                           subject_id=f"platform_send_email:{uuid.uuid4().hex[:32]}", tool_name="platform_send_email",
-                          risk_tier="external", expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                          risk_tier=RISK_EXTERNAL, expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
                           details={"action": "platform_send_email", "action_description": "Send an email.",
                                    "params": {"recipient_email": "aisha@example.com"}})
     db_session.add(grant)

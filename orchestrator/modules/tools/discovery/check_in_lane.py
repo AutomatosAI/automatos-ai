@@ -195,16 +195,17 @@ def platform_actions_only_in_a_check_in(execute_tool: ExecuteTool) -> ExecuteToo
 
 def check_in_of(caller_context: Any) -> Optional[Dict[str, Any]]:
     """A check-in's own facts, from the server-built ``caller_context``: ``run_id``,
-    ``reads`` (a new list), ``agent_id`` and ``user_id`` (a follow-up's person, US-C11d).
-    None outside the lane."""
+    ``reads`` (a new list) and ``agent_id``, plus ``user_id`` only in a follow-up's turn (its
+    person, US-C11d), so a check-in's facts stay W1's. None outside the lane."""
     if not in_a_check_in(caller_context):
         return None
     reads = caller_context.get(READS_KEY)
+    person = caller_context.get(USER_KEY)
     return {
         "run_id": caller_context.get(RUN_ID_KEY),
         "reads": list(reads) if isinstance(reads, (list, tuple)) else [],
         "agent_id": caller_context.get(AGENT_KEY),
-        "user_id": caller_context.get(USER_KEY),
+        **({"user_id": person} if person is not None else {}),
     }
 
 
