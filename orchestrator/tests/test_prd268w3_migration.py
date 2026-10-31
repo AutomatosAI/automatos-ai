@@ -5,8 +5,9 @@
 ``ck_proactive_runs_outcome`` with ``posted``, and creates ``proactive_calibrations``.
 Proven here:
 
-* The revision chains onto the base head (``prd268_w2_delivery``) and nothing chains onto
-  it: it is the single head.
+* The revision chains onto the base head (``prd268_w2_delivery``) and only
+  ``prd270_w1_cloud_sync`` (PRD-270 W1) chains onto it; the single head is pinned by
+  test_prd209_alembic_single_head.py.
 * It does exactly K6's four things (five statements), each ``IF EXISTS`` / ``IF NOT
   EXISTS``, and touches no other table; the downgrade deletes only the follow-up rows and
   the posted runs, restores both CHECKs and drops the index, the column and the table.
@@ -134,7 +135,7 @@ def _pg(clause) -> str:
 # --------------------------------------------------------------------------- the chain
 
 
-def test_the_revision_chains_onto_the_base_head_and_is_the_single_head():
+def test_the_revision_chains_onto_the_base_head_and_prd270_w1_chains_onto_it():
     assert _assigned(MIGRATION, "revision") == REVISION
     assert _assigned(MIGRATION, "down_revision") == BASE_HEAD
     assert f"Revision ID: {REVISION}\nRevises: {BASE_HEAD}\n" in MIGRATION.read_text(encoding="utf-8")
@@ -145,7 +146,7 @@ def test_the_revision_chains_onto_the_base_head_and_is_the_single_head():
                       if down == parent or (isinstance(down, tuple) and parent in down))
 
     assert revises(BASE_HEAD) == [MIGRATION.name]
-    assert revises(REVISION) == []
+    assert revises(REVISION) == ["prd270_w1_cloud_sync.py"]  # 2026-10-31: W1's revision (PRD-270 US-270-00)
 
 
 # --------------------------------------------------------------------------- the steps

@@ -27,7 +27,7 @@ The downgrade drops the sync table, then the CHECK and the column. It deletes no
 would delete its installs: ``theme_installations.package_id`` is ON DELETE CASCADE).
 
 Revision ID: prd270_w1_cloud_sync
-Revises: prd268_w2_delivery
+Revises: prd268_w3_follow_ups
 Create Date: 2026-10-30
 """
 
@@ -35,7 +35,7 @@ from alembic import op
 
 
 revision = "prd270_w1_cloud_sync"
-down_revision = "prd268_w2_delivery"
+down_revision = "prd268_w3_follow_ups"
 branch_labels = None
 depends_on = None
 
