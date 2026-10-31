@@ -306,6 +306,58 @@
    ],
    "passes": false,
    "notes": "Patterns: e2e/browser/specs/marketplace-themes-tab.spec.ts (the Marketplace on the local edition, @host :141) and host-cards.spec.ts (fulfillBackendJson, chooseStyle). browser-e2e.yml: AUTH_EDITION local :373, the local frontend build :413-422, the @host run :497. A WebKit 'internal error' on reload is the Playwright 1.57 flake (rerun it), not app code."
+  },
+  {
+   "id": "P270W1-RVW-1",
+   "title": "Deactivating a Cloud version never moves an install onto a Cloud version whose files aren't stored",
+   "description": "MEDIUM (review of 7a0ff63f3). As a workspace on a local install, I want a theme version's deactivation to leave my install on a version whose files this install holds, so the theme never stops loading because an admin took a newer version down.",
+   "acceptanceCriteria": [
+    "CAUSE: services/themes/auto_update.previous_listed (:99-107) picks the newest listed, compatible version below the one taken down, and roll_back_installs (:110-124) moves every unpinned listing install on it there through updates.move_back (:197-214). A Sync writes EVERY catalogue version as an approved, reviewed Cloud row with no stored file (pull.py _cloud_row, K15), listed_versions lists them, and move_back's refusals (_refuse_unusable :109-113, _check_switch) never look at storage. Failure: after one Sync (Arcade 1.0.0, 1.1.0, 1.2.0 all Cloud rows), a workspace adds Arcade (only 1.2.0 is fetched, US-270-04a); the local owner, a super admin on the local edition (api/admin_themes.py:18-19), deactivates 1.2.0 (POST /api/admin/themes/{id}/deactivate -> review.deactivate -> roll_back_installs, review.py:370); the install's package_id becomes 1.1.0, whose theme.json and dist/entry.js were never stored, so its files route serves nothing and the theme can't load. No Sync heals it: updates.updatable_themes only moves an install UP to the newest listed version, which 1.1.0 now is. This is the wave's 'an install or update of a Cloud row whose files aren't stored'.",
+    "CHANGE: auto_update.previous_listed (or roll_back_installs) skips a candidate that is a Cloud row (source == THEME_SOURCE_CLOUD) whose files aren't stored: theme.json present and hashing to its file manifest, read with services/themes' own serve.verified_file(package, MANIFEST_PATH, read_stored_file) (what marketplace_cloud/package.is_stored reads; use serve directly, not marketplace_cloud.package, so no import cycle forms through review/auto_update). With no stored candidate the installs stay where they are and the disable sends their members to the base on the next load: the base's 'no listed version below' path, logged with the theme, the version skipped and why. A storage outage during the check skips that candidate and logs it; the deactivation (a safety action) still succeeds. A local-origin row (source NULL) is considered exactly as today, with no storage read. No network call inside review.deactivate's locked transaction (the alternative, fetching the target first, would hold that row lock over a download: say in the commit why it wasn't chosen if the story picks it). auto_update.apply_listed_update, review.approve and updates.apply_update / move_back stay byte-identical (K4); python3 -m py_compile and the code-shape script pass on the changed lines.",
+    "TEST (new file orchestrator/tests/test_prd270w1_cloud_deactivation.py, the db + fake-storage pattern of test_prd261_theme_auto_update.py:211-248, which stays unchanged): Cloud 1.1.0 not stored + Cloud 1.2.0 stored, an unpinned listing install on 1.2.0, deactivate 1.2.0 -> the install stays on 1.2.0, installsRolledBack 0 and the deactivated event's detail says 0 (FAILS on 7a0ff63f3: the install moves to 1.1.0); the same with 1.1.0 stored -> it moves to 1.1.0 as today; a local-origin 1.1.0 below -> moves as today and storage is never read for it; storage raising ThemeStorageUnavailable during the check -> the deactivation succeeds, nothing moves, logged; a pinned install never moves (unchanged). The existing test_prd261_theme_auto_update.py deactivation tests still pass."
+   ],
+   "priority": 20,
+   "passes": false,
+   "notes": "Found by the review's code-reviewer (finding 5, PLAUSIBLE) and confirmed by tracing listed_versions -> previous_listed -> move_back -> _refuse_unusable/_check_switch: none reads storage. Only review.deactivate calls roll_back_installs (the revocation pull never does), so the fix is local to that path. Reinstalling would heal an install today (install_listing's ensure_stored stores the newest listed version), but nobody is told to. security-reviewer + database-reviewer in the foreground on the change (K24: which installs move)."
+  },
+  {
+   "id": "P270W1-RVW-2",
+   "title": "A public agent's or Playbook's icon is answered only as an https URL or plain text, as fields.py says",
+   "description": "LOW (review of 7a0ff63f3). As a visitor's browser, or any client of the public API, I want an icon URL to be https only, so an approved row's http: or javascript: value never leaves an unauthenticated route.",
+   "acceptanceCriteria": [
+    "CAUSE: services/marketplace_public/fields.py's docstring (and K10's display contract) says 'an icon given as a URL is answered only when it is https', but display_item maps icon through text_or_none (fields.py:131); only applications.py:32 wraps it in https_url_or_none. agents.py:55 and playbooks.py:43 pass marketplace_icon as stored, so an approved Marketplace agent whose marketplace_icon is 'http://host/x.png', 'javascript:alert(1)' or '//host/x.png' is answered as-is by GET /api/public/marketplace/agents|playbooks (public, indexable). The web's iconOf (frontend/lib/marketplace/public-items.ts) filters it today, so no exploit in this app; the API breaks its own contract for every other reader.",
+    "CHANGE: one icon mapper in fields.py, used by display_item for every type: a value with a URL scheme (urlsplit(text).scheme non-empty) or starting with '//' is kept only when https_url_or_none keeps it; any other value is the trimmed text as today (an emoji or an icon name). applications.py keeps its https logo (unchanged answer). No allowlist key changes.",
+    "TEST (orchestrator/tests/test_prd270w1_public_reads.py, realdb as the file is): an approved agent and an approved Playbook with icon 'http://cdn.example/x.png', 'javascript:alert(1)', '//cdn.example/x.png' -> icon null; 'https://cdn.example/x.png' and an emoji -> kept as given (FAILS on 7a0ff63f3 for the first three); plus a pure unit test of the mapper. The allowlist walk and every other test still pass."
+   ],
+   "priority": 21,
+   "passes": false,
+   "notes": "Raised by both the code-reviewer (3) and the security-reviewer (3) as LOW. The values are on approved, curated Marketplace rows, which is why it isn't higher."
+  },
+  {
+   "id": "P270W1-RVW-3",
+   "title": "No database transaction stays open while Automatos Cloud answers (the Sync's catalogue read and an install's download)",
+   "description": "LOW (review of 7a0ff63f3). As the operator, I want a Sync or a Cloud theme's install to hold no idle transaction over a network read, as the post-Sync auto-update already does (US-270-04b).",
+   "acceptanceCriteria": [
+    "CAUSE: marketplace_cloud/package.ensure_stored (:210-228) downloads on the caller's session after the install and update routes have read (the auth dependency, listings.install_target at api/marketplace_themes.py:122; find_active_install in ensure_stored_for_update, api/themes_install.py:180), so the request sits idle in transaction for the download (up to DEADLINE_FACTOR x AUTOMATOS_CLOUD_TIMEOUT_SECONDS = 60 s by default) and, for a second caller, the digest lock's wait_seconds() (75 s) too; package.py:31 says so. Likewise pull._run_sync (:244-249) fetches the catalogue with the MANAGE dependency's reads still open. updates._fetched (:127-141) already does it right: expunge the row, roll back, then download. Each idle connection holds its AccessShare locks (blocking DDL) and a pool slot; this repo has a history of idle-in-transaction connections blocking DDL.",
+    "CHANGE: end the read transaction before every Automatos Cloud read. pull._run_sync: db.rollback() before fetch_bytes (nothing is written before it). ensure_stored: take what the download, the checks and the write need from the row before it (digest, theme_id, version, file_manifest, signature, storage_prefix and the verdict's keyId, e.g. by expunging the row as _fetched does), end the read transaction, then download, read, check (check_upload_signature opens its own short read) and store, in the same order: nothing stored before every 04a check passes. The routes re-read their rows afterwards (install_listing and apply_update already query again); install_listing, apply_update and every K4 function stay byte-identical; the routes' answers and status codes don't change.",
+    "TEST: test_prd270w1_cloud_install.py: inside the mocked package download (the MockTransport handler) the route's session is not in a transaction (session.in_transaction() is False), for an install and for an update (FAILS on 7a0ff63f3); test_prd270w1_cloud_pull.py: the same inside the catalogue fetch of a Sync run through the route. Every existing 04a/04b/03a/03b test still passes."
+   ],
+   "priority": 22,
+   "passes": false,
+   "notes": "Raised by the database-reviewer (1, 2) and the security-reviewer (4). The revocation pull's admin route has the same shape on the base (revocation_pull.pull_feed): it is K13-frozen and not part of this story."
+  },
+  {
+   "id": "P270W1-RVW-4",
+   "title": "A Sync counts only a unique-index collision as 'written meanwhile'; any other integrity error fails the Sync",
+   "description": "LOW (review of 7a0ff63f3). As the operator, I want a bug in the row a Sync builds to fail the Sync with its plain error, never to show up only as a refused count.",
+   "acceptanceCriteria": [
+    "CAUSE: pull.write_item (:179-193) catches every IntegrityError as 'another Sync or a submission wrote that version or digest meanwhile' and the item is counted refused with a warning, so a CHECK (ck_theme_packages_source, the status CHECK), NOT NULL or foreign-key violation, which is a bug in _cloud_row, is swallowed as a count instead of rolling the Sync back with NOT_SAVED (AGENTS.md: never swallow an error). Also apply_catalog (:221-223) adds the item to held (held.with_item) even when the write was refused, so a second catalogue entry with that digest reads 'unchanged' though nothing was written.",
+    "CHANGE: write_item treats only a unique violation as 'written meanwhile' (the DBAPI error's pgcode '23505', or its constraint name being one of theme_packages' unique indexes) and re-raises any other IntegrityError, which _run_sync's SQLAlchemyError branch turns into _failed(NOT_SAVED) with nothing written; apply_catalog adds an item to held only when it was written.",
+    "TEST (orchestrator/tests/test_prd270w1_cloud_pull.py, realdb): a monkeypatched _cloud_row that breaks a CHECK (e.g. status 'bogus') -> the Sync fails with pull.NOT_SAVED, no Cloud row and no review event written, last_error recorded (FAILS on 7a0ff63f3: it succeeds with refused 1); the existing test_a_row_written_meanwhile_refuses_only_its_item still passes; a catalogue listing the same item twice whose first write a unique index refuses counts both refused, none unchanged."
+   ],
+   "priority": 23,
+   "passes": false,
+   "notes": "Raised by the database-reviewer (4). Not filed (LOW, the reviewer's call, listed in the review's report for the owner): the status row's first insert can collide across two workers (the local default is WEB_CONCURRENCY=1, envs/api.defaults:48)."
   }
  ]
 }
