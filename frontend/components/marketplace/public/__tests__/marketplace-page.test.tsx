@@ -33,6 +33,7 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }))
+vi.mock('next/navigation', () => ({ usePathname: () => '/marketplace', useSearchParams: () => new URLSearchParams() }))
 vi.mock('@/hooks/use-page-api', () => ({ usePageAPI }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
@@ -78,8 +79,8 @@ describe('MarketplacePage (PRD-270 US-270-08a)', () => {
     render(<MarketplacePage />)
 
     expect(screen.getByRole('img', { name: 'Automatos logo' })).toHaveAttribute('src', '/brand/automatos-mark-hi.png')
-    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in')
-    expect(screen.getByRole('link', { name: 'Start free' })).toHaveAttribute('href', '/sign-up')
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in?redirect_url=%2Fmarketplace')
+    expect(screen.getByRole('link', { name: 'Start free' })).toHaveAttribute('href', '/sign-up?redirect_url=%2Fmarketplace')
     expect(screen.getByRole('heading', { name: 'Community Marketplace' })).toBeInTheDocument()
     expect(screen.getByTestId('visitor-tabs')).toBeInTheDocument()
     expect(screen.queryByTestId('main-layout')).not.toBeInTheDocument()

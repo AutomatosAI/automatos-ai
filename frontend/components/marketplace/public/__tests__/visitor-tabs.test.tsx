@@ -38,6 +38,7 @@ vi.mock('@clerk/nextjs', () => ({ useReverification: (fetcher: unknown) => fetch
 
 import { SIGNED_BY_AUTOMATOS } from '@/components/settings/themes/theme-labels'
 import { CATALOG_ENDPOINT } from '@/lib/marketplace/public-catalog'
+import { marketplaceItemPath, signInUrl } from '@/lib/marketplace/return-after-sign-in'
 import {
   ARCADE_DIGEST,
   ARCADE_NEW,
@@ -66,9 +67,10 @@ import {
   SUBMIT_PACKAGE,
 } from '../../themes/storefront/copy'
 import { NO_ITEM_MATCHES, SHOW_MORE, itemDetails } from '../copy'
-import { signInToAdd } from '../visitor-add'
 import { VisitorTabs, visitorTab } from '../visitor-tabs'
 
+/** The visitor's Add link: sign-in, then back on the item (US-270-09a). */
+const signInToAdd = (tab: string, item: string) => signInUrl(marketplaceItemPath(tab, item))
 const ARCADE_FILES = `${BASE}${filesOf(ARCADE_DIGEST)}`
 const PUBLIC_REQUEST = /^\/api\/(marketplace\/catalog|public\/marketplace\/[a-z]+\?limit=100&offset=\d+)$/
 const READ = /^\/api\/public\/marketplace\/([a-z]+)\?limit=100&offset=(\d+)$/

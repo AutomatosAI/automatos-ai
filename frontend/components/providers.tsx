@@ -19,6 +19,7 @@ import { ChooseInstallProvider } from './settings/themes/choose-install'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
 import { isSaaS } from '@/lib/auth-edition'
+import { ResumeAfterSignIn } from './auth/resume-after-sign-in'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
 // picker entry like any other theme (D1a); the default stays `system` until
@@ -137,6 +138,7 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
                 <GlobalSearch />
               </ChooseInstallProvider>
               <Toaster position="top-right" richColors closeButton />
+              <ResumeAfterSignIn />
             </WorkspaceProvider>
           </QueryClientProvider>
           </UiStyleProvider>
