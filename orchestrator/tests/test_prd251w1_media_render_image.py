@@ -173,7 +173,8 @@ def test_the_media_render_job_runs_on_demand_only():
     """7 Oct (Gerard): the media-render lanes live in their own workflow, run from the Actions
     tab when the Socials feature changes, never on a pull request or a push."""
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "media-render.yml").read_text())
-    assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
+    # Its one input, PRD-262 US-050's listening test, adds a job; it adds no trigger.
+    assert list(workflow.get("on", workflow.get(True))) == ["workflow_dispatch"]
     job = workflow["jobs"].get("media-render")
     assert job is not None, "the media-render job is missing from media-render.yml"
     assert job["name"] == "media-render — image builds and renders the fixture"
