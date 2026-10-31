@@ -1,6 +1,11 @@
 # PRD-271: Phone layout contracts — a creator's theme picks one of Automatos Go's built-in layouts
 
 **Status:** Draft for Gerard, 31 Oct 2026. Every §8 recommendation stands unless Gerard changes it (his 29 Oct rule).
+W1 built (draft PR, 31 Oct 2026); where the build found the code saying otherwise, the PRD follows the code: a tint
+also takes `transparent` and Candy's blobs are tints (§4.1, §4.3); a `{"look": …}` variable is one the table's knobs
+or pairs write, never a numeric rule's (§4.1); the defaults must fill every slot taken from the look, not only the
+required ones (§4.4, C02); the skin's look under `fromLooks` is the one its tokens are painted from (§4.4); the review
+corpus gains the `contrast` check (C04); and the core files (§7).
 **Owner:** Gerard · **Grounded on:** `automatos-ai` `main @ 1a8956c87`, `automatos-go` `main @ 39b638c` and
 `feat/a9-candy @ 99ed5aa` (Candy, A9, Ralph running), `automatos-design-kit` `main @ eb516bd`.
 **Gerard's decision (31 Oct 2026, 01:40):**
@@ -93,8 +98,12 @@ without a catalogue can't supply: `arcade/PauseButton.tsx:25`, `arcade/parts/use
 - `layout` and `slots` come together. Each slot value is a literal of the slot's kind, or `{"look": …}`: a
   `--variable` the theme's `boot/prepaint.json` writes (colour and tint slots) or a look knob (number and choice
   slots). One theme can mix both. `{"look": …}` needs `boot/prepaint.json`.
-- Slot kinds: `colour` (`#rrggbb` or `H S% L%`), `tint` (a colour, or `rgba(r,g,b,a)`), `number` (an integer in the
-  slot's range), `choice` (one of the slot's named options).
+- Slot kinds: `colour` (`#rrggbb` or `H S% L%`), `tint` (a colour, `rgba(r,g,b,a)` with no spaces, or `transparent`:
+  Candy's prepaint paints its aura blobs `transparent` off Vivid), `number` (an integer in the slot's range),
+  `choice` (one of the slot's named options).
+- A `{"look": "--name"}` names a variable the table's knobs or pairs write, as the browser's first paint keeps it; a
+  numeric rule's variable is painted last from the look's number, so it is never a slot's source (take the knob
+  itself into a number slot). A `{"look": "knob"}` names a knob of the table's looks (`lookSpecOf`).
 - Fonts and the mascot stay the block's existing fields; the contract says which text each font role draws on that
   layout and which mascot modes it honours (D-6).
 - A block with `layout` needs host contract 1.2.0: `engines.automatos` must admit no older host (as
@@ -149,8 +158,8 @@ colours. Defaults are the home theme's default preset's values [T].
 |---|---|---|---|---|
 | Required colours | `bg`, `surface`, `text`, `text2`, `accent`, `accentInk`, `autoLight` | `bg`, `accent`, `accentInk` | `page`, `win`, `bar`, `barTx`, `tx`, `tx2`, `bd`, `ac`, `aci`, `hl`, `hlt`, `hp`, `xp`, `mp`, `qs` | `page`, `bandA`, `bandB`, `band1`-`band3`, `win`, `chip`, `text`, `quiet`, `border`, `bandQuiet`, `accent`, `accentInk`, `accentText`, `userA`, `userB`, `userInk`, `stageInk`, `cardInk`, `g1a`-`g3c` |
 | Required tints | `line`, `chip`, `panel` | — | `sh`, `bevl`, `bevd` | `line`, `tint` |
-| Optional | `error` (#FF6B6B), `glow` 0-40, `shell` (bronze, gold, silver, cobalt) | `grid` 0-30, `glow` 0-40, `scan` on/off, `auto` on/off | the 13 map colours (Overworld's), `art` (bronze, shades), `scanlines`, `windowStyle`, `pixelScale` | `blob1`-`blob3`, `gradient`, `roundness` 16-40, `glow` 0-10 |
-| Fixed by the layout | coral error unless set | text, text2, line, track, error (`HUD_FIXED`) | — | danger fill and ink per tone; info blue and agent violet, made readable on the theme's grounds |
+| Optional | `error` (#FF6B6B), `glow` 0-40, `shell` (bronze, gold, silver, cobalt) | `grid` 0-30, `glow` 0-40, `scan` on/off, `auto` on/off | the 13 map colours `g1`-`wall` (Overworld's), `art` (bronze, shades), `pixelScale` ("2", "3"), `scanlines` (off, soft, strong), `windowStyle` (classic, thin) | tints `blob1`-`blob3`, `gradient`, `roundness` 16-40, `glow` 0-10 |
+| Fixed by the layout | coral error unless set | text, text2, line, track, error (`HUD_FIXED`, the table's `fixed`) | — | danger fill and ink per tone; info blue and agent violet, made readable on the theme's grounds (derived in the app per tone; no pair names them, so they are not in the table's `fixed`) |
 | Tone | ground: `bg` vs `text` | always dark | ground: `page` vs `tx` | ground: `page` vs `text` |
 | Pairs | 5 (text and text2 on bg and surface, ink on accent) | 4 (fixed text and text2 on bg, ink on accent, accent on bg at 3:1) | 15 | 34 |
 | Fonts | serif display, sans body, mono labels | serif display, mono labels and transcript, sans body | serif titles and labels, sans running text | serif titles, sans body |
@@ -167,11 +176,12 @@ colours. Defaults are the home theme's default preset's values [T].
 ```
 
 - Every slot of the contract is present: literals as written, `{"look": …}` resolved for the **same look** the skin
-  paints (`_stored_active_look`, else the defaults), optional slots left out filled with the contract's default.
+  paints (under `fromLooks` the look its tokens are painted from, `_phone_look`; else `_stored_active_look`; none
+  paints the defaults), optional slots left out filled with the contract's default.
 - Resolution is a sibling of `_phone_tokens`: `mobile_tokens.paint_vars(table, look, names)` walks the same table
   in the same order and keeps the named variables whatever their form (`#rrggbb`, triplet, `rgba()`), each checked
   against its slot's kind. A look that doesn't fit paints the defaults whole, as today. Defaults that can't fill a
-  required slot give `layout: null` (logged): the phone draws the Studio skin.
+  slot give `layout: null` (logged): the phone draws the Studio skin. A block with no layout gives `layout: null` too.
 - `tone` is the contract's tone rule over the resolved slots, so core, kit and Go agree.
 - No new route and no new discovery capability: the field's presence is the signal, and an older server simply lacks
   it (D-9).
@@ -222,7 +232,7 @@ Membership, opt-in and revocation keep `mobile` null exactly as today. The table
   choice; `layout` without `slots` and the reverse refused
 - [ ] `THEME_HOST_VERSION` and `shared-modules.json` `hostVersion` → 1.2.0; `LAYOUT_MIN_HOST = "1.2.0"`
 - [ ] At package check: each `{"look": …}` names a variable or knob the prepaint table has, and the defaults fill
-  every required slot (`MOBILE_CANNOT_PAINT` naming the slot). A number slot from a knob takes its number, or a
+  every slot the block takes from the look (`MOBILE_CANNOT_PAINT` naming the slot). A number slot from a knob takes its number, or a
   choice key that names one (Candy's `roundness` is a string key since kit 1.0.1)
 - [ ] TS twin `frontend/lib/theme-host/mobile-layout.ts`; new `manifests` cases in `tests/fixtures/themes/cases.json`
   hold both languages to the same verdicts
@@ -235,7 +245,8 @@ Membership, opt-in and revocation keep `mobile` null exactly as today. The table
 #### US-271-C04: Review contrast per layout
 - [ ] `measure_mobile` measures the contract's pairs over the slots: once for fixed slots; for look slots, the
   defaults then each preset (as `_look_tokens`); the Studio skin is still measured. A failing pair blocks the
-  listing (`MOBILE_CONTRAST_FAIL_LEVEL`); new `review-cases.json` cases
+  listing (`MOBILE_CONTRAST_FAIL_LEVEL`); new `review-cases.json` cases, the corpus gaining the `contrast` check
+  (the kit's K02 follows it)
 #### US-271-C05: Docs
 - [ ] `docs/theme-host/mobile.md`: the `layout` and `slots` fields, the table, the answer's `layout`, the fallback
 
@@ -305,7 +316,7 @@ Gerard's (Q1).
 
 | Repo | Files |
 |---|---|
-| core | new `services/themes/{data/phone-layouts.json, layout_contracts.py, mobile_layout.py}`, `frontend/lib/theme-host/{phone-layouts.json, mobile-layout.ts}`; changed `mobile_manifest.py`, `mobile.py`, `mobile_tokens.py`, `mobile_contrast.py`, `contract.py`, `shared-modules.json`, `api-client.ts`, `docs/theme-host/mobile.md`, both corpora |
+| core | new `services/themes/{data/phone-layouts.json, layout_contracts.py, layout_slots.py (the kinds), layout_paint.py (the resolution the reader, the answer and the review share), mobile_layout.py, layout_contrast.py}`, `frontend/lib/theme-host/{phone-layouts.json, mobile-layout.ts, mobile-colour.ts}`; changed `mobile_manifest.py`, `mobile.py`, `mobile_tokens.py`, `mobile_contrast.py`, `review_stage.py`, `package.py`, `contract.py`, `shared-modules.json`, `mobile-manifest.ts`, `api-client.ts`, `test.yml` (`FRONTEND_PATHS`), `docs/theme-host/mobile.md`, both corpora |
 | kit | `packages/theme-cli/src/core/*` (re-vendor), `mobile-answer.ts`, `check/mobile-contrast.ts`, `skin-check.ts`; `packages/theme-harness/src/phone/skin.ts`, `app/phone/` (layout view, designer); `guides/` |
 | Go | `scripts/core-manifest.json`, `src/styles/registry/{layouts.ts, style-id.ts, picker.ts}`, `themes/{schemas,layout-paint,types,follow,installed}.ts`, `provider/resolve.ts`, `tokens/{play,hud,arcade,candy}.ts`, the §1 readers |
 
