@@ -30,6 +30,11 @@ HOSTED_PUBLIC_API_HOST = "api.automatos.app"
 # An unset publish address is this machine only, as compose's own default (PRD-266 §4.3).
 DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
 
+# Default for CLERK_AUTHORIZED_PARTIES: the production frontend and saas-mode local
+# development. The Studio site (studio.automatos.app) is left out on purpose: it
+# only joins the waitlist and never calls this API with a session token.
+CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:3000"
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -571,6 +576,14 @@ class Config:
     CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
     CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
     CLERK_AUDIENCE: str = os.getenv("CLERK_AUDIENCE", "")
+    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk
+    # session tokens the API accepts, comma-separated. FRONTEND_URL's origin is
+    # always added. A token whose azp names any other origin gets a 401.
+    CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
+    # A token with no azp at all (Clerk omits it when the minting request had no
+    # Origin: native apps, tokens minted through the Backend API). false = log a
+    # warning and accept it; true = 401.
+    CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
