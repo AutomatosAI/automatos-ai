@@ -207,7 +207,7 @@ services:
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
     # maintained build; its free tier offers only `latest`, so the digest pins it
     # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
-    image: cgr.dev/chainguard/minio:latest@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
+    image: cgr.dev/chainguard/minio:latest@sha256:a1d2b3516a41296510f7fb49184c18b88287fa8f35cf3ce5c047289053b94964
     container_name: automatos_minio
     restart: unless-stopped
     # No user: key. MinIO runs as the image's own user, uid 65532, never root
@@ -249,7 +249,7 @@ services:
   # Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
   # ===========================================================================
   qdrant:
-    image: qdrant/qdrant:latest@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    image: qdrant/qdrant:latest@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     container_name: automatos_qdrant
     restart: unless-stopped
     profiles: ["memory"]
