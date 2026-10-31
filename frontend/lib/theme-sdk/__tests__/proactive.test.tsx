@@ -5,6 +5,8 @@
  * - The SDK module hands a theme the same functions as the area modules, and DISPLAY_STATE_LABELS is the host's table.
  * - Each hook asks the host's endpoint into the host's cache (a theme's read and the host's surfaces share one
  *   answer), hands back a frozen copy, and checks a theme's input before anything is sent; calibration asks nothing.
+ * - useSuggestions hands back only the signed-in person's own suggestions (GET /api/profile names them): an owner's or
+ *   admin's list holds the workspace's, and until the person is known no row is handed back.
  * - Each default component is the host's (its words, its names, its protected surface, its route), with the theme's
  *   props checked: a prop of the wrong kind throws, naming the card and the prop, and what a card hands back is frozen.
  */
@@ -15,11 +17,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const requestMock = vi.hoisted(() => vi.fn())
 const postMock = vi.hoisted(() => vi.fn())
+const profileMock = vi.hoisted(() => vi.fn())
+const authMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/api-client', () => ({
   apiClient: {
     request: (...args: unknown[]) => requestMock(...args),
     post: (...args: unknown[]) => postMock(...args),
+    getProfile: (...args: unknown[]) => profileMock(...args),
   },
+}))
+vi.mock('@/lib/auth-hooks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/auth-hooks')>()),
+  useAuth: () => authMock(),
 }))
 vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' } }) }))
 vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => ({ mutate: vi.fn() }) }))
@@ -64,6 +73,22 @@ const SUGGESTION = {
   est_credits: null, created_at: null, delivered_at: null, expires_at: null,
 } as const satisfies sdk.Suggestion
 
+/** users.id of the workspace's admin (SUGGESTION is addressed to them) and of a member. */
+const ADMIN = 1
+const MEMBER = 2
+const MEMBERS_ID = '3c9e1f7a-6b2d-4e8f-a1c3-5d7e9f0b2a4c'
+const MEMBERS_SUGGESTION = { ...SUGGESTION, id: MEMBERS_ID, user_id: MEMBER, title: 'Chase the Porto invoice' } as const satisfies sdk.Suggestion
+
+/** The identity provider's session for a signed-in person. */
+function sessionOf(userId: string) {
+  return { isLoaded: true, isSignedIn: true, userId }
+}
+
+/** GET /api/profile's answer for the person `id` (null: the server has no row for them). */
+function profileOf(id: number | null) {
+  return { edition: 'saas', editable: false, id, email: null, name: null, username: null, avatar_url: null, system_role: 'user', email_note: '' }
+}
+
 const ROW = { id: 'sugg:1', title: 'Lisbon flights', why: 'Prices dropped', action: { verb: 'start', label: 'Start' } } as const
 const BRIEF = {
   v: 1, date: TODAY, greeting: 'Morning, Sam.', prose: 'Two things need you today.',
@@ -101,6 +126,10 @@ function silenceBoundary() {
 beforeEach(() => {
   requestMock.mockReset()
   postMock.mockReset()
+  profileMock.mockReset()
+  profileMock.mockResolvedValue(profileOf(ADMIN))
+  authMock.mockReset()
+  authMock.mockReturnValue(sessionOf('user_admin'))
   requestMock.mockImplementation(async (path: string) => {
     if (path === SUGGESTIONS_PATH) return { suggestions: [SUGGESTION] }
     if (path === READINESS_PATH) return READINESS
@@ -209,6 +238,94 @@ describe('proactive hooks — the host’s endpoints and cache', () => {
     expect(() => result.current.answer.run({ calibration_id: '', answer: 'accept' })).toThrow(/^Automatos theme SDK: useAnswerCalibration/)
     expect(requestMock).not.toHaveBeenCalled()
     expect(postMock).not.toHaveBeenCalled()
+  })
+})
+
+/** The host's open list answers `rows`, as GET /api/proactive/suggestions does for an owner or admin. */
+function hostListHolds(rows: readonly sdk.Suggestion[]) {
+  requestMock.mockImplementation(async (path: string) => {
+    if (path === SUGGESTIONS_PATH) return { suggestions: rows }
+    throw new Error(`unexpected request ${path}`)
+  })
+}
+
+const idsOf = (rows: readonly sdk.Suggestion[] | null) => rows?.map((row) => row.id) ?? null
+
+describe('useSuggestions — the signed-in person’s own open suggestions', () => {
+  it('an admin, whose host list holds their own and a member’s, gets only their own', async () => {
+    hostListHolds([SUGGESTION, MEMBERS_SUGGESTION])
+    const { client, wrapper } = setup()
+    const { result } = renderHook(() => sdk.useSuggestions(), { wrapper })
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    expect(client.getQueryData(suggestionQueryKeys.open)).toHaveLength(2)
+    expect(idsOf(result.current.data)).toEqual([ID])
+    expect(Object.isFrozen(result.current.data)).toBe(true)
+    expect(Object.isFrozen(result.current.data?.[0])).toBe(true)
+  })
+
+  it('a member gets their own, and no row the host’s list holds for someone else', async () => {
+    profileMock.mockResolvedValue(profileOf(MEMBER))
+    hostListHolds([SUGGESTION, MEMBERS_SUGGESTION])
+    const { result } = renderHook(() => sdk.useSuggestions(), { wrapper: setup().wrapper })
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    expect(idsOf(result.current.data)).toEqual([MEMBERS_ID])
+    expect(result.current.data?.[0]).toMatchObject({ user_id: MEMBER, title: MEMBERS_SUGGESTION.title })
+  })
+
+  it('while the signed-in person is unknown, no other person’s suggestion is ever handed back', async () => {
+    let answerProfile: (profile: unknown) => void = () => undefined
+    profileMock.mockReturnValue(
+      new Promise((resolve) => {
+        answerProfile = resolve
+      }),
+    )
+    hostListHolds([SUGGESTION, MEMBERS_SUGGESTION])
+    const { client, wrapper } = setup()
+    const seen: (readonly sdk.Suggestion[] | null)[] = []
+    const { result } = renderHook(() => {
+      const read = sdk.useSuggestions()
+      seen.push(read.data)
+      return read
+    }, { wrapper })
+    await waitFor(() => expect(client.getQueryData(suggestionQueryKeys.open)).toHaveLength(2))
+    await act(async () => undefined)
+    expect(result.current).toMatchObject({ data: null, isLoading: true, error: null })
+    await act(async () => answerProfile(profileOf(ADMIN)))
+    await waitFor(() => expect(idsOf(result.current.data)).toEqual([ID]))
+    expect(seen.flatMap((rows) => rows ?? []).filter((row) => row.user_id !== ADMIN)).toEqual([])
+  })
+
+  it('another person signed in in the same tab gets their own, never the previous person’s', async () => {
+    hostListHolds([SUGGESTION, MEMBERS_SUGGESTION])
+    const { wrapper } = setup()
+    const seen: (readonly sdk.Suggestion[] | null)[] = []
+    const { result, rerender } = renderHook(() => {
+      const read = sdk.useSuggestions()
+      seen.push(read.data)
+      return read
+    }, { wrapper })
+    await waitFor(() => expect(idsOf(result.current.data)).toEqual([ID]))
+    const before = seen.length
+    profileMock.mockResolvedValue(profileOf(MEMBER))
+    authMock.mockReturnValue(sessionOf('user_member'))
+    rerender()
+    await waitFor(() => expect(idsOf(result.current.data)).toEqual([MEMBERS_ID]))
+    expect(seen.slice(before).flatMap((rows) => rows ?? []).filter((row) => row.user_id !== MEMBER)).toEqual([])
+  })
+
+  it('a person the server has no row for gets none, and a failed read of who is signed in is the error, never the list', async () => {
+    hostListHolds([SUGGESTION, MEMBERS_SUGGESTION])
+    profileMock.mockResolvedValue(profileOf(null))
+    const nobody = renderHook(() => sdk.useSuggestions(), { wrapper: setup().wrapper })
+    await waitFor(() => expect(nobody.result.current.data).toEqual([]))
+    nobody.unmount()
+    profileMock.mockRejectedValue(new Error('HTTP 503'))
+    const { client, wrapper } = setup()
+    const failed = renderHook(() => sdk.useSuggestions(), { wrapper })
+    await waitFor(() => expect(failed.result.current.error).toBe('HTTP 503'))
+    await waitFor(() => expect(client.getQueryData(suggestionQueryKeys.open)).toHaveLength(2))
+    await act(async () => undefined)
+    expect(failed.result.current).toMatchObject({ data: null, isLoading: false, error: 'HTTP 503' })
   })
 })
 
