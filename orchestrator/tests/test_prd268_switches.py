@@ -8,7 +8,8 @@ commit inside it, by SAVEPOINT). Proven here:
   where it switched check-ins on, else off; no platform row is ``PROACTIVE_MODE_DEFAULT``;
   a settings read that fails skips the run (fail closed): the platform mode and the
   workspace switch (``skipped_off``), the owner's pause (``skipped_paused``) and the caps
-  (``skipped_cap``, ``caps_unreadable``), each a run row and no model call;
+  (``skipped_cap``, ``caps_unreadable``), each a run row and no model call; a paused owner's
+  live check-ins post nothing and raise no ``suggestion_ready``, so no suggestion push;
 * **the caps** (``services.proactive.limits``): config's defaults are the §6.9 numbers and
   every workspace's that set none; a workspace's own replace them one by one and can only
   tighten them (a looser stored cap is held to the platform's); each refuses with its
@@ -307,6 +308,31 @@ def test_a_paused_owner_is_skipped_and_resuming_lets_the_check_in_start(team, ch
 
     assert _as(team, team.owner).put(ME, json={"paused": False}).json() == {"paused": False, **NO_QUIET_HOURS}
     assert _goes_ahead(team)
+
+
+def test_a_paused_owners_live_check_ins_post_nothing_and_raise_no_suggestion_push(team, checking, monkeypatch):
+    """The suggestion push is pause-aware at the check-in's start: refused, the run makes no
+    suggestion, so nothing is posted and no ``suggestion_ready`` (what a push is sent for) is
+    raised. The dispatcher's calls are recorded (CI's test database has no ``notifications``)."""
+    from core.services.notification_dispatcher import NotificationDispatcher
+
+    rung = []
+
+    async def record(self, **kwargs):
+        rung.append(kwargs.get("event_type"))
+        return {"dispatched_to": []}
+
+    monkeypatch.setattr(NotificationDispatcher, "dispatch", record)
+    checking.mode = "live"
+    assert _as(team, team.owner).put(ME, json={"paused": True}).status_code == 200
+    _refused(team, checking, _workspace_check_in(team), "skipped_paused", "paused")
+    _refused(team, checking, _agent_check_in(team), "skipped_paused", "paused")
+
+    made = team.db.execute(text(
+        "SELECT (SELECT count(*) FROM messages WHERE workspace_id = CAST(:w AS uuid)), "
+        "(SELECT count(*) FROM proactive_suggestions WHERE workspace_id = CAST(:w AS uuid))"),
+        {"w": str(team.ws)}).one()
+    assert rung == [] and tuple(made) == (0, 0)
 
 
 def test_another_members_pause_does_not_hold_the_owners_check_ins(team, checking):

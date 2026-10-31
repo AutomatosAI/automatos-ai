@@ -2,8 +2,11 @@
 
 * ``suggestions``: one workspace's suggestions in one state, newest first. ``everyone`` (an
   owner or admin) lists every person's; anyone else lists only the ones addressed to them
-  (``user_id``), and nothing without one. The workspace's open suggestions past their 7 days
-  lapse first (``services.proactive.expiry``): they list as ``expired``, never ``open``.
+  (``user_id``), and nothing without one. A person who paused suggestions (§6.9,
+  ``services.proactive.switches.person_paused``: a pause that cannot be read is a pause)
+  lists none of their own: nothing, or, as an owner or admin, every other person's. The
+  workspace's open suggestions past their 7 days lapse first (``services.proactive.expiry``):
+  they list as ``expired``, never ``open``.
 * ``runs``: one workspace's check-in runs since a time, newest first: the audit an owner
   compares with the tickets the heartbeats filed over the shadow week (§10). Without a time,
   the last ``RUNS_WINDOW``.
@@ -20,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from core.models.proactive import ProactiveRun, ProactiveSuggestion
 from services.proactive.expiry import expire_lapsed
+from services.proactive.switches import person_paused
 
 __all__ = [
     "DEFAULT_RUNS",
@@ -42,15 +46,20 @@ RUNS_WINDOW = timedelta(days=7)
 def suggestions(db: Session, workspace_id: UUID, *, status: str, limit: int, everyone: bool,
                 user_id: Optional[int]) -> List[ProactiveSuggestion]:
     """The workspace's suggestions in ``status``, newest first: every person's when
-    ``everyone``, else ``user_id``'s alone (none without one). Open ones that have lapsed
-    are expired before the read."""
-    if not everyone and user_id is None:
+    ``everyone``, else ``user_id``'s alone (none without one). While ``user_id`` has paused
+    suggestions (§6.9; a pause that cannot be read is a pause) none of theirs are listed:
+    nothing, or every other person's when ``everyone``. Open ones that have lapsed are
+    expired before the read."""
+    paused = user_id is not None and person_paused(db, workspace_id, user_id)
+    if not everyone and (user_id is None or paused):
         return []
     expire_lapsed(db, workspace_id, datetime.now(timezone.utc))
     query = db.query(ProactiveSuggestion).filter(
         ProactiveSuggestion.workspace_id == workspace_id, ProactiveSuggestion.status == status)
     if not everyone:
         query = query.filter(ProactiveSuggestion.user_id == user_id)
+    elif paused:
+        query = query.filter(ProactiveSuggestion.user_id != user_id)
     return query.order_by(ProactiveSuggestion.created_at.desc(), ProactiveSuggestion.id).limit(limit).all()
 
 
