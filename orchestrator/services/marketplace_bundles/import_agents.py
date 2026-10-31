@@ -27,7 +27,10 @@ held (case-insensitively, as ``cascade_installer._marketplace_agent_named`` find
 ``.first()`` of any of one name) by another marketplace agent, which would make that lookup pick either;
 or its mapping naming a row that is no longer a marketplace agent. K14 names the rows without a mapping;
 another Cloud agent of the same name refuses it too (the reviews of US-270-13b), for the same reason: the
-first one written keeps the name. Refusals are this module's own sentences, logged with the externalId
+first one written keeps the name. So does a marketplace agent whose SLUG is that name (the security review of
+US-270-14g): an install by reference (``package_installer._find_marketplace_agent``, a seeded package's members)
+reads a slug or a name, ``.first()`` of either, so a Cloud agent named after a seeded one's slug could be
+installed in its place, without its disclosure. Refusals are this module's own sentences, logged with the externalId
 (it passed its pattern), never a value of the bundle.
 """
 from __future__ import annotations
@@ -55,7 +58,7 @@ logger = logging.getLogger(__name__)
 ITEM_TYPE = AGENT_ITEM
 ACTIVE = "active"  # Agent.status of a row an install may clone
 
-NAME_HELD = "A marketplace agent this install holds already has its name."
+NAME_HELD = "A marketplace agent this install holds already has its name, or has it as its slug."
 NOT_A_MARKETPLACE_ROW = "The agent this install held for it is gone or is no longer a marketplace agent."
 BAD_VERSION = "Its version can't be recorded here."
 
@@ -137,11 +140,12 @@ def _is_marketplace_row(row: Optional[Agent]) -> bool:
 
 def name_held(db: Session, name: str, own_id: Optional[int] = None) -> bool:
     """Whether a marketplace agent other than ``own_id`` (the item's own Cloud row, when it has one) is
-    called ``name``, case-insensitively: by Python's lower-casing, as the Playbook install compares, and
-    by the database's, which differ for some non-ASCII names."""
-    lowered = func.lower(Agent.name)
+    called ``name``, or has it as its slug, case-insensitively: by Python's lower-casing, as the Playbook
+    install compares, and by the database's, which differ for some non-ASCII names."""
+    held_as = (func.lower(Agent.name), func.lower(Agent.slug))
     query = db.query(Agent.id).filter(
-        Agent.owner_type == MARKETPLACE_OWNER, or_(lowered == name.lower(), lowered == func.lower(name)),
+        Agent.owner_type == MARKETPLACE_OWNER,
+        or_(*(column == said for column in held_as for said in (name.lower(), func.lower(name)))),
     )
     if own_id is not None:
         query = query.filter(Agent.id != own_id)
