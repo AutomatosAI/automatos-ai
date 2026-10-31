@@ -19,8 +19,8 @@ limit runs the real ``RateLimitStore`` over a fake Redis. Proven here:
   the local edition is 404 before the limit counts; 429 with ``Retry-After`` in the route's own bucket;
 * the bundle route answers from the catalogue's build: a fresh build is reused, an unlisted revision
   builds nothing of its own, and a process without a build builds once;
-* W1's own reader (``feed.parse_catalog`` as on this branch) given this catalogue lists the same themes,
-  refuses nothing and skips the entries (K11's older reader);
+* the local reader (``feed.parse_catalog``) given this catalogue lists the same themes, refuses nothing and
+  reads every entry onto ``entries`` (US-270-13a's dispatch; a W1-only reader skipped them, K11);
 * the route is a plain ``def`` with no request-context or permission dependency, in the route manifest,
   mounted by ``RouterSpec``.
 
@@ -432,7 +432,8 @@ def test_w1_s_own_reader_lists_the_same_themes_and_fails_nothing(hosted):
     parsed = feed.parse_catalog(resp.content, hosted.db)
     assert [(item.theme_id, item.version, item.digest) for item in parsed.items] == [
         (theme.theme_id, theme.version, theme.digest)]
-    assert parsed.refused == () and parsed.skipped == len(entries) >= len(TYPE_ORDER)
+    assert parsed.refused == () and parsed.skipped == 0 and parsed.entries.refused == ()
+    assert len(parsed.entries.listed) == len(entries) >= len(TYPE_ORDER)
 
 
 def test_the_route_is_public_a_plain_def_in_the_manifest_and_mounted_by_router_spec():

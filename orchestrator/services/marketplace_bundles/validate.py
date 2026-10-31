@@ -25,7 +25,7 @@ from services.marketplace_bundles.schema import (
     BUNDLE_SCHEMA, DOCUMENT_STEP_TYPE, SCALAR_NUMBER_MAX, SCALAR_TEXT_MAX, TYPE_SPECS, Spec, is_plain_text, number, text,
 )
 
-__all__ = ["BundleError", "validate_bundle"]
+__all__ = ["BundleError", "check_value", "validate_bundle"]
 
 ROOT = "bundle"
 # A scalar that is text or a number: any text, or any number either side of zero, up to its cap.
@@ -40,6 +40,13 @@ def validate_bundle(data: Any) -> Dict[str, Any]:
     if data["type"] == "playbook":
         _check_steps(data["playbook"])
     return data
+
+
+def check_value(value: Any, spec: Spec, where: str) -> None:
+    """Check ``value`` against ``spec`` (built with schema.py's builders) as a bundle's fields are
+    checked, naming it ``where`` in a message; raise BundleError on the first problem. A catalogue
+    entry's fields are checked this way (items_feed.py)."""
+    _walk(value, spec, where)
 
 
 def _type_spec(data: Any) -> Spec:
