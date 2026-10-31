@@ -18,7 +18,7 @@ out, the long description cut to its cap. A bundle refused all the same is logge
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Query, Session
 
@@ -52,10 +52,14 @@ _COLUMNS = (
 )
 
 
-def exported_plugins(db: Session) -> List[ExportedItem]:
-    """One ExportedItem per approved, active plugin whose scan said safe, by slug; a plugin whose bundle
-    validate_bundle refuses is logged and left out."""
-    rows = _selected(db.query(*_COLUMNS)).order_by(MarketplacePlugin.slug).all()
+def exported_plugins(db: Session, *, slug: Optional[str] = None) -> List[ExportedItem]:
+    """One ExportedItem per approved, active plugin whose scan said safe, by slug (only ``slug``'s when it
+    is given: the plugin package route, US-270-12d); a plugin whose bundle validate_bundle refuses is
+    logged and left out."""
+    query = _selected(db.query(*_COLUMNS))
+    if slug is not None:
+        query = query.filter(MarketplacePlugin.slug == slug)
+    rows = query.order_by(MarketplacePlugin.slug).all()
     items = (
         exported_item(ITEM_TYPE, lineage, envelope(
             ITEM_TYPE, lineage, fitted_publisher(display_name(lineage.newest.original_author)), _body(lineage.newest),
