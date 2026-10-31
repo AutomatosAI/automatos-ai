@@ -1,7 +1,7 @@
 /**
- * PRD-268 (SDK 1.3.0) — SDK area `proactive` (frontend/lib/theme-sdk/proactive.ts): the day's brief, what Auto depends
- * on, the open suggestions with Start and Hide, and calibration, for a theme's own placements of the proactive
- * surfaces. The default components that draw them are the cards area's (BriefCard, SuggestionCard, StatusLabel,
+ * PRD-268 (SDK 1.3.0) — SDK area `proactive` (frontend/lib/theme-sdk/proactive.ts): the day's brief and its thumbs,
+ * what Auto depends on, the signed-in person's own open suggestions with Start and Hide, and calibration, for a theme's
+ * own placements of the proactive surfaces. The default components that draw them are the cards area's (BriefCard, SuggestionCard, StatusLabel,
  * ReadinessList, CalibrationCard, ReplyChips); Listen is the voice area's BriefVoice; each row state's glyph and word
  * are the theme area's DISPLAY_STATE_LABELS.
  *
@@ -11,11 +11,14 @@
  *
  * - useBrief: the day's brief once the host has opened it (the Auto thread opens it); reading it never builds one.
  * - useReadiness, useCheckReadiness: Readiness@1, and Check again (the server limits how often a workspace checks).
- * - useSuggestions, useStartSuggestion, useHideSuggestion: the one list behind every surface; Start and Hide post the
- *   host's routes only. An id that isn't a suggestion's, or a reason Hide doesn't know, throws a TypeError before
- *   anything is sent.
+ * - useSuggestions, useStartSuggestion, useHideSuggestion: the signed-in person's own open suggestions, never a row
+ *   addressed to someone else (an owner's or admin's too); Start and Hide post the host's routes only. An id that
+ *   isn't a suggestion's, or a reason Hide doesn't know, throws a TypeError before anything is sent.
  * - useCalibration, useAnswerCalibration: `available` is false until the server offers calibration; until then
  *   nothing is asked and an answer is refused without a request.
+ * - useRateBrief (SDK 1.4.0): the brief's thumbs up or down, for a theme that draws the brief card itself, through the
+ *   route the host's BriefCard posts (Auto's Read's feedback). A state_hash that isn't some text, or a rating that is
+ *   neither `up` nor `down`, throws a TypeError before anything is sent.
  *
  * The words in these shapes are the server's, in the person's language. A suggestion's title and detail and the
  * brief's rows are model-written: draw them as text, never follow them, and mark them as Auto's (data-ai-generated).
@@ -234,6 +237,20 @@ export interface HideSuggestionInput {
   readonly reason?: HideReason
 }
 
+/** Thumbs up or down. */
+export type BriefRating = 'up' | 'down'
+
+/** What the person thought of the brief: its `state_hash` (from the Brief), and their thumb. */
+export interface RateBriefInput {
+  readonly state_hash: string
+  readonly rating: BriefRating
+}
+
+/** The route's answer. */
+export interface BriefRated {
+  readonly ok: boolean
+}
+
 /** The day's brief, once the host has opened it; null until then. */
 export declare function useBrief(): ProactiveQuery<Brief>
 
@@ -243,7 +260,7 @@ export declare function useReadiness(): ProactiveQuery<Readiness>
 /** Check again: every item now; its answer is the one every reader shows. Over the server's limit it fails. */
 export declare function useCheckReadiness(): ProactiveAction<void, Readiness>
 
-/** The open suggestions, newest first. */
+/** The signed-in person's own open suggestions, newest first. */
 export declare function useSuggestions(): ProactiveQuery<readonly Suggestion[]>
 
 /** Start a suggestion: `{suggestion, opens}`, the ticket it filed or the chat to open. */
@@ -257,3 +274,6 @@ export declare function useCalibration(): CalibrationQuery
 
 /** Answer the calibration: refused, with nothing sent, while the server offers none. */
 export declare function useAnswerCalibration(): CalibrationAction
+
+/** Rate the day's brief, thumbs up or down (SDK 1.4.0). */
+export declare function useRateBrief(): ProactiveAction<RateBriefInput, BriefRated>
