@@ -17,12 +17,19 @@
  * (components/proactive/thread-cards.tsx), outside the AI-generated block, so their controls sit outside it and
  * each card marks Auto's words itself. `Message` gets a copy without those parts, and without the text part when
  * the brief card holds the prose (lib/proactive/thread-parts.ts). A message with neither renders as before.
+ *
+ * PRD-268 US-W03a: each message rendered here is registered as its chat's newest until a newer one renders
+ * (components/proactive/newest-message.ts), and an assistant message's reply chips (lib/chat/turn-parts.ts) go to
+ * ThreadCards, which draws them while it is the newest. A read-only chat has no composer to send them, so no chips.
  */
 import { useMemo } from 'react'
 import { Message, type MessageProps } from './message'
 import { ReceiptsBlock } from './receipts-block'
 import { receiptsOf } from '@/lib/chat/receipts'
+import { replyChipsOfMessage } from '@/lib/chat/turn-parts'
+import { useRenderedMessage } from '@/components/proactive/newest-message'
 import { ThreadCards } from '@/components/proactive/thread-cards'
+import type { ThreadReplyChipsProps } from '@/components/proactive/thread-reply-chips'
 import { threadPartsOf } from '@/lib/proactive/thread-parts'
 
 function MessageAndReceipts(props: MessageProps) {
@@ -40,15 +47,22 @@ function MessageAndReceipts(props: MessageProps) {
   )
 }
 
+/** The reply chips a message offers, and where it sits; none on a read-only chat. */
+function threadReplyChips({ chatId, message, isReadonly }: MessageProps): ThreadReplyChipsProps | undefined {
+  const chips = isReadonly ? undefined : replyChipsOfMessage(message)
+  return chips ? { chatId, messageId: message.id, chips } : undefined
+}
+
 export function MessageWithReceipts(props: MessageProps) {
   const thread = useMemo(() => threadPartsOf(props.message), [props.message])
+  useRenderedMessage(props.chatId, props.message.id)
   if (props.message.role !== 'assistant') return <MessageAndReceipts {...props} />
   return (
     <>
       <div data-ai-generated="true" data-testid="ai-generated-message">
         <MessageAndReceipts {...props} message={thread.message} />
       </div>
-      <ThreadCards brief={thread.brief} suggestionIds={thread.suggestionIds} />
+      <ThreadCards brief={thread.brief} suggestionIds={thread.suggestionIds} replyChips={threadReplyChips(props)} />
     </>
   )
 }

@@ -16,6 +16,9 @@
  * US-W02: the brief card has Listen, the host's BriefVoice reading this brief's own `spoken` words (the server voice,
  * the browser's speech on a refusal code; it never plays until pressed), beside its thumbs (the digest feedback route,
  * the brief's state_hash).
+ *
+ * PRD-268 US-W03a: a message that offers reply chips has them last, while it is the chat's newest message
+ * (thread-reply-chips.tsx); a tap sends one as the person's message.
  */
 import type { ReactNode } from 'react'
 import { BriefVoice } from '@/components/voice/brief-voice'
@@ -24,6 +27,7 @@ import type { Brief, Suggestion } from '@/lib/proactive/types'
 import { BriefCard } from './brief-card'
 import { usePinnedSuggestionIds } from './mission-suggestion-presence'
 import { SuggestionCard } from './suggestion-card'
+import { ThreadReplyChips, type ThreadReplyChipsProps } from './thread-reply-chips'
 import { useKeptStarted, withKept } from './use-suggested-list'
 
 /** The avatar's width and gap (w-8 + space-x-3), so a card lines up with the message's bubble. */
@@ -33,6 +37,8 @@ const NO_SUGGESTIONS: readonly Suggestion[] = Object.freeze([])
 export interface ThreadCardsProps {
   readonly brief: Brief | null
   readonly suggestionIds: readonly string[]
+  /** US-W03a: the reply chips the message offers, with its chat and its id; none on a read-only chat. */
+  readonly replyChips?: ThreadReplyChipsProps
 }
 
 function Aligned({ children }: { readonly children: ReactNode }) {
@@ -73,12 +79,22 @@ function WithSuggestions({ brief, ids }: { readonly brief: Brief | null; readonl
 }
 
 /** A message's brief and suggestion cards, lined up with its bubble; nothing when it carries neither. */
-export function ThreadCards({ brief, suggestionIds }: ThreadCardsProps) {
+function Cards({ brief, suggestionIds }: Pick<ThreadCardsProps, 'brief' | 'suggestionIds'>) {
   if (suggestionIds.length > 0) return <WithSuggestions brief={brief} ids={suggestionIds} />
   if (brief === null) return null
   return (
     <Aligned>
       <ThreadBrief brief={brief} />
     </Aligned>
+  )
+}
+
+/** A message's cards, then its reply chips while it is the chat's newest; nothing when it carries none. */
+export function ThreadCards({ brief, suggestionIds, replyChips }: ThreadCardsProps) {
+  return (
+    <>
+      <Cards brief={brief} suggestionIds={suggestionIds} />
+      {replyChips ? <ThreadReplyChips {...replyChips} /> : null}
+    </>
   )
 }
