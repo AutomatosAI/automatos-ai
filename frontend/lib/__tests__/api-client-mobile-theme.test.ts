@@ -5,7 +5,7 @@
  * api-client.ts) sees it. Pinned: the path and the GET, the install id as one encoded segment, the
  * answer and a 404 carried to the caller, the (method, path) pair in
  * orchestrator/reports/route-manifest.json, and a method body that goes through this.request, never a
- * raw fetch.
+ * raw fetch. PRD-271 C03: the answer carries the theme's phone layout, its contract, tone and slots.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -33,6 +33,11 @@ const ANSWER: MobileTheme = {
     mascot: {
       mode: 'clips',
       states: [{ name: 'idle', clip: `${FILES}/assets/mascot/idle.mp4`, still: `${FILES}/assets/mascot/idle.png` }],
+    },
+    layout: {
+      contract: 'hud@1',
+      tone: 'dark',
+      slots: { bg: '#030507', grid: 14, scan: 'on', accent: '#3FE0FF', accentInk: '#021116', glow: 22, auto: 'on' },
     },
   },
 }

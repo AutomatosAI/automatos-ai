@@ -1,0 +1,257 @@
+{
+  "_comment": "PRD-271 D-2: the phone layout contracts, the host's (services/themes/layout_contracts.py reads it). A theme's mobile block names one as \"<layout>@<major>\" and fills its slots. A slot with a default is optional; one without is required. Within a major the only change is a new optional slot (revision + 1); anything else is the next major, kept beside this one. Copied byte for byte by the kit (packages/theme-cli/src/core/data/) and Automatos Go (src/core/phone-layouts.json); the browser's copy, frontend/lib/theme-host/phone-layouts.json, is this file less each layout's home line, as no frontend runtime file names a first-party theme's id (PRD-261 A-20; validator-parity.test.ts holds the two equal). Each example is its home theme's default look as slots, and passes its own contract.",
+  "schema": "automatos-phone-layouts/v1",
+  "layouts": {
+    "play": {
+      "name": "Play",
+      "home": "automatos/play",
+      "versions": {
+        "1": {
+          "revision": 1,
+          "tone": {"rule": "ground", "ground": "bg", "text": "text"},
+          "slots": {
+            "bg": {"kind": "colour", "group": "Page"},
+            "surface": {"kind": "colour", "group": "Page"},
+            "text": {"kind": "colour", "group": "Page"},
+            "text2": {"kind": "colour", "group": "Page"},
+            "line": {"kind": "tint", "group": "Page"},
+            "chip": {"kind": "tint", "group": "Page"},
+            "panel": {"kind": "tint", "group": "Page"},
+            "accent": {"kind": "colour", "group": "Accent"},
+            "accentInk": {"kind": "colour", "group": "Accent"},
+            "glow": {"kind": "number", "min": 0, "max": 40, "default": 24, "group": "Accent"},
+            "autoLight": {"kind": "colour", "group": "Auto"},
+            "shell": {"kind": "choice", "choices": ["bronze", "gold", "silver", "cobalt"], "default": "bronze", "group": "Auto"},
+            "error": {"kind": "colour", "default": "#FF6B6B", "group": "Status"}
+          },
+          "fixed": {},
+          "pairs": [
+            ["text", "bg", "text"],
+            ["text", "surface", "text"],
+            ["text2", "bg", "text"],
+            ["text2", "surface", "text"],
+            ["accentInk", "accent", "text"]
+          ],
+          "fonts": {"serif": "display titles", "sans": "body and the thread", "mono": "labels and figures"},
+          "mascot": "bundled",
+          "example": {
+            "bg": "#131110", "surface": "#1D1917", "text": "#F4EEE8", "text2": "#B7ADA4",
+            "line": "rgba(244,238,232,.12)", "chip": "rgba(244,238,232,.06)", "panel": "rgba(244,238,232,.025)",
+            "accent": "#FF6A1F", "accentInk": "#1A0A02", "glow": 24, "autoLight": "#4BF0B7", "shell": "bronze",
+            "error": "#FF6B6B"
+          }
+        }
+      }
+    },
+    "hud": {
+      "name": "HUD",
+      "home": "automatos/hud",
+      "versions": {
+        "1": {
+          "revision": 1,
+          "tone": {"rule": "dark"},
+          "slots": {
+            "bg": {"kind": "colour", "group": "Page"},
+            "grid": {"kind": "number", "min": 0, "max": 30, "default": 14, "group": "Page"},
+            "scan": {"kind": "choice", "choices": ["on", "off"], "default": "on", "group": "Page"},
+            "accent": {"kind": "colour", "group": "Accent"},
+            "accentInk": {"kind": "colour", "group": "Accent"},
+            "glow": {"kind": "number", "min": 0, "max": 40, "default": 22, "group": "Accent"},
+            "auto": {"kind": "choice", "choices": ["on", "off"], "default": "on", "group": "Auto"}
+          },
+          "fixed": {
+            "text": "#E6F1F5", "text2": "#93A6AF", "line": "rgba(230,241,245,.10)", "track": "rgba(230,241,245,.08)",
+            "error": "#FF6B6B"
+          },
+          "pairs": [
+            ["text", "bg", "text"],
+            ["text2", "bg", "text"],
+            ["accentInk", "accent", "text"],
+            ["accent", "bg", "ui"]
+          ],
+          "fonts": {"serif": "display titles and panel labels", "sans": "body", "mono": "labels, buttons and the transcript"},
+          "mascot": "bundled",
+          "example": {
+            "bg": "#030507", "grid": 14, "scan": "on", "accent": "#3FE0FF", "accentInk": "#021116", "glow": 22, "auto": "on"
+          }
+        }
+      }
+    },
+    "arcade": {
+      "name": "Arcade",
+      "home": "automatos/arcade",
+      "versions": {
+        "1": {
+          "revision": 1,
+          "tone": {"rule": "ground", "ground": "page", "text": "tx"},
+          "slots": {
+            "page": {"kind": "colour", "group": "Page"},
+            "win": {"kind": "colour", "group": "Windows"},
+            "tx": {"kind": "colour", "group": "Windows"},
+            "tx2": {"kind": "colour", "group": "Windows"},
+            "bd": {"kind": "colour", "group": "Windows"},
+            "sh": {"kind": "tint", "group": "Windows"},
+            "bevl": {"kind": "tint", "group": "Windows"},
+            "bevd": {"kind": "tint", "group": "Windows"},
+            "bar": {"kind": "colour", "group": "Bar"},
+            "barTx": {"kind": "colour", "group": "Bar"},
+            "ac": {"kind": "colour", "group": "Accent"},
+            "aci": {"kind": "colour", "group": "Accent"},
+            "hl": {"kind": "colour", "group": "Accent"},
+            "hlt": {"kind": "colour", "group": "Accent"},
+            "hp": {"kind": "colour", "group": "Game"},
+            "xp": {"kind": "colour", "group": "Game"},
+            "mp": {"kind": "colour", "group": "Game"},
+            "qs": {"kind": "colour", "group": "Game"},
+            "g1": {"kind": "colour", "default": "#2F5A2A", "group": "Map"},
+            "g2": {"kind": "colour", "default": "#3E7136", "group": "Map"},
+            "t1": {"kind": "colour", "default": "#1F4A22", "group": "Map"},
+            "t2": {"kind": "colour", "default": "#143318", "group": "Map"},
+            "w1": {"kind": "colour", "default": "#2A5C8A", "group": "Map"},
+            "w2": {"kind": "colour", "default": "#6FA6D6", "group": "Map"},
+            "p1": {"kind": "colour", "default": "#8A6A3E", "group": "Map"},
+            "p2": {"kind": "colour", "default": "#6B4F2A", "group": "Map"},
+            "r1": {"kind": "colour", "default": "#6E6A5E", "group": "Map"},
+            "r2": {"kind": "colour", "default": "#4A463E", "group": "Map"},
+            "sn": {"kind": "colour", "default": "#E8E4D4", "group": "Map"},
+            "roof": {"kind": "colour", "default": "#B5502E", "group": "Map"},
+            "wall": {"kind": "colour", "default": "#D9CFA8", "group": "Map"},
+            "art": {"kind": "choice", "choices": ["bronze", "shades"], "default": "bronze", "group": "Art"},
+            "pixelScale": {"kind": "choice", "choices": ["2", "3"], "default": "3", "group": "Art"},
+            "scanlines": {"kind": "choice", "choices": ["off", "soft", "strong"], "default": "soft", "group": "Frame"},
+            "windowStyle": {"kind": "choice", "choices": ["classic", "thin"], "default": "classic", "group": "Frame"}
+          },
+          "fixed": {},
+          "pairs": [
+            ["tx", "win", "text"],
+            ["tx2", "win", "text"],
+            ["barTx", "bar", "text"],
+            ["ac", "page", "text"],
+            ["hp", "win", "text"],
+            ["xp", "win", "text"],
+            ["mp", "win", "text"],
+            ["qs", "win", "text"],
+            ["hlt", "hl", "text"],
+            ["aci", "ac", "text"],
+            ["bd", "page", "ui"],
+            ["tx", "page", "text"],
+            ["tx2", "page", "text"],
+            ["ac", "win", "text"],
+            ["bd", "win", "ui"]
+          ],
+          "fonts": {"serif": "titles, labels, buttons and counters", "sans": "running text"},
+          "mascot": "drawn",
+          "example": {
+            "page": "#0D1710", "win": "#15291B", "tx": "#EEE7D2", "tx2": "#BCC7A9", "bd": "#D9CFA8",
+            "sh": "rgba(0,0,0,.55)", "bevl": "rgba(255,255,255,.14)", "bevd": "rgba(0,0,0,.45)",
+            "bar": "#0A120C", "barTx": "#EEE7D2", "ac": "#7FE35C", "aci": "#0B1A07", "hl": "#7FE35C", "hlt": "#0B1A07",
+            "hp": "#FF6E61", "xp": "#FFD24A", "mp": "#74BDFF", "qs": "#FFE34D",
+            "g1": "#2F5A2A", "g2": "#3E7136", "t1": "#1F4A22", "t2": "#143318", "w1": "#2A5C8A", "w2": "#6FA6D6",
+            "p1": "#8A6A3E", "p2": "#6B4F2A", "r1": "#6E6A5E", "r2": "#4A463E", "sn": "#E8E4D4", "roof": "#B5502E",
+            "wall": "#D9CFA8",
+            "art": "bronze", "pixelScale": "3", "scanlines": "soft", "windowStyle": "classic"
+          }
+        }
+      }
+    },
+    "candy": {
+      "name": "Candy",
+      "home": "automatos/candy",
+      "versions": {
+        "1": {
+          "revision": 1,
+          "tone": {"rule": "ground", "ground": "page", "text": "text"},
+          "slots": {
+            "page": {"kind": "colour", "group": "Page"},
+            "bandA": {"kind": "colour", "group": "Band"},
+            "bandB": {"kind": "colour", "group": "Band"},
+            "band1": {"kind": "colour", "group": "Band"},
+            "band2": {"kind": "colour", "group": "Band"},
+            "band3": {"kind": "colour", "group": "Band"},
+            "win": {"kind": "colour", "group": "Page"},
+            "chip": {"kind": "colour", "group": "Page"},
+            "text": {"kind": "colour", "group": "Page"},
+            "quiet": {"kind": "colour", "group": "Page"},
+            "line": {"kind": "tint", "group": "Page"},
+            "border": {"kind": "colour", "group": "Page"},
+            "bandQuiet": {"kind": "colour", "group": "Band"},
+            "accent": {"kind": "colour", "group": "Accent"},
+            "accentInk": {"kind": "colour", "group": "Accent"},
+            "accentText": {"kind": "colour", "group": "Accent"},
+            "userA": {"kind": "colour", "group": "Bubbles"},
+            "userB": {"kind": "colour", "group": "Bubbles"},
+            "userInk": {"kind": "colour", "group": "Bubbles"},
+            "stageInk": {"kind": "colour", "group": "Bubbles"},
+            "cardInk": {"kind": "colour", "group": "Cards"},
+            "g1a": {"kind": "colour", "group": "Cards"},
+            "g1b": {"kind": "colour", "group": "Cards"},
+            "g1c": {"kind": "colour", "group": "Cards"},
+            "g2a": {"kind": "colour", "group": "Cards"},
+            "g2b": {"kind": "colour", "group": "Cards"},
+            "g2c": {"kind": "colour", "group": "Cards"},
+            "g3a": {"kind": "colour", "group": "Cards"},
+            "g3b": {"kind": "colour", "group": "Cards"},
+            "g3c": {"kind": "colour", "group": "Cards"},
+            "tint": {"kind": "tint", "group": "Shape"},
+            "blob1": {"kind": "tint", "default": "#F9C6E4", "group": "Cards"},
+            "blob2": {"kind": "tint", "default": "#FFE0C7", "group": "Cards"},
+            "blob3": {"kind": "tint", "default": "#E5D4FF", "group": "Cards"},
+            "gradient": {"kind": "choice", "choices": ["soft", "rich", "vivid"], "default": "rich", "group": "Cards"},
+            "roundness": {"kind": "number", "min": 16, "max": 40, "default": 28, "group": "Shape"},
+            "glow": {"kind": "number", "min": 0, "max": 10, "default": 6, "group": "Shape"}
+          },
+          "fixed": {},
+          "pairs": [
+            ["text", "page", "text"],
+            ["text", "win", "text"],
+            ["text", "chip", "text"],
+            ["text", "bandA", "text"],
+            ["quiet", "win", "text"],
+            ["quiet", "page", "text"],
+            ["accentInk", "accent", "text"],
+            ["accent", "win", "ui"],
+            ["accent", "page", "ui"],
+            ["cardInk", "g1a", "text"],
+            ["cardInk", "g2a", "text"],
+            ["cardInk", "g3a", "text"],
+            ["text", "bandB", "text"],
+            ["text", "band1", "text"],
+            ["text", "band2", "text"],
+            ["text", "band3", "text"],
+            ["quiet", "chip", "text"],
+            ["bandQuiet", "bandA", "text"],
+            ["bandQuiet", "bandB", "text"],
+            ["bandQuiet", "band1", "text"],
+            ["bandQuiet", "band2", "text"],
+            ["bandQuiet", "band3", "text"],
+            ["accentText", "page", "text"],
+            ["accentText", "win", "text"],
+            ["accentText", "chip", "text"],
+            ["userInk", "userA", "text"],
+            ["userInk", "userB", "text"],
+            ["stageInk", "cardInk", "text"],
+            ["cardInk", "g1b", "text"],
+            ["cardInk", "g2b", "text"],
+            ["cardInk", "g3b", "text"],
+            ["cardInk", "g1c", "ui"],
+            ["cardInk", "g2c", "ui"],
+            ["cardInk", "g3c", "ui"]
+          ],
+          "fonts": {"serif": "titles and figures", "sans": "body, labels and buttons"},
+          "mascot": "drawn",
+          "example": {
+            "page": "#FBF0F4", "bandA": "#FFD9E8", "bandB": "#FFC2DA", "band1": "#FFC6E0", "band2": "#F2C9FF",
+            "band3": "#FFD9C2", "win": "#FFFFFF", "chip": "#FCE8F1", "text": "#2A1830", "quiet": "#6E5670",
+            "line": "rgba(42,24,48,.09)", "border": "#ECEAEC", "bandQuiet": "#634B65", "accent": "#D62F7A",
+            "accentInk": "#FFFFFF", "accentText": "#C2266C", "userA": "#D73178", "userB": "#B01E5F", "userInk": "#FFFFFF",
+            "stageInk": "#4A1E8E", "cardInk": "#FFFFFF",
+            "g1a": "#D73178", "g1b": "#B01E5F", "g1c": "#9C3BD0", "g2a": "#8E4AE8", "g2b": "#5B2BCB", "g2c": "#3557D8",
+            "g3a": "#2675D3", "g3b": "#0F5DAE", "g3c": "#0B8FB0",
+            "tint": "rgba(214,47,122,.14)", "blob1": "#F9C6E4", "blob2": "#FFE0C7", "blob3": "#E5D4FF",
+            "gradient": "rich", "roundness": 28, "glow": 6
+          }
+        }
+      }
+    }
+  }
+}

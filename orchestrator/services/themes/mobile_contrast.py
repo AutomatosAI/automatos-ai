@@ -122,7 +122,7 @@ def outcome_of(statuses: Iterable[str]) -> str:
     return OUTCOME_PASS if OUTCOME_PASS in seen else OUTCOME_NOT_MEASURED
 
 
-def _document(files: Mapping[str, bytes], path: str) -> Any:
+def document_of(files: Mapping[str, bytes], path: str) -> Any:
     """A package file's JSON document, or None when it is absent or not JSON."""
     raw = files.get(path)
     if raw is None:
@@ -143,9 +143,9 @@ def _scheme_tokens(block: Mapping[str, Any]) -> List[Subject]:
 
 def _look_tokens(files: Mapping[str, bytes]) -> List[Subject]:
     """The table's defaults (no stored look), then each preset by id, each painted as the web paints it."""
-    table = _document(files, PREPAINT_PATH)
+    table = document_of(files, PREPAINT_PATH)
     presets = [
-        Subject(preset, SUBJECT_PRESET, PRESET_LABEL.format(preset=preset), paint_look(table, _document(files, path)))
+        Subject(preset, SUBJECT_PRESET, PRESET_LABEL.format(preset=preset), paint_look(table, document_of(files, path)))
         for preset, path in preset_ids(files).items()
     ]
     return [Subject(DEFAULTS_ID, SUBJECT_DEFAULTS, DEFAULTS_LABEL, paint_look(table, None)), *presets]

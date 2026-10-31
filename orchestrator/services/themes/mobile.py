@@ -8,7 +8,8 @@ draw the theme a member chose without loading any of its code::
                        "tokens": {"light": {...} | null, "dark": {...} | null},
                        "fonts": {"sans" | "serif" | "mono": "<files URL>"},
                        "mascot": {"mode": "clips" | "stills" | "none",
-                                  "states": [{"name", "clip": "<files URL>" | null, "still": "<files URL>" | null}]}}}
+                                  "states": [{"name", "clip": "<files URL>" | null, "still": "<files URL>" | null}]},
+                       "layout": null | {"contract": "<id>@<major>", "tone": "light" | "dark", "slots": {...}}}}
 
 * **Who.** The install and the caller are matched as the boot route matches them (``serve.boot_target``):
   membership of the install's workspace, never ``ctx.workspace_id``.
@@ -34,27 +35,39 @@ draw the theme a member chose without loading any of its code::
   ``GET /api/themes/files/...`` under the same membership. A URL is given only for a path the
   package's file manifest lists, never for a JS or CSS file. A mascot clip is the state's ``.mp4``
   (``.webm`` is the web's), a still its ``.png``; ``stills`` gives no clip and ``none`` no states.
+* **``layout``** (PRD-271 C03, §4.4). Every slot of the contract the block names (``layout_paint.resolve_slots``):
+  literals as written, ``{"look": …}`` resolved for the look the skin paints (under ``fromLooks`` the one its
+  tokens come from, else the stored active look; no stored look paints the defaults), slots left out at the
+  contract's defaults; and ``tone``, the contract's tone rule over them. A look that can't fill a slot paints
+  the defaults whole; defaults that can't either, or a table that can't be read, give ``layout`` null
+  (logged), and the phone draws the Studio skin. No layout gives ``layout`` null too: the field's presence
+  is what tells a phone the host has layouts (D-9), and ``schema`` stays 1.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from core.models.themes import ThemePackage
 from services.themes.contract import MOBILE_FONT_ROLES
 from services.themes.css_value import PREPAINT_PATH
+from services.themes.layout_paint import LAYOUT_FIELD, block_contract, layout_answer, look_slots, resolve_slots
 from services.themes.look_schema import SCHEMA_PATH as LOOK_SCHEMA_PATH
 from services.themes.looks import LooksError, read_looks, resolve_look_source
 from services.themes.membership import Membership
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD, MOBILE_SCHEMES
 from services.themes.mobile_tokens import look_tone, missing_tokens, paint_look
 from services.themes.revocations import is_disabled
-from services.themes.serve import BootTarget, FileReader, ThemeFileMissing, may_run, module_url, theme_prepaint
+from services.themes.serve import (
+    BootTarget, FileReader, ThemeFileMissing, ThemeStorageUnavailable, may_run, module_url, theme_prepaint,
+)
 
 logger = logging.getLogger(__name__)
 
 MOBILE_ANSWER_SCHEMA = 1
+# serve.theme_prepaint refused the table on read (it logged why): no look is painted from it.
+UNREADABLE = object()
 SOURCE_TOKENS = "tokens"
 SOURCE_LOOKS = "fromLooks"
 MASCOT_CLIPS = "clips"
@@ -139,36 +152,79 @@ def _phone_look(table: Mapping[str, Any], stored: Optional[Dict[str, Any]], targ
     return None
 
 
-def _look_colours(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Optional[Dict[str, Any]]:
-    """A ``fromLooks`` block's colours: the active look (else the defaults) painted as the web paints it, under its tone."""
-    package = target.package
+def _read_table(target: BootTarget, reader: FileReader, block: Mapping[str, Any]) -> Any:
+    """The package's prepaint table, None when it has none, ``UNREADABLE`` when it is refused on read (logged).
+
+    Under a ``tokens`` skin only the layout's look slots need the table, so storage failing there costs the
+    layout (null, logged), never the skin; under ``fromLooks`` it is the route's 503, as before.
+    """
     try:
-        table = theme_prepaint(package, reader)
+        return theme_prepaint(target.package, reader)
     except ThemeFileMissing:
-        return None  # verified_file or theme_prepaint logged why
+        return UNREADABLE  # verified_file or theme_prepaint logged why
+    except ThemeStorageUnavailable:
+        if block.get(SOURCE_LOOKS) is True:
+            raise
+        logger.error("Package %s's %s can't be read from storage: the phone gets its skin, no layout", target.package.id, PREPAINT_PATH)
+        return UNREADABLE
+
+
+def _readable(table: Any) -> bool:
+    """A table a look can be painted through: the package has one, and it passed the read."""
+    return table is not None and table is not UNREADABLE
+
+
+def _look_colours(table: Any, stored: Optional[Dict[str, Any]], target: BootTarget) -> Tuple[Optional[Dict[str, Any]], Any]:
+    """A ``fromLooks`` block's colours (the active look, else the defaults, painted as the web paints it, under its
+    tone) and the look they were painted from; no colours when the table can't paint."""
+    package = target.package
+    if table is UNREADABLE:
+        return None, None
     if table is None:
         logger.error("Package %s's mobile block paints from looks, but it has no %s", package.id, PREPAINT_PATH)
-        return None
-    look = _phone_look(table, _stored_active_look(db, membership, target), target)
+        return None, None
+    look = _phone_look(table, stored, target)
     painted = paint_look(table, look)
     if missing_tokens(painted):
         logger.error("Package %s's %s defaults paint no ground or text for a phone: nothing to paint", package.id, PREPAINT_PATH)
-        return None
+        return None, None
     tone = look_tone(table, look, (package.manifest or {}).get("tone"))
     tokens = {scheme: (painted if scheme == tone else None) for scheme in MOBILE_SCHEMES}
-    return {"source": SOURCE_LOOKS, "tone": tone, "tokens": tokens}
+    return {"source": SOURCE_LOOKS, "tone": tone, "tokens": tokens}, look
 
 
 def _colours(
-    db: Any, membership: Membership, target: BootTarget, block: Mapping[str, Any], reader: FileReader,
-) -> Optional[Dict[str, Any]]:
-    """The block's source, tone and schemes; None when it can't paint (the check on import allows one source)."""
+    block: Mapping[str, Any], table: Any, stored: Optional[Dict[str, Any]], target: BootTarget,
+) -> Tuple[Optional[Dict[str, Any]], Any]:
+    """The block's source, tone and schemes, and the look a layout's slots follow; no colours when it can't paint."""
     if SOURCE_TOKENS in block:
-        return _block_colours(block)
+        return _block_colours(block), stored
     if block.get(SOURCE_LOOKS) is True:
-        return _look_colours(db, membership, target, reader)
+        return _look_colours(table, stored, target)
     logger.error("Package %s's mobile block has no source of colours", target.package.id)
-    return None
+    return None, None
+
+
+def _layout(block: Mapping[str, Any], table: Any, look: Any, target: BootTarget) -> Optional[Dict[str, Any]]:
+    """The answer's ``layout`` (module docstring): None without one, or when its slots can't be filled (logged)."""
+    contract = block_contract(block)
+    if contract is None:
+        if LAYOUT_FIELD in block:  # a major the host has since retired (PRD-271 §4.2)
+            logger.error("Package %s names a layout this host doesn't have: the phone draws the skin", target.package.id)
+        return None
+    if look_slots(block) and not _readable(table):
+        logger.error(
+            "Package %s's %s slots come from looks it can't paint: the phone draws the skin", target.package.id, contract.layout,
+        )
+        return None
+    resolved = resolve_slots(contract, block, table, look)
+    if resolved.unresolved:
+        logger.error(
+            "Package %s's %s defaults fill no %s: the phone draws the skin", target.package.id, contract.layout,
+            ", ".join(resolved.unresolved),
+        )
+        return None
+    return layout_answer(contract, resolved)
 
 
 def _mobile_block(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Optional[Dict[str, Any]]:
@@ -179,10 +235,14 @@ def _mobile_block(db: Any, membership: Membership, target: BootTarget, reader: F
         return None
     if not may_run(db, membership, target.install, package) or is_disabled(db, package):
         return None
-    colours = _colours(db, membership, target, block, reader)
+    paints_looks = block.get(SOURCE_LOOKS) is True or bool(look_slots(block))
+    table = _read_table(target, reader, block) if paints_looks else None
+    stored = _stored_active_look(db, membership, target) if _readable(table) else None
+    colours, look = _colours(block, table, stored, target)
     if colours is None:
         return None
-    return {**colours, "fonts": _fonts(package, block), "mascot": _mascot(package, block)}
+    layout = _layout(block, table, look, target)
+    return {**colours, "fonts": _fonts(package, block), "mascot": _mascot(package, block), "layout": layout}
 
 
 def mobile_theme(db: Any, membership: Membership, target: BootTarget, reader: FileReader) -> Dict[str, Any]:

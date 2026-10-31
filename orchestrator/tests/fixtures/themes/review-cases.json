@@ -1,11 +1,12 @@
 {
   "schema": "automatos-theme-review-corpus/v1",
-  "_comment": "PRD-261 B-03e1: the shared review corpus. Core's review stage (orchestrator/services/themes/review_stage.py, run by orchestrator/tests/test_prd261_review_corpus.py) and the kit's automatos-theme check (which vendors this file from core byte for byte) each review every case and must give the level in expected for each check named in checks. A case is the hello package (orchestrator/tests/fixtures/themes/hello, which the kit vendors from the same commit) changed as orchestrator/tests/fixtures/themes/build.py changes it: manifestSet sets top-level theme.json fields over hello's, manifestUnset removes them, and the result is written as JSON with two-space indent and a final newline; replace sets a file's text (a path hello lacks adds the file) or, with null, drops it. Files are packed in path order. Every case is a package the reader accepts, so sizes, cssScope and looks are the reader's checks recorded as passed (a refused package never reaches the review; cases.json's packages section holds the refusals). The SDK names are the host's own list, services/themes/data/sdk-surface.json at the same commit; a case whose host is {\"sdkSurface\": \"missing\"} is reviewed as on a host that has no readable SDK name list. Anywhere in a case, {\"$corePageSha\": path} stands for that core page file's sha256 as services/themes/data/core-pages.json at the same commit gives it, so no page edit changes this file. The LLM stage is not part of the corpus (core runs it with a fake answering risk 0; it is the server's own check), and neither is contrast (its mobile cases are in test_prd261_review_stage.py). The file is held to its canonical form, json.dumps with indent 2 and a final newline, so its sha256 changes only when a case does.",
+  "_comment": "PRD-261 B-03e1: the shared review corpus. Core's review stage (orchestrator/services/themes/review_stage.py, run by orchestrator/tests/test_prd261_review_corpus.py) and the kit's automatos-theme check (which vendors this file from core byte for byte) each review every case and must give the level in expected for each check named in checks. A case is the hello package (orchestrator/tests/fixtures/themes/hello, which the kit vendors from the same commit) changed as orchestrator/tests/fixtures/themes/build.py changes it: manifestSet sets top-level theme.json fields over hello's, manifestUnset removes them, and the result is written as JSON with two-space indent and a final newline; replace sets a file's text (a path hello lacks adds the file) or, with null, drops it. Files are packed in path order. Every case is a package the reader accepts, so sizes, cssScope and looks are the reader's checks recorded as passed (a refused package never reaches the review; cases.json's packages section holds the refusals). The SDK names are the host's own list, services/themes/data/sdk-surface.json at the same commit; a case whose host is {\"sdkSurface\": \"missing\"} is reviewed as on a host that has no readable SDK name list. Anywhere in a case, {\"$corePageSha\": path} stands for that core page file's sha256 as services/themes/data/core-pages.json at the same commit gives it, so no page edit changes this file. The LLM stage is not part of the corpus (core runs it with a fake answering risk 0; it is the server's own check). contrast (M-03; PRD-271 C04) is: a hello case with no mobile block is not_measured; a mobile block has its skin's pairs measured, and a block that names a phone layout its contract's pairs over its slots too (services/themes/data/phone-layouts.json, which the kit vendors from the same commit), once for values, else for the prepaint table's defaults and each preset. The file is held to its canonical form, json.dumps with indent 2 and a final newline, so its sha256 changes only when a case does.",
   "package": "hello",
   "checks": [
     "sizes",
     "cssScope",
     "looks",
+    "contrast",
     "uses",
     "clonedFrom"
   ],
@@ -22,6 +23,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -35,6 +37,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -50,6 +53,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -68,6 +72,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -86,6 +91,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "error",
         "clonedFrom": "pass"
       }
@@ -104,6 +110,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -123,6 +130,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -142,6 +150,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -162,6 +171,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -178,6 +188,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -197,6 +208,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -216,6 +228,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -234,6 +247,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -253,6 +267,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -271,6 +286,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -290,6 +306,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -308,6 +325,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -327,6 +345,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -345,6 +364,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -366,6 +386,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -386,6 +407,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -404,6 +426,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "warning",
         "clonedFrom": "pass"
       }
@@ -424,6 +447,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -450,6 +474,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "pass"
       }
@@ -474,6 +499,7 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "warning"
       }
@@ -507,8 +533,180 @@
         "sizes": "pass",
         "cssScope": "pass",
         "looks": "pass",
+        "contrast": "not_measured",
         "uses": "pass",
         "clonedFrom": "warning"
+      }
+    },
+    {
+      "name": "a mobile skin pair under AA",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "engines": {
+          "automatos": "^1.1.0",
+          "sdk": "^1.0.0"
+        },
+        "mobile": {
+          "tokens": {
+            "light": {
+              "--background": "0 0% 100%",
+              "--foreground": "0 0% 58%"
+            }
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "contrast": "error",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a mobile skin whose measured pairs meet AA",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "engines": {
+          "automatos": "^1.1.0",
+          "sdk": "^1.0.0"
+        },
+        "mobile": {
+          "tokens": {
+            "light": {
+              "--background": "0 0% 100%",
+              "--foreground": "#14181c",
+              "--ring": "0 0% 56.5%"
+            }
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "contrast": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a phone layout whose slots meet AA",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "engines": {
+          "automatos": "^1.2.0",
+          "sdk": "^1.0.0"
+        },
+        "mobile": {
+          "tokens": {
+            "light": {
+              "--background": "0 0% 100%",
+              "--foreground": "#14181c"
+            }
+          },
+          "layout": "hud@1",
+          "slots": {
+            "bg": "#030507",
+            "accent": "#3FE0FF",
+            "accentInk": "#021116"
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "contrast": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a phone layout pair under AA",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "engines": {
+          "automatos": "^1.2.0",
+          "sdk": "^1.0.0"
+        },
+        "mobile": {
+          "tokens": {
+            "light": {
+              "--background": "0 0% 100%",
+              "--foreground": "#14181c"
+            }
+          },
+          "layout": "hud@1",
+          "slots": {
+            "bg": "#030507",
+            "accent": "#3FE0FF",
+            "accentInk": "#2AA8C0"
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "contrast": "error",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a phone layout from the look, one preset under AA",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "engines": {
+          "automatos": "^1.2.0",
+          "sdk": "^1.0.0"
+        },
+        "mobile": {
+          "tokens": {
+            "light": {
+              "--background": "0 0% 100%",
+              "--foreground": "#14181c"
+            }
+          },
+          "layout": "hud@1",
+          "slots": {
+            "bg": {
+              "look": "--hello-bg"
+            },
+            "accent": {
+              "look": "--hello-accent"
+            },
+            "accentInk": {
+              "look": "--hello-on-accent"
+            },
+            "glow": {
+              "look": "radius"
+            }
+          }
+        }
+      },
+      "replace": {
+        "boot/prepaint.json": "{\"knobs\": {\"accent\": {\"blue\": {\"--hello-accent\": \"#2F6FED\", \"--hello-on-accent\": \"#FFFFFF\"}, \"green\": {\"--hello-accent\": \"#1E7F3C\", \"--hello-on-accent\": \"#0B1A07\"}}, \"ground\": {\"paper\": {\"--hello-bg\": \"#14181C\"}, \"ink\": {\"--hello-bg\": \"#030507\"}}}, \"pairs\": [], \"numeric\": [{\"var\": \"--hello-glow\", \"knob\": \"radius\", \"min\": 0, \"max\": 16, \"integer\": true, \"scale\": 100, \"capTable\": null, \"color\": {\"knob\": \"accent\", \"rgb\": {\"blue\": \"47,111,237\", \"green\": \"30,127,60\"}}, \"template\": \"rgba-alpha\"}], \"defaults\": {\"accent\": \"blue\", \"ground\": \"paper\", \"radius\": 6}}"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "contrast": "error",
+        "uses": "pass",
+        "clonedFrom": "pass"
       }
     }
   ]

@@ -13,11 +13,15 @@
  *   MOBILE_REQUIRED_TOKENS, each value an `H S% L%` triplet as hexToTriplet writes it, or `#rrggbb`;
  * - `fonts` gives MOBILE_FONT_ROLES only, each a different `assets/fonts/mobile/<NAME>.ttf` or `.otf`;
  * - `mascot` is one of MOBILE_MASCOT_MODES; `clips` and `stills` need the top-level `mascot` with its states;
- * - `engines.automatos` admits no host below MOBILE_MIN_HOST.
+ * - `engines.automatos` admits no host below MOBILE_MIN_HOST;
+ * - PRD-271 (host 1.2.0): `layout` and `slots`, one of the phone's layouts and its contract's slots, are
+ *   mobile-layout.ts's `layoutErrors`, and a block with `layout` admits no host below LAYOUT_MIN_HOST.
  *
  * Each refusal is BAD_MOBILE naming the field, or UNKNOWN_FIELD for a key outside the block.
  */
 import { echo, errorIf, hasOwn, isRecord, own, themeError, unknownFieldErrors, type JsonRecord, type ThemeError } from './css-value'
+import { isMobileColour } from './mobile-colour'
+import { LAYOUT_FIELD, LAYOUT_FIELDS, layoutErrors, type LayoutSlotValue } from './mobile-layout'
 
 /** The 24 Studio tokens lookToStudioTokens writes as 'H S% L%' triplets, less its status tokens (PRD-268 K13; US-T01) and never its eight pre-wrapped aliases. */
 export const MOBILE_TOKEN_NAMES: readonly string[] = [
@@ -45,10 +49,12 @@ export const MOBILE_AA_TEXT = 4.5
 export const MOBILE_AA_UI = 3
 /** A theme with a `mobile` block must not admit a host below this one: an older host refuses the field. */
 export const MOBILE_MIN_HOST = '1.1.0'
+/** PRD-271 C02: a block with `layout` must not admit a host below this one (contract.py LAYOUT_MIN_HOST). */
+export const LAYOUT_MIN_HOST = '1.2.0'
 
 export const MOBILE_ERROR_CODE = 'BAD_MOBILE'
 const MOBILE_FIELD = 'mobile'
-const MOBILE_FIELDS: readonly string[] = ['tokens', 'fromLooks', 'fonts', 'mascot']
+const MOBILE_FIELDS: readonly string[] = ['tokens', 'fromLooks', 'fonts', 'mascot', ...LAYOUT_FIELDS]
 const MOBILE_SCHEMES: readonly string[] = ['light', 'dark']
 const REQUIRED_SCHEME = 'light'
 const MASCOT_NONE = 'none'
@@ -56,11 +62,6 @@ const MANIFEST_OWNER = 'theme.json'
 const MOBILE_FONT_PATTERN = /^assets\/fonts\/mobile\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:ttf|otf)$/
 /** An engines range (package-manifest.ts RANGE_PATTERN): the lowest host it admits is its own version. */
 const HOST_RANGE_PATTERN = /^\^?([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})$/
-/** look-kit hsl.ts TRIPLET and contrast.ts HEX: what hexToTriplet writes, and #rrggbb. */
-const TRIPLET_PATTERN = /^([0-9]{1,3}(?:\.[0-9]{1,2})?) ([0-9]{1,3}(?:\.[0-9]{1,2})?)% ([0-9]{1,3}(?:\.[0-9]{1,2})?)%$/
-const HEX_PATTERN = /^#[0-9a-f]{6}$/i
-const FULL_TURN = 360
-const PERCENT = 100
 
 export type MobileScheme = Readonly<Record<string, string>>
 /** A checked `mobile` block. */
@@ -69,18 +70,9 @@ export interface ThemeMobileBlock {
   readonly fromLooks?: true
   readonly fonts?: Readonly<Partial<Record<'sans' | 'serif' | 'mono', string>>>
   readonly mascot?: 'clips' | 'stills' | 'none'
-}
-
-/**
- * True when `value` is a colour a phone can read: a triplet look-kit's parseTriplet accepts (hue below
- * 360, saturation and lightness at most 100) or a #rrggbb (mobile_tokens.py parse_colour is its twin).
- */
-export function isMobileColour(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  if (HEX_PATTERN.test(value)) return true
-  const match = TRIPLET_PATTERN.exec(value)
-  if (match === null) return false
-  return Number(match[1]) < FULL_TURN && Number(match[2]) <= PERCENT && Number(match[3]) <= PERCENT
+  /** PRD-271: one of the phone's layouts, `<id>@<major>`, and its contract's slots. */
+  readonly layout?: string
+  readonly slots?: Readonly<Record<string, LayoutSlotValue>>
 }
 
 function bad(path: string, message: string): ThemeError[] {
@@ -162,21 +154,27 @@ function mascotErrors(block: JsonRecord, mascot: unknown): ThemeError[] {
   ))
 }
 
-/** True when `version` (X.Y.Z parts) is below MOBILE_MIN_HOST. */
-function belowMinHost(version: readonly number[]): boolean {
-  const minimum = MOBILE_MIN_HOST.split('.').map(Number)
-  const at = version.findIndex((part, index) => part !== minimum[index])
-  return at !== -1 && version[at] < minimum[at]
+/** True when `version` (X.Y.Z parts) is below `minimum`. */
+function belowHost(version: readonly number[], minimum: string): boolean {
+  const parts = minimum.split('.').map(Number)
+  const at = version.findIndex((part, index) => part !== parts[index])
+  return at !== -1 && version[at] < parts[at]
 }
 
-/** The block is host 1.1.0's: a range that admits an older host is refused (BAD_ENGINES covers a malformed one). */
-function enginesErrors(engines: unknown): ThemeError[] {
+/**
+ * The block is host 1.1.0's, and 1.2.0's with `layout`: a range that admits an older host is refused (BAD_ENGINES
+ * covers a malformed one).
+ */
+function enginesErrors(engines: unknown, block: JsonRecord): ThemeError[] {
+  const withLayout = hasOwn(block, LAYOUT_FIELD)
+  const minimum = withLayout ? LAYOUT_MIN_HOST : MOBILE_MIN_HOST
+  const needs = withLayout ? '"mobile.layout"' : '"mobile"'
   const host = isRecord(engines) ? own(engines, 'automatos') : undefined
   const match = typeof host === 'string' ? HOST_RANGE_PATTERN.exec(host) : null
-  if (match === null || !belowMinHost(match.slice(1).map(Number))) return []
+  if (match === null || !belowHost(match.slice(1).map(Number), minimum)) return []
   return bad('engines.automatos', (
-    `A theme with "mobile" needs host ${MOBILE_MIN_HOST} or later: "engines.automatos" must not admit an earlier one `
-    + `(use ^${MOBILE_MIN_HOST}).`
+    `A theme with ${needs} needs host ${minimum} or later: "engines.automatos" must not admit an earlier one `
+    + `(use ^${minimum}).`
   ))
 }
 
@@ -189,6 +187,7 @@ export function mobileErrors(document: JsonRecord): ThemeError[] {
     ...sourceErrors(block),
     ...fontErrors(block),
     ...mascotErrors(block, own(document, 'mascot')),
-    ...enginesErrors(own(document, 'engines')),
+    ...layoutErrors(block),
+    ...enginesErrors(own(document, 'engines'), block),
   ]
 }

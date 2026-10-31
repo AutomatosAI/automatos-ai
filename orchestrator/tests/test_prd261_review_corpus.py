@@ -7,12 +7,13 @@ and runs ``check`` over every case (B-03e2); this test runs ``run_review_stage``
 A case is the hello package (``fixtures/themes/hello``) changed as ``build.py`` changes it
 (``manifestSet``/``manifestUnset`` on theme.json, ``replace`` setting a file's text, null dropping
 it), with the level it expects from each check both sides make: ``sizes``, ``cssScope``,
-``looks``, ``uses`` and ``clonedFrom``. The LLM is a fake answering risk 0. The SDK names are this
+``looks``, ``contrast`` (PRD-271 C04: the mobile skin's pairs and a phone layout's), ``uses`` and
+``clonedFrom``. The LLM is a fake answering risk 0. The SDK names are this
 host's own (``data/sdk-surface.json``), and a fresh clone's sha is written ``{"$corePageSha": path}``
 and read from ``data/core-pages.json``, so no edit of a core page changes the corpus.
 
 ``COVERED`` names, for each test of ``test_prd261_review_stage.py`` that proves a path of those
-five checks, the cases that repeat it; ``OUTSIDE`` names every other test of that file and why it
+six checks, the cases that repeat it; ``OUTSIDE`` names every other test of that file and why it
 has no case. A test added there fails here until it is placed in one of them.
 """
 from __future__ import annotations
@@ -42,7 +43,7 @@ CORPUS_TEXT = CORPUS_FILE.read_text(encoding="utf-8")
 CORPUS = json.loads(CORPUS_TEXT)
 CASES = CORPUS["cases"]
 CORPUS_SCHEMA = "automatos-theme-review-corpus/v1"
-CHECKS = (*READER_CHECKS, "uses", "clonedFrom")
+CHECKS = (*READER_CHECKS, "contrast", "uses", "clonedFrom")
 CASE_FIELDS = ("name", "manifestSet", "manifestUnset", "replace", "host", "expected")
 CORE_PAGE_SHA = "$corePageSha"
 HOST_SURFACE, SURFACE_MISSING = "sdkSurface", "missing"
@@ -76,13 +77,13 @@ COVERED = {
         "a clone of a core page this host changed",
     ),
     "test_a_clone_of_the_current_core_page_passes": ("a clone of the current core page",),
+    "test_a_mobile_pair_under_aa_makes_contrast_an_error_naming_it_and_blocks": ("a mobile skin pair under AA",),
+    "test_a_mobile_block_whose_measured_pairs_meet_aa_passes_contrast": ("a mobile skin whose measured pairs meet AA",),
 }
 VERDICT, CONTRAST, LLM, VIEW = "the verdict rule", "contrast (M-03)", "the LLM stage", "the uploader's view"
 OUTSIDE = {
     "test_the_verdict_is_blocked_on_an_error_review_required_on_a_warning_and_never_not_run": VERDICT,
     "test_contrast_is_listed_per_preset_as_not_measured_and_never_moves_the_verdict": CONTRAST,
-    "test_a_mobile_pair_under_aa_makes_contrast_an_error_naming_it_and_blocks": CONTRAST,
-    "test_a_mobile_block_whose_measured_pairs_meet_aa_passes_contrast": CONTRAST,
     "test_from_looks_a_preset_under_aa_blocks_and_is_named": CONTRAST,
     "test_from_looks_defaults_under_aa_block_while_every_preset_passes": CONTRAST,
     "test_a_high_llm_risk_blocks_and_a_middle_one_asks_for_review": LLM,
@@ -167,9 +168,11 @@ def test_the_corpus_holds_no_core_page_hash():
     assert not set(SHA256_TEXT.findall(CORPUS_TEXT)) & set(core_page_hashes().values())
 
 
-def test_uses_and_cloned_from_each_reach_every_level_they_can_give():
-    reached = {check: {case["expected"][check] for case in CASES} for check in ("uses", "clonedFrom")}
-    assert reached == {"uses": {"pass", "warning", "error"}, "clonedFrom": {"pass", "warning"}}
+def test_uses_cloned_from_and_contrast_each_reach_every_level_they_can_give():
+    reached = {check: {case["expected"][check] for case in CASES} for check in ("uses", "clonedFrom", "contrast")}
+    assert reached == {
+        "uses": {"pass", "warning", "error"}, "clonedFrom": {"pass", "warning"}, "contrast": {"pass", "error", "not_measured"},
+    }
 
 
 def test_every_review_stage_test_is_repeated_here_or_named_as_outside_the_corpus():

@@ -1078,6 +1078,19 @@ export type MobileThemeTokens = Record<string, string>
 /** One mascot state: its `.mp4` clip (clips mode only) and its `.png` still, as files-route URLs. */
 export interface MobileThemeMascotState { name: string; clip: string | null; still: string | null }
 
+/**
+ * PRD-271 §4.4: the phone layout a theme names (services/themes/data/phone-layouts.json), with every slot of its
+ * contract resolved for the member's look. A colour or tint slot is `#rrggbb`, `H S% L%`, `rgba(r,g,b,a)` or
+ * `transparent`; a number slot a whole number; a choice slot one of its choices.
+ */
+export interface MobileThemeLayout {
+  /** `<layout id>@<contract major>`, such as `candy@1`. */
+  contract: string
+  /** The contract's tone rule over the slots: Light / Dark / System doesn't apply on a layout. */
+  tone: MobileThemeScheme
+  slots: Record<string, string | number>
+}
+
 export interface MobileThemeBlock {
   source: 'tokens' | 'fromLooks'
   /** The look's tone for `fromLooks` (its scheme is the one filled); null for `tokens`: follow the device. */
@@ -1086,6 +1099,12 @@ export interface MobileThemeBlock {
   /** Only the roles the theme declares; each URL is relative to the API base. */
   fonts: Partial<Record<'sans' | 'serif' | 'mono', string>>
   mascot: { mode: 'clips' | 'stills' | 'none'; states: MobileThemeMascotState[] }
+  /**
+   * Null when the theme names no layout, or its slots can't be filled (the phone draws the skin above). An app
+   * that doesn't implement the contract draws the skin too. This host always sends it; a server from before
+   * PRD-271 lacks it, which is how a phone tells the two apart (D-9).
+   */
+  layout: MobileThemeLayout | null
 }
 
 export interface MobileTheme {

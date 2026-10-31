@@ -1,6 +1,7 @@
 # The phone's theme: the `mobile` block and its answer
 
-PRD-261 M-01..M-04 (host contract 1.1.0). A phone app draws a member's theme from data alone
+PRD-261 M-01..M-04 (host contract 1.1.0) and PRD-271 W1 (host contract 1.2.0: a theme may pick one of the
+phone's layouts). A phone app draws a member's theme from data alone
 (Automatos Go reads this answer, and `GET /api/themes/active`, when it opens and each time it returns to the
 foreground; the discovery document lists it as the `mobile_theme` capability). It never loads a theme's
 `dist/entry.js` or `dist/theme.css`: an app may not download and run code (App Store guideline
@@ -15,7 +16,10 @@ foreground; the discovery document lists it as the `mobile_theme` capability). I
   // or, instead of "tokens":
   "fromLooks": true,
   "fonts": { "sans": "assets/fonts/mobile/inter-regular.ttf", "serif": "…", "mono": "…" },
-  "mascot": "clips"
+  "mascot": "clips",
+  // PRD-271 (host 1.2.0), optional: one of the phone's layouts and its contract's slots
+  "layout": "candy@1",
+  "slots": { "page": "#FFF4F9", "accent": { "look": "--bubble-accent" }, "roundness": { "look": "roundness" } }
 }
 ```
 
@@ -26,7 +30,8 @@ foreground; the discovery document lists it as the `mobile_theme` capability). I
 | `fromLooks` | The member's look is painted through `boot/prepaint.json`, which the package must have, and the table's `defaults`, painted as the web paints them (below), must give `--background` and `--foreground` as `H S% L%` triplets. A Studio token written `#rrggbb` in the table paints nothing, on the web or the phone. Defaults that don't fit the table would paint nothing either, so the reader refuses that table whatever the block (`PREPAINT_DEFAULTS_UNFIT`, [Theme host](_index.md) §1). |
 | `fonts` | Any of `sans`, `serif`, `mono`; each a different `assets/fonts/mobile/<name>.ttf` or `.otf` in the package (one sfnt face, at most 400 KB). |
 | `mascot` | `clips`, `stills` or `none` (absent means `none`). `clips` needs each state of the top-level `mascot.states` to have `assets/mascot/<state>.mp4` and `.png`; `stills` needs the `.png`. |
-| `engines.automatos` | Must not admit a host older than 1.1.0. |
+| `layout`, `slots` | Optional, and together (PRD-271). `layout` names a phone layout and its contract major, `"<id>@<major>"`: one of [the contracts](#the-phone-layouts-and-their-contracts). `slots` fills that contract: no slot it lacks, every slot it requires, each value of its slot's kind or `{"look": …}` (below). The Studio skin (`tokens` or `fromLooks`) stays required: an app without the layout draws it. |
+| `engines.automatos` | Must not admit a host older than 1.1.0, or 1.2.0 when the block has `layout` (an older host refuses the field as `UNKNOWN_FIELD`). |
 
 The review measures AA contrast for the block (4.5:1 for text on its fill, 3:1 for `--primary` and
 `--ring` on `--background`) on exactly what the answer below can serve: per scheme for `tokens`; for
@@ -35,6 +40,52 @@ The review measures AA contrast for the block (4.5:1 for text on its fill, 3:1 f
 `defaults` keeps its own entry, kind `preset`) and then each preset, each painted as the web paints
 it. A pair under its minimum blocks the listing, and so does a scheme or painting that gives no
 `--background` or `--foreground` (a phone can't draw it).
+
+A block with a layout is measured too: the contract's pairs (a text or mark slot on a ground slot,
+or on a colour the layout fixes, such as HUD's text) over its slots, once when every slot is a value,
+else for the prepaint table's `defaults` and then each preset, each resolved as the answer below
+resolves it. The Studio skin is still measured beside it, and a pair under its minimum in either
+blocks the listing (`services/themes/layout_contrast.py`).
+
+## The phone layouts and their contracts
+
+Automatos Go draws every screen with a layout built into the app (App Store guideline 2.5.2 allows no
+downloaded code), and Automatos adds layouts in app releases. Each layout publishes a **contract**: the
+slots it paints from. The contracts are `orchestrator/services/themes/data/phone-layouts.json`
+(`services/themes/layout_contracts.py` reads it), the host's own data, copied byte for byte by the
+design kit and Automatos Go. The browser's copy (`frontend/lib/theme-host/phone-layouts.json`) leaves out
+each layout's `home`, since no frontend runtime file names a first-party theme's id.
+
+| Contract | Home theme | Required slots | Optional slots (default) | Fixed by the layout | Tone | Auto |
+|---|---|---|---|---|---|---|
+| `play@1` | `automatos/play` | colours `bg`, `surface`, `text`, `text2`, `accent`, `accentInk`, `autoLight`; tints `line`, `chip`, `panel` | `glow` 0-40 (24), `shell` bronze, gold, silver or cobalt (bronze), `error` (#FF6B6B) | | `bg` against `text` | bundled: the theme's clips or stills when the block brings them, else its own Auto in `shell` and `autoLight` |
+| `hud@1` | `automatos/hud` | colours `bg`, `accent`, `accentInk` | `grid` 0-30 (14), `scan` on or off (on), `glow` 0-40 (22), `auto` on or off (on) | `text`, `text2`, `line`, `track`, `error` | always dark | bundled (`auto`) |
+| `arcade@1` | `automatos/arcade` | colours `page`, `win`, `tx`, `tx2`, `bd`, `bar`, `barTx`, `ac`, `aci`, `hl`, `hlt`, `hp`, `xp`, `mp`, `qs`; tints `sh`, `bevl`, `bevd` | the 13 map colours (Overworld's), `art` bronze or shades, `pixelScale` 2 or 3 (3), `scanlines` off, soft or strong (soft), `windowStyle` classic or thin (classic) | | `page` against `tx` | drawn: the pixel sprite in `art`'s colours |
+| `candy@1` | `automatos/candy` | colours `page`, `bandA`, `bandB`, `band1`-`band3`, `win`, `chip`, `text`, `quiet`, `border`, `bandQuiet`, `accent`, `accentInk`, `accentText`, `userA`, `userB`, `userInk`, `stageInk`, `cardInk`, `g1a`-`g3c`; tints `line`, `tint` | tints `blob1`-`blob3` (Blush's), `gradient` soft, rich or vivid (rich), `roundness` 16-40 (28), `glow` 0-10 (6) | danger, info and agent colours, derived in the app per tone | `page` against `text` | drawn: the glossy shell, fixed colours |
+
+Each contract also lists its pairs (Play 5, HUD 4, Arcade 15, Candy 34, the layout's own pairs of the
+home theme's `design/contrast.json` re-keyed to slots), which text each font role draws on it, and an
+`example`: the home theme's default look as slots, which passes its own contract. A slot with a
+default is optional, one without is required. Within a major the only change is a new optional slot
+(the `revision` goes up), which an older app ignores, drawing its own default, which is the
+contract's. Anything else (a new required slot, a slot removed, renamed or retyped, a narrower range,
+a changed pair) is the next major, `candy@2`, kept beside `candy@1` while any listed theme names it.
+
+**Slot kinds** (`services/themes/layout_slots.py`, `frontend/lib/theme-host/mobile-layout.ts`):
+
+| Kind | A value | From the look |
+|---|---|---|
+| `colour` | `#rrggbb` or `H S% L%` | `{"look": "--name"}`: a variable `boot/prepaint.json` writes |
+| `tint` | a colour, `rgba(r,g,b,a)` (no spaces; each channel 0 to 255, the alpha 0 to 1 with up to four decimals) or `transparent` | `{"look": "--name"}` |
+| `number` | a whole number in the slot's range | `{"look": "knob"}`: the knob's number, or a choice key that writes one (Candy's `roundness` keys `"16"` to `"40"`) |
+| `choice` | one of the slot's choices | `{"look": "knob"}`: the knob's choice |
+
+A variable and a knob are named as the browser's first paint keeps them: `--` then 1 to 64 lower-case
+letters, digits or dashes; a letter then up to 31 letters, digits or `_`. On import
+(`services/themes/mobile_layout.py`), a slot from the look needs `boot/prepaint.json`; its variable
+must be one the table's knobs or pairs write (a numeric rule's variable is painted from a number, so
+it is none), its knob one of the table's looks; and the table's `defaults` must fill it. Each refusal
+is `MOBILE_CANNOT_PAINT` naming the slot.
 
 ## The answer: `GET /api/themes/mobile/{install_id}`
 
@@ -53,7 +104,9 @@ phone app copies it.
     "mascot": { "mode": "clips" | "stills" | "none",
                 "states": [ { "name": "idle",
                               "clip": "/api/themes/files/<digest>/assets/mascot/idle.mp4" | null,
-                              "still": "/api/themes/files/<digest>/assets/mascot/idle.png" | null } ] }
+                              "still": "/api/themes/files/<digest>/assets/mascot/idle.png" | null } ] },
+    "layout": null | { "contract": "candy@1", "tone": "light",
+                       "slots": { "page": "#FFF4F9", "line": "rgba(42,24,48,.09)", "roundness": 28, "gradient": "vivid" } }
   }
 }
 ```
@@ -73,6 +126,22 @@ phone app copies it.
 - **`mobile` is null** when the theme has no `mobile` block, when the member may not run it
   (a workspace's own or unreviewed theme the member has not opted in to), when it is revoked, or
   when a `fromLooks` theme's prepaint table can't be read (logged on the server).
+- **`layout`** (PRD-271). Every slot of the contract the block names: values as written,
+  `{"look": …}` resolved for the look the skin paints (under `fromLooks` the one its tokens come from,
+  else the member's saved look; none saved paints the defaults), slots the block leaves out at the
+  contract's default. A colour or tint keeps the form it was written or painted in (`#rrggbb`,
+  `H S% L%`, `rgba()`, `transparent`), a number is whole, a choice is one of the slot's. `tone` is the
+  contract's rule over the slots (HUD always `dark`; the others `dark` when the ground slot is darker
+  than the text slot), so core, the kit and the phone agree; Light / Dark / System doesn't apply on a
+  layout. A look that can't fill a slot paints the defaults whole; defaults that can't either, or a
+  table that can't be read, give `layout` null (logged), and the phone draws the skin. A block with
+  no layout gives `layout` null too: the field's presence tells a phone the server has layouts, and an
+  older server simply lacks it. `schema` stays 1, and there is no new route or discovery capability.
+- **Which layout a phone draws** for a theme that names `candy@1`: an app that implements `candy@1`
+  draws Candy from the slots; an app without Candy, or with only another major, and every app shipped
+  before PRD-271, draws the theme's Studio skin; an older server refuses the package on import
+  (`layout` is `UNKNOWN_FIELD` there), as any field newer than the host is. The layout's own home theme
+  (the table's `home`) keeps its native path on the phone, painted from the phone's own looks.
 - **Headers.** `Cache-Control: private, no-store`: the answer follows the member's look.
 
 ## Painting a look: the web's first paint
