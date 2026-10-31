@@ -2,18 +2,19 @@
 
 Pins:
 
-* the hosted router (``api.marketplace_catalog_items``: a bundle by its revision and a plugin's package) is a
-  ``RouterSpec`` entry in ``router_manifest.py``, and ``main.py`` names it nowhere: the wave leaves it unchanged;
-* it declares exactly the two W2 routes, both GETs (the wave adds no mutating route, K22), each in
+* the hosted router (``api.marketplace_catalog_items``: a bundle by its revision and a plugin's package) and the
+  local reads router (``api.marketplace_cloud_items``: the Cloud items, a disclosure and the updates, US-270-14a)
+  are ``RouterSpec`` entries in ``router_manifest.py``, and ``main.py`` names neither: the wave leaves it unchanged;
+* they declare exactly the five W2 routes, every one a GET (the wave adds no mutating route, K22), each in
   ``reports/route-manifest.json`` as a GET, and ``route_count == len(routes)``;
 * the live app (a probe in a clean subprocess with an unreachable Postgres, the ``test_prd261_c3_wire.py``
   precedent, as ``test_prd270w1_wire.py``) serves each W2 route once, each answered by its own handler, none
   shadowed by an earlier route (W1's catalogue files route ``/files/{digest}/{path:path}`` included);
 * neither hosted route's dependant tree holds ``get_request_context_hybrid``, on the router and on the live app,
   and neither carries a workspace permission: nothing they answer depends on a caller;
+* each local read's first two dependencies are the local-edition check, then ``get_request_context_hybrid``
+  (404 on SaaS before the caller is looked at; then any member, K18), on the router and on the live app;
 * the wave's three settings are on ``config`` and named in ``reports/config-surface.json``.
-
-US-270-14a's local reads router joins ``W2_MODULES`` and ``W2_ROUTES`` here when it is built.
 """
 from __future__ import annotations
 
@@ -38,20 +39,29 @@ if str(ORCH) not in sys.path:
 from fastapi.routing import APIRoute  # noqa: E402
 
 import api.marketplace_catalog_items as catalog_items_api  # noqa: E402
+import api.marketplace_cloud_items as cloud_items_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 from config import config  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from router_manifest import MANIFEST_ROUTERS, RouterSpec  # noqa: E402
 
-W2_MODULES = {"api.marketplace_catalog_items": catalog_items_api}
+W2_MODULES = {"api.marketplace_catalog_items": catalog_items_api, "api.marketplace_cloud_items": cloud_items_api}
 BUNDLE = "/api/marketplace/catalog/bundles/{revision}"
 PLUGIN_PACKAGE = "/api/marketplace/catalog/plugins/{slug}/{version}/package.zip"
 HOSTED_ROUTES = {("GET", BUNDLE), ("GET", PLUGIN_PACKAGE)}
-W2_ROUTES = HOSTED_ROUTES
+CLOUD_ITEMS = "/api/marketplace/cloud-sync/items"
+DISCLOSURE = "/api/marketplace/cloud-sync/items/{kind}/{key}/disclosure"
+UPDATES = "/api/marketplace/cloud-sync/updates"
+LOCAL_ROUTES = {("GET", CLOUD_ITEMS), ("GET", DISCLOSURE), ("GET", UPDATES)}
+W2_ROUTES = HOSTED_ROUTES | LOCAL_ROUTES
 SAMPLES = {
     ("GET", BUNDLE): "/api/marketplace/catalog/bundles/" + "ab" * 32,
     ("GET", PLUGIN_PACKAGE): "/api/marketplace/catalog/plugins/test-research-kit/1.0.0/package.zip",
+    ("GET", CLOUD_ITEMS): CLOUD_ITEMS,
+    ("GET", DISCLOSURE): "/api/marketplace/cloud-sync/items/agent/12/disclosure",
+    ("GET", UPDATES): UPDATES,
 }
+LOCAL_CHECK = f"{cloud_items_api.require_local_edition.__module__}.{cloud_items_api.require_local_edition.__qualname__}"
 SETTINGS = ("AUTOMATOS_CLOUD_BUNDLE_MAX_KB", "AUTOMATOS_CLOUD_PLUGINS_PER_SYNC", "MARKETPLACE_CATALOG_BUNDLE_MAX_KB")
 HYBRID = f"{get_request_context_hybrid.__module__}.{get_request_context_hybrid.__qualname__}"
 
@@ -112,6 +122,12 @@ def test_no_hosted_route_depends_on_the_caller_or_a_workspace_permission():
         calls = _calls(_w2_routes()[key].dependant)
         assert get_request_context_hybrid not in calls, f"{key} must not read a caller"
         assert not [call for call in calls if getattr(call, permission_mod.PERMISSION_MARKER_ATTR, None)], key
+
+
+def test_every_local_read_checks_the_edition_first_then_reads_the_caller():
+    for key in LOCAL_ROUTES:
+        calls = [sub.call for sub in _w2_routes()[key].dependant.dependencies]
+        assert calls[:2] == [cloud_items_api.require_local_edition, get_request_context_hybrid], key
 
 
 # --------------------------------------------------------------------------- the live app (a clean subprocess)
@@ -197,3 +213,9 @@ def test_on_the_live_app_no_hosted_route_reads_a_caller_or_a_workspace_permissio
         if _key(name) in HOSTED_ROUTES:
             assert HYBRID not in found, f"{name} must not read a caller"
             assert live_app["perms"][name] == [], name
+
+
+def test_on_the_live_app_every_local_read_checks_the_edition_before_the_caller(live_app):
+    for name, found in live_app["dependencies"].items():
+        if _key(name) in LOCAL_ROUTES:
+            assert found[:2] == [LOCAL_CHECK, HYBRID], f"{name}: {found[:2]}"

@@ -1,5 +1,5 @@
 {
-  "route_count": 1002,
+  "route_count": 1005,
   "routes": [
     {
       "method": "GET",
@@ -1715,7 +1715,19 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/cloud-sync/items"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/items/{kind}/{key}/disclosure"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/cloud-sync/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/updates"
     },
     {
       "method": "GET",
