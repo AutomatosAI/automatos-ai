@@ -18,7 +18,9 @@ host can't make yet:
   answer can serve. A measured pair under its minimum, or a scheme or painting that gives no
   ``--background`` or ``--foreground``, is an error naming it (``MOBILE_CONTRAST_FAIL_LEVEL``), every
   measured pair passing is a pass, and any other pair whose two tokens are not both set is listed
-  ``not_measured``.
+  ``not_measured``. PRD-271 C04: a block that names a phone layout has its contract's pairs measured over
+  its slots too (``layout_contrast.py``: once for values, else the defaults and each preset), and a pair
+  under AA there is the same error.
   Without the block: ``not_measured`` per preset. A look is knob values; neither
   ``looks/schema.json`` nor ``boot/prepaint.json`` says which painted colour is text on which
   ground, so there is no pair to measure (``scan.CONTRAST_NOT_RUN``). The reviewer checks it by
@@ -49,6 +51,7 @@ from typing import Any, Dict, Mapping, Optional
 
 from services.themes.audio_capture import audio_capture_check
 from services.themes.drift import stale_clones
+from services.themes.layout_contrast import with_layout
 from services.themes.llm_stage import ChunkCall, TokenBudget, llm_check, run_llm_stage
 from services.themes.mobile_contrast import OUTCOME_FAIL, OUTCOME_NOT_MEASURED, OUTCOME_PASS, measure_mobile
 from services.themes.package import ThemePackage
@@ -81,10 +84,13 @@ STALE_CLONES = (
 
 
 def contrast_check(checked: ThemePackage, unmeasured: Mapping[str, Any]) -> Dict[str, Any]:
-    """The ``contrast`` entry: the mobile block's pairs measured (M-03), else the scan's ``unmeasured`` one."""
-    measured = measure_mobile(checked.manifest, {path: item.data for path, item in checked.files.items()})
-    if measured is None:
+    """The ``contrast`` entry: the mobile block's pairs measured (M-03) with its layout's (PRD-271 C04), else the
+    scan's ``unmeasured`` one."""
+    files = {path: item.data for path, item in checked.files.items()}
+    skin = measure_mobile(checked.manifest, files)
+    if skin is None:
         return {**unmeasured, "level": LEVEL_NOT_MEASURED}
+    measured = with_layout(skin, checked.manifest, files)
     return {**measured, "level": CONTRAST_LEVELS[measured["status"]]}
 
 
