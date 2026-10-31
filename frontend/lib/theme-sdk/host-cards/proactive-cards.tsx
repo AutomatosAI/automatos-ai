@@ -44,7 +44,8 @@ import {
 } from './proactive-props'
 
 /** The host's brief card: the date, the greeting, Auto's Read, the five sections, Listen and the thumbs. */
-export function BriefCard({ brief, listen = true, onAction, onOpen, onShowMore, className }: BriefCardProps): ReactElement {
+export function BriefCard(props: BriefCardProps): ReactElement {
+  const { brief, listen = true, thumbs = true, onAction, onOpen, onShowMore, className } = props
   const shown = useMemo(() => checkedBrief(brief), [brief])
   const action = handlerOf(onAction, 'BriefCard', 'onAction')
   const open = handlerOf(onOpen, 'BriefCard', 'onOpen')
@@ -53,6 +54,7 @@ export function BriefCard({ brief, listen = true, onAction, onOpen, onShowMore, 
     <HostBriefCard
       brief={shown}
       listen={withListen ? <BriefVoice /> : undefined}
+      thumbs={checkedFlag(thumbs, 'BriefCard', 'thumbs')}
       onAction={action && ((row, section) => action(frozenCopy(row), section))}
       onOpen={open && ((row, section) => open(frozenCopy(row), section))}
       onShowMore={handlerOf(onShowMore, 'BriefCard', 'onShowMore')}

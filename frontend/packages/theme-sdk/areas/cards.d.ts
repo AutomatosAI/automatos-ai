@@ -247,6 +247,11 @@ export interface BriefCardProps {
   readonly brief: Brief
   /** Listen (voice.BriefVoice: the brief the host holds) in the card's footer; default true. False when the theme places it itself. */
   readonly listen?: boolean
+  /**
+   * The thumbs (SDK 1.4.0), showing the person's remembered rating; default true. False when the theme draws its own
+   * with proactive.useRateBrief, so the card draws none.
+   */
+  readonly thumbs?: boolean
   /** A row's action was pressed: resolve to show "✓ done_label" in place, reject to leave the row as it was. */
   readonly onAction?: (row: BriefRow, section: BriefSection) => unknown
   /** A row with somewhere to go was opened; without it no row is a link. */
@@ -367,7 +372,8 @@ export declare function CorePage(props: CorePageProps): ReactElement
 
 /**
  * The host's brief card: the date, the greeting (the only serif), Auto's Read, the five sections with the server's
- * labels and counts, "Show N more", the empty sentence, the "Auto is an AI" caption, Listen and the thumbs.
+ * labels and counts, "Show N more", the empty sentence, the "Auto is an AI" caption, Listen and the thumbs (the
+ * person's remembered rating; none with `thumbs={false}`).
  */
 export declare function BriefCard(props: BriefCardProps): ReactElement
 

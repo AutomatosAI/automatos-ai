@@ -26,6 +26,7 @@ import {
   withChatTouched,
   withDraft,
   withDraftClosed,
+  withDraftStarted,
   withTabClosed,
   withThreadRead,
   withTitles,
@@ -48,6 +49,8 @@ export interface ChatSessionStore {
   reload: () => void
   openChat: (chatId: string) => void
   newDraft: () => void
+  /** The person typed or sent in the blank chat shown while nothing is open: it stays theirs (a draft). */
+  draftStarted: () => void
   closeTab: (chatId: string) => void
   closeDraft: () => void
   chatIdAssigned: (chatId: string) => void
@@ -116,6 +119,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => {
 
     openChat: (chatId) => apply((s, now) => withChatOpened(s, chatId, now)),
     newDraft: () => apply((s, now) => withDraft(s, now)),
+    draftStarted: () => apply((s, now) => withDraftStarted(s, now)),
     closeTab: (chatId) => apply((s, now) => withTabClosed(s, chatId, now)),
     closeDraft: () => apply((s, now) => withDraftClosed(s, now)),
     chatIdAssigned: (chatId) => apply((s, now) => withChatIdAssigned(s, chatId, now)),

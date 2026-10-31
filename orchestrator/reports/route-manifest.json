@@ -1,5 +1,5 @@
 {
-  "route_count": 1003,
+  "route_count": 1004,
   "routes": [
     {
       "method": "GET",
@@ -28,6 +28,10 @@
     {
       "method": "GET",
       "path": "/api/activity/digest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/digest/feedback"
     },
     {
       "method": "POST",

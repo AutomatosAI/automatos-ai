@@ -102,7 +102,8 @@ The server checks a package with `services/themes/manifest.py`, `look_schema.py`
 | You change | Also do | Guard |
 |---|---|---|
 | A rule in a Python validator | The TypeScript twin, and a case in the shared corpus `orchestrator/tests/fixtures/themes/cases.json` | `test_prd261_theme_package.py` runs the corpus in Python and `validator-parity.test.ts` in TypeScript: both must give the same verdict and code |
-| A list or limit in `contract.py` (reserved classes, slots, pages, error codes, the mobile lists, the contrast pairs) | The TypeScript constant | `validator-parity.test.ts` reads the Python sources as text |
+| A list or limit in `contract.py` (reserved classes, slots, pages, error codes, the mobile lists, the contrast pairs, `PREPAINT_VALUE_MAX`) | The TypeScript constant | `validator-parity.test.ts` reads the Python sources as text |
+| The browser's first-paint gate (`css_value.py` `BOOT_VALUE_CHARS`, `BOOT_VALUE_FUNCTIONS`, `boot_value_problem`) | Its one TypeScript copy, `css-value.ts` (`boot-sanitize.ts` imports `isBootValue` from it), and a case in the corpus's `prepaintDrops` section | `validator-parity.test.ts` reads the function list from `css_value.py` and runs `prepaintDrops` with `prepaintDropErrors`; `test_prd261_theme_package.py` runs it with `prepaint_drop_errors` |
 | The contrast maths | Both sides, and the corpus's `contrast` section | `test_prd261_mobile_contrast.py` and `contrast-parity.test.ts` |
 
 The [Design Kit](https://github.com/AutomatosAI/automatos-design-kit) vendors these TypeScript validators and the

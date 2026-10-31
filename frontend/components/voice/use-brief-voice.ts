@@ -14,21 +14,28 @@
  * unmounting stops it too, and so does the tab's voice session starting (`sessionRunning`: a hold or a call), so
  * Auto never talks over itself and the microphone never hears Listen. Only a reading still going is cancelled: the
  * browser's speech is the page's one queue, so a finished Listen never cuts off another voice (a quick ask's reply).
+ *
+ * row (SDK 1.4.0) is the brief row Auto is reading, its index in the brief's rows in the sections' order, or null
+ * while it reads none (brief-voice-rows.ts: read off the port's own events, the engine unchanged).
  */
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react'
 import { SYSTEM_CLOCK } from '@/lib/voice/quick-ask/clock'
 import { speechPort } from '@/lib/voice/quick-ask/deps'
 import { sentenceChunker } from '@/lib/voice/quick-ask/sentences'
-import { createSpeaker, type Speaker, type SynthesisPort } from '@/lib/voice/quick-ask/speaker'
+import { createSpeaker, type Speaker } from '@/lib/voice/quick-ask/speaker'
+
+import { rowTrackingPort, type RowTrackingPort, type SpokenRow } from './brief-voice-rows'
 
 interface BriefSpeech {
-  readonly port: SynthesisPort
+  readonly port: RowTrackingPort
   readonly speaker: Speaker
 }
 
 export interface BriefVoiceControl {
   /** Auto is reading the brief. */
   readonly speaking: boolean
+  /** The brief row Auto is reading (its index, in the sections' order); null while it reads none. */
+  readonly row: SpokenRow
   /** Reads the spoken text from its start; call it only from the person's press. */
   readonly listen: () => void
   readonly stop: () => void
@@ -53,10 +60,16 @@ function stopSpeech(speech: MutableRefObject<BriefSpeech | null>): void {
   if (current?.speaker.speaking()) current.speaker.stop()
 }
 
+/** Stops the reading and ends it, so no row is being read; its late events report nothing. */
+function endSpeech(speech: MutableRefObject<BriefSpeech | null>): void {
+  stopSpeech(speech)
+  speech.current?.port.end()
+}
+
 /** The voice for Listen, made on the first press; null (logged) when this browser can't make one. */
-function newSpeech(onDrained: () => void): BriefSpeech | null {
+function newSpeech(onDrained: () => void, onRow: (row: SpokenRow) => void): BriefSpeech | null {
   try {
-    const port = speechPort()
+    const port = rowTrackingPort(speechPort(), onRow)
     const speaker = createSpeaker(port, SYSTEM_CLOCK, (event) => {
       if (event.type === 'drained') onDrained()
     })
@@ -67,27 +80,63 @@ function newSpeech(onDrained: () => void): BriefSpeech | null {
   }
 }
 
-/** Listen and Stop over the brief's spoken text; `sessionRunning` stops Listen while the tab's voice session runs. */
-export function useBriefVoice(spoken: string, sessionRunning = false): BriefVoiceControl {
+/** Tells `handler` the row, logging (never rethrowing) a failure: a theme's handler never breaks Auto's speech. */
+function tell(handler: ((row: SpokenRow) => void) | undefined, row: SpokenRow): void {
+  try {
+    handler?.(row)
+  } catch (error) {
+    console.warn(LOG_PREFIX, 'onSpeakingRow failed', error)
+  }
+}
+
+/**
+ * The row Auto reads: its state, for the root's attribute, and `report`, which also tells `onRow` straight from the
+ * speech's event, each change once, so a clip that starts and ends in one render batch is still heard.
+ */
+function useRowReport(onRow: ((row: SpokenRow) => void) | undefined) {
+  const [row, setRow] = useState<SpokenRow>(null)
+  const handler = useRef(onRow)
+  const reported = useRef<SpokenRow>(null)
+  handler.current = onRow
+  const report = useCallback((next: SpokenRow) => {
+    setRow(next)
+    if (next === reported.current) return
+    reported.current = next
+    tell(handler.current, next)
+  }, [])
+  return { row, report }
+}
+
+/**
+ * Listen and Stop over the brief's spoken text; `sessionRunning` stops Listen while the tab's voice session runs, and
+ * `onRow` hears the row Auto reads each time it changes (null once it reads none, unmounting included).
+ */
+export function useBriefVoice(spoken: string, sessionRunning = false, onRow?: (row: SpokenRow) => void): BriefVoiceControl {
   const [speaking, setSpeaking] = useState(false)
+  const { row, report } = useRowReport(onRow)
   const speech = useRef<BriefSpeech | null>(null)
+  const drained = useCallback(() => {
+    setSpeaking(false)
+    report(null)
+  }, [report])
   const listen = useCallback(() => {
     const sentences = spokenSentences(spoken)
     if (sentences.length === 0) return
-    speech.current = speech.current ?? newSpeech(() => setSpeaking(false))
+    speech.current = speech.current ?? newSpeech(drained, report)
     if (speech.current === null) return
     stopSpeech(speech)
+    speech.current.port.begin(sentences)
     speech.current.port.prime()
     setSpeaking(true)
     speech.current.speaker.speak(sentences)
-  }, [spoken])
+  }, [spoken, drained, report])
   const stop = useCallback(() => {
-    stopSpeech(speech)
+    endSpeech(speech)
     setSpeaking(false)
   }, [])
   useEffect(() => {
     if (sessionRunning) stop()
   }, [sessionRunning, stop])
-  useEffect(() => () => stopSpeech(speech), [])
-  return { speaking, listen, stop }
+  useEffect(() => () => endSpeech(speech), [])
+  return { speaking, row, listen, stop }
 }
