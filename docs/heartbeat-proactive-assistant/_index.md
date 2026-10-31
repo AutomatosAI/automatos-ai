@@ -39,6 +39,19 @@ As a PARENT page, this document provides a high-level overview of the heartbeat 
 
 **Sources:** [orchestrator/services/heartbeat_service.py:1-10](), [orchestrator/services/heartbeat_service.py:135-142]()
 
+### Proactive Auto (PRD-268)
+
+Proactive Auto changes what a heartbeat does when its workspace has it on. The scheduler now runs the bridge's jobs
+(`agent_job`, `orchestrator_job` in `orchestrator/services/proactive/heartbeat_bridge.py`) instead of the ticks: in
+`shadow` mode a read-only check-in runs beside the tick, and in `live` mode it runs instead of the tick, so a
+converted heartbeat files no ticket and no per-tick report. An agent's heartbeat converts unless its
+`heartbeat.mode` is `act` (unset: `act` when `auto_act` is set); the orchestrator's converts at `proactive_level`
+`silent` or `notify`. With the mode off, every heartbeat runs exactly as described on these pages.
+
+- For people using a workspace: [Proactive Auto](../proactive-auto/_index.md).
+- For engineers: [Proactive Auto: engineering](../proactive-auto/engineering/_index.md), and
+  [Check-ins](../proactive-auto/engineering/check-ins.md#the-heartbeat-bridge) for the bridge.
+
 ---
 
 ## Architecture Overview
