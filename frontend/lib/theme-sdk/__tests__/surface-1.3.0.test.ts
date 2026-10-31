@@ -39,7 +39,7 @@ const DECLARED_TYPE = /^export (?:declare )?(?:type|interface) ([A-Za-z_$][\w$]*
 /** What 1.4.0 adds, area by area: nothing else may appear, and nothing of 1.3.0 may go. */
 const ADDED_IN_1_4_0: Readonly<Record<string, AreaSurface>> = {
   chat: { values: [], types: ['HostBriefPart', 'HostMessagePart', 'HostReplyChipsPart', 'HostSuggestionPart', 'HostTextPart'] },
-  proactive: { values: ['useRateBrief'], types: ['BriefRated', 'BriefRating', 'RateBriefInput'] },
+  proactive: { values: ['useRateBrief'], types: ['BriefRated', 'BriefRating', 'RateBriefAction', 'RateBriefInput'] },
   voice: { values: [], types: ['BriefVoiceProps'] },
 }
 const NOTHING_ADDED: AreaSurface = { values: [], types: [] }

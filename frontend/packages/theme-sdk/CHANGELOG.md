@@ -17,9 +17,13 @@ PRD-268 Wave K, for themes that own `/chat` (Play, HUD). No area is added, and t
 - **voice:** `BriefVoice` takes `BriefVoiceProps`: `onSpeakingRow(row)` hears the brief row Auto starts reading (its
   index in the brief's rows, in the sections' order: the number Auto says, less one) and null between rows, during the
   greeting and once the reading ends. Its root also carries `data-voice-row="<index>"` while a row is read.
-- **proactive:** `useRateBrief()`, the brief's thumbs up or down (`RateBriefInput`: `state_hash`, `rating` of
-  `BriefRating`, `up` or `down`; it answers `BriefRated`), through the host's existing digest feedback route, the one
-  `cards.BriefCard` posts.
+- **proactive:** `useRateBrief(stateHash?)`, the brief's thumbs up or down (`RateBriefInput`: `state_hash`, `rating`
+  of `BriefRating`, `up` or `down`; it answers `BriefRated`), through the host's existing digest feedback route, the one
+  `cards.BriefCard` posts. It is a `RateBriefAction`: given the brief's `state_hash`, its `rating` is the person's own
+  rating of that brief (`up`, `down` or null), read from the server and shared with `BriefCard`'s thumbs, so a press
+  in either shows in both. The server keeps one rating per person per brief: a second press changes it.
+- **cards:** `BriefCard` takes `thumbs` (default true). Its thumbs show the person's remembered rating; `thumbs={false}`
+  draws none, for a theme that draws its own with `useRateBrief` beside the card.
 - **proactive (docs):** `useSuggestions` is the signed-in person's own open suggestions, never a row addressed to
   someone else.
 

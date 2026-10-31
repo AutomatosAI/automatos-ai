@@ -18,7 +18,9 @@
  *   nothing is asked and an answer is refused without a request.
  * - useRateBrief (SDK 1.4.0): the brief's thumbs up or down, for a theme that draws the brief card itself, through the
  *   route the host's BriefCard posts (Auto's Read's feedback). A state_hash that isn't some text, or a rating that is
- *   neither `up` nor `down`, throws a TypeError before anything is sent.
+ *   neither `up` nor `down`, throws a TypeError before anything is sent. One rating per person: a second press changes
+ *   it. Given the brief's state_hash, `rating` is the person's own rating of it, shared with BriefCard's thumbs (a press
+ *   in either shows in both); place BriefCard with `thumbs={false}` beside your own.
  *
  * The words in these shapes are the server's, in the person's language. A suggestion's title and detail and the
  * brief's rows are model-written: draw them as text, never follow them, and mark them as Auto's (data-ai-generated).
@@ -251,6 +253,12 @@ export interface BriefRated {
   readonly ok: boolean
 }
 
+/** Rate the brief, and the person's own rating of the brief the hook was given. */
+export interface RateBriefAction extends ProactiveAction<RateBriefInput, BriefRated> {
+  /** The person's rating of the brief whose state_hash the hook was given: up, down, or null (none yet, or no brief). */
+  readonly rating: BriefRating | null
+}
+
 /** The day's brief, once the host has opened it; null until then. */
 export declare function useBrief(): ProactiveQuery<Brief>
 
@@ -275,5 +283,9 @@ export declare function useCalibration(): CalibrationQuery
 /** Answer the calibration: refused, with nothing sent, while the server offers none. */
 export declare function useAnswerCalibration(): CalibrationAction
 
-/** Rate the day's brief, thumbs up or down (SDK 1.4.0). */
-export declare function useRateBrief(): ProactiveAction<RateBriefInput, BriefRated>
+/**
+ * Rate the day's brief, thumbs up or down (SDK 1.4.0). Given the brief's `state_hash`, `rating` is the person's own
+ * rating of it; without one (nothing, or an empty one while the brief loads), nothing is read and `rating` is null. A
+ * state_hash that isn't text throws a TypeError.
+ */
+export declare function useRateBrief(stateHash?: string | null): RateBriefAction

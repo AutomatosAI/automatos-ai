@@ -22,7 +22,10 @@ vi.mock('@/lib/api-client', () => ({
   },
 }))
 vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => ({ workspace: { id: 'ws-1' } }) }))
-vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => ({ mutate: vi.fn() }) }))
+vi.mock('@/hooks/use-digest-api', () => ({
+  useSubmitDigestFeedback: () => ({ mutate: vi.fn() }),
+  useDigestRating: () => ({ data: undefined }),
+}))
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode; className?: string }) => (
     <a href={href} {...rest}>
