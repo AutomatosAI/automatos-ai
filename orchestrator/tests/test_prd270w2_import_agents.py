@@ -269,7 +269,7 @@ def test_what_this_install_lacks_is_recorded_unresolved_and_the_agent_is_still_w
     assert _mapping(db, bundle).unresolved == [
         {"kind": "persona", "name": body["persona"]},
         {"kind": "model", "name": body["model"]["modelId"]},
-        {"kind": "skill", "name": body["skills"][0]["name"]},
+        {"kind": "skill", "name": body["skills"][0]["name"], "package": body["skills"][0]["package"]},
         {"kind": "skill", "name": body["skills"][1]["name"]},
         {"kind": "plugin", "name": body["plugins"][0]},
     ]

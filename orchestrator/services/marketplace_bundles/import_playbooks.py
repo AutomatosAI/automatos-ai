@@ -7,13 +7,14 @@ a step naming an agent of the same pass finds its row. The Playbook is upserted 
 * no mapping: a NEW marketplace row (owner 'marketplace', no workspace, public, approved, not featured,
   not a system Playbook, template id ``cloud-<externalId>``, the seed's empty template definition) and its
   mapping;
-* a mapping at the bundle's revision: UNCHANGED, nothing written;
-* a mapping at another revision: the SAME row UPDATED in place (its name, description, steps, inputs,
-  outputs, execution, schedule, agents, apps, tags, category, icon, version and its creator's name, the
-  publisher's, as ``upsert_agent`` moves an agent's) and the mapping moved. A local operator's approval,
-  featuring and visibility of the row stand, as do its template id and counts.
-* a mapping at the same revision is never resolved again: the Sync fetches no bundle for it (K13), so a
-  helper that arrives later is the Playbook's once Automatos Cloud's revision of it moves.
+* a mapping at the bundle's revision whose ``unresolved`` the bundle resolves to again: UNCHANGED, nothing
+  written;
+* a mapping at another revision, or at the same one while its helpers resolve otherwise now (a Cloud agent
+  a later Sync brought, P270W2-RVW-1: the Sync fetches its bundle again for that, ``items_feed``'s
+  ``rechecked_entries``): the SAME row UPDATED in place (its name, description, steps, inputs, outputs,
+  execution, schedule, agents, apps, tags, category, icon, version and its creator's name, the publisher's,
+  as ``upsert_agent`` moves an agent's) and the mapping moved. A local operator's approval, featuring and
+  visibility of the row stand, as do its template id and counts.
 
 Its steps are stored as the Socials seed stores them (``seed_socials_package._stored_steps``): each agent
 step names its agent by ``agent_id`` and ``agent_name``, which a Playbook's install remaps to the
@@ -22,12 +23,14 @@ names, which the install clones (by name). An agent reference resolves (resolve.
 approved marketplace agent: ``{slug}`` a seeded one, ``{item}`` the Cloud agent mapped to it. One that
 doesn't (``{name}`` never does) leaves its step with no agent, ``needs_helper`` and ``agent_name`` its name
 (F223's shape, ``cascade_installer._unpin_foreign_helpers``), and is recorded in the mapping's
-``unresolved`` as a helper; the Playbook is still written. The row is checked with the model's own three
-validators (the seed's ``_validate``) before anything is written.
+``unresolved`` as a helper (an ``{item}`` one with its agent's externalId); the Playbook is still
+written. The row is checked with the model's own three validators (the seed's ``_validate``) before
+anything is written.
 
 Never touched: a row without a mapping (seeded, operator-made or submitted here) and a workspace's copy of a
 Cloud row. A REFUSED Playbook writes nothing: its mapping naming a row that is no longer a marketplace
-Playbook, its template id held by another row, or a validator refusing it. Refusals are this module's own
+Playbook, its template id held by another row, or a validator refusing it; at the revision its mapping
+holds (a re-resolve, P270W2-RVW-1) the row stands as it was: UNCHANGED. Refusals are this module's own
 sentences (a validator's is the model's own), logged with the externalId, never a value of the bundle.
 """
 from __future__ import annotations
@@ -44,7 +47,8 @@ from core.models.marketplace_cloud import MarketplaceCloudItem
 from services.marketplace_bundles.canonical import local_version
 from services.marketplace_bundles.errors import BundleError
 from services.marketplace_bundles.resolve import (
-    HELPER, MARKETPLACE_OWNER, PLAYBOOK_ITEM, LocalAgent, agent_for_ref, unresolved,
+    HELPER, MARKETPLACE_OWNER, PLAYBOOK_ITEM, LocalAgent, agent_for_ref, at_revision, held_as_resolved,
+    unresolved,
 )
 from services.marketplace_cloud.pull import NEW, REFUSED, UNCHANGED, UPDATED
 
@@ -88,20 +92,21 @@ def upsert_playbook(
     names of the pass's agent bundles by externalId, the name of a helper that didn't resolve.
 
     Answers (outcome, row): NEW or UPDATED with the row written and flushed, UNCHANGED with the row held
-    (nothing written), or REFUSED with None (nothing written). The caller commits; a database error is the
-    caller's to roll back.
+    (nothing written: its mapping is at ``revision`` and its helpers resolve as they did, or a rewrite at that
+    revision was refused, so it stands as it was), or REFUSED with None (nothing written). The caller commits;
+    a database error is the caller's to roll back.
     """
     external_id = bundle["externalId"]
     mapping = _mapping(db, external_id)
     row = db.get(WorkflowTemplate, mapping.recipe_id) if mapping is not None else None
-    if mapping is not None and mapping.revision == revision:
-        return UNCHANGED, row
     parts = resolved_parts(db, bundle[ITEM_TYPE], agent_names)
+    if held_as_resolved(mapping, revision, parts.unresolved):
+        return UNCHANGED, row
     fields, refusal = _checked_fields(bundle, revision, publisher, parts)
     refusal = _refusal(db, external_id, mapping, row) or refusal
     if refusal is not None:
         logger.warning("Automatos Cloud sync: Playbook %s is refused: %s", external_id, refusal)
-        return REFUSED, None
+        return (UNCHANGED, row) if at_revision(mapping, revision) else (REFUSED, None)
     outcome, row = _written_row(db, row, fields, external_id)
     _map(db, mapping, bundle, revision, row.id, parts.unresolved)
     db.flush()
@@ -138,7 +143,8 @@ def resolved_parts(db: Session, body: Mapping[str, Any], agent_names: Mapping[st
         steps=tuple(_stored_step(step, refs, found, agent_names) for step in body["steps"]),
         recommended=_distinct(found[local_id].name for local_id in named if found[local_id] is not None),
         unresolved=tuple(unresolved(
-            (HELPER, helper_name(refs[local_id], agent_names)) for local_id in named if found[local_id] is None
+            (HELPER, helper_name(refs[local_id], agent_names), refs[local_id].get("item"))
+            for local_id in named if found[local_id] is None
         )),
     )
 

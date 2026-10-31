@@ -6,11 +6,13 @@ fetched and validated, and commits the pass itself. The agent is upserted by its
 
 * no mapping: a NEW marketplace row (owner 'marketplace', no workspace, approved, not featured,
   active, a new public_id, no slug, no configuration) and its mapping;
-* a mapping at the bundle's revision: UNCHANGED, nothing written;
-* a mapping at another revision: the SAME row UPDATED in place (its name, description, type, tags,
-  category, icon, prompt, persona, model, apps, skills, plugins and version) and the mapping moved. A
-  local operator's approval, featuring and status of the row stand, as do its public_id and install
-  count.
+* a mapping at the bundle's revision whose ``unresolved`` the bundle resolves to again: UNCHANGED, nothing
+  written;
+* a mapping at another revision, or at the same one while what it names resolves otherwise now (a plugin
+  or a skill a later Sync brought, P270W2-RVW-1): the SAME row UPDATED in place (its name, description,
+  type, tags, category, icon, prompt, persona, model, apps, skills, plugins and version) and the mapping
+  moved. A local operator's approval, featuring and status of the row stand, as do its public_id and
+  install count.
 
 The row's version is ``local_version`` (Automatos Cloud's version and the revision's first 12), which
 every clone copies, so a workspace copy records the bundle it was cloned from. Its apps are
@@ -18,8 +20,8 @@ every clone copies, so a workspace copy records the bundle it was cloned from. I
 ``_copy_tool_assignments`` reads), its skills ``agent_skills`` rows in the bundle's order (the first the
 highest priority), its plugins ``AgentAssignedPlugin`` rows in the bundle's order; on an update all three
 are replaced. What doesn't resolve here (resolve.py: a shared persona, a global skill, an approved
-plugin, a model) is left off the row and recorded in the mapping's ``unresolved``; the item is still
-written.
+plugin, a model) is left off the row and recorded in the mapping's ``unresolved`` (a skill with the slug
+of the plugin it comes from); the item is still written.
 
 Never touched: a row without a mapping (seeded, operator-made or submitted here) and a workspace's copy
 of a Cloud row (``cloned_from_id``), which nothing here reads. A REFUSED item writes nothing: its name
@@ -32,8 +34,9 @@ US-270-14g): an install by reference (``package_installer._find_marketplace_agen
 reads a slug or a name, ``.first()`` of either, so a Cloud agent named after a seeded one's slug could be
 installed in its place, without its disclosure. And so does a package or a marketplace Playbook without a mapping
 that names an agent so (a member's ref, a recommended agent), even while no agent here has that name: installing
-it would add the Cloud agent. Refusals are this module's own sentences, logged with the externalId
-(it passed its pattern), never a value of the bundle.
+it would add the Cloud agent. A rewrite refused at the revision its mapping holds (a re-resolve,
+P270W2-RVW-1) leaves the row as it was: UNCHANGED. Refusals are this module's own sentences, logged with
+the externalId (it passed its pattern), never a value of the bundle.
 """
 from __future__ import annotations
 
@@ -50,8 +53,8 @@ from core.models.marketplace_plugins import AgentAssignedPlugin
 from services.marketplace_bundles.canonical import local_version
 from services.marketplace_bundles.errors import BundleError
 from services.marketplace_bundles.resolve import (
-    AGENT_ITEM, MARKETPLACE_OWNER, MODEL, PERSONA, PLUGIN, SKILL, SkillKey, global_skills, model_held,
-    plugins_by_slug, shared_persona_by_slug, unresolved,
+    AGENT_ITEM, MARKETPLACE_OWNER, MODEL, PERSONA, PLUGIN, SKILL, SkillKey, at_revision, global_skills,
+    held_as_resolved, model_held, plugins_by_slug, shared_persona_by_slug, unresolved,
 )
 from services.marketplace_cloud.pull import NEW, REFUSED, UNCHANGED, UPDATED
 
@@ -111,13 +114,15 @@ def upsert_agent(
     marketplace row its mapping holds, with ``publisher`` as its creator's name.
 
     Answers (outcome, row): NEW or UPDATED with the row written and flushed, UNCHANGED with the row held
-    (nothing written), or REFUSED with None (nothing written). The caller commits; a database error is
-    the caller's to roll back.
+    (nothing written: its mapping is at ``revision`` and what it names resolves as it did, or a rewrite at
+    that revision was refused, so it stands as it was), or REFUSED with None (nothing written). The caller
+    commits; a database error is the caller's to roll back.
     """
     external_id = bundle["externalId"]
     mapping = _mapping(db, external_id)
     row = db.get(Agent, mapping.agent_id) if mapping is not None else None
-    if mapping is not None and mapping.revision == revision:
+    parts = resolved_parts(db, bundle[ITEM_TYPE])
+    if held_as_resolved(mapping, revision, parts.unresolved):
         return UNCHANGED, row
     refusal = _refusal(db, bundle, mapping, row)
     try:
@@ -126,8 +131,7 @@ def upsert_agent(
         refusal = refusal or BAD_VERSION
     if refusal is not None:
         logger.warning("Automatos Cloud sync: agent %s is refused: %s", external_id, refusal)
-        return REFUSED, None
-    parts = resolved_parts(db, bundle[ITEM_TYPE])
+        return (UNCHANGED, row) if at_revision(mapping, revision) else (REFUSED, None)
     fields = agent_fields(bundle, version, publisher, parts)
     outcome, row = _written_row(db, row, fields)
     _replace_links(db, row.id, parts)
@@ -198,7 +202,7 @@ def resolved_parts(db: Session, body: Mapping[str, Any]) -> AgentParts:
         apps=_distinct(body["apps"]),
         unresolved=tuple(unresolved([
             *_missing_persona_and_model(db, body, persona_id),
-            *((SKILL, name) for name, package in wanted if (name, package) not in skills),
+            *((SKILL, name, package) for name, package in wanted if (name, package) not in skills),
             *((PLUGIN, slug) for slug in body["plugins"] if slug not in plugins),
         ])),
     )

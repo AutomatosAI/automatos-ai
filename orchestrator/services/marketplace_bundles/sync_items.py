@@ -15,14 +15,18 @@ this Sync's passes don't run (logged; its answer counts its themes only) and tha
    plugins, and the skills they make, must exist before the agent is written.
 2. The item pass: the agent, Playbook and package entries no mapping holds at their revision have their
    bundles fetched (``items_feed.fetch_bundles``) with no transaction open, and ``import_items`` writes them
-   in one transaction.
+   in one transaction. So, at their revision, do the entries ``items_feed.rechecked_entries`` names: an item
+   written while a plugin, a skill a plugin makes or a Playbook's helper hadn't arrived, once it has (the
+   plugin pass brought it, or this pass fetched the agent's bundle), is resolved anew (P270W2-RVW-1) and
+   counted updated when its row changes, else unchanged; a refetch that fails, or a rewrite its writer
+   refuses, leaves it as it is (unchanged).
 
 Each type is counted {new, updated, unchanged, refused}: an entry the catalogue refused (``Entries.refused``), an
 unchanged entry (nothing fetched), a bundle its fetch refused, and what each pass answered. When the plugin
 pass fails (its mapping read, or anything unforeseen), its error is recorded in W1's ``marketplace_cloud_sync``
-row and no item pass runs (an agent written without its plugins would keep them unresolved until its next
-revision): every entry of the four types then counts refused, as ``import_items`` counts a pass that failed (a
-plugin committed before the failure is unchanged on the next Sync). A failed item pass records its own error;
+row and no item pass runs (an agent written without its plugins would be resolved again only on a later Sync):
+every entry of the four types then counts refused, as ``import_items`` counts a pass that failed (a plugin
+committed before the failure is unchanged on the next Sync). A failed item pass records its own error;
 the theme pass's rows and the plugins stand. A plugin past ``AUTOMATOS_CLOUD_PLUGINS_PER_SYNC`` is counted in
 ``plugins.waiting`` only.
 
@@ -34,14 +38,16 @@ from __future__ import annotations
 
 import logging
 from types import MappingProxyType
-from typing import Any, Dict, Iterable, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional, Tuple, TypeVar
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.models.marketplace_cloud import CLOUD_ITEM_TYPES, MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
-from services.marketplace_bundles.import_items import ITEM_TYPES, import_items
-from services.marketplace_bundles.items_feed import CatalogEntry, Entries, changed_entries, fetch_bundles
+from services.marketplace_bundles.import_items import AGENT, ITEM_TYPES, import_items
+from services.marketplace_bundles.items_feed import (
+    CatalogEntry, Entries, changed_entries, fetch_bundles, rechecked_entries,
+)
 from services.marketplace_bundles.plugin_import import ITEM_TYPE as PLUGIN
 from services.marketplace_bundles.plugin_import import RunAsync, import_plugins
 from services.marketplace_cloud import pull
@@ -49,6 +55,8 @@ from services.marketplace_cloud.fetch import ClientFactory
 from services.marketplace_cloud.pull import LAST_ERROR_MAX, REFUSED, UNCHANGED, SyncCounts, SyncOutcome, sync_row
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 PLUGINS_FAILED = (
     "The plugins from Automatos Cloud couldn't be read, so no plugin or item was added; the themes stand."
@@ -125,22 +133,40 @@ def item_counts(
     db: Session, listed: Iterable[CatalogEntry], client_factory: Optional[ClientFactory],
 ) -> Dict[str, SyncCounts]:
     """The item pass over the listed agent, Playbook and package entries: the unchanged ones counted, the
-    others' bundles fetched and written in one transaction (``import_items``); the counts by type."""
+    changed ones' bundles fetched, then the rechecked ones' (the agents just fetched among what they await),
+    and all of them written in one transaction (``import_items``); the counts by type. A rechecked item whose
+    bundle can't be fetched again stands as it is: unchanged."""
     chosen = tuple(entry for entry in listed if entry.type in ITEM_TYPES)
     if not chosen:
         return {}
+    changed = _mappings_read(db, lambda: changed_entries(db, chosen))
+    if changed is None:
+        return refused_by_type(chosen)
+    fetched = fetch_bundles(changed, client_factory)
+    arriving = frozenset(one.entry.external_id for one in fetched.bundles if one.entry.type == AGENT)
+    rechecked = _mappings_read(db, lambda: rechecked_entries(db, chosen, arriving))
+    if rechecked is None:
+        return refused_by_type(chosen)
+    to_fetch = frozenset((*changed, *rechecked))
+    unchanged = counted((entry.type for entry in chosen if entry not in to_fetch), UNCHANGED)
+    again = fetch_bundles(rechecked, client_factory)
+    bundles = (*fetched.bundles, *again.bundles)
+    written = import_items(db, bundles).counts if bundles else {}
+    kept = counted((refusal.type for refusal in again.refused), UNCHANGED)
+    return merged(unchanged, kept, refused_by_type(fetched.refused), written)
+
+
+def _mappings_read(db: Session, read: Callable[[], T]) -> Optional[T]:
+    """``read()``'s answer, its transaction ended before any fetch; None when the database fails, the pass's
+    error recorded (logged)."""
     try:
-        changed = changed_entries(db, chosen)
+        answer = read()
         db.rollback()  # the mappings' read ends before any fetch
     except SQLAlchemyError:
         logger.exception("Sync with Automatos Cloud: the item mappings couldn't be read")
         record_error(db, ITEMS_NOT_READ)
-        return refused_by_type(chosen)
-    to_fetch = frozenset(changed)
-    unchanged = counted((entry.type for entry in chosen if entry not in to_fetch), UNCHANGED)
-    fetched = fetch_bundles(changed, client_factory)
-    written = import_items(db, fetched.bundles).counts if fetched.bundles else {}
-    return merged(unchanged, refused_by_type(fetched.refused), written)
+        return None
+    return answer
 
 
 def counted(types: Iterable[str], verdict: str = REFUSED) -> Dict[str, SyncCounts]:

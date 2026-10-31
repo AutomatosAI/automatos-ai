@@ -12,7 +12,11 @@ additive). An entry (``parse_item_entry``) is refused, counted and never fetched
 Only those keys are read. Its ``bundle`` (a path the catalogue gives) never is: the URL is DERIVED.
 
 ``changed_entries`` leaves out each entry a ``marketplace_cloud_items`` mapping holds at the same revision
-(unchanged: nothing is fetched). ``fetch_bundle`` reads one bundle from the configured origin
+(unchanged: nothing is fetched). ``rechecked_entries`` names those of them to fetch again at their revision
+(P270W2-RVW-1): the mapping records, unresolved, what a later Sync can bring (``resolve.awaited``: a plugin, a
+skill a plugin makes, a Playbook's helper that is a Cloud agent), and this install now holds some of it, or
+the Sync has just fetched that agent's bundle, so the item pass resolves the item anew; what hasn't arrived
+fetches nothing. ``fetch_bundle`` reads one bundle from the configured origin
 (``AUTOMATOS_CLOUD_URL``, held to ``fetch.checked_origin``'s rule) and ``catalog_paths.bundle_path`` of the
 revision, through W1's guarded GET (``fetch.fetch_bytes``: no redirect, identity encoding, no Authorization,
 Cookie or X-Workspace-ID) capped at ``AUTOMATOS_CLOUD_BUNDLE_MAX_KB``. The body's sha256 must be the
@@ -30,7 +34,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, Iterable, Mapping, NamedTuple, Optional, Tuple
+from functools import reduce
+from typing import Any, Dict, FrozenSet, Iterable, Mapping, NamedTuple, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -39,6 +44,7 @@ from core.models.marketplace_cloud import MarketplaceCloudItem
 from services.marketplace_bundles.canonical import canonical_bytes
 from services.marketplace_bundles.catalog_paths import bundle_path
 from services.marketplace_bundles.errors import BundleError
+from services.marketplace_bundles.resolve import NOTHING_AWAITED, Awaited, awaited, held_now
 from services.marketplace_bundles.schema import (
     BUNDLE_TYPES, CATEGORY_MAX, DESCRIPTION_MAX, EXTERNAL_ID_LENGTH, EXTERNAL_ID_PATTERN, ICON_MAX, ICON_PATTERN,
     NAME_MAX, PUBLISHER_NAME_MAX, REVISION_PATTERN, TAG_MAX, TAGS_MAX, VERSION_MAX, VERSION_PATTERN, choice, listing,
@@ -182,15 +188,50 @@ def parse_item_entry(item: Mapping[str, Any]) -> CatalogEntry:
 def changed_entries(db: Session, entries: Iterable[CatalogEntry]) -> Tuple[CatalogEntry, ...]:
     """``entries`` less each one a ``marketplace_cloud_items`` mapping holds at the same revision (unchanged)."""
     listed = tuple(entries)
-    if not listed:
+    held = _held(db, listed)
+    return tuple(entry for entry in listed if not _at_revision(held, entry))
+
+
+def rechecked_entries(
+    db: Session, entries: Iterable[CatalogEntry], arriving: FrozenSet[str] = frozenset(),
+) -> Tuple[CatalogEntry, ...]:
+    """Of ``entries``, each a mapping holds at the same revision whose ``unresolved`` awaits something that has
+    arrived: a plugin or a skill this install now holds, or a Cloud agent it holds or this Sync has fetched
+    (``arriving``, those agent bundles' externalIds). Their bundles are fetched again (P270W2-RVW-1); only
+    reads."""
+    listed = tuple(entries)
+    held = _held(db, listed)
+    waiting = {entry: awaited(held[_key(entry)].unresolved) for entry in listed if _at_revision(held, entry)}
+    waiting = {entry: wanted for entry, wanted in waiting.items() if wanted.any()}
+    if not waiting:
         return ()
+    found = held_now(db, reduce(Awaited.plus, waiting.values(), NOTHING_AWAITED), arriving)
+    return tuple(entry for entry, wanted in waiting.items() if wanted.meets(found))
+
+
+def _key(entry: CatalogEntry) -> Tuple[str, str]:
+    return entry.type, entry.external_id
+
+
+def _held(db: Session, listed: Tuple[CatalogEntry, ...]) -> Dict[Tuple[str, str], Any]:
+    """The mappings of ``listed`` by (type, externalId): each one's revision and ``unresolved``."""
+    if not listed:
+        return {}
     rows = (
-        db.query(MarketplaceCloudItem.item_type, MarketplaceCloudItem.external_id, MarketplaceCloudItem.revision)
+        db.query(
+            MarketplaceCloudItem.item_type, MarketplaceCloudItem.external_id, MarketplaceCloudItem.revision,
+            MarketplaceCloudItem.unresolved,
+        )
         .filter(MarketplaceCloudItem.external_id.in_(sorted({entry.external_id for entry in listed})))
         .all()
     )
-    held = {(row.item_type, row.external_id): row.revision for row in rows}
-    return tuple(entry for entry in listed if held.get((entry.type, entry.external_id)) != entry.revision)
+    return {(row.item_type, row.external_id): row for row in rows}
+
+
+def _at_revision(held: Mapping[Tuple[str, str], Any], entry: CatalogEntry) -> bool:
+    """Whether a mapping holds ``entry``'s item at its revision."""
+    row = held.get(_key(entry))
+    return row is not None and row.revision == entry.revision
 
 
 # --------------------------------------------------------------------------- a bundle
@@ -272,5 +313,5 @@ def fetch_bundles(entries: Iterable[CatalogEntry], client_factory: Optional[Clie
 __all__ = [
     "BUNDLE_TYPES", "ENTRY_KEYS", "ENTRY_TRUST", "NO_ENTRIES", "CatalogEntry", "Entries", "EntryRefused", "Fetched",
     "FetchedBundle", "RefusedEntry", "bundle_url", "changed_entries", "fetch_bundle", "fetch_bundles",
-    "fetch_max_bytes", "is_bundle_item", "parse_item_entry",
+    "fetch_max_bytes", "is_bundle_item", "parse_item_entry", "rechecked_entries",
 ]
