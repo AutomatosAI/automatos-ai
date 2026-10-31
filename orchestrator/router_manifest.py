@@ -118,6 +118,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 US-C10b (§6.4) -- the brief on open, once per person per local date
     # (POST /api/proactive/brief/open).
     RouterSpec("api.proactive_brief"),
+    # PRD-268 US-C11e (§6.3) -- the person's own follow-ups: list and cancel
+    # (/api/proactive/follow-ups*).
+    RouterSpec("api.proactive_follow_ups"),
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),

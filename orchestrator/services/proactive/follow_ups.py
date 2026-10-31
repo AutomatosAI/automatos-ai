@@ -18,7 +18,8 @@ only (``modules.tools.discovery.follow_up_context``).
   per person: a per-person key could not bound the workspace's 100 a day.
 * ``list_follow_ups``: the person's own, pending by default, optionally in one chat.
 * ``cancel_follow_up``: the person's own pending one only; another's, or another
-  workspace's, is not found. It removes the job and writes the audit row.
+  workspace's, is not found. It removes the job and writes the audit row, whose actor is
+  Auto (its tool) or the person (``ACTOR_PERSON``: the thread's Cancel).
 
 Every statement keeps ``deliver_as = 'follow_up'`` a SQL literal, so the partial index
 ``ix_scheduled_tasks_follow_ups`` serves it. The audit rows never carry the reason, which
@@ -29,7 +30,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from uuid import UUID
 
@@ -43,7 +44,8 @@ from modules.proactive.follow_up_caps import CapBroken, FollowUpCaps, FollowUpCo
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "CANCELLED", "FIRED", "FollowUp", "FollowUpRequest", "NOT_FOUND", "PENDING", "STATUSES",
+    "ACTOR_AGENT", "ACTOR_PERSON", "CANCELLED", "FIRED", "FollowUp", "FollowUpRequest", "NOT_FOUND", "PENDING",
+    "STATUSES",
     "auto_agent_id", "cancel_follow_up", "list_follow_ups", "platform_caps", "schedule_follow_up",
 ]
 
@@ -61,6 +63,8 @@ LIST_LIMIT = 100
 SCHEDULED_ACTION = "proactive:follow_up_scheduled"
 CANCELLED_ACTION = "proactive:follow_up_cancelled"
 AUDIT_RESOURCE = "follow_up"
+# Who did it, as audit_logs.actor_type says: Auto through a tool, or the person themself.
+ACTOR_AGENT, ACTOR_PERSON = "agent", "user"
 
 _LOCK = text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:workspace_id))")
 _AUTO = text("SELECT id FROM agents WHERE workspace_id = CAST(:ws AS uuid) AND is_system_agent IS TRUE "
@@ -96,7 +100,7 @@ _CANCEL = text("""
     UPDATE agent_scheduled_tasks SET status = 'cancelled', updated_at = NOW()
     WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up'
       AND for_user_id = :user AND status = 'active'
-    RETURNING id, next_run_at, origin_chat_id
+    RETURNING id, next_run_at, description, origin_chat_id
 """)
 _STATUS = text("""
     SELECT status FROM agent_scheduled_tasks
@@ -129,9 +133,9 @@ class FollowUp:
     chat_id: Optional[str]
 
     def to_dict(self) -> Dict[str, Any]:
-        """``{id, at, reason, status, chat_id}``, the time as UTC ISO."""
-        return {"id": self.id, "at": self.at.isoformat() if self.at else None, "reason": self.reason,
-                "status": self.status, "chat_id": self.chat_id}
+        """``{id, at, reason, status, chat_id}``, the time as UTC ISO (whatever the session's zone)."""
+        at = self.at.astimezone(timezone.utc).isoformat() if self.at else None
+        return {"id": self.id, "at": at, "reason": self.reason, "status": self.status, "chat_id": self.chat_id}
 
 
 def platform_caps() -> FollowUpCaps:
@@ -174,11 +178,11 @@ def _service(db: Session, workspace_id: UUID) -> Any:
 
 
 def _audit(db: Session, workspace_id: UUID, user_id: int, action: str, follow_up_id: int,
-           details: Dict[str, Any]) -> None:
+           details: Dict[str, Any], actor_type: str = ACTOR_AGENT) -> None:
     """The follow-up's audit row, after its commit (W1's K15); never its reason."""
     from core.workspaces.audit import AuditService
 
-    AuditService(db).log(workspace_id=str(workspace_id), user_id=user_id, action=action, actor_type="agent",
+    AuditService(db).log(workspace_id=str(workspace_id), user_id=user_id, action=action, actor_type=actor_type,
                          resource_type=AUDIT_RESOURCE, resource_id=str(follow_up_id), details=details)
 
 
@@ -226,11 +230,12 @@ def _not_cancelled(db: Session, workspace_id: UUID, user_id: int, follow_up_id: 
     return status if status in (FIRED, CANCELLED) else NOT_FOUND
 
 
-def cancel_follow_up(db: Session, workspace_id: UUID, user_id: int,
-                     follow_up_id: int) -> Tuple[str, Optional[FollowUp]]:
-    """Cancel the person's own pending follow-up: ``(CANCELLED, it)``. Otherwise nothing
-    changes and the first item says why: ``NOT_FOUND`` (another person's, another
-    workspace's, or none), ``FIRED`` or ``CANCELLED`` (already)."""
+def cancel_follow_up(db: Session, workspace_id: UUID, user_id: int, follow_up_id: int, *,
+                     actor_type: str = ACTOR_AGENT) -> Tuple[str, Optional[FollowUp]]:
+    """Cancel the person's own pending follow-up: ``(CANCELLED, it)``, audited as
+    ``actor_type`` did it. Otherwise nothing changes and the first item says why:
+    ``NOT_FOUND`` (another person's, another workspace's, or none), ``FIRED`` or
+    ``CANCELLED`` (already)."""
     row = db.execute(_CANCEL, {"id": follow_up_id, "ws": str(workspace_id), "user": user_id}).first()
     if row is None:
         db.rollback()
@@ -239,6 +244,6 @@ def cancel_follow_up(db: Session, workspace_id: UUID, user_id: int,
     _service(db, workspace_id)._reschedule(follow_up_id, "cancelled")
     logger.info("[follow-up] %d cancelled by user %s in %s", follow_up_id, user_id, workspace_id)
     _audit(db, workspace_id, user_id, CANCELLED_ACTION, follow_up_id,
-           {"at": row.next_run_at.isoformat() if row.next_run_at else None})
-    return CANCELLED, FollowUp(id=follow_up_id, at=row.next_run_at, reason="", status=CANCELLED,
-                               chat_id=str(row.origin_chat_id) if row.origin_chat_id else None)
+           {"at": row.next_run_at.isoformat() if row.next_run_at else None}, actor_type)
+    return CANCELLED, FollowUp(id=follow_up_id, at=row.next_run_at, reason=str(row.description or ""),
+                               status=CANCELLED, chat_id=str(row.origin_chat_id) if row.origin_chat_id else None)

@@ -1,5 +1,5 @@
 {
-  "route_count": 997,
+  "route_count": 999,
   "routes": [
     {
       "method": "GET",
@@ -2084,6 +2084,14 @@
     {
       "method": "POST",
       "path": "/api/proactive/brief/open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/follow-ups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/follow-ups/{follow_up_id}/cancel"
     },
     {
       "method": "GET",
