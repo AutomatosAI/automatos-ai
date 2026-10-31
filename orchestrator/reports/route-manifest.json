@@ -1,5 +1,5 @@
 {
-  "route_count": 1000,
+  "route_count": 1001,
   "routes": [
     {
       "method": "GET",
@@ -1696,6 +1696,10 @@
     {
       "method": "GET",
       "path": "/api/marketplace/catalog"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/catalog/bundles/{revision}"
     },
     {
       "method": "GET",
