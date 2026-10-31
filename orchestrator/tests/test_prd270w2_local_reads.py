@@ -88,6 +88,12 @@ def _rolled_back(engine):
         session = Session(bind=conn, join_transaction_mode="create_savepoint")
         try:
             conn.execute(sa.text("SET LOCAL lock_timeout = '5s'"))
+            # An agent with no model hint has its model looked up in a legacy catalogue table (marketplace_items,
+            # cascade_installer.cascade_agent_dependencies) that only alembic creates: an install's schema has
+            # it, the test schema (create_all) has none. Rolled back below (test_prd251w1_socials_package's way).
+            conn.execute(sa.text(
+                "CREATE TABLE IF NOT EXISTS marketplace_items (id serial PRIMARY KEY, type text, name text, metadata jsonb)"
+            ))
             yield session
         finally:
             session.close()
