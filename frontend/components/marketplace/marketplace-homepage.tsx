@@ -7,13 +7,6 @@ import {
   Download,
   Star,
   Sparkles,
-  Store,
-  Package,
-  Bot,
-  BookOpen,
-  Cpu,
-  Puzzle,
-  Palette,
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
@@ -27,7 +20,8 @@ import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { MarketplacePackagesTab } from './marketplace-packages-tab'
-import { MarketplaceThemesTab, THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './themes/tab'
+import { MarketplaceThemesTab, THEMES_TAB_VALUE } from './themes/tab'
+import { CATEGORY_TABS, TAB_ICONS, initialMarketplaceTab } from './category-tabs'
 import { SyncButton } from './cloud/sync-button'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
@@ -211,38 +205,6 @@ function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[];
 }
 
 // ── Main Page ───────────────────────────────────────────────────────
-
-const TAB_ICONS: Record<string, any> = {
-  packages: Store,
-  tools: Package,
-  agents: Bot,
-  recipes: BookOpen,
-  llms: Cpu,
-  capabilities: Puzzle,
-  [THEMES_TAB_VALUE]: Palette,
-}
-
-const CATEGORY_TABS = [
-  // PRD-261: the Themes storefront leads the Marketplace, and the Marketplace opens on it (Gerard,
-  // 30 Oct 2026; the tab named "Themes", not "Skins", D3/Q11). Packages follow (PRD-230).
-  { value: THEMES_TAB_VALUE, label: THEMES_TAB_LABEL },
-  { value: 'packages', label: 'Packages' },
-  { value: 'tools', label: 'Applications' },
-  { value: 'agents', label: 'Agents' },
-  { value: 'recipes', label: 'Playbooks' },
-  { value: 'llms', label: 'LLMs' },
-  { value: 'capabilities', label: 'Capabilities' },
-]
-
-/**
- * The tab a `?tab=` link names, by its value or its label (`?tab=tools`, `?tab=playbooks`, as the
- * Tools dashboard and the Playbooks grid link here), else Themes, the tab the Marketplace opens on.
- */
-function initialMarketplaceTab(param: string | null | undefined): string {
-  const wanted = param?.trim().toLowerCase()
-  const named = CATEGORY_TABS.find((tab) => tab.value === wanted || tab.label.toLowerCase() === wanted)
-  return named?.value ?? THEMES_TAB_VALUE
-}
 
 function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
   const searchParams = useSearchParams()

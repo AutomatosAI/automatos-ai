@@ -8,7 +8,8 @@
  *
  * The edition is a build-time constant, so each case loads the module under its own edition.
  * The app shell and the homepage are stubbed (they are today's, unchanged); the page header is
- * stubbed as the /verify test does (its theme slots are not under test).
+ * stubbed as the /verify test does (its theme slots are not under test); the visitor's tabs are
+ * stubbed too (US-270-08b, visitor-tabs.test.tsx covers them).
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -38,6 +39,9 @@ vi.mock('@/components/layout/main-layout', () => ({
 }))
 vi.mock('@/components/marketplace/marketplace-homepage', () => ({
   MarketplaceHomepage: () => <div data-testid="marketplace-homepage" />,
+}))
+vi.mock('@/components/marketplace/public/visitor-tabs', () => ({
+  VisitorTabs: () => <div data-testid="visitor-tabs" />,
 }))
 vi.mock('@/components/shared/page-header', () => ({
   PageHeader: ({ title, titleAccent }: { title: string; titleAccent: string }) => (
@@ -77,6 +81,7 @@ describe('MarketplacePage (PRD-270 US-270-08a)', () => {
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in')
     expect(screen.getByRole('link', { name: 'Start free' })).toHaveAttribute('href', '/sign-up')
     expect(screen.getByRole('heading', { name: 'Community Marketplace' })).toBeInTheDocument()
+    expect(screen.getByTestId('visitor-tabs')).toBeInTheDocument()
     expect(screen.queryByTestId('main-layout')).not.toBeInTheDocument()
     expect(screen.queryByTestId('marketplace-homepage')).not.toBeInTheDocument()
     expect(usePageAPI).toHaveBeenCalledWith('marketplace')
@@ -89,6 +94,7 @@ describe('MarketplacePage (PRD-270 US-270-08a)', () => {
 
     expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId('marketplace-homepage'))
     expect(screen.queryByRole('link', { name: 'Start free' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('visitor-tabs')).not.toBeInTheDocument()
     expect(usePageAPI).toHaveBeenCalledWith('marketplace')
   })
 
