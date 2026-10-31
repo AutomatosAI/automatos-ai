@@ -2314,6 +2314,12 @@ class Config:
     # A firing quotes the origin chat's last this-many messages; a reason is at most this long.
     PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES", "5"))
     PROACTIVE_FOLLOW_UP_REASON_CHARS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_REASON_CHARS", "500"))
+    # §6.7, K14 (W3): the proactive evals (orchestrator/evals/proactive/), run by hand by the
+    # owner, never by CI. GOLD_DIR is a folder OUTSIDE the repository holding one <eval>.jsonl per
+    # eval (public repo: gold sets are never committed); empty, missing or inside the repository is
+    # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
+    PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
+    PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
 
     # =============================================================================
     # PRD-251 Socials

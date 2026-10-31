@@ -148,6 +148,9 @@ tests/e2e/.auth/
 # live/ dirs hold real workspace UUIDs + client corpus data (e.g. InBuild UK).
 orchestrator/scripts/eval/**/live/
 *.gold.jsonl
+# PRD-268 §6.7 (K14): the proactive evals read their gold sets from PROACTIVE_EVAL_GOLD_DIR,
+# outside the repository; one copied in here is still never tracked.
+orchestrator/evals/proactive/**/*.jsonl
 
 # Workspace-worker host directory (PRD-233 S1): agent deliverables live here on
 # YOUR machine (AUTOMATOS_WORKSPACE_DIR, default ./workspaces). Never tracked.
