@@ -7,7 +7,8 @@ the block, ``layout_paint.py`` resolves it for the phone, ``layout_contrast.py``
 
 The contracts are data, ``data/phone-layouts.json``, read at runtime like ``core-pages.json`` and
 ``signing-keys.json``: the host's contract, not seed content. The kit and Automatos Go copy the file
-byte for byte; ``frontend/lib/theme-host/phone-layouts.json`` is the browser's copy, held equal by
+byte for byte; ``frontend/lib/theme-host/phone-layouts.json`` is the browser's copy, the file less each layout's
+``home`` line (no frontend runtime file names a first-party theme's id, PRD-261 A-20), held equal by
 ``validator-parity.test.ts`` and ``tests/test_prd271_layout_contracts.py``. Its shape::
 
     {"schema": "automatos-phone-layouts/v1",

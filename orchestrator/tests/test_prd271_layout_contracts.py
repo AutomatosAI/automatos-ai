@@ -2,7 +2,8 @@
 
 The table's own shape; every contract's ``example`` passing its contract (each value of its slot's kind
 and in range, every pair at AA); every pair naming a colour slot or a fixed colour; the loader's answers;
-and the browser's copy, ``frontend/lib/theme-host/phone-layouts.json``, byte for byte the host's. §4.3's
+and the browser's copy, ``frontend/lib/theme-host/phone-layouts.json``: the host's file less each layout's
+``home`` line, since no frontend runtime file names a first-party theme's id (PRD-261 A-20). §4.3's
 four contracts at major 1 are pinned by their slot lists and pair counts.
 """
 from __future__ import annotations
@@ -210,5 +211,8 @@ def test_the_loaded_table_is_read_only():
         layouts_table()["layouts"]["hud"] = {}
 
 
-def test_the_frontend_copy_is_byte_for_byte_the_hosts():
-    assert FRONTEND_COPY.read_bytes() == LAYOUTS_FILE.read_bytes()
+def test_the_frontend_copy_is_the_hosts_file_less_each_home_line():
+    host = LAYOUTS_FILE.read_text(encoding="utf-8").split("\n")
+    homes = [line for line in host if line.strip().startswith('"home": ')]
+    assert len(homes) == len(_raw()["layouts"])
+    assert FRONTEND_COPY.read_text(encoding="utf-8").split("\n") == [line for line in host if line not in homes]

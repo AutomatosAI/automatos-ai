@@ -29,7 +29,8 @@
  * PRD-271 C02 (host 1.2.0): the manifests section carries the mobile block's `layout` and `slots` (mobile-layout.ts,
  * mobile_layout.py), and a manifest case with `messages` pins the exact sentences both languages give. The contracts
  * table the browser reads is byte for byte the host's, each contract's example is a block both accept, and
- * LAYOUT_MIN_HOST equals contract.py's.
+ * LAYOUT_MIN_HOST equals contract.py's. The browser's copy of the contracts is the host's less each layout's `home`
+ * (no runtime file names a first-party theme's id, A-20).
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -44,7 +45,7 @@ import {
 import { FIRST_PAINT_ERROR_CODES, firstPaintErrors } from '../first-paint'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
 import {
-  contractOf, homeLayouts, isTint, LAYOUT_PATTERN, layoutNames, LOOK_VARIABLE_PATTERN, RGBA_PATTERN,
+  contractOf, isTint, LAYOUT_PATTERN, layoutNames, LOOK_VARIABLE_PATTERN, RGBA_PATTERN,
 } from '../mobile-layout'
 import {
   LAYOUT_MIN_HOST, MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES,
@@ -60,7 +61,7 @@ import sharedModules from '../shared-modules.json'
 const REPO_ROOT = path.resolve(__dirname, '../../../..')
 const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
-/** PRD-271 D-2: the host's contracts table, and the browser's copy of it. */
+/** PRD-271 D-2: the host's contracts table, and the browser's copy of it (less each layout's `home`, A-20). */
 const HOST_LAYOUTS_PATH = path.join(THEMES_DIR, 'data/phone-layouts.json')
 const BROWSER_LAYOUTS_PATH = path.join(__dirname, '../phone-layouts.json')
 // PB-3: the host contract's version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
@@ -365,12 +366,14 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(LAYOUT_MIN_HOST).toBe(LAYOUT_BLOCK_HOST)
   })
 
-  it("reads the host's contracts table byte for byte, and names a variable as the first paint does (PRD-271 D-2)", () => {
-    expect(readFileSync(BROWSER_LAYOUTS_PATH)).toEqual(readFileSync(HOST_LAYOUTS_PATH))
+  it("reads the host's contracts table less its homes, and names a variable as the first paint does (PRD-271 D-2)", () => {
+    const host = JSON.parse(readFileSync(HOST_LAYOUTS_PATH, 'utf8')) as { layouts: Record<string, Record<string, unknown>> }
+    const homeless = Object.fromEntries(Object.entries(host.layouts).map(([id, entry]) => (
+      [id, Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'home'))]
+    )))
+    expect(JSON.parse(readFileSync(BROWSER_LAYOUTS_PATH, 'utf8'))).toEqual({ ...host, layouts: homeless })
+    expect(Object.values(host.layouts).every((entry) => typeof entry.home === 'string')).toBe(true)
     expect(layoutNames()).toEqual(['play@1', 'hud@1', 'arcade@1', 'candy@1'])
-    expect(homeLayouts()).toEqual({
-      'automatos/play': 'play', 'automatos/hud': 'hud', 'automatos/arcade': 'arcade', 'automatos/candy': 'candy',
-    })
     expect(LOOK_VARIABLE_PATTERN.source).toBe(CSS_VAR_NAME_PATTERN.source)
     expect(strings('LAYOUT_PATTERN', PYTHON.layoutContracts)).toEqual([LAYOUT_PATTERN.source.replace(/^\^|\$$/g, '')])
   })

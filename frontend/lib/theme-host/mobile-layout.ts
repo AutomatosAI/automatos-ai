@@ -2,9 +2,10 @@
  * PRD-271 C02 (D-1, host 1.2.0) — a `mobile` block's `layout` and `slots`, checked: one of Automatos Go's phone
  * layouts, and the slots its contract lists. The TypeScript twin of `orchestrator/services/themes/mobile_layout.py`
  * (`layout_errors`), `layout_slots.py` (the slot kinds) and `layout_contracts.py` (the table). The contracts are
- * `phone-layouts.json`, a byte-identical copy of the host's `services/themes/data/phone-layouts.json`
- * (`__tests__/validator-parity.test.ts` holds the two equal); the shared corpus's `manifests` cases hold both
- * languages to the same verdicts.
+ * `phone-layouts.json`, the host's `services/themes/data/phone-layouts.json` less each layout's `home` (no runtime
+ * file of the frontend names a first-party theme's id, PRD-261 A-20; the browser never needs it), which
+ * `__tests__/validator-parity.test.ts` holds equal; the shared corpus's `manifests` cases hold both languages to
+ * the same verdicts.
  *
  * - `layout` and `slots` come together; `layout` names a contract the host knows, `"<id>@<major>"`;
  * - `slots` is an object: no slot the contract lacks, every slot it requires (one with no `default`), each value a
@@ -56,13 +57,12 @@ export interface LayoutSlot {
 export type LayoutSlotValue = string | number | { readonly look: string }
 export type LayoutPair = readonly [foreground: string, background: string, kind: 'text' | 'ui']
 
-/** One major of one layout (layout_contracts.py LayoutContract). */
+/** One major of one layout (layout_contracts.py LayoutContract, less its home theme). */
 export interface LayoutContract {
   readonly layout: string
   readonly layoutId: string
   readonly major: number
   readonly name: string
-  readonly home: string
   readonly revision: number
   readonly tone: { readonly rule: 'ground' | 'light' | 'dark'; readonly ground?: string; readonly text?: string }
   readonly slots: Readonly<Record<string, LayoutSlot>>
@@ -73,10 +73,9 @@ export interface LayoutContract {
   readonly example: Readonly<Record<string, string | number>>
 }
 
-type ContractVersion = Omit<LayoutContract, 'layout' | 'layoutId' | 'major' | 'name' | 'home'>
+type ContractVersion = Omit<LayoutContract, 'layout' | 'layoutId' | 'major' | 'name'>
 interface PhoneLayout {
   readonly name: string
-  readonly home: string
   readonly versions: Readonly<Record<string, ContractVersion>>
 }
 interface PhoneLayouts {
@@ -84,7 +83,7 @@ interface PhoneLayouts {
   readonly layouts: Readonly<Record<string, PhoneLayout>>
 }
 
-/** The host's contracts table, as the browser's copy holds it. */
+/** The host's contracts table, as the browser's copy holds it (no `home`). */
 export const PHONE_LAYOUTS = phoneLayoutsTable as unknown as PhoneLayouts
 
 /** The contract `"<id>@<major>"` names, or null for anything else (an unknown id or major, a wrong shape). */
@@ -95,7 +94,7 @@ export function contractOf(layout: unknown): LayoutContract | null {
   const entry = hasOwn(PHONE_LAYOUTS.layouts, layoutId) ? PHONE_LAYOUTS.layouts[layoutId] : undefined
   const version = entry !== undefined && hasOwn(entry.versions, major) ? entry.versions[major] : undefined
   if (entry === undefined || version === undefined) return null
-  return { ...version, layout: `${layoutId}@${major}`, layoutId, major: Number(major), name: entry.name, home: entry.home }
+  return { ...version, layout: `${layoutId}@${major}`, layoutId, major: Number(major), name: entry.name }
 }
 
 /** Every contract the host knows, as a theme names it (`"play@1"`), in the table's order. */
@@ -103,11 +102,6 @@ export function layoutNames(): string[] {
   return Object.entries(PHONE_LAYOUTS.layouts).flatMap(([layoutId, entry]) => (
     Object.keys(entry.versions).map((major) => `${layoutId}@${major}`)
   ))
-}
-
-/** `{theme id: layout id}`: the first-party theme that owns each layout (D-4). */
-export function homeLayouts(): Record<string, string> {
-  return Object.fromEntries(Object.entries(PHONE_LAYOUTS.layouts).map(([layoutId, entry]) => [entry.home, layoutId]))
 }
 
 /** A colour, an `rgba(r,g,b,a)` whose channels are 0 to 255, or `transparent` (layout_slots.py is_tint). */

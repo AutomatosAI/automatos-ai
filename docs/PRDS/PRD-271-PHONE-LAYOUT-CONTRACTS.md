@@ -5,7 +5,8 @@ W1 built (draft PR, 31 Oct 2026); where the build found the code saying otherwis
 also takes `transparent` and Candy's blobs are tints (§4.1, §4.3); a `{"look": …}` variable is one the table's knobs
 or pairs write, never a numeric rule's (§4.1); the defaults must fill every slot taken from the look, not only the
 required ones (§4.4, C02); the skin's look under `fromLooks` is the one its tokens are painted from (§4.4); the review
-corpus gains the `contrast` check (C04); and the core files (§7).
+corpus gains the `contrast` check (C04); the browser's copy of the table leaves out `home`, as no frontend runtime file
+may name Play's package id (A-20, §4.2); and the core files (§7).
 **Owner:** Gerard · **Grounded on:** `automatos-ai` `main @ 1a8956c87`, `automatos-go` `main @ 39b638c` and
 `feat/a9-candy @ 99ed5aa` (Candy, A9, Ralph running), `automatos-design-kit` `main @ eb516bd`.
 **Gerard's decision (31 Oct 2026, 01:40):**
@@ -144,8 +145,9 @@ from that folder at runtime today: `signature_verify.py:51`, `contract.py:122`).
   beside `1`. Core keeps a major while any listed theme names it.
 - **Copies.** The kit copies the file byte for byte to `packages/theme-cli/src/core/data/` (as it copies
   `core-pages.json`). Go copies it through `scripts/core-manifest.json` `copy` (as the route manifest) to
-  `src/core/phone-layouts.json`. Core's TS twin reads a byte-identical copy at `frontend/lib/theme-host/`, held equal
-  by `validator-parity.test.ts`.
+  `src/core/phone-layouts.json`. Core's TS twin reads a copy at `frontend/lib/theme-host/` that is the file less each
+  layout's `home` line, held equal by `validator-parity.test.ts`: no frontend runtime file may name a first-party
+  theme's id (PRD-261 A-20, `prd261-no-theme-in-core.test.ts`), and the browser never needs `home`.
 - Studio is not in the table: its contract is the existing skin (`tokens` / `fromLooks`, `contract.py` lists).
 
 ### 4.3 The four contracts at major 1
@@ -224,7 +226,7 @@ Membership, opt-in and revocation keep `mobile` null exactly as today. The table
 - [ ] `services/themes/data/phone-layouts.json` with play@1, hud@1, arcade@1, candy@1 (§4.3); loader
   `services/themes/layout_contracts.py` (stdlib only, like `contract.py`): `contract_of(layout)`, `home_layouts()`
 - [ ] Tests: the table's own shape; every `example` passes its contract (kinds, ranges, pairs); every pair names a
-  slot or a fixed colour; the frontend copy is byte-identical
+  slot or a fixed colour; the frontend copy is the table less each `home` (A-20)
 #### US-271-C02: Checking the block
 - [ ] `services/themes/mobile_layout.py` (keeps `mobile_manifest.py` small), called from `mobile_errors`:
   `MOBILE_FIELDS` gains `layout` and `slots`; `BAD_MOBILE` at `mobile.layout` for an unknown layout or major, and at

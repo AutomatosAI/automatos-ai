@@ -53,7 +53,8 @@ Automatos Go draws every screen with a layout built into the app (App Store guid
 downloaded code), and Automatos adds layouts in app releases. Each layout publishes a **contract**: the
 slots it paints from. The contracts are `orchestrator/services/themes/data/phone-layouts.json`
 (`services/themes/layout_contracts.py` reads it), the host's own data, copied byte for byte by the
-browser (`frontend/lib/theme-host/phone-layouts.json`), the design kit and Automatos Go.
+design kit and Automatos Go. The browser's copy (`frontend/lib/theme-host/phone-layouts.json`) leaves out
+each layout's `home`, since no frontend runtime file names a first-party theme's id.
 
 | Contract | Home theme | Required slots | Optional slots (default) | Fixed by the layout | Tone | Auto |
 |---|---|---|---|---|---|---|
