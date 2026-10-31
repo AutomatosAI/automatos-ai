@@ -1,16 +1,24 @@
 """PRD-270 W2 (K8) — the item bundle format, schema 1: its caps, its patterns and its specs.
 
-One JSON document per approved item travels from Automatos Cloud to a local install. The specs
-below are what ``validate.py`` walks. An object spec names every key it allows, so a key outside
-the spec, at any depth, is refused: only the spec's keys can ever cross. A key an object spec does
-not mark optional is required. An optional key is absent rather than null, except where its spec
-allows null (a step's ``agent`` and ``pass_to``). A Playbook's agent step names an agent of the
-bundle and carries its prompt_template; its document step names none (validate.py checks both).
+One JSON document per approved item (an agent, a Playbook, a package or a plugin) travels from
+Automatos Cloud to a local install. The specs below are what ``validate.py`` walks. An object spec
+names every key it allows, so a key outside the spec, at any depth, is refused: only the spec's
+keys can ever cross. A key an object spec does not mark optional is required. An optional key is
+absent rather than null, except where its spec allows null (a step's ``agent`` and ``pass_to``).
+A package member's ``type`` says which member spec it follows. A Playbook's agent step names an
+agent of the bundle and carries its prompt_template; its document step names none (validate.py
+checks both).
+
+Stricter than K8's text, from the US-270-11c reviews: a package's setup objects take only the keys
+the seeds write and the web reads (K8 allowed any key on a pattern, which no allowlist covers); a
+plugin's scan report says only what the scanner says of a plugin it calls safe; a finding's file is
+a relative path; a plugin's author holds no '@' (K9: never an email).
 
 The caps come from the columns the local install writes (core.py: Agent.name String(255),
 marketplace_category String(100), version String(50); composio_cache.py: app_name String(100);
-the personas, plugins and packages tables' slugs). Standard library only: the hosted export and
-the local import share this package.
+the personas, plugins and packages tables' slugs; marketplace_plugins.py: author String(255),
+license String(100)). Standard library only: the hosted export and the local import share this
+package.
 """
 from __future__ import annotations
 
@@ -38,6 +46,12 @@ ICON_PATTERN = r"^(?:[A-Za-z0-9 _-]|[^\x00-\x9f])*$"
 TAGS_MAX = 20
 TAG_MAX = 64
 PUBLISHER_NAME_MAX = 100
+# A revision is the sha256 of a bundle's canonical bytes; a local Cloud row's version is
+# '<version>+<the revision's first 12>' (canonical.local_version, K10): at most 45 characters, under
+# Agent.version's and WorkflowTemplate.version's String(50).
+REVISION_PATTERN = r"^[0-9a-f]{64}$"
+LOCAL_REVISION_LENGTH = 12
+LOCAL_VERSION_MAX = VERSION_MAX + 1 + LOCAL_REVISION_LENGTH
 
 # An agent.
 AGENT_TYPE_MAX = 100
@@ -97,8 +111,72 @@ EXECUTION_KEYS = ("mode", "max_retries", "timeout_per_step", "total_timeout", "p
 EXECUTION_MODES = ("sequential", "parallel")
 EXECUTION_NUMBER_MAX = 1_000_000
 
+# A package (core/models/marketplace_packages.py: slug String(120), its MEMBER_TYPES). Its setup
+# manifest's four lists hold flat objects of the keys the seeds write (seed_packages.py,
+# seed_socials_package.py) and the web reads (frontend/components/marketplace/package-types.ts).
+PACKAGE_SLUG_MAX = 120
+PACKAGE_SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,119}$"
+VERTICAL_TAGS_MAX = 20
+MATCHING_KEYS = ("platforms", "url_patterns", "vocabulary")
+MATCHING_ITEMS_MAX = 50
+MATCHING_TEXT_MAX = 255
+MEMBER_TYPES = ("agent", "tool", "skill", "plugin", "playbook", "llm")  # marketplace_packages.MEMBER_TYPES
+MEMBERS_MAX = 100
+SETUP_OBJECT_KEYS: Mapping[str, Tuple[str, ...]] = MappingProxyType({
+    "questions": ("id", "prompt", "setting"),
+    "required_connects": ("app_name", "app_type", "needs_oauth", "optional", "group", "note"),
+    "guide_steps": ("step", "title", "description"),
+    "report_templates": ("name", "title", "description"),
+})
+SETUP_KEYS = tuple(SETUP_OBJECT_KEYS)
+SETUP_REQUIRED_KEYS: Mapping[str, Tuple[str, ...]] = MappingProxyType({"required_connects": ("app_name",)})
+SETUP_LIST_MAX = 50
+
+# A plugin (core/models/marketplace_plugins.py) and the report of its scan on Automatos Cloud
+# (plugin_security_scanner.py: StaticFinding less pattern and matched_text, which quote a file's
+# content; LLMFinding's severity and description only).
+LONG_DESCRIPTION_MAX = 20000
+AUTHOR_MAX = 255
+AUTHOR_PATTERN = r"^[^@]*$"  # a name, never an email (K9)
+LICENSE_MAX = 100
+CONTENT_KINDS = ("skills", "commands", "agents", "hooks")
+CONTENT_COUNT_MAX = 500
+RECOMMENDED_MODELS_MAX = 20
+TOKEN_ESTIMATE_MAX = 10_000_000
+# What the scanner says of every plugin it calls safe (PluginScanService.scan_plugin): any critical
+# static finding blocks the plugin before the LLM scan, and the verdict is safe only when the LLM
+# scan passed with a risk score under 20. A report saying otherwise is refused.
+SCAN_VERDICTS = ("safe",)
+STATIC_STATUSES = ("passed", "flagged")
+SAFE_LLM_STATUSES = ("passed",)
+SAFE_RISK_SCORE_MAX = 19
+STATIC_SEVERITIES = ("high", "medium", "low")
+SEVERITIES = ("critical", "high", "medium", "low")
+FINDINGS_MAX = 50
+FINDING_TYPE_MAX = 50
+FINDING_TYPE_PATTERN = r"^[a-z][a-z0-9_]{0,49}$"
+FINDING_FILE_MAX = 500
+# A path inside the plugin, as its zip names it: not absolute, no '..' part, no backslash, no ':'
+# (a drive or a URL scheme), no control character.
+FINDING_FILE_PATTERN = r"^(?!/)(?!(?:.*/)?\.\.(?:/|$))[^\x00-\x1f\x7f\\:]{1,500}$"
+FINDING_LINE_MAX = 10_000_000
+FINDING_DESCRIPTION_MAX = 2000
+SCAN_SUMMARY_MAX = 4000
+SCANNED_AT_MAX = 32
+SCANNED_AT_PATTERN = (r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?"
+                      r"(?:Z|[+-][0-9]{2}:[0-9]{2})?$")
+
+# A skill a package names, by its name: any text but a control character.
+SKILL_REF_NAME_PATTERN = r"^[^\x00-\x1f\x7f]{1,255}$"
+
 # The fields whose value is a reference; refs.py says which kinds each takes.
 PLAYBOOK_AGENT_REF = "playbook.agents"
+PACKAGE_MEMBER_REF = "package.members"
+
+
+def member_ref_field(member_type: str) -> str:
+    """The reference field of a package member of ``member_type`` (refs.FIELD_REFS names its kinds)."""
+    return f"{PACKAGE_MEMBER_REF}.{member_type}"
 
 
 def is_plain_text(value: str) -> bool:
@@ -145,6 +223,11 @@ def obj(fields: Mapping[str, Spec], *, optional: Tuple[str, ...] = ()) -> Spec:
     return MappingProxyType({"kind": "object", "fields": MappingProxyType(dict(fields)), "required": required})
 
 
+def tagged(key: str, variants: Mapping[str, Spec]) -> Spec:
+    """An object whose ``key`` names which of ``variants`` (object specs) it follows."""
+    return MappingProxyType({"kind": "tagged", "key": key, "variants": MappingProxyType(dict(variants))})
+
+
 def named(key_pattern: str, values: Spec, max_entries: int) -> Spec:
     """An object used as a map: up to ``max_entries`` names matching ``key_pattern``, each value ``values``."""
     return MappingProxyType({"kind": "map", "key": re.compile(key_pattern), "values": values, "max": max_entries})
@@ -153,6 +236,11 @@ def named(key_pattern: str, values: Spec, max_entries: int) -> Spec:
 def ref(field: str) -> Spec:
     """A reference, of a kind ``field`` takes (refs.FIELD_REFS)."""
     return MappingProxyType({"kind": "ref", "field": field})
+
+
+def instant(max_len: int, pattern: str) -> Spec:
+    """A text on ``pattern`` that is also a real ISO 8601 date and time (validate.py parses it)."""
+    return MappingProxyType({"kind": "instant", "text": text(max_len, pattern=pattern)})
 
 
 def local_id() -> Spec:
@@ -243,9 +331,70 @@ PLAYBOOK_SPEC = obj({
     "apps": listing(APP, APPS_MAX),
 })
 
+
+def _member(member_type: str) -> Spec:
+    """A package member of ``member_type``: its reference is of a kind that type takes (refs.py)."""
+    return obj({
+        "type": choice((member_type,)),
+        "ref": ref(member_ref_field(member_type)),
+        "name": text(NAME_MAX, min_len=1),
+        "description": text(DESCRIPTION_MAX),
+    })
+
+
+
+
+def _setup_object(list_name: str) -> Spec:
+    """An object of a setup list: only its list's keys, each a scalar or a list of scalars."""
+    keys = SETUP_OBJECT_KEYS[list_name]
+    required = SETUP_REQUIRED_KEYS.get(list_name, ())
+    return obj({key: scalars(lists=True) for key in keys}, optional=tuple(key for key in keys if key not in required))
+
+
+PACKAGE_SPEC = obj({
+    "slug": text(PACKAGE_SLUG_MAX, pattern=PACKAGE_SLUG_PATTERN),
+    "verticalTags": listing(text(TAG_MAX, min_len=1), VERTICAL_TAGS_MAX),
+    "matching": obj({key: listing(text(MATCHING_TEXT_MAX, min_len=1), MATCHING_ITEMS_MAX) for key in MATCHING_KEYS}),
+    "members": listing(tagged("type", {kind: _member(kind) for kind in MEMBER_TYPES}), MEMBERS_MAX, min_items=1),
+    "setup": obj({key: listing(_setup_object(key), SETUP_LIST_MAX) for key in SETUP_KEYS}),
+})
+
+STATIC_FINDING_SPEC = obj({
+    "type": text(FINDING_TYPE_MAX, pattern=FINDING_TYPE_PATTERN),
+    "severity": choice(STATIC_SEVERITIES),
+    "file": text(FINDING_FILE_MAX, pattern=FINDING_FILE_PATTERN),
+    "line": number(FINDING_LINE_MAX, integer=True),
+    "description": text(FINDING_DESCRIPTION_MAX),
+})
+
+SCAN_SPEC = obj({
+    "verdict": choice(SCAN_VERDICTS),
+    "staticStatus": choice(STATIC_STATUSES),
+    "staticFindings": listing(STATIC_FINDING_SPEC, FINDINGS_MAX),
+    "llmStatus": choice(SAFE_LLM_STATUSES),
+    "riskScore": number(SAFE_RISK_SCORE_MAX, integer=True),
+    "summary": text(SCAN_SUMMARY_MAX),
+    "findings": listing(obj({"severity": choice(SEVERITIES), "description": text(FINDING_DESCRIPTION_MAX)}),
+                        FINDINGS_MAX),
+    "scannedAt": instant(SCANNED_AT_MAX, SCANNED_AT_PATTERN),
+})
+
+PLUGIN_SPEC = obj({
+    "slug": PLUGIN_SLUG,
+    "longDescription": text(LONG_DESCRIPTION_MAX),
+    "author": text(AUTHOR_MAX, pattern=AUTHOR_PATTERN),
+    "license": text(LICENSE_MAX),
+    "contents": obj({kind: number(CONTENT_COUNT_MAX, integer=True) for kind in CONTENT_KINDS}),
+    "recommendedModels": listing(text(MODEL_ID_MAX, pattern=MODEL_ID_PATTERN), RECOMMENDED_MODELS_MAX),
+    "tokenEstimate": number(TOKEN_ESTIMATE_MAX, integer=True),
+    "scan": SCAN_SPEC,
+})
+
 # One spec per bundle type; the types a reader knows are the ones with a spec.
 TYPE_SPECS: Mapping[str, Spec] = MappingProxyType({
     "agent": _envelope("agent", AGENT_SPEC),
     "playbook": _envelope("playbook", PLAYBOOK_SPEC),
+    "package": _envelope("package", PACKAGE_SPEC),
+    "plugin": _envelope("plugin", PLUGIN_SPEC),
 })
 BUNDLE_TYPES: Tuple[str, ...] = tuple(TYPE_SPECS)

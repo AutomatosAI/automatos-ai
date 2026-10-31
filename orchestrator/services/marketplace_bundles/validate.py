@@ -2,7 +2,8 @@
 
 ``validate_bundle`` walks the bundle against its type's spec (schema.py) and refuses the first
 problem it finds with a BundleError: a key outside the spec at any depth, a wrong type, a value
-over its cap or off its pattern, a reference of the wrong kind, a step naming no agent of the
+over its cap or off its pattern (a scan time that is no real date and time), a reference of the
+wrong kind (a package member's, of a kind its type does not take), a step naming no agent of the
 bundle, an agent step without an agent or a prompt, a document step naming an agent. The hosted
 export never lists a bundle this refuses, and a local install writes no row before its bundle
 passes. The whole document's size is checked by canonical.capped_bytes, against the cap its
@@ -14,6 +15,7 @@ value of the bundle. Standard library only: the hosted export and the local impo
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Callable, Dict, Mapping
 
@@ -78,6 +80,20 @@ def _check_object(value: Any, spec: Spec, where: str) -> None:
             raise BundleError("schema", f"{where}.{key} is missing.")
 
 
+def _check_tagged(value: Any, spec: Spec, where: str) -> None:
+    """An object checked against the variant its ``key`` names (a package member, by its type)."""
+    _expect(isinstance(value, dict), where)
+    key = spec["key"]
+    if key not in value:
+        raise BundleError("schema", f"{where}.{key} is missing.")
+    tag = value[key]
+    _expect(isinstance(tag, str), f"{where}.{key}")
+    variant = spec["variants"].get(tag)
+    if variant is None:
+        raise BundleError("pattern", f"{where}.{key} is not one of the values the bundle format allows.")
+    _check_object(value, variant, where)
+
+
 def _check_map(value: Any, spec: Spec, where: str) -> None:
     _expect(isinstance(value, dict), where)
     if len(value) > spec["max"]:
@@ -107,6 +123,14 @@ def _check_text(value: Any, spec: Spec, where: str) -> None:
     pattern = spec["pattern"]
     if not is_plain_text(value) or (pattern is not None and pattern.fullmatch(value) is None):
         raise BundleError("pattern", f"{where} is not in the form the bundle format allows.")
+
+
+def _check_instant(value: Any, spec: Spec, where: str) -> None:
+    _check_text(value, spec["text"], where)
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        raise BundleError("pattern", f"{where} is not a real date and time.") from None
 
 
 def _is_number(value: Any, integer: bool) -> bool:
@@ -183,9 +207,11 @@ def _check_steps(playbook: Mapping[str, Any]) -> None:
 
 _CHECKS: Mapping[str, Callable[[Any, Spec, str], None]] = MappingProxyType({
     "object": _check_object,
+    "tagged": _check_tagged,
     "map": _check_map,
     "list": _check_list,
     "text": _check_text,
+    "instant": _check_instant,
     "number": _check_number,
     "flag": _check_flag,
     "choice": _check_choice,
