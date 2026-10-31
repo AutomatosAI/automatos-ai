@@ -50,8 +50,8 @@ GET_BRIEF = "platform_get_brief"
 DISPATCHER = "platform_execute"
 ACTION_KEY = "action"
 
-__all__ = ["GET_BRIEF", "OFFER_REPLIES", "REPLIES", "REPLY_CHIPS", "brief_called", "called_action",
-           "ends_on_reply_chips", "offered_replies", "round_text", "says_its_own", "with_reply_chips"]
+__all__ = ["GET_BRIEF", "OFFER_REPLIES", "REPLIES", "REPLY_CHIPS", "action_answer", "brief_called", "brief_in",
+           "called_action", "ends_on_reply_chips", "offered_replies", "round_text", "says_its_own", "with_reply_chips"]
 
 
 def called_action(name: str, args: Any) -> str:
@@ -61,9 +61,9 @@ def called_action(name: str, args: Any) -> str:
     return name
 
 
-def _answer(result: Any) -> Optional[Dict[str, Any]]:
+def action_answer(result: Any) -> Optional[Dict[str, Any]]:
     """The action's own answer when the call succeeded (the chat hands it back as ``raw_result``),
-    else None."""
+    else None. US-C12c reads a follow-up's id and time from it too."""
     if not isinstance(result, dict) or result.get("success") is False:
         return None
     raw = result.get("raw_result")
@@ -76,7 +76,7 @@ def offered_replies(name: str, args: Any, result: Any) -> Optional[List[str]]:
     own check (US-C12a); None for any other call, a refused one, or replies the check refuses."""
     if called_action(name, args) != OFFER_REPLIES:
         return None
-    answer = _answer(result)
+    answer = action_answer(result)
     if answer is None:
         return None
     from modules.tools.discovery.handlers_replies import replies_refusal
@@ -95,12 +95,16 @@ def round_text(messages: Any) -> str:
     return ""
 
 
+def brief_in(outcomes: Any) -> bool:
+    """Whether a tracker's ``outcomes`` hold a ``platform_get_brief`` call, directly or through
+    ``platform_execute``: the tracker records each call under the action asked for, succeeded or
+    not, as the model wrote it (the executor strips ``action`` before it runs it, so this does too)."""
+    return any(str(action).strip() == GET_BRIEF for action, _params, _result in outcomes or ())
+
+
 def brief_called(loop: Any) -> bool:
-    """Whether the turn called ``platform_get_brief``, directly or through ``platform_execute``: the
-    tracker records each call under the action asked for, succeeded or not, as the model wrote it
-    (the executor strips ``action`` before it runs it, so this does too)."""
-    outcomes = getattr(getattr(loop, "tracker", None), "outcomes", None) or ()
-    return any(str(action).strip() == GET_BRIEF for action, _params, _result in outcomes)
+    """Whether the loop's turn called ``platform_get_brief`` (``brief_in`` its tracker's outcomes)."""
+    return brief_in(getattr(getattr(loop, "tracker", None), "outcomes", None))
 
 
 def says_its_own(post: Any) -> bool:
