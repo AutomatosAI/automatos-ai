@@ -46,8 +46,15 @@ logger = logging.getLogger(__name__)
 
 
 def _origin(value: str) -> str:
-    """``scheme://host[:port]`` of a configured URL, lower-cased; "" if it has none."""
-    parts = urlsplit(value.strip())
+    """``scheme://host[:port]`` of a configured URL, lower-cased; "" if it has none.
+
+    An entry ``urlsplit`` can't parse (``http://[bad``) is "" too, so the caller drops
+    it with its warning: one typo in the variable never 401s every sign-in.
+    """
+    try:
+        parts = urlsplit(value.strip())
+    except ValueError:
+        return ""
     if not (parts.scheme and parts.netloc):
         return ""
     return f"{parts.scheme}://{parts.netloc}".lower()

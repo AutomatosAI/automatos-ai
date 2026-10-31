@@ -395,6 +395,15 @@ def test_parse_drops_entries_without_scheme_and_host(caplog):
     assert "ui.no-scheme.example" in caplog.text
 
 
+def test_parse_drops_an_entry_it_cannot_parse_and_keeps_the_rest(caplog):
+    from core.auth.clerk_azp import parse_authorized_parties
+
+    with caplog.at_level(logging.WARNING, logger="core.auth.clerk_azp"):
+        allowed = parse_authorized_parties("http://[bad,https://ok.example")
+    assert allowed == frozenset({"https://ok.example"})
+    assert "http://[bad" in caplog.text
+
+
 def _fresh_config_copy():
     """Execute config.py as a private module, so the class body re-reads the env
     without touching ``sys.modules['config']`` or the shared singleton."""
