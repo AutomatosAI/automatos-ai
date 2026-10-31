@@ -30,11 +30,8 @@ import type {
 import { CLOUD_FILES_PATH } from '@/lib/marketplace/cloud-files'
 import { THEME_DIGEST_PATTERN } from '@/lib/theme-host/constants'
 
-import { PUBLIC_PAGE_LIMIT, publicPage } from './public-items'
+import { CATALOG_ENDPOINT, publicPage, publicPagePath } from './public-items'
 import type { PublicMarketplaceType, PublicPage } from './public-items'
-
-export const CATALOG_ENDPOINT = '/api/marketplace/catalog'
-export const PUBLIC_MARKETPLACE_ENDPOINT = '/api/public/marketplace'
 
 const CATALOG_SCHEMA = 1
 const THEME_TYPE = 'theme'
@@ -209,7 +206,6 @@ export async function getPublicThemes(): Promise<ThemeListingDetail[]> {
 
 /** One page of a public Marketplace read from `offset`. */
 export async function getPublicPage(type: PublicMarketplaceType, offset: number): Promise<PublicPage> {
-  const query = new URLSearchParams({ limit: String(PUBLIC_PAGE_LIMIT), offset: String(offset) })
-  const answer = await apiClient.get<unknown>(`${PUBLIC_MARKETPLACE_ENDPOINT}/${type}?${query}`)
+  const answer = await apiClient.get<unknown>(publicPagePath(type, offset))
   return publicPage(answer, type, offset)
 }

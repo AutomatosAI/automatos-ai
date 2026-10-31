@@ -37,7 +37,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@clerk/nextjs', () => ({ useReverification: (fetcher: unknown) => fetcher }))
 
 import { SIGNED_BY_AUTOMATOS } from '@/components/settings/themes/theme-labels'
-import { CATALOG_ENDPOINT } from '@/lib/marketplace/public-catalog'
+import { CATALOG_ENDPOINT } from '@/lib/marketplace/public-items'
 import { marketplaceItemPath, signInUrl } from '@/lib/marketplace/return-after-sign-in'
 import {
   ARCADE_DIGEST,

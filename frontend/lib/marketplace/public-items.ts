@@ -12,6 +12,9 @@
  * which the app's img-src decides.
  */
 
+/** The hosted edition's public routes a visitor reads: the catalogue (US-270-01) and a tab's public read. */
+export const CATALOG_ENDPOINT = '/api/marketplace/catalog'
+export const PUBLIC_MARKETPLACE_ENDPOINT = '/api/public/marketplace'
 export const PUBLIC_PAGE_LIMIT = 100
 
 export const PUBLIC_MARKETPLACE_TYPES = [
@@ -146,6 +149,12 @@ export function publicItem(value: unknown, type: PublicMarketplaceType): PublicI
     facts: factsOf(value, type),
     includes: includesOf(value, type),
   }
+}
+
+/** The path of one page of the public read of `type` from `offset`. */
+export function publicPagePath(type: PublicMarketplaceType, offset: number): string {
+  const query = new URLSearchParams({ limit: String(PUBLIC_PAGE_LIMIT), offset: String(offset) })
+  return `${PUBLIC_MARKETPLACE_ENDPOINT}/${type}?${query}`
 }
 
 /** One page of the read at `offset`; an answer that isn't the type's page reads as an empty last page. */

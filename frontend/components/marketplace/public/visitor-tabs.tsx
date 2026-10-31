@@ -16,13 +16,12 @@ import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { PublicMarketplaceType } from '@/lib/marketplace/public-items'
 
 import {
   CAPABILITIES_TAB_VALUE,
   CATEGORY_TABS,
-  PLUGINS_SUB_TAB,
-  SKILLS_SUB_TAB,
+  PUBLIC_CAPABILITY_TABS,
+  PUBLIC_ITEM_TABS,
   TAB_ICONS,
   openedMarketplaceTab,
 } from '../category-tabs'
@@ -31,25 +30,6 @@ import { THEMES_TAB_VALUE } from '../themes/listing-format'
 import { CAPABILITY_TABS_LABEL, VISITOR_TABS_LABEL } from './copy'
 import { VisitorItemsTab } from './visitor-items'
 import { VisitorThemesTab } from './visitor-themes'
-
-interface ItemTab {
-  /** Its value in a Marketplace link (`?tab=`). */
-  readonly tab: string
-  readonly type: PublicMarketplaceType
-}
-
-/** The tabs of CATEGORY_TABS that read a public item list, and what each reads. */
-const ITEM_TABS: readonly ItemTab[] = [
-  { tab: 'packages', type: 'packages' },
-  { tab: 'tools', type: 'applications' },
-  { tab: 'agents', type: 'agents' },
-  { tab: 'recipes', type: 'playbooks' },
-  { tab: 'llms', type: 'llms' },
-]
-const CAPABILITY_TABS: readonly (ItemTab & { readonly label: string })[] = [
-  { tab: PLUGINS_SUB_TAB, type: 'plugins', label: 'Plugins' },
-  { tab: SKILLS_SUB_TAB, type: 'skills', label: 'Skills' },
-]
 
 interface Linked {
   /** The tab, or the Capabilities sub-tab, the link names. */
@@ -83,13 +63,13 @@ function CapabilitiesTabs({ initial, searchQuery, itemFor, onSwitch }: Capabilit
   return (
     <Tabs value={capability} onValueChange={choose} className="space-y-4">
       <TabsList aria-label={CAPABILITY_TABS_LABEL}>
-        {CAPABILITY_TABS.map((entry) => (
+        {PUBLIC_CAPABILITY_TABS.map((entry) => (
           <TabsTrigger key={entry.tab} value={entry.tab}>
             {entry.label}
           </TabsTrigger>
         ))}
       </TabsList>
-      {CAPABILITY_TABS.map((entry) => (
+      {PUBLIC_CAPABILITY_TABS.map((entry) => (
         <TabsContent key={entry.tab} value={entry.tab} className="mt-4">
           <VisitorItemsTab
             type={entry.type}
@@ -132,7 +112,7 @@ export function VisitorTabs({ searchQuery }: { searchQuery: string }) {
       <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
         <VisitorThemesTab searchQuery={searchQuery} item={itemFor(THEMES_TAB_VALUE)} />
       </TabsContent>
-      {ITEM_TABS.map((entry) => (
+      {PUBLIC_ITEM_TABS.map((entry) => (
         <TabsContent key={entry.tab} value={entry.tab} className="mt-0">
           <VisitorItemsTab
             type={entry.type}

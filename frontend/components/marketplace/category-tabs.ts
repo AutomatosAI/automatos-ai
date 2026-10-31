@@ -1,10 +1,13 @@
 /**
  * The Marketplace's tabs, in order, with their icons, and the tab a `?tab=` link opens: the member
  * page (marketplace-homepage.tsx) and the signed-out visitor's (public/visitor-tabs.tsx, PRD-270
- * K20) draw the same strip from here, so the visitor's page never imports the member tabs.
+ * K20) draw the same strip from here, so the visitor's page never imports the member tabs. Which
+ * public read each tab draws is here too, for the visitor's tabs and a link's share card (US-270-10).
  */
 import { BookOpen, Bot, Cpu, Package, Palette, Puzzle, Store } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+
+import type { PublicMarketplaceType } from '@/lib/marketplace/public-items'
 
 import { THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './themes/listing-format'
 
@@ -35,6 +38,34 @@ export const PLUGINS_SUB_TAB = 'plugins'
 export const SKILLS_SUB_TAB = 'skills'
 /** The Capabilities tab's sub-tabs, in order; a `?tab=` link may name one (PRD-270 K21, K22). */
 export const CAPABILITY_SUB_TABS = [PLUGINS_SUB_TAB, SKILLS_SUB_TAB] as const
+
+/** A tab that draws a public read (PRD-270 K10), by its value in a Marketplace link (`?tab=`). */
+export interface PublicItemTab {
+  readonly tab: string
+  readonly type: PublicMarketplaceType
+}
+
+/**
+ * The tabs of CATEGORY_TABS but Themes and Capabilities, and the public read each draws: the
+ * visitor's tabs (public/visitor-tabs.tsx) and a link's share card (lib/marketplace/share-card-read.ts).
+ */
+export const PUBLIC_ITEM_TABS: readonly PublicItemTab[] = [
+  { tab: 'packages', type: 'packages' },
+  { tab: 'tools', type: 'applications' },
+  { tab: 'agents', type: 'agents' },
+  { tab: 'recipes', type: 'playbooks' },
+  { tab: 'llms', type: 'llms' },
+]
+/** The Capabilities sub-tabs, with their labels, and the public read each draws. */
+export const PUBLIC_CAPABILITY_TABS: readonly (PublicItemTab & { readonly label: string })[] = [
+  { tab: PLUGINS_SUB_TAB, type: 'plugins', label: 'Plugins' },
+  { tab: SKILLS_SUB_TAB, type: 'skills', label: 'Skills' },
+]
+
+/** The public read a link's tab value draws, or null (Themes reads the catalogue). */
+export function publicReadOfTab(tab: string): PublicMarketplaceType | null {
+  return [...PUBLIC_ITEM_TABS, ...PUBLIC_CAPABILITY_TABS].find((entry) => entry.tab === tab)?.type ?? null
+}
 
 /** The tab a `?tab=` link opens, and the Capabilities sub-tab that tab opens on. */
 export interface OpenedMarketplaceTab {

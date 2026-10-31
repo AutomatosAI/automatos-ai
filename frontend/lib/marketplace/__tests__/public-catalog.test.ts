@@ -19,15 +19,13 @@ import { themeFileUrl } from '@/components/marketplace/themes/listing-format'
 import { storefrontViews } from '@/components/marketplace/themes/storefront/storefront-views'
 
 import {
-  CATALOG_ENDPOINT,
-  PUBLIC_MARKETPLACE_ENDPOINT,
   catalogFileUrl,
   catalogListings,
   catalogVersion,
   getPublicPage,
   getPublicThemes,
 } from '../public-catalog'
-import { filterPublicItems, publicItem, publicPage } from '../public-items'
+import { CATALOG_ENDPOINT, PUBLIC_MARKETPLACE_ENDPOINT, filterPublicItems, publicItem, publicPage } from '../public-items'
 import type { PublicItem } from '../public-items'
 import {
   ARCADE_DIGEST,
