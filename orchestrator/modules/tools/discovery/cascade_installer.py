@@ -450,23 +450,29 @@ def _copy_tool_assignments(
                 VALUES (:agent_id, :tool_id, true, NOW(), NOW())
             """), {"agent_id": target_agent_id, "tool_id": tool_name})
 
-        # --- Workspace entity connection (composio_connections) ---
-        # "added" status = tool registered but OAuth not yet connected
-        ws_conn_exists = db.execute(text("""
-            SELECT 1 FROM composio_connections
-            WHERE entity_id = :entity_id AND app_name = :app_name
-        """), {"entity_id": entity_id, "app_name": upper_name}).first()
-
-        if not ws_conn_exists:
-            db.execute(text("""
-                INSERT INTO composio_connections
-                    (entity_id, app_name, status, connected_at, updated_at)
-                VALUES
-                    (:entity_id, :app_name, 'added', NOW(), NOW())
-            """), {"entity_id": entity_id, "app_name": upper_name})
+        _add_workspace_connection(db, entity_id, upper_name)
 
     db.flush()
     return [t.upper() for t in tool_names]
+
+
+def _add_workspace_connection(db: Session, entity_id: int, app_name: str) -> None:
+    """The workspace entity's ``composio_connections`` row for ``app_name``, status 'added' (registered, OAuth
+    not yet connected), unless one exists. ``created_at`` is named: it is NOT NULL with only a Python-side
+    default (``ComposioConnection``), so a schema ``create_all`` built (a fresh install, CI) has no server
+    default for it and a row without it is refused."""
+    exists = db.execute(text("""
+        SELECT 1 FROM composio_connections
+        WHERE entity_id = :entity_id AND app_name = :app_name
+    """), {"entity_id": entity_id, "app_name": app_name}).first()
+    if exists:
+        return
+    db.execute(text("""
+        INSERT INTO composio_connections
+            (entity_id, app_name, status, connected_at, created_at, updated_at)
+        VALUES
+            (:entity_id, :app_name, 'added', NOW(), NOW(), NOW())
+    """), {"entity_id": entity_id, "app_name": app_name})
 
 
 # ---------------------------------------------------------------------------
