@@ -51,6 +51,9 @@ export const SCROLL_ON = 'Scroll the themes on'
 export const MAKE_YOUR_OWN = 'Make your own theme'
 export const MAKE_YOUR_OWN_BODY =
   'Design it with the Automatos Design Kit, for the web and for Automatos Go. Submit it here and, once reviewed, every workspace can install it.'
+/** "Make your own" on the signed-out visitor's storefront, which offers no submit (PRD-270 K20). */
+export const MAKE_YOUR_OWN_VISITOR_BODY =
+  'Design it with the Automatos Design Kit, for the web and for Automatos Go. Sign in to submit it for review: once reviewed, every workspace can install it.'
 export const OPEN_DESIGN_KIT = 'Open the Design Kit'
 export const DESIGN_KIT_URL = 'https://github.com/AutomatosAI/automatos-design-kit'
 export const SUBMIT_PACKAGE = 'Submit a theme package for review'

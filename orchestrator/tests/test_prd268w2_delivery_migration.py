@@ -4,8 +4,9 @@
 and adds ``mobile_devices.push_categories`` (the optional push categories the phone's app
 registered). Proven here:
 
-* The revision chains onto the base head (``prd268_w1_proactive``) and nothing chains onto
-  it: it is the single head.
+* The revision chains onto the base head (``prd268_w1_proactive``) and only
+  ``prd268_w3_follow_ups`` (PRD-268 W3) chains onto it; the single head is pinned by
+  test_prd209_alembic_single_head.py.
 * The model's CHECK (built from ``PUSH_TYPES``) equals the revision's; the downgrade puts
   back the three-type CHECK.
 * ``push_categories`` is declared the same way on both sides: JSONB, NOT NULL, default
@@ -78,7 +79,7 @@ def _model_check() -> str:
 # --------------------------------------------------------------------------- the chain
 
 
-def test_the_revision_chains_onto_the_base_head_and_is_the_single_head():
+def test_the_revision_chains_onto_the_base_head_and_prd268_w3_chains_onto_it():
     assert _assigned(MIGRATION, "revision") == REVISION
     assert _assigned(MIGRATION, "down_revision") == BASE_HEAD
     assert f"Revision ID: {REVISION}\nRevises: {BASE_HEAD}\n" in MIGRATION.read_text(encoding="utf-8")

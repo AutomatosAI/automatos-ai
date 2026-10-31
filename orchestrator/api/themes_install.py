@@ -43,6 +43,7 @@ from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.themes import THEME_CHOICE_LENGTH
+from services.marketplace_cloud.package import ensure_stored_for_update
 from services.themes import updates
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError, set_choice
 from services.themes.defaults import resolve_active, set_default
@@ -176,6 +177,7 @@ def update_theme_install(
 ) -> Dict[str, Any]:
     """Move the install to a newer package; the old one becomes the rollback target."""
     workspace_id = _workspace_of(ctx)
+    _run(db, lambda: ensure_stored_for_update(db, workspace_id, install_id, body.packageId), commit=False)
     install = _run(db, lambda: updates.apply_update(db, workspace_id, install_id, body.packageId), commit=True)
     return _install_answer(db, ctx, install)
 

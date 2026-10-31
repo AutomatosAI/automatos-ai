@@ -1637,6 +1637,25 @@ class Config:
     THEME_REVOCATIONS_PULL_MINUTES: int = int(os.getenv("THEME_REVOCATIONS_PULL_MINUTES", "60"))
     THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
     THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
+    # PRD-270 Sync with Automatos Cloud (§5.1-5.4; §8-Q6: on by default in the local edition).
+    # The Automatos Cloud a local install syncs Marketplace themes from and downloads their
+    # packages from: an ORIGIN only (https, or http to a loopback host; no user name or password,
+    # no path, query or fragment: services/marketplace_cloud/fetch.py checks it). Empty turns the
+    # Sync off: the pull refuses, its status answers enabled false and the web hides the button.
+    # A deploy-time trust boundary, as THEME_REVOCATIONS_URL is: only the environment sets it.
+    AUTOMATOS_CLOUD_URL: str = (
+        os.getenv("AUTOMATOS_CLOUD_URL", "https://api.automatos.app") or ""
+    ).strip()
+    # The largest Automatos Cloud catalogue a local install reads (bigger fails the Sync).
+    AUTOMATOS_CLOUD_FEED_MAX_KB: int = int(os.getenv("AUTOMATOS_CLOUD_FEED_MAX_KB", "1024"))
+    # Seconds each read from Automatos Cloud may take: the catalogue, or one theme's package.
+    AUTOMATOS_CLOUD_TIMEOUT_SECONDS: int = int(os.getenv("AUTOMATOS_CLOUD_TIMEOUT_SECONDS", "15"))
+    # The hosted side (§5.2): the largest catalogue GET /api/marketplace/catalog serves (a bigger
+    # one is a logged 503: served, it would fail every Sync).
+    MARKETPLACE_CATALOG_FEED_MAX_KB: int = int(os.getenv("MARKETPLACE_CATALOG_FEED_MAX_KB", "1024"))
+    # The public Marketplace routes (§5.7) take no account, so each client IP gets this many reads
+    # a minute on each of them, each route with its own bucket (at least one).
+    MARKETPLACE_PUBLIC_RATE_PER_MINUTE: int = max(1, int(os.getenv("MARKETPLACE_PUBLIC_RATE_PER_MINUTE", "120")))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
     # The theme publish key (POST /api/marketplace/themes/publish, services/themes/publish_key.py): the
     # Design Kit's publish job lists, approves and signs a version with it. Core holds only the key's

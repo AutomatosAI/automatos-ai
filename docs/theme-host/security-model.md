@@ -150,7 +150,7 @@ is what the browser paints. The boot script uses `classList` and `style.setPrope
   belongs to the first person who submits under it; a submission by anyone else is 409.
 - A private upload under `automatos/…` needs a platform admin, or a signature an active Automatos key verifies.
 - A reserved name alone is never **Official**: the listing is Official only when the version shown also carries a
-  signature an active key verifies (`listings._publisher`).
+  signature an active key verifies (`listings.publisher_view`).
 
 **Host-owned routes.** A theme can't register a page for sign-in and sign-up, `/settings`, `/team`, `/admin`,
 `/marketplace`, `/looks`, `/safe-mode`, `/x`, `/api`, `/dev` or `/verify` (`contract.HOST_OWNED_ROUTES`).

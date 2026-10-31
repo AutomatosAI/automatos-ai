@@ -7,13 +7,6 @@ import {
   Download,
   Star,
   Sparkles,
-  Store,
-  Package,
-  Bot,
-  BookOpen,
-  Cpu,
-  Puzzle,
-  Palette,
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
@@ -27,7 +20,11 @@ import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { MarketplacePackagesTab } from './marketplace-packages-tab'
-import { MarketplaceThemesTab, THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './themes/tab'
+import { MarketplaceThemesTab, THEMES_TAB_VALUE } from './themes/tab'
+import { CATEGORY_TABS, TAB_ICONS, openedMarketplaceTab } from './category-tabs'
+import { marketplaceLink } from './deep-link/deep-link-params'
+import { MarketplaceDeepLink } from './deep-link/marketplace-deep-link'
+import { SyncButton } from './cloud/sync-button'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -56,8 +53,15 @@ export interface MarketplaceItem {
 
 const DEEP_LINK_TYPES = new Set(['agent', 'recipe'])
 
-function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
-  const [subTab, setSubTab] = useState('plugins')
+interface CapabilitiesTabProps {
+  searchQuery: string
+  workspaceId: string
+  /** The sub-tab a `?tab=plugins` or `?tab=skills` link opens on (openedMarketplaceTab). */
+  initialSubTab: string
+}
+
+function CapabilitiesTab({ searchQuery, workspaceId, initialSubTab }: CapabilitiesTabProps) {
+  const [subTab, setSubTab] = useState(initialSubTab)
 
   return (
     <div className="space-y-4">
@@ -211,41 +215,11 @@ function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[];
 
 // ── Main Page ───────────────────────────────────────────────────────
 
-const TAB_ICONS: Record<string, any> = {
-  packages: Store,
-  tools: Package,
-  agents: Bot,
-  recipes: BookOpen,
-  llms: Cpu,
-  capabilities: Puzzle,
-  [THEMES_TAB_VALUE]: Palette,
-}
-
-const CATEGORY_TABS = [
-  // PRD-261: the Themes storefront leads the Marketplace, and the Marketplace opens on it (Gerard,
-  // 30 Oct 2026; the tab named "Themes", not "Skins", D3/Q11). Packages follow (PRD-230).
-  { value: THEMES_TAB_VALUE, label: THEMES_TAB_LABEL },
-  { value: 'packages', label: 'Packages' },
-  { value: 'tools', label: 'Applications' },
-  { value: 'agents', label: 'Agents' },
-  { value: 'recipes', label: 'Playbooks' },
-  { value: 'llms', label: 'LLMs' },
-  { value: 'capabilities', label: 'Capabilities' },
-]
-
-/**
- * The tab a `?tab=` link names, by its value or its label (`?tab=tools`, `?tab=playbooks`, as the
- * Tools dashboard and the Playbooks grid link here), else Themes, the tab the Marketplace opens on.
- */
-function initialMarketplaceTab(param: string | null | undefined): string {
-  const wanted = param?.trim().toLowerCase()
-  const named = CATEGORY_TABS.find((tab) => tab.value === wanted || tab.label.toLowerCase() === wanted)
-  return named?.value ?? THEMES_TAB_VALUE
-}
-
 function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
   const searchParams = useSearchParams()
-  const [selectedTab, setSelectedTab] = useState(() => initialMarketplaceTab(searchParams?.get('tab')))
+  const [opened] = useState(() => openedMarketplaceTab(searchParams?.get('tab')))
+  const [selectedTab, setSelectedTab] = useState(opened.tab)
+  const link = marketplaceLink(searchParams)
 
   return (
     <motion.div
@@ -267,7 +241,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
         </TabsList>
 
         <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
-          <MarketplaceThemesTab searchQuery={searchQuery} />
+          <MarketplaceThemesTab searchQuery={searchQuery} link={link?.tab === THEMES_TAB_VALUE ? link : null} />
         </TabsContent>
 
         <TabsContent value="packages" className="mt-0">
@@ -291,7 +265,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
         </TabsContent>
 
         <TabsContent value="capabilities" className="mt-0">
-          <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId} />
+          <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId} initialSubTab={opened.capability} />
         </TabsContent>
       </Tabs>
     </motion.div>
@@ -379,6 +353,7 @@ export function MarketplaceHomepage() {
         lede="Tools, agents, skills, and playbooks shared by the community. Install with one click; everything is sandboxed and reversible."
         actions={
           <>
+            <SyncButton />
             {isAdmin && (
               <AdminWorkspaceSwitcher onWorkspaceChange={handleAdminWorkspaceChange} />
             )}
@@ -413,6 +388,9 @@ export function MarketplaceHomepage() {
 
       {/* ── Category Tabs ───────────────────────────────────── */}
       <MarketplaceCategoryTabs searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
+
+      {/* A ?tab=&item=&add=1 link's detail modal, for every tab but Themes (PRD-270 K22) */}
+      <MarketplaceDeepLink workspaceId={effectiveWorkspaceId} onSearch={setSearchQuery} />
 
       {/* Item detail modal for featured/recommended clicks */}
       {selectedItem !== null && (

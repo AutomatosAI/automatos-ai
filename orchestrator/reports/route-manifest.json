@@ -1,5 +1,5 @@
 {
-  "route_count": 1004,
+  "route_count": 1009,
   "routes": [
     {
       "method": "GET",
@@ -1715,6 +1715,22 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/catalog"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/catalog/files/{digest}/{path:path}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/cloud-sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/status"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/featured"
     },
     {
@@ -2152,6 +2168,10 @@
     {
       "method": "PUT",
       "path": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/marketplace/{type}"
     },
     {
       "method": "GET",

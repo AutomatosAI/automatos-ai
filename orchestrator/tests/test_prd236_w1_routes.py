@@ -354,10 +354,15 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = "prd268_w1_proactive"' in delivery
     # 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto it — the
     # deliver_as CHECK widens to follow_up, agent_scheduled_tasks gains for_user_id, the outcome
-    # CHECK gains posted and proactive_calibrations is new; the guard follows it.
+    # CHECK gains posted and proactive_calibrations is new.
     follow_ups = (versions / "prd268_w3_follow_ups.py").read_text()
     assert 'down_revision = "prd268_w2_delivery"' in follow_ups
-    assert 'EXPECTED_HEAD = "prd268_w3_follow_ups"' in guard
+    # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
+    # it (re-chained from prd268_w1_proactive, then prd268_w2_delivery, as W1 merged main, 31 Oct)
+    # — theme_packages.source and the single-row marketplace_cloud_sync table; the guard follows it.
+    cloud_sync = (versions / "prd270_w1_cloud_sync.py").read_text()
+    assert 'down_revision = "prd268_w3_follow_ups"' in cloud_sync
+    assert 'EXPECTED_HEAD = "prd270_w1_cloud_sync"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

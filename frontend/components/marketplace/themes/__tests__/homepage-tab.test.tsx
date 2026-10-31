@@ -11,6 +11,9 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const nav = vi.hoisted(() => ({ params: new URLSearchParams() }))
+// One answer for every render, as react-query's is: a fresh `[]` each render re-runs the homepage's
+// recommendations effect (its dependency) without end, and an awaiting test never finished.
+const featured = vi.hoisted(() => ({ data: [], isLoading: false }))
 
 vi.mock('framer-motion', () => ({
   motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> },
@@ -26,10 +29,11 @@ vi.mock('@/lib/api-client', () => ({
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 vi.mock('@/contexts/role-context', () => ({ useSystemRole: () => ({ isAdmin: false }) }))
 vi.mock('@/hooks/use-marketplace-api', () => ({
-  useFeaturedItems: () => ({ data: [], isLoading: false }),
+  useFeaturedItems: () => featured,
   useToggleFeatured: () => ({ mutate: vi.fn(), isLoading: false }),
 }))
 vi.mock('@/components/analytics/admin-workspace-switcher', () => ({ AdminWorkspaceSwitcher: () => null }))
+vi.mock('@/components/marketplace/cloud/sync-button', () => ({ SyncButton: () => null }))
 vi.mock('@/components/shared', () => ({
   PageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
   SearchInput: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
@@ -119,5 +123,26 @@ describe('the Marketplace’s Themes tab', () => {
     render(<MarketplaceHomepage />)
 
     expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('data-state', 'active')
+  })
+
+  // PRD-270 US-270-09b: the visitor's Add links name a Capabilities sub-tab (K21).
+  it.each([
+    ['plugins', 'Plugins'],
+    ['skills', 'Skills'],
+  ])('a ?tab=%s link opens Capabilities on %s', (param, name) => {
+    nav.params = new URLSearchParams({ tab: param })
+    render(<MarketplaceHomepage />)
+
+    expect(screen.getByRole('tab', { name: 'Capabilities' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('tab', { name })).toHaveAttribute('data-state', 'active')
+  })
+
+  // render's act flushes the link's effect and the search it sets before it returns.
+  it('a skill’s ?item= link opens Capabilities › Skills with the search set to its name', () => {
+    nav.params = new URLSearchParams({ tab: 'skills', item: 'pdf-tools', add: '1' })
+    render(<MarketplaceHomepage />)
+
+    expect(screen.getByRole('tab', { name: 'Skills' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByLabelText('Search the marketplace')).toHaveValue('pdf-tools')
   })
 })

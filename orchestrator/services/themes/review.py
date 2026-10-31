@@ -230,7 +230,7 @@ def _history(db: Session, package_id: UUID) -> List[Dict[str, Any]]:
 def _stored_verdict(db: Session, package: ThemePackage) -> signature_verify.Verdict:
     """The report's check on the stored signature; a key the hosted feed revoked reads ``invalid``
     (``feed_checked``). A keys file that does not load reads ``invalid`` (as
-    ``listings._signature_verdict`` does), so the report still answers; the paste refuses."""
+    ``listings.signature_verdict`` does), so the report still answers; the paste refuses."""
     try:
         verdict = signature_verify.package_verdict(package)
     except signature_verify.SigningKeysError as bad:
