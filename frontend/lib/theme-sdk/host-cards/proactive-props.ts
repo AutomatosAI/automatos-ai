@@ -39,6 +39,11 @@ export interface BriefCardProps {
   readonly brief: Brief
   /** Listen (voice.BriefVoice: the brief the host holds) in the card's footer; default true. False when the theme places it itself. */
   readonly listen?: boolean
+  /**
+   * The thumbs (SDK 1.4.0), showing the person's remembered rating; default true. False when the theme draws its own
+   * with proactive.useRateBrief, so the card draws none.
+   */
+  readonly thumbs?: boolean
   /** A row's action was pressed: resolve to show "✓ done_label" in place, reject to leave the row as it was. */
   readonly onAction?: (row: BriefRow, section: BriefSection) => unknown
   /** A row with somewhere to go was opened; without it no row is a link. */

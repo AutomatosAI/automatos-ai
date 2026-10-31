@@ -220,6 +220,11 @@ from modules.tools.discovery.ask_orchestrator_binding import (  # P229-RVW-2, mo
     bind_ask_orchestrator_context as _bind_ask_orchestrator_context,
 )
 from modules.tools.discovery.handlers_brief import carries_the_brief_caller, get_brief  # PRD-268 US-C19d
+from modules.tools.discovery.handlers_follow_ups import cancel_follow_up, list_follow_ups, schedule_follow_up  # US-C11c
+from modules.tools.discovery.follow_up_context import carries_the_follow_up  # PRD-268 US-C11c
+from modules.tools.discovery.handlers_replies import offer_replies  # PRD-268 US-C12a
+from services.board_consent import OPERATOR_CONSENT_ACTIONS  # PRD-234 D16, moved (K3)
+from modules.tools.discovery.super_admin_caller import caller_is_super_admin as _caller_is_super_admin  # moved (K3)
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -370,19 +375,6 @@ _DRIVER_AWARE_ACTIONS = (
 )
 
 
-# PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
-# driving human so the local edition can record consent before dispatch.
-# platform_schedule_task joins them (calendar): a scheduled board ticket is
-# filed at fire time, and the operator who scheduled it is that consent.
-OPERATOR_CONSENT_ACTIONS = (
-    "platform_create_task",
-    "platform_assign_task",
-    "platform_update_task",
-    "platform_update_task_status",
-    "platform_schedule_task",
-)
-
-
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
     """Resolve the driving user's workspace role, fresh, at the gate.
 
@@ -456,18 +448,6 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     from core.security.driving_user import driver_is_workspace_admin
 
     return driver_is_workspace_admin(db, workspace_id, ctx)
-
-
-def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
-    """PRD-143's super-admin predicate: only a literal system_role ==
-    'super_admin' passes. There is no fallback, and no caller_context refuses.
-    The gate and platform_list_tools' listing (F122) both read this one. A
-    public widget turn never passes, whatever its context names (F155)."""
-    from core.security.surface import widget_turn
-
-    if widget_turn():
-        return False
-    return (caller_context or {}).get("system_role") == "super_admin"
 
 
 # F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the full-autonomy dial.
@@ -795,6 +775,7 @@ class PlatformActionExecutor:
     @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
     @carries_the_session_ticket  # PRD-255 US-012: the session's ticket, server-side, to the tools that write there
     @carries_the_check_in  # PRD-268 US-C03b: the check-in's run and reads, server-side, to the suggestion tool
+    @carries_the_follow_up  # PRD-268 US-C11c: the chat's own person and chat, server-side, to the follow-up tools
     @carries_the_brief_caller  # PRD-268 US-C19d: the chat's own person and language, server-side, to get_brief
     async def execute(
         self,
@@ -1375,6 +1356,10 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_fleet_status": fleet_status,
     "platform_suggest_next_step": suggest_next_step,  # PRD-268 US-C03b: a check-in's one write
     "platform_get_brief": get_brief,  # PRD-268 US-C19d: the person's Brief@1, in any chat
+    "platform_schedule_follow_up": schedule_follow_up,  # PRD-268 US-C11c: Auto keeps its word, chat only
+    "platform_list_follow_ups": list_follow_ups,  # PRD-268 US-C11c
+    "platform_cancel_follow_up": cancel_follow_up,  # PRD-268 US-C11c
+    "platform_offer_replies": offer_replies,  # PRD-268 US-C12a: reply chips, chat only
     # PRD-163 S1: mission lifecycle control
     "platform_approve_mission": approve_mission,
     "platform_reject_mission": reject_mission,

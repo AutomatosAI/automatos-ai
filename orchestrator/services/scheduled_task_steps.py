@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
 DELIVER_BOARD_TASK = "board_task"  # file a board ticket (assigned, or Inbox)
 DELIVERY_MODES = (DELIVER_CHAT, DELIVER_BOARD_TASK)
+# PRD-268 W3: a person's follow-up, fired once in the check-in lane. Not in DELIVERY_MODES:
+# only services/proactive/follow_ups.py inserts one, never create_task or platform_schedule_task.
+DELIVER_FOLLOW_UP = "follow_up"
 REVIEW_MODES = ("auto", "human", "llm")
 
 

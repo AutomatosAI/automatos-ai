@@ -1,5 +1,5 @@
 {
-  "route_count": 1002,
+  "route_count": 1009,
   "routes": [
     {
       "method": "GET",
@@ -28,6 +28,10 @@
     {
       "method": "GET",
       "path": "/api/activity/digest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/digest/feedback"
     },
     {
       "method": "POST",
@@ -632,6 +636,22 @@
     {
       "method": "GET",
       "path": "/api/attachments/{attachment_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/lines/{line_id}/reject"
     },
     {
       "method": "POST",
@@ -2100,6 +2120,14 @@
     {
       "method": "POST",
       "path": "/api/proactive/brief/open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/follow-ups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/follow-ups/{follow_up_id}/cancel"
     },
     {
       "method": "GET",

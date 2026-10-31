@@ -9,6 +9,7 @@
     "useCalibration",
     "useCheckReadiness",
     "useHideSuggestion",
+    "useRateBrief",
     "useReadiness",
     "useStartSuggestion",
     "useSuggestions"

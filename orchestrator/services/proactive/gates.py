@@ -20,6 +20,12 @@
 
 The first check that refuses names the run's outcome and what refused it. A refused
 check-in writes its run row and makes no model call (the runner).
+
+PRD-268 W3 (K11): a follow-up's firing starts through the same checks (``follow_up=True``,
+the person as the addressee), except two that are a check-in's own. It is due when Auto said,
+not on an interval, so ``min_interval_minutes`` (read against Auto's workspace check-in when
+there is no agent) never refuses it; and it may say one thing where it cannot suggest, so a
+suggestion cap at 0 does not refuse it either (``platform_suggest_next_step`` still does).
 """
 from __future__ import annotations
 
@@ -130,15 +136,19 @@ def _allows_nothing(caps: Caps, agent_id: Optional[int]) -> Optional[CapRefusal]
                               open_for_agent=None if agent_id is None else 0)
 
 
-def _cap_refusal(db: Session, workspace_id: UUID, agent_id: Optional[int], now: datetime) -> Optional[Refusal]:
+def _cap_refusal(db: Session, workspace_id: UUID, agent_id: Optional[int], now: datetime,
+                 follow_up: bool) -> Optional[Refusal]:
     caps = _read_caps(db, workspace_id)
     if caps is None:
         return Refusal(RUN_SKIPPED_CAP, CAPS_UNREADABLE)
-    checks: Tuple[Callable[[], Optional[CapRefusal]], ...] = (
+    model_runs: Tuple[Callable[[], Optional[CapRefusal]], ...] = (
         lambda: run_refusal(caps, model_runs_today(db, workspace_id, now)),
+    )
+    check_in_only: Tuple[Callable[[], Optional[CapRefusal]], ...] = (
         lambda: _too_soon(db, workspace_id, agent_id, caps, now),
         lambda: _allows_nothing(caps, agent_id),
     )
+    checks = model_runs if follow_up else model_runs + check_in_only
     for check in checks:
         refusal = check()
         if refusal is not None:
@@ -147,15 +157,16 @@ def _cap_refusal(db: Session, workspace_id: UUID, agent_id: Optional[int], now: 
 
 
 def start_refusal(db: Session, workspace_id: UUID, owner_id: Optional[int], now: datetime,
-                  what: str, agent_id: Optional[int] = None) -> Optional[Refusal]:
+                  what: str, agent_id: Optional[int] = None, *, follow_up: bool = False) -> Optional[Refusal]:
     """The first check that refuses this check-in's start, or None to go ahead. ``owner_id``
     is the addressee (K11); ``what`` names the check-in in the spend guard's log;
-    ``agent_id`` is the agent whose check-in it is, None for Auto's workspace check-in."""
+    ``agent_id`` is the agent whose check-in it is, None for Auto's workspace check-in;
+    ``follow_up`` a follow-up's firing, which no interval and no suggestion cap at 0 refuses."""
     checks: Tuple[Callable[[], Optional[Refusal]], ...] = (
         lambda: _switch_refusal(db, workspace_id, owner_id),
         lambda: _credits_refusal(db, workspace_id),
         lambda: _spend_refusal(db, workspace_id, what),
-        lambda: _cap_refusal(db, workspace_id, agent_id, now),
+        lambda: _cap_refusal(db, workspace_id, agent_id, now, follow_up),
     )
     for check in checks:
         refusal = check()

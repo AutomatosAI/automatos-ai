@@ -4,10 +4,14 @@
  * PRD-268 §6.11.2, K16 (US-C21c) — the brief's five sections, in Brief@1's order: needs you,
  * suggestions, today, since your last brief, and what couldn't be checked.
  *
- * Every word is the server's (K16): each section's label, "Show N more" and the empty sentence come
- * from `brief.labels`. A section draws the rows the server sent (it folds at 5, never at 6) and, when
- * its exact count is more than those rows, the server's "Show N more" for it. A section with no rows
- * draws nothing, and a brief with no rows anywhere says so in the server's sentence.
+ * Every word is the server's (K16). Each section's label and the empty sentence come from `brief.copy`
+ * (US-C23), else from `brief.labels` (a brief built before W3, or one a theme hands the card: the SDK's
+ * Brief carries labels only, K17). A section draws the rows the server sent (it folds at 5, never at 6)
+ * and, when its exact count is more than those rows, the server's "Show N more" for it from
+ * `labels.more`: the server filled that line from the same template `copy` carries, with the number its
+ * fold hid. The card never fills the template itself: `counts.needs_you` is the badge's total, and a
+ * viewer's fold counts only the rows they may see. A section with no rows draws nothing, and a brief
+ * with no rows anywhere says so in the server's sentence.
  *
  * A pressed row is remembered here, on this card, so it shows "✓ {done_label}" in place. A press the
  * surface refuses (its handler rejects) leaves the row as it was, pressable again; the surface that
@@ -41,6 +45,16 @@ export function foldedCount(brief: Brief, section: BriefSection): number {
   return typeof count === 'number' ? Math.max(count - rowsOf(brief, section).length, 0) : 0
 }
 
+/** A section's label: the brief's copy, else its labels. */
+function sectionLabel(brief: Brief, section: BriefSection): string | undefined {
+  return brief.copy?.section_labels?.[section] ?? brief.labels?.sections?.[section]
+}
+
+/** The sentence a brief with no rows says: the copy's, else the labels'. */
+function emptySentence(brief: Brief): string | null | undefined {
+  return brief.copy?.empty_sentence ?? brief.labels?.empty
+}
+
 interface SectionProps extends BriefSectionsProps {
   readonly section: BriefSection
   readonly pressed: Keys
@@ -60,7 +74,7 @@ function ShowMore({ section, text, onShowMore }: { readonly section: BriefSectio
 function Section({ brief, section, pressed, pending, onPress, onAction, onOpen, onShowMore }: SectionProps) {
   const rows = rowsOf(brief, section)
   if (rows.length === 0) return null
-  const label = brief.labels?.sections?.[section]
+  const label = sectionLabel(brief, section)
   const count = section === 'unchecked' ? null : brief.counts?.[section]
   const more = foldedCount(brief, section) > 0 ? brief.labels?.more?.[section] : undefined
   return (
@@ -117,7 +131,7 @@ export function BriefSections(props: BriefSectionsProps) {
   }
 
   if (BRIEF_SECTIONS.every((section) => rowsOf(brief, section).length === 0)) {
-    const empty = brief.labels?.empty
+    const empty = emptySentence(brief)
     return empty ? (
       <p data-ai-generated="true" data-brief-empty="" className="text-sm text-muted-foreground">
         {empty}

@@ -13,9 +13,13 @@
  *
  * `liveReceiptsOf(part)` reads the turn's receipts off one of the parts `onData` hands over, exactly as the
  * reply will carry them, so a theme can react the moment they arrive.
+ *
+ * SDK 1.4.0: each message's `knownParts`, its text, brief@1, suggestion@1 and reply_chips@1 parts, checked and
+ * frozen, so a theme that owns /chat finds the day's brief by its part. A part of any other type is left out.
  */
 
 import type { WithdrawOffer } from './cards'
+import type { Brief } from './proactive'
 
 export type HostChatRole = 'system' | 'user' | 'assistant'
 export type HostChatStatus = 'idle' | 'streaming' | 'error'
@@ -94,6 +98,37 @@ export interface HostChatError {
   readonly code: string | null
 }
 
+/** A message's words, as one of its parts (SDK 1.4.0, `knownParts`). */
+export interface HostTextPart {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/** The day's brief, posted beside its text: find the brief by this part, never by its prose. */
+export interface HostBriefPart {
+  readonly type: 'brief@1'
+  readonly brief: Brief
+}
+
+/** A suggestion Auto posted into the thread: its id, the row useSuggestions lists and Start and Hide take. */
+export interface HostSuggestionPart {
+  readonly type: 'suggestion@1'
+  readonly suggestion_id: string
+}
+
+/**
+ * The short answers Auto offered under its message: the chips the host draws, two or three, each at most 24
+ * characters, Auto's words (mark them data-ai-generated). A tap is the person's own message: send the chip's text
+ * with the controller's `send`, or place cards.ReplyChips. There is no route of its own.
+ */
+export interface HostReplyChipsPart {
+  readonly type: 'reply_chips@1'
+  readonly replies: readonly string[]
+}
+
+/** A message part a theme can read; a part of any other type is left out. */
+export type HostMessagePart = HostTextPart | HostBriefPart | HostSuggestionPart | HostReplyChipsPart
+
 /**
  * An approval a reply raised: a tool approval (a grant) or a Mission plan. The host draws it
  * (cards.ToolApproval, cards.MissionApproval: protected surfaces); the theme only places it.
@@ -122,6 +157,12 @@ export interface HostChatMessage {
   readonly role: HostChatRole
   /** The words: the text parts, or the content when there are none. */
   readonly text: string
+  /**
+   * The message's parts of the types a theme can read, in its order, each checked and frozen (SDK 1.4.0). A part of
+   * another type, or one that isn't what its type says, is left out. brief@1, suggestion@1 and reply_chips@1 count on
+   * Auto's messages only.
+   */
+  readonly knownParts: readonly HostMessagePart[]
   /** The reply's activity lines (narration, a long tool's progress). */
   readonly activity: readonly string[]
   readonly error: HostChatError | null

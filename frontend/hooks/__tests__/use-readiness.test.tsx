@@ -1,6 +1,7 @@
 /**
  * PRD-268 §6.11.3, K12 (US-C21b) — readiness on W1's routes (Check again replaces the answer; a
- * check over the limit says so), and calibration inert until US-C22: no request, nothing offered.
+ * check over the limit says so), and calibration while the server offers none (US-W06: the hooks are
+ * live on US-C22's routes, and CALIBRATION_ENABLED ships off): nothing offered, no answer sent.
  */
 import React from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -17,7 +18,7 @@ vi.mock('@/lib/api-client', () => ({
   },
 }))
 
-import { CALIBRATION_UNAVAILABLE, useAnswerCalibration, useCalibration } from '@/hooks/use-calibration'
+import { CALIBRATION_PATH, CALIBRATION_UNAVAILABLE, useAnswerCalibration, useCalibration } from '@/hooks/use-calibration'
 import { checkedRecently, readinessQueryKeys, useCheckReadiness, useReadiness } from '@/hooks/use-readiness'
 
 function readiness(state: 'ready' | 'not_checked' | 'needs_setup', checkedAt: string) {
@@ -128,25 +129,33 @@ describe('useCheckReadiness', () => {
   })
 })
 
-describe('calibration (inert until US-C22, K12)', () => {
-  it('offers nothing and is not available', () => {
+describe('calibration while the server offers none (CALIBRATION_ENABLED off, K15)', () => {
+  const NOT_OFFERED = { available: false, offer: false, consent_line: '', status: null, calibration: null, rejected_lines: [], accepted_lines: [] }
+  /** Only the calibration read was asked: nothing was answered. */
+  const onlyTheRead = () => requestMock.mock.calls.every(([path]) => String(path).startsWith(CALIBRATION_PATH))
+
+  it('offers nothing and is not available', async () => {
+    requestMock.mockResolvedValue(NOT_OFFERED)
     const { wrapper } = setup()
     const { result } = renderHook(() => useCalibration(), { wrapper })
 
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current).toEqual({ data: null, available: false, isLoading: false })
-    expect(requestMock).not.toHaveBeenCalled()
+    expect(onlyTheRead()).toBe(true)
   })
 
-  it('refuses an answer as not available on this server, and sends no request', async () => {
+  it('refuses an answer as not available on this server, and sends no answer', async () => {
+    requestMock.mockResolvedValue(NOT_OFFERED)
     const { wrapper } = setup()
     const { result } = renderHook(() => useAnswerCalibration(), { wrapper })
+    await waitFor(() => expect(requestMock).toHaveBeenCalled())
 
     expect(result.current.available).toBe(false)
     await expect(result.current.mutate({ calibration_id: 'c-1', answer: 'accept' })).rejects.toThrow(CALIBRATION_UNAVAILABLE)
     await expect(
       result.current.mutate({ calibration_id: 'c-1', answer: 'reject', line_id: 'l-1' }),
     ).rejects.toThrow('not available on this server')
-    expect(requestMock).not.toHaveBeenCalled()
+    expect(onlyTheRead()).toBe(true)
     expect(postMock).not.toHaveBeenCalled()
   })
 })

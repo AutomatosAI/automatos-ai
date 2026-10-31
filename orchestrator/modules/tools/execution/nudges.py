@@ -57,6 +57,12 @@ UNRUN_SOURCE_RECOVERY_MSG = (
     "be out of date. Call {tool} now, in this response, or say plainly that the "
     "answer is from an earlier conversation and was not searched again."
 )
+# F099: what the owner is told when the reply still cites a source that did not run (moved here from
+# tool_loop.py, which is over its size limit, for PRD-268 US-C12b's decorator; re-exported there).
+UNRUN_SOURCE_NOTICE = (
+    "No search ran for this reply — it gives {tool} as its source, but repeats an "
+    "earlier answer that may be out of date. Ask me to search again."
+)
 # finish_reason "length" mid tool call: the arguments' JSON was cut (moved here from
 # tool_loop.py, which is over its size limit, for F328's decorator).
 LENGTH_RECOVERY_MSG = (

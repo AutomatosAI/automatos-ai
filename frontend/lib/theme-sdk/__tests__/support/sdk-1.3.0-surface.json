@@ -1,0 +1,495 @@
+{
+  "_comment": "SDK 1.3.0's surface (main at 684ea7ef4, #1375): each area's runtime names (surface/<area>.json) and the types its areas/<area>.d.ts declared. lib/theme-sdk/__tests__/surface-1.3.0.test.ts holds every later 1.x to keep them all. Never edited: a 1.x only adds.",
+  "version": "1.3.0",
+  "areas": {
+    "assets": {
+      "values": [
+        "assetUrl"
+      ],
+      "types": []
+    },
+    "cards": {
+      "values": [
+        "AiLabelFence",
+        "BriefCard",
+        "CalibrationCard",
+        "CorePage",
+        "FilePreview",
+        "FirstRunNudge",
+        "HeaderUtilities",
+        "MadeBy",
+        "MarkdownView",
+        "MissionApproval",
+        "MissionCreatedCard",
+        "MissionSuggestionCard",
+        "ReadinessList",
+        "ReplyChips",
+        "StatusLabel",
+        "SuggestionCard",
+        "TaskCard",
+        "ToolApproval",
+        "TrialExhaustedBanner",
+        "WithdrawOfferCard"
+      ],
+      "types": [
+        "AiLabelFenceProps",
+        "AiLabelId",
+        "ApprovalAnswer",
+        "ApprovalDecision",
+        "ApprovalViewData",
+        "BriefCardProps",
+        "CalibrationCardProps",
+        "CardOrigin",
+        "CorePageProps",
+        "FilePreviewProps",
+        "FilePreviewType",
+        "MadeByProps",
+        "MarkdownViewProps",
+        "MissionApprovalData",
+        "MissionApprovalProps",
+        "MissionApprovalTask",
+        "MissionCreatedCardProps",
+        "MissionSuggestionCardProps",
+        "MissionSuggestionMessage",
+        "OversightTier",
+        "ReadinessListProps",
+        "ReplyChipsProps",
+        "StatusLabelProps",
+        "SuggestionCardProps",
+        "SuggestionCardVariant",
+        "TaskCardData",
+        "TaskCardProps",
+        "ToolApprovalData",
+        "ToolApprovalProps",
+        "TrialExhaustedBannerProps",
+        "WithdrawOffer",
+        "WithdrawOfferCardProps",
+        "WithdrawRequest"
+      ]
+    },
+    "chat": {
+      "values": [
+        "liveReceiptsOf",
+        "movedSomethingOnTheBoard",
+        "receiptLine",
+        "receiptLink",
+        "useChatController",
+        "useConversationList",
+        "useRecentChats",
+        "useStartChat"
+      ],
+      "types": [
+        "HostChatApproval",
+        "HostChatController",
+        "HostChatControllerOptions",
+        "HostChatConversation",
+        "HostChatDraft",
+        "HostChatDraftLink",
+        "HostChatError",
+        "HostChatMessage",
+        "HostChatOnScreen",
+        "HostChatOnScreenOptions",
+        "HostChatRole",
+        "HostChatStatus",
+        "HostChatSummary",
+        "HostChatTurnEvent",
+        "HostConversationListState",
+        "HostDeliverable",
+        "HostLiveReceipts",
+        "HostMissionSuggestion",
+        "HostReceipt",
+        "HostRecentChats",
+        "HostStartChat",
+        "HostTaskCard",
+        "HostToolCall"
+      ]
+    },
+    "context": {
+      "values": [
+        "useEdition",
+        "useHealth",
+        "useMediaPreferences",
+        "useOnline",
+        "useRole",
+        "useThemeLayout",
+        "useTone",
+        "useTrial",
+        "useWorkspace"
+      ],
+      "types": [
+        "HostEdition",
+        "HostHealth",
+        "HostHealthOptions",
+        "HostMediaPreferences",
+        "HostRole",
+        "HostSystemRole",
+        "HostThemeLayout",
+        "HostTone",
+        "HostTrial",
+        "HostWorkspace",
+        "HostWorkspaceRole",
+        "HostWorkspaceState"
+      ]
+    },
+    "deliverables": {
+      "values": [
+        "DELIVERABLE_FEED_FILTERS",
+        "DELIVERABLE_TAB_LABELS",
+        "deliverableDownloadUrl",
+        "deliverableFileUrl",
+        "deliverableFilename",
+        "deliverableLabel",
+        "fileDownloadUrl",
+        "useAuthenticatedBlobUrl",
+        "useDeliverable",
+        "useDeliverables",
+        "useFileDownload",
+        "visibleDeliverableTabs"
+      ],
+      "types": [
+        "AuthenticatedBlobUrl",
+        "Deliverable",
+        "DeliverableDateRange",
+        "DeliverableDetailResponse",
+        "DeliverableFileRef",
+        "DeliverableFilters",
+        "DeliverableListResponse",
+        "DeliverableNameRef",
+        "DeliverableQuery",
+        "DeliverableTab",
+        "DeliverablesOptions",
+        "DeliverablesQuery",
+        "FileDownload"
+      ]
+    },
+    "events": {
+      "values": [
+        "HOST_EVENT_NAMES",
+        "onHostEvent",
+        "openGlobalSearch",
+        "useHostEvent"
+      ],
+      "types": [
+        "HostEventHandler",
+        "HostEventName"
+      ]
+    },
+    "looks": {
+      "values": [
+        "exportLook",
+        "importLook",
+        "listLooks",
+        "saveLook",
+        "useLook",
+        "useLookScope"
+      ],
+      "types": [
+        "HostLook",
+        "HostLookFile",
+        "HostLookResult",
+        "HostLookState"
+      ]
+    },
+    "navigation": {
+      "values": [
+        "BOARD_HREF",
+        "CHAT_HREF",
+        "DELIVERABLES_HREF",
+        "DELIVERABLE_EXPLORER_HREF",
+        "DELIVERABLE_PARAM",
+        "HostLink",
+        "LOOKS_HREF",
+        "LOOK_STYLE_HREF",
+        "QUESTIONS_HREF",
+        "chatHref",
+        "missionHref",
+        "questionHref",
+        "resolveActiveNavId",
+        "ticketHref",
+        "useCoreNav",
+        "useHostPathname",
+        "useHostRouter",
+        "useHostSearchParams"
+      ],
+      "types": [
+        "CoreNav",
+        "CoreNavItem",
+        "HostLinkProps",
+        "HostQuestionRef",
+        "HostRouter",
+        "HostSearchParams"
+      ]
+    },
+    "notices": {
+      "values": [
+        "dismissNotice",
+        "notify"
+      ],
+      "types": [
+        "Notice",
+        "NoticeAction",
+        "NoticeId",
+        "NoticeKind"
+      ]
+    },
+    "pages/agents": {
+      "values": [
+        "useAgentStats",
+        "useAgents"
+      ],
+      "types": [
+        "AgentStatistics",
+        "AgentStatisticsQuery",
+        "RosterAgent",
+        "RosterAgentsQuery"
+      ]
+    },
+    "pages/assignments": {
+      "values": [
+        "useApproveMission",
+        "useCancelMission",
+        "useFieldQuery",
+        "useMission",
+        "useMissionField",
+        "useMissions",
+        "usePauseMission",
+        "useRecommendedAssignments",
+        "useRejectMission",
+        "useReplanMission",
+        "useRerunMission",
+        "useResumeMission",
+        "useSaveAsRoutine",
+        "useUpdateMissionSettings"
+      ],
+      "types": [
+        "Mission",
+        "MissionAction",
+        "MissionApproveBody",
+        "MissionApproveInput",
+        "MissionCreateBody",
+        "MissionDetail",
+        "MissionEvent",
+        "MissionField",
+        "MissionFieldMetrics",
+        "MissionFieldOptions",
+        "MissionFieldPattern",
+        "MissionFieldQueryInput",
+        "MissionFieldScope",
+        "MissionFieldStability",
+        "MissionFieldStatus",
+        "MissionFieldTrace",
+        "MissionFieldTraceHit",
+        "MissionFilters",
+        "MissionList",
+        "MissionQuery",
+        "MissionRejectBody",
+        "MissionRejectInput",
+        "MissionReplanInput",
+        "MissionRunState",
+        "MissionSettings",
+        "MissionSettingsBody",
+        "MissionSettingsInput",
+        "MissionStateType",
+        "MissionTask",
+        "MissionTaskProgress",
+        "MissionTaskState",
+        "RecommendedAssignment",
+        "RecommendedAssignments",
+        "SaveAsRoutineBody",
+        "SaveAsRoutineInput",
+        "SavedRoutine"
+      ]
+    },
+    "pages/command-center": {
+      "values": [
+        "useActivityFeed",
+        "useActivitySchedule",
+        "useActivityStats",
+        "useBoardEventStream",
+        "useNeedsYou",
+        "useQuestions",
+        "useWatches"
+      ],
+      "types": [
+        "ActivityFeed",
+        "ActivityFeedFilters",
+        "ActivityFeedItem",
+        "ActivityItemType",
+        "ActivityPeriod",
+        "ActivitySchedule",
+        "ActivityStats",
+        "ActivityStatusFilter",
+        "CommandCenterQuery",
+        "NeedsYou",
+        "NeedsYouAskRow",
+        "NeedsYouCounts",
+        "NeedsYouTicketRow",
+        "QuestionGrant",
+        "QuestionGrants",
+        "ScheduleItem",
+        "ScheduleRange",
+        "Watch",
+        "Watches"
+      ]
+    },
+    "pages/documents": {
+      "values": [
+        "useCloudConnections",
+        "useDatabaseKnowledge",
+        "useDeleteDocument",
+        "useDocumentStats",
+        "useDocumentTeamCounts",
+        "useDocuments",
+        "useSelectRootFolder",
+        "useTeams",
+        "useTriggerSync",
+        "useUploadDocument"
+      ],
+      "types": [
+        "KnowledgeAction",
+        "KnowledgeCacheStats",
+        "KnowledgeCloudConnection",
+        "KnowledgeDatabase",
+        "KnowledgeDatabaseQueryOptions",
+        "KnowledgeDatabaseQueryResult",
+        "KnowledgeDatabaseSource",
+        "KnowledgeDatabaseSourceInput",
+        "KnowledgeDocument",
+        "KnowledgeQuery",
+        "KnowledgeQueryTemplate",
+        "KnowledgeRootFolderInput",
+        "KnowledgeStats",
+        "KnowledgeSyncJob",
+        "KnowledgeTeam",
+        "KnowledgeTeamCounts",
+        "KnowledgeUploadInput"
+      ]
+    },
+    "pages/playbooks": {
+      "values": [
+        "useCreatePlaybook",
+        "useDeletePlaybook",
+        "useExecutePlaybook",
+        "usePlaybookExecutions",
+        "useUpdatePlaybook",
+        "useWorkflowPlaybook",
+        "useWorkflowPlaybooks"
+      ],
+      "types": [
+        "Playbook",
+        "PlaybookAction",
+        "PlaybookDeleted",
+        "PlaybookDraft",
+        "PlaybookFilters",
+        "PlaybookId",
+        "PlaybookList",
+        "PlaybookQuery",
+        "PlaybookRun",
+        "PlaybookRunFilters",
+        "PlaybookRunInput",
+        "PlaybookRunList",
+        "PlaybookRunStarted",
+        "PlaybookRunStatus",
+        "PlaybookSaved",
+        "PlaybookSort",
+        "PlaybookUpdateInput"
+      ]
+    },
+    "proactive": {
+      "values": [
+        "useAnswerCalibration",
+        "useBrief",
+        "useCalibration",
+        "useCheckReadiness",
+        "useHideSuggestion",
+        "useReadiness",
+        "useStartSuggestion",
+        "useSuggestions"
+      ],
+      "types": [
+        "Brief",
+        "BriefActionVerb",
+        "BriefCountedSection",
+        "BriefLabels",
+        "BriefOpensType",
+        "BriefRow",
+        "BriefSection",
+        "Calibration",
+        "CalibrationAction",
+        "CalibrationAnswer",
+        "CalibrationLine",
+        "CalibrationQuery",
+        "CalibrationSource",
+        "DisplayState",
+        "EvidenceRef",
+        "HideAnswer",
+        "HideReason",
+        "HideSuggestionInput",
+        "ProactiveAction",
+        "ProactiveQuery",
+        "ProposedAction",
+        "Readiness",
+        "ReadinessItem",
+        "ReadinessNeed",
+        "ReadinessState",
+        "Retry",
+        "StartAnswer",
+        "StartOpens",
+        "StartSuggestionInput",
+        "Suggestion",
+        "SuggestionSeverity",
+        "SuggestionStatus",
+        "SuggestionVia"
+      ]
+    },
+    "storage": {
+      "values": [
+        "THEME_STATE_LIMITS",
+        "readThemeState",
+        "removeThemeState",
+        "subscribeThemeState",
+        "useThemeState",
+        "writeThemeState"
+      ],
+      "types": [
+        "ThemeStateOptions",
+        "ThemeStateRead",
+        "ThemeStateResult",
+        "ThemeStateValue"
+      ]
+    },
+    "theme": {
+      "values": [
+        "DISPLAY_STATE_LABELS",
+        "SDK_VERSION",
+        "defineTheme"
+      ],
+      "types": [
+        "DisplayStateLabel",
+        "StatusRole",
+        "StatusToken",
+        "ThemeDefinition",
+        "ThemeRegistrationHost"
+      ]
+    },
+    "voice": {
+      "values": [
+        "BriefVoice",
+        "VoiceButton",
+        "readVoiceLevels",
+        "useVoice"
+      ],
+      "types": [
+        "HostVoiceAvailability",
+        "HostVoiceLevels",
+        "HostVoiceMode",
+        "HostVoicePhase",
+        "HostVoiceState",
+        "VoiceButtonMode",
+        "VoiceButtonPress",
+        "VoiceButtonProps",
+        "VoiceButtonSize"
+      ]
+    }
+  }
+}

@@ -64,6 +64,7 @@ from modules.proactive.provenance import TICKET
 from services.credits.alerts import LEVEL_LOW, LEVEL_OUT
 from services.needs_you import stuck_tickets
 from services.scheduled_task_service import ONE_SHOT_MISFIRE_GRACE_SECONDS
+from services.scheduled_task_steps import DELIVER_FOLLOW_UP
 from services.ticket_numbers import ticket_numbers
 
 __all__ = [
@@ -345,11 +346,14 @@ _GRANTS = text("""
 """)
 # A one-off is given up once its time is further back than the grace: that moment falls
 # in the window when its time falls in the window moved back by the grace.
+# PRD-268 K8: a follow-up's reason is its person's own, so a skipped follow-up never reaches
+# the owner's check-in.
 _SKIPPED_RUNS = text("""
     SELECT t.id, t.description, t.next_run_at AS at, a.name AS agent_name
       FROM agent_scheduled_tasks t
       LEFT JOIN agents a ON a.id = t.target_agent_id AND a.workspace_id = t.workspace_id
      WHERE t.workspace_id = CAST(:ws AS uuid) AND t.task_type = 'one_shot' AND t.status = 'active'
+       AND t.deliver_as <> :follow_up
        AND t.last_run_at IS NULL AND t.next_run_at >= :since_due AND t.next_run_at < :until_due
   ORDER BY t.next_run_at DESC LIMIT :limit
 """)
@@ -376,7 +380,8 @@ def _expiring_grants(db: Session, window: _Window) -> List[Signal]:
 
 def _skipped_runs(db: Session, window: _Window) -> List[Signal]:
     rows = db.execute(_SKIPPED_RUNS, window.params(since_due=window.since - SKIP_GRACE,
-                                                   until_due=window.until - SKIP_GRACE)).all()
+                                                   until_due=window.until - SKIP_GRACE,
+                                                   follow_up=DELIVER_FOLLOW_UP)).all()
     return [_signal(SCHEDULED_RUN_SKIPPED, SCHEDULED_TASK_REF, row.id, row.at, who=row.agent_name or AN_AGENT,
                     when=_when(row.at), what=row.description) for row in rows]
 

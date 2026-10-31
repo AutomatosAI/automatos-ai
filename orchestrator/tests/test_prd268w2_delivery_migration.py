@@ -90,7 +90,7 @@ def test_the_revision_chains_onto_the_base_head_and_prd270_w1_chains_onto_it():
                       if down == parent or (isinstance(down, tuple) and parent in down))
 
     assert revises(BASE_HEAD) == [MIGRATION.name]
-    assert revises(REVISION) == ["prd270_w1_cloud_sync.py"]
+    assert revises(REVISION) == ["prd268_w3_follow_ups.py"]  # 2026-10-29: W3's revision (PRD-268 US-C11a)
 
 
 # --------------------------------------------------------------------------- one shape

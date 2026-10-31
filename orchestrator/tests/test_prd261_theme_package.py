@@ -407,9 +407,10 @@ def test_an_encrypted_member_is_refused():
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
     # PB-3 (D7, QB-3): host 1.1.0 for the boot tone rule and looks presets. Theme voice (C5): SDK 1.2.0 for its
-    # voice area; PRD-268 (K12): SDK 1.3.0 for its proactive area. The host contract is unchanged.
+    # voice area; PRD-268 (K12): SDK 1.3.0 for its proactive area; PRD-268 Wave K (K17): SDK 1.4.0 for a message's
+    # parts, the brief's speaking row and its thumbs. The host contract is unchanged.
     assert contract.THEME_HOST_VERSION == "1.1.0"
-    assert contract.SDK_VERSION == "1.3.0"
+    assert contract.SDK_VERSION == "1.4.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
     assert contract.RESERVED_HTML_CLASSES == HOST_HTML_CLASSES
     assert not hasattr(contract, "HTML_CLASS_OWNERS")  # A-20: no theme's id keeps a reserved class

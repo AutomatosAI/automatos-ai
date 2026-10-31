@@ -54,9 +54,10 @@ const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
 // PB-3: the host contract's version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
 const CONTRACT_VERSION = '1.1.0'
-// Theme voice (C5): the SDK moved to 1.2.0 for its voice area; PRD-268 (K12) to 1.3.0 for its proactive area. The host
-// contract stayed at CONTRACT_VERSION.
-const SDK_CONTRACT_VERSION = '1.3.0'
+// Theme voice (C5): the SDK moved to 1.2.0 for its voice area; PRD-268 (K12) to 1.3.0 for its proactive area; PRD-268
+// Wave K (K17) to 1.4.0 for a message's parts, the brief's speaking row and its thumbs. The host contract stayed at
+// CONTRACT_VERSION.
+const SDK_CONTRACT_VERSION = '1.4.0'
 // PB-32: the mobile block joined host 1.1.0, so a theme with one admits no older host (a later bump keeps this).
 const MOBILE_BLOCK_HOST = '1.1.0'
 // A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
@@ -286,7 +287,7 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(sharedModules.sdkVersion).toBe(SDK_VERSION)
   })
 
-  it('is at host 1.1.0 (the boot tone rule, PB-3) and SDK 1.3.0 (the proactive area, PRD-268 K12)', () => {
+  it('is at host 1.1.0 (the boot tone rule, PB-3) and SDK 1.4.0 (message parts, the speaking row, the thumbs: PRD-268 K17)', () => {
     expect(THEME_HOST_VERSION).toBe(CONTRACT_VERSION)
     expect(SDK_VERSION).toBe(SDK_CONTRACT_VERSION)
   })

@@ -8,7 +8,9 @@ quiet hours. Proven here:
   columns, in the same order, with the same types, nullability, primary keys, defaults and
   foreign keys (the workspace CASCADEs; persons and agents are plain integers); the same
   CHECKs, built from the module's status and outcome constants; and the same indexes,
-  the partial unique on open rows included.
+  the partial unique on open rows included. A CHECK a later revision re-adds is read from
+  the newest revision that sets it: the outcome CHECK gained ``posted`` in
+  ``prd268_w3_follow_ups`` (PRD-268 W3, K20).
 * The revision chains onto the old head, creates only what is absent (every CREATE is
   ``IF NOT EXISTS``), alters no other table, and its downgrade drops only these three.
 * ``ProactiveSuggestion.to_dict`` gives every column as a JSON-ready value.
@@ -34,6 +36,8 @@ from sqlalchemy import text
 
 ORCH = Path(__file__).resolve().parents[1]
 MIGRATION = ORCH / "alembic" / "versions" / "prd268_w1_proactive.py"
+# K20 (PRD-268 W3): a CHECK a later revision re-adds, and the newest revision that sets it.
+NEWEST_CHECK = {"ck_proactive_runs_outcome": ORCH / "alembic" / "versions" / "prd268_w3_follow_ups.py"}
 OLD_HEAD = "prd266_w2_push"
 TABLES = ("proactive_suggestions", "proactive_runs", "proactive_person_settings")
 
@@ -52,7 +56,7 @@ COLUMNS = dict(zip(TABLES, (SUGGESTION_COLUMNS, RUN_COLUMNS, PERSON_COLUMNS)))
 STATUSES = ("open", "started", "hidden", "expired")
 OUTCOMES = (
     "silent", "suggested", "error", "skipped_quiet", "skipped_cap",
-    "skipped_credits", "skipped_paused", "skipped_off",
+    "skipped_credits", "skipped_paused", "skipped_off", "posted",
 )
 OPEN_UNIQUE = "uq_proactive_suggestions_open_subject"
 INDEXES = {
@@ -80,10 +84,10 @@ def _tables() -> dict:
     return {model.__tablename__: model.__table__ for model in models}
 
 
-def _constants() -> dict:
+def _constants(migration: Path = MIGRATION) -> dict:
     """The revision's module-level literal constants, read with ast (never imported)."""
     found = {}
-    for node in ast.parse(MIGRATION.read_text(encoding="utf-8")).body:
+    for node in ast.parse(migration.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             try:
                 found[node.targets[0].id] = ast.literal_eval(node.value)
@@ -190,7 +194,11 @@ def test_the_checks_are_built_from_the_module_constants_and_match_the_revision(t
     for name, (column, values) in CHECKS[table_name].items():
         assert checks[name].startswith(f"{column} IN (")
         assert tuple(re.findall(r"'([a-z_]+)'", checks[name])) == values
-        assert f"CONSTRAINT {name} CHECK ({checks[name]})" in lines
+        if name in NEWEST_CHECK:  # K20: re-added whole by the newest revision that sets it
+            readd = f"ALTER TABLE {table_name} DROP CONSTRAINT IF EXISTS {name}, ADD CONSTRAINT {name} CHECK ({checks[name]});"
+            assert readd in _constants(NEWEST_CHECK[name])["_UPGRADE"]
+        else:
+            assert f"CONSTRAINT {name} CHECK ({checks[name]})" in lines
 
 
 def test_the_status_and_outcome_constants():
@@ -202,7 +210,7 @@ def test_the_status_and_outcome_constants():
     assert proactive.RUN_OUTCOMES == OUTCOMES
     assert (proactive.RUN_SILENT, proactive.RUN_SUGGESTED, proactive.RUN_ERROR, proactive.RUN_SKIPPED_QUIET,
             proactive.RUN_SKIPPED_CAP, proactive.RUN_SKIPPED_CREDITS, proactive.RUN_SKIPPED_PAUSED,
-            proactive.RUN_SKIPPED_OFF) == OUTCOMES
+            proactive.RUN_SKIPPED_OFF, proactive.RUN_POSTED) == OUTCOMES
 
 
 def test_model_indexes_equal_ddl_indexes():
