@@ -4,12 +4,14 @@
  * PRD-268 §6.3 'In the thread', K8 (US-W03b) — the caller's follow-ups in one chat, and Cancel.
  *
  * The follow-up line under the message that scheduled one (components/proactive/follow-up-line.tsx) reads this
- * list: GET /api/proactive/follow-ups?chat_id=&status=all (US-C11e), the caller's own, pending, fired and
- * cancelled alike, so the line can say where each stands. Every line of a chat shares the one query. It is asked
+ * list: GET /api/proactive/follow-ups?chat_id=&status=all (US-C11e), the caller's own, pending, fired, cancelled
+ * and missed alike, so the line can say where each stands. Every line of a chat shares the one query. It is asked
  * again when a chat changes (the board stream's `automatos:chat-changed`: a follow-up that spoke posts into the
  * chat), and once the soonest pending one is due, since a follow-up with nothing to say posts nothing to announce
- * it fired. Cancel posts …/{id}/cancel; the cancelled row the server answers goes into the list at once, and the
- * list is asked again however the cancel ended (a 409 means it fired or was cancelled elsewhere). A chat id that
+ * it fired. A missed one (its time passed and the scheduler never ran it) will never fire, so it is never waited on:
+ * a chat whose follow-ups are all missed, fired or cancelled asks no more. Cancel posts …/{id}/cancel; the
+ * cancelled row the server answers goes into the list at once, and the list is asked again however the cancel ended
+ * (a 409 means it fired, was cancelled elsewhere or was missed). A chat id that
  * isn't a UUID asks nothing, and an id that isn't a follow-up's never reaches a request path. The server answers at
  * most its LIST_LIMIT (100) rows, pending first: a chat's oldest fired or cancelled follow-ups can fall off it, and
  * their lines then draw nothing.
@@ -43,7 +45,8 @@ function cancelPath(id: number): string {
 }
 
 /** How long until the list is asked again: when the soonest pending follow-up is due, at least a minute and at
- * most FOLLOW_UPS_MAX_WAIT_MS; never once none is pending. */
+ * most FOLLOW_UPS_MAX_WAIT_MS; never once none is pending (a missed one is not: the server stops calling it
+ * pending once its time is past the scheduler's grace). */
 export function nextAskIn(rows: readonly FollowUp[] | undefined, now: number = Date.now()): number | false {
   const due = (rows ?? []).filter((row) => row.status === 'pending').map((row) => (row.at ? Date.parse(row.at) : now))
   if (due.length === 0) return false

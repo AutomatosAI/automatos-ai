@@ -55,6 +55,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "follow_up_not_found": "Follow-up not found.",
         "follow_up_fired": "This follow-up already came, so there is nothing to cancel.",
         "follow_up_cancelled": "This follow-up was already cancelled.",
+        "follow_up_missed": ("This follow-up was missed: its time passed and it never ran, so there is nothing "
+                             "to cancel."),
         "follow_ups_unreadable": "Your follow-ups could not be read right now. Try again in a minute.",
         "follow_up_unavailable": "The follow-up could not be cancelled right now. Try again in a minute.",
     }),
@@ -88,6 +90,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "follow_up_not_found": "Acompanhamento não encontrado.",
         "follow_up_fired": "Este acompanhamento já chegou, então não há o que cancelar.",
         "follow_up_cancelled": "Este acompanhamento já foi cancelado.",
+        "follow_up_missed": ("Este acompanhamento foi perdido: o horário passou e ele nunca rodou, então não há o "
+                             "que cancelar."),
         "follow_ups_unreadable": "Não foi possível ler seus acompanhamentos agora. Tente de novo em um minuto.",
         "follow_up_unavailable": "Não foi possível cancelar o acompanhamento agora. Tente de novo em um minuto.",
     }),

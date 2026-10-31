@@ -14,7 +14,10 @@ the model reads (``services.proactive.follow_up_strings``) and an ``error_code``
 
 Scheduling also refuses (K10) a call outside the person's own chat (``no_conversation``), a
 workspace whose ``effective_mode`` is not live (``not_live``: a follow-up that will not
-post must not be promised), a paused person (``paused``), a follow-up about a Mission, a
+post must not be promised), a workspace whose background work only the trial could pay
+for (``no_background``: the scheduler skips such a run, ``services.credits.routing
+.background_allowed``; a check that cannot be read refuses too), a paused person
+(``paused``), a follow-up about a Mission, a
 playbook run or a ticket, or whose reason names a ticket by its board number
 (``use_a_watch``: the watcher supervises those), a reason or a time it cannot read, and
 any cap (``follow_up_cap``, with the cap's name and value). The check-in lane never runs
@@ -48,10 +51,11 @@ logger = logging.getLogger(__name__)
 __all__ = ["cancel_follow_up", "list_follow_ups", "names_a_ticket", "schedule_follow_up"]
 
 NO_PERSON, NO_CONVERSATION, NOT_AUTO = "no_person", "no_conversation", "not_auto"
-NOT_LIVE, PAUSED, USE_A_WATCH = "not_live", "paused", "use_a_watch"
+NOT_LIVE, NO_BACKGROUND, PAUSED, USE_A_WATCH = "not_live", "no_background", "paused", "use_a_watch"
 NO_REASON, LONG_REASON, BAD_ABOUT, BAD_STATUS, BAD_ID = "no_reason", "long_reason", "bad_about", "bad_status", "bad_id"
 CAP_CODE = "follow_up_cap"
-ALREADY = {follow_ups.FIRED: "already_fired", follow_ups.CANCELLED: "already_cancelled"}
+ALREADY = {follow_ups.FIRED: "already_fired", follow_ups.CANCELLED: "already_cancelled",
+           follow_ups.MISSED: "already_missed"}
 ABOUT_ID_CHARS = 64
 STATUS_ALL = "all"
 # A follow-up's number: ASCII digits, as many as a row id can have.
@@ -113,8 +117,23 @@ def _who_refusal(db: Session, workspace_id: UUID, caller: Mapping[str, Any], age
     return None
 
 
+def _background_allowed(db: Session, workspace_id: UUID) -> bool:
+    """Whether something other than the trial can pay for the follow-up's run: the scheduler
+    skips it otherwise (``scheduled_task_steps.skipped_for_credits``). A check that cannot be
+    read says no, as ``gates._credits_refusal`` refuses a check-in."""
+    from services.credits.routing import background_allowed
+
+    try:
+        with db.begin_nested():
+            return bool(background_allowed(db, workspace_id))
+    except Exception:  # noqa: BLE001 — a check that did not complete refuses the follow-up
+        logger.exception("[follow-up] background_allowed could not be read for %s: schedule refused", workspace_id)
+        return False
+
+
 def _schedule_who_refusal(db: Session, workspace_id: UUID, caller: Mapping[str, Any], agent_id: Any) -> Optional[str]:
-    """K10: Auto, in the person's own chat, in a live workspace, for a person not paused."""
+    """K10: Auto, in the person's own chat, in a live workspace whose background work more
+    than the trial pays for, for a person not paused."""
     from services.proactive.switches import MODE_LIVE, effective_mode, person_paused
 
     refusal = _who_refusal(db, workspace_id, caller, agent_id)
@@ -124,6 +143,8 @@ def _schedule_who_refusal(db: Session, workspace_id: UUID, caller: Mapping[str, 
         return NO_CONVERSATION
     if effective_mode(db, workspace_id) != MODE_LIVE:
         return NOT_LIVE
+    if not _background_allowed(db, workspace_id):
+        return NO_BACKGROUND
     return PAUSED if person_paused(db, workspace_id, int(caller["user_id"])) else None
 
 
@@ -256,7 +277,7 @@ def _cancel(db: Session, workspace_id: UUID, params: Mapping[str, Any], follow_u
     if refusal is not None:
         return _refused(locale, refusal)
     outcome, cancelled = follow_ups.cancel_follow_up(db, workspace_id, int(caller["user_id"]), follow_up_id)
-    if cancelled is None:  # CANCELLED with nothing cancelled now: already cancelled (follow_ups._not_cancelled)
+    if cancelled is None:  # nothing cancelled now: already fired, cancelled or missed (follow_ups._not_cancelled)
         code = ALREADY.get(outcome, follow_ups.NOT_FOUND)
         return _refused(locale, code, follow_up_id=follow_up_id)
     return {"success": True, "follow_up_id": follow_up_id, "status": follow_ups.CANCELLED,

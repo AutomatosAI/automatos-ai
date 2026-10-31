@@ -66,8 +66,8 @@ _LIST_PARAMETERS = {
         "status": {
             "type": "string",
             "enum": ["pending", "all"],
-            "description": "'pending' (the default) for the ones still to come; 'all' for those that came or were "
-                           "cancelled too.",
+            "description": "'pending' (the default) for the ones still to come; 'all' for those that came, were "
+                           "cancelled or were missed too.",
         },
     },
     "required": [],
@@ -106,7 +106,8 @@ def register_follow_up_actions(registry: ActionRegistry) -> None:
         name="platform_list_follow_ups",
         description=(
             "The person's own follow-ups you scheduled: each one's number, time (UTC), reason and status "
-            "(pending, fired or cancelled). Pending only unless status is 'all'."
+            "(pending, fired, cancelled, or missed: its time passed and it never ran). Pending only unless status "
+            "is 'all'."
         ),
         category="proactive",
         parameters=_LIST_PARAMETERS,

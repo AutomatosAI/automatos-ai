@@ -28,6 +28,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
                             "was scheduled."),
         "not_auto": "Only Auto keeps follow-ups, so nothing was done.",
         "not_live": "Follow-ups are not on in this workspace, so nothing was scheduled. Don't promise to check back.",
+        "no_background": ("Background work can't run in this workspace right now, so a follow-up would never "
+                          "come and nothing was scheduled. Don't promise to check back."),
         "paused": "This person paused Auto's suggestions, so nothing was scheduled. Don't promise to check back.",
         "use_a_watch": "Use a watch for that: it supervises the work to a verdict and posts back here.",
         "no_reason": "Give the reason: one sentence saying what to check when the follow-up comes.",
@@ -53,6 +55,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "not_found": "There is no follow-up {follow_up_id} of this person's.",
         "already_fired": "Follow-up {follow_up_id} already came, so there is nothing to cancel.",
         "already_cancelled": "Follow-up {follow_up_id} was already cancelled.",
+        "already_missed": "Follow-up {follow_up_id} was missed: its time passed and it never ran, so there is "
+                          "nothing to cancel.",
         "cancelled": "Follow-up {follow_up_id} is cancelled: nothing will come of it.",
     }),
     "pt-BR": MappingProxyType({
@@ -63,6 +67,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "not_auto": "Só o Auto cuida de acompanhamentos, então nada foi feito.",
         "not_live": ("Os acompanhamentos não estão ligados neste workspace, então nada foi agendado. Não prometa "
                      "voltar a ver."),
+        "no_background": ("O trabalho em segundo plano não pode rodar neste workspace agora, então um "
+                          "acompanhamento nunca chegaria e nada foi agendado. Não prometa voltar a ver."),
         "paused": ("Esta pessoa pausou as sugestões do Auto, então nada foi agendado. Não prometa voltar a ver."),
         "use_a_watch": "Use um watch para isso: ele acompanha o trabalho até o veredito e avisa aqui.",
         "no_reason": "Dê o motivo: uma frase dizendo o que ver quando o acompanhamento chegar.",
@@ -88,6 +94,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         "not_found": "Não há acompanhamento {follow_up_id} desta pessoa.",
         "already_fired": "O acompanhamento {follow_up_id} já chegou, então não há o que cancelar.",
         "already_cancelled": "O acompanhamento {follow_up_id} já foi cancelado.",
+        "already_missed": ("O acompanhamento {follow_up_id} foi perdido: o horário passou e ele nunca rodou, então "
+                           "não há o que cancelar."),
         "cancelled": "O acompanhamento {follow_up_id} está cancelado: nada virá dele.",
     }),
 })

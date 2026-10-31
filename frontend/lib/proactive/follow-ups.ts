@@ -2,14 +2,14 @@
  * PRD-268 §6.3 'In the thread', K8 (US-W03b) — the person's follow-ups, checked off the wire.
  *
  * GET /api/proactive/follow-ups answers `{follow_ups: [{id, at, reason, status, chat_id}]}` and its cancel answers
- * `{follow_up}` (US-C11e): the caller's own follow-ups only, `at` the UTC ISO time it fires, `status` pending, fired
- * or cancelled. A row that is not what it says is left out and the rest are kept, and an id is checked before it
- * reaches a request path. The reason was written by the model in the person's own chat: it stays text. Nothing here
- * mutates what it reads.
+ * `{follow_up}` (US-C11e): the caller's own follow-ups only, `at` the UTC ISO time it fires, `status` pending, fired,
+ * cancelled or missed (its time passed and the scheduler never ran it). A row that is not what it says is left out and
+ * the rest are kept, and an id is checked before it reaches a request path. The reason was written by the model in
+ * the person's own chat: it stays text. Nothing here mutates what it reads.
  */
 import { recordOf, textOf } from './wire'
 
-export const FOLLOW_UP_STATUSES = ['pending', 'fired', 'cancelled'] as const
+export const FOLLOW_UP_STATUSES = ['pending', 'fired', 'cancelled', 'missed'] as const
 export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number]
 
 const STATUSES: ReadonlySet<unknown> = new Set(FOLLOW_UP_STATUSES)

@@ -6,7 +6,8 @@
  * (hooks/use-follow-ups.ts: GET /api/proactive/follow-ups?chat_id=&status=all through apiClient, asked again on
  * `automatos:chat-changed`). "Follow-up at HH:MM · Cancel" while pending, "Cancelled" after a cancel and "Followed up at
  * HH:MM" once fired, in the viewer's locale; Cancel posts …/{id}/cancel once and the list is asked again; a refused
- * cancel says why in one line; a follow-up the list does not hold draws nothing.
+ * cancel says why in one line; a follow-up the list does not hold draws nothing. P268W3-RVW-1: a follow-up whose time
+ * passed and that never ran is "Missed follow-up at HH:MM", with no Cancel, and is never waited on.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
@@ -38,6 +39,7 @@ import {
   FollowUpLines,
   firedLabel,
   followUpTime,
+  missedLabel,
   pendingLabel,
 } from '@/components/proactive/follow-up-line'
 import { REFUSED_FALLBACK } from '@/components/proactive/use-suggestion-card'
@@ -120,6 +122,17 @@ describe('where the follow-up stands', () => {
     renderThread()
     expect(await screen.findByTestId('follow-up-line')).toHaveTextContent(firedLabel(VIEWER_TIME))
     expect(cancelButton()).toBeNull()
+  })
+
+  it("missed: 'Missed follow-up at HH:MM', with no Cancel and never the reason", async () => {
+    requestMock.mockResolvedValue(listOf(row('missed')))
+    renderThread()
+    const line = await screen.findByTestId('follow-up-line')
+    expect(line).toHaveTextContent(missedLabel(VIEWER_TIME))
+    expect(line).toHaveAttribute('data-follow-up-status', 'missed')
+    expect(within(line).getByText(missedLabel(VIEWER_TIME))).toHaveClass('studio-eyebrow')
+    expect(cancelButton()).toBeNull()
+    expect(screen.queryByText(REASON)).toBeNull()
   })
 
   it('draws the live followUps the turn_parts frame put on the reply being streamed', async () => {
@@ -260,11 +273,26 @@ describe('the list', () => {
     expect(nextAskIn([pending('2026-11-06T15:10:00Z')], now)).toBe(FOLLOW_UPS_MAX_WAIT_MS)
   })
 
+  it('is never asked again for a chat whose follow-ups are all missed, and a missed one is never waited on', () => {
+    const now = Date.parse(AT)
+    const rows = followUpsOf(listOf(row('missed', 1, '2026-10-31T14:10:00Z'), row('missed', 2, '2026-10-31T09:00:00Z')))
+    expect(rows.map((kept) => kept.status)).toEqual(['missed', 'missed'])
+    expect(nextAskIn(rows, now)).toBe(false)
+    const withFired = followUpsOf(listOf(row('missed', 1, '2026-10-31T14:10:00Z'), row('fired', 3), row('cancelled', 4)))
+    expect(withFired).toHaveLength(3)
+    expect(nextAskIn(withFired, now)).toBe(false)
+    const withPending = followUpsOf(listOf(row('missed', 1, '2026-10-31T14:10:00Z'), row('pending', 5, '2026-10-31T17:10:00Z')))
+    expect(nextAskIn(withPending, now)).toBe(2 * 60 * 60_000)
+  })
+
   it("keeps the rows that are follow-ups and leaves out the rest; a chat's path names it once, every status", () => {
-    const rows = followUpsOf(listOf(row('pending'), row('fired', 8, 'not a time'), { ...row('pending'), id: '9' }, row('open', 10), null))
+    const rows = followUpsOf(
+      listOf(row('pending'), row('fired', 8, 'not a time'), { ...row('pending'), id: '9' }, row('open', 10), null, row('missed', 11)),
+    )
     expect(rows.map((kept) => [kept.id, kept.status, kept.at])).toEqual([
       [ID, 'pending', AT],
       [8, 'fired', null],
+      [11, 'missed', AT],
     ])
     expect(followUpsOf({ follow_ups: 'none' })).toEqual([])
     expect([7, 0, -1, 1.5, '7', Number.MAX_SAFE_INTEGER + 1].map(isFollowUpId)).toEqual([true, false, false, false, false, false])

@@ -21,6 +21,15 @@ only (``modules.tools.discovery.follow_up_context``).
   workspace's, is not found. It removes the job and writes the audit row, whose actor is
   Auto (its tool) or the person (``ACTOR_PERSON``: the thread's Cancel).
 
+A follow-up the scheduler never ran is **missed** (``MISSED``): its row is still 'active'
+but its time is further past than the scheduler's misfire grace
+(``ONE_SHOT_MISFIRE_GRACE_SECONDS``: a deploy or a lost leader outlasted it, or only the
+trial could pay, so ``execute_task`` skipped it before counting the run). Nothing will run
+it now, so it is read as missed: never pending, never counted against the pending cap, and
+never cancelled. The 24-hour and workspace caps still count it, since it was scheduled. A
+row inside its grace is about to fire and stays pending. Missed is read, never written:
+no new writer touches ``agent_scheduled_tasks``.
+
 Every statement keeps ``deliver_as = 'follow_up'`` a SQL literal, so the partial index
 ``ix_scheduled_tasks_follow_ups`` serves it. The audit rows never carry the reason, which
 comes from a private chat.
@@ -40,23 +49,26 @@ from sqlalchemy.orm import Session
 from config import config
 from core.llm.auto_model_sync import AUTO_SLUG_PATTERN
 from modules.proactive.follow_up_caps import CapBroken, FollowUpCaps, FollowUpCounts, count_broken
+from services.scheduled_task_service import ONE_SHOT_MISFIRE_GRACE_SECONDS
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ACTOR_AGENT", "ACTOR_PERSON", "CANCELLED", "FIRED", "FollowUp", "FollowUpRequest", "NOT_FOUND", "PENDING",
-    "STATUSES",
+    "ACTOR_AGENT", "ACTOR_PERSON", "CANCELLED", "FIRED", "FollowUp", "FollowUpRequest", "MISSED", "NOT_FOUND",
+    "PENDING", "STATUSES",
     "auto_agent_id", "cancel_follow_up", "list_follow_ups", "platform_caps", "schedule_follow_up",
 ]
 
 # The workspace's follow-up lock, in a key space of its own ('fwup').
 FOLLOW_UP_LOCK_NAMESPACE = 0x66777570
 ONE_SHOT = "one_shot"
-# A follow-up as the person sees it, from its row's status.
-PENDING, FIRED, CANCELLED = "pending", "fired", "cancelled"
-STATUSES = (PENDING, FIRED, CANCELLED)
+# A follow-up as the person sees it, from its row's status (and, for MISSED, its time).
+PENDING, FIRED, CANCELLED, MISSED = "pending", "fired", "cancelled", "missed"
+STATUSES = (PENDING, FIRED, CANCELLED, MISSED)
 # A one-shot that fired is 'completed' (or 'failed', should a run ever mark one so).
 _ROW_STATUS = {"active": PENDING, "completed": FIRED, "failed": FIRED, "cancelled": CANCELLED}
+# An 'active' row whose time is further past than this was never run, and never will be.
+MISSED_AFTER = timedelta(seconds=ONE_SHOT_MISFIRE_GRACE_SECONDS)
 NOT_FOUND = "not_found"
 DAY = timedelta(hours=24)
 LIST_LIMIT = 100
@@ -71,7 +83,8 @@ _AUTO = text("SELECT id FROM agents WHERE workspace_id = CAST(:ws AS uuid) AND i
              "AND slug LIKE :pattern ORDER BY id LIMIT 1")
 _COUNTS = text("""
     SELECT
-        count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND status = 'active'),
+        count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND status = 'active'
+                         AND (next_run_at IS NULL OR next_run_at >= :due_floor)),
         count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND created_at > :since),
         count(*) FILTER (WHERE created_at > :since)
     FROM agent_scheduled_tasks
@@ -86,24 +99,30 @@ _INSERT = text("""
          :at, CAST(:chat AS uuid), 'follow_up', CAST(:payload AS jsonb), NULL, :user)
     RETURNING id
 """)
+# ``missed``: an 'active' row past its grace (NULL for an 'active' row with no time: pending).
 _LIST = text("""
-    SELECT id, next_run_at, description, status, origin_chat_id
-    FROM agent_scheduled_tasks
-    WHERE workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up' AND for_user_id = :user
-      AND status IN ('active', 'completed', 'failed', 'cancelled')
-      AND (CAST(:only_pending AS boolean) IS FALSE OR status = 'active')
-      AND (CAST(:chat AS uuid) IS NULL OR origin_chat_id = CAST(:chat AS uuid))
-    ORDER BY status <> 'active', CASE WHEN status = 'active' THEN next_run_at END, next_run_at DESC, id
+    SELECT id, next_run_at, description, status, origin_chat_id, missed
+    FROM (
+        SELECT id, next_run_at, description, status, origin_chat_id,
+               status = 'active' AND next_run_at < :due_floor AS missed
+        FROM agent_scheduled_tasks
+        WHERE workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up' AND for_user_id = :user
+          AND status IN ('active', 'completed', 'failed', 'cancelled')
+          AND (CAST(:chat AS uuid) IS NULL OR origin_chat_id = CAST(:chat AS uuid))
+    ) AS own
+    WHERE CAST(:only_pending AS boolean) IS FALSE OR (status = 'active' AND missed IS NOT TRUE)
+    ORDER BY status <> 'active' OR missed IS TRUE,
+             CASE WHEN status = 'active' AND missed IS NOT TRUE THEN next_run_at END, next_run_at DESC, id
     LIMIT :limit
 """)
 _CANCEL = text("""
     UPDATE agent_scheduled_tasks SET status = 'cancelled', updated_at = NOW()
     WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up'
-      AND for_user_id = :user AND status = 'active'
+      AND for_user_id = :user AND status = 'active' AND (next_run_at IS NULL OR next_run_at >= :due_floor)
     RETURNING id, next_run_at, description, origin_chat_id
 """)
 _STATUS = text("""
-    SELECT status FROM agent_scheduled_tasks
+    SELECT status, status = 'active' AND next_run_at < :due_floor AS missed FROM agent_scheduled_tasks
     WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up' AND for_user_id = :user
 """)
 
@@ -156,9 +175,15 @@ def auto_agent_id(db: Session, workspace_id: UUID) -> Optional[int]:
     return int(row[0]) if row is not None else None
 
 
+def _due_floor(now: Optional[datetime] = None) -> datetime:
+    """The time before which an 'active' follow-up is missed: ``now`` (else the clock) less the grace."""
+    return (now or datetime.now(timezone.utc)) - MISSED_AFTER
+
+
 def _counts(db: Session, request: FollowUpRequest, now: datetime) -> FollowUpCounts:
+    """The caps' counts: the person's pending (a missed one is not), and the last 24 hours' (it is)."""
     row = db.execute(_COUNTS, {"ws": str(request.workspace_id), "user": request.user_id,
-                               "agent": request.agent_id, "since": now - DAY}).one()
+                               "agent": request.agent_id, "since": now - DAY, "due_floor": _due_floor(now)}).one()
     return FollowUpCounts(pending=int(row[0]), today=int(row[1]), workspace_today=int(row[2]))
 
 
@@ -208,26 +233,30 @@ def schedule_follow_up(db: Session, request: FollowUpRequest, caps: FollowUpCaps
 
 def _follow_up(row: Any) -> FollowUp:
     return FollowUp(id=int(row.id), at=row.next_run_at, reason=str(row.description or ""),
-                    status=_ROW_STATUS[str(row.status)],
+                    status=MISSED if row.missed else _ROW_STATUS[str(row.status)],
                     chat_id=str(row.origin_chat_id) if row.origin_chat_id else None)
 
 
 def list_follow_ups(db: Session, workspace_id: UUID, user_id: int, *, chat_id: Optional[UUID] = None,
                     only_pending: bool = True) -> List[FollowUp]:
     """The person's own follow-ups in the workspace: pending only by default, soonest first;
-    else the pending ones, then those that fired or were cancelled, newest first; in one chat
-    when ``chat_id`` names it."""
+    else the pending ones, then those that fired, were cancelled or were missed, newest first;
+    in one chat when ``chat_id`` names it."""
     rows = db.execute(_LIST, {"ws": str(workspace_id), "user": user_id, "only_pending": only_pending,
-                              "chat": str(chat_id) if chat_id else None, "limit": LIST_LIMIT}).fetchall()
+                              "chat": str(chat_id) if chat_id else None, "limit": LIST_LIMIT,
+                              "due_floor": _due_floor()}).fetchall()
     return [_follow_up(row) for row in rows]
 
 
 def _not_cancelled(db: Session, workspace_id: UUID, user_id: int, follow_up_id: int) -> str:
-    """Why the person's follow-up was not cancelled: it already fired or was cancelled, or it
-    is not theirs (or not there) at all."""
-    row = db.execute(_STATUS, {"id": follow_up_id, "ws": str(workspace_id), "user": user_id}).first()
-    status = _ROW_STATUS.get(str(row[0])) if row is not None else None
-    return status if status in (FIRED, CANCELLED) else NOT_FOUND
+    """Why the person's follow-up was not cancelled: it already fired, was cancelled or was
+    missed, or it is not theirs (or not there) at all."""
+    row = db.execute(_STATUS, {"id": follow_up_id, "ws": str(workspace_id), "user": user_id,
+                               "due_floor": _due_floor()}).first()
+    if row is None:
+        return NOT_FOUND
+    status = MISSED if row.missed else _ROW_STATUS.get(str(row.status))
+    return status if status in (FIRED, CANCELLED, MISSED) else NOT_FOUND
 
 
 def cancel_follow_up(db: Session, workspace_id: UUID, user_id: int, follow_up_id: int, *,
@@ -235,8 +264,9 @@ def cancel_follow_up(db: Session, workspace_id: UUID, user_id: int, follow_up_id
     """Cancel the person's own pending follow-up: ``(CANCELLED, it)``, audited as
     ``actor_type`` did it. Otherwise nothing changes and the first item says why:
     ``NOT_FOUND`` (another person's, another workspace's, or none), ``FIRED`` or
-    ``CANCELLED`` (already)."""
-    row = db.execute(_CANCEL, {"id": follow_up_id, "ws": str(workspace_id), "user": user_id}).first()
+    ``CANCELLED`` (already), or ``MISSED`` (the scheduler never ran it)."""
+    row = db.execute(_CANCEL, {"id": follow_up_id, "ws": str(workspace_id), "user": user_id,
+                               "due_floor": _due_floor()}).first()
     if row is None:
         db.rollback()
         return _not_cancelled(db, workspace_id, user_id, follow_up_id), None

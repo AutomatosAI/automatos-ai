@@ -7,14 +7,15 @@ sees them, and nobody else (K8):
   workspace, pending by default (soonest first); ``all`` adds those that fired or were
   cancelled (newest first); ``chat_id`` keeps one chat's; at most ``follow_ups.LIST_LIMIT``
   (100: the pending cap is 5, so only old history is ever left out). ``{follow_ups: [{id, at,
-  reason, status, chat_id}]}``: ``at`` is the UTC ISO time and ``status`` pending, fired or
-  cancelled.
+  reason, status, chat_id}]}``: ``at`` is the UTC ISO time and ``status`` pending, fired,
+  cancelled or missed (its time passed the scheduler's grace and it never ran: listed with
+  ``all`` only, never pending).
   The reason was written by the model in the person's own chat: it is theirs to read, and a
   client draws it as plain text.
 * ``POST /follow-ups/{follow_up_id}/cancel`` — cancel the caller's own pending follow-up:
   ``{follow_up}``, now cancelled, its job removed and the cancel audited with the person as
   its actor. One that already fired is 409 ``follow_up_fired``, one already cancelled 409
-  ``follow_up_cancelled``.
+  ``follow_up_cancelled``, and one that was missed 409 ``follow_up_missed``.
 
 Another person's follow-up and another workspace's are 404 ``follow_up_not_found``, never
 403: the list never shows them, and the cancel cannot tell them from none. A caller with no
@@ -63,6 +64,7 @@ NO_PERSON = "follow_up_no_person"
 NOT_FOUND = "follow_up_not_found"
 FIRED = "follow_up_fired"
 CANCELLED = "follow_up_cancelled"
+MISSED = "follow_up_missed"
 UNREADABLE = "follow_ups_unreadable"
 UNAVAILABLE = "follow_up_unavailable"
 HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_UNAVAILABLE = 403, 404, 409, 503
@@ -71,6 +73,7 @@ NOT_CANCELLED = {
     follow_ups.NOT_FOUND: (NOT_FOUND, HTTP_NOT_FOUND),
     follow_ups.FIRED: (FIRED, HTTP_CONFLICT),
     follow_ups.CANCELLED: (CANCELLED, HTTP_CONFLICT),
+    follow_ups.MISSED: (MISSED, HTTP_CONFLICT),
 }
 
 ListStatus = Literal["pending", "all"]
@@ -117,7 +120,7 @@ def cancel_my_follow_up(
     ctx: RequestContext = Depends(require_workspace_permission(CANCEL_PERMISSION)),
     db: Session = Depends(get_db),
 ) -> Union[Dict[str, Any], JSONResponse]:
-    """Cancel the caller's own pending follow-up; 409 when it already fired or was cancelled."""
+    """Cancel the caller's own pending follow-up; 409 when it already fired, was cancelled or was missed."""
     locale = request_locale(accept_language)
     if ctx.workspace_id is None:
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)

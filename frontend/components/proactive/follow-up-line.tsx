@@ -6,8 +6,9 @@
  *
  * thread-cards.tsx draws these under an assistant message whose turn scheduled follow-ups (its live `followUps`, else
  * its saved `follow_up@1` parts: lib/chat/turn-parts.ts). Each line reads where its follow-up stands from the caller's
- * own list (hooks/use-follow-ups.ts): "Follow-up at 15:10 · Cancel" while pending, "Cancelled" once cancelled, and
- * "Followed up at 15:10" once fired, the time in the viewer's own locale and zone. A follow-up the list does not hold
+ * own list (hooks/use-follow-ups.ts): "Follow-up at 15:10 · Cancel" while pending, "Cancelled" once cancelled,
+ * "Followed up at 15:10" once fired, and "Missed follow-up at 15:10" once its time passed and it never ran (no Cancel:
+ * there is nothing left to cancel), the time in the viewer's own locale and zone. A follow-up the list does not hold
  * (another person's, or one the server no longer has) draws nothing. A refused cancel says why in one line, as a
  * refused Start does (suggestion-parts.tsx RefusedLine): the server's sentence, else the cards' own. The label is a
  * studio-eyebrow and Cancel a text button: the composer's Send stays the view's ink primary. The labels are the
@@ -28,6 +29,14 @@ export const CANCEL_LABEL = 'Cancel'
 export const CANCELLED_LABEL = 'Cancelled'
 export const pendingLabel = (time: string) => `Follow-up at ${time}`
 export const firedLabel = (time: string) => `Followed up at ${time}`
+export const missedLabel = (time: string) => `Missed follow-up at ${time}`
+
+const STATE_LABELS: Readonly<Record<FollowUp['status'], (time: string) => string>> = {
+  pending: pendingLabel,
+  fired: firedLabel,
+  cancelled: () => CANCELLED_LABEL,
+  missed: missedLabel,
+}
 
 /** HH:MM in the viewer's own locale and time zone. */
 export function followUpTime(at: string): string {
@@ -35,8 +44,7 @@ export function followUpTime(at: string): string {
 }
 
 function stateLabel(status: FollowUp['status'], time: string): string {
-  if (status === 'cancelled') return CANCELLED_LABEL
-  return status === 'fired' ? firedLabel(time) : pendingLabel(time)
+  return STATE_LABELS[status](time)
 }
 
 interface FollowUpLineProps {
