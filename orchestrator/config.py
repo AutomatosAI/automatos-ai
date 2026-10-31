@@ -2302,6 +2302,28 @@ class Config:
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
+    # §6.3, K9 (W3): the follow-up caps (modules/proactive/follow_up_caps.py). A follow-up is at
+    # least MIN_MINUTES and at most MAX_DAYS away; pending and per day count one person's
+    # follow-ups from Auto, per workspace per day the workspace's; a day is the last 24 hours.
+    PROACTIVE_FOLLOW_UP_MIN_MINUTES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MIN_MINUTES", "10"))
+    PROACTIVE_FOLLOW_UP_MAX_DAYS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_DAYS", "7"))
+    PROACTIVE_FOLLOW_UP_MAX_PENDING: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PENDING", "5"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_DAY: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_DAY", "20"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY: int = int(
+        os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY", "100"))
+    # A firing quotes the origin chat's last this-many messages; a reason is at most this long.
+    PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES", "5"))
+    PROACTIVE_FOLLOW_UP_REASON_CHARS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_REASON_CHARS", "500"))
+    # §6.7, K14 (W3): the proactive evals (orchestrator/evals/proactive/), run by hand by the
+    # owner, never by CI. GOLD_DIR is a folder OUTSIDE the repository holding one <eval>.jsonl per
+    # eval (public repo: gold sets are never committed); empty, missing or inside the repository is
+    # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
+    PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
+    PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
+    # §6.11.5, K15 (W3): calibration on day one (api/auto_calibration.py) ships OFF until §12-Q22
+    # (consent to read the titles of a person's work) is answered. While off, GET answers
+    # available false, every POST is 404 and discovery does not list calibration.
+    CALIBRATION_ENABLED: bool = os.getenv("CALIBRATION_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
     # PRD-251 Socials

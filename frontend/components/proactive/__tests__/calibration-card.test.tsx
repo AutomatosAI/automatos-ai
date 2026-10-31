@@ -7,9 +7,12 @@
  * the controls; the AI caption once; and the same parts in Studio light, Studio dark and Classic.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/api-client', () => ({ apiClient: {} }))
+const postMock = vi.hoisted(() => vi.fn())
+// The server offers no calibration (CALIBRATION_ENABLED ships off): its read says so, and no answer is sent.
+vi.mock('@/lib/api-client', () => ({ apiClient: { request: async () => ({ available: false }), post: postMock } }))
 
 import {
   CALIBRATION_EMPTY,
@@ -72,10 +75,19 @@ function deferredAnswer() {
 /** Lets the card's answer chain run to its end. */
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
 
-/** The card over the inert hook (K12): every answer is refused, and nothing is sent. */
+/** The card over the hook while the server offers none (K15): every answer is refused, and nothing is sent. */
 function InertCalibration() {
   const answering = useAnswerCalibration()
   return <CalibrationCard calibration={calibration()} onAnswer={answering.mutate} />
+}
+
+function drawInert() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  return render(
+    <QueryClientProvider client={client}>
+      <InertCalibration />
+    </QueryClientProvider>,
+  )
 }
 
 describe('CalibrationCard parts', () => {
@@ -176,7 +188,7 @@ describe('CalibrationCard answers', () => {
   })
 
   it('leaves the card as it was, with one line, when the answer is refused', async () => {
-    const { container } = render(<InertCalibration />)
+    const { container } = drawInert()
     fireEvent.click(screen.getByRole('button', { name: `Reject: ${BAKERY}` }))
     await settle()
     expect(screen.getByRole('alert')).toHaveTextContent(REFUSED_FALLBACK)
@@ -184,6 +196,7 @@ describe('CalibrationCard answers', () => {
     expect(lineOf(container, 'l1')).toHaveAttribute('data-state', 'open')
     expect(screen.getByRole('button', { name: `Reject: ${BAKERY}` })).toBeEnabled()
     expect(console.warn).toHaveBeenCalled()
+    expect(postMock).not.toHaveBeenCalled()
   })
 
   it('starts a new calibration with none of the last one’s answers', async () => {

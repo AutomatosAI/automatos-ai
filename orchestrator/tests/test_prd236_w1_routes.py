@@ -352,7 +352,12 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # follows it.
     delivery = (versions / "prd268_w2_delivery.py").read_text()
     assert 'down_revision = "prd268_w1_proactive"' in delivery
-    assert 'EXPECTED_HEAD = "prd268_w2_delivery"' in guard
+    # 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto it — the
+    # deliver_as CHECK widens to follow_up, agent_scheduled_tasks gains for_user_id, the outcome
+    # CHECK gains posted and proactive_calibrations is new; the guard follows it.
+    follow_ups = (versions / "prd268_w3_follow_ups.py").read_text()
+    assert 'down_revision = "prd268_w2_delivery"' in follow_ups
+    assert 'EXPECTED_HEAD = "prd268_w3_follow_ups"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

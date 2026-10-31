@@ -47,6 +47,8 @@ vi.mock('@/components/chatbot/mission-suggestion-card', () => ({
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/hooks/use-missions-api', () => ({ useCreateMission: () => state.createMission }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+// The consent line above the composer (US-W06) as a stand-in: the server offers no calibration here.
+vi.mock('@/components/proactive/calibration-offer', () => ({ CalibrationOffer: () => null, useCalibrationOffered: () => false }))
 
 import { MultimodalInput } from '@/components/proactive/composer-with-suggestion'
 import { MissionSuggestionCard } from '@/components/proactive/mission-suggestion-with-presence'

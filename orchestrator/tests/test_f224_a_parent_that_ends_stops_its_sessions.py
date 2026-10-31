@@ -189,7 +189,7 @@ def routines(db_session):
         "CREATE TEMP TABLE agent_scheduled_tasks (id serial PRIMARY KEY, workspace_id uuid NOT NULL, "
         "created_by_agent_id int, target_agent_id int, task_type varchar(20) NOT NULL DEFAULT 'one_shot', "
         "description text NOT NULL, schedule varchar(100) NOT NULL, status varchar(20) NOT NULL DEFAULT 'active', "
-        "updated_at timestamptz NOT NULL DEFAULT now())"))
+        "updated_at timestamptz NOT NULL DEFAULT now(), deliver_as varchar(20) NOT NULL DEFAULT 'chat')"))
 
     def _routine(ws, agent):
         return db_session.execute(text(

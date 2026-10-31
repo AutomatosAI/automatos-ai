@@ -39,11 +39,23 @@ agent whose check-in it is; absent for Auto's workspace check-in).
 caller-supplied ``_check_in`` is stripped from every call, so a model can neither forge
 its run nor its reads, and the tool refuses a call that carries none.
 
+PRD-268 US-C11d (K11): a follow-up's turn runs in this lane too, and its runner adds
+``check_in_user_id``, the person whose chat scheduled it, so the suggestion it records is
+addressed to that person (``source_type`` 'follow_up') instead of the workspace owner. That
+person may hold any role, so the lane clears no action that needs an admin (the surface never
+offers one either): the full-autonomy dial, which lets Auto past the admin gate, opens nothing
+here.
+
 PRD-268 P268W1-RVW-1 (K17): ``read`` means read in the lane. A few read actions keep a
 record of their own as they read (a search's log row, the onboarding funnel's stamp, a
 spreadsheet's copy in the workspace, the NL2SQL audit and training rows, a preview's
 picture). ``carries_the_check_in`` runs every check-in call but the suggestion inside
 ``core.read_only_call.reading_only()``, and each of those records is skipped there.
+
+PRD-268 US-C11c (K10, §12-Q9): ``CHAT_ONLY_ACTIONS`` run in a person's own chat only: the
+three follow-up tools and the reply chips. A check-in is neither offered nor cleared them,
+read or not, and a follow-up's own turn runs in this lane, so no follow-up schedules,
+lists or cancels another, and none offers chips.
 """
 from __future__ import annotations
 
@@ -71,7 +83,12 @@ OUTSIDE_CATEGORIES = frozenset({"web"})
 RUN_ID_KEY = "run_id"
 READS_KEY = "check_in_reads"
 AGENT_KEY = "check_in_agent_id"
+USER_KEY = "check_in_user_id"
 CHECK_IN_PARAM = "_check_in"
+# PRD-268 US-C11c (K10): a person's own chat only, never a check-in (or a follow-up's turn).
+CHAT_ONLY_ACTIONS = frozenset({
+    "platform_schedule_follow_up", "platform_list_follow_ups", "platform_cancel_follow_up", "platform_offer_replies",
+})
 
 ExecuteTool = Callable[..., Awaitable[Dict[str, Any]]]
 
@@ -95,9 +112,11 @@ def reads_the_workspace(action: Any) -> bool:
 
 def may_clear_in_a_check_in(action_name: str) -> bool:
     """Whether a check-in may run ``action_name``: ``platform_suggest_next_step``, or an
-    action registered as positively ``read`` that reads inside the platform. Unknown, write
-    and destructive actions are refused, a web read too, and so is one whose definition
-    cannot be read."""
+    action registered as positively ``read`` that reads inside the platform and needs no
+    admin. Unknown, write and destructive actions are refused, a web read too, a chat-only one
+    (``CHAT_ONLY_ACTIONS``), an admin-only one, and one whose definition cannot be read."""
+    if action_name in CHAT_ONLY_ACTIONS:
+        return False
     if action_name == SUGGEST_NEXT_STEP:
         return True
     try:
@@ -107,7 +126,12 @@ def may_clear_in_a_check_in(action_name: str) -> bool:
     except Exception:
         logger.exception("[check_in_lane] could not read the definition of %s; refused", action_name)
         return False
-    return action_def is not None and reads_the_workspace(action_def)
+    return action_def is not None and reads_the_workspace(action_def) and not needs_an_admin(action_def)
+
+
+def needs_an_admin(action: Any) -> bool:
+    """Whether ``action`` is admin-only or super-admin-only."""
+    return bool(getattr(action, "admin_only", False) or getattr(action, "super_admin_only", False))
 
 
 def is_a_platform_action(tool_name: Any) -> bool:
@@ -120,14 +144,14 @@ def is_a_platform_action(tool_name: Any) -> bool:
 def offered_in_a_check_in(action: Any) -> bool:
     """PRD-268 US-C02c: whether a check-in's tool surface (``ContextMode.CHECK_IN``) offers
     ``action``, a registered definition. It must be a platform action that is positively
-    ``read`` and reads inside the platform, or ``platform_suggest_next_step``; needs no
-    admin; and can run on this server.
+    ``read`` and reads inside the platform, or ``platform_suggest_next_step``; not
+    chat-only (``CHAT_ONLY_ACTIONS``); needs no admin; and can run on this server.
     The surface offers nothing the two decorators below would refuse, so the model is
     never shown a tool it may not call."""
     name = getattr(action, "name", None)
-    if not is_a_platform_action(name):
+    if not is_a_platform_action(name) or name in CHAT_ONLY_ACTIONS:
         return False
-    if getattr(action, "admin_only", False) or getattr(action, "super_admin_only", False):
+    if needs_an_admin(action):
         return False
     if name != SUGGEST_NEXT_STEP and not reads_the_workspace(action):
         return False
@@ -171,14 +195,17 @@ def platform_actions_only_in_a_check_in(execute_tool: ExecuteTool) -> ExecuteToo
 
 def check_in_of(caller_context: Any) -> Optional[Dict[str, Any]]:
     """A check-in's own facts, from the server-built ``caller_context``: ``run_id``,
-    ``reads`` (a new list) and ``agent_id``. None outside the lane."""
+    ``reads`` (a new list) and ``agent_id``, plus ``user_id`` only in a follow-up's turn (its
+    person, US-C11d), so a check-in's facts stay W1's. None outside the lane."""
     if not in_a_check_in(caller_context):
         return None
     reads = caller_context.get(READS_KEY)
+    person = caller_context.get(USER_KEY)
     return {
         "run_id": caller_context.get(RUN_ID_KEY),
         "reads": list(reads) if isinstance(reads, (list, tuple)) else [],
         "agent_id": caller_context.get(AGENT_KEY),
+        **({"user_id": person} if person is not None else {}),
     }
 
 
@@ -211,6 +238,7 @@ def carries_the_check_in(execute: ExecuteTool) -> ExecuteTool:
 
 __all__ = [
     "AGENT_KEY",
+    "CHAT_ONLY_ACTIONS",
     "CHECK_IN_LANE",
     "CHECK_IN_PARAM",
     "CHECK_IN_REFUSAL",
@@ -219,6 +247,7 @@ __all__ = [
     "READS_KEY",
     "RUN_ID_KEY",
     "SUGGEST_NEXT_STEP",
+    "USER_KEY",
     "carries_the_check_in",
     "check_in_of",
     "check_in_params",
@@ -226,6 +255,7 @@ __all__ = [
     "in_a_check_in",
     "is_a_platform_action",
     "may_clear_in_a_check_in",
+    "needs_an_admin",
     "offered_in_a_check_in",
     "platform_actions_only_in_a_check_in",
     "reads_only_in_a_check_in",

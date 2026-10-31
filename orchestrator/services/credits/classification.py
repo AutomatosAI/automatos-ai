@@ -43,6 +43,7 @@ OVERHEAD_PURPOSES = frozenset({
 CUSTOMER_PURPOSES = frozenset({
     "blog_cover_gen",         # modules/tools/discovery/handlers_blog
     "brand_style_read",       # modules/documents/brand_style
+    "calibration",            # services/calibration/build — what Auto knows on day one, on the person's own consent (PRD-268)
     "check_in",               # services/proactive/runner — one ask per check-in (PRD-268)
     "cover_image",            # modules/tools/discovery/handlers_blog — a post's cover image
     "clarification",          # services/orchestrator_answers — answers a worker mid-run

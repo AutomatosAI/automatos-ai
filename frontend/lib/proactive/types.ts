@@ -7,7 +7,7 @@
  *   GET /api/proactive/suggestions and the answers of Start and Hide (api/proactive.py);
  * - `Readiness` (Readiness@1): services/readiness/contract.py, GET /api/readiness;
  * - `ApprovalView` (ApprovalView@1): modules/tools/formatting/approval_view.py, on the approval cards;
- * - `Calibration` (Calibration@1): §6.11.5. Its routes are US-C22's, so no server answers it yet (K12);
+ * - `Calibration` (Calibration@1): §6.11.5, US-C22's routes (GET and POST /api/auto/calibration), off until CALIBRATION_ENABLED;
  * - `DisplayState`: services/proactive/display_state.py, on needs-you, Mission and board rows.
  *
  * Every id is a string and a field a reader doesn't know is ignored. The words in these shapes are
@@ -61,6 +61,18 @@ export interface BriefLabels {
   empty?: string | null
 }
 
+/**
+ * The card's words whatever its rows (US-C23): each section's label, the empty sentence, and "Show {n} more"
+ * unfilled, for a client that folds the rows its own way. The default card draws the server's fold, so its
+ * "Show N more" stays `labels.more`. A brief built before W3, or one a theme hands the card, may have no copy;
+ * the card then reads `labels`.
+ */
+export interface BriefCopy {
+  section_labels: Partial<Record<BriefSection, string>>
+  empty_sentence?: string | null
+  show_more_template?: string | null
+}
+
 export interface Brief {
   v: 1
   /** The person's local date, YYYY-MM-DD. */
@@ -75,6 +87,7 @@ export interface Brief {
   /** Each counted section's exact number, whatever its rows show. */
   counts: Record<BriefCountedSection, number>
   labels: BriefLabels
+  copy?: BriefCopy | null
   state_hash: string
   generated_at: string
 }
