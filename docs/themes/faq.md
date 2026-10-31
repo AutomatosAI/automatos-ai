@@ -36,10 +36,12 @@ The questions people ask first, with short answers and a link to the full story.
 
 ### How do I get Play, HUD, Arcade or Candy?
 
-On the local edition, download the theme's `.autotheme` from the Design Kit's
-[releases](https://github.com/AutomatosAI/automatos-design-kit/releases), install it with **Settings › Appearance ›
-Themes › Install theme**, then opt in to it. On the hosted edition, add it from **Marketplace › Themes** when it is
-listed there. See [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy).
+On the hosted edition, add it from **Marketplace › Themes**. On the local edition, an owner or admin can press **Sync
+with Automatos Cloud** in the Marketplace header and then add it from **Marketplace › Themes**, or download the
+theme's `.autotheme` and its `.sig.json` from the Design Kit's
+[releases](https://github.com/AutomatosAI/automatos-design-kit/releases) and install both with **Settings › Appearance
+› Themes › Install theme**. See [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy) and
+[The open Marketplace](../community-marketplace/open-marketplace.md).
 
 ### I chose a theme, but I see Studio. Why?
 
@@ -63,10 +65,10 @@ for the workspace or the whole server. See [Who can add a theme](installing-and-
 
 ### I uploaded Play (or HUD) and got "Only an Automatos admin can upload a theme under the "automatos" publisher."
 
-`automatos/…` ids are reserved for platform admins. On the local edition, upload it as the local edition's operator,
-who is one. On the hosted edition, add it from **Marketplace › Themes** when it is listed there. A signature file
-would also let the upload through, but no release is signed yet. See
-[Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy).
+`automatos/…` ids are reserved for platform admins. Add the theme from **Marketplace › Themes** instead, or upload it
+again with its signature file (**Add its signature file**, then the release's `<version>.sig.json`): a signature an
+active Automatos key verifies lets the reserved id through. On the local edition the operator is a platform admin, so
+the upload goes through anyway. See [The signature file](installing-and-choosing.md#the-signature-file).
 
 ### Why does my theme say "Private · not reviewed"?
 
@@ -74,16 +76,24 @@ Because nobody at Automatos reviewed it. The scan is automatic, and a person rev
 Marketplace. An uploaded theme keeps the label whatever its verdict, and each member opts in to it before it runs for
 them.
 
-A theme added from **Marketplace › Themes** never shows **Private · not reviewed**: a person reviewed every version
-listed there. It shows **Signed by Automatos** in Settings when its version carries a signature an active Automatos key
-verifies. No version is signed yet: see [Who vouches for a theme](_index.md#who-vouches-for-a-theme).
+A theme added from **Marketplace › Themes** never shows **Private · not reviewed**: every version listed there was
+reviewed. It shows **Signed by Automatos** in Settings when its version carries a signature an active Automatos key
+verifies, as the official themes' versions do. An upload with its signature file shows **Signed by Automatos** too.
+See [Who vouches for a theme](_index.md#who-vouches-for-a-theme).
 
 ### Why is "Make default" greyed?
 
 Only a theme that isn't private can be the workspace default, because a default runs for members who never said yes
 to its code. The reason is written beside the button: "A theme that was not reviewed can’t be the workspace default."
-Add the theme's Marketplace version instead, if it is listed. A signed upload could be the default too, but no release
-is signed yet. See [The workspace default](installing-and-choosing.md#the-workspace-default).
+Add the theme's Marketplace version instead, if it is listed, or upload it again with its signature file: a signed
+upload can be the default too. See [The workspace default](installing-and-choosing.md#the-workspace-default).
+
+### My theme changed version by itself. Why?
+
+A theme added from the Marketplace updates itself: when a newer version is listed, the install moves to it and keeps
+your looks. On the local edition this happens after a **Sync with Automatos Cloud** that brings a newer version. To
+stay on a version, an owner or admin pins it under **Settings › Appearance › Themes › Pinned versions**; **Roll back**
+returns to the version before. See [Updates](managing-themes.md#updates) and [Pin a version](managing-themes.md#pin-a-version).
 
 ### I opted in last week. Why does it ask again?
 

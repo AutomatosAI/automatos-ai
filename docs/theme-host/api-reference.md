@@ -48,7 +48,7 @@ The following files were used as context for generating this page:
 </details>
 
 Every theme route of the backend, as `orchestrator/reports/route-manifest.json` lists them (36), grouped by what they
-are for. The frontend calls them through `apiClient`, with two exceptions: the root layout fetches the boot route on
+are for, and the five routes of Sync with Automatos Cloud and the public Marketplace. The frontend calls them through `apiClient`, with two exceptions: the root layout fetches the boot route on
 the server (`frontend/lib/theme-host/boot-server.ts`), and the browser loads theme files through the frontend's own
 `/api/themes/files/...` proxy (see [Security model](security-model.md#the-files-proxy)).
 
@@ -133,6 +133,12 @@ The body of both upload routes is capped on the wire at the package cap plus 512
 version runs on this host, when the asked-for version needs another host, when the workspace runs another version of
 the theme ("Update it from Settings, Appearance, Themes.") or its own upload of it ("Uninstall it first…"), and 403
 while the Marketplace is off. A listing id is the theme id with its `/` written as `.` (`automatos.play`).
+
+In the local edition, a version a Sync with Automatos Cloud listed (`source: "cloud"`) is fetched from Automatos
+Cloud and checked before the install or an update to it (`services/marketplace_cloud/package.py` `ensure_stored`):
+409 when the bytes are refused or the Sync is off, 413 past `THEME_MAX_PACKAGE_MB`, 502 when Automatos Cloud can't be
+reached or doesn't answer 200, 503 when storage or the signing keys file fails or another download of the version
+outlasts the wait. Nothing is stored or installed on any of them.
 
 ## Installed themes and their versions
 
@@ -323,6 +329,21 @@ reviewed, scanVerdict, scanReport}, duplicate}`, the report without the AI code 
 | 429 | The person submitted `THEME_SUBMISSIONS_PER_DAY` themes in the last 24 hours |
 | 503 | Every review slot is busy (`Retry-After: 30`); the files couldn't be stored |
 
+## Automatos Cloud and the public Marketplace
+
+| Method and path | Edition | Who | Answer |
+|---|---|---|---|
+| `GET /api/marketplace/cloud-sync/status` | local (hosted: 404) | manage | The Sync's status |
+| `POST /api/marketplace/cloud-sync` | local (hosted: 404) | manage | One Sync, then the updates: `{counts, updatesApplied, updatesFailed, status}` |
+| `GET /api/marketplace/catalog` | hosted (local: 404) | anyone | The signed theme catalogue, schema 1 |
+| `GET /api/marketplace/catalog/files/{digest}/{path}` | hosted (local: 404) | anyone | A listed version's `package.autotheme` or one of its screenshots |
+| `GET /api/public/marketplace/{type}` | hosted (local: 404) | anyone | One page of a type's approved Marketplace items, display fields only |
+
+The three public routes are rate-limited per client address (`MARKETPLACE_PUBLIC_RATE_PER_MINUTE`). Their rules,
+answers and errors are in [Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md): the
+local routes under [The routes](../community-marketplace/sync-with-automatos-cloud.md#the-routes), the hosted ones
+under [On the hosted edition](../community-marketplace/sync-with-automatos-cloud.md#on-the-hosted-edition-the-catalogue-and-the-public-marketplace).
+
 ## The revocation feed
 
 | Method and path | Who | Request | Answer |
@@ -359,7 +380,7 @@ that is not a Marketplace submission answers 404, as a missing one does.
 | `GET /api/admin/themes/{packageId}/report` | platform admin | none | The summary plus `manifest`, `scanReport` (whole), `reportNote`, `approval`, `history`, `signatureRequest`, `signatureVerified`, `keyId` |
 | `GET /api/admin/themes/{packageId}/review-package` | platform admin | none | `{url, digest, expiresAt}`: a presigned link to the version's rebuilt package, for 15 minutes |
 | `POST /api/admin/themes/{packageId}/report-note` | platform admin, step-up | `{"summary": "<1 to 20000 characters>", "outcome": "pass" \| "fail"}` | The summary plus `reportNote` |
-| `POST /api/admin/themes/{packageId}/approve` | platform admin, step-up | none | The summary plus `signatureRequest`, `updatesOffered` (installs offered it) and `updatesApplied` (the unpinned ones moved to it) |
+| `POST /api/admin/themes/{packageId}/approve` | platform admin, step-up | none | The summary plus `signatureRequest`, `updatesOffered` (installs offered it) and `updatesApplied` (the unpinned ones moved to it; see [Updates and rollback](updates-and-rollback.md)) |
 | `POST /api/admin/themes/{packageId}/reject` | platform admin | `{"reason": "<1 to 2000 characters>"}` | The summary plus `reason` |
 | `POST /api/admin/themes/{packageId}/deactivate` | platform admin, step-up | `{"reason": "<1 to 2000 characters>"}` | The summary plus `reason`, `revocation: "disable"` and `installsRolledBack` (the unpinned installs moved back to the previous listed version) |
 | `POST /api/admin/themes/{packageId}/signature` | platform admin, step-up | `{"requestId": "<uuid>", "signature": "<base64>"}` | The summary plus `signature: {requestId, signature, algorithm, verified, keyId}` |
@@ -368,7 +389,7 @@ A summary: `id`, `themeId`, `version`, `name`, `publisher`, `digest`, `status`, 
 `submittedBy`, `signed`, `createdAt`. `approval` is `{allowed, reason}`: what approve would answer now.
 
 The signature request that approve opens: `{requestId, payload: {id, version, digest, files}, payloadSha256,
-algorithm: "ed25519", form, canonical}`. `canonical` is the exact text the Design Kit's sign workflow signs.
+algorithm: "ed25519", form, canonical}`. `canonical` is the exact text the Design Kit's publish job signs (`signing.canonical_text`).
 
 | Route | Status | Reason |
 |---|---|---|

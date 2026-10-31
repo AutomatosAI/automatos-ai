@@ -9,6 +9,9 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/settings/WebhooksSettingsTab.tsx](frontend/components/settings/WebhooksSettingsTab.tsx)
 - [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
 - [orchestrator/alembic/versions/prd_workspace_models_backfill.py](orchestrator/alembic/versions/prd_workspace_models_backfill.py)
+- [orchestrator/core/auth/clerk.py](orchestrator/core/auth/clerk.py)
+- [orchestrator/core/auth/clerk_azp.py](orchestrator/core/auth/clerk_azp.py)
+- [orchestrator/core/auth/clerk_mobile_template.py](orchestrator/core/auth/clerk_mobile_template.py)
 - [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
 - [orchestrator/core/models/workspaces.py](orchestrator/core/models/workspaces.py)
 - [orchestrator/services/trial_ledger.py](orchestrator/services/trial_ledger.py)
@@ -52,13 +55,16 @@ Automatos AI implements a **hybrid authentication system** supporting both Clerk
 
 Automatos AI supports multiple authentication methods that resolve to a `RequestContext`. The `get_request_context_hybrid` function acts as the primary entry point for resolving identity from headers or session tokens [orchestrator/core/auth/hybrid.py:246-300](). 
 
-The `ClerkAuth` class handles JWT verification using JWKS (JSON Web Key Set) [orchestrator/core/auth/clerk.py:20-26](). It normalizes user claims, including the `system_role` which is extracted from Clerk session token metadata [orchestrator/core/auth/clerk.py:122-135]().
+The `ClerkAuth` class handles JWT verification using JWKS (JSON Web Key Set) [orchestrator/core/auth/clerk.py:26-32](). It normalizes user claims, including the `system_role` which is extracted from Clerk session token metadata [orchestrator/core/auth/clerk.py:131-143]().
+
+After the signature and expiry checks, `verify_token` also checks the token's `azp` (authorized party) claim against the allowed frontend origins, `CLERK_AUTHORIZED_PARTIES` plus `FRONTEND_URL`'s origin, and refuses a token minted on any other origin [orchestrator/core/auth/clerk.py:103-106](). The Automatos Go app's token has no `azp`, and passes on a marker claim from the Clerk `mobile` JWT template. See [Clerk Authorized Parties (azp)](clerk-authorized-parties.md).
 
 Title: Hybrid Authentication & Context Resolution
 ```mermaid
 graph TB
     subgraph "Client_Layer"
         Browser["Browser<br/>(Clerk Session)"]
+        Phone["Automatos Go<br/>(Clerk mobile template token)"]
         Automation["Automation Client<br/>(API Key)"]
         EnvConfig["Environment<br/>(DEFAULT_WORKSPACE_ID)"]
     end
@@ -66,6 +72,7 @@ graph TB
     subgraph "Authentication_Logic"
         Hybrid["get_request_context_hybrid()"]
         ClerkAuth["ClerkAuth.verify_token()"]
+        AzpCheck["azp_allowed()<br/>CLERK_AUTHORIZED_PARTIES"]
         WorkspaceRes["_get_workspace_id_from_request()"]
         AccessCheck["_user_has_workspace_access()"]
     end
@@ -75,17 +82,19 @@ graph TB
     end
     
     Browser -->|"Authorization: Bearer {jwt}"| Hybrid
+    Phone -->|"Authorization: Bearer {jwt}"| Hybrid
     Automation -->|"x-api-key: {key}"| Hybrid
     EnvConfig --> WorkspaceRes
     
     Hybrid --> ClerkAuth
+    ClerkAuth --> AzpCheck
     Hybrid --> WorkspaceRes
     WorkspaceRes --> AccessCheck
     AccessCheck --> Context
     ClerkAuth --> Context
 ```
 
-**Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [orchestrator/core/auth/hybrid.py:146-165](), [orchestrator/core/auth/clerk.py:63-97]()
+**Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [orchestrator/core/auth/hybrid.py:146-165](), [orchestrator/core/auth/clerk.py:69-106](), [orchestrator/core/auth/clerk_azp.py:112-121]()
 
 ---
 
@@ -190,6 +199,7 @@ For details, see [Trials, Plan Tiers & Session Modes](#17.7).
 
 ## Child Pages
 - [Authentication Flow](#17.1) — Clerk JWT vs API key, get_request_context_hybrid, AUTH_EDITION saas vs local, sign-in/sign-up pages, Edge proxy security
+- [Clerk Authorized Parties (azp)](clerk-authorized-parties.md) — the azp check in verify_token, CLERK_AUTHORIZED_PARTIES and CLERK_AZP_REQUIRED, Automatos Go's mobile JWT template marker, log lines, 401 diagnosis
 - [Workspace Management](#17.2) — Workspace model, workspace_id context injection, workspace switching, model seeding, workspace purge, provisioning
 - [Data Isolation](#17.3) — Database foreign keys, tenancy matrix tests, query key scoping, memory namespacing, cache isolation, team access
 - [Admin Access Control](#17.4) — system_role field, admin gates, workspace_admin/workspace_permission dependencies, bootstrap mode, authz boundary sweeps

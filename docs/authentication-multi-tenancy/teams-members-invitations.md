@@ -223,7 +223,7 @@ The `WorkspaceInvitation` model [orchestrator/core/workspaces/invitations.py:22-
     *   Checks against workspace plan limits for members.
 3.  **Clerk Integration**: If validation passes, an invitation is created in Clerk using `clerk.invitations.create` [orchestrator/core/workspaces/invitations.py:190-198](). This sends an email to the invitee.
 4.  **Database Record**: A `WorkspaceInvitation` record is created in the local database, storing the invitation details and the `clerk_invitation_id`. [orchestrator/core/workspaces/invitations.py:180-188]()
-5.  **Acceptance**: When the invitee clicks the link in the email, they are directed to a public endpoint `/api/team/accept-invitation` [orchestrator/api/team.py:321-349](). This endpoint verifies the token, marks the invitation as accepted, and creates a `WorkspaceMember` entry for the user. It also logs the action in the `AuditLog`.
+5.  **Acceptance**: When the invitee clicks the link in the email, they are directed to a public endpoint `/api/team/accept-invitation` [orchestrator/api/team.py:508-556](). The endpoint first verifies the caller's Clerk token with `ClerkAuth.verify_token`, the same check as every other route, `azp` included: no bearer token gets 401 `Missing bearer token`, and a token that fails verification gets 401 `Invalid token` [orchestrator/api/team.py:439-453]() (see [Clerk Authorized Parties (azp)](clerk-authorized-parties.md)). It then verifies the invitation token, marks the invitation as accepted, and creates a `WorkspaceMember` entry for the user. It also logs the action in the `AuditLog`.
 
 ### Invite Modal
 

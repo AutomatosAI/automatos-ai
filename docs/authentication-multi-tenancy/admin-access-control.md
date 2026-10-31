@@ -59,7 +59,7 @@ Administrative status is enforced through `_assert_admin` checks in the backend 
 ## System Role Architecture
 
 ### Role Resolution (Clerk)
-In SaaS deployments using Clerk, roles are extracted from the JWT `public_metadata`. The `ClerkAuth` client normalizes these claims, looking for a `role` key within the metadata [orchestrator/core/auth/clerk.py:122-135]().
+In SaaS deployments using Clerk, roles are extracted from the JWT `public_metadata`. The `ClerkAuth` client normalizes these claims, looking for a `role` key within the metadata [orchestrator/core/auth/clerk.py:131-143](). The Automatos Go app's token comes from the Clerk `mobile` JWT template, which leaves out `org_role` on purpose, so a phone's system role comes from `metadata` alone and never from an organization role [orchestrator/core/auth/clerk_mobile_template.py:77-92]().
 
 ### Frontend Defense-in-Depth
 The frontend `RoleProvider` implements a secondary check for Automatos staff. Even if a Clerk metadata claim suggests an `admin` role, the system requires the user's email to end with `@automatos.app` to grant elevated privileges [frontend/contexts/role-context.tsx:48-56]().
@@ -86,7 +86,7 @@ graph TD
         A --> U
     end
 ```
-**Sources:** [orchestrator/core/auth/clerk.py:122-135](), [frontend/contexts/role-context.tsx:48-56](), [orchestrator/core/auth/dependencies.py:13-28]()
+**Sources:** [orchestrator/core/auth/clerk.py:131-143](), [frontend/contexts/role-context.tsx:48-56](), [orchestrator/core/auth/dependencies.py:13-28]()
 
 ---
 

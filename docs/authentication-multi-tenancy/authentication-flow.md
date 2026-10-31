@@ -31,11 +31,16 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
 - [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
 - [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/core/auth/clerk.py](orchestrator/core/auth/clerk.py)
+- [orchestrator/core/auth/clerk_azp.py](orchestrator/core/auth/clerk_azp.py)
+- [orchestrator/core/auth/clerk_mobile_template.py](orchestrator/core/auth/clerk_mobile_template.py)
 - [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
 - [orchestrator/core/composio/entity_manager.py](orchestrator/core/composio/entity_manager.py)
 - [orchestrator/core/models/workspaces.py](orchestrator/core/models/workspaces.py)
 - [orchestrator/services/trial_ledger.py](orchestrator/services/trial_ledger.py)
 - [orchestrator/services/workspace_model_seeding.py](orchestrator/services/workspace_model_seeding.py)
+- [orchestrator/tests/test_clerk_azp_check.py](orchestrator/tests/test_clerk_azp_check.py)
 - [orchestrator/tests/test_invitation_routing.py](orchestrator/tests/test_invitation_routing.py)
 - [orchestrator/tests/test_prd175_auth_edition.py](orchestrator/tests/test_prd175_auth_edition.py)
 - [orchestrator/tests/test_prd222_trial_enforcement.py](orchestrator/tests/test_prd222_trial_enforcement.py)
@@ -55,7 +60,7 @@ This page documents the hybrid authentication system in Automatos AI, which supp
 
 ## Authentication Architecture Overview
 
-Automatos AI implements a dual-mode authentication system that accepts both **Clerk JWT tokens** (for browser-based users) and **API keys** (for headless clients, automation scripts, and external integrations).
+Automatos AI implements a dual-mode authentication system that accepts both **Clerk JWT tokens** (for browser-based users, and for the Automatos Go app on the hosted edition) and **API keys** (for headless clients, automation scripts, and external integrations).
 
 ### Code Entity Space: Authentication Components
 The following diagram maps high-level concepts to specific code entities within the authentication pipeline.
@@ -77,6 +82,7 @@ graph TB
     
     subgraph "Backend - FastAPI"
         HybridAuth["get_request_context_hybrid<br/>orchestrator/core/auth/hybrid.py"]
+        ClerkVerify["ClerkAuth.verify_token + azp_allowed<br/>orchestrator/core/auth/clerk.py<br/>orchestrator/core/auth/clerk_azp.py"]
         Provisioning["_provision_new_user_workspace<br/>orchestrator/core/auth/hybrid.py"]
         Resolver["_resolve_workspace_for_clerk_user<br/>orchestrator/core/auth/hybrid.py"]
         ApiKeyService["ApiKeyService<br/>core.services.api_key_service.py"]
@@ -93,6 +99,7 @@ graph TB
     
     SignInForm -->|JWT| HybridAuth
     SignUpForm -->|JWT| HybridAuth
+    HybridAuth --> ClerkVerify
     HybridAuth --> Resolver
     Resolver --> Provisioning
     HybridAuth --> ReqContext
@@ -100,7 +107,7 @@ graph TB
     ApiKeyService -- Validates --> HybridAuth
 ```
 
-**Sources:** [frontend/middleware.ts:1-33](), [orchestrator/core/auth/hybrid.py:200-230](), [frontend/components/auth/sign-in-form.tsx:41-81](), [frontend/next.config.js:4-112](), [frontend/components/workspace-provider.tsx:91-204](), [frontend/components/auth/sign-up-form.tsx:17-81]()
+**Sources:** [frontend/middleware.ts:1-33](), [orchestrator/core/auth/hybrid.py:200-230](), [orchestrator/core/auth/clerk.py:69-106](), [frontend/components/auth/sign-in-form.tsx:41-81](), [frontend/next.config.js:4-112](), [frontend/components/workspace-provider.tsx:91-204](), [frontend/components/auth/sign-up-form.tsx:17-81]()
 
 ---
 
@@ -119,6 +126,21 @@ The frontend Next.js middleware protects all routes except specific public ones 
 - `/sso-callback(.*)` [frontend/app/sso-callback/page.tsx:5-13]()
 - `/accept-invitation(.*)` [frontend/app/accept-invitation/page.tsx:27-30]()
 - `/api/webhooks(.*)`
+
+On the hosted edition, the Automatos Go app also signs in with Clerk. It sends a token from the Clerk `mobile` JWT template rather than a session token, so every claim `clerk.py` reads must also come from that template or be listed as left out of it [orchestrator/core/auth/clerk.py:7-10](), [orchestrator/core/auth/clerk_mobile_template.py:26-39]().
+
+### Clerk Token Verification
+
+`ClerkAuth.verify_token` checks a bearer token in this order and returns its claims, or `None` [orchestrator/core/auth/clerk.py:69-116]():
+
+1. **JWKS configured.** Without `CLERK_JWKS_URL` it logs an error and returns `None` [orchestrator/core/auth/clerk.py:79-81]().
+2. **Signature and time claims.** `jwt.decode` checks the RS256 signature against the key from the Clerk JWKS (cached for 5 minutes), and `exp`, `iat` and `nbf` [orchestrator/core/auth/clerk.py:58-67](), [orchestrator/core/auth/clerk.py:83-101]().
+3. **Audience.** When `CLERK_AUDIENCE` is set, the token's `aud` must match it [orchestrator/core/auth/clerk.py:87-96]().
+4. **Authorized party.** `azp_allowed` checks the token's `azp` claim against the origins in `CLERK_AUTHORIZED_PARTIES` plus `FRONTEND_URL`'s origin. A token with no `azp` is accepted when it carries Automatos Go's marker (`client: "automatos-go"`); otherwise `CLERK_AZP_REQUIRED` decides [orchestrator/core/auth/clerk.py:103-106](), [orchestrator/core/auth/clerk_azp.py:112-121]().
+
+When `verify_token` returns `None`, `get_request_context_hybrid` answers 401 `Invalid or expired token` [orchestrator/core/auth/hybrid.py:886-888](), and `POST /api/team/accept-invitation` answers 401 `Invalid token` [orchestrator/api/team.py:439-453](). The settings, the Automatos Go template, the log lines and how to diagnose a refusal are in [Clerk Authorized Parties (azp)](clerk-authorized-parties.md).
+
+**Sources:** [orchestrator/core/auth/clerk.py:69-116](), [orchestrator/core/auth/clerk_azp.py:1-34](), [orchestrator/config.py:578-586](), [orchestrator/tests/test_clerk_azp_check.py:113-255]()
 
 ### API Key (Headless & External)
 
@@ -155,7 +177,8 @@ sequenceDiagram
     Backend->>HybridAuth: Resolve Context
     
     alt JWT Auth
-        HybridAuth->>HybridAuth: get_clerk_auth()
+        HybridAuth->>HybridAuth: get_clerk_auth().verify_token()
+        Note right of HybridAuth: signature, exp/iat/nbf, aud (if set), azp<br/>failure: 401 "Invalid or expired token"
     else API Key Auth
         HybridAuth->>HybridAuth: Validate x-api-key
     end
