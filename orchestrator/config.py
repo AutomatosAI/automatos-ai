@@ -1637,9 +1637,18 @@ class Config:
     AUTOMATOS_CLOUD_FEED_MAX_KB: int = int(os.getenv("AUTOMATOS_CLOUD_FEED_MAX_KB", "1024"))
     # Seconds each read from Automatos Cloud may take: the catalogue, or one theme's package.
     AUTOMATOS_CLOUD_TIMEOUT_SECONDS: int = int(os.getenv("AUTOMATOS_CLOUD_TIMEOUT_SECONDS", "15"))
+    # PRD-270 W2 (§5.6): the largest item bundle (an agent, Playbook, package or plugin) a local
+    # install reads from Automatos Cloud; a bigger one is refused and counted.
+    AUTOMATOS_CLOUD_BUNDLE_MAX_KB: int = int(os.getenv("AUTOMATOS_CLOUD_BUNDLE_MAX_KB", "256"))
+    # The new or changed plugins one Sync downloads; the rest wait for the next Sync and are
+    # counted 'waiting'. 0 downloads none (a negative value reads as 0).
+    AUTOMATOS_CLOUD_PLUGINS_PER_SYNC: int = max(0, int(os.getenv("AUTOMATOS_CLOUD_PLUGINS_PER_SYNC", "5")))
     # The hosted side (§5.2): the largest catalogue GET /api/marketplace/catalog serves (a bigger
     # one is a logged 503: served, it would fail every Sync).
     MARKETPLACE_CATALOG_FEED_MAX_KB: int = int(os.getenv("MARKETPLACE_CATALOG_FEED_MAX_KB", "1024"))
+    # PRD-270 W2: the largest item bundle the hosted catalogue lists; a bigger one is left out of
+    # the catalogue and logged as a warning.
+    MARKETPLACE_CATALOG_BUNDLE_MAX_KB: int = int(os.getenv("MARKETPLACE_CATALOG_BUNDLE_MAX_KB", "256"))
     # The public Marketplace routes (§5.7) take no account, so each client IP gets this many reads
     # a minute on each of them, each route with its own bucket (at least one).
     MARKETPLACE_PUBLIC_RATE_PER_MINUTE: int = max(1, int(os.getenv("MARKETPLACE_PUBLIC_RATE_PER_MINUTE", "120")))

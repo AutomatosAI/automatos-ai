@@ -140,7 +140,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-30 (PRD-270 W1 the open Marketplace, US-270-00): prd270_w1_cloud_sync chains onto
 # prd268_w1_proactive — theme_packages.source (nullable, a CHECK) and the single-row
 # marketplace_cloud_sync table the local edition's Sync with Automatos Cloud writes.
-EXPECTED_HEAD = "prd270_w1_cloud_sync"
+# 2026-10-31 (PRD-270 W2 Cloud bundles, US-270-11a): prd270_w2_cloud_bundles chains onto
+# prd270_w1_cloud_sync — marketplace_cloud_items (a new table only): which local marketplace
+# rows a Sync with Automatos Cloud wrote.
+EXPECTED_HEAD = "prd270_w2_cloud_bundles"
 
 
 def _literal(node: ast.AST):
