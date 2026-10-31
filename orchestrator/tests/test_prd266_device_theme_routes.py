@@ -80,6 +80,7 @@ def test_a_paired_phone_reads_its_workspaces_install_as_data_and_loads_every_fil
         "source": "tokens", "tone": None, "tokens": {"light": harness.MOBILE_LIGHT, "dark": None},
         "fonts": {"sans": font},
         "mascot": {"mode": "clips", "states": [{"name": build.CLIP_STATE, "clip": clip, "still": still}]},
+        "layout": None,  # PRD-271 C03: a block that names no layout
     }
     for url, path in zip((font, clip, still), files):
         served = phone.get(url, headers=headers)
