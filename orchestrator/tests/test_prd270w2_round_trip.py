@@ -23,7 +23,6 @@ what Automatos Cloud's found. Each test runs in one transaction rolled back at i
 from __future__ import annotations
 
 import json
-import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
