@@ -36,6 +36,8 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from core.utils.slug import slugify
+
 logger = logging.getLogger(__name__)
 
 DONE = "done"
@@ -45,7 +47,6 @@ NO_ANSWER = "{ticket} has no answer to add."
 REPORT_NOT_APPROVED = "This report's ticket isn't approved yet. Approve it on the board, then add the report."
 REPORT_EMPTY = "This report has no text to add."
 _METRICS = re.compile(r"\n## Execution Metrics\n.*?(?=\n## |\Z)", re.S)
-_SLUG = re.compile(r"[^a-z0-9]+")
 SLUG_CHARS = 60
 DESCRIPTION_CHARS = 500
 # The tag that marks the owner's copy of each kind of source (F305's card and report
@@ -73,8 +74,6 @@ class Refused(Exception):
     """The card, report or Deliverable cannot be added; the message says why, for the owner."""
 
 
-def _slug(title: str, fallback: str) -> str:
-    return _SLUG.sub("-", (title or "").lower())[:SLUG_CHARS].strip("-") or fallback
 
 
 def _tag(template: str, source_id: Any) -> str:
@@ -204,7 +203,7 @@ async def add_card(db: Any, workspace_id: Any, task_id: int, *, by: str) -> Dict
 
     async def file_it() -> int:
         content = f"# {task.title}\n\n{_approved_answer(task)}\n"
-        return await _file_as_owners(workspace_id, content, f"{_slug(task.title, f'card-{task.id}')}.md",
+        return await _file_as_owners(workspace_id, content, f"{slugify(task.title, max_len=SLUG_CHARS, fallback=f'card-{task.id}')}.md",
                                      task.title, [_tag(CARD_TAG, task.id)], by)
 
     added = await _file_once(db, workspace_id, CARD_TAG, task.id, file_it)
@@ -253,7 +252,7 @@ async def add_report(db: Any, workspace_id: Any, report_id: str, *, by: str) -> 
 
     async def file_it() -> int:
         content = await _report_text(db, workspace_id, row)
-        return await _file_as_owners(workspace_id, content + "\n", f"{_slug(row.title, 'report')}.md", row.title,
+        return await _file_as_owners(workspace_id, content + "\n", f"{slugify(row.title, max_len=SLUG_CHARS, fallback='report')}.md", row.title,
                                      [_tag(REPORT_TAG, row.id)], by)
 
     added = await _file_once(db, workspace_id, REPORT_TAG, row.id, file_it)
@@ -310,7 +309,7 @@ async def add_deliverable(db: Any, workspace_id: Any, deliverable_id: Any, *, by
         if not data:
             raise Refused(FILE_UNREADABLE)
         tags = [_tag(DELIVERABLE_TAG, did), *party_tags(row.extra)]
-        return await _file_as_owners(workspace_id, data, f"{_slug(row.title, 'document')}{extension}", row.title,
+        return await _file_as_owners(workspace_id, data, f"{slugify(row.title, max_len=SLUG_CHARS, fallback='document')}{extension}", row.title,
                                      tags, by, _about(row))
 
     added = await _file_once(db, workspace_id, DELIVERABLE_TAG, did, file_it)

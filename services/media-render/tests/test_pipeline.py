@@ -165,8 +165,12 @@ def test_tts_speaks_with_kokoro_through_the_api(settings):
             line = body["lines"][0]
             assert line["id"] == "l01" and line["seconds"] > 1.0 and line["sample_rate"] == 24000
             assert len(line["segments"]) >= 3 and "audio_base64" not in line
+            # PRD-262 US-052: a voice the image's voices file lacks is refused before Kokoro
+            # runs, as a 400 naming the field (test_server.py covers lang too).
             unknown = await client.post("/tts", data=json.dumps({**request, "voice": "zz_nobody"}), headers=AUTH)
-            assert unknown.status == 400 and (await unknown.json())["error"] == "voice_refused"
+            refusal = await unknown.json()
+            assert unknown.status == 400 and refusal["error"] == "invalid_request", refusal
+            assert refusal["message"].startswith("voice must be one of "), refusal
 
     asyncio.run(go())
 

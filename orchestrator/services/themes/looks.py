@@ -1,16 +1,16 @@
 """PRD-261 A-09a — a member's looks for one theme, kept on the server (Q5).
 
 One ``theme_looks`` row per (workspace, user, theme id): the saved looks and the active one,
-exactly as the look editor holds them (``frontend/lib/looks/storage.ts`` ``StoredLooks``).
+exactly as the host's look store holds them (``StoredLooks`` in
+``frontend/lib/theme-host/looks/storage.ts``).
 They are keyed by the theme id (``publisher/slug``), never by a version, so an update or a
-rollback keeps them.
+rollback keeps them, and so do an uninstall and a later install of the same theme id: looks
+saved under ``automatos/play`` while Play was compiled into the app (PA-8) read again once its
+package is installed.
 
 * **Which schema.** The workspace's active install of that theme id names a package; its
   ``looks/schema.json`` (checked by ``look_schema.py``) is the one every look is held to.
-  Builtin Play (``automatos/play``, PA-8) has no install until A-18: its schema is the
-  committed ``data/play-look-schema.json``, mirrored from ``frontend/lib/looks/types.ts`` and
-  ``catalogue.ts`` (``tests/test_prd261_play_schema_parity.py``) until A-16c ships it in the
-  package. A theme id with neither is "not installed here": 404, also when another workspace
+  A theme id with no such install is "not installed here": 404, also when another workspace
   has it, so a caller learns nothing about other workspaces.
 * **Writes are strict.** ``PUT`` refuses any look the schema refuses, naming the field.
 * **Reads carry looks over.** A look saved under an earlier version is fitted to the current
@@ -24,9 +24,6 @@ rollback keeps them.
 from __future__ import annotations
 
 import logging
-import threading
-from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from uuid import UUID
 
@@ -34,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.models.themes import ThemeInstallation, ThemeLook, ThemePackage
+from services.themes.bounded_cache import BoundedCache
 from services.themes.contract import ThemeError, echo, parse_json, theme_error
 from services.themes.digest import sha256_hex
 from services.themes.look_schema import (
@@ -44,17 +42,11 @@ from services.themes.serve import ThemeStorageUnavailable, read_stored_file
 
 logger = logging.getLogger(__name__)
 
-# PA-8: builtin Play's package id; its looks are kept under it, so A-18 finds them in place.
-BUILTIN_PLAY_THEME_ID = "automatos/play"
-# frontend/lib/looks/presets.ts DEFAULT_LOOK (Ember).
-BUILTIN_PLAY_DEFAULT_LOOK = "ember"
-PLAY_SCHEMA_FILE = Path(__file__).resolve().parent / "data" / "play-look-schema.json"
-
 # A member's saved looks for one theme (the editor's own list has no cap; this keeps a row small).
 MAX_SAVED_LOOKS = 100
 BODY_FIELDS = ("looks", "active")
 # Checked looks/schema.json documents, by the sha256 of the file (content-addressed, so safe
-# to share between packages and workspaces).
+# to share between packages and workspaces); the least recently used goes first.
 SCHEMA_CACHE_SIZE = 64
 MARKETPLACE_OWNER = "marketplace"
 
@@ -95,36 +87,7 @@ class StoredLooks(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def builtin_play_schema() -> LookSchema:
-    """The committed schema of builtin Play; a broken file is a release bug, so it raises."""
-    document, error = parse_json(PLAY_SCHEMA_FILE.read_bytes(), PLAY_SCHEMA_FILE.name)
-    schema, errors = validate_look_schema(document) if error is None else (None, [error])
-    if schema is None:
-        raise RuntimeError(f"data/play-look-schema.json is not a valid look schema: {errors}")
-    return schema
-
-
-class _SchemaCache:
-    """A small bounded map of checked schemas by file sha256, safe across threadpool workers."""
-
-    def __init__(self, size: int) -> None:
-        self._size = size
-        self._items: Dict[str, LookSchema] = {}
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> Optional[LookSchema]:
-        with self._lock:
-            return self._items.get(key)
-
-    def put(self, key: str, schema: LookSchema) -> None:
-        with self._lock:
-            if key not in self._items and len(self._items) >= self._size:
-                self._items.pop(next(iter(self._items)))
-            self._items[key] = schema
-
-
-_schema_cache = _SchemaCache(SCHEMA_CACHE_SIZE)
+_schema_cache: BoundedCache[LookSchema] = BoundedCache(SCHEMA_CACHE_SIZE)
 
 
 def _stored_schema_bytes(package: ThemePackage, expected_sha: str) -> bytes:
@@ -198,8 +161,6 @@ def resolve_look_source(db: Session, workspace_id: UUID, theme_id: str) -> LookS
     package = _installed_package(db, workspace_id, theme_id)
     if package is not None:
         return LookSource(theme_id, package_look_schema(package), package_default_look(package))
-    if theme_id == BUILTIN_PLAY_THEME_ID:
-        return LookSource(theme_id, builtin_play_schema(), BUILTIN_PLAY_DEFAULT_LOOK)
     raise LooksError(404, NOT_INSTALLED)
 
 

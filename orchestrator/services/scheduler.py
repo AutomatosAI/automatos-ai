@@ -53,6 +53,22 @@ class UnifiedScheduler:
         self._scheduler.start()
         logger.info("[Scheduler] Unified scheduler started")
 
+        # PRD-265: the credit meter and the nightly overhead record.
+        from services.credits.jobs import register_credit_jobs
+
+        register_credit_jobs(self._scheduler)
+
+        # PRD-261 C-05h: the local edition's pull of the hosted theme revocation feed (QB-25).
+        # It registers nothing in SaaS or with an empty THEME_REVOCATIONS_URL. Guarded like
+        # ComposioSyncScheduler: a failure is logged and the shared scheduler keeps running.
+        try:
+            from services.theme_revocation_scheduler import get_theme_revocation_scheduler
+
+            if get_theme_revocation_scheduler().start(scheduler=self._scheduler):
+                logger.info("[Scheduler] ThemeRevocationScheduler started on unified scheduler")
+        except Exception:
+            logger.exception("[Scheduler] Could not start ThemeRevocationScheduler (non-fatal)")
+
     def stop(self):
         """Shut down the shared scheduler (stops all registered jobs)."""
         if self._scheduler:

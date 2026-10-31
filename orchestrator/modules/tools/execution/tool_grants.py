@@ -152,16 +152,14 @@ def issue_tool_grant(
     """
     try:
         from core.models.approval_grants import SUBJECT_TOOL_CALL
-        from core.services.approval_grants import create_grant, find_pending_grant
+        from core.services.approval_grants import create_grant
+        from modules.tools.execution.stale_cards import the_pending_card
 
         subject_id = tool_call_subject_id(workspace_id, action, params)
-
-        existing = find_pending_grant(
-            db, workspace_id, subject_type=SUBJECT_TOOL_CALL, subject_id=subject_id
-        )
+        # Idempotent ask: the pending row (already announced on creation) is the
+        # actionable thing, unless it lapsed or another chat raised it (N17-3, F439).
+        existing = the_pending_card(db, workspace_id, subject_id, caller_context)
         if existing is not None:
-            # Idempotent ask: the pending row (already announced on creation)
-            # is the actionable thing — no grant spam, no re-notify.
             return existing
 
         risk_class = _risk_class_for(action, permission_level)
@@ -180,8 +178,9 @@ def issue_tool_grant(
                 f"{(description or 'gated platform action')[:200]}"
             ),
             question_md=question_md,
+            # Flushed with the row (N17-3): a card read before the turn commits keeps its chat and lane.
+            details=_grant_details(action, params, description, caller_context or {}, lane),
         )
-        grant.details = _grant_details(action, params, description, caller_context or {}, lane)
 
         # PRD-193 S5: an ask that fires with nobody watching must not be
         # silent — announce the fresh pending grant on non-chat lanes (chat
@@ -305,9 +304,10 @@ def attach_ask_grant(
         # yield id-less rows get the plain prose ask, never a dead card.
         if grant is None or not isinstance(getattr(grant, "id", None), int):
             return ask
-        return enrich_ask_with_grant(
-            ask, grant, risk_class=_risk_class_for(action, permission_level)
-        )
+        from modules.tools.execution.stale_cards import with_already_waiting
+
+        enriched = enrich_ask_with_grant(ask, grant, risk_class=_risk_class_for(action, permission_level))
+        return with_already_waiting(enriched, grant, caller_context)  # N17-3: a card an earlier turn raised
     except Exception:  # pragma: no cover - issue/enrich already guard; belt & braces
         logger.warning("[tool_grants] ask enrichment failed for %s", action, exc_info=True)
         return ask
@@ -462,7 +462,9 @@ async def _dispatch_approval_pending(
 
     Owns its session: by the time the loop runs this, the creating caller's
     transaction is finished (and its session may be closed). The grant id rides
-    ``link_id`` so the P2-15 approvals queue has a deep-link target.
+    ``link_id`` so the P2-15 approvals queue has a deep-link target. The
+    dispatcher never commits, so this commits its bell row (closing the session
+    alone would roll it back).
     """
     from core.database.database import SessionLocal
     from core.services.notification_dispatcher import NotificationDispatcher
@@ -480,11 +482,13 @@ async def _dispatch_approval_pending(
             link_id=str(grant_id) if grant_id is not None else None,
             status="action_required",
         )
+        db.commit()
     except Exception:
         logger.warning(
             "[tool_grants] approval_pending dispatch failed for grant %s",
             grant_id, exc_info=True,
         )
+        db.rollback()
     finally:
         try:
             db.close()

@@ -274,6 +274,22 @@ jobs:
             echo "::error::the fixture MP4 carries no random InstanceID (FR-16)"; exit 1
           fi
           echo "the fixture MP4 carries DigitalSourceType $expected and a random InstanceID: PASS"
+      # PRD-264 EUAI-06b: the same MP4 carries a signed C2PA manifest, read back with the
+      # image's own c2pa (the signer, D14): c2pa.created with the same digital source type,
+      # the claim generator "Automatos AI media-render/<version>", and the job names the
+      # file's SHA-256 and the manifest's id for the provenance row. The container signs
+      # with a certificate it makes on first use (no chain configured, D15). Every format's
+      # read-back runs in tests/test_content_credentials.py above.
+      - name: The MP4 carries a signed C2PA manifest (c2pa reads it back), and the job names its SHA-256 and manifest id
+        run: |
+          out="$RUNNER_TEMP/out"
+          docker run --rm -v "$out:/out:ro" --entrypoint python "$IMAGE" -c \
+            'import json, pathlib; from media_render.content_credentials import read_store; print(json.dumps(read_store(pathlib.Path("/out/fixture.mp4"), "video/mp4")))' \
+            > "$out/manifest.json"
+          python3 -m json.tool "$out/manifest.json" | head -n 80
+          python3 services/media-render/ci/assert_manifest.py "$out/manifest.json" --job "$out/job.json" \
+            --file "$out/fixture.mp4" --name render.mp4 \
+            --expected http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
@@ -411,6 +427,46 @@ jobs:
           docker logs media-render-voices 2>&1 | tail -n 20
           docker rm -f media-render-voices > /dev/null
           exit "$code"
+      # PRD-262 #7: the js stage deletes the npm paths render, check and snapshot never
+      # load (services/media-render/js/prune.txt) and every source map, type
+      # declaration and Markdown file. The image renders the fixture (a check, then a
+      # render) and its preview (a check, then a snapshot) with Node's module
+      # resolution traced: ci/trace_modules.mjs, mounted (ci/ never ships), loaded into
+      # every Node process through NODE_OPTIONS. Both must render, and no process may
+      # load or try a pruned path (ci/assert_module_trace.py).
+      - name: Render, check and snapshot never load the pruned npm paths (Node's module loading traced)
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/module-trace"
+          mkdir -p "$out/trace"
+          chmod 777 "$out/trace"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle > "$out/render.json"
+          python3 -c 'import json, sys; b = json.load(open(sys.argv[1])); b["preview"] = {"at": [1.5]}; json.dump(b, open(sys.argv[2], "w"))' \
+            "$out/render.json" "$out/preview.json"
+          docker run -d --name media-render-trace --shm-size=1g -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -e NODE_OPTIONS=--import=/ci/trace_modules.mjs \
+            -v "$PWD/services/media-render/ci:/ci:ro" -v "$out/trace:/trace" \
+            -p 127.0.0.1:8095:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8095/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-trace; docker rm -f media-render-trace > /dev/null; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/render_bundle.py --url http://127.0.0.1:8095 --token "$TOKEN" \
+            --bundle "$out/render.json" --out "$out/render" --output render.mp4
+          render=$?
+          python3 services/media-render/ci/render_bundle.py --url http://127.0.0.1:8095 --token "$TOKEN" \
+            --bundle "$out/preview.json" --out "$out/preview" --output preview-01.png
+          preview=$?
+          set -e
+          docker logs media-render-trace 2>&1 | tail -n 40
+          docker rm -f media-render-trace > /dev/null
+          if [ "$render" != 0 ] || [ "$preview" != 0 ]; then echo "::error::a render with Node's module loading traced failed"; exit 1; fi
+          python3 services/media-render/ci/assert_module_trace.py --trace "$out/trace/modules.log" \
+            --prune services/media-render/js/prune.txt --commands check,render,snapshot
       # PRD-262 US-051 (§8's media-render row): the amd64 image is at most 1.30 GB on
       # disk; it was 1.81 GB in run 37612086159. `docker image ls` prints the image's
       # Size rounded, so the bar reads the same Size in bytes. It runs last and always,

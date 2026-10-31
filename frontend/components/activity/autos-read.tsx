@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Sparkles, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useWorkspaceDigest, useSubmitDigestFeedback } from '@/hooks/use-digest-api'
+import { useBrief } from '@/hooks/use-brief'
+import { BriefSections } from '@/components/proactive/brief-sections'
 
 /** Per-read collapse memory: keyed by the read's state hash, so a new read reappears. */
 const COLLAPSE_KEY_PREFIX = 'autosRead:collapsed:'
@@ -35,10 +37,13 @@ export function readPreview(text: string): string {
 // state, mounted in BOTH Command Centre shells (classic ActivityPage + studio
 // summary tab). One component, no fork. PRD-244 review (Gerard, 09-17): the
 // card collapses to one line, and a thumbs-up collapses it — the read has done
-// its job — until the next read arrives.
+// its job — until the next read arrives. PRD-268 US-W02: when today's brief is
+// held (useBrief: the one BriefOnOpen opened), its rows sit under the prose;
+// without one, the card is exactly as before.
 export function AutosRead({ period = '1d' }: { period?: string }) {
   const { data, isLoading, isError } = useWorkspaceDigest(period)
   const submit = useSubmitDigestFeedback()
+  const brief = useBrief().data ?? null
   const [rated, setRated] = useState<1 | -1 | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const hash = data?.state_hash
@@ -108,6 +113,11 @@ export function AutosRead({ period = '1d' }: { period?: string }) {
       </div>
 
       {!collapsed && <p className="text-sm leading-relaxed text-muted-foreground">{data.text}</p>}
+      {!collapsed && brief && (
+        <div className="mt-3" data-testid="autos-read-brief">
+          <BriefSections brief={brief} />
+        </div>
+      )}
 
       <div className={`flex items-center justify-between ${collapsed ? 'hidden' : 'mt-3'}`}>
         <span className="text-xs text-muted-foreground">

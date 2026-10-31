@@ -28,6 +28,10 @@
  * review rule (docs/theme-host/css-layer-model.md): a generic selector such as
  * `button` that matches the card's elements without naming the card, a rule on
  * an ancestor, an element drawn over the card, and a theme's code in the page.
+ *
+ * PRD-268 US-C20c: a card that carries `approval_view` also shows who asked, the action, its
+ * target, the exact preview and the rule that asked, before the buttons, and answers keys 1 (Deny)
+ * and 3 (Approve & run) while it has focus (approval-view-parts.tsx). Without one it is today's.
  */
 
 import { useState } from 'react'
@@ -36,31 +40,16 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ApprovalViewParts, useApprovalCardBody } from '../approval-view-parts'
+import { TOOL_APPROVAL_TITLE } from '@/lib/chat/approvals'
 import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
+import { executedOutcomeLine, executedResultOf, refusedClickLine } from '@/lib/grant-outcome'
 
-
-interface ExecutedResult {
-  success?: boolean
-  error?: string | null
-  requires_confirmation?: boolean
-  resumed_via?: string
-}
-
-/** Post-approve outcome line — honest about what actually happened (S4). */
-export function executedOutcomeLine(executed?: ExecutedResult | null): string {
-  if (!executed) return 'Approved.'
-  if (executed.resumed_via === 'board_task_requeue') {
-    return 'Approved — the blocked task was re-queued and will complete under this grant.'
-  }
-  if (executed.requires_confirmation) {
-    return 'Approved, but the action asked for confirmation again — check the pending approvals.'
-  }
-  if (executed.success) return 'Approved — the action ran.'
-  return `Approved, but execution failed: ${executed.error || 'unknown error'}`
-}
+// P256-FIX-N17-2: the outcome line lives in lib/grant-outcome, shared with the Governance inbox.
+export { executedOutcomeLine }
 
 /** What the owner decided on the card. */
 export type ApprovalDecision = 'approved' | 'denied'
@@ -101,9 +90,7 @@ function ToolApprovalCard({
 
   const handleApprove = async () => {
     try {
-      const res = await grantApproval.mutateAsync(data.grant_id)
-      const executed = (res?.grant?.details as { executed_result?: ExecutedResult } | undefined)
-        ?.executed_result
+      const executed = executedResultOf(await grantApproval.mutateAsync(data.grant_id))
       const line = executedOutcomeLine(executed)
       setOutcome(line)
       setDone('approved')
@@ -113,8 +100,8 @@ function ToolApprovalCard({
       } else {
         toast.success(line)
       }
-    } catch {
-      toast.error('Failed to approve the action')
+    } catch (err) {
+      toast.error(refusedClickLine(err, 'Failed to approve the action'))
     }
   }
 
@@ -130,9 +117,16 @@ function ToolApprovalCard({
     }
   }
 
+  const heading = title || TOOL_APPROVAL_TITLE
+  const card = useApprovalCardBody(data.approval_view, String(data.grant_id), heading, {
+    refuse: handleDeny,
+    allowOnce: handleApprove,
+    disabled: busy || done !== null,
+  })
+
   return (
     <WidgetBase
-      title={title || 'Action approval needed'}
+      title={heading}
       icon={<ShieldCheck className="h-4 w-4" />}
       metadata={metadata}
       isActive={isActive}
@@ -142,7 +136,7 @@ function ToolApprovalCard({
       onMaximize={onMaximize}
       onRefresh={onRefresh}
     >
-      <div className="flex flex-col gap-3 p-3">
+      <div {...card.body}>
         <div>
           <p className="text-sm font-medium break-all">{data.action}</p>
           {data.question_md ? (
@@ -176,17 +170,19 @@ function ToolApprovalCard({
           </dl>
         )}
 
+        {card.view && <ApprovalViewParts view={card.view} ruleId={card.ruleId} />}
+
         {done ? (
           <p className="text-sm text-muted-foreground" role="status">
             {outcome}
           </p>
         ) : (
           <div className="flex gap-2">
-            <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1">
+            <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1" {...card.allowOnceKey}>
               <Check className="h-4 w-4 mr-1" />{' '}
               {grantApproval.isLoading ? 'Approving…' : 'Approve & run'}
             </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={handleDeny}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={handleDeny} {...card.refuseKey}>
               <X className="h-4 w-4 mr-1" /> Deny
             </Button>
           </div>

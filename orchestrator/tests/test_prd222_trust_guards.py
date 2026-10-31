@@ -28,13 +28,16 @@ from modules.context.sections.onboarding import OnboardingSection
 
 _ORCH_ROOT = Path(onb_mod.__file__).resolve().parents[3]  # orchestrator/
 
-# The onboarding-owned surface: the section, the state machine, the trial ledger,
-# the capability report, the new platform tools (onboarding + intake), and the
-# Wave-1b (US-016) dev-reset / built-artifact wipe surface.
+# The onboarding-owned surface: the section, the state machine, the one-time
+# trial grant (PRD-265: services/credits/trial.py, the successor of the
+# deleted services/trial_ledger.py — the rest of services/credits/ is the
+# general credit system, not onboarding-owned), the capability report, the
+# new platform tools (onboarding + intake), and the Wave-1b (US-016) dev-reset
+# / built-artifact wipe surface.
 _ONBOARDING_OWNED = [
     "modules/context/sections/onboarding.py",
     "services/onboarding_state.py",
-    "services/trial_ledger.py",
+    "services/credits/trial.py",
     "services/capability_report.py",
     "modules/tools/discovery/actions_onboarding.py",
     "modules/tools/discovery/handlers_onboarding.py",
@@ -135,7 +138,6 @@ def _render_powerup():
         "stage": "powerup",
         "stages": {},
         "segment": {},
-        "trial": {"granted_usd": 5.0, "spent_usd": 1.0, "state": "active"},
     }
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = ws

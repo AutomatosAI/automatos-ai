@@ -63,6 +63,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 from config import config
+from core import generation_guard
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.socials import SocialPost
 from core.social_templates import IMAGE_SLOT, VIDEO_SLOT, slot_generatable
@@ -89,6 +90,7 @@ from modules.socials.recipes.footage_toolkits import (
     Route,
     Shot,
     aspect_ratio,
+    prompt_for,
 )
 from modules.socials.recipes.toolkit import (
     ToolkitSchemaChanged,
@@ -105,6 +107,7 @@ logger = logging.getLogger(__name__)
 
 # A job whose status cannot be read this many times running is given up on.
 MAX_POLL_FAILURES = 5
+GUARD_PATH = "socials.footage"  # where a generation guard refusal came from (ART5-1): logged, never the prompt
 FOOTAGE_FILE_PREFIX = "footage-"
 DIGEST_CHARS = 8
 DELIVERABLE_SOURCE_TYPE = "social_post"
@@ -659,6 +662,14 @@ async def _submit(executor: Any, session_factory: Callable[[], Any], shot: Shot,
     return _Job(shot=shot, route=route, price=price, booking=booking, handle=handle)
 
 
+def _why_failed(job: _Job, workspace_id: UUID) -> str:
+    """Why a failed job made nothing: a provider's refusal, logged and never asked elsewhere (ART5-1), or its reason."""
+    label = job.route.recipe.label
+    if job.state.refused:
+        return generation_guard.provider_refusal(workspace_id, GUARD_PATH, label)
+    return job.state.reason or f"{label} could not make it"
+
+
 async def _collect(store: MediaStore, session_factory: Callable[[], Any], jobs: Sequence[_Job], *,
                    workspace_id: UUID, post_id: UUID, title: str) -> Tuple[Dict[str, Made], Dict[str, str]]:
     """Each job as the wait left it: one that finished is kept (fetched, stored,
@@ -671,7 +682,7 @@ async def _collect(store: MediaStore, session_factory: Callable[[], Any], jobs: 
             minutes = config.SOCIALS_FOOTAGE_MAX_WAIT_SECONDS // 60
             failed[job.shot.slot] = f"{label} did not finish it within {minutes} minutes"
         elif job.state.status == FAILED:
-            failed[job.shot.slot] = job.state.reason or f"{label} could not make it"
+            failed[job.shot.slot] = _why_failed(job, workspace_id)
         else:
             try:
                 made[job.shot.slot] = await _keep(
@@ -724,15 +735,40 @@ async def _run_toolkit(executor: Any, store: MediaStore, session_factory: Callab
     return made, failed
 
 
+async def _guarded(plan: FootagePlan, workspace_id: UUID) -> None:
+    """PRD-264 ART5-1: every prompt and reference image a recipe may send, through the generation guard
+    before anything is priced. A refusal, or a reference that can't be read, submits nothing."""
+    links = dict.fromkeys(link for shot, _ in plan.shots for link in shot.references) if generation_guard.reads_enabled() else {}
+    try:
+        images = tuple([await _reference_image(link) for link in links])
+    except FileOutputError:
+        verdict = generation_guard.unchecked(workspace_id, GUARD_PATH)
+    else:
+        texts = tuple(prompt_for(shot.prompt, shot.style) for shot, _ in plan.shots)  # as sent: the style too
+        verdict = await generation_guard.check(generation_guard.GenerationRequest(GUARD_PATH, texts, images), workspace_id=workspace_id)
+    if not verdict.allowed:
+        raise FootageRefused(f"{verdict.message} Nothing was submitted.")
+
+
+async def _reference_image(link: str) -> Tuple[bytes, str]:
+    """A reference image's bytes and type, for the guard's read; :class:`FileOutputError` otherwise."""
+    data = await fetch(link, max_bytes=config.SOCIALS_FOOTAGE_MAX_BYTES, timeout_seconds=config.SOCIALS_MEDIA_FETCH_TIMEOUT_SECONDS)
+    found = media_type(data)
+    if found is None or found[0] != IMAGE_SLOT:
+        raise FileOutputError("a reference is not an image")
+    return data, found[2]
+
+
 async def generate(plan: FootagePlan, *, workspace_id: UUID, post_id: UUID, title: str,
                    session_factory: Callable[[], Any], store: MediaStore) -> Dict[str, Made]:
-    """Generate the plan's shots (D12, D13): priced and capped first, then
-    submitted, polled, copied into our storage, registered and marked done, and
-    booked. :class:`FootageRefused` when nothing was submitted, and why;
-    :class:`FootageError` naming each shot that failed (what was made is kept
-    on the post, and the next render reuses it)."""
+    """Generate the plan's shots (D12, D13): checked by the generation guard
+    (ART5-1), priced and capped, then submitted, polled, copied into our storage,
+    registered and marked done, and booked. :class:`FootageRefused` when nothing
+    was submitted, and why; :class:`FootageError` naming each shot that failed
+    (what was made is kept on the post, and the next render reuses it)."""
     if not plan.shots:
         return {}
+    await _guarded(plan, workspace_id)
     made: Dict[str, Made] = {}
     failed: Dict[str, str] = {}
     db = session_factory()

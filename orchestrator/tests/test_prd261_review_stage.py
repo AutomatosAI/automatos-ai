@@ -3,7 +3,10 @@
 Packages are the hello fixture, read by ``read_theme_package`` and then changed one way each
 (seeded bad packages), so each one fails at its own check. The LLM is a fake answering as the
 Messages API would; the SDK's names are a small test surface, so these tests don't depend on the
-generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/).
+generated ``data/sdk-surface.json`` (``test_prd261_sdk_surface_drift.py`` holds that to frontend/),
+except E3d's storage tests and theme voice's voice tests, which review on this host's own list: they
+prove the SDK's storage and voice areas are ones this host's review accepts. M-03's cases give hello a ``mobile`` block, whose colour pairs the
+contrast check measures (an error under AA blocks the verdict).
 The routes that run the stage are covered in ``test_prd261_theme_import.py`` (private upload) and
 by C-01a's submit tests.
 """
@@ -72,12 +75,12 @@ def test_a_clean_package_passes_with_every_check_reported():
     checks = report["checks"]
 
     assert (report["schema"], report["stage"], report["verdict"]) == (REPORT_SCHEMA, "C-02a", "pass")
-    assert set(checks) == {"sizes", "cssScope", "looks", "contrast", "uses", "clonedFrom", "llm"}
+    assert set(checks) == {"sizes", "cssScope", "looks", "contrast", "uses", "audioCapture", "clonedFrom", "llm"}
     assert {name: check["level"] for name, check in checks.items()} == {
         "sizes": "pass", "cssScope": "pass", "looks": "pass", "contrast": "not_measured",
-        "uses": "pass", "clonedFrom": "pass", "llm": "pass",
+        "uses": "pass", "audioCapture": "pass", "clonedFrom": "pass", "llm": "pass",
     }
-    assert report["summary"] == {"pass": 6, "warning": 0, "error": 0, "not_measured": 1}
+    assert report["summary"] == {"pass": 7, "warning": 0, "error": 0, "not_measured": 1}
     assert checks["uses"]["usedAreas"] == ["theme"] and checks["llm"]["calls"] >= 1
 
 
@@ -91,6 +94,93 @@ def test_contrast_is_listed_per_preset_as_not_measured_and_never_moves_the_verdi
     contrast = _review()["checks"]["contrast"]
     assert contrast["level"] == "not_measured" and contrast["reason"]
     assert [preset["id"] for preset in contrast["presets"]] == ["default", "night"]
+
+
+# M-03 (PB-35): a theme with a mobile block has its ten colour pairs measured (test_prd261_mobile_contrast.py
+# holds the measuring itself), for the table's defaults and then each preset. hello's two presets painted for
+# the phone: default (paper, blue) reads, night (ink, green) puts white text on a green at 3.41:1.
+MOBILE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.0.0"}
+WHITE, INK_TEXT = "0 0% 100%", "#14181c"
+# The table paints Studio tokens as triplets only (the web reads them as hsl(var(--x))): #14181c and #2e9e5b.
+INK_TRIPLET, GREEN = "210 16.67% 9.41%", "144.11 54.9% 40%"
+LOOK_TABLE = {
+    "knobs": {
+        "ground": {
+            "paper": {"--background": WHITE, "--foreground": INK_TRIPLET},
+            "ink": {"--background": "220 13% 9%", "--foreground": "210 20% 96%"},
+        },
+        "accent": {
+            "blue": {"--primary": "221.21 83.19% 53.33%", "--primary-foreground": WHITE},
+            "green": {"--primary": GREEN, "--primary-foreground": WHITE},
+        },
+    },
+    # radius is painted by a numeric rule, as the reader needs every look knob painted (first_paint.py).
+    "numeric": [build.HELLO_RADIUS_RULE],
+    "defaults": {"accent": "blue", "ground": "paper", "radius": 6},
+}
+
+
+def _review_mobile(mobile, files=None):
+    """The review of hello with a ``mobile`` block (and any files added), its engines at the block's lowest host."""
+    fields = {"uses": ["theme"], "engines": MOBILE_ENGINES, "mobile": mobile}
+    data = build.build_package(replace={build.MANIFEST: build.changed_manifest(fields), **(files or {})})
+    return run_review_stage(read_theme_package(data), len(data), llm_call=_llm(), surface=SURFACE)
+
+
+def test_a_mobile_pair_under_aa_makes_contrast_an_error_naming_it_and_blocks():
+    report = _review_mobile({"tokens": {"light": {"--background": WHITE, "--foreground": "0 0% 58%"}}})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["status"]) == ("blocked", "error", "fail")
+    assert contrast["problems"] == [
+        "mobile.tokens.light: --foreground on --background is 3.03:1, under the AA minimum of 4.5:1 for text.",
+    ]
+    assert report["summary"]["error"] == 1 and report["checks"]["llm"]["level"] == "pass"
+    assert member_view(report)["checks"]["contrast"] == contrast  # the uploader sees why it is blocked
+
+
+def test_a_mobile_block_whose_measured_pairs_meet_aa_passes_contrast():
+    report = _review_mobile({"tokens": {"light": {"--background": WHITE, "--foreground": INK_TEXT, "--ring": "0 0% 56.5%"}}})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["source"]) == ("pass", "pass", "tokens")
+    assert [scheme["id"] for scheme in contrast["schemes"]] == ["light"] and "presets" not in contrast
+    assert report["summary"] == {"pass": 8, "warning": 0, "error": 0, "not_measured": 0}
+
+
+def test_from_looks_a_preset_under_aa_blocks_and_is_named():
+    report = _review_mobile({"fromLooks": True}, {"boot/prepaint.json": json.dumps(LOOK_TABLE).encode("utf-8")})
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"], contrast["source"]) == ("blocked", "error", "fromLooks")
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("boot/prepaint.json#defaults", "pass"), ("default", "pass"), ("night", "fail"),
+    ]
+    assert contrast["problems"] == [
+        'Preset "night": --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.',
+    ]
+
+
+def test_from_looks_defaults_under_aa_block_while_every_preset_passes():
+    # The answer serves the table's defaults to every member with no stored look, so the review measures them too.
+    table = {**LOOK_TABLE, "defaults": {"accent": "green", "ground": "paper", "radius": 6}}
+    night = {
+        "schema": "automatos-e2e-hello-look/v1", "id": "night", "name": "Night", "sub": "",
+        "accent": "blue", "ground": "ink", "radius": 0,
+    }
+    report = _review_mobile({"fromLooks": True}, {
+        "boot/prepaint.json": json.dumps(table).encode("utf-8"),
+        "looks/presets/night.look.json": json.dumps(night).encode("utf-8"),
+    })
+    contrast = report["checks"]["contrast"]
+
+    assert (report["verdict"], contrast["level"]) == ("blocked", "error")
+    assert [(preset["id"], preset["status"]) for preset in contrast["presets"]] == [
+        ("boot/prepaint.json#defaults", "fail"), ("default", "pass"), ("night", "pass"),
+    ]
+    assert contrast["problems"] == [
+        "boot/prepaint.json#defaults: --primary-foreground on --primary is 3.41:1, under the AA minimum of 4.5:1 for text.",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +230,87 @@ def test_a_namespace_import_is_a_warning_and_its_names_are_found_in_the_text():
 
     assert uses["level"] == "warning" and uses["wideImport"] is True
     assert uses["usedAreas"] == ["chat", "theme"] and uses["unknownNames"] == []
+
+
+STORAGE_IMPORT = "defineTheme, readThemeState, writeThemeState"
+STORAGE_AREA = "storage"
+
+
+def _review_on_this_host(entry: str, **manifest):
+    """The review with no test surface: the SDK names are this host's ``data/sdk-surface.json``."""
+    checked, size = _checked(entry, **manifest)
+    return run_review_stage(checked, size, llm_call=_llm())
+
+
+def test_an_sdk_storage_call_declared_in_uses_passes_on_this_hosts_sdk():
+    report = _review_on_this_host(_entry_importing(STORAGE_IMPORT), uses=["theme", STORAGE_AREA])
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert STORAGE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert {"readThemeState", "writeThemeState"} <= set(uses["usedNames"])
+
+
+def test_an_sdk_storage_call_without_storage_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(STORAGE_IMPORT))
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [STORAGE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=STORAGE_AREA)]
+
+
+VOICE_IMPORT = "defineTheme, VoiceButton, readVoiceLevels, useVoice"
+VOICE_AREA = "voice"
+VOICE_NAMES = {"VoiceButton", "readVoiceLevels", "useVoice"}
+# The voice area is SDK 1.2.0's: a theme that uses it asks for that SDK, and this host (contract.SDK_VERSION) is it.
+VOICE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.2.0"}
+
+
+def test_an_sdk_voice_call_declared_in_uses_passes_on_this_hosts_sdk():
+    # Theme voice (TV-C5): the SDK 1.2.0 voice area is one this host's review accepts.
+    report = _review_on_this_host(_entry_importing(VOICE_IMPORT), uses=["theme", VOICE_AREA], engines=VOICE_ENGINES)
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert VOICE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert VOICE_NAMES <= set(uses["usedNames"])
+
+
+def test_an_sdk_voice_call_without_voice_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(VOICE_IMPORT))
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [VOICE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=VOICE_AREA)]
+
+
+PROACTIVE_IMPORT = "defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions"
+PROACTIVE_AREA = "proactive"
+PROACTIVE_NAMES = {"DISPLAY_STATE_LABELS", "BriefCard", "SuggestionCard", "BriefVoice", "useBrief", "useSuggestions"}
+# The proactive area and its default components are SDK 1.3.0's (PRD-268 K12): a theme that uses them asks for it.
+PROACTIVE_ENGINES = {"automatos": "^1.1.0", "sdk": "^1.3.0"}
+
+
+def test_an_sdk_proactive_call_declared_in_uses_passes_on_this_hosts_sdk():
+    # PRD-268 US-C21e: the hooks, the default cards, BriefVoice and DISPLAY_STATE_LABELS are names this host exports.
+    uses_declared = ["cards", PROACTIVE_AREA, "theme", "voice"]
+    report = _review_on_this_host(_entry_importing(PROACTIVE_IMPORT), uses=uses_declared, engines=PROACTIVE_ENGINES)
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("pass", "pass", [])
+    assert PROACTIVE_AREA in uses["usedAreas"] and uses["undeclaredAreas"] == []
+    assert PROACTIVE_NAMES <= set(uses["usedNames"])
+
+
+def test_an_sdk_proactive_call_without_proactive_in_uses_is_a_warning_listing_it():
+    report = _review_on_this_host(_entry_importing(PROACTIVE_IMPORT), uses=["cards", "theme", "voice"])
+    uses = report["checks"]["uses"]
+
+    assert (report["verdict"], uses["level"], uses["unknownNames"]) == ("review_required", "warning", [])
+    assert uses["undeclaredAreas"] == [PROACTIVE_AREA]
+    assert uses["problems"] == [sdk_uses.UNDECLARED.format(areas=PROACTIVE_AREA)]
 
 
 def test_without_the_sdk_name_list_the_uses_check_is_a_warning(monkeypatch):

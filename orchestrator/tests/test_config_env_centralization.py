@@ -87,7 +87,8 @@ def _restore_config_module():
     ``_reload_config`` mutates the shared ``config`` module (``importlib.reload``
     rebuilds its ``Config`` class + singleton). Downstream suites co-run after
     this file — which sorts first — must not inherit a test's env-derived config
-    state (the leak that broke test_harness_commands / test_prd143_concierge).
+    state (the leak that broke test_prd143_concierge, and test_harness_commands
+    until PRD-263 US-047 deleted it with the handler it tested).
 
     Restore the exact pre-test ``config`` module object into ``sys.modules`` so
     the class identity the rest of the session already bound (via

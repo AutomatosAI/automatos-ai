@@ -3,3 +3,5 @@ node_modules/
 test-results/
 playwright-report/
 records/
+# PRD-261 C-06q1: Play's preview shots, uploaded as the play-previews artifact; an owner commits the picked ones to the kit.
+previews/

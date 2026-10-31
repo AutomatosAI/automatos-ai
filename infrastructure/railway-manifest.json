@@ -18,6 +18,7 @@
         "automotas-ai-frontend",
         "agent-workspace-worker",
         "media-render",
+        "voice-tts",
         "agent-opt-worker"
       ]
     },
@@ -178,6 +179,8 @@
         "VOICE_STT_MODEL",
         "VOICE_TTS_DEFAULT_VOICE",
         "VOICE_TTS_MODEL",
+        "VOICE_TTS_TOKEN",
+        "VOICE_TTS_URL",
         "WIDGET_TOKEN_SECRET",
         "WORKER_INTERNAL_TOKEN",
         "WORKER_INTERNAL_URL"
@@ -304,12 +307,50 @@
         "ENVIRONMENT",
         "LOG_LEVEL",
         "LOG_RELAY_ENABLED",
+        "MEDIA_RENDER_C2PA_SIGNING_CERT_PEM",
+        "MEDIA_RENDER_C2PA_SIGNING_KEY_PEM",
         "MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE",
         "MEDIA_RENDER_MAX_CONCURRENT_RENDERS",
         "MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE",
         "MEDIA_RENDER_MEDIA_URL_PREFIXES",
         "SERVICE_NAME",
         "SOCIALS_RENDER_TOKEN"
+      ]
+    },
+    "voice-tts": {
+      "_note": "Auto's server voice (27 Oct 2026): Kokoro streamed as MP3 for the phone and the web quick-ask, reached by the API at VOICE_TTS_URL. Start at 2 vCPU / 2 GB, ONE replica: it speaks as many replies at once as it has vCPUs, so raise the vCPUs, not the replicas. /readyz answers 200 only once the model has loaded.",
+      "group": "core",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/services/voice-tts"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8100,
+      "healthcheck": "/readyz",
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": 1,
+      "resources": {
+        "vcpu": 2,
+        "memory_gb": 2
+      },
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "ENVIRONMENT",
+        "LOG_LEVEL",
+        "LOG_RELAY_ENABLED",
+        "SERVICE_NAME",
+        "VOICE_TTS_MAX_CONCURRENT",
+        "VOICE_TTS_TOKEN"
       ]
     },
     "agent-opt-worker": {
@@ -913,6 +954,7 @@
       "automatos-ai-mem0-Server",
       "agent-workspace-worker",
       "media-render",
+      "voice-tts",
       "prometheus",
       "loki",
       "alertmanager",

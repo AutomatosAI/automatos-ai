@@ -125,3 +125,56 @@ def test_skill_gaps_are_marked_skill_and_come_for_an_api_agent_too():
     # with Data off, the same skill names a tool its sessions would not have
     off = agents_api._session_tool_gaps(api_agent, ["graph"])
     assert off == [{"skill": "shop-analysis", "tools": ["platform_query_data"], "kind": "skill"}]
+
+
+# ── PRD-256 F430: Socials on for the workspace, and the agent's sessions without it ──
+
+class _WorkspaceDB(_DB):
+    """A workspace row for the Socials check; every other table as ``_DB`` has it."""
+
+    def __init__(self, *present):
+        super().__init__(*present)
+        self.workspace = SimpleNamespace(id=WS, settings={"socials": {"enabled": True}})
+
+    def query(self, column):
+        from core.models.workspaces import Workspace
+
+        if column is Workspace:
+            self._table = "workspaces"
+            return self
+        return super().query(column)
+
+    def first(self):
+        return self.workspace if self._table == "workspaces" else super().first()
+
+
+@pytest.fixture
+def socials(monkeypatch):
+    """Socials on (both switches), or off with its reason."""
+    from modules.socials import settings
+
+    state = {"off": None}
+    monkeypatch.setattr(settings, "socials_off_reason", lambda workspace: state["off"])
+    return state
+
+
+def test_socials_on_with_the_group_off_is_flagged_with_its_fix(graph, socials):
+    found = _gaps(_WorkspaceDB(), [g for g in GROUP_IDS if g != "socials"])
+    assert found == [{
+        "kind": "workspace", "capability": "socials", "group": "socials",
+        "message": gaps.CAPABILITIES[-1].message, "fix": {"enable_group": "socials"},
+    }]
+    assert "cannot draft posts" in found[0]["message"]
+
+
+def test_socials_off_or_the_group_on_is_not_flagged(graph, socials):
+    socials["off"] = "Socials is off for this workspace."
+    assert _gaps(_WorkspaceDB(), ["data"]) == []
+    socials["off"] = None
+    assert _gaps(_WorkspaceDB(), ["socials"]) == []
+
+
+def test_no_workspace_row_is_no_socials_gap_and_logs_nothing(graph, caplog):
+    with caplog.at_level("ERROR"):
+        assert _gaps(_DB(), []) == []
+    assert not [r for r in caplog.records if "socials" in r.getMessage()]

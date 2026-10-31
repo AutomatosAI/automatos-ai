@@ -9,15 +9,16 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { UiStyleProvider, useUiStyle } from '../contexts/ui-style-context'
-import { LookProvider } from './looks/look-provider'
-import { AccountLookScope } from './looks/account-look-scope'
+import { UiStyleProvider } from '../contexts/ui-style-context'
 import type { UiStyle } from '@/lib/ui-style'
 import type { ThemeTone } from '@/lib/theme-host/boot'
-import { BUILTIN_THEME_CLIENTS } from '@/lib/theme-host/builtin/clients'
+import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
+import { ChooseInstallProvider } from './settings/themes/choose-install'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
+import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
+import { BriefOnOpen } from './proactive/brief-on-open'
 import { isSaaS } from '@/lib/auth-edition'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
@@ -77,28 +78,24 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** PRD-261 A-03: the active builtin theme's client module (its stylesheet chunk), or nothing. */
-function BuiltinThemeClient() {
-  const { activeTheme } = useUiStyle()
-  const Client = activeTheme === null ? undefined : BUILTIN_THEME_CLIENTS.get(activeTheme.ref)
-  return Client === undefined ? null : <Client />
-}
-
 interface ProvidersProps {
   children: React.ReactNode
   /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
   initialUiStyle?: UiStyle
   /** PRD-260 K4, PRD-261 A-03: the boot's tone (a theme whose tone follows its look), forced from the first paint. */
   initialTone?: ThemeTone
+  /** PRD-261 W-A6b: an installed theme's registry entry, from its boot (lib/theme-host/installed-entry.ts); null otherwise. */
+  initialTheme?: ThemeEntry | null
 }
 
-export function Providers({ children, initialUiStyle, initialTone }: ProvidersProps) {
-  // PRD-260 K4: under Play the look's ground sets the tone (LookProvider hands it up).
-  // forcedTheme forces it without overwriting the user's stored tone, which returns when
-  // they leave Play; it starts from the server's tone cookie, so next-themes' script
-  // forces it before paint. Forced at every width: the look paints <html> under Play below
-  // 1024 px too, and Studio's semantic tokens and dark: classes must match its ground there.
-  const [playTone, setPlayTone] = useState<ThemeTone | undefined>(initialTone)
+export function Providers({ children, initialUiStyle, initialTone, initialTheme = null }: ProvidersProps) {
+  // PRD-260 K4, PRD-261 A-13c: under a theme whose tone follows its look, the look's ground
+  // sets the tone (the look runtime hands it up). forcedTheme forces it without overwriting
+  // the user's stored tone, which returns when they leave the theme; it starts from the
+  // server's tone cookie, so next-themes' script forces it before paint. Forced at every
+  // width: the look runtime paints <html> below the theme's minWidth too, and Studio's
+  // semantic tokens and dark: classes must match its ground there.
+  const [lookTone, setLookTone] = useState<ThemeTone | undefined>(initialTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -118,24 +115,31 @@ export function Providers({ children, initialUiStyle, initialTone }: ProvidersPr
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
-          forcedTheme={playTone}
+          forcedTheme={lookTone}
         >
-          <UiStyleProvider initialStyle={initialUiStyle}>
-          <BuiltinThemeClient />
+          <UiStyleProvider initialStyle={initialUiStyle} installedTheme={initialTheme}>
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
-              {/* PRD-260 F5: looks are the signed-in user's in this workspace,
-                  so the LookProvider sits inside the WorkspaceProvider. */}
-              <AccountLookScope>
-              <LookProvider onToneChange={setPlayTone}>
-              {/* PRD-222: a new workspace lands directly in the conversation
-                  where Auto opens (OnboardingOpener) — no first-login modal or
-                  guided tour (both retired in W2·S5). */}
-              <ThemeHostProvider>{children}</ThemeHostProvider>
-              <GlobalSearch />
+              {/* PRD-261 A-07d: one chooser for installed themes, around every page (Settings, the
+                  Marketplace, the header's theme menu) and ⌘K, so a private version's opt-in
+                  dialog opens from any of them before the choice is stored. */}
+              <ChooseInstallProvider>
+                {/* PRD-222: a new workspace lands directly in the conversation
+                    where Auto opens (OnboardingOpener) — no first-login modal or
+                    guided tour (both retired in W2·S5). */}
+                <ThemeHostProvider>
+                  {/* PRD-261 A-13c: the active theme's look runtime, at every width, switched on only
+                      while the theme declares looks (Classic and Studio get none); it stays mounted
+                      either way, so a style switched in place never remounts the page (M69).
+                      PRD-260 F5: looks are the signed-in user's in this workspace, so it sits inside
+                      the WorkspaceProvider. */}
+                  <ThemeLookRuntime onToneChange={setLookTone}>{children}</ThemeLookRuntime>
+                </ThemeHostProvider>
+                <GlobalSearch />
+              </ChooseInstallProvider>
+              {/* PRD-268 US-W02: the day's brief, opened once per local date when a signed-in workspace loads. */}
+              <BriefOnOpen />
               <Toaster position="top-right" richColors closeButton />
-              </LookProvider>
-              </AccountLookScope>
             </WorkspaceProvider>
           </QueryClientProvider>
           </UiStyleProvider>

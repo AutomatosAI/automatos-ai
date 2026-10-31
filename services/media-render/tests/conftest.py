@@ -23,11 +23,14 @@ from media_render.media_urls import parse_prefixes  # noqa: E402
 
 @pytest.fixture
 def settings(tmp_path):
-    """The image's own settings, with a scratch work dir, an empty library and a token."""
+    """The image's own settings, with a scratch work dir, an empty library and a token. No
+    signing certificate is configured, so the C2PA signer makes a throwaway per-install one
+    in the scratch dir on first use (PRD-264 EUAI-06b): nothing secret is committed."""
     return replace(
         load_settings(),
         work_dir=str(tmp_path / "work"),
         music_dir=str(tmp_path / "music"),
         internal_token=TOKEN,
         media_url_prefixes=parse_prefixes(STORAGE),
+        c2pa_data_dir=str(tmp_path / "c2pa"),
     )

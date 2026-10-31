@@ -9,13 +9,19 @@
  * session and its workspace from the page). The boot route is not workspace-scoped (it resolves
  * the workspace from the install, §2.2), so no X-Workspace-ID is needed. In SaaS the Clerk
  * session's token goes as Bearer and a signed-out request asks nothing; in the local edition no
- * token is sent and the backend serves the local operator, as the files proxy does (A-08b).
+ * token is sent and the backend serves the local operator. On a local install in
+ * LOCAL_REMOTE_ACCESS=paired mode that lane is closed: the boot route answers 401
+ * (device_pairing_required), which paints the base boot quietly, and the browser then asks the
+ * boot route itself with its own device token (boot-client.ts; PRD-266 K8: the layout reads no
+ * device cookie) while the client host loads the theme with it.
  *
- * The fetch has 300 ms (INSTALLED_BOOT_TIMEOUT_MS). When it fails, times out or answers
- * anything but a boot, the resolver throws and createThemeBootResolver (boot.ts) paints the base
- * boot (Studio's classes); the client host then loads the theme as before. A 401, 403 or 404 (an
- * expired session, a stale cookie, an install removed or of another workspace) is no theme to
- * paint, not a failure: the base boot, with nothing logged.
+ * The fetch has 300 ms (INSTALLED_BOOT_TIMEOUT_MS): it holds up the first HTML of every page under
+ * an installed theme, so it stays short. When it fails, times out or answers anything but a boot,
+ * the resolver throws and createThemeBootResolver (boot.ts) paints the base boot (Studio's
+ * classes); the client host then loads the theme, and the browser fetches the boot itself
+ * (boot-client.ts) for the theme's entry and look rules, so the look paints late rather than never.
+ * A 401, 403 or 404 (an expired session, a stale cookie, an install removed or of another
+ * workspace) is no theme to paint, not a failure: the base boot, with nothing logged.
  *
  * A per-process cache keeps a boot for 60 s keyed by (user, install, digest): one slot per user
  * and install holds the boot and the one package digest its integrity names, and it is served
@@ -35,11 +41,10 @@
 import { isSaaS } from '@/lib/auth-edition'
 
 import { baseThemeBoot } from './boot'
-import { sanitizeThemeBoot } from './boot-sanitize'
+import { parseInstalledBoot } from './boot-sanitize'
 import type { ThemeBoot, ThemeBootResolver } from './boot-types'
 import { THEME_DIGEST_PATTERN, THEME_FILES_PATH } from './constants'
-import { isInstalledThemeStyle, themeRefOf } from './registry'
-import type { UiStyle } from './registry-types'
+import { installIdOfStyle } from './registry'
 import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 
 /** The time the boot fetch may take before the page paints the base boot. */
@@ -56,7 +61,6 @@ const BACKEND_URL = // Server-side: BACKEND_INTERNAL_URL (container DNS, local e
 // is the frontend itself. Unset in SaaS ⇒ identical to before. (PRD-209)
 process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-const INSTALL_REF_PREFIX = 'install:'
 /** The local edition has one identity, the local operator (hybrid.py's anonymous fallback). */
 const LOCAL_OPERATOR = 'local-operator'
 /** Answers that mean "no theme to paint for this caller", not a broken theme. */
@@ -140,13 +144,6 @@ export async function requestDigestHint(installId: string): Promise<string | nul
   }
 }
 
-/** The install a style names, or null for anything but `theme:install:<uuid>`. */
-export function installIdOfStyle(style: UiStyle): string | null {
-  if (!isInstalledThemeStyle(style)) return null
-  const ref = themeRefOf(style)
-  return ref === null ? null : ref.slice(INSTALL_REF_PREFIX.length)
-}
-
 /** The slot of a user's install: both values, unambiguously (the digest is checked against the entry's). */
 export function bootCacheKey(user: string, installId: string): string {
   return JSON.stringify([user, installId])
@@ -161,15 +158,6 @@ export function bootDigest(boot: ThemeBoot): string | null {
   const digests = new Set(Object.keys(boot.integrity).map((url) => url.slice(THEME_FILES_PATH.length).split('/')[0]))
   if (digests.size !== 1) throw new Error(`the boot's integrity names ${digests.size} package digests`)
   return Array.from(digests)[0]
-}
-
-/** The answer as a boot that may be written into the page; throws when it is not an object. */
-export function parseInstalledBoot(value: unknown): ThemeBoot {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('the boot route did not answer with an object')
-  }
-  // Every field is checked by sanitizeThemeBoot, which reads each one as unknown.
-  return sanitizeThemeBoot(value as ThemeBoot)
 }
 
 /** `work` with a deadline: past it the request is aborted and the promise rejects. */

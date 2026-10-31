@@ -41,6 +41,7 @@ def _make_action(
         description=description,
         category=category,
         parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
         admin_only=admin_only,
         super_admin_only=super_admin_only,
         promoted=promoted,
@@ -161,7 +162,7 @@ def test_su_action_included_only_with_explicit_include_flag(registry):
 
     # The flag default is False on the definition itself.
     assert ActionDefinition(
-        name="x", description="d", category="c", parameters={},
+        name="x", description="d", category="c", parameters={}, permission_level="read",
     ).super_admin_only is False
 
 

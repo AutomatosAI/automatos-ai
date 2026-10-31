@@ -5,10 +5,10 @@ tasks, playbook runs, and (future) scheduled/webhook agents. A pending grant
 holds its subject blocked; granting it here authorises the subject and re-queues
 a blocked board task; revoking a live grant retracts the authorisation.
 
-PRD-196 S2 (P2-15, governance C.8): the whole surface is workspace-admin gated
-via the canonical ``require_workspace_admin`` dependency (PRD-185 S12) — a
-plain member must not be able to authorise an agent's destructive action, and
-the approvals surface is ws-admin-only by Gerard's posture call (196 Q2).
+PRD-266 D16 (Gerard, 20 Oct, #1253) reverses PRD-196 S2's admin-only posture here:
+list, grant, deny and answer take ``require_workspace_answerer`` (an owner, admin or
+editor answers; a viewer is refused), and revoke keeps ``require_workspace_admin``
+(PRD-185 S12): only an owner or admin retracts an authorisation once given.
 
 Every state change is audited (governance action) via the S1 nullable-user audit
 path — the actor here is the human approver.
@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
-from core.auth.workspace_admin import require_workspace_admin
+from core.auth.workspace_admin import require_workspace_admin, require_workspace_answerer
 from core.database.database import get_db
 from core.models.approval_grants import (
     ApprovalGrant,
@@ -32,6 +32,7 @@ from core.models.approval_grants import (
     KIND_QUESTION,
     SUBJECT_BOARD_TASK,
 )
+from api.approval_grant_lapses import the_card_can_run
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
 from services.click_memory import APPROVED, DECLINED, remembers_the_decision
@@ -108,7 +109,7 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 async def list_grants(
     status: Optional[str] = None,
     kind: Optional[str] = None,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """List this workspace's approval grants, newest first.
@@ -171,7 +172,7 @@ def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGran
 @remembers_the_decision(APPROVED)  # P256-FIX-N13-4: the owner's click reaches what Auto knows
 async def grant_approval(
     grant_id: int,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Approve a pending grant (a human says yes) and re-queue any blocked subject."""
@@ -180,8 +181,7 @@ async def grant_approval(
     # completion path (a yes/no can't stand in for a free-text decision).
     if grant.kind == KIND_QUESTION:
         raise HTTPException(status_code=422, detail=question_not_approval(grant))
-    if grant.status != GrantStatus.PENDING.value:
-        raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
+    the_card_can_run(db, grant)  # P256-FIX-N17-3: not pending, replaced or expired: 422, nothing runs
 
     # F193: two approvals at once (a double click, two admins) both read PENDING
     # and both resumed the call. The flip is a compare-and-set: only the approval
@@ -283,7 +283,7 @@ def _cas_resolve_grant(
 @remembers_the_decision(DECLINED)  # P256-FIX-N13-4: a decline is remembered too
 async def deny_approval(
     grant_id: int,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Refuse a pending grant. An approval denial FAILS the subject; a question
@@ -364,7 +364,7 @@ class AnswerRequest(BaseModel):
 async def answer_question(
     grant_id: int,
     body: AnswerRequest,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Answer a pending question: record the answer, resume the parked subject

@@ -1,0 +1,50 @@
+{
+  "_comment": "PRD-261 A-11b: recorded chat turns, in the stream format lib/chat/hooks.ts reads: each frame is a '0:' text line ({ text }) or a 'd:' data line ({ data }). The payloads have the shapes the backend sends (a chat-id frame naming the new chat, tool-data with a tool_approval, result_formatter.py; finish). A turn with hold: true keeps the stream open after its frames, until the browser aborts it (Stop). specs/sdk-chat.spec.ts answers the app's own POST /api/chat with them. Test data only.",
+  "chatId": "e2e-a11b-chat",
+  "turns": {
+    "answer": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-a11b-chat" } },
+        { "text": "Here are three laptops" },
+        { "text": " under 1,000 euros." },
+        { "data": { "type": "finish" } }
+      ]
+    },
+    "again": {
+      "frames": [
+        { "text": "Here are three more laptops." },
+        { "data": { "type": "finish" } }
+      ]
+    },
+    "partial": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-a11b-chat" } },
+        { "text": "I am still writing the comparison" }
+      ],
+      "hold": true
+    },
+    "approval": {
+      "frames": [
+        { "data": { "type": "chat-id", "chatId": "e2e-a11b-chat" } },
+        { "text": "This action needs your approval before it runs." },
+        {
+          "data": {
+            "type": "tool-data",
+            "data": {
+              "tool_approval": {
+                "grant_id": 11201,
+                "action": "platform_delete_document",
+                "message": "This action (destructive) requires confirmation.",
+                "permission_level": "destructive",
+                "params": { "document_id": "e2e-a11b-doc" },
+                "risk_tier": "human_in_the_loop",
+                "oversight_rationale": "Deletes a document. A human must approve before it runs."
+              }
+            }
+          }
+        },
+        { "data": { "type": "finish" } }
+      ]
+    }
+  }
+}

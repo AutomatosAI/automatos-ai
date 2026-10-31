@@ -28,8 +28,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import (
+from config import config
+from core.llm.embedding_manager import EmbeddingManager
+from core.qdrant import (
     Distance,
     FieldCondition,
     Filter,
@@ -39,11 +40,9 @@ from qdrant_client.models import (
     MatchValue,
     PayloadSchemaType,
     PointStruct,
+    QdrantRestClient,
     VectorParams,
 )
-
-from config import config
-from core.llm.embedding_manager import EmbeddingManager
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
@@ -109,7 +108,7 @@ class DurableMemoryStore:
         # URL and is unchanged.
         self._enabled = bool(config.QDRANT_URL)
         self._client = (
-            AsyncQdrantClient(
+            QdrantRestClient(
                 url=config.QDRANT_URL,
                 api_key=config.QDRANT_API_KEY or None,
                 timeout=30,

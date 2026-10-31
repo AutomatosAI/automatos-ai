@@ -6,17 +6,25 @@ Handles:
 - Formatting AI SDK Data Stream format
 - Word-boundary-aware chunking for smooth streaming
 - Widget-related SSE events (memory, workflow)
+- PRD-264 EUAI-09 (Art. 50(2)): every assistant message is marked machine-readable as
+  AI-generated: the frame that opens it (``chat-id``) and the frame that closes it
+  (``finish``) carry ``"ai_generated": true``. The chat text itself is not recorded
+  anywhere for detection (EUAI-10): the mark rides in the payload only.
 """
 
 import json
 import logging
-from typing import Dict, Any, AsyncGenerator, List, Optional
+from typing import Dict, Any, AsyncGenerator, List, Mapping, Optional, Union
 import asyncio
 
 from consumers.chatbot import on_screen
 from modules.tools.execution.card_raised import WAITING, streams_the_wait
 
 logger = logging.getLogger(__name__)
+
+# PRD-264 EUAI-09: the payload field that marks an assistant message as AI-generated.
+AI_GENERATED_FIELD = "ai_generated"
+_AI_GENERATED = f'"{AI_GENERATED_FIELD}":true'
 
 
 class StreamingHandler:
@@ -34,8 +42,16 @@ class StreamingHandler:
         escaped = json.dumps(text)
         return f'0:{escaped}\n'
 
-    def format_aisdk_data(self, event_type: str, data: Dict[str, Any] = None) -> str:
-        """Format data event for AI SDK Data Stream."""
+    def format_aisdk_data(self, event_type: Union[str, Mapping[str, Any]], data: Dict[str, Any] = None) -> str:
+        """Format data event for AI SDK Data Stream.
+
+        PRD-266 US-007b: a mapping that carries its own ``type`` is the frame itself, so the
+        agent-info frame is ``d:{"type": "agent-info", "agent": {…}}``, the shape
+        ``frontend/lib/chat/hooks.ts`` reads (it was ``d:{"type": {…}}``). A string is the
+        event's type and ``data`` its payload, as every other caller passes them.
+        """
+        if isinstance(event_type, Mapping) and "type" in event_type:
+            return f'd:{json.dumps(dict(event_type))}\n'
         payload = {"type": event_type}
         if data:
             payload["data"] = data
@@ -72,8 +88,8 @@ class StreamingHandler:
         )
 
     def format_aisdk_chat_id(self, chat_id: str) -> str:
-        """Format chat-id data event."""
-        return f'd:{{"type":"chat-id","chatId":"{chat_id}"}}\n'
+        """Format chat-id data event: the assistant message's first frame, marked AI-generated."""
+        return f'd:{{"type":"chat-id","chatId":"{chat_id}",{_AI_GENERATED}}}\n'
 
     def format_aisdk_tool_data(self, tool_data: Dict[str, Any]) -> str:
         """Format tool-data event for AI SDK."""
@@ -142,8 +158,8 @@ class StreamingHandler:
         return f'd:{{"type":"usage","data":{json.dumps(usage_data)}}}\n'
 
     def format_aisdk_finish(self, reason: str = "stop") -> str:
-        """Format finish event."""
-        return f'd:{{"type":"finish","finishReason":"{reason}"}}\n'
+        """Format finish event: the assistant message's last frame, marked AI-generated."""
+        return f'd:{{"type":"finish","finishReason":"{reason}",{_AI_GENERATED}}}\n'
 
     def format_aisdk_error(self, error: str, code: Optional[str] = None) -> str:
         """Format error event for AI SDK. PRD-239 S4: ``code`` is the stable
@@ -266,7 +282,7 @@ class StreamingHandler:
         cost: Optional[float] = None,
     ) -> str:
         """Format done event with metadata (PRD-123 enriched finish)."""
-        payload: Dict[str, Any] = {"finishReason": "stop"}
+        payload: Dict[str, Any] = {"finishReason": "stop", AI_GENERATED_FIELD: True}
         if stop_reason:
             payload["stopReason"] = stop_reason
         if tokens_used is not None:

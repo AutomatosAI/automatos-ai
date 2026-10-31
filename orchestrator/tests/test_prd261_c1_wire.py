@@ -8,14 +8,17 @@ Pins (plan §2.4 W-C1 row, §2.6 C1-wire; Gerard D3, 19 Oct):
 * every W-C1 route is in ``reports/route-manifest.json`` and ``route_count == len(routes)``;
 * the submit route's body limit is sized from ``THEME_MAX_PACKAGE_MB``;
 * step-up (A-07c) is on submit and listing install, after the permission gate, and nowhere else
-  among the W-C1 routes; app-wide it is on exactly the W-B2 routes and these two;
+  among the W-C1 routes besides the four admin ones; app-wide it is on exactly the W-B2 and account
+  routes, these and W-C3's revocation create and lift;
 * the admin review routes carry no workspace gate, call ``_require_admin(ctx)`` first, and every
   mutating one is in the authZ sweep's ``ADMIN_GATED_IN_HANDLER``; every other W-C1 mutating route
   carries ``require_workspace_permission`` (bucket a);
 * the review config names are on ``config`` and in ``reports/config-surface.json``, with the
   defaults the lanes read (Q9 off; the LLM chunking of ``llm_stage.py``), and none names a key;
 * the seam: approving a version offers it to the listing installs that run an older one
-  (``listing_updates.offer_listed_update`` called from ``review.approve``).
+  (``listing_updates.offer_listed_update`` called from ``review.approve``) and moves the unpinned
+  ones to it (``auto_update.apply_listed_update``, publish contract D1; the rest of that rule is
+  ``test_prd261_theme_auto_update.py``).
 
 Submit's default review stage (C-02a, wired here) is proven on the route in
 ``test_prd261_theme_submit.py``; ``sdk-surface.json`` against ``frontend/`` in
@@ -64,6 +67,7 @@ from services.themes.digest import package_digest  # noqa: E402
 from tests.test_p2w2_authz_boundary_sweep import ADMIN_GATED_IN_HANDLER  # noqa: E402
 from tests.test_prd261_b2_wire import ACCOUNT_STEP_UP_ROUTES  # noqa: E402
 from tests.test_prd261_b2_wire import STEP_UP_ROUTES as B2_STEP_UP_ROUTES  # noqa: E402
+from tests.test_prd261_c3_wire import C3_STEP_UP_ROUTES  # noqa: E402
 
 C1_MODULES = {
     "marketplace_themes_submit_router": submit_api, "marketplace_themes_router": listings_api,
@@ -74,7 +78,8 @@ LISTING = "/api/marketplace/themes/{listing_id}"
 C1_ROUTES = {
     ("POST", "/api/marketplace/themes/submit"),
     ("GET", "/api/marketplace/themes"), ("GET", LISTING), ("POST", LISTING + "/install"),
-    ("GET", "/api/admin/themes/pending"), ("GET", ADMIN + "/report"), ("POST", ADMIN + "/report-note"),
+    ("GET", "/api/admin/themes/pending"), ("GET", ADMIN + "/report"), ("GET", ADMIN + "/review-package"),
+    ("POST", ADMIN + "/report-note"),
     ("POST", ADMIN + "/approve"), ("POST", ADMIN + "/reject"), ("POST", ADMIN + "/deactivate"),
     ("POST", ADMIN + "/signature"),
 }
@@ -231,8 +236,9 @@ SAMPLES = {
     "POST /api/marketplace/themes/{listing_id}/install": "/api/marketplace/themes/acme.ink/install",
     "GET /api/admin/themes/pending": "/api/admin/themes/pending",
 }
-for tail in ("report", "report-note", "approve", "reject", "deactivate", "signature"):
-    method = "GET" if tail == "report" else "POST"
+READS = ("report", "review-package")  # the admin GETs; the other tails are POSTs
+for tail in READS + ("report-note", "approve", "reject", "deactivate", "signature"):
+    method = "GET" if tail in READS else "POST"
     SAMPLES[method + " /api/admin/themes/{package_id}/" + tail] = (
         "/api/admin/themes/00000000-0000-4000-8000-000000000000/" + tail)
 
@@ -311,9 +317,10 @@ def test_no_earlier_route_shadows_a_w_c1_route(live_app):
         assert handler.startswith(modules[key] + ".") and path == key[1], f"{key} is answered by {answer}"
 
 
-def test_the_app_carries_step_up_on_the_w_b2_account_and_w_c1_routes_only(live_app):
-    # W-B2's theme routes, A-07f's account routes (role change, invite, API key) and W-C1's.
-    expected = B2_STEP_UP_ROUTES | ACCOUNT_STEP_UP_ROUTES | C1_STEP_UP_ROUTES
+def test_the_app_carries_step_up_on_the_w_b2_account_w_c1_and_w_c3_routes_only(live_app):
+    # W-B2's theme routes, A-07f's account routes (role change, invite, API key), W-C1's and
+    # W-C3's revocation create and lift (test_prd261_c3_wire.py).
+    expected = B2_STEP_UP_ROUTES | ACCOUNT_STEP_UP_ROUTES | C1_STEP_UP_ROUTES | C3_STEP_UP_ROUTES
     assert {_key(name) for name in live_app["step_up"]} == expected
 
 
@@ -363,7 +370,7 @@ def _version(db, version, status):
     return row
 
 
-def test_approving_a_version_offers_it_to_older_listing_installs(db):
+def test_approving_a_version_offers_it_to_older_listing_installs_and_moves_the_unpinned_one(db):
     old = _version(db, "1.0.0", "approved")
     install = ThemeInstallation(workspace_id=uuid.uuid4(), theme_id=PLAY, package_id=old.id)
     db.add(install)
@@ -376,5 +383,6 @@ def test_approving_a_version_offers_it_to_older_listing_installs(db):
     db.commit()
 
     db.refresh(install)
-    assert answer["updatesOffered"] == 1 and answer["status"] == "approved"
-    assert install.pending_package_id == new.id and install.package_id == old.id  # offered, never switched
+    assert answer["updatesOffered"] == 1 and answer["updatesApplied"] == 1 and answer["status"] == "approved"
+    # Offered, then moved by the platform (D1): the old version is the rollback target, the offer is spent.
+    assert (install.package_id, install.previous_package_id, install.pending_package_id) == (new.id, old.id, None)

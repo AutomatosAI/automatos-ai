@@ -10,6 +10,9 @@
  * * a failed render shows its reason and offers Render again;
  * * the list polls only while a post renders, and the minutes are read again
  *   when the last render ends.
+ * * P256-FIX-SOC-5 (F437): a rendering post says when it started and when it gives up (the
+ *   server's `render`), keeping the "Rendering." start; a plan's draft that waits for you
+ *   (SOC-2's `needs_input`) says what it waits for.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
@@ -68,6 +71,8 @@ import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { SocialsRenderMinutes } from '@/components/deliverables/socials/socials-render-minutes'
 import { formatRenderMinutes } from '@/components/deliverables/socials/socials-status'
 import { renderPollInterval, SOCIALS_RENDER_POLL_MS } from '@/hooks/use-socials-api'
+import { RENDERING_NOTE, renderingLine, waitingLine } from '@/components/deliverables/socials/socials-post-detail'
+import { format } from 'date-fns'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
 
@@ -229,6 +234,32 @@ describe('rendering a post', () => {
     // Failed is editable: fix the post, then render again.
     expect(within(card).getByRole('button', { name: 'Save copy' })).toBeInTheDocument()
     expect(within(card).getByText('Render failed')).toBeInTheDocument()
+  })
+})
+
+describe('P256-FIX-SOC-5: a render says since when, and a waiting draft says why', () => {
+  const STARTED = '2026-10-14T16:22:00+00:00'
+  const GIVES_UP = '2026-10-14T16:47:00+00:00'
+  const asked = { at: '2026-10-14T07:00:00Z', by: 'the plan', action: 'needs_input', comment: 'fill in item_1_name, item_1_value before rendering' }
+
+  it('a rendering post shows when it started and when it gives up, after "Rendering."', async () => {
+    const render_ = { state: 'rendering', started_at: STARTED, gives_up_at: GIVES_UP, finished_at: null, why: null }
+    server.posts = [post({ status: 'rendering', render: render_, review_log: [{ at: STARTED, by: 'user-1', action: 'render', comment: null, gives_up_at: GIVES_UP }] })]
+    render(wrap(<SocialsTab />))
+    fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
+    const line = `Rendering. Started ${format(new Date(STARTED), 'HH:mm')}; it gives up at ${format(new Date(GIVES_UP), 'HH:mm')} if it has not finished.`
+    expect(within(detail('Launch teaser')).getByRole('status')).toHaveTextContent(line)
+    expect(renderingLine({ render: null })).toBe(RENDERING_NOTE)  // a render the server gives no start for
+  })
+
+  it('a draft whose newest entry asks for your input says so, and one rendered since does not', async () => {
+    server.posts = [post({ review_log: [asked] })]
+    render(wrap(<SocialsTab />))
+    fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
+    expect(within(detail('Launch teaser')).getByRole('alert')).toHaveTextContent('Waiting for you: fill in item_1_name, item_1_value before rendering')
+    const rendered = { at: '2026-10-14T08:00:00Z', by: 'user-1', action: 'render', comment: null }
+    expect(waitingLine({ status: 'draft', review_log: [asked, rendered] } as any)).toBeNull()
+    expect(waitingLine({ status: 'draft', review_log: [{ ...asked, fields: ['Item 1 name'] }] } as any)).toBe('Waiting for you: Fill in: Item 1 name')
   })
 })
 

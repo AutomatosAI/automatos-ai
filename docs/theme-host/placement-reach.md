@@ -25,9 +25,9 @@ places Auto through a `pages` entry** (`registerPage`, A-04b/A-04d). A page the 
 ## How this list was made
 
 This list comes from reading the code at the W-A1 merge (`286957d64`), not from running it. For each
-`app/**/page.tsx`, the imports were walked across `app/` and `components/`, skipping
-`components/play/**` (whose `PageHeader` is a different component) and `workspace-skills-tab.tsx`
-(whose `EmptyState` is a local function). A page counts when a file it reaches renders
+`app/**/page.tsx`, the imports were walked across `app/` and `components/`, skipping Play's own
+components (in core until PRD-261 A-19; their `PageHeader` is a different component) and
+`workspace-skills-tab.tsx` (whose `EmptyState` is a local function). A page counts when a file it reaches renders
 `<PageHeader` or `<EmptyState` imported from `components/shared`. Each page's base was then read from
 its `useIsStudio()` branch. A change to any of these pages, or a new user of the two primitives,
 should update this file in the same pull request.
@@ -63,7 +63,7 @@ None of these has a Studio branch, so each one reaches its slot under both bases
 | `/activity/execution` | `PageHeader` | the page file |
 | `/deliverables/explorer` | `PageHeader` | the page file |
 | `/admin/plugins`, `/admin/plugins/upload`, `/admin/workspaces` | `PageHeader` | the page files |
-| `/looks`, `/looks/style` | `PageHeader`, on the plain note shown under Classic and Studio | `components/looks/play-only-route.tsx` (until A-04b) |
+| `/looks`, `/looks/style` | `PageHeader`, on the plain note shown when the active theme registers no `lookEditor@1` or `styleSheet@1` (Classic, Studio, or a theme without one) | `components/theme-host/no-look-editor-note.tsx` |
 
 So under a theme on the Studio base, Auto reaches `/missions/[id]`, `/documents` and the empty
 Templates tab of `/deliverables` through slots. To reach `/chat`, `/assignments`, `/agents`,
@@ -83,8 +83,8 @@ had before. The browser lane proves a registered `page-header.mascot@1` draws on
 
 The in-app AI label ("Auto is an AI", or "{agent name} is an AI") is drawn by the host, never through a
 placement slot or a `pages` entry: `AiLabelGate` renders it in `app/chat/layout.tsx` after `ThemeSlot`, so it
-shows on `/chat` whether the core's page, Play's chat or a theme's own `/chat` page is on screen. Every `/x/`
-theme route (`app/x/[...path]/page.tsx`), Play's Conversations among them, renders the same gate around
+shows on `/chat` whether the core's page or a theme's own `/chat` page (Play's chat among them) is on screen.
+Every `/x/` theme route (`app/x/[...path]/page.tsx`), Play's Conversations among them, renders the same gate around
 `MainLayout`, so the label sits outside the theme's frame. No slot id, prop or manifest field reaches it, so a
 theme can neither replace nor remove it, and a theme page never renders a second copy. The rule and its
 runtime check are in `css-layer-model.md` and `sdk-surface-map.md` ("Host-owned AI label").

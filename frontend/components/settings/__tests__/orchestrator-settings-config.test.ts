@@ -3,7 +3,8 @@
  * the tab did inline: the heartbeat channel key parsed for delivery on save, one
  * connected channel per platform, and the fallback config when the endpoint fails.
  * PR-1E-b (US-017) changed only HARNESS: the fallback is report_only with no Enable
- * switch, and a stored mode the list does not offer shows as Report only.
+ * switch, and a stored mode the list does not offer shows as Report only. US-054 adds
+ * Propose to the list.
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -76,9 +77,11 @@ describe('fallbackOrchestratorConfig', () => {
 
 describe('harnessModeOption', () => {
   it('shows an offered mode as itself and anything else as Report only', () => {
-    expect(HARNESS_MODE_OPTIONS.map((option) => option.value)).toEqual(['report_only', 'disabled'])
+    // PRD-263 US-054 offers Propose, so a stored propose now shows as itself.
+    expect(HARNESS_MODE_OPTIONS.map((option) => option.value)).toEqual(['report_only', 'propose', 'disabled'])
     expect(harnessModeOption('disabled').label).toBe('Disabled')
-    for (const mode of ['full_auto', 'manual', 'propose', undefined]) {
+    expect(harnessModeOption('propose').label).toBe('Propose')
+    for (const mode of ['full_auto', 'manual', undefined]) {
       expect(harnessModeOption(mode).value).toBe('report_only')
     }
   })

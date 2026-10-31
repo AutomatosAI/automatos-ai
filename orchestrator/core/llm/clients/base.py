@@ -182,6 +182,9 @@ class LLMResponse:
     # PRD-240 S4: sources a provider-executed web search cited for this reply
     # ([{title, url}]), when the route carried a server-side search tool.
     citations: Optional[List[Dict[str, Any]]] = None
+    # PRD-268 US-C12b (K12): the replies a turn offered as taps (platform_offer_replies), set on the
+    # tool loop's final response by modules.tools.execution.reply_chips_turn; None for any other.
+    reply_chips: Optional[List[str]] = None
 
 
 class BaseLLMProvider(ABC):

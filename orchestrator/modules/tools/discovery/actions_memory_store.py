@@ -59,11 +59,13 @@ _STORE_MEMORY_PARAMETERS = {
             "description": "Optional pointer to the source — workspace file path, report id, run id, etc.",
         },
         "replaces": {
-            "type": "string",
+            "type": ["string", "array"],
+            "items": {"type": "string"},
             "description": (
                 "When the owner changes one of their standing rules: the old rule, word for word as "
                 "the Standing Rules list shows it (or its id from platform_browse_memories). The old "
-                "one is retired once the new one is stored as their rule."
+                "one is retired once the new one is stored as their rule. Several old rules: a list "
+                "of them (ids or words)."
             ),
         },
     },
@@ -87,7 +89,8 @@ def register_store_memory_action(registry: ActionRegistry) -> None:
             "(the answer's standing_rule says which). Anything you word yourself is kept as a "
             "memory, never as their rule. When they change a rule ('make it 10 kg, not 12'), store "
             "the new one in their words with `replaces` set to the old one: the old one is retired "
-            "(the answer's `retired` lists it), so one rule stands.\n\n"
+            "(the answer's `retired` lists it), so one rule stands. To replace several rules "
+            "(\"replace the lot\"), list each in replaces (ids from platform_browse_memories).\n\n"
             "`source_type` is optional and set for you when left out (platform_verified when a "
             "person drives this chat, claude_reports otherwise); never ask the user for it.\n\n"
             "Set `type` from the taxonomy (decision / open_loop / preference / "

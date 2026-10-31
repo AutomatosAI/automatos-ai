@@ -40,6 +40,9 @@ from services.themes.submissions import THEME_SUBMIT_ROUTE  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
 HELLO_ID = "automatos-e2e/hello"
+# A Marketplace submission must ship source/ (C-06p4); the hello fixture has none, so _hello adds one file.
+SOURCE_FILE = "source/src/index.tsx"
+SOURCE_BYTES = b"export default {}\n"
 USER_PKS = {"user_1": 1, "user_2": 2, "admin_1": 9}
 MEMBERS_DDL = (
     "CREATE TABLE workspace_members (id INTEGER PRIMARY KEY, workspace_id CHAR(32) NOT NULL, "
@@ -159,6 +162,13 @@ def _submit(client, data: bytes):
 
 
 def _hello(**fields) -> bytes:
+    """The hello package with one source/ file; ``fields`` change its theme.json."""
+    manifest = {build.MANIFEST: build.changed_manifest(fields)} if fields else {}
+    return build.build_package(replace={SOURCE_FILE: SOURCE_BYTES, **manifest})
+
+
+def _no_source(**fields) -> bytes:
+    """The hello package as A-06a builds it: no source/."""
     if not fields:
         return build.build_package()
     return build.build_package(replace={build.MANIFEST: build.changed_manifest(fields)})
@@ -241,8 +251,7 @@ def test_a_submission_is_a_pending_marketplace_row_with_its_stage_verdict(env):
 
 def test_by_default_the_c02a_stage_runs_on_dist_and_source_and_with_no_llm_key_a_person_may_approve(env):
     # C1-wire: submit's default stage is C-02a's, never A-07a's "not_run" report (approve refuses that).
-    data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
-    response = _submit(_client(env, _ctx()), data)
+    response = _submit(_client(env, _ctx()), _hello())
     assert response.status_code == 201, response.text
     (row,) = _rows(env, ThemePackage)
     llm = row.scan_report["checks"]["llm"]
@@ -304,11 +313,11 @@ def test_the_llm_check_always_reads_dist_and_source_too_when_shipped(env, monkey
     from services.themes.package import read_theme_package
 
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
-    data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
+    data = _hello()
     llm = marketplace_review(read_theme_package(data), len(data))["checks"]["llm"]
 
     assert llm["read"] == "dist+source"
-    assert "dist/entry.js" in llm["files"] and llm["files"][-1] == "source/src/index.tsx"
+    assert "dist/entry.js" in llm["files"] and llm["files"][-1] == SOURCE_FILE
 
 
 def test_the_submitter_sees_the_verdict_and_plain_checks_never_the_llm_check(env):
@@ -432,6 +441,110 @@ def test_one_open_submission_when_on_refuses_a_second_pending_one(env, monkeypat
     response = _submit(client, _hello(version="1.0.1"))
     assert response.status_code == 409 and "waiting for review" in response.json()["detail"]
     assert _submit(client, _hello()).status_code == 200  # the same bytes are not a second submission
+
+
+# ---------------------------------------------------------------------------
+# C-06p4: a submission ships source/ (QB-12)
+# ---------------------------------------------------------------------------
+
+
+def _spend_spies(monkeypatch):
+    """Records each review slot, upload claim and token hold the route opens (all three stay real)."""
+    import api.marketplace_themes_submit as submit_api
+    from services.themes import review_limits
+
+    opened = []
+    real_slot, real_hold, real_claim = review_limits.review_slot, review_limits.token_hold, submit_api.upload_claim
+
+    def slot():
+        opened.append("slot")
+        return real_slot()
+
+    def hold(tokens_left):
+        opened.append("hold")
+        return real_hold(tokens_left)
+
+    def claim(*args):
+        opened.append("claim")
+        return real_claim(*args)
+
+    monkeypatch.setattr(review_limits, "review_slot", slot)
+    monkeypatch.setattr(review_limits, "token_hold", hold)
+    monkeypatch.setattr(submit_api, "upload_claim", claim)
+    return opened
+
+
+def _assert_source_required(response):
+    from api.marketplace_themes_submit import SOURCE_REQUIRED, SOURCE_REQUIRED_CODE
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["message"] == SOURCE_REQUIRED
+    assert detail["errors"] == [{"code": SOURCE_REQUIRED_CODE, "path": "source/", "message": SOURCE_REQUIRED}]
+
+
+def _assert_nothing_spent_or_saved(env, opened):
+    assert opened == []  # no review slot, no upload claim, no token hold
+    assert _rows(env, ThemePackage) == [] and _rows(env, ThemePublisher) == [] and _rows(env, ThemeReviewEvent) == []
+    assert env.s3.objects == {}
+
+
+def test_a_package_with_no_source_is_422_source_required_before_the_stage_and_any_row(env, monkeypatch):
+    opened = _spend_spies(monkeypatch)
+    stage = _stage("pass")
+    response = _submit(_client(env, _ctx(), stage=stage), _no_source())
+
+    _assert_source_required(response)
+    assert stage.calls == []  # the review stage (and its LLM check) never ran
+    _assert_nothing_spent_or_saved(env, opened)
+
+
+def test_with_no_source_the_default_stage_never_calls_the_llm(env, monkeypatch):
+    from services.themes import llm_stage
+
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "a-key-the-stage-would-use")
+    monkeypatch.setattr(llm_stage, "_client_call", lambda: (_never_called, None))
+    opened = _spend_spies(monkeypatch)
+    response = _submit(_client(env, _ctx()), _no_source())
+
+    _assert_source_required(response)
+    _assert_nothing_spent_or_saved(env, opened)
+
+
+def test_a_bare_source_folder_entry_is_no_source(env):
+    stage = _stage("pass")
+    response = _submit(_client(env, _ctx(), stage=stage), build.build_package(extra=[("source/", b"")]))
+
+    _assert_source_required(response)
+    assert stage.calls == [] and _rows(env, ThemePackage) == []
+
+
+def test_the_package_checks_answer_before_the_source_rule(env):
+    response = _submit(_client(env, _ctx()), _no_source(htmlClass="studio"))
+    assert response.status_code == 400
+    codes = [error["code"] for error in response.json()["detail"]["errors"]]
+    assert "RESERVED_HTML_CLASS" in codes and "SOURCE_REQUIRED" not in codes
+
+
+def test_with_source_the_same_package_is_submitted(env, monkeypatch):
+    opened = _spend_spies(monkeypatch)
+    stage = _stage("review_required")
+    response = _submit(_client(env, _ctx(), stage=stage), _hello())
+
+    assert response.status_code == 201, response.text
+    assert SOURCE_FILE in stage.calls[0] and opened == ["slot", "claim", "hold"]
+
+
+def test_a_private_import_with_no_source_is_unchanged(env):
+    data = _no_source()
+    client = _client(env, _ctx())
+    upload = client.post(THEME_IMPORT_ROUTE, files={"file": ("hello.autotheme", data, "application/zip")})
+
+    assert upload.status_code == 201, upload.text
+    (row,) = _rows(env, ThemePackage)
+    assert row.owner_type == "workspace" and not any(path.startswith("source/") for path in row.file_manifest)
+    _assert_source_required(_submit(client, data))
+    assert len(_rows(env, ThemePackage)) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional, Set
+from typing import Any, Optional, Set, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 # Strong refs to fire-and-forget notification tasks (the api/webhooks.py
 # background-task idiom) so the loop cannot GC them mid-flight.
 _NOTIFY_TASKS: Set["asyncio.Task"] = set()
+
+# The reason a task the policy lets run gives (no rule asked, so no rule sentence).
+AUTO_APPROVED_REASON = "auto-approved by workspace policy"
 
 
 @dataclass(frozen=True)
@@ -81,88 +84,130 @@ def evaluate_board_task_approval(
 ) -> BoardApprovalOutcome:
     """Decide whether a board task needs approval; create + audit a grant if so.
 
+    PRD-268 US-C20b: a task the policy holds gives the rule that asked, in words: the English
+    sentence for ``approval_policy.<policy>`` (:func:`held_reason`) is the outcome's reason, the
+    grant's and its bell's. The ticket's blocked line shows it, and the approval view reads the
+    policy back from it.
+
     ``_policy_override`` / ``_ceiling_override`` are test seams that bypass the
     workspace-settings read so the gate can be exercised without a DB row.
     """
-    from core.services.approval_grants import (
-        DEFAULT_TTL_SECONDS,
-        create_grant,
-        find_pending_grant,
-    )
-    from core.models.approval_grants import SUBJECT_BOARD_TASK
+    auto_approve, policy = _decide(db, workspace_id, estimated_cost_usd, _policy_override, _ceiling_override)
+    if auto_approve:  # auto-approve ⇒ no grant, task runs.
+        return _outcome(False, AUTO_APPROVED_REASON, None, policy, estimated_cost_usd)
 
-    # Resolve the approval decision. Reuse the mission primitive unless a test
-    # override is supplied.
-    if _policy_override is not None:
-        decision = _decide_from_override(_policy_override, _ceiling_override, estimated_cost_usd)
-        policy = _policy_override
-    else:
-        from core.services.approval_policy import evaluate_approval
-
-        d = evaluate_approval(db, workspace_id, estimated_cost_usd)
-        decision = d.auto_approve
-        policy = d.policy
-
-    if decision:  # auto-approve ⇒ no grant, task runs.
-        return BoardApprovalOutcome(
-            requires_approval=False,
-            reason="auto-approved by workspace policy",
-            grant=None,
-            policy=policy,
-            estimated_cost_usd=estimated_cost_usd,
-        )
-
+    reason = held_reason(policy)
     # Needs approval. Idempotency: reuse an existing pending grant for this task.
-    existing = find_pending_grant(
-        db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task_id)
-    )
+    existing = _pending_grant(db, workspace_id, task_id)
     if existing is not None:
-        return BoardApprovalOutcome(
-            requires_approval=True,
-            reason="pending approval grant already exists",
-            grant=existing,
-            policy=policy,
-            estimated_cost_usd=estimated_cost_usd,
-        )
+        return _outcome(True, reason, existing, policy, estimated_cost_usd)
 
-    reason = f"board task requires approval under '{policy}' policy"
-    grant = create_grant(
-        db, workspace_id,
-        subject_type=SUBJECT_BOARD_TASK,
-        subject_id=str(task_id),
-        risk_tier=risk_tier,
-        agent_id=agent_id,
-        reason=reason,
-        estimated_cost_usd=estimated_cost_usd,
-        ttl_seconds=ttl_seconds if ttl_seconds is not None else DEFAULT_TTL_SECONDS,
+    held = _HeldTask(
+        workspace_id=workspace_id, task_id=str(task_id), agent_id=agent_id, risk_tier=risk_tier,
+        policy=policy, reason=reason, estimated_cost_usd=estimated_cost_usd,
     )
-    _audit_governance(
-        db, workspace_id, "approval_grant:created",
-        grant_id=getattr(grant, "id", None),
-        subject_type=SUBJECT_BOARD_TASK,
-        subject_id=str(task_id),
-        policy=policy,
-        estimated_cost_usd=estimated_cost_usd,
-        risk_tier=risk_tier,
-    )
-    # PRD-196 S2 (C.8): a pending grant must never wait silently — tell the
-    # workspace's humans. Only on fresh creation (the reuse branch above was
-    # already announced when its grant was created).
-    _notify_approval_pending(
-        workspace_id,
-        grant_id=getattr(grant, "id", None),
-        subject_id=str(task_id),
-        risk_tier=risk_tier,
-        reason=reason,
-        estimated_cost_usd=estimated_cost_usd,
-    )
+    return _outcome(True, reason, _open_grant(db, held, ttl_seconds), policy, estimated_cost_usd)
+
+
+def held_reason(policy: str) -> str:
+    """The reason a task ``policy`` holds gives: the English rule sentence for
+    ``approval_policy.<policy>`` (``rule_sentences``' fallback for a policy it doesn't know),
+    never the policy key."""
+    from modules.policy.rule_sentences import approval_policy_rule, rule_sentence
+    from modules.proactive.locale import ENGLISH
+
+    return rule_sentence(approval_policy_rule(policy), ENGLISH)
+
+
+@dataclass(frozen=True)
+class _HeldTask:
+    """A board task the approval policy holds, as its new grant records it."""
+
+    workspace_id: UUID | str
+    task_id: str
+    agent_id: Optional[int]
+    risk_tier: Optional[str]
+    policy: str
+    reason: str
+    estimated_cost_usd: float
+
+
+def _outcome(
+    requires_approval: bool, reason: str, grant: Optional[Any], policy: str, estimated_cost_usd: float,
+) -> BoardApprovalOutcome:
+    """The gate's answer, every field named."""
     return BoardApprovalOutcome(
-        requires_approval=True,
+        requires_approval=requires_approval,
         reason=reason,
         grant=grant,
         policy=policy,
         estimated_cost_usd=estimated_cost_usd,
     )
+
+
+def _decide(
+    db: Any,
+    workspace_id: UUID | str,
+    estimated_cost_usd: float,
+    policy_override: Optional[str],
+    ceiling_override: Optional[float],
+) -> Tuple[bool, str]:
+    """Whether the workspace policy auto-approves the task, and that policy.
+
+    Reuses the mission primitive unless a test override is supplied.
+    """
+    if policy_override is not None:
+        return _decide_from_override(policy_override, ceiling_override, estimated_cost_usd), policy_override
+    from core.services.approval_policy import evaluate_approval
+
+    decision = evaluate_approval(db, workspace_id, estimated_cost_usd)
+    return decision.auto_approve, decision.policy
+
+
+def _pending_grant(db: Any, workspace_id: UUID | str, task_id: int | str) -> Optional[Any]:
+    """The task's pending approval grant in the workspace, if one already waits."""
+    from core.models.approval_grants import SUBJECT_BOARD_TASK
+    from core.services.approval_grants import find_pending_grant
+
+    return find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task_id))
+
+
+def _open_grant(db: Any, held: _HeldTask, ttl_seconds: Optional[int]) -> Any:
+    """Create the held task's grant, audit it and announce it to the workspace's humans."""
+    from core.models.approval_grants import SUBJECT_BOARD_TASK
+    from core.services.approval_grants import DEFAULT_TTL_SECONDS, create_grant
+
+    grant = create_grant(
+        db, held.workspace_id,
+        subject_type=SUBJECT_BOARD_TASK,
+        subject_id=held.task_id,
+        risk_tier=held.risk_tier,
+        agent_id=held.agent_id,
+        reason=held.reason,
+        estimated_cost_usd=held.estimated_cost_usd,
+        ttl_seconds=ttl_seconds if ttl_seconds is not None else DEFAULT_TTL_SECONDS,
+    )
+    _audit_governance(
+        db, held.workspace_id, "approval_grant:created",
+        grant_id=getattr(grant, "id", None),
+        subject_type=SUBJECT_BOARD_TASK,
+        subject_id=held.task_id,
+        policy=held.policy,
+        estimated_cost_usd=held.estimated_cost_usd,
+        risk_tier=held.risk_tier,
+    )
+    # PRD-196 S2 (C.8): a pending grant must never wait silently — tell the
+    # workspace's humans. Only on fresh creation (a reused grant was already
+    # announced when it was created).
+    _notify_approval_pending(
+        held.workspace_id,
+        grant_id=getattr(grant, "id", None),
+        subject_id=held.task_id,
+        risk_tier=held.risk_tier,
+        reason=held.reason,
+        estimated_cost_usd=held.estimated_cost_usd,
+    )
+    return grant
 
 
 async def _dispatch_approval_pending(
@@ -176,7 +221,9 @@ async def _dispatch_approval_pending(
     """Dispatch ``approval_pending`` through the canonical notification seam.
 
     Owns its session: by the time the loop runs this, the creating caller's
-    transaction is finished (and its session may be closed).
+    transaction is finished (and its session may be closed). The dispatcher
+    never commits, so this commits its bell row (closing the session alone
+    would roll it back).
     """
     from core.database.database import SessionLocal
     from core.services.notification_dispatcher import NotificationDispatcher
@@ -196,11 +243,13 @@ async def _dispatch_approval_pending(
             link_id=str(grant_id) if grant_id is not None else None,
             status="action_required",
         )
+        db.commit()
     except Exception:
         logger.warning(
             "[board_approval] approval_pending dispatch failed for grant %s",
             grant_id, exc_info=True,
         )
+        db.rollback()
     finally:
         db.close()
 

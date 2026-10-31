@@ -8,13 +8,16 @@ approves **later** reaches existing installs only through ``offer_listed_update`
 Wired at C1-wire: C-03a's ``review.approve`` calls ``offer_listed_update(db, package)`` once it has
 set ``status='approved'`` and ``reviewed=True``, in the same transaction. Only installs that run a
 Marketplace version of the theme are offered it (a workspace's own upload is not a listing
-install), and an install that already waits on a version at least as new keeps that one. The
-install never switches by itself.
+install), and an install that already waits on a version at least as new keeps that one. The offer
+is not the last step: ``review.approve`` then moves every offered install that is not pinned to the
+new version (``auto_update.apply_listed_update``, publish contract D1). A pinned install, and one
+the move refuses, keeps the offer here.
 
 A version taken off the Marketplace (``review.deactivate``) withdraws its offers through
 ``withdraw_offers``: each install it was offered to is offered the newest listed version newer
 than the one it runs instead, or nothing. A pending version that is no longer listed never counts
-as a newer offer still waiting, so a later fix numbered below it is still offered. Nothing here
+as a newer offer still waiting, so a later fix numbered below it is still offered. The installs
+that RUN the version taken off are moved back by ``auto_update.roll_back_installs``. Nothing here
 commits.
 """
 

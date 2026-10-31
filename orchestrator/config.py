@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # Default tenant UUID for single-tenant deployments
 DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
+# The hosted product's API host: PUBLIC_API_HOST's default. A local install still on it
+# has not named its own host, so it never advertises this one (PRD-266 K15).
+HOSTED_PUBLIC_API_HOST = "api.automatos.app"
+
+# An unset publish address is this machine only, as compose's own default (PRD-266 §4.3).
+DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
+
 # Default for CLERK_AUTHORIZED_PARTIES: the production frontend and saas-mode local
 # development. The Studio site (studio.automatos.app) is left out on purpose: it
 # only joins the waitlist and never calls this API with a session token.
@@ -652,6 +659,10 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-266 US-016b: the Automatos moderation inbox for content reports. SaaS only
+    # (a local install posts nothing even when it is set); an https URL; a credential,
+    # never logged. PRD-266 open question 2 names the destination.
+    MODERATION_WEBHOOK_URL: str = os.getenv("MODERATION_WEBHOOK_URL", "")
     # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
     # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
     # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
@@ -671,6 +682,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
+    # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
+    # takes no account, so each client IP gets this many checks a minute (at least one).
+    PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
@@ -745,6 +759,10 @@ class Config:
     # burst waits for a slot holding no pool connection; keep it well under the
     # pool (10 + 20), since each call can hold its own connection plus one more.
     SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
+    # P256-FIX-N17-9 (F448): how long, from the call's arrival, a session's document or memory
+    # read (services/session_read_deadline.DEADLINED_TOOLS) may take before it answers with a
+    # worded failure, so the session's own client never gives up first ("The operation timed out.").
+    SESSION_TOOL_READ_DEADLINE_S: float = float(os.getenv("SESSION_TOOL_READ_DEADLINE_S", "45"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
@@ -949,10 +967,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
-    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
-    # The weekly run is report_only and applies nothing whatever its value
-    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
+    # PRD-263 US-054: the installation's switch that allows HARNESS to raise approval
+    # grants. HIGH RISK — default OFF. Only while it is on does a ``propose`` workspace
+    # get an Approvals card per proposed change (services.harness_grants), applied only
+    # on the owner's click; off, every workspace runs report_only and gets no card.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
@@ -986,6 +1004,24 @@ class Config:
     # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
     # connection failures is reported as "reconnect <app>", never as a bad tool.
     HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
+    # PRD-263 US-050 (section 11-Q10 defaults): HARNESS suggests doubling an enabled heartbeat's
+    # interval (clamped to 5-1440 minutes, as the heartbeat handler clamps it) only when its
+    # judged week has at least HARNESS_HEARTBEAT_MIN_RUNS runs with an outcome (a run whose
+    # objective_met is None is not counted) and the Wilson upper bound (95%) of the share
+    # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
+    HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
+    HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
+    # PRD-263 US-053 (section 11-Q7 default): a HARNESS proposal granted, or being applied,
+    # longer than HARNESS_RECONCILE_GRACE_MINUTES ago with no outcome is closed as failed.
+    # The daily sweep of HARNESS grants runs on HARNESS_GRANT_SWEEP_CRON, read in UTC
+    # (default 09:00 every day; services.harness_grants).
+    HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
+    HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
+    # PRD-263 US-056: each change HARNESS applied is judged week by week against the
+    # HARNESS_REF_DAYS before it (services.harness_post_change). A metric waits for a week
+    # of at least HARNESS_MIN_SAMPLES for up to HARNESS_POST_CHANGE_MAX_WEEKS weeks after
+    # the change; otherwise the report says it was not judged.
+    HARNESS_POST_CHANGE_MAX_WEEKS: int = int(os.getenv("HARNESS_POST_CHANGE_MAX_WEEKS", "4"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1553,8 +1589,9 @@ class Config:
     THEMES_PRIVATE_UPLOAD: str = (os.getenv("THEMES_PRIVATE_UPLOAD", "auto") or "auto").strip().lower()
     # The theme Marketplace (W-C1 routes read it): on | off.
     THEMES_MARKETPLACE: str = (os.getenv("THEMES_MARKETPLACE", "on") or "on").strip().lower()
-    # The .autotheme as uploaded; main.py sizes the import route's body limit from it.
-    THEME_MAX_PACKAGE_MB: int = int(os.getenv("THEME_MAX_PACKAGE_MB", "10"))
+    # The .autotheme as uploaded; main.py sizes the import, submit and publish routes' body limits from it.
+    # 32 MB: 24 web and 24 phone screenshots at 512 KB each (24 MB), the 3 MB code cap and a mascot fit.
+    THEME_MAX_PACKAGE_MB: int = int(os.getenv("THEME_MAX_PACKAGE_MB", "32"))
     # JS plus CSS, the entry module, and each mascot clip (D1-a: 3 MB, 300 KB, 1 MB).
     THEME_MAX_CODE_KB: int = int(os.getenv("THEME_MAX_CODE_KB", "3072"))
     THEME_MAX_ENTRY_KB: int = int(os.getenv("THEME_MAX_ENTRY_KB", "300"))
@@ -1585,7 +1622,32 @@ class Config:
     THEME_SUBMISSIONS_PER_DAY: int = int(os.getenv("THEME_SUBMISSIONS_PER_DAY", "10"))
     THEME_UPLOADS_PER_DAY: int = int(os.getenv("THEME_UPLOADS_PER_DAY", "20"))
     THEME_REVIEW_DAILY_TOKENS: int = int(os.getenv("THEME_REVIEW_DAILY_TOKENS", "2000000"))
+    # PRD-261 W-C3 theme revocations (QB-25: the local edition pulls the hosted feed by default).
+    # The feed the local edition pulls (https, or http to loopback only; empty = no pull) and how
+    # often (services/themes/revocation_pull.py, services/theme_revocation_scheduler.py). The hosted
+    # edition serves the feed (api/themes_revocations_feed.py) with rows lifted in the last
+    # THEME_REVOCATIONS_LIFTED_DAYS days, and neither side reads a feed over THEME_REVOCATIONS_FEED_MAX_KB.
+    # THEME_REVOCATIONS_URL is a deploy-time trust boundary: only the environment sets it, and https
+    # to any host passes revocation_pull.checked_url (no DNS or private-range check). Never let a
+    # lower-trust actor set it (an admin setting, a per-workspace override) without a host allowlist
+    # or a check of the resolved address.
+    THEME_REVOCATIONS_URL: str = (
+        os.getenv("THEME_REVOCATIONS_URL", "https://api.automatos.app/api/themes/revocations") or ""
+    ).strip()
+    THEME_REVOCATIONS_PULL_MINUTES: int = int(os.getenv("THEME_REVOCATIONS_PULL_MINUTES", "60"))
+    THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
+    THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
+    # The theme publish key (POST /api/marketplace/themes/publish, services/themes/publish_key.py): the
+    # Design Kit's publish job lists, approves and signs a version with it. Core holds only the key's
+    # sha256 in lower-case hex (two, comma-separated, while a rotation runs), never the key; the
+    # publishers it may publish under (comma-separated); and the users.id it acts as, a service user
+    # (scripts/theme_publish_actor.py). Any of the three unset: the route answers 503. And the versions
+    # it may publish in a rolling 24 hours (more is 429).
+    THEME_PUBLISH_KEY_SHA256: str = (os.getenv("THEME_PUBLISH_KEY_SHA256", "") or "").strip()
+    THEME_PUBLISH_PUBLISHERS: str = (os.getenv("THEME_PUBLISH_PUBLISHERS", "") or "").strip()
+    THEME_PUBLISH_ACTOR: str = (os.getenv("THEME_PUBLISH_ACTOR", "") or "").strip()
+    THEME_PUBLISH_PER_DAY: int = int(os.getenv("THEME_PUBLISH_PER_DAY", "10"))
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)
@@ -1668,6 +1730,15 @@ class Config:
     BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
     # ...and wait at most this long for a free pool connection, then drop the row.
     BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
+    # F458: GET /health reads a full pool from its counters, never waiting on it, and
+    # answers degraded (200). A pool seen full at every probe for this long is stuck:
+    # /health answers 503, so the liveness watchdog (docker-entrypoint.sh, F416)
+    # restarts the backend. A dead or hung backend still restarts within ~2 min.
+    HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
+    # F458: when a checkout leaves the pool full, one WARNING lists who holds every
+    # connection and where each holder is now (core/database/pool_watch.py), at most
+    # once per this many seconds. 0 = off.
+    DB_POOL_FULL_LOG_SECONDS: float = float(os.getenv("DB_POOL_FULL_LOG_SECONDS", "60"))
     # F140: a playbook step's whole answer at most this long, ending by asking for
     # what it needs, stops the run and asks the owner. Night 4's 12 asks were at
     # most 402 characters; a longer answer is the step's work, even if it ends
@@ -1719,7 +1790,6 @@ class Config:
     # =============================================================================
     AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
-    GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
     # F353: draw a document Deliverable's first page for its card, after it is made.
     DOCUMENT_THUMBNAILS_ENABLED: bool = os.getenv("DOCUMENT_THUMBNAILS_ENABLED", "true").lower() == "true"
@@ -1915,21 +1985,85 @@ class Config:
     PREMIUM_TO_BUDGET_SAVINGS_RATIO: float = float(os.getenv("PREMIUM_TO_BUDGET_SAVINGS_RATIO", "0.85"))
 
     # =============================================================================
-    # TRIAL CREDIT (PRD-222 W1·S9: the $5 onboarding trial ledger)
+    # CREDITS (PRD-265 W1): the ledger behind hosted Studio's plans and trial
     # =============================================================================
-    # A one-time, platform-funded usage allowance that funds a new user's
-    # onboarding "first mile" on the platform key, so the value moment (BOOM)
-    # lands BEFORE the BYOK ask (D4). The ledger itself lives in
-    # workspaces.onboarding.trial JSONB — no new table; enforcement + spend
-    # accumulation live in services/trial_ledger.py. These are the only tunables.
+    # 1 credit = 1 US cent of AI usage at Automatos prices. Every movement is a
+    # credit_ledger row (services/credits/). The local edition never meters.
     # Kill switch — false disables all trial grants; provisioning otherwise unchanged.
     TRIAL_ENABLED: bool = os.getenv("TRIAL_ENABLED", "true").lower() == "true"
-    # Dollars granted per new Clerk user (once — checked across all their workspaces).
-    TRIAL_CREDIT_USD: float = float(os.getenv("TRIAL_CREDIT_USD", "5.00"))
-    # Platform-wide daily ceiling on aggregate trial spend; new grants PAUSE once
-    # today's accumulated trial spend reaches this (US-005's daily counter feeds it).
-    TRIAL_GLOBAL_DAILY_USD: float = float(os.getenv("TRIAL_GLOBAL_DAILY_USD", "25.00"))
-    # Models a trial workspace may use on the platform key. Reuses the platform's
+    # Credits granted once per person (checked across all their workspaces).
+    TRIAL_CREDITS: int = int(os.getenv("TRIAL_CREDITS", "500"))
+    # Platform-wide daily ceiling on trial credits spent; new grants PAUSE once
+    # today's trial spend reaches it. Grants already made keep working.
+    TRIAL_GLOBAL_DAILY_CREDITS: int = int(os.getenv("TRIAL_GLOBAL_DAILY_CREDITS", "2500"))
+    # Paid plans are on sale. False (the beta): checkout is open to platform admins
+    # only (test mode, live card tests), and plan prices carry the "beta" label
+    # (facts sheet §4). Credits are granted only by a verified Stripe payment,
+    # open or not. US-013 flips it.
+    BILLING_OPEN: bool = os.getenv("BILLING_OPEN", "false").lower() == "true"
+    # Metered credits (Gerard, 20 Oct 2026: tokens × model price, like OpenRouter —
+    # replaces the fixed-per-ask bands). Every platform-funded call costs
+    # ceil(its llm_usage cost in cents × this markup) credits. Decision D-1 sets it.
+    CREDITS_MARKUP: float = float(os.getenv("CREDITS_MARKUP", "1.2"))
+    # How often the meter turns the calls since its last run into ledger debits.
+    CREDITS_METER_INTERVAL_SECONDS: int = int(os.getenv("CREDITS_METER_INTERVAL_SECONDS", "60"))
+    # The share of a workspace's allowance (the trial, or the plan's monthly credits)
+    # left when the "running low" alert fires; the second alert fires at zero.
+    CREDITS_ALERT_LOW_SHARE: float = float(os.getenv("CREDITS_ALERT_LOW_SHARE", "0.20"))
+    # The people who never pay (Gerard, 23 Oct 2026: "Super Admin doesn't have to pay"):
+    # a workspace whose OWNER's email is in this comma-separated list runs on an
+    # allowance, like Enterprise: its calls on the platform's AI keys are recorded
+    # (for the margin numbers) but never charged and never paused. An email, not the
+    # super-admin role, because that role lives only in Clerk's sign-in token, and the
+    # meter and the scheduled work run with nobody signed in. Empty = nobody is free.
+    BILLING_FREE_OWNER_EMAILS: frozenset = frozenset(
+        email.strip().lower() for email in os.getenv("BILLING_FREE_OWNER_EMAILS", "").split(",") if email.strip()
+    )
+    # A month's credits stay spendable this long past their period end when the
+    # renewal hasn't been paid yet (Stripe retries a failed card for days); then
+    # the hourly sweep expires them (services/credits/expiry.py).
+    BILLING_MONTHLY_EXPIRY_GRACE_HOURS: int = int(os.getenv("BILLING_MONTHLY_EXPIRY_GRACE_HOURS", "24"))
+    # A top-up (PRD-265 §3): credits per pack, the display price, and how long they last.
+    TOPUP_CREDITS: int = int(os.getenv("TOPUP_CREDITS", "1000"))
+    TOPUP_PRICE_USD: int = int(os.getenv("TOPUP_PRICE_USD", "10"))
+    TOPUP_VALID_DAYS: int = int(os.getenv("TOPUP_VALID_DAYS", "365"))
+
+    # =============================================================================
+    # STRIPE (PRD-265 W2): in-page Checkout, Stripe Tax, card and plan management, webhooks
+    # =============================================================================
+    # Gerard, 20 + 23 Oct 2026: Stripe takes the money, Clerk only signs people in
+    # (Clerk Billing has no 3-D Secure, no VAT and no one-off purchases), and the
+    # customer never leaves Studio: the card form is Stripe's fields inside our own
+    # Billing tab (Checkout elements), and card, invoices, cancel and plan changes are
+    # ours too — no hosted page, no portal. Keys come from the environment only.
+    # Without STRIPE_SECRET_KEY billing is "not configured": its routes answer 503.
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+    # The publishable key (pk_…) Stripe.js needs in the browser; safe to expose.
+    STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    # Every request pins this API version (Stripe-Version header), and
+    # scripts/stripe_setup.py creates the webhook endpoint at it, so event shapes
+    # never change under us when Stripe ships a new version. It must stay on the
+    # release train of the frontend's @stripe/stripe-js (10.x = endive).
+    STRIPE_API_VERSION: str = os.getenv("STRIPE_API_VERSION", "2026-09-30.endive")
+    # The Stripe Price behind each plan and the top-up (scripts/stripe_setup.py
+    # prints them). Business is sold only through the admin invite link.
+    STRIPE_PRICE_BASIC: str = os.getenv("STRIPE_PRICE_BASIC", "")
+    STRIPE_PRICE_PRO: str = os.getenv("STRIPE_PRICE_PRO", "")
+    STRIPE_PRICE_BUSINESS: str = os.getenv("STRIPE_PRICE_BUSINESS", "")
+    STRIPE_PRICE_TOPUP: str = os.getenv("STRIPE_PRICE_TOPUP", "")
+    # How long a platform admin's Business offer stays open on the workspace's Billing tab.
+    BUSINESS_OFFER_DAYS: int = int(os.getenv("BUSINESS_OFFER_DAYS", "14"))
+    # The Stripe account (acct_…) payments go to, recorded on each billing account
+    # so a later move to a company's account can tell old customers from new.
+    STRIPE_ACCOUNT_ID: str = os.getenv("STRIPE_ACCOUNT_ID", "")
+    # How old a webhook's signed timestamp may be before it is refused as a replay.
+    STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = int(os.getenv("STRIPE_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    STRIPE_TIMEOUT_SECONDS: float = float(os.getenv("STRIPE_TIMEOUT_SECONDS", "20"))
+    # Counsel's EU withdrawal-consent wording for buying credits (decision D-4).
+    # When set, the Billing tab's checkout shows it beside a box the buyer must tick,
+    # and the acceptance is stamped on the Checkout Session; empty = no box.
+    BILLING_WITHDRAWAL_CONSENT_TEXT: str = os.getenv("BILLING_WITHDRAWAL_CONSENT_TEXT", "")
 
     # PRD-222 W1·S10 (D9) — DEV/OPS ONLY, TEMPORARY. Arms
     # POST /api/workspaces/current/onboarding/reset so the operator can re-run
@@ -1952,6 +2086,12 @@ class Config:
         os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
     )
     VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
+    # PRD-265 D-6 (Gerard, 30 Oct 2026): an Auto Live call is paid from credits like chat, at what
+    # Retell charges us x CREDITS_MARKUP (modules/voice/live_billing.py). The cost comes on the
+    # call_ended event; when an event carries none, the call's minutes are charged at this rate:
+    # Retell's list price for our voice at its dearest (voice infra $0.055 + an ElevenLabs voice
+    # up to $0.10, retellai.com/pricing, 30 Oct 2026), as the meter does for an unpriced model.
+    VOICE_LIVE_ESTIMATE_USD_PER_MINUTE: float = float(os.getenv("VOICE_LIVE_ESTIMATE_USD_PER_MINUTE", "0.155"))
     # Spoken turns ride a FAST PATH: only this many recent messages feed the
     # prompt (a call is a conversation, not an archive replay) — first-token
     # time is the product in voice.
@@ -1976,10 +2116,10 @@ class Config:
     VOICE_AI_GREETING: str = os.getenv(
         "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant."
     )
-    # Every this many minutes of call time, and after an automatic reconnect,
-    # the next response opens with "Just so you know, I'm an AI assistant."
-    # (Guidelines ¶37). 0 or less reminds on every response; it never turns off.
-    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "10"))
+    # The spoken AI notice is once per call, the greeting above (policy, 23 Oct 2026).
+    # Above 0: every this many minutes of call time and after a reconnect, the next
+    # response opens with "Just so you know, I'm an AI assistant." (¶37). 0 or less: never.
+    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "0"))
     # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
     # AND re-applied on every one-click re-arm. Pinning the language stops
     # multilingual STT from hallucinating confident nonsense; background-speech
@@ -2063,15 +2203,140 @@ class Config:
     VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
         "VOICE_LIVE_SKIP_COMPOSIO", "true"
     ).strip().lower() == "true"
+    # Spoken turns (POST /api/chat with spokenMode, and Auto Live) answer on this model;
+    # typed turns keep the agent's own (consumers/chatbot/spoken_model.py). 28 Oct 2026: a
+    # spoken quick ask took 26-32 s on claude-opus-5-5; the 11 Oct benchmark scored
+    # claude-haiku-5-5 the same at about 3% of the cost. The id is the provider's own (a
+    # direct Anthropic id, never OpenRouter's dotted twin). Empty model or provider = off:
+    # spoken turns use the agent's model too. A workspace that cannot reach it (no key for
+    # the provider, a policy block) answers on the agent's model.
+    SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
+    SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
+    # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
+    # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
+    # keep the device voice. The token is sent as `Authorization: Bearer` and must match
+    # the service's own VOICE_TTS_TOKEN. TIMEOUT bounds one whole answer, the stream
+    # included; CONNECT is short so a refusal is fast. RATE is sentences a workspace may
+    # have spoken a minute (0 = no limit).
+    VOICE_TTS_URL: str = os.getenv("VOICE_TTS_URL", "").strip().rstrip("/")
+    VOICE_TTS_TOKEN: str = os.getenv("VOICE_TTS_TOKEN", "").strip()
+    VOICE_TTS_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_TIMEOUT_SECONDS", "15"))
+    VOICE_TTS_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_CONNECT_TIMEOUT_SECONDS", "2"))
+    VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart").strip()
+    VOICE_TTS_RATE_PER_MINUTE: int = int(os.getenv("VOICE_TTS_RATE_PER_MINUTE", "60"))
     # The ONE public host (PRD-258 US-003; it was defined twice): Retell's
     # custom-LLM socket + events webhook (arming builds the agent's URLs from
     # it) and the channels' inbound webhook URLs (PRD-142 W3-S5 / G7). Railway
     # injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_API_HOST overrides it (the local
     # tunnel's domain, set in the compose override). No trailing slash.
     PUBLIC_API_HOST: str = (
-        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
-        or "api.automatos.app"
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", HOSTED_PUBLIC_API_HOST))
+        or HOSTED_PUBLIC_API_HOST
     ).strip().rstrip("/")
+
+    # =============================================================================
+    # PRD-266 Automatos Go: pairing a phone (or a browser) with a local install
+    # =============================================================================
+    # LOCAL_REMOTE_ACCESS (local edition, §4.3): 'off' (the default) keeps the install on this
+    # machine; 'paired' opens POST /api/v1/mobile/pair and closes the anonymous lane; 'open'
+    # keeps it on a published install, warned at every boot. Boot refuses an unknown value and
+    # 'off' with a publish address beyond loopback (services/mobile/remote_access.py).
+    LOCAL_REMOTE_ACCESS: str = (os.getenv("LOCAL_REMOTE_ACCESS", "off") or "off").strip().lower()
+    # The addresses compose publishes the API and the web app on (docker-compose.yml passes
+    # both in), so the API knows whether it is reachable beyond this machine.
+    API_PUBLISH_ADDRESS: str = (os.getenv("API_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    WEB_PUBLISH_ADDRESS: str = (os.getenv("WEB_PUBLISH_ADDRESS") or DEFAULT_PUBLISH_ADDRESS).strip()
+    # A paired device is asked to rotate its token this many days after it was issued
+    # (``rotate_after`` in the pairing answer), at least one.
+    MOBILE_TOKEN_ROTATE_DAYS: int = max(1, int(os.getenv("MOBILE_TOKEN_ROTATE_DAYS", "30")))
+    # After a rotation the previous token keeps working this long (§4.2: ten minutes).
+    MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS: int = max(
+        0, int(os.getenv("MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS", "600"))
+    )
+    # Push through Expo's push service (services/push/expo.py, AGENTS.md exception 2). Expo's
+    # optional access token: empty sends without one. A secret: never logged, never in
+    # discovery, never a key in Settings.
+    EXPO_PUSH_ACCESS_TOKEN: str = (os.getenv("EXPO_PUSH_ACCESS_TOKEN") or "").strip()
+    # Each request to Expo times out after this many seconds, at least one.
+    EXPO_PUSH_TIMEOUT_SECONDS: int = max(1, int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10")))
+    # The receipts job (services/push/receipts.py) reads Expo's receipts this often on the
+    # leader's scheduler, at least a minute apart.
+    PUSH_RECEIPTS_INTERVAL_SECONDS: int = max(60, int(os.getenv("PUSH_RECEIPTS_INTERVAL_SECONDS", "900")))
+    # The daily digest (services/mobile/digest.py, US-013) is checked this often on the leader's
+    # scheduler, at least a minute apart; a person is due for 90 minutes after their digest time.
+    DIGEST_JOB_INTERVAL_SECONDS: int = max(60, int(os.getenv("DIGEST_JOB_INTERVAL_SECONDS", "900")))
+    # The digest time of a phone that names none, 'HH:MM' in the phone's timezone; a value that
+    # is not HH:MM reads as 08:00 (services.mobile.digest.default_digest_time).
+    DIGEST_DEFAULT_TIME: str = (os.getenv("DIGEST_DEFAULT_TIME") or "08:00").strip()
+    # "Send me today's brief now" (POST /api/v1/mobile/digest/now): one per person at most this
+    # many seconds apart, at least one.
+    DIGEST_NOW_MIN_INTERVAL_SECONDS: int = max(1, int(os.getenv("DIGEST_NOW_MIN_INTERVAL_SECONDS", "300")))
+    # PRD-268 (P268W2-RVW-1): a brief's claim (mobile_digest_posts.posted_at) older than this many
+    # seconds, with no brief posted for its day, was left by a claimant that died between the claim
+    # and the post; the next open or tick takes it over (services.mobile.digest.take_over). The
+    # build's one model call is Auto's Read (services.digest_service.generate_digest): 180 s per
+    # try on the OpenAI-compatible clients (core/llm/clients/openai_compatible_client.py
+    # DEFAULT_TIMEOUT_SECONDS) with the SDK's two retries, 540 s in all, under this default. The
+    # Anthropic client (the platform default, core/llm/defaults.py) sets no timeout, so its
+    # SDK's own 600 s per try and two retries hold, which this default does not outlast. A
+    # winner still building when its claim is taken over checks the claim before it posts and
+    # posts nothing, so a call that outlasts this costs a second build, never a second brief.
+    BRIEF_CLAIM_STALE_SECONDS: int = max(60, int(os.getenv("BRIEF_CLAIM_STALE_SECONDS", "600")))
+
+    # =============================================================================
+    # PRD-268 Proactive Auto: check-ins that suggest
+    # =============================================================================
+    # K7: the platform mode is off | shadow | live, the ``proactive.mode`` system setting
+    # (services/proactive/switches.py), read strictly. No row takes this default; a value
+    # that is none of the three, or a read that cannot complete, is off.
+    PROACTIVE_MODE_DEFAULT: str = (os.getenv("PROACTIVE_MODE_DEFAULT") or "off").strip().lower()
+    # §6.9: the caps every workspace's check-ins are held to unless its owners or admins set
+    # their own (settings.proactive.caps, services/proactive/limits.py). 0 allows nothing; a
+    # value the caps refuse (a negative one, a minimum interval past the maximum) refuses
+    # every check-in until it is fixed.
+    PROACTIVE_MAX_MODEL_RUNS_PER_DAY: int = int(os.getenv("PROACTIVE_MAX_MODEL_RUNS_PER_DAY", "48"))
+    PROACTIVE_MAX_SUGGESTIONS_PER_RUN: int = int(os.getenv("PROACTIVE_MAX_SUGGESTIONS_PER_RUN", "3"))
+    PROACTIVE_MAX_NEW_PER_PERSON_PER_DAY: int = int(os.getenv("PROACTIVE_MAX_NEW_PER_PERSON_PER_DAY", "10"))
+    # Past this the person's oldest open suggestions expire; nothing is refused.
+    PROACTIVE_MAX_OPEN_PER_PERSON: int = int(os.getenv("PROACTIVE_MAX_OPEN_PER_PERSON", "20"))
+    PROACTIVE_MAX_OPEN_PER_AGENT: int = int(os.getenv("PROACTIVE_MAX_OPEN_PER_AGENT", "3"))
+    # A check-in's interval: one sooner than the minimum after the last is refused.
+    PROACTIVE_MIN_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MIN_INTERVAL_MINUTES", "30"))
+    PROACTIVE_MAX_INTERVAL_MINUTES: int = int(os.getenv("PROACTIVE_MAX_INTERVAL_MINUTES", "1440"))
+    # K9: at most this many suggestion_ready bell rows per person per workspace since their local
+    # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
+    PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
+        0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
+    # K9: the fourth push type, suggestion, ships OFF. While off no suggestion push is sent
+    # (services/push/fanout.py); the bell row is still written. Discovery's suggestion_push
+    # follows it (US-C09b). The owner turns it on after §12-Q27 and the app's category (US-G02).
+    SUGGESTION_PUSH_ENABLED: bool = os.getenv("SUGGESTION_PUSH_ENABLED", "false").lower() in ("true", "1", "yes")
+    # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
+    # its item reads not_checked. At least a tenth of a second.
+    READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
+    # §6.3, K9 (W3): the follow-up caps (modules/proactive/follow_up_caps.py). A follow-up is at
+    # least MIN_MINUTES and at most MAX_DAYS away; pending and per day count one person's
+    # follow-ups from Auto, per workspace per day the workspace's; a day is the last 24 hours.
+    PROACTIVE_FOLLOW_UP_MIN_MINUTES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MIN_MINUTES", "10"))
+    PROACTIVE_FOLLOW_UP_MAX_DAYS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_DAYS", "7"))
+    PROACTIVE_FOLLOW_UP_MAX_PENDING: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PENDING", "5"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_DAY: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_DAY", "20"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY: int = int(
+        os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY", "100"))
+    # A firing quotes the origin chat's last this-many messages; a reason is at most this long.
+    PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES", "5"))
+    PROACTIVE_FOLLOW_UP_REASON_CHARS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_REASON_CHARS", "500"))
+    # §6.7, K14 (W3): the proactive evals (orchestrator/evals/proactive/), run by hand by the
+    # owner, never by CI. GOLD_DIR is a folder OUTSIDE the repository holding one <eval>.jsonl per
+    # eval (public repo: gold sets are never committed); empty, missing or inside the repository is
+    # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
+    PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
+    PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
+    # §6.11.5, K15 (W3): calibration on day one (api/auto_calibration.py) ships OFF until §12-Q22
+    # (consent to read the titles of a person's work) is answered. While off, GET answers
+    # available false, every POST is 404 and discovery does not list calibration.
+    CALIBRATION_ENABLED: bool = os.getenv("CALIBRATION_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
     # PRD-251 Socials
@@ -2123,6 +2388,12 @@ class Config:
     # declared duration against the monthly quota while it runs, at most this;
     # one whose duration cannot be read holds this much.
     SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
+    # PRD-264 EUAI-08a (EU AI Act Art. 50(4)): a labelled video shows "AI-generated" for
+    # its first this many seconds, and again for as long every interval after
+    # (modules/socials/deepfake_label.py; media-render burns it in). An interval no longer
+    # than the label shows it the whole video.
+    SOCIALS_AI_LABEL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_SECONDS", "3"))
+    SOCIALS_AI_LABEL_INTERVAL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_INTERVAL_SECONDS", "30"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.
@@ -2160,6 +2431,14 @@ class Config:
     # workspace's own), and how long it may take.
     BRAND_STYLE_READ_MODEL: str = os.getenv("BRAND_STYLE_READ_MODEL", "")
     BRAND_STYLE_READ_TIMEOUT_SECONDS: int = int(os.getenv("BRAND_STYLE_READ_TIMEOUT_SECONDS", "90"))
+    # PRD-264 ART5-1 (EU AI Act Art. 5): the model read that checks every image, video and voice
+    # request before it goes to a provider (core/generation_guard.py; empty model: the
+    # workspace's own), and how long it may take. A read that fails refuses the request.
+    GENERATION_GUARD_MODEL: str = os.getenv("GENERATION_GUARD_MODEL", "")
+    GENERATION_GUARD_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_GUARD_TIMEOUT_SECONDS", "30"))
+    # Off until after Web Summit (Gerard, 23 Oct 2026): no model read, so no cost and no refused
+    # demo when the read fails. Only the CSAM keyword block and the providers' own refusals run.
+    GENERATION_GUARD_READ_ENABLED: bool = os.getenv("GENERATION_GUARD_READ_ENABLED", "false").lower() in ("true", "1", "yes")
     # The voices a voice toolkit lists in the Socials voice picker, at most.
     SOCIALS_VOICE_LIST_LIMIT: int = int(os.getenv("SOCIALS_VOICE_LIST_LIMIT", "30"))
     # S1.8 (D12): footage and stills from the workspace's own Composio generation
@@ -2336,6 +2615,8 @@ class Config:
         - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
           workspace the auto-authenticated local session resolves to (W6 seeds it).
           It requires NO Clerk env.
+        - PRD-266 §4.3: a ``local`` install published beyond loopback needs
+          ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
@@ -2373,6 +2654,13 @@ class Config:
                     "local workspace the auto-authenticated local session resolves "
                     "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
                 )
+
+        # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
+        from services.mobile import remote_access
+        remote_access.enforce_boot_decision(self.AUTH_EDITION, self.LOCAL_REMOTE_ACCESS, {
+            "API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS,
+            "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS,
+        })
 
     def validate(self) -> bool:
         """
@@ -2433,20 +2721,34 @@ COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
 orchestrator_config = config
 
 # ---------------------------------------------------------------------------
-# PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
-# 2026-08-28). DISPLAY PRICING ONLY — no billing or commerce is wired anywhere
-# (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
-# charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
-# both derive from here: US-024 reads them for exposure profiles, and US-025's
-# assignment helper (services/plan_tiers.py) writes the limits into
+# PRD-222 W2·S1 (US-023), re-priced by PRD-265 US-001: PLAN_TIERS — the tier
+# contract the public facts sheet sells (§4): Own keys $9, Pro $29, Business $99
+# (by invite), Enterprise coming soon. Capability families (codegraph/nl2sql/
+# team/voice) and the quota limits derive from here: exposure profiles read them,
+# and the assignment helper (services/plan_tiers.py) writes the limits into
 # ``workspaces.plan_limits`` under the keys live code already reads
 # (seats→max_members, max_agents, budget). ``enterprise`` is a COMING-SOON
 # display entry only — never assignable.
 #
+# PRD-265 fields:
+#   * ``platform_ai`` — whether the plan's monthly and top-up credits may pay for
+#     calls on the platform's own AI keys. Own keys (DB key ``basic``) is False:
+#     its calls run on the customer's keys only. Trial credits fund platform AI on
+#     any plan (services/credits/routing.py).
+#   * ``monthly_credits`` — the credits a paid period grants (granted by billing
+#     from W2 on; nothing grants them while ``BILLING_OPEN`` is false).
+#   * ``self_serve`` — bought through checkout by the owner. Business is False:
+#     by invite, assigned by a platform admin only.
+#   * ``metered`` — False only for enterprise: an explicit platform allowance,
+#     contract-billed, so its platform calls are recorded but never gated.
+# The DB key ``basic`` stays (workspaces.plan defaults to it); only the display
+# name changed. Own keys is the same service as Pro (facts sheet §4): same seats,
+# agents, render minutes and families — only the credits differ.
+#
 # Every number is env-overridable WITHOUT a redeploy via
-# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
-# so tiers can be tuned live while testing. ``0`` means "unlimited" for
-# max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults).
+# ``0`` means "unlimited" for max_agents / watcher_limit, and "no ceiling /
+# custom" for budget_usd.
 #
 # PRD-251 S1.1c (owner, 2026-09-23): every plan gets Socials, and plans differ
 # only in hosting: ``render_minutes_month`` is the monthly render quota
@@ -2454,40 +2756,48 @@ orchestrator_config = config
 # max_agents: enterprise has none until the owner sets one, and the local
 # edition never has one.
 # ---------------------------------------------------------------------------
+_PRO_LIMITS: dict = {
+    "seats": 5,
+    "max_agents": 20,
+    "mission_concurrency": 3,
+    "watcher_limit": 5,
+    "marketplace_depth": 2,
+    "budget_usd": 100,
+    "render_minutes_month": 60,
+    # PRD-265 D-6 (30 Oct 2026): voice on every plan; an Auto Live call is paid by the minute
+    # from credits, so it is the customer's choice (it was Business-only, PRD-266 D34).
+    "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
+}
+
 _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
     "basic": {
-        "display_name": "Basic",
-        "display_price_usd": 19,
-        "price_label": "early access",
+        **copy.deepcopy(_PRO_LIMITS),
+        "display_name": "Own keys",
+        "display_price_usd": 9,
         "assignable": True,
-        "seats": 1,
-        "max_agents": 5,
-        "mission_concurrency": 1,
-        "watcher_limit": 1,
-        "marketplace_depth": 1,
-        "budget_usd": 25,
-        "render_minutes_month": 10,
-        "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
+        "self_serve": True,
+        "platform_ai": False,
+        "metered": True,
+        "monthly_credits": 0,
     },
     "pro": {
+        **copy.deepcopy(_PRO_LIMITS),
         "display_name": "Pro",
-        "display_price_usd": 49,
-        "price_label": "early access",
+        "display_price_usd": 29,
         "assignable": True,
-        "seats": 5,
-        "max_agents": 20,
-        "mission_concurrency": 3,
-        "watcher_limit": 5,
-        "marketplace_depth": 2,
-        "budget_usd": 100,
-        "render_minutes_month": 60,
-        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+        "self_serve": True,
+        "platform_ai": True,
+        "metered": True,
+        "monthly_credits": 2000,
     },
     "business": {
         "display_name": "Business",
         "display_price_usd": 99,
-        "price_label": "early access",
         "assignable": True,
+        "self_serve": False,
+        "platform_ai": True,
+        "metered": True,
+        "monthly_credits": 8000,
         "seats": 25,
         "max_agents": 0,
         "mission_concurrency": 10,
@@ -2508,6 +2818,9 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "display_name": "Enterprise",
         "assignable": False,
         "coming_soon": True,
+        "platform_ai": True,
+        "metered": False,
+        "monthly_credits": 0,
     },
 }
 

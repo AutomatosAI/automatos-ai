@@ -10,8 +10,18 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
 * approve writes the ``approved`` event and records a signature REQUEST whose payload is
   ``{id, version, digest, files}``; it never signs and the package has no signature after it;
 * the signature route stores a pasted base64 Ed25519 signature (64 bytes) for the open request
-  only; the reviewer's isolated-job note is stored and gates approval on the hosted edition;
-* reject needs a reason; deactivate writes a ``disable`` revocation of the digest;
+  only, and only when an active key of the keys file verifies it (C-05b: the keys path points at
+  an RFC 8032 public key, whose published seed signs the request's canonical text here); one no
+  active key verifies is a 400 and nothing is stored; the ``signed`` event and the report carry
+  ``verified`` and the keyId from ``signature_verify``; a stored signature an active key still
+  verifies refuses another (409), one that no longer does takes an active key's (QB-28); a keys
+  file that does not load reads ``invalid`` in the report (200) and the paste is a 503 with its
+  plain message, nothing stored; in the local edition a key the hosted feed revoked
+  (``theme_revocation_sync``) reads unverified in the report, never signs, and its stored
+  signature takes an active key's, as on load (the hosted edition never reads that row);
+* the reviewer's isolated-job note is stored and gates approval on the hosted edition;
+* reject needs a reason; deactivate writes a ``disable`` revocation of the digest, unless a live
+  ``local`` one stands (a pulled ``feed`` one doesn't: the feed may lift it);
 * every route refuses a non-admin, and a workspace's private upload is 404 here;
 * report-note, approve, deactivate and signature need a fresh step-up after the admin check
   (a non-admin gets the plain 403, never a reverification prompt); a ``pass`` note must carry
@@ -33,6 +43,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -60,16 +71,23 @@ from core.auth import step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.themes import ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation  # noqa: E402
-from services.themes import revocations, signing  # noqa: E402
+from core.models.themes import (  # noqa: E402
+    THEME_REVOCATION_SYNC_ROW_ID, ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation,
+    ThemeRevocationSync,
+)
+from services.themes import revocations, signature_verify, signing  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 
 ADMIN_PK, MEMBER_PK = 7, 8
-TABLES = [m.__table__ for m in (ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation)]
+TABLES = [m.__table__ for m in (
+    ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation, ThemeRevocationSync,
+)]
 GOOD_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")
 NOTE_TAIL = "isolated job: build reproducible, digests equal, JS rules clean"
 FAILED_NOTE = {"summary": "Outcome: fail\ndigest differs after rebuild", "outcome": "fail"}
 BASE = "/api/admin/themes"
+VECTOR = json.loads((_ORCH / "tests" / "fixtures" / "themes" / "signing-vector.json").read_text(encoding="utf-8"))
+RFC_KEY, OTHER_RFC_KEY = VECTOR["ed25519"]["cases"][:2]
 
 
 def _ctx(role="admin", clerk="clerk-7", fresh=True):
@@ -82,7 +100,7 @@ def _ctx(role="admin", clerk="clerk-7", fresh=True):
 
 
 def _passing_note(package):
-    """The kit's summary for this version (automatos-play scripts/review/summary.ts header lines)."""
+    """The kit's summary for this version (automatos-design-kit scripts/review/summary.ts header lines)."""
     summary = (f"Automatos theme review (automatos-theme-review/v1): {package.theme_id} {package.version}\n"
                f"Outcome: pass\nExpected digest: {package.digest}\nPackage digest:  {package.digest}\n\n{NOTE_TAIL}")
     return {"summary": summary, "outcome": "pass"}
@@ -109,6 +127,22 @@ def api(monkeypatch):
     finally:
         session.close()
         engine.dispose()
+
+
+def _keys(monkeypatch, tmp_path, status="active", case=None):
+    """Point the verifier at a keys file holding one RFC 8032 public key (TEST 1 unless ``case``)."""
+    case = case or RFC_KEY
+    entry = {"keyId": case["keyId"], "spki": case["spki"], "status": status, "added": "2026-10-20"}
+    path = tmp_path / f"signing-keys-{status}.json"
+    path.write_text(json.dumps({"schema": 1, "keys": [entry]}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", path)
+    return case["keyId"]
+
+
+def _signed(canonical, case=None):
+    """The request's canonical text signed with an RFC seed, as the kit's sign workflow prints it."""
+    seed = Ed25519PrivateKey.from_private_bytes(bytes.fromhex((case or RFC_KEY)["seed"]))
+    return base64.b64encode(seed.sign(canonical.encode("ascii"))).decode("ascii")
 
 
 def _files(version="1.0.0"):
@@ -267,7 +301,7 @@ def test_report_shows_note_history_and_request(api):
     assert events[0] == "report_note"  # its own request, before the approval
     assert sorted(events[1:]) == ["approved", "signature_requested"]  # one flush, same instant possible
     assert report["signatureRequest"]["payload"]["digest"] == package.digest
-    assert report["signatureVerified"] is False
+    assert (report["signatureVerified"], report["keyId"], report["signed"]) == (False, None, False)
 
 
 def test_a_private_upload_or_unknown_id_is_404(api):
@@ -316,6 +350,24 @@ def test_deactivate_writes_a_disable_revocation(api):
     assert len(_events(api.db, package, "deactivated")) == 1
 
 
+def test_a_pulled_disable_does_not_stand_in_for_the_deactivations_own(api):
+    package = _package(api.db, status="approved")
+    api.db.add(ThemeRevocation(digest=package.digest, level="disable", reason="pulled", origin="feed"))
+    api.db.commit()
+    resp = api.client.post(f"{BASE}/{package.id}/deactivate", json={"reason": "reported: exfiltrates chat"})
+    assert resp.status_code == 200, resp.text
+    rows = api.db.query(ThemeRevocation).filter(ThemeRevocation.digest == package.digest).all()
+    assert sorted((row.origin, row.level, row.reason) for row in rows) == [
+        ("feed", "disable", "pulled"), ("local", "disable", "reported: exfiltrates chat"),
+    ]
+    # A live local disable does stand in: the next deactivation of that digest writes none.
+    again = _package(api.db, status="approved", theme_id="acme/ink-copy", digest="ef" * 32)
+    api.db.add(ThemeRevocation(digest=again.digest, level="disable", reason="written here"))
+    api.db.commit()
+    assert api.client.post(f"{BASE}/{again.id}/deactivate", json={"reason": "same files"}).status_code == 200
+    assert api.db.query(ThemeRevocation).filter(ThemeRevocation.digest == again.digest).count() == 1
+
+
 # --- signature ---------------------------------------------------------------------------
 
 
@@ -323,22 +375,192 @@ def _signature(api, package, request_id, signature=GOOD_SIGNATURE):
     return api.client.post(f"{BASE}/{package.id}/signature", json={"requestId": str(request_id), "signature": signature})
 
 
-def test_signature_is_stored_for_the_open_request_only(api):
+def test_signature_is_stored_for_the_open_request_only(api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
     package = _package(api.db)
     assert _signature(api, package, uuid.uuid4()).status_code == 409  # not approved yet
-    request_id = _approve(api, package).json()["signatureRequest"]["requestId"]
-    assert _signature(api, package, uuid.uuid4()).status_code == 409
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, good = request["requestId"], _signed(request["canonical"])
+    assert _signature(api, package, uuid.uuid4(), good).status_code == 409
     assert _signature(api, package, request_id, "not base64 !").status_code == 400
     short = base64.b64encode(b"x" * 32).decode("ascii")
     assert _signature(api, package, request_id, short).status_code == 400
-    urlsafe = base64.urlsafe_b64encode(bytes(range(64))).decode("ascii").rstrip("=")
+    urlsafe = base64.urlsafe_b64encode(base64.b64decode(good)).decode("ascii").rstrip("=")
     resp = _signature(api, package, request_id, f"  {urlsafe}\n")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["signature"]["verified"] is False
+    assert (resp.json()["signature"]["verified"], resp.json()["signature"]["keyId"]) == (True, key_id)
     api.db.refresh(package)
-    assert package.signature == GOOD_SIGNATURE
-    assert len(_events(api.db, package, signing.EVENT_SIGNED)) == 1
-    assert _signature(api, package, request_id).status_code == 409  # already signed
+    assert package.signature == good
+    [signed] = _events(api.db, package, signing.EVENT_SIGNED)
+    assert (signed.detail["verified"], signed.detail["keyId"], signed.detail["requestId"]) == (True, key_id, request_id)
+    assert _signature(api, package, request_id, good).status_code == 409  # already signed
+
+
+def _refused_and_nothing_stored(api, package, request_id, signature):
+    resp = _signature(api, package, request_id, signature)
+    assert resp.status_code == 400 and resp.json()["detail"] == signing.NOT_VERIFIED, resp.text
+    api.db.refresh(package)
+    assert package.signature is None and _events(api.db, package, signing.EVENT_SIGNED) == []
+
+
+def test_a_signature_no_active_key_verifies_is_400_and_nothing_is_stored(api, monkeypatch, tmp_path):
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, canonical = request["requestId"], request["canonical"]
+    _refused_and_nothing_stored(api, package, request_id, _signed(canonical))  # the shipped file: no key
+    _keys(monkeypatch, tmp_path)
+    _refused_and_nothing_stored(api, package, request_id, GOOD_SIGNATURE)  # 64 bytes, no key's signature
+    _refused_and_nothing_stored(api, package, request_id, _signed(canonical, OTHER_RFC_KEY))  # another key
+    other = json.loads(canonical)
+    other["version"] = "9.9.9"
+    _refused_and_nothing_stored(api, package, request_id, _signed(signing.canonical_text(other)))  # other text
+    for status in ("retired", "revoked"):
+        _keys(monkeypatch, tmp_path, status=status)
+        _refused_and_nothing_stored(api, package, request_id, _signed(canonical))
+    _keys(monkeypatch, tmp_path)
+    assert _signature(api, package, request_id, _signed(canonical)).status_code == 200  # the request stays open
+
+
+def test_the_report_reads_signature_verified_and_key_id_from_signature_verify(api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    assert (report["signatureVerified"], report["keyId"]) == (False, None)  # approved, not signed yet
+    assert _signature(api, package, request["requestId"], _signed(request["canonical"])).status_code == 200
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    assert (report["signatureVerified"], report["keyId"], report["signed"]) == (True, key_id, True)
+    _keys(monkeypatch, tmp_path, status="retired")  # the same stored signature, its key retired since
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    assert (report["signatureVerified"], report["keyId"], report["signed"]) == (False, key_id, True)
+    _keys(monkeypatch, tmp_path, case=OTHER_RFC_KEY)  # a keys file without the signer's key
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    assert (report["signatureVerified"], report["keyId"]) == (False, None)
+
+
+def _key_file(monkeypatch, tmp_path, *held):
+    """Point the verifier at a keys file holding each ``(case, status)`` of ``held``."""
+    keys = [{"keyId": case["keyId"], "spki": case["spki"], "status": status, "added": "2026-10-20"}
+            for case, status in held]
+    path = tmp_path / "signing-keys-held.json"
+    path.write_text(json.dumps({"schema": 1, "keys": keys}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", path)
+
+
+def _report_check(api, package):
+    """The report's check on the stored signature: ``(signatureVerified, keyId)``."""
+    report = api.client.get(f"{BASE}/{package.id}/report").json()
+    return report["signatureVerified"], report["keyId"]
+
+
+def test_a_signature_whose_key_was_retired_takes_an_active_keys_and_one_that_verifies_never(
+        api, monkeypatch, tmp_path):
+    first, second = _keys(monkeypatch, tmp_path), OTHER_RFC_KEY["keyId"]
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, canonical = request["requestId"], request["canonical"]
+    assert _signature(api, package, request_id, _signed(canonical)).status_code == 200
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # still verifies
+    _key_file(monkeypatch, tmp_path, (RFC_KEY, "retired"), (OTHER_RFC_KEY, "active"))
+    assert _report_check(api, package) == (False, first)
+    resp = _signature(api, package, request_id, _signed(canonical))  # the retired key's again: 400, kept as it was
+    assert resp.status_code == 400 and resp.json()["detail"] == signing.NOT_VERIFIED, resp.text
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical)
+
+    resp = _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY))
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["signature"]["verified"], resp.json()["signature"]["keyId"]) == (True, second)
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical, OTHER_RFC_KEY)
+    replaced = {row.detail["keyId"]: row.detail["replaces"] for row in _events(api.db, package, signing.EVENT_SIGNED)}
+    assert replaced == {first: None, second: {"state": "invalid", "keyId": first}}
+    assert _report_check(api, package) == (True, second)
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # as before
+
+
+def test_a_signature_stored_before_c05b_checked_takes_one_an_active_key_verifies(api, monkeypatch, tmp_path):
+    key_id = _keys(monkeypatch, tmp_path)
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    package.signature = GOOD_SIGNATURE  # 64 bytes no key signed, as a row stored unverified before C-05b
+    api.db.commit()
+    resp = _signature(api, package, request["requestId"], _signed(request["canonical"]))
+    assert resp.status_code == 200, resp.text
+    [signed] = _events(api.db, package, signing.EVENT_SIGNED)
+    assert (signed.detail["keyId"], signed.detail["replaces"]) == (key_id, {"state": "invalid", "keyId": None})
+
+
+def test_a_keys_file_that_does_not_load_reads_invalid_in_the_report_and_the_paste_is_a_503(
+        api, monkeypatch, tmp_path):
+    package = _package(api.db)
+    request = _approve(api, package).json()["signatureRequest"]
+    request_id, good = request["requestId"], _signed(request["canonical"])
+    broken = tmp_path / "signing-keys-broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    resp = _signature(api, package, request_id, good)
+    assert resp.status_code == 503 and resp.json()["detail"] == signature_verify.NOT_JSON, resp.text
+    api.db.refresh(package)
+    assert package.signature is None and _events(api.db, package, signing.EVENT_SIGNED) == []
+
+    _keys(monkeypatch, tmp_path)
+    assert _signature(api, package, request_id, good).status_code == 200
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", broken)
+    report = api.client.get(f"{BASE}/{package.id}/report")
+    assert report.status_code == 200, report.text
+    assert (report.json()["signatureVerified"], report.json()["keyId"], report.json()["signed"]) == (False, None, True)
+    resp = _signature(api, package, request_id, good)  # a signed version: checking the stored one needs the keys
+    assert resp.status_code == 503 and resp.json()["detail"] == signature_verify.NOT_JSON, resp.text
+    api.db.refresh(package)
+    assert package.signature == good and len(_events(api.db, package, signing.EVENT_SIGNED)) == 1
+
+
+def _feed_revokes(db, *key_ids):
+    """The single sync row as the local edition's pull leaves it, with ``key_ids`` revoked by the hosted feed."""
+    db.merge(ThemeRevocationSync(id=THEME_REVOCATION_SYNC_ROW_ID, revoked_key_ids=list(key_ids)))
+    db.commit()
+
+
+def _signed_in_the_local_edition(api, monkeypatch, tmp_path):
+    """An approved version TEST 1's key signed, TEST 2's key active beside it, in the local edition."""
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    _key_file(monkeypatch, tmp_path, (RFC_KEY, "active"), (OTHER_RFC_KEY, "active"))
+    package = _package(api.db)
+    request = _approve(api, package, with_note=False).json()["signatureRequest"]
+    assert _signature(api, package, request["requestId"], _signed(request["canonical"])).status_code == 200
+    return package, request
+
+
+def test_the_report_reads_a_key_the_hosted_feed_revoked_as_unverified_in_the_local_edition_only(
+        api, monkeypatch, tmp_path):
+    package, _ = _signed_in_the_local_edition(api, monkeypatch, tmp_path)
+    _feed_revokes(api.db, OTHER_RFC_KEY["keyId"])
+    assert _report_check(api, package) == (True, RFC_KEY["keyId"])
+    _feed_revokes(api.db, RFC_KEY["keyId"])
+    assert revocations.is_disabled(api.db, package)  # disabled on load, everywhere a member sees it
+    assert _report_check(api, package) == (False, RFC_KEY["keyId"])  # and the admin's report agrees
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")  # the row is the local edition's own
+    assert _report_check(api, package) == (True, RFC_KEY["keyId"])
+
+
+def test_a_key_the_hosted_feed_revoked_never_signs_and_its_signature_takes_an_active_keys(
+        api, monkeypatch, tmp_path):
+    package, request = _signed_in_the_local_edition(api, monkeypatch, tmp_path)
+    request_id, canonical = request["requestId"], request["canonical"]
+    assert _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY)).status_code == 409  # verifies
+    _feed_revokes(api.db, RFC_KEY["keyId"])
+    resp = _signature(api, package, request_id, _signed(canonical))  # the revoked key's again: 400, kept as it was
+    assert resp.status_code == 400 and resp.json()["detail"] == signing.NOT_VERIFIED, resp.text
+    api.db.refresh(package)
+    assert package.signature == _signed(canonical)
+    resp = _signature(api, package, request_id, _signed(canonical, OTHER_RFC_KEY))
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["signature"]["verified"], resp.json()["signature"]["keyId"]) == (True, OTHER_RFC_KEY["keyId"])
+    replaced = {row.detail["keyId"]: row.detail["replaces"] for row in _events(api.db, package, signing.EVENT_SIGNED)}
+    assert replaced == {RFC_KEY["keyId"]: None, OTHER_RFC_KEY["keyId"]: {"state": "invalid", "keyId": RFC_KEY["keyId"]}}
+    assert not revocations.is_disabled(api.db, package)  # a new signature lifts it on the next load
+    assert _report_check(api, package) == (True, OTHER_RFC_KEY["keyId"])
 
 
 # --- gates, shape and the no-key rule ----------------------------------------------------
@@ -348,7 +570,7 @@ EXPECTED_ROUTES = {
     ("GET", f"{BASE}/pending"), ("GET", f"{BASE}/{{package_id}}/report"),
     ("POST", f"{BASE}/{{package_id}}/report-note"), ("POST", f"{BASE}/{{package_id}}/approve"),
     ("POST", f"{BASE}/{{package_id}}/reject"), ("POST", f"{BASE}/{{package_id}}/deactivate"),
-    ("POST", f"{BASE}/{{package_id}}/signature"),
+    ("POST", f"{BASE}/{{package_id}}/signature"), ("GET", f"{BASE}/{{package_id}}/review-package"),
 }
 
 

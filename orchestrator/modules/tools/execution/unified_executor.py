@@ -38,7 +38,9 @@ from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.tools.execution.params_text import decodes_nested_params, params_refusal_text
 from modules.tools.execution.direct_contract import missing_on_a_direct_call  # PRD-256 US-006
+from modules.tools.execution.refused_calls import says_why_it_refused  # P256-FIX-N17-10 (F449)
 from modules.tools.discovery.owner_only import asks_before_a_send  # PRD-256 US-004
+from modules.tools.discovery.check_in_lane import platform_actions_only_in_a_check_in  # PRD-268 US-C02b
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 from core.database.session_health import rollback_if_aborted
@@ -50,21 +52,6 @@ TOOL_ALIASES: Dict[str, str] = {
     "search_documents": "platform_search_documents",   # searches the uploads and names the file
     "search_code": "search_codebase",
 }
-
-# PRD-36: Composio Integration (lazy import to avoid startup overhead)
-_composio_executor = None
-
-
-def _get_composio_executor(db):
-    """Lazy import of Composio executor."""
-    global _composio_executor
-    if _composio_executor is None:
-        try:
-            from core.composio.tool_executor import ComposioToolExecutor
-            _composio_executor = ComposioToolExecutor
-        except ImportError:
-            return None
-    return _composio_executor(db) if _composio_executor else None
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +404,7 @@ class UnifiedToolExecutor:
         """Lazy-load Composio executor (PRD-36) only when needed."""
         if self._composio_executor is None:
             logger.debug("  Initializing Composio executor...")
-            self._composio_executor = _get_composio_executor(self.db)
+            self._composio_executor = exec_composio.get_composio_executor(self.db)
         return self._composio_executor
 
     @property
@@ -875,8 +862,10 @@ class UnifiedToolExecutor:
     # Main dispatch
     # ------------------------------------------------------------------
 
+    @platform_actions_only_in_a_check_in  # PRD-268 US-C02b: a check-in runs platform actions only, first
     @decodes_nested_params  # F321 (night 9b): params sent as JSON text run as the object they hold
     @asks_before_a_send  # PRD-256 US-004: a Composio send from a person's chat waits for their click
+    @says_why_it_refused  # P256-FIX-N17-10 (F449): its refusals carry the owner's reason
     async def execute_tool(
         self,
         tool_name: str,

@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 from config import config
+from core.monitoring.path_digests import redact_digest_segments
 
 try:
     from prometheus_client import (
@@ -198,8 +199,13 @@ def setup_metrics(app, service_name: Optional[str] = None):
 
 
 def _normalize_path(path: str) -> str:
-    """Replace dynamic path segments with placeholders to keep cardinality low."""
+    """Replace dynamic path segments with placeholders to keep cardinality low.
+
+    A SHA-256 segment goes first (PRD-264 FR-17): each file hash checked at the public
+    provenance route would otherwise be its own label on the unauthenticated /metrics.
+    """
     import re
+    path = redact_digest_segments(path)
     # Replace UUIDs
     path = re.sub(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",

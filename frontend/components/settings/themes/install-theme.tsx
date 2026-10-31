@@ -8,17 +8,33 @@
  * reviewed"; the install appears in the list below, where each member opts in and chooses it. A
  * refusal (package checks, a version clash, uploads off) shows the server's sentence. The button
  * is reused by the Marketplace's Install theme (W-C2, C-04b), not copied.
+ *
+ * C-05k: before choosing the package, the admin may add its detached signature file (`.sig.json`,
+ * released beside the `.autotheme`); both go in one upload, the file as `signature` (C-05d). The
+ * server checks it against the package's own files before it stores anything: a refusal
+ * (`SIGNATURE_MISMATCH` for another package's file, `SIGNATURE_BAD`, 413 over 4 KB) is listed here
+ * in the server's own sentences, and nothing is installed. An upload that carried a signature and
+ * was taken is signed: it shows "Signed by Automatos" in place of "Private · not reviewed" (QB-24).
  */
-import { useRef } from 'react'
-import { Upload } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ShieldCheck, Upload } from 'lucide-react'
 
+import { submissionRefusalOf } from '@/components/marketplace/themes/publish-errors'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useImportTheme } from '@/hooks/use-installed-themes'
 import type { ThemeSettings, ThemeUpload } from '@/lib/api-client'
 
 import { ScanReport } from './scan-report'
-import { PRIVATE_NOT_REVIEWED } from './theme-labels'
+import {
+  ADD_SIGNATURE_FILE,
+  PRIVATE_NOT_REVIEWED,
+  REMOVE_SIGNATURE_FILE,
+  SIGNATURE_FILE_ACCEPT,
+  SIGNATURE_FILE_CHOSEN,
+  SIGNATURE_FILE_HINT,
+  SIGNED_BY_AUTOMATOS,
+} from './theme-labels'
 
 export const INSTALL_THEME = 'Install theme'
 export const THEME_PACKAGE_ACCEPT = '.autotheme'
@@ -36,13 +52,19 @@ const STATUS_TEXT: Readonly<Record<ThemeUpload['status'], string>> = {
   stored: 'Stored. It is not installed.',
 }
 
+/**
+ * Why this caller can't install any theme here (the workspace's "who installs", the server's
+ * `require_install_role`), or null. Also the Marketplace's "Add to my workspace" gate (C-04b).
+ */
+export function installRoleRefusal(settings: ThemeSettings | undefined): string | null {
+  if (!settings || settings.canInstall) return null
+  return `In this workspace only ${WHO_INSTALLS[settings.installRole] ?? WHO_INSTALLS.owner} can install themes.`
+}
+
 /** Why this caller can't upload here, or null when the button works. */
 export function uploadBlockedReason(settings: ThemeSettings | undefined): string | null {
   if (!settings) return null
-  if (!settings.canInstall) {
-    return `In this workspace only ${WHO_INSTALLS[settings.installRole] ?? WHO_INSTALLS.owner} can install themes.`
-  }
-  return settings.privateUploads.effective === 'off' ? UPLOADS_OFF : null
+  return installRoleRefusal(settings) ?? (settings.privateUploads.effective === 'off' ? UPLOADS_OFF : null)
 }
 
 /** A note that does not block: under the platform's `admins` switch the server decides who uploads. */
@@ -50,14 +72,15 @@ function uploadNote(settings: ThemeSettings | undefined): string | null {
   return settings?.privateUploads.effective === 'admins' ? UPLOADS_PLATFORM_ADMINS : null
 }
 
-function UploadResult({ upload }: { upload: ThemeUpload }) {
+function UploadResult({ upload, signed }: { upload: ThemeUpload; signed: boolean }) {
   const pkg = upload.package
   return (
     <div className="space-y-3 rounded-xl border border-border/50 px-4 py-3" data-testid="theme-upload-result">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-foreground">{pkg.name || pkg.themeId}</span>
         <span className="text-xs text-muted-foreground">{pkg.version}</span>
-        {!pkg.reviewed && <Badge variant="secondary">{PRIVATE_NOT_REVIEWED}</Badge>}
+        {signed && <Badge variant="secondary">{SIGNED_BY_AUTOMATOS}</Badge>}
+        {!signed && !pkg.reviewed && <Badge variant="secondary">{PRIVATE_NOT_REVIEWED}</Badge>}
       </div>
       <p className="text-xs text-muted-foreground">
         {STATUS_TEXT[upload.status]}
@@ -68,14 +91,68 @@ function UploadResult({ upload }: { upload: ThemeUpload }) {
   )
 }
 
+/** The checks' refusal of an upload (400 or 413 with `{message, errors}`), each in the server's words. */
+function UploadRefusal({ error }: { error: unknown }) {
+  const refusal = submissionRefusalOf(error)
+  if (refusal === null) return null
+  return (
+    <div role="alert" className="space-y-1 rounded-xl border border-destructive/40 px-4 py-3" data-testid="theme-upload-refusal">
+      <p className="text-sm font-medium text-destructive">{refusal.message}</p>
+      <ul className="space-y-1">
+        {refusal.errors.map((item, index) => (
+          <li key={`${item.code}-${index}`} className="text-sm">
+            {item.message} <code className="text-xs text-muted-foreground">{item.code}</code>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function SignatureFile({ file, disabled, onChange }: { file: File | null; disabled: boolean; onChange: (next: File | null) => void }) {
+  const input = useRef<HTMLInputElement>(null)
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {file ? (
+        <>
+          <span data-testid="install-theme-signature-name">
+            {SIGNATURE_FILE_CHOSEN} <span className="font-mono text-foreground">{file.name}</span>
+          </span>
+          <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => onChange(null)}>
+            {REMOVE_SIGNATURE_FILE}
+          </Button>
+        </>
+      ) : (
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => input.current?.click()}>
+          <ShieldCheck className="mr-2 h-4 w-4" aria-hidden />
+          {ADD_SIGNATURE_FILE}
+        </Button>
+      )}
+      <span>{SIGNATURE_FILE_HINT}</span>
+      <input
+        ref={input}
+        type="file"
+        accept={SIGNATURE_FILE_ACCEPT}
+        className="hidden"
+        data-testid="install-theme-signature-input"
+        onChange={(event) => {
+          onChange(event.target.files?.[0] ?? null)
+          event.target.value = ''
+        }}
+      />
+    </div>
+  )
+}
+
 export function InstallTheme({ settings }: { settings: ThemeSettings | undefined }) {
   const input = useRef<HTMLInputElement>(null)
   const importTheme = useImportTheme()
+  const [signature, setSignature] = useState<File | null>(null)
   const blocked = uploadBlockedReason(settings)
   const note = blocked ?? uploadNote(settings)
 
   const onFile = (file: File | undefined) => {
-    if (file) importTheme.mutate(file)
+    if (file) importTheme.mutate({ file, signature }, { onSuccess: () => setSignature(null) })
     if (input.current) input.current.value = ''
   }
 
@@ -96,7 +173,11 @@ export function InstallTheme({ settings }: { settings: ThemeSettings | undefined
         />
         {note && <p className="text-xs text-muted-foreground">{note}</p>}
       </div>
-      {importTheme.data && <UploadResult upload={importTheme.data} />}
+      {blocked === null && <SignatureFile file={signature} disabled={importTheme.isLoading} onChange={setSignature} />}
+      {importTheme.error ? <UploadRefusal error={importTheme.error} /> : null}
+      {importTheme.data && (
+        <UploadResult upload={importTheme.data} signed={Boolean(importTheme.variables?.signature)} />
+      )}
     </section>
   )
 }

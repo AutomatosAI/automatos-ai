@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 
 import { MainLayout } from '@/components/layout/main-layout'
 import type { SlotId } from '@/lib/theme-host/registry-types'
+import { CorePageProvider } from '@/lib/theme-sdk/host-cards/core-page'
 
 import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from './theme-slot-registrations'
 
@@ -15,10 +16,12 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  *
  * - a **page** entry (`page="/chat"`, registerPage): on that route only, unless the link asks for
  *   a surface only the core page has (`keepCorePage` names those query parameters; `themeServes`
- *   names values of one that the theme's page still is). An installed theme's page draws full
- *   bleed inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d); builtin
- *   Play's pages draw MainLayout themselves (ActiveThemeSlots.framesPages).
- * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed.
+ *   names values of one that the theme's page still is). The theme's page draws full bleed
+ *   inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d).
+ *   The theme's page is handed the core page (CorePageProvider, A-12a), so its `cards.CorePage`
+ *   draws the core page where the theme keeps a surface only the core page has.
+ * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed. A slot has no core page
+ *   to hand down: `cards.CorePage` in it renders its own children.
  *
  * Where the theme decides (it registered this page or slot, or an installed theme is still
  * loading and may have), nothing renders while the layout is 'pending' (the width is not known:
@@ -41,7 +44,7 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  * they never suspend, and the core pages under this seam read them with no boundary of their own
  * (app/playbooks/page.tsx, app/chat/page.tsx). Were a route prerendered, `next build` would stop
  * on it (missing-suspense-with-csr-bailout) rather than ship a broken page. And the core page sits
- * at one place in the tree in every state: a style switched in place (Studio and builtin Play, an
+ * at one place in the tree in every state: a style switched in place (Classic and Studio, an
  * installed theme and Studio), the width becoming known, an installed theme settling or failing,
  * never remounts it (M69).
  */
@@ -95,28 +98,33 @@ export function corePageAsked(
 }
 
 /**
- * The theme's version if it draws here now, null for nothing yet, or the core's version. `framed`
- * draws the theme's version inside MainLayout (an installed theme's page).
+ * The theme's version if it draws here now, null for nothing yet, or the core's version. A page
+ * entry (`asPage`) hands the core page down to the theme's page and frames it in MainLayout.
  */
-function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, framed = false): ReactNode {
+function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, asPage = false): ReactNode {
   const Theme = registeredComponent(registered)
   if (active.layout === 'none' || active.layout === 'narrow') return core
   if (active.layout === 'pending') return active.registrations === null || Theme !== null ? null : core
-  return Theme === null ? core : <ThemeVersion component={Theme} framed={framed} />
+  if (Theme === null) return core
+  if (!asPage) return <ThemeVersion component={Theme} framed={false} />
+  return <ThemeVersion component={Theme} framed corePage={{ page: core }} />
 }
 
 interface ThemeVersionProps {
   readonly component: ComponentType
   readonly framed: boolean
+  /** The core page a page entry hands down (cards.CorePage); absent for a slot. */
+  readonly corePage?: { readonly page: ReactNode }
 }
 
 /** The theme's component; a lazy one (an installed theme's React.lazy) suspends to nothing. */
-function ThemeVersion({ component: Component, framed }: ThemeVersionProps) {
-  const version = (
+function ThemeVersion({ component: Component, framed, corePage }: ThemeVersionProps) {
+  const theme = (
     <Suspense fallback={null}>
       <Component />
     </Suspense>
   )
+  const version = corePage === undefined ? theme : <CorePageProvider page={corePage.page}>{theme}</CorePageProvider>
   return framed ? <MainLayout fullBleed>{version}</MainLayout> : version
 }
 
@@ -127,7 +135,8 @@ function ThemePageSlot({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED
   const params = useSearchParams()
   const here = routeMatches(page, pathname) && !corePageAsked(params, keepCorePage, themeServes)
   if (!here) return <>{children}</>
-  return <>{chooseVersion(active, active.registrations?.pages.get(page), children, active.framesPages)}</>
+  const version = chooseVersion(active, active.registrations?.pages.get(page), children, true)
+  return <>{version}</>
 }
 
 function ThemeNamedSlot({ slot, children }: ThemeNamedSlotProps) {

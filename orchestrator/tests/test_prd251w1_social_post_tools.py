@@ -90,7 +90,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SOCIAL_POST_STATUSES, Socia
 from core.models.workspaces import Workspace  # noqa: E402
 from core.report_tables import PARTS  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
-from modules.tools.discovery import actions_socials  # noqa: E402
+from core import social_post_schema  # noqa: E402
 from modules.tools.discovery.action_registry import get_action_registry  # noqa: E402
 from modules.tools.discovery.platform_executor import PlatformActionExecutor  # noqa: E402
 
@@ -113,7 +113,7 @@ TOOLS = (
     # PRD-251B (US-B204): the research playbook reads a plan and adds topics to its bank.
     "platform_get_social_plan",
     "platform_add_social_topics",
-    "platform_get_social_history",  # PRD-251C (US-C103): what the workspace already posted
+    "platform_get_social_history", "platform_get_social_plan_slots",  # PRD-251C (US-C103) posted; P256-FIX-SOC-5 slots
 )
 # The steps no tool may reach: the review, the schedule and the way out (D6, D14).
 NOT_FOR_AGENTS = {
@@ -625,7 +625,7 @@ def test_list_filters_by_status_and_returns_only_the_callers_workspace(env):
 
     unknown = _tool(env, "platform_list_social_posts", status=["pending"])
     assert unknown["success"] is False and "Unknown status pending" in unknown["error"]
-    too_many = _tool(env, "platform_list_social_posts", limit=actions_socials.LIST_MAX_LIMIT + 1)
+    too_many = _tool(env, "platform_list_social_posts", limit=social_post_schema.LIST_MAX_LIMIT + 1)
     assert too_many["success"] is False and "limit must be" in too_many["error"]
     assert _tool(env, "platform_list_social_posts", workspace_id=WS_OTHER)["posts"][0]["id"] == theirs["id"]
 
@@ -692,7 +692,7 @@ def test_no_registered_tool_approves_schedules_or_publishes_a_post():
         "platform_list_social_posts": "read",
         "platform_get_social_plan": "read",
         "platform_add_social_topics": "write",
-        "platform_get_social_history": "read",
+        "platform_get_social_history": "read", "platform_get_social_plan_slots": "read",
     }
     # Every tool is routed to its handler here, and nothing a tool runs reaches a review, a
     # schedule or the way out: neither the handlers nor the flows they share with the routes.
@@ -713,12 +713,13 @@ def test_a_field_the_post_does_not_take_is_refused_and_nothing_is_saved(env):
 
 
 def test_the_schemas_speak_the_lifecycles_own_vocabulary():
-    assert actions_socials.POST_FORMATS == list(SOCIAL_POST_FORMATS)
-    assert actions_socials.POST_STATUSES == list(SOCIAL_POST_STATUSES)
-    assert actions_socials.CHART_KINDS == list(CHART_KINDS)
-    assert actions_socials.CHART_PARTS == list(PARTS)
+    assert social_post_schema.POST_FORMATS == list(SOCIAL_POST_FORMATS)
+    assert social_post_schema.POST_STATUSES == list(SOCIAL_POST_STATUSES)
+    assert social_post_schema.CHART_KINDS == list(CHART_KINDS)
+    assert social_post_schema.CHART_PARTS == list(PARTS)
     create = get_action_registry().get("platform_create_social_post")
-    fields = set(create.parameters["properties"]) - {"template", "chart_report", "render"}
+    # channels: the post's targets; REST sets them with PUT /posts/{id}/targets (P256-FIX-SOC-4).
+    fields = set(create.parameters["properties"]) - {"template", "chart_report", "render", "channels"}
     # The REST body's own fields, template_id taken as ``template`` (an id or a name).
     rest = {f.alias or name for name, f in socials_api.CreateSocialPostRequest.model_fields.items()} - {"template_id"}
     assert fields == rest
@@ -798,16 +799,16 @@ def test_a_draft_renders_by_default_through_media_render_and_waits_for_approval(
 
 def test_past_the_render_quota_the_draft_is_saved_and_the_render_refused_before_media_render(env):
     template_id = _template(env)
-    env.session.add(_usage_row(WS, 600))  # Basic: 10 minutes, all used
+    env.session.add(_usage_row(WS, 3600))  # Own keys: 60 minutes, all used
     env.session.commit()
 
     result = _tool(env, "platform_create_social_post", **_draft_fields(), template=str(template_id), render=True)
 
     assert result["success"] is False and result["render"]["started"] is False, result  # F379: a failed call
-    assert "used 10.0 of its 10 render minutes this month on the Basic plan" in result["render"]["error"]
+    assert "used 60.0 of its 60 render minutes this month on the Own keys plan" in result["render"]["error"]
     assert result["error"].startswith(f"Saved post {result['post']['id']} (\"Web Summit countdown\") as a draft, "
                                       "but it did NOT render: ")
-    assert "used 10.0 of its 10 render minutes" in result["error"] and result["saved_as_draft"] is True
+    assert "used 60.0 of its 60 render minutes" in result["error"] and result["saved_as_draft"] is True
     assert env.health == [] and env.launched == []
     row = _row(env, result["post"]["id"])
     assert row.status == "draft" and [e["action"] for e in row.review_log] == ["draft"]

@@ -8,7 +8,7 @@
  * that delivers flat silence (a continuity iPhone, a recorder extension's
  * virtual input, an unplugged USB mic) while the strip says "Mic live" —
  * the caller talks into a dead channel and Auto never hears a word. The
- * hook's analyser measures the user's RMS; when a full window stays at
+ * Live engine's analyser measures the user's RMS; when a full window stays at
  * digital silence the banner names the fault and offers the fix — pick
  * another device — right where the eye already is.
  */
@@ -23,10 +23,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { MicInputDevice } from '@/hooks/use-retell-call'
+import type { MicInputDevice } from '@/lib/voice/live/devices'
 
 interface DevicePickProps {
-  devices: MicInputDevice[]
+  devices: readonly MicInputDevice[]
   /** null = the browser default device. */
   activeDeviceId: string | null
   onPickDevice: (deviceId: string) => void

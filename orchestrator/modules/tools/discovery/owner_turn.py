@@ -139,7 +139,11 @@ def owners_recent_words(db: Session, workspace_id: Any, turn: OwnerTurn) -> Tupl
 
 def _chat_words(db: Session, workspace_id: Any, turn: OwnerTurn, role: str, count: int) -> Tuple[str, ...]:
     """The text of the last ``count`` messages by ``role`` in the turn's chat, newest
-    first. Read in a savepoint: a refused read must not abort the caller's transaction."""
+    first. Read in a savepoint: a refused read must not abort the caller's transaction.
+    A failed turn's note ("⚠️ Auto could not finish this reply…") is never Auto's words."""
+    from sqlalchemy import func
+
+    from consumers.chatbot.turn_errors import TURN_ERROR_ORIGIN
     from core.models.core import Message
     from modules.memory.thread_checkpoint import extract_message_text
 
@@ -149,7 +153,8 @@ def _chat_words(db: Session, workspace_id: Any, turn: OwnerTurn, role: str, coun
         with db.begin_nested():
             rows = (db.query(Message.parts)
                     .filter(Message.chat_id == turn.chat_id, Message.workspace_id == _as_uuid(workspace_id),
-                            Message.role == role)
+                            Message.role == role,
+                            func.coalesce(Message.source["origin"].astext, "") != TURN_ERROR_ORIGIN)
                     .order_by(Message.created_at.desc()).limit(count).all())
     except Exception:
         logger.exception("[owner_turn] could not read the %s messages in chat %s", role, turn.chat_id)
@@ -198,12 +203,12 @@ def _cards_in_words(db: Session, workspace_id: Any, text: str) -> List[NamedCard
         task_id, by_id = card_said(db, workspace_id, said.digits)
         task = _card(db, workspace_id, task_id)
         ref = (ticket_number(db, task) if task is not None else None) or _as_number(said.digits)
-        seq, step = _seq_and_step(ref)
+        seq, step = seq_and_step(ref)
         cards.append(NamedCard(ref=ref, seq=seq, step=step, task=task, by_id=by_id))
     return cards
 
 
-def _seq_and_step(ref: str) -> Tuple[int, Optional[int]]:
+def seq_and_step(ref: str) -> Tuple[int, Optional[int]]:
     """(42, None) for "#0042", (51, 3) for "#0051.3"."""
     parts = re.fullmatch(r"#(\d+)(?:\.(\d+))?", ref)
     if parts is None:
@@ -276,4 +281,4 @@ def card_words(card: NamedCard) -> str:
 
 
 __all__ = ["CARD_REF", "SENDS_IT_BACK", "NamedCard", "OwnerTurn", "autos_last_reply", "autos_proposal", "card_kind", "card_words",
-           "cards_named", "names_card", "owner_turn", "owners_recent_words", "says", "values_in"]
+           "cards_named", "names_card", "owner_turn", "owners_recent_words", "says", "seq_and_step", "values_in"]

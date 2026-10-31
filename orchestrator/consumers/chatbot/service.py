@@ -22,7 +22,7 @@ from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, or_
 
 # Converged tool-loop spine — chat + agent share this (PRD-142 W3-S4 / G6)
 from modules.tools.execution.tool_loop import (
@@ -45,24 +45,26 @@ from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8
 from consumers.chatbot.atom_prompt import (
     atom_memory_block, atom_system_prompt, resolve_atom_attachments, todays_line_off_loop,
 )
+from consumers.chatbot.chat_history import history_page  # PRD-266 US-007b: the paged chat list
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
+from consumers.chatbot.tool_cut import TOOL_RESULT_TOKEN_BUDGET as _TOOL_RESULT_TOKEN_BUDGET, logs_what_the_cut_keeps
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
-from modules.tools.tool_router import (
-    get_tools_for_agent_async,
-)
+from modules.tools.tool_router import get_tools_for_agent_async
 from services.page_context import (
     merge_into_trace,
     page_actions_from_context as _page_actions_from_context,
 )
 
-from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+from consumers.chatbot.empty_completion import NOTHING_SAID, is_empty_completion, with_fallback_content
+from consumers.chatbot.failed_loop import a_failed_loop_fails_the_turn  # a later round's failure fails the turn
+from consumers.chatbot.turn_notes import save_turn_note  # PRD-239 S4: a failed turn's note
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
@@ -74,20 +76,20 @@ from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's call
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
+from consumers.chatbot.reply_locale import replies_in_the_persons_locale  # the variant Auto replies in (pt-BR)
+from consumers.chatbot.spoken_model import answers_on_the_turns_model  # spoken turns: SPOKEN_MODE_MODEL
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_failure_key as _same_failure_key  # F030
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
+from consumers.chatbot.waiting_asks_turn import reads_the_waiting_asks  # F439 (nights 16-17)
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
-    about_a_document, full_path_for_documents, with_document_actions,
+    about_a_document, full_path_for_documents, message_text, with_document_actions,
 )
+from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD-264 EUAI-09
 
 logger = logging.getLogger(__name__)
-
-# PRD-157 S3: token budget for a single tool result fed back into the LLM loop
-# (replaces the former 6000/4000-char cuts). Truncation is token-aware.
-_TOOL_RESULT_TOKEN_BUDGET = 2000
 
 
 NARRATED_ACTIONS_NOTICE = (
@@ -214,15 +216,14 @@ def resolve_known_user_name(db, user_id: Optional[int]) -> Optional[str]:
 
 
 def atom_identity_clause(user_name: Optional[str]) -> str:
-    """The ATOM prompt's "who am I talking to" clause (PRD-233 S6).
-
-    Mirrors the full path's personality wording ("You're talking to <name>",
-    consumers/chatbot/personality.py) so both lanes greet from ONE source —
-    ``ConversationState.user_name``. Empty (prompt byte-identical) when the
-    name is unknown.
+    """The ATOM prompt's "who am I talking to" clause (PRD-233 S6): the full path's personality
+    wording ("You're talking to <name>", and F460's ``owner_is_you``), so both lanes greet from ONE
+    source, ``ConversationState.user_name``. Empty (prompt byte-identical) when the name is unknown.
     """
+    from consumers.chatbot.owner_is_you import owner_is_you
+
     name = user_name.strip() if isinstance(user_name, str) else ""
-    return f" You're talking to {name}." if name else ""
+    return f" You're talking to {name}. {owner_is_you(name)}" if name else ""
 
 
 def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
@@ -238,11 +239,6 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     if row is not None and is_cli_agent(row[0]):
         return RuntimeMismatchError(agent_id, RUNTIME_CLI, lane="chat")
     return None
-
-
-# F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
-# a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it.
-NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
 
 
 def _update_runtime_metrics(agent_runtime: Any, response: Any) -> None:
@@ -313,22 +309,16 @@ class ChatService:
         self,
         user_id: int,
         limit: int = 20,
-        starting_after: Optional[datetime] = None,
+        starting_after: Optional[str] = None,
         workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user within a workspace.
+        """Get chat history for a user within a workspace (``consumers.chatbot.chat_history``).
 
-        Ordered by most recent activity (``updated_at`` — bumped on every
-        ``save_message``), not creation time, so a thread that just received a
-        message surfaces first (PRD-220 S2). ``starting_after`` pages on the
-        same key.
+        Ordered by most recent activity (PRD-220 S2). ``starting_after`` is a chat id
+        (PRD-266 US-007b): the chats after it in that order; ``ChatCursorNotFound``
+        when it is not this user's chat in this workspace.
         """
-        query = self.db.query(Chat).filter(Chat.user_id == user_id)
-        if workspace_id is not None:
-            query = query.filter(Chat.workspace_id == workspace_id)
-        if starting_after:
-            query = query.filter(Chat.updated_at < starting_after)
-        return query.order_by(desc(Chat.updated_at)).limit(limit).all()
+        return history_page(self.db, user_id, limit, starting_after, workspace_id)
 
     def update_chat_title(self, chat_id: str, title: str) -> bool:
         """Update chat title, handling unique constraint violations."""
@@ -547,6 +537,7 @@ _BASE64_IMG_RE = re.compile(
 
 
 @a_saved_reply_is_on_brand  # F337 (night 10): the saved reply's placeholder company and sign-off are filled
+@reply_images_are_marked  # PRD-264 EUAI-09: each image it saves carries the AI mark and a provenance row
 async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
     """Find base64 image markdown in text, upload to S3, replace with URLs."""
     matches = list(_BASE64_IMG_RE.finditer(text))
@@ -754,8 +745,11 @@ class StreamingChatService:
         return self.workspace_id
 
     def _extract_user_text(self, llm_messages: List[Dict[str, Any]]) -> str:
-        """The latest message the person wrote (F295: never a nudge of the tool loop's)."""
-        return next((m.get("content") or "" for m in reversed(llm_messages)
+        """The words of the latest message the person wrote (F295: never a nudge of the tool
+        loop's). A message sent with a photo carries its content as parts (text plus image), so
+        only its text parts are read: the answer checks after the loop (F187 invented_ids,
+        F205 internal_names) run regexes over this and crashed on a list (24 Oct, the app)."""
+        return next((message_text(m) for m in reversed(llm_messages)
                      if m.get("role") == "user" and not is_nudge(m)), "")
 
     async def _load_agent_context(self, agent_runtime) -> dict:
@@ -838,6 +832,7 @@ class StreamingChatService:
     # ─────────────────────────────────────────────────────────────────────
 
     @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
+    @replies_in_the_persons_locale  # the turn's locale (pt-BR) names the language variant Auto replies in
     async def _prepare_messages(
         self,
         messages: List[Dict[str, Any]],
@@ -1403,16 +1398,17 @@ class StreamingChatService:
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
+    @reads_the_waiting_asks  # F439 (night 16): "did it run?" names the cards still waiting for the click
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
-        """F085-A: search the documents for a question before the first model
-        call. Yields the activity-trail frames; appends the cited passages to
+        """F085-A: search the documents for a question (N17-11: or a drafting turn)
+        before the first model call. Yields the activity-trail frames; appends the cited passages to
         ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
-        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, is_question, prefetch
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, prefetch, searched_first
 
-        if not is_question(latest_text):
+        if (how := searched_first(latest_text)) is None:  # P256-FIX-N17-11 (F443): a question, or a drafting turn
             return
 
         async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1430,7 +1426,7 @@ class StreamingChatService:
         try:
             found = await prefetch(
                 self.db, self.workspace_id, latest_text, search=_search, viewer=getattr(self, "_viewer_subject_id", None),
-                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH,
+                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH, **how,
                 limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
             )
         except Exception:
@@ -1487,6 +1483,7 @@ class StreamingChatService:
 
     @the_loop_writes_receipts  # PRD-256 US-001: the loop's receipts, from its tracker, before the answer
     @settles_held_retractions  # FX-017: a retraction held after a blank retry goes out only if replaced
+    @a_failed_loop_fails_the_turn  # a later round's failure is the turn's: error frame and note, never a reply
     async def _stream_tool_loop(
         self,
         response,
@@ -2094,6 +2091,7 @@ class StreamingChatService:
     # fire on this lane and failures surface honestly (no unconditional
     # success:True). No shim (CLAUDE.md §5).
 
+    @logs_what_the_cut_keeps  # P256-FIX-N17-11 (F443): the cut that follows, logged ('[tool-cut] kept N of M')
     def _track_search_spiral(
         self,
         result: Dict[str, Any],
@@ -2404,25 +2402,31 @@ class StreamingChatService:
         is_super_admin: bool = False,
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
+        locale: Optional[str] = None,  # the person's checked BCP 47 tag (api.chat_models), pt-BR
     ) -> AsyncGenerator[str, None]:
         """Stream a chat response produced by the specified agent.
 
         Every LLM call of the turn — the agent's, the complexity assessor's, a
         memory distil's — is booked to the ``chat`` lane and to this
         conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
+        The turn is one ask (PRD-265): its calls are metered at their real cost,
+        and it stops if they reach the workspace's credit balance.
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
         from core.security.surface import WIDGET, turn_surface
+        from services.credits.asks import ask_scope
 
         # F351 (night 10b): a document conversation keeps its document tools on a follow-up —
         # the full path (never the dispatcher-only ATOM lane) and the template actions ranked in.
         self._document_turn = not self.widget_mode and about_a_document(messages)
+        self._reply_locale = locale  # read by reply_locale.replies_in_the_persons_locale; None: none named
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
         # is off for it) leaves every action listing of the turn, the ATOM enum too.
         with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id), \
+                ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
                 self._hidden_action_scope(agent_id):
@@ -2455,6 +2459,7 @@ class StreamingChatService:
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
+    @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,
@@ -3008,17 +3013,8 @@ class StreamingChatService:
 
     def _persist_turn_error(self, chat_id: str, err: Any) -> None:
         """PRD-239 S4: keep the failure in the conversation (an assistant note with
-        provenance) so it survives a reload and the detached-turn path. Fail-soft."""
-        try:
-            self.chat_service.save_message(
-                chat_id=chat_id,
-                role="assistant",
-                parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
-                workspace_id=self.workspace_id,
-                source={"origin": "turn_error", "label": "Error", "code": err.code},
-            )
-        except Exception:  # noqa: BLE001
-            logger.debug("[Chat] could not persist the turn error note", exc_info=True)
+        provenance) so it survives a reload and the detached-turn path (turn_notes)."""
+        save_turn_note(self.chat_service, chat_id, self.workspace_id, err)
 
     async def _execute_pretriggered_tools(
         self,

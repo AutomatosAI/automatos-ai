@@ -223,6 +223,7 @@ def _make_action(name: str, *, category: str = "agents", description: str = "") 
         description=description or f"{name} description",
         category=category,
         parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
         admin_only=False,
         promoted=False,
     )

@@ -29,7 +29,7 @@ import {
   useMarkAllNotificationsRead,
   useDismissNotification,
 } from '@/hooks/use-notifications-api'
-import { BOARD_HREF, QUESTIONS_HREF, questionIdHref, ticketHref } from '@/lib/ticket-links'
+import { BOARD_HREF, QUESTIONS_HREF, SUGGESTED_HREF, questionIdHref, suggestionHref, ticketHref } from '@/lib/ticket-links'
 
 // ---------------------------------------------------------------------------
 // Route mapping
@@ -72,6 +72,13 @@ export function linkFor(row: NotificationRow): string | null {
       return '/command-center?tab=governance'
     case 'watch':
       return '/command-center?tab=watchlist'
+    // PRD-266 US-016c: a content report → Governance, whose Audit pane lists it
+    // (owners and admins: who receives the notice and who can open the tab).
+    case 'content_report':
+      return '/command-center?tab=governance'
+    // PRD-266 US-012b: Auto messaged you → that chat (the Command Center feed's chat link).
+    case 'chat':
+      return link_id ? `/chat?chatId=${link_id}` : '/chat'
     // PRD-225: an agent question → answering resumes the work. PRD-252 R1: the
     // board opens the ticket it was asked on, at the question.
     case 'question':
@@ -86,6 +93,9 @@ export function linkFor(row: NotificationRow): string | null {
       return '/deliverables?tab=socials&view=queue'
     case 'social_posted':
       return link_id ? `/deliverables?tab=socials&view=posted&plan=${link_id}` : '/deliverables?tab=socials&view=posted'
+    // PRD-268 US-W01a: a suggestion_ready row → its card in the Command Center's Suggested list.
+    case 'suggestion':
+      return link_id ? suggestionHref(link_id) : SUGGESTED_HREF
     default:
       return null
   }

@@ -1,6 +1,6 @@
 /**
- * PRD-261 A-01, A-04a — the theme host provider, in every build (no build flag). Under Classic,
- * Studio and builtin Play it renders its children and does nothing else: no load, no global, no
+ * PRD-261 A-01, A-04a — the theme host provider, in every build (no build flag). Under Classic
+ * and Studio it renders its children and does nothing else: no load, no global, no
  * status on <html>. Under an installed theme's style it loads that theme, never in safe mode,
  * reports 'loading' from its first render, turns off with no notice when the server has no active
  * install, falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders
@@ -10,6 +10,12 @@
  * A-04c: the theme's own failures are recorded per theme; the third within ten minutes sends the
  * member back to Studio (the server choice, the cookie, the style, a notice that outlives the
  * host's), `auth` never counts, and /safe-mode is safe mode.
+ *
+ * W-A6b (gap G1): the host releases the installed theme's registry entry (the style context's
+ * releaseInstalledTheme) when it cannot run the theme, and holds it while it loads or runs it.
+ *
+ * C-05l: a `disable` revocation of the chosen install turns the host off with a notice of its own
+ * (the theme was withdrawn, and why); any other "no theme here" stays silent.
  */
 import React, { useEffect, useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
@@ -29,12 +35,15 @@ const mocks = vi.hoisted(() => ({
   style: { current: 'studio' as string | null },
   loadThemeForStyle: vi.fn(),
   setStyle: vi.fn(),
+  releaseInstalledTheme: vi.fn(),
   putThemeChoice: vi.fn(),
   toast: Object.assign(vi.fn(), { error: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }),
 }))
 
 vi.mock('@/contexts/ui-style-context', () => ({
-  useUiStyleOptional: () => (mocks.style.current === null ? null : { style: mocks.style.current, setStyle: mocks.setStyle }),
+  useUiStyleOptional: () => (mocks.style.current === null
+    ? null
+    : { style: mocks.style.current, setStyle: mocks.setStyle, releaseInstalledTheme: mocks.releaseInstalledTheme }),
 }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { putThemeChoice: mocks.putThemeChoice } }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
@@ -52,6 +61,7 @@ import {
   THEME_REVERTED_NOTICE,
   THEME_REVOKED_WARNING_NOTICE,
   THEME_SAFE_MODE_NOTICE,
+  THEME_WITHDRAWN_NOTICE,
   ThemeHostProvider,
 } from '../theme-host-provider'
 import { useThemeHost } from '../theme-host-context'
@@ -142,6 +152,7 @@ beforeEach(() => {
   mocks.style.current = INSTALLED_STYLE
   mocks.loadThemeForStyle.mockReset()
   mocks.setStyle.mockReset()
+  mocks.releaseInstalledTheme.mockReset()
   mocks.putThemeChoice.mockReset()
   mocks.putThemeChoice.mockResolvedValue({ choice: 'studio', theme: null })
   mocks.toast.mockReset()
@@ -322,6 +333,53 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
   })
 })
 
+describe("PRD-261 W-A6b — the installed theme's registry entry stands only while the host runs the theme", () => {
+  function lastRelease(): unknown {
+    const calls = mocks.releaseInstalledTheme.mock.calls
+    return calls.length === 0 ? undefined : calls[calls.length - 1][0]
+  }
+
+  it('holds it while the theme loads and once it runs', async () => {
+    const pending = deferred<ThemeLoadResult>()
+    mocks.loadThemeForStyle.mockReturnValue(pending.promise)
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('loading'))
+    expect(mocks.releaseInstalledTheme).toHaveBeenCalledWith(null)
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+    await act(async () => pending.resolve(okResult()))
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(lastRelease()).toBeNull()
+    expect(mocks.releaseInstalledTheme).not.toHaveBeenCalledWith(INSTALLED_STYLE)
+  })
+
+  it('releases it when the load fails', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: 'load', detail: 'refused' })
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it in safe mode', async () => {
+    window.history.replaceState(null, '', '/agents?safe_mode=themes')
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('releases it when the server names no theme to run for the install', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: null, detail: 'no active install' })
+    render(app())
+    await waitFor(() => expect(lastRelease()).toBe(INSTALLED_STYLE))
+  })
+
+  it('names nothing under a style with no installed theme', async () => {
+    mocks.style.current = 'studio'
+    render(app())
+    await act(async () => undefined)
+    expect(lastRelease()).toBeNull()
+  })
+})
+
 describe('PRD-261 A-04b seam — ThemeHostProvider hands the theme\'s pages and routes to the slots', () => {
   function HelloRoute() {
     return <p>hello route</p>
@@ -369,6 +427,46 @@ describe('PRD-261 seam — a warn revocation of the running theme', () => {
     mocks.loadThemeForStyle.mockResolvedValue(okResult())
     render(app())
     await screen.findByTestId('f')
+    expect(mocks.toast.warning).not.toHaveBeenCalled()
+  })
+})
+
+describe('PRD-261 C-05l — a disable revocation of the chosen install', () => {
+  const withdrawn = (reason: string) => ({
+    ok: false, reason: null, detail: "GET /api/themes/active names no installed theme: the install's version is revoked",
+    revoked: { level: 'disable', reason },
+  })
+
+  it('turns off (Studio shows, no frame, no status on <html>) and says the theme was withdrawn, with the reason', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue(withdrawn('Sends chat text to another site.'))
+    render(app())
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(
+        THEME_WITHDRAWN_NOTICE,
+        expect.objectContaining({ id: THEME_NOTICE_ID, description: 'Sends chat text to another site.' }),
+      ),
+    )
+    expect(hostStatus()).toBeNull()
+    expect(screen.getByText('no frame')).toBeInTheDocument()
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+    expect(mocks.toast.dismiss).not.toHaveBeenCalledWith(THEME_NOTICE_ID)
+  })
+
+  it('with no reason given, the notice says the version was withdrawn', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue(withdrawn(''))
+    render(app())
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(
+        THEME_WITHDRAWN_NOTICE,
+        expect.objectContaining({ description: 'This version of it was withdrawn.' }),
+      ),
+    )
+  })
+
+  it('a stale cookie with no revocation still turns off with no notice', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: null, detail: 'no active install' })
+    render(app())
+    await waitFor(() => expect(mocks.toast.dismiss).toHaveBeenCalledWith(THEME_NOTICE_ID))
     expect(mocks.toast.warning).not.toHaveBeenCalled()
   })
 })

@@ -17,7 +17,14 @@ import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useBoardTask } from '@/hooks/use-board-tasks'
 import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
-import { CHAT_ROUTE, discussionHint, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
+import {
+  CHAT_ROUTE,
+  discussionHint,
+  discussionLabel,
+  discussionOf,
+  type Discussion,
+  type ThemeChatOnScreen,
+} from '@/lib/discussion'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useDiscussionStore } from '@/stores/discussion-store'
@@ -29,7 +36,7 @@ const BAR_CLASS =
 
 export function DiscussionBar() {
   const { discussion, missing } = useDiscussionFromLink()
-  const inThemeChat = useThemeChatOnScreen()
+  const themeChat = useThemeChatOnScreen()
   const end = useEndDiscussion()
   useEndOnAnotherConversation(end)
   const [rebriefing, setRebriefing] = useState(false)
@@ -43,7 +50,7 @@ export function DiscussionBar() {
   }
   if (!discussion) return null
   const label = discussionLabel(discussion)
-  const hint = discussionHint(discussion, inThemeChat)
+  const hint = discussionHint(discussion, themeChat)
   return (
     <div role="region" aria-label="Discussion" className={BAR_CLASS} data-testid="discussion-bar">
       <MessagesSquare className="h-4 w-4 shrink-0 text-primary" />
@@ -83,14 +90,15 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
   )
 }
 
-/** The theme's own chat is what /chat shows: the active theme owns /chat and its layout renders
- * it (PRD-260 D7, the ThemeSlot page entry in app/chat/layout.tsx, PRD-261 A-04b), read from the
- * same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box has no agent
- * picker, so the hint differs there. */
-function useThemeChatOnScreen(): boolean {
-  const ownsChat = useActiveTheme()?.ownsPages.includes(CHAT_ROUTE) ?? false
+/** The theme's own chat, when it is what /chat shows: the active theme owns /chat and its layout
+ * renders it (PRD-260 D7, the ThemeSlot page entry in app/chat/layout.tsx, PRD-261 A-04b), read
+ * from the same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box has no
+ * agent picker, so the hint differs there, and names the theme by its entry's name. */
+function useThemeChatOnScreen(): ThemeChatOnScreen | null {
+  const theme = useActiveTheme()
   const layout = useThemeLayout()
-  return ownsChat && layout === 'theme'
+  if (theme === null || layout !== 'theme' || !theme.ownsPages.includes(CHAT_ROUTE)) return null
+  return { themeName: theme.name }
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)

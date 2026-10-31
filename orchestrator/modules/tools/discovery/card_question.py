@@ -9,7 +9,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - a new mission: its goal and the steps the owner gave;
 - approving or cancelling a mission: its title and its ticket number;
 - a Composio send: every recipient (to, cc, bcc), the subject, the body's first line, each
-  attachment and every other field it carries (P256-FIX-RVW-26, ``card_question_sends``);
+  attachment and every other field it carries (P256-FIX-RVW-26, ``card_question_sends``); the
+  AI line an agent's send starts with on its own line before the first (PRD-264 EUAI-07);
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
@@ -20,6 +21,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - P256-FIX-T4: a playbook run: the playbook, each input it is given and its "wait for me".
 - P256-FIX-N13-7: a mission's plan changed: the mission, each step's change and the check.
 - P256-FIX-N14-7: a skill made: its name, what it does and its instructions' first line.
+- P256-FIX-N17-11: a blog post: whether it goes live, its excerpt, category, tags, first line and
+  length; a social post sent for approval: the post, its channels, caption and time, the note.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -32,6 +35,7 @@ from typing import Any, Callable, Dict, List
 
 from modules.tools.discovery import card_question_agents as agents
 from modules.tools.discovery import card_question_plans as plans
+from modules.tools.discovery import card_question_publish as publish
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery import card_question_sends as sends
@@ -51,7 +55,9 @@ STAFFED = "{agent} does: {does}"
 # A Composio send's subject and body, by the names its actions use (its recipients: card_question_sends).
 SUBJECT_KEYS = ("subject", "title")
 BODY_KEYS = ("body", "message", "text", "content", "commentary", "markdown_text", "caption")
-SEND_FIELDS = (("subject", SUBJECT_KEYS), ("first line", BODY_KEYS))
+FIRST_LINE = "first line"
+AI_NOTICE = "AI notice"   # PRD-264 EUAI-07: the line an agent's send starts with
+SEND_FIELDS = (("subject", SUBJECT_KEYS), (FIRST_LINE, BODY_KEYS))
 
 
 def platform_question(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], act: str) -> str:
@@ -77,8 +83,19 @@ def send_question(act: str, params: Any) -> str:
         if key is not None:
             used.add(key)
             said = params[key]
-            lines.append(said_line(label, _first_line(said) if label == "first line" else said))
+            lines.extend(body_lines(said) if label == FIRST_LINE else [said_line(label, said)])
     return question(act, [*lines, *sends.attachment_lines(params), *sends.other_lines(params, used)])
+
+
+def body_lines(body: Any) -> List[str]:
+    """The card's lines for a send's body: its first line, and before it, on a line of its own,
+    the AI line every agent's send starts with (PRD-264 EUAI-07), so the owner sees both what
+    goes out at the top and how the message itself begins."""
+    from modules.policy.ai_disclosure import split_send_notice
+
+    notice, rest = split_send_notice(str(body).strip())
+    first = said_line(FIRST_LINE, _first_line(rest))
+    return [said_line(AI_NOTICE, notice), first] if notice else [first]
 
 
 def first_key(params: Dict[str, Any], keys: tuple) -> Any:
@@ -114,7 +131,8 @@ READERS: Dict[str, Lines] = {
     "platform_update_agent": lambda db, ws, action, params: rows.agent_lines(db, ws, params),
     "platform_assign_tool_to_agent": rows.tool_lines,
     "platform_unassign_tool_from_agent": rows.tool_lines,
-    "platform_update_task": lambda db, ws, action, params: rows.task_lines(db, ws, params, gives_the_card=True),
+    "platform_update_task": lambda db, ws, action, params: rows.task_lines(db, ws, params, gives_the_card=True,
+                                                                           rebriefs=True),  # N17-1
     "platform_update_task_status": lambda db, ws, action, params: rows.task_lines(db, ws, params),
     "platform_update_system_setting": lambda db, ws, action, params: rows.setting_lines(db, params),
     "platform_create_mission": lambda db, ws, action, params: mission_create_lines(params),
@@ -144,7 +162,10 @@ READERS: Dict[str, Lines] = {
     "platform_update_mission_plan": plans.plan_lines,
     # P256-FIX-N14-7: a skill made from the chat: its name, what it does, its instructions' first line.
     "platform_create_workspace_skill": skill_create.create_skill_lines,
+    # P256-FIX-N17-11 (F443): a blog post (live or a draft) and a social post sent for approval, shown.
+    "platform_publish_blog_post": publish.blog_lines,
+    "platform_submit_social_post": publish.social_submit_lines,
 }
 
 
-__all__ = ["BODY_KEYS", "READERS", "SUBJECT_KEYS", "first_key", "mission_create_lines", "platform_question", "send_question"]
+__all__ = ["AI_NOTICE", "BODY_KEYS", "READERS", "SUBJECT_KEYS", "body_lines", "first_key", "mission_create_lines", "platform_question", "send_question"]

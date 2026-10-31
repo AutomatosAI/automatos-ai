@@ -63,6 +63,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 from config import config
+from core import generation_guard
 from core.composio.tool_executor import ComposioToolExecutor
 from modules.socials import media_ledger, service
 from modules.socials.capabilities import BALANCE, TTS, VOICES, MediaCapabilities, OfferedAction
@@ -84,6 +85,8 @@ from modules.socials.recipes.toolkit import (
 logger = logging.getLogger(__name__)
 
 KOKORO_LABEL = "Kokoro (built in)"
+# Where the generation guard says a refusal came from (ART5-1): logged, never the script.
+GUARD_PATH = "socials.voice"
 AVAILABLE, CONNECT, UNAVAILABLE = "available", "connect", "unavailable"
 # The keys a voice listing's items carry, in the order they are trusted.
 VOICE_ID_KEYS = ("voice_id", "_id", "id", "model_id")
@@ -115,6 +118,10 @@ class VoiceToolError(VoiceError):
 
 class VoiceRefused(VoiceError):
     """Speaking the script would take the post or the workspace over its media cap: nothing was spoken."""
+
+
+class ScriptRefused(VoiceRefused):
+    """The generation guard refused the script (PRD-264 ART5-1): nothing was spoken, by a toolkit or by Kokoro."""
 
 
 def _utf8_bytes(text: str) -> int:
@@ -197,6 +204,7 @@ class VoicePlan:
     voice_id: str
     speak_action: OfferedAction
     balance_action: Optional[OfferedAction] = None
+    name: str = ""  # the voice's name as the toolkit lists it: the generation guard reads it (ART5-1)
 
 
 @dataclass(frozen=True)
@@ -250,6 +258,7 @@ def plan_for(voice: Optional[Mapping[str, Any]], caps: MediaCapabilities) -> Opt
         voice_id=str(voice["voice_id"]),
         speak_action=caps.actions(toolkit, TTS)[0],
         balance_action=balances[0] if balances else None,
+        name=str(voice.get("name") or ""),
     )
 
 
@@ -564,8 +573,18 @@ async def _speak_lines(
     return spoken
 
 
+async def _check_script(plan: Optional[VoicePlan], lines: Sequence[Tuple[str, str]], workspace_id: UUID) -> None:
+    """PRD-264 ART5-1: the script's lines, and the name of the voice that speaks them (a voice cloned
+    from a real person may say so), through the generation guard; :class:`ScriptRefused` when refused."""
+    voice = (f"The voice it is spoken in: {plan.label}, {plan.name}",) if plan is not None and plan.name else ()
+    request = generation_guard.GenerationRequest(path=GUARD_PATH, texts=tuple(text for _, text in lines) + voice)
+    verdict = await generation_guard.check(request, workspace_id=workspace_id)
+    if not verdict.allowed:
+        raise ScriptRefused(f"{verdict.message} Nothing was spoken.")
+
+
 async def speak(
-    plan: VoicePlan,
+    plan: Optional[VoicePlan],
     *,
     workspace_id: UUID,
     post_id: UUID,
@@ -583,7 +602,15 @@ async def speak(
     :class:`VoiceRefused`. The price is booked on the media lane before the first
     line is spoken, and settled to what speaking spent before the window closes,
     whatever happened (P251W1-RVW-5). :class:`VoiceError` when a line cannot be
-    spoken or kept."""
+    spoken or kept.
+
+    Every line goes through the generation guard first (PRD-264 ART5-1), whoever
+    speaks it: :class:`ScriptRefused` when it refuses. ``plan`` None is Kokoro,
+    which speaks the script inside media-render: checked, then nothing is spoken
+    here."""
+    await _check_script(plan, lines, workspace_id)
+    if plan is None:
+        return {}
     recipe = RECIPES[plan.toolkit]
     price = price_usd(recipe, [text for _, text in lines])
     async with spend_window(session_factory, workspace_id):

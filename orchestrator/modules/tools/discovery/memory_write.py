@@ -12,11 +12,17 @@ own message is saved before the turn runs), never taken from what the model says
 
 The checks and the metadata were split out of ``store_memory`` (over the length limit) as they
 were; their refusals are word for word the handler's.
+
+P256-FIX-N17-4 (nights 16-17, F447): 'New standing rule, remember this one: the autumn tier
+launches on 4 November 2026' stored without its lead-in kept 8 of 14 words and was no rule, and
+'replace the lot' ended in four deletes. A write that is not the owner's rule now names their own
+sentence that holds it (``store_as``, ``rule_wording.their_sentence``) and tells Auto never to
+delete the old rules to make room; the owner's messages are read once per store (``owner_turns``).
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -29,7 +35,12 @@ from modules.tools.discovery.memory_source import SOURCE_TYPES
 STANDING_RULE_COVERAGE = 0.6
 SOURCE = "platform_tool"
 NOT_THE_OWNERS_RULE = ("Kept as a memory, not as the owner's standing rule: their messages in this chat do "
-                       "not say it in these words. To make it their rule, store it as they said it.")
+                       "not say it in these words. To make it their rule, store it as they said it. "
+                       "Nothing it replaces was retired: do not delete the old rules to make room. store_as, "
+                       "when given, is their own sentence that holds this: if that whole sentence is the rule "
+                       "they gave you, store store_as as it stands (with the same replaces); if it is a request "
+                       "or someone else's words, keep this as a memory.")
+STORE_AS_KEY = "store_as"
 
 
 def memory_params_refusal(params: Dict[str, Any]) -> Optional[str]:
@@ -64,30 +75,41 @@ def _unit_float(value: Any) -> Optional[float]:
     return number if 0.0 <= number <= 1.0 else None
 
 
-def stated_by_the_owner(db: Optional[Session], workspace_id: Any, params: Dict[str, Any],
-                        owner: Optional[str]) -> bool:
-    """Whether the memory is in the words of its owner's own messages in this chat (an owned
-    write only: a turn no person drives has none)."""
-    from modules.tools.discovery.rule_wording import in_their_words
+def owner_turns(db: Optional[Session], workspace_id: Any, params: Dict[str, Any],
+                owner: Optional[str]) -> List[str]:
+    """The owner's messages in the chat the call came from, newest first (``chat_owner_turns``);
+    [] for a write no person owns (a turn no person drives says nothing)."""
     from modules.tools.discovery.said_instructions import chat_owner_turns
+
+    return chat_owner_turns(db, workspace_id, params) if owner else []
+
+
+def stated_by_the_owner(db: Optional[Session], workspace_id: Any, params: Dict[str, Any],
+                        owner: Optional[str], *, said: Optional[List[str]] = None) -> bool:
+    """Whether the memory is in the words of its owner's own messages in this chat (an owned
+    write only: a turn no person drives has none). ``said`` is those messages when the caller
+    read them already; they are read from the chat only when it is None."""
+    from modules.tools.discovery.rule_wording import in_their_words
 
     if not owner:
         return False
-    said = chat_owner_turns(db, workspace_id, params)
+    if said is None:
+        said = owner_turns(db, workspace_id, params, owner)
     return in_their_words(str(params.get("content") or ""), said, STANDING_RULE_COVERAGE)
 
 
 def memory_metadata(db: Optional[Session], workspace_id: str, params: Dict[str, Any],
-                    owner: Optional[str]) -> Dict[str, Any]:
+                    owner: Optional[str], *, said: Optional[List[str]] = None) -> Dict[str, Any]:
     """The canonical metadata ``store_memory`` writes (PRD-206 S1's write contract: type, scope,
-    provenance, owner, chat link). ``_origin_chat_id`` is server-injected, never the caller's."""
+    provenance, owner, chat link). ``_origin_chat_id`` is server-injected, never the caller's.
+    ``said``: the owner's messages, when the caller read them (``stated_by_the_owner``)."""
     from modules.memory.write_contract import build_memory_metadata
 
     extra: Dict[str, Any] = {"workspace_id": workspace_id, "source": SOURCE,
                              "verified_at": datetime.now(timezone.utc).isoformat()}
     if params.get("evidence_uri"):
         extra["evidence_uri"] = params["evidence_uri"]
-    if stated_by_the_owner(db, workspace_id, params, owner):
+    if stated_by_the_owner(db, workspace_id, params, owner, said=said):
         extra[STATED_BY_KEY] = STATED_BY_OWNER
     return build_memory_metadata(
         fact_type=params.get("type") or "business_fact",
@@ -102,14 +124,19 @@ def memory_metadata(db: Optional[Session], workspace_id: str, params: Dict[str, 
     )
 
 
-def rule_answer(metadata: Dict[str, Any]) -> Dict[str, Any]:
+def rule_answer(metadata: Dict[str, Any], content: str = "", said: Sequence[str] = ()) -> Dict[str, Any]:
     """What ``store_memory``'s answer says of the rule: whether this write is the owner's standing
-    rule and, for one a person owns that is not, why (so Auto never tells them it is)."""
+    rule and, for one a person owns that is not, why (so Auto never tells them it is), with
+    ``store_as``, their own sentence that holds ``content``, when ``said`` has one (N17-4)."""
+    from modules.tools.discovery.rule_wording import their_sentence
+
     standing = is_standing_rule({"metadata": metadata})
     if standing or not metadata.get("owner"):
         return {"standing_rule": standing}
-    return {"standing_rule": False, "rule_note": NOT_THE_OWNERS_RULE}
+    answer: Dict[str, Any] = {"standing_rule": False, "rule_note": NOT_THE_OWNERS_RULE}
+    store_as = their_sentence(content, said, STANDING_RULE_COVERAGE) if content and said else None
+    return {**answer, STORE_AS_KEY: store_as} if store_as else answer
 
 
-__all__ = ["STANDING_RULE_COVERAGE", "memory_metadata", "memory_params_refusal", "rule_answer",
-           "stated_by_the_owner"]
+__all__ = ["STANDING_RULE_COVERAGE", "STORE_AS_KEY", "memory_metadata", "memory_params_refusal", "owner_turns",
+           "rule_answer", "stated_by_the_owner"]

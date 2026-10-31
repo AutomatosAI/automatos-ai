@@ -17,14 +17,13 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 const APP = path.resolve(__dirname, '..')
-const COMPONENTS = path.resolve(__dirname, '..', '..', 'components')
+const FRONTEND = path.resolve(__dirname, '..', '..')
 
 /** Routes that legitimately carry no page header. */
 const NO_HEADER: Record<string, string> = {
   '/': 'redirects to the workspace entry point',
   '/chat': 'a conversation surface, not a document page',
-  '/conversations': 'redirects to /x/conversations under a theme that serves it (PRD-261 A-04b), else to /chat',
-  '/x/[...path]': "a theme's own route (registerRoute): the theme draws the page and its head; Play's Conversations heads the list's own column, as in the Play app (P260-FX-14, M35)",
+  '/x/[...path]': "a theme's own route (registerRoute): the theme draws the page and its head, or the member is sent to /chat (or the 404)",
   '/missions': 'redirects to the Assignments Missions tab',
   '/playbooks': 'redirects to the Assignments Playbooks tab',
   '/marketplace/widgets/[id]': 'item detail — the record’s own name is the title',
@@ -39,7 +38,10 @@ const NO_HEADER: Record<string, string> = {
   '/sign-up/[[...rest]]': 'Clerk flow',
 }
 
+// A page's frame can come from a component it imports from components/: the looks pages, for one,
+// wear the core's note (components/theme-host/no-look-editor-note.tsx), which renders PageHeader.
 const IMPORT = /import \{ ([A-Z][A-Za-z]+)[^}]*\} from ["']@\/components\/([^"']+)["']/g
+const COMPONENTS = path.join(FRONTEND, 'components')
 
 function framed(file: string, depth = 0): boolean {
   const src = readFileSync(file, 'utf8')
@@ -74,6 +76,10 @@ describe('every page wears a frame', () => {
     expect(all.length).toBeGreaterThan(20)
     expect(all).toContain('/team')
     expect(all).toContain('/admin/workspaces')
+  })
+
+  it('lists in NO_HEADER only routes the app has', () => {
+    expect(Object.keys(NO_HEADER).filter((route) => !all.includes(route))).toEqual([])
   })
 
   it('no route hand-rolls its page header', () => {

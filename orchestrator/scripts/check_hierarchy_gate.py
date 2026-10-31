@@ -21,7 +21,9 @@ Registrations are read with ``ast``: a flag named in a comment never counts,
 and only a literal ``True`` gates. A registration the audit cannot read (a
 name or permission_level that is not a literal string, an ActionDefinition
 built outside ``registry.register(...)``, or a ``register(...)`` given anything
-but an ``ActionDefinition(...)``) stops it rather than passing unseen.
+but an ``ActionDefinition(...)``) stops it rather than passing unseen. So does
+one that states no permission_level, named (PRD-268 US-C02a: nothing defaults
+to read).
 
 Run as part of CI / pre-push:
 
@@ -45,7 +47,6 @@ EXECUTOR = ACTIONS_DIR / "platform_executor.py"
 
 PERMISSION_LEVELS = ("read", "write", "destructive")
 MUTATING_LEVELS = ("write", "destructive")
-DEFAULT_PERMISSION_LEVEL = "read"  # ActionDefinition's own default
 GATE_FLAGS = ("super_admin_only", "admin_only")
 
 # Mutating actions that are intentionally neither hierarchy- nor flag-gated.
@@ -71,6 +72,13 @@ ALLOW_LIST: Set[str] = {
     "platform_send_notification",
     "platform_update_auto_reporting_prefs",
     "platform_harness_trigger",
+    # PRD-263 US-004 (#1150): applies one HARNESS change only on its owner's granted,
+    # unexpired approval, over a setting that still reads its prior value (the handler's
+    # own checks). Its inner heartbeat or unassign call runs as the workspace's Auto
+    # through the executor, where can_actor_modify checks only that Auto exists, is in
+    # the workspace and is active (system_actor_bypass), and the rate limit and the
+    # destructive backstop still run.
+    "platform_harness_apply",
     "platform_acknowledge_report",
     "platform_link_report_to_task",
     "platform_submit_report",
@@ -100,6 +108,20 @@ ALLOW_LIST: Set[str] = {
     "platform_ask_orchestrator",
     "platform_notify_owner",
     "platform_checkpoint_thread",
+    # PRD-268 US-C02a: shares one finding into a mission's shared field (the calling
+    # task's, PRD-178 S1, unless the call names one); no agent, ticket or member to scope.
+    "platform_field_inject",
+    # PRD-268 US-C02d: the read sweep caught it writing. It finds patterns in the same
+    # field and reinforces the ones it returns, creating the field on first use; it
+    # changes no agent, ticket or member.
+    "platform_field_query",
+    # PRD-268 US-C03b: writes only a proactive_suggestions row, in the check-in lane (the
+    # handler refuses any call that is not a check-in's); no agent, ticket or member to scope.
+    "platform_suggest_next_step",
+    # PRD-268 US-C11c: Auto in a person's own chat turn; each writes only the caller's own
+    # follow-up row (the person and the chat are server-side); no agent, ticket or member to scope.
+    "platform_schedule_follow_up",         # writes only the caller's own follow-up row
+    "platform_cancel_follow_up",           # writes only the caller's own follow-up row
     # F151: the workspace's own watches.
     "platform_create_watch",
     "platform_cancel_watch",
@@ -179,7 +201,9 @@ def _unreadable(path: Path, line: int, why: str) -> None:
 def _read_registration(path: Path, definition: ast.Call) -> tuple:
     kwargs = {kw.arg: kw.value for kw in definition.keywords if kw.arg}
     name = _literal(kwargs.get("name"))
-    level = _literal(kwargs["permission_level"]) if "permission_level" in kwargs else DEFAULT_PERMISSION_LEVEL
+    level = _literal(kwargs.get("permission_level"))
+    if isinstance(name, str) and "permission_level" not in kwargs:
+        _unreadable(path, definition.lineno, f"{name} states no permission_level: give it read, write or destructive")
     if not isinstance(name, str) or level not in PERMISSION_LEVELS:
         _unreadable(path, definition.lineno, "name and permission_level must be literal strings")
     flag_gated = any(_literal(kwargs.get(flag)) is True for flag in GATE_FLAGS)

@@ -1,0 +1,106 @@
+{
+  "_comment": "PRD-261 A-19c: what the boot route answers for theme/ (serve.py theme_prepaint and theme_looks; test_prd261_boot_looks.py holds the two equal), and what the browser keeps of it (boot-server.test.ts: nothing dropped). The default look (theme.json look: paper) first, the rest in file-name order.",
+  "themeJson": {
+    "id": "automatos-e2e/hello-a09b",
+    "look": "paper"
+  },
+  "prepaint": {
+    "knobs": {
+      "ground": {
+        "paper": {
+          "--a09b-bg": "#f4efe6",
+          "--a09b-ink": "#1a1814"
+        },
+        "ink": {
+          "--a09b-bg": "#101418",
+          "--a09b-ink": "#f2f2f2"
+        },
+        "dusk": {
+          "--a09b-bg": "#1b2340",
+          "--a09b-ink": "#e8ecf8"
+        }
+      },
+      "accent": {
+        "blue": {
+          "--a09b-accent": "#2f6fed"
+        },
+        "green": {
+          "--a09b-accent": "#1f9d55"
+        }
+      }
+    },
+    "pairs": [],
+    "numeric": [
+      {
+        "var": "--a09b-glow",
+        "knob": "glow",
+        "min": 0,
+        "max": 40,
+        "integer": true,
+        "scale": 100,
+        "capTable": null,
+        "caps": null,
+        "color": {
+          "knob": "accent",
+          "rgb": {
+            "blue": "47,111,237",
+            "green": "31,157,85"
+          }
+        },
+        "template": "rgba-alpha"
+      }
+    ],
+    "defaults": {
+      "ground": "paper",
+      "accent": "blue",
+      "glow": 12
+    },
+    "tone": {
+      "knob": "ground",
+      "values": {
+        "paper": "light",
+        "ink": "dark",
+        "dusk": "dark"
+      }
+    }
+  },
+  "lookGuard": {
+    "schema": "automatos-e2e-a09b-look/v1",
+    "iface": "hello-a09b"
+  },
+  "looks": {
+    "defaultLook": "paper",
+    "presets": [
+      {
+        "schema": "automatos-e2e-a09b-look/v1",
+        "interface": "hello-a09b",
+        "id": "paper",
+        "name": "Paper",
+        "sub": "Light, with a blue accent",
+        "ground": "paper",
+        "accent": "blue",
+        "glow": 12
+      },
+      {
+        "schema": "automatos-e2e-a09b-look/v1",
+        "interface": "hello-a09b",
+        "id": "dusk",
+        "name": "Dusk",
+        "sub": "Dark blue, green accent",
+        "ground": "dusk",
+        "accent": "green",
+        "glow": 24
+      },
+      {
+        "schema": "automatos-e2e-a09b-look/v1",
+        "interface": "hello-a09b",
+        "id": "ink",
+        "name": "Ink",
+        "sub": "Dark, with a blue accent",
+        "ground": "ink",
+        "accent": "blue",
+        "glow": 30
+      }
+    ]
+  }
+}

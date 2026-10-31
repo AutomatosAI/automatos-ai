@@ -113,6 +113,9 @@ export interface ScheduleItem {
   /** The row behind the item, so the calendar can act on it (pause, cancel,
    *  open) without parsing the composite `id`. Each source sets its own. */
   scheduled_task_id?: number
+  /** task only: the user paused it (PRD-266 D27). A paused task stays in the feed at
+   *  the slot it would run, greyed, with Resume in place of Pause; Next up skips it. */
+  paused?: boolean
   task_type?: 'one_shot' | 'recurring'
   /** task only: what firing does — open a chat, or file a board ticket */
   deliver_as?: 'chat' | 'board_task'

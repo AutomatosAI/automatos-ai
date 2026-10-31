@@ -1,19 +1,24 @@
 /**
  * PRD-261 A-02c (PA-12, R16) — the server holds the theme choice; the style cookie caches it.
  *
- * - A pick stores the choice (builtin Play as 'builtin:play', an install by its id); Classic,
- *   Studio and builtin themes apply at once (undone if the PUT fails), an installed one after it.
+ * - A pick stores the choice ('classic', 'studio', an install by its id); Classic and Studio
+ *   apply at once (undone if the PUT fails), an installed one after it.
  * - The check: one GET /api/themes/active per workspace and tab; a differing server choice moves
- *   the tab, an installed one with one reload at most (sessionStorage guard; none without it).
+ *   the tab, an installed one with one reload at most (sessionStorage guard; none without it). A
+ *   server choice this build does not know (no theme is compiled in, A-19f1) moves nothing.
  * - The appearance-defaults step never overrides a server choice, and never stores one.
- * - A server Studio moves a tab only off an installed theme (off anything else it may mean "no
+ * - A server Studio moves a tab only off an installed theme (off Classic it may mean "no
  *   choice"); safe mode asks nothing; a pick made while the check is in flight wins, and so does
  *   the host's revert to Studio (A-04c), so its answer never reloads back into the failing theme.
- * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed;
- *   D1-c hides builtin Play once automatos/play is installed, except from a member still on it.
- * - M1: the installs are fetched only once the menu, ⌘K or the Play note wants them, never in
- *   safe mode. M2: with no stored server choice (`source` default or fallback), a tab on its own
- *   style (not Studio) stores it instead of following the workspace default.
+ * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed,
+ *   'Private · opt in first' while this member has not opted in to the version; Play's package is
+ *   an install like any other, and a withdrawn install is not offered.
+ * - A pick of a version this member has not opted in to is never stored by useChooseStyle: it goes
+ *   to the opt-in dialog (components/__tests__/theme-choice-opt-in.test.tsx), and with none mounted
+ *   nothing is stored.
+ * - M1: the installs are fetched only once the menu or ⌘K wants them, never in safe mode. M2: with
+ *   no stored server choice (`source` default or fallback), a tab on its own style (not Studio)
+ *   stores it instead of following the workspace default.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -32,15 +37,12 @@ vi.mock('sonner', () => ({ toast: toasts }))
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import {
-  BUILT_IN_NOTE,
   CHOICE_CHECK_KEY_PREFIX,
   CHOICE_NOT_SAVED,
   ThemeChoiceSync,
   choiceOfStyle,
   forgetChecksInThisDocumentForTests,
-  packageIdOfBuiltin,
   reconcileTarget,
   storesTabStyle,
   styleChoices,
@@ -55,7 +57,12 @@ import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, UI_STYLE_COOKIE, 
 const INSTALL_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_INSTALL_ID = '44444444-4444-4444-8444-444444444444'
 const INSTALLED_STYLE = `theme:install:${INSTALL_ID}` as UiStyle
+const OTHER_INSTALLED_STYLE = `theme:install:${OTHER_INSTALL_ID}` as UiStyle
 const PRIVATE_NOT_REVIEWED = 'Private · not reviewed'
+const PRIVATE_OPT_IN_FIRST = 'Private · opt in first'
+const SIGNED_BY_AUTOMATOS = 'Signed by Automatos'
+/** A server choice this build does not know: no theme is compiled into the app (A-19f1). */
+const UNKNOWN_CHOICE = 'builtin:nope'
 
 function installRow(overrides: Partial<InstalledTheme> = {}): InstalledTheme {
   return {
@@ -63,11 +70,14 @@ function installRow(overrides: Partial<InstalledTheme> = {}): InstalledTheme {
     version: '1.0.0', ownerType: 'workspace', reviewed: false, private: true, isDefault: false,
     pinnedVersion: null, previousPackageId: null, pendingPackageId: null, pendingVersion: null,
     installedAt: null, optIn: { required: false, wording: '', packageId: '' }, revoked: null, needsUpdate: false,
-    ...overrides,
+    signature: { state: 'unsigned', keyId: null }, ...overrides,
   }
 }
 
-/** The installed package of builtin Play (D1-c). */
+/** An install whose version this member has not opted in to (services/themes/optin.py opt_in_state). */
+const ASKS_FIRST = installRow({ optIn: { required: true, wording: 'Opt in?', packageId: '22222222-2222-4222-8222-222222222222' } })
+
+/** The Design Kit's Play package, installed in the workspace. */
 const INSTALLED_PLAY = installRow({ installId: OTHER_INSTALL_ID, themeId: 'automatos/play', name: 'Play', reviewed: true })
 
 function activeAnswer(choice: string, theme: unknown = null) {
@@ -89,7 +99,7 @@ function Probe() {
     <div>
       <span data-testid="style">{style}</span>
       <button onClick={() => choose('classic')}>pick classic</button>
-      <button onClick={() => choose(BUILTIN_PLAY_STYLE)}>pick play</button>
+      <button onClick={() => choose('studio')}>pick studio</button>
       <button onClick={() => choose(INSTALLED_STYLE)}>pick garden</button>
     </div>
   )
@@ -134,30 +144,33 @@ afterEach(() => {
 })
 
 describe('choice ↔ style', () => {
-  it("sends builtin Play as 'builtin:play', an install by its id, Classic and Studio as themselves", () => {
-    expect(choiceOfStyle(BUILTIN_PLAY_STYLE)).toBe('builtin:play')
+  it('sends an install by its id, Classic and Studio as themselves', () => {
     expect(choiceOfStyle(INSTALLED_STYLE)).toBe(INSTALL_ID)
     expect(choiceOfStyle('classic')).toBe('classic')
     expect(choiceOfStyle('studio')).toBe('studio')
   })
 
   it("reads the server's choices back, and none it does not know", () => {
-    expect(styleOfChoice('builtin:play')).toBe(BUILTIN_PLAY_STYLE)
     expect(styleOfChoice(INSTALL_ID)).toBe(INSTALLED_STYLE)
     expect(styleOfChoice('classic')).toBe('classic')
-    for (const unknown of ['builtin:nope', 'theme:builtin:play', 'NOT-A-UUID', 'ABCDEF01-1111-4111-8111-111111111111', '']) {
+    expect(styleOfChoice('studio')).toBe('studio')
+    for (const unknown of [UNKNOWN_CHOICE, 'acme-unknown', 'NOT-A-UUID', 'ABCDEF01-1111-4111-8111-111111111111', '']) {
       expect(styleOfChoice(unknown)).toBeNull()
     }
     expect(styleOfChoice(null)).toBeNull()
   })
 
-  it('moves to a differing server choice; a server Studio only off an installed theme', () => {
-    expect(reconcileTarget('studio', activeAnswer('builtin:play'))).toBe(BUILTIN_PLAY_STYLE)
+  it('moves to a differing server choice; a server Studio only off an installed theme; an unknown one never', () => {
+    expect(reconcileTarget('studio', activeAnswer('classic'))).toBe('classic')
     expect(reconcileTarget('classic', activeAnswer(INSTALL_ID, {}))).toBe(INSTALLED_STYLE)
-    expect(reconcileTarget(BUILTIN_PLAY_STYLE, activeAnswer('builtin:play'))).toBeNull()
-    expect(reconcileTarget(BUILTIN_PLAY_STYLE, activeAnswer('studio'))).toBeNull()
+    expect(reconcileTarget(INSTALLED_STYLE, activeAnswer(OTHER_INSTALL_ID, {}))).toBe(OTHER_INSTALLED_STYLE)
+    expect(reconcileTarget('classic', activeAnswer('classic'))).toBeNull()
+    expect(reconcileTarget(INSTALLED_STYLE, activeAnswer(INSTALL_ID, {}))).toBeNull()
     expect(reconcileTarget('classic', activeAnswer('studio'))).toBeNull()
     expect(reconcileTarget(INSTALLED_STYLE, activeAnswer('studio'))).toBe('studio')
+    for (const current of ['classic', 'studio', INSTALLED_STYLE] as const) {
+      expect(reconcileTarget(current, activeAnswer(UNKNOWN_CHOICE))).toBeNull()
+    }
     expect(reconcileTarget('classic', { choice: 42 })).toBeNull()
     expect(reconcileTarget('classic', null)).toBeNull()
   })
@@ -165,11 +178,27 @@ describe('choice ↔ style', () => {
 
 describe('the entries the menu and ⌘K offer', () => {
   it('lists an install as theme:install:<id>, "Private · not reviewed" when nobody reviewed it', () => {
-    const entries = themeChoiceEntries([installRow(), installRow({ installId: OTHER_INSTALL_ID, name: 'Dune', reviewed: true })], 'studio')
-    expect(entries.map((entry) => [entry.style, entry.name, entry.note])).toEqual([
-      [BUILTIN_PLAY_STYLE, 'Play', null],
-      [INSTALLED_STYLE, 'Garden', PRIVATE_NOT_REVIEWED],
-      [`theme:install:${OTHER_INSTALL_ID}`, 'Dune', null],
+    const entries = themeChoiceEntries([installRow(), installRow({ installId: OTHER_INSTALL_ID, name: 'Dune', reviewed: true })])
+    expect(entries.map((entry) => [entry.style, entry.name, entry.kind, entry.note])).toEqual([
+      [INSTALLED_STYLE, 'Garden', 'installed', PRIVATE_NOT_REVIEWED],
+      [OTHER_INSTALLED_STYLE, 'Dune', 'installed', null],
+    ])
+  })
+
+  it('notes a signature an Automatos key verifies as "Signed by Automatos", as the Settings row does; never an invalid one', () => {
+    const signed = installRow({ signature: { state: 'verified', keyId: 'automatos-2026' } })
+    const invalid = installRow({ installId: OTHER_INSTALL_ID, name: 'Dune', signature: { state: 'invalid', keyId: 'automatos-2026' } })
+    expect(themeChoiceEntries([signed, invalid]).map((entry) => [entry.name, entry.note])).toEqual([
+      ['Garden', SIGNED_BY_AUTOMATOS],
+      ['Dune', PRIVATE_NOT_REVIEWED],
+    ])
+  })
+
+  it('notes a version this member has not opted in to "Private · opt in first"; an opted-in one keeps its note', () => {
+    const optedIn = installRow({ installId: OTHER_INSTALL_ID, name: 'Dune' })
+    expect(themeChoiceEntries([ASKS_FIRST, optedIn]).map((entry) => [entry.name, entry.note])).toEqual([
+      ['Garden', PRIVATE_OPT_IN_FIRST],
+      ['Dune', PRIVATE_NOT_REVIEWED],
     ])
   })
 
@@ -177,46 +206,57 @@ describe('the entries the menu and ⌘K offer', () => {
     const withdrawn = installRow({ revoked: { level: 'disable', reason: 'withdrawn' } })
     const malformed = installRow({ installId: 'not-a-uuid' })
     const nameless = installRow({ installId: OTHER_INSTALL_ID, name: null })
-    expect(themeChoiceEntries([withdrawn, malformed, nameless], 'studio').map((entry) => entry.name)).toEqual(['Play', 'acme/garden'])
+    expect(themeChoiceEntries([withdrawn, malformed, nameless]).map((entry) => entry.name)).toEqual(['acme/garden'])
   })
 
-  it('D1-c: hides builtin Play once automatos/play is installed, leaving the installed Play', () => {
-    const entries = themeChoiceEntries([INSTALLED_PLAY], 'studio')
-    expect(entries.map((entry) => [entry.style, entry.kind])).toEqual([[`theme:install:${OTHER_INSTALL_ID}`, 'installed']])
-    expect(packageIdOfBuiltin('builtin:play')).toBe('automatos/play')
-  })
-
-  it('D1-c: keeps builtin Play, noted "Built in", for a member still on it (until A-18)', () => {
-    const entries = themeChoiceEntries([INSTALLED_PLAY], BUILTIN_PLAY_STYLE)
-    expect(entries.map((entry) => [entry.style, entry.note])).toEqual([
-      [BUILTIN_PLAY_STYLE, BUILT_IN_NOTE],
-      [`theme:install:${OTHER_INSTALL_ID}`, null],
+  it("lists Play's package and another publisher's play as installs like any other, and no withdrawn one", () => {
+    const lookalike = installRow({ themeId: 'someone/play', name: 'Play?' })
+    const withdrawn = { ...INSTALLED_PLAY, revoked: { level: 'disable' as const, reason: 'withdrawn' } }
+    expect(themeChoiceEntries([INSTALLED_PLAY, lookalike, withdrawn]).map((entry) => [entry.style, entry.name, entry.kind])).toEqual([
+      [OTHER_INSTALLED_STYLE, 'Play', 'installed'],
+      [INSTALLED_STYLE, 'Play?', 'installed'],
     ])
   })
 
-  it("D1-c: another publisher's play, or a withdrawn automatos/play, hides nothing", () => {
-    const lookalike = installRow({ themeId: 'someone/play', name: 'Play?' })
-    const withdrawn = { ...INSTALLED_PLAY, revoked: { level: 'disable' as const, reason: 'withdrawn' } }
-    expect(themeChoiceEntries([lookalike, withdrawn], 'studio')[0].style).toBe(BUILTIN_PLAY_STYLE)
-  })
-
   it('⌘K adds Classic and Studio before the themes', () => {
-    expect(styleChoices([], 'studio').map((entry) => entry.name)).toEqual(['Classic', 'Studio', 'Play'])
+    expect(styleChoices([]).map((entry) => entry.name)).toEqual(['Classic', 'Studio'])
+    expect(styleChoices([installRow()]).map((entry) => [entry.style, entry.name, entry.kind])).toEqual([
+      ['classic', 'Classic', 'core'],
+      ['studio', 'Studio', 'core'],
+      [INSTALLED_STYLE, 'Garden', 'installed'],
+    ])
   })
 })
 
 describe('the server choice check (once per workspace and tab)', () => {
-  it('moves the tab to a differing builtin choice in place, and records the check', async () => {
+  it('moves the tab to a differing Classic choice in place, and records the check', async () => {
     seenDefaults()
     const reload = vi.fn()
-    const active = vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('builtin:play'))
+    const active = vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('classic'))
     mount('studio', reload)
     await settle()
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
-    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`)
+    expect(styleShown()).toBe('classic')
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
     expect(reload).not.toHaveBeenCalled()
     expect(active).toHaveBeenCalledTimes(1)
     expect(checkRecord('ws-1')).toBe('checked')
+  })
+
+  it('a server choice this build does not know moves nothing, and records the check', async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer(UNKNOWN_CHOICE))
+    for (const style of ['classic', INSTALLED_STYLE] as const) {
+      forgetChecksInThisDocumentForTests()
+      window.sessionStorage.clear()
+      const reload = vi.fn()
+      mount(style, reload)
+      await settle()
+      expect(styleShown()).toBe(style)
+      expect(reload).not.toHaveBeenCalled()
+      expect(checkRecord('ws-1')).toBe('checked')
+      cleanup()
+    }
+    expect(document.cookie).not.toContain(`${UI_STYLE_COOKIE}=`)
   })
 
   it('reloads into an installed server choice once, and never again in the tab', async () => {
@@ -274,26 +314,27 @@ describe('the server choice check (once per workspace and tab)', () => {
   it('the defaults step never overrides a server choice, and stores none', async () => {
     // A browser that has not seen the defaults: the step moves it to Studio + Dark at mount.
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
-    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('builtin:play'))
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('classic'))
     mount('classic', vi.fn())
     await settle()
     expect(tone.setTheme).toHaveBeenCalledWith('dark')
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+    expect(styleShown()).toBe('classic')
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
     expect(put).not.toHaveBeenCalled()
   })
 
-  it('a server Studio leaves builtin Play on (a pick before PA-12; A-18 moves it)', async () => {
+  it('a server Studio leaves a Classic tab on Classic (a pick made before PA-12)', async () => {
     seenDefaults()
     vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
-    mount(BUILTIN_PLAY_STYLE, vi.fn())
+    mount('classic', vi.fn())
     await settle()
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+    expect(styleShown()).toBe('classic')
     expect(checkRecord('ws-1')).toBe('checked')
   })
 
   it('asks nothing in safe mode, or outside a workspace', async () => {
     seenDefaults()
-    const active = vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('builtin:play'))
+    const active = vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('classic'))
     window.history.replaceState(null, '', `/agents?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`)
     mount('studio', vi.fn())
     await settle()
@@ -311,12 +352,12 @@ describe('the server choice check (once per workspace and tab)', () => {
     let answer: (value: unknown) => void = () => {}
     vi.spyOn(apiClient, 'getActiveTheme').mockReturnValue(new Promise((resolve) => { answer = resolve }))
     vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
-    mount('studio', vi.fn())
+    mount('classic', vi.fn())
     await settle()
-    act(() => { screen.getByText('pick classic').click() })
-    await act(async () => { answer(activeAnswer('builtin:play')) })
+    act(() => { screen.getByText('pick studio').click() })
+    await act(async () => { answer(activeAnswer('classic')) })
     await settle()
-    expect(styleShown()).toBe('classic')
+    expect(styleShown()).toBe('studio')
   })
 
   it("drops an answer that lands after the host's revert to Studio, which is no pick (A-04c)", async () => {
@@ -377,7 +418,8 @@ describe('the server choice check (once per workspace and tab)', () => {
 describe('a cookie-only style with no stored server choice (M2)', () => {
   it('stores the tab style only when the server holds no choice and the tab is on its own style', () => {
     expect(storesTabStyle('classic', sourcedAnswer(INSTALL_ID, 'default'))).toBe(true)
-    expect(storesTabStyle(BUILTIN_PLAY_STYLE, sourcedAnswer('studio', 'fallback'))).toBe(true)
+    expect(storesTabStyle('classic', sourcedAnswer('studio', 'fallback'))).toBe(true)
+    expect(storesTabStyle('classic', sourcedAnswer(UNKNOWN_CHOICE, 'default'))).toBe(true)   // a default this build does not know
     expect(storesTabStyle(INSTALLED_STYLE, sourcedAnswer(OTHER_INSTALL_ID, 'default'))).toBe(true)
     expect(storesTabStyle('studio', sourcedAnswer(INSTALL_ID, 'default'))).toBe(false)     // the build default follows
     expect(storesTabStyle('classic', sourcedAnswer(INSTALL_ID, 'choice'))).toBe(false)     // the member's own choice wins
@@ -422,36 +464,44 @@ describe('a cookie-only style with no stored server choice (M2)', () => {
   it('a refused store (members may not choose) follows the server as before', async () => {
     seenDefaults()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('builtin:play', 'default'))
-    vi.spyOn(apiClient, 'putThemeChoice').mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
-    mount('classic', vi.fn())
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('classic', 'default'))
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    const reload = vi.fn()
+    mount(INSTALLED_STYLE, reload)
     await settle()
     await settle()
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+    expect(put).toHaveBeenCalledWith(INSTALL_ID)
+    expect(styleShown()).toBe('classic')
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it("the member's own stored choice is followed, never overwritten", async () => {
     seenDefaults()
-    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('builtin:play', 'choice'))
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('classic', 'choice'))
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
-    mount('classic', vi.fn())
+    mount(INSTALLED_STYLE, vi.fn())
     await settle()
     expect(put).not.toHaveBeenCalled()
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+    expect(styleShown()).toBe('classic')
   })
 })
 
 describe('choosing stores the choice on the server', () => {
-  it("selecting builtin Play applies it at once and sends 'builtin:play'", async () => {
+  it('selecting Classic or Studio applies it at once and sends it as itself', async () => {
     seenDefaults()
     vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
     mount('studio', vi.fn())
     await settle()
-    act(() => { screen.getByText('pick play').click() })
-    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+    act(() => { screen.getByText('pick classic').click() })
+    expect(styleShown()).toBe('classic')
     await settle()
-    expect(put).toHaveBeenCalledWith('builtin:play')
+    expect(put).toHaveBeenLastCalledWith('classic')
+    act(() => { screen.getByText('pick studio').click() })
+    expect(styleShown()).toBe('studio')
+    await settle()
+    expect(put).toHaveBeenLastCalledWith('studio')
+    expect(put).toHaveBeenCalledTimes(2)
   })
 
   it('an installed theme is stored first, then the page reloads into it', async () => {
@@ -496,6 +546,28 @@ describe('choosing stores the choice on the server', () => {
     await settle()
     expect(styleShown()).toBe('studio')
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
+  })
+
+  it('never stores a version this member has not opted in to; with no opt-in dialog mounted, nothing at all', async () => {
+    seenDefaults()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
+    vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [ASKS_FIRST] })
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    const reload = vi.fn()
+    function Installed() {
+      return <span data-testid="installed">{useUiStyle().installedThemes.map((row) => row.name).join(',')}</span>
+    }
+    mount('studio', reload, <Installed />)
+    act(() => wantInstalledThemes())
+    await waitFor(() => expect(screen.getByTestId('installed').textContent).toBe('Garden'))
+    act(() => { screen.getByText('pick garden').click() })
+    await settle()
+    expect(put).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(styleShown()).toBe('studio')
+    expect(document.cookie).not.toContain(INSTALLED_STYLE)
+    expect(warn).toHaveBeenCalledWith('[theme-choice]', expect.stringContaining('opt-in'))
   })
 
   it('outside a workspace a pick only applies the style', async () => {

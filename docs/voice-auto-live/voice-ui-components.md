@@ -5,282 +5,276 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/api/generated-images/[id]/route.ts](frontend/app/api/generated-images/[id]/route.ts)
-- [frontend/components/__tests__/prd207-live-voice.test.tsx](frontend/components/__tests__/prd207-live-voice.test.tsx)
-- [frontend/components/chatbot/agent-selector.tsx](frontend/components/chatbot/agent-selector.tsx)
-- [frontend/components/chatbot/chat-mode-bar.tsx](frontend/components/chatbot/chat-mode-bar.tsx)
-- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
-- [frontend/components/chatbot/code-block.tsx](frontend/components/chatbot/code-block.tsx)
-- [frontend/components/chatbot/image-gallery.tsx](frontend/components/chatbot/image-gallery.tsx)
-- [frontend/components/chatbot/message-actions.tsx](frontend/components/chatbot/message-actions.tsx)
-- [frontend/components/chatbot/mission-created-card.tsx](frontend/components/chatbot/mission-created-card.tsx)
-- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
-- [frontend/components/chatbot/pin-agent-picker.tsx](frontend/components/chatbot/pin-agent-picker.tsx)
-- [frontend/components/chatbot/sheet-artifact.tsx](frontend/components/chatbot/sheet-artifact.tsx)
-- [frontend/components/voice/LiveVoiceMode.tsx](frontend/components/voice/LiveVoiceMode.tsx)
-- [frontend/components/voice/MicHealthControl.tsx](frontend/components/voice/MicHealthControl.tsx)
-- [frontend/components/voice/PresenceOrb.tsx](frontend/components/voice/PresenceOrb.tsx)
-- [frontend/components/voice/VoiceCallPanel.tsx](frontend/components/voice/VoiceCallPanel.tsx)
-- [frontend/components/voice/VoiceErrorBoundary.tsx](frontend/components/voice/VoiceErrorBoundary.tsx)
-- [frontend/hooks/use-retell-call.ts](frontend/hooks/use-retell-call.ts)
-- [frontend/lib/voice/mic-health.ts](frontend/lib/voice/mic-health.ts)
-- [frontend/lib/voice/orb-state.ts](frontend/lib/voice/orb-state.ts)
-- [orchestrator/alembic/versions/prd203_voice_turns.py](orchestrator/alembic/versions/prd203_voice_turns.py)
-- [orchestrator/alembic/versions/prd207_su_capture.py](orchestrator/alembic/versions/prd207_su_capture.py)
-- [orchestrator/alembic/versions/prd207_voice_live.py](orchestrator/alembic/versions/prd207_voice_live.py)
-- [orchestrator/api/voice_retell.py](orchestrator/api/voice_retell.py)
-- [orchestrator/core/models/voice_calls.py](orchestrator/core/models/voice_calls.py)
-- [orchestrator/core/models/voice_turns.py](orchestrator/core/models/voice_turns.py)
-- [orchestrator/core/services/image_store.py](orchestrator/core/services/image_store.py)
-- [orchestrator/modules/voice/call_binding.py](orchestrator/modules/voice/call_binding.py)
-- [orchestrator/modules/voice/live_settings.py](orchestrator/modules/voice/live_settings.py)
-- [orchestrator/modules/voice/providers/retell.py](orchestrator/modules/voice/providers/retell.py)
-- [orchestrator/modules/voice/retell_api.py](orchestrator/modules/voice/retell_api.py)
-- [orchestrator/modules/voice/spoken_style.py](orchestrator/modules/voice/spoken_style.py)
-- [orchestrator/modules/voice/telemetry.py](orchestrator/modules/voice/telemetry.py)
-- [orchestrator/modules/voice/voice_meter.py](orchestrator/modules/voice/voice_meter.py)
-- [orchestrator/tests/test_prd203_voice_retell.py](orchestrator/tests/test_prd203_voice_retell.py)
-- [orchestrator/tests/test_prd207_voice_live.py](orchestrator/tests/test_prd207_voice_live.py)
-- [orchestrator/tests/test_voice_quality.py](orchestrator/tests/test_voice_quality.py)
+- [frontend/app/chat/layout.tsx](../../frontend/app/chat/layout.tsx)
+- [frontend/app/x/[...path]/page.tsx](../../frontend/app/x/[...path]/page.tsx)
+- [frontend/components/chatbot/chat-mode-bar.tsx](../../frontend/components/chatbot/chat-mode-bar.tsx)
+- [frontend/components/chatbot/chat.tsx](../../frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/composer-actions.tsx](../../frontend/components/chatbot/composer-actions.tsx)
+- [frontend/components/chatbot/composer-voice.tsx](../../frontend/components/chatbot/composer-voice.tsx)
+- [frontend/components/voice/AiVoiceLabel.tsx](../../frontend/components/voice/AiVoiceLabel.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx)
+- [frontend/components/voice/PresenceOrb.tsx](../../frontend/components/voice/PresenceOrb.tsx)
+- [frontend/components/voice/VoiceErrorBoundary.tsx](../../frontend/components/voice/VoiceErrorBoundary.tsx)
+- [frontend/components/voice/host-presence-orb.tsx](../../frontend/components/voice/host-presence-orb.tsx)
+- [frontend/components/voice/voice-button.tsx](../../frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/voice-button-view.ts](../../frontend/components/voice/voice-button-view.ts)
+- [frontend/components/voice/voice-controls.tsx](../../frontend/components/voice/voice-controls.tsx)
+- [frontend/components/voice/voice-hotkey.ts](../../frontend/components/voice/voice-hotkey.ts)
+- [frontend/components/voice/voice-press.ts](../../frontend/components/voice/voice-press.ts)
+- [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx)
+- [frontend/lib/chat/live-voice-turns.ts](../../frontend/lib/chat/live-voice-turns.ts)
+- [frontend/lib/theme-sdk/voice.ts](../../frontend/lib/theme-sdk/voice.ts)
+- [frontend/lib/theme-sdk/host-cards/voice-button.tsx](../../frontend/lib/theme-sdk/host-cards/voice-button.tsx)
+- [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts)
+- [frontend/lib/voice/support.ts](../../frontend/lib/voice/support.ts)
+- [frontend/lib/voice/live-turns.ts](../../frontend/lib/voice/live-turns.ts)
+- [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts)
+- [frontend/lib/voice/orb-state.ts](../../frontend/lib/voice/orb-state.ts)
+- [frontend/lib/voice/host/availability.ts](../../frontend/lib/voice/host/availability.ts)
+- [frontend/lib/voice/host/shared-host.ts](../../frontend/lib/voice/host/shared-host.ts)
+- [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts)
+- [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
+- [frontend/lib/voice/live/refusal.ts](../../frontend/lib/voice/live/refusal.ts)
+- [frontend/lib/voice/live/retell-call.ts](../../frontend/lib/voice/live/retell-call.ts)
+- [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts)
+- [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts)
+- [frontend/lib/voice/quick-ask/config.ts](../../frontend/lib/voice/quick-ask/config.ts)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](../../frontend/components/__tests__/prd207-live-voice.test.tsx)
+- [frontend/components/voice/__tests__/voice-button.test.tsx](../../frontend/components/voice/__tests__/voice-button.test.tsx)
+- [frontend/components/voice/__tests__/voice-provider.test.tsx](../../frontend/components/voice/__tests__/voice-provider.test.tsx)
+- [frontend/lib/voice/live/__tests__/live-engine.test.ts](../../frontend/lib/voice/live/__tests__/live-engine.test.ts)
+- [frontend/lib/voice/quick-ask/__tests__/quick-ask-engine.test.ts](../../frontend/lib/voice/quick-ask/__tests__/quick-ask-engine.test.ts)
 
 </details>
 
+This page covers the browser side of voice: the host voice provider and its two engines (Auto Live and quick ask),
+the surfaces Studio draws from it, the voice button themes share, and the microphone and presence helpers. For what
+the person using it sees, see the [Voice guide](../voice/_index.md).
 
+## The host voice provider
 
-This page details the frontend components responsible for the Voice UI in Automatos AI, specifically focusing on the `LiveVoiceMode`, `PresenceOrb` visualizer, `useRetellCall` hook, `MicHealthControl` and RMS detection, `VoiceErrorBoundary`, `VoiceCallPanel`, and the `orb-state` management. These components collectively provide a real-time, interactive voice experience within the chat interface, integrating with the Retell voice transport system.
+`VoiceProvider` [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx) holds the tab's one voice session. It is mounted
+around the chat page's slot [frontend/app/chat/layout.tsx](../../frontend/app/chat/layout.tsx) and around a theme's routes
+[frontend/app/x/[...path]/page.tsx](../../frontend/app/x/[...path]/page.tsx), so Studio's chat and a theme's screens read the same session through
+`useHostVoice()` (or `useOptionalHostVoice()`, which answers null outside a provider).
 
-## LiveVoiceMode
+The rules live outside React in `VoiceHost` [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts):
 
-The `LiveVoiceMode` component [frontend/components/voice/LiveVoiceMode.tsx:3-242]() is the central control strip for an active voice call. It manages the lifecycle of the voice call, including connecting, starting, stopping, and muting, and feeds presence information (such as speaking/listening state and audio levels) to other UI elements like the `PresenceOrb`.
+- a start binds the session to the conversation on screen (null for a new chat), or to the one it names, and runs
+  the engine asked for; starting the other engine stops the one running;
+- a new chat takes the conversation the session names (the mint's `chat_id`, or quick ask's new chat), as a typed
+  first message does;
+- moving to another conversation ends the session;
+- the session's words in progress go to the conversation they belong to [frontend/lib/voice/live-turns.ts](../../frontend/lib/voice/live-turns.ts), and
+  every chat on the host's stream shows them as two live entries at the end of it
+  [frontend/lib/chat/live-voice-turns.ts](../../frontend/lib/chat/live-voice-turns.ts). The saved rows arrive with `chat_changed` and replace them.
 
-It is rendered as a slim strip above the message box in the chat interface, displaying the call's state, duration, microphone status, and controls for muting/unmuting and ending the call. When a call fails to mint (e.g., due to budget limits or configuration issues), it displays an honest refusal message and options to retry or close.
-
-Key functionalities include:
-*   **Call Management**: Initiates and terminates the voice call using the `useRetellCall` hook [frontend/components/voice/LiveVoiceMode.tsx:70-82]().
-*   **State Display**: Shows the current state of the call (e.g., "Auto is listening", "Mic live") and its duration [frontend/components/voice/LiveVoiceMode.tsx:152-167]().
-*   **Mic Control**: Provides a button to toggle microphone mute/unmute [frontend/components/voice/LiveVoiceMode.tsx:170-183]() and a `MicDevicePicker` to select the input audio device [frontend/components/voice/LiveVoiceMode.tsx:186-191]().
-*   **Presence Feedback**: Communicates the `orbState` and `levelsRef` (audio levels) to parent components for ambient visual feedback, such as the `PresenceOrb` [frontend/components/voice/LiveVoiceMode.tsx:92-93]().
-*   **Error Handling**: Displays refusal or error messages if the call cannot be established or encounters issues [frontend/components/voice/LiveVoiceMode.tsx:135-136]().
-
-The `LiveVoiceMode` component also handles the persistence of the selected capture device in local storage [frontend/components/voice/LiveVoiceMode.tsx:25-35]().
-
-Sources:
-*   [frontend/components/voice/LiveVoiceMode.tsx:3-242]()
-*   [frontend/components/chatbot/chat-mode-bar.tsx:22-23]()
-
-## PresenceOrb Canvas Visualizer
-
-The `PresenceOrb` component [frontend/components/voice/PresenceOrb.tsx:1-425]() is a canvas-based visualizer that provides ambient feedback on the voice call's state and audio levels. It can operate in two modes: a compact band (for `VoiceCallPanel`) or a full-bleed background (for the chat window).
-
-The visualizer renders dynamic elements such as woven ribbon bundles, luminous bars, and particles, with their intensity and movement reflecting the `OrbState` (e.g., `speaking`, `listening`, `thinking`) and live audio levels.
-
-Key aspects of its implementation:
-*   **Canvas Rendering**: Uses HTML5 Canvas API for drawing complex, animated visuals [frontend/components/voice/PresenceOrb.tsx:103-107]().
-*   **State-driven Intensity**: The visual intensity of the orb changes based on the `OrbState`, providing a subtle yet informative cue to the user [frontend/components/voice/PresenceOrb.tsx:68-76]().
-*   **Audio Level Integration**: It reads live audio levels from a `MutableRefObject<VoiceLevels>` [frontend/components/voice/PresenceOrb.tsx:34]() to animate elements like the luminous bars, without triggering React re-renders for every audio frame [frontend/hooks/use-retell-call.ts:11-12]().
-*   **Dynamic Sizing**: Adjusts its dimensions based on its parent container when in background mode (`fullBleed`), ensuring it fills the available space [frontend/components/voice/PresenceOrb.tsx:153-156]().
-*   **Palette**: Uses CSS HSL variables for brand colors, allowing for dynamic theming [frontend/components/voice/PresenceOrb.tsx:117-137]().
-*   **Safety**: The rendering loop is wrapped in a `try/catch` block to prevent rendering faults from crashing the page [frontend/components/voice/PresenceOrb.tsx:24-26]().
-
-### Orb State Management
-
-The `orb-state` module [frontend/lib/voice/orb-state.ts]() defines the possible states of the `PresenceOrb` and the logic for transitioning between them.
-
-**OrbState Enum**:
-*   `connecting`: Initial state while establishing the call.
-*   `listening`: Agent is listening for user input.
-*   `speaking`: Agent is generating and speaking a response.
-*   `thinking`: Agent is processing user input or generating a response.
-*   `idle`: Call is active but no active speech or processing.
-*   `error`: An error occurred during the call.
-*   `ended`: The call has ended.
-
-The `orbReducer` function [frontend/lib/voice/orb-state.ts:100-122]() manages state transitions based on events like `call_connecting`, `call_started`, `agent_start_talking`, `user_voice`, `tick`, and `call_ended`. This reducer ensures that the orb's visual state accurately reflects the call's real-time status.
-
-**RMS Detection**: The `rmsLevel` function [frontend/lib/voice/orb-state.ts:122]() calculates the Root Mean Square (RMS) level from audio data, providing a measure of audio amplitude. This is used to drive the visual intensity of the orb.
+`availability.ts` [frontend/lib/voice/host/availability.ts](../../frontend/lib/voice/host/availability.ts) decides what the provider offers: Auto Live when
+`GET /api/voice/live-status` says it can start and the browser can capture, quick ask when the browser has speech
+recognition and speech synthesis [frontend/lib/voice/support.ts](../../frontend/lib/voice/support.ts). A start in `auto` mode picks Live when it can,
+else quick ask. The mint stays the truth: asking for Live when it is unavailable still tries, and the refusal reaches
+the member as a sentence [frontend/lib/voice/live/refusal.ts](../../frontend/lib/voice/live/refusal.ts).
 
 Sources:
-*   [frontend/components/voice/PresenceOrb.tsx:1-425]()
-*   [frontend/lib/voice/orb-state.ts]()
-*   [frontend/hooks/use-retell-call.ts:11-12]()
-*   [frontend/components/__tests__/prd207-live-voice.test.tsx:28-39]()
+- [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx)
+- [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts)
+- [frontend/lib/voice/host/availability.ts](../../frontend/lib/voice/host/availability.ts)
+- [frontend/lib/voice/live-turns.ts](../../frontend/lib/voice/live-turns.ts)
 
-## useRetellCall Hook
+## The two engines
 
-The `useRetellCall` hook [frontend/hooks/use-retell-call.ts:1-378]() is a React hook that encapsulates the logic for interacting with the Retell voice transport system. It replaces the previous `useVoiceStream` hook and leverages Retell's WebRTC SDK for real-time audio communication.
+Both keep the contract in [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts): `start`, `release` (hold-to-talk let go), `stop`, a
+frozen `snapshot` (mode, phase, microphone open, muted, heard, reply, duration, error, conversation) and `levels()`
+(the member's and Auto's, 0 to 1, read inside an animation frame without a render). Phases run
+`connecting → listening → thinking → speaking`, with `ended` and `error`. Neither engine throws to its caller: a
+failure is a plain sentence in `snapshot.error`.
 
-This hook is responsible for:
-*   **Call Initialization**: Mints a short-lived access token server-side via `apiClient.post('/api/voice/web-call')` [frontend/hooks/use-retell-call.ts:200-201]() and initializes the Retell SDK client.
-*   **Audio Stream Management**: Manages the user's microphone input stream, including device selection and muting [frontend/hooks/use-retell-call.ts:230-231]().
-*   **Audio Level Analysis**: Continuously analyzes microphone input to detect silence and feed audio levels to the `levelsRef` [frontend/hooks/use-retell-call.ts:289-300]().
-*   **State Management**: Maintains the `OrbState` (e.g., `listening`, `speaking`) and call duration, dispatching updates to the `orbReducer` [frontend/hooks/use-retell-call.ts:126-128]().
-*   **Transcript Handling**: Processes real-time transcripts from Retell, updating captions and notifying `onLiveTurn` for live-typing effects in the chat [frontend/hooks/use-retell-call.ts:330-334]().
-*   **Error and Refusal Handling**: Captures and exposes errors or refusals from the call minting process or during the call [frontend/hooks/use-retell-call.ts:202-210]().
-*   **Device Enumeration**: Lists available audio input devices and refreshes the list on device changes [frontend/hooks/use-retell-call.ts:154-164]().
+### Auto Live
 
-The `levelsRef` is a mutable ref [frontend/hooks/use-retell-call.ts:102]() that holds the current agent and user audio levels. This design allows the `PresenceOrb` to read these levels in its own `requestAnimationFrame` loop without causing frequent React re-renders, which is crucial for performance with high-frequency audio data.
+`live-engine.ts` [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts) replaced the former `useRetellCall` hook. A start mints a
+short-lived access token server-side (`POST /api/voice/web-call`; the Retell key never reaches the browser), then
+Retell's WebRTC SDK, loaded on demand in one place [frontend/lib/voice/live/retell-call.ts](../../frontend/lib/voice/live/retell-call.ts), carries the audio both
+ways and drives Auto's own agent loop through the custom-LLM socket. Retell's events walk the presence state machine
+[frontend/lib/voice/orb-state.ts](../../frontend/lib/voice/orb-state.ts); a local analyser tap measures the microphone for the levels and for the
+silent-capture check [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts). The member can mute and pick the capture device, which is
+kept across loads.
+
+There is one Live engine per tab, so one Retell session per tab. Every call has a generation: `stop()` and a new
+`start()` retire the old one, so a late answer or event of a retired call changes nothing.
+
+### Quick ask
+
+`createQuickAskEngine` [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts) is hold-to-talk in the browser:
+
+- the browser's speech recognition hears the member, with interim words in `snapshot.heard`;
+- the release (or the browser's own end of speech, or 60 seconds of holding) sends the words as a normal
+  `POST /api/chat` turn with `spokenMode`, through the app's own chat route as a typed turn goes;
+- the streamed reply is cut into speakable sentences (no markdown, code, tables or URLs); a sentence over 200
+  characters is spoken in pieces. Each piece is spoken by Auto's server voice
+  [frontend/lib/voice/quick-ask/server-speech.ts](../../frontend/lib/voice/quick-ask/server-speech.ts): one MP3 per
+  piece from `POST /api/voice/speech` (services/voice-tts), the next one fetched while the current one plays, played
+  on one `<audio>` element that the press unlocks. From the first piece the server voice fails (any refusal, a
+  network error, no MP3 within four seconds once the piece is due, audio that won't play), `speechSynthesis` speaks
+  that piece and every later piece of the answer, in order after the pieces before it; the requests in flight are
+  aborted and nothing more is asked for that answer. The answer ends at the next hold or a stop, not when the queue
+  empties (a reply streams sentence by sentence), and the next answer asks the server again. After `tts_off`, or when
+  the server has no voice for the language, `speechSynthesis` speaks every piece and the server is asked nothing more
+  until the page reloads;
+- the AI notice, the backend's greeting, is spoken once per browser tab session before the first reply
+  [frontend/lib/voice/quick-ask/ai-notice.ts](../../frontend/lib/voice/quick-ask/ai-notice.ts);
+- "Auto, stop" (or "stop", "cancel", "stop it") as the whole utterance stops and sends nothing; a press while Auto
+  speaks cancels the recognition, the speech and the streaming turn, on the server too;
+- a hidden tab or an unloading page stops the microphone and the speech;
+- recognition and speech both use the browser's language, `navigator.language` (`en-US` when it names none)
+  [frontend/lib/voice/quick-ask/deps.ts](../../frontend/lib/voice/quick-ask/deps.ts); the stop phrases are
+  English. The server voice for that language comes from `GET /api/voice/voices`, asked once per page: the server's
+  default when it speaks the language in any accent, else the first voice in exactly the browser's language and
+  region, else none
+  [frontend/lib/voice/quick-ask/voice-choice.ts](../../frontend/lib/voice/quick-ask/voice-choice.ts).
 
 Sources:
-*   [frontend/hooks/use-retell-call.ts:1-378]()
-*   [frontend/components/voice/LiveVoiceMode.tsx:70-82]()
-*   [frontend/components/voice/PresenceOrb.tsx:34]()
+- [frontend/lib/voice/engine.ts](../../frontend/lib/voice/engine.ts)
+- [frontend/lib/voice/live/live-engine.ts](../../frontend/lib/voice/live/live-engine.ts)
+- [frontend/lib/voice/quick-ask/create-engine.ts](../../frontend/lib/voice/quick-ask/create-engine.ts)
+- [frontend/lib/voice/quick-ask/config.ts](../../frontend/lib/voice/quick-ask/config.ts)
 
-## MicHealthControl and mic-health RMS detection
+## Studio's surfaces
 
-The `MicHealthControl` component [frontend/components/voice/MicHealthControl.tsx]() and the `mic-health` module [frontend/lib/voice/mic-health.ts]() are responsible for monitoring the health of the user's microphone input.
+| Surface | File | What it does |
+|---|---|---|
+| **Live chip** | [frontend/components/chatbot/chat-mode-bar.tsx](../../frontend/components/chatbot/chat-mode-bar.tsx) | In the mode bar under the chat box. Pressed while the tab's session is a live call; a press starts Auto Live on the conversation on screen or ends the call. Its title says why Live can't start, and a press still tries. |
+| **Call strip** | [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx) | Above the message box while the session is a live call: the "AI voice assistant" caption, the state and timer, the microphone state, mute, the device picker and End; a failure in plain words with Try again and Close. |
+| **Presence wave** | [frontend/components/voice/host-presence-orb.tsx](../../frontend/components/voice/host-presence-orb.tsx) over [frontend/components/voice/PresenceOrb.tsx](../../frontend/components/voice/PresenceOrb.tsx) | The chat's full-bleed background while a session runs: the phase as its state, the engine's levels read each frame through a getter, never a render. |
+| **Quick-ask button** | [frontend/components/chatbot/composer-voice.tsx](../../frontend/components/chatbot/composer-voice.tsx) | Beside Send in the composer's action row [frontend/components/chatbot/composer-actions.tsx](../../frontend/components/chatbot/composer-actions.tsx): the shared `VoiceButton` in quick mode, held, with no hotkey (Space types into the box). |
 
-**MicHealthControl**:
-This component provides UI elements related to microphone health, such as the `MicDevicePicker` for selecting an input device and the `MicSilentBanner` which warns the user if their microphone appears to be silent.
-
-**mic-health RMS detection**:
-The `mic-health` module [frontend/lib/voice/mic-health.ts]() implements the logic for detecting digital silence from the microphone input.
-*   `initialMicHealth(now: number)`: Initializes the mic health state [frontend/lib/voice/mic-health.ts:14-20]().
-*   `feedMicLevel(health: MicHealth, rms: number, now: number)`: Updates the mic health state with a new RMS level. It tracks a window of audio input and determines if the microphone has been consistently silent for a predefined duration (`MIC_SILENT_AFTER_MS`) [frontend/lib/voice/mic-health.ts:22-40]().
-*   `MIC_SILENT_PEAK`: A threshold below which audio is considered silent [frontend/lib/voice/mic-health.ts:10]().
-
-This detection helps identify scenarios where a microphone is connected but not picking up any sound, which can be a common issue with virtual audio devices or incorrect selections.
+`chat.tsx` keeps no voice state of its own: it renders the strip and the wave, and the session's words reach its
+messages through `useChatWithReceipts`.
 
 Sources:
-*   [frontend/components/voice/MicHealthControl.tsx]()
-*   [frontend/lib/voice/mic-health.ts]()
-*   [frontend/components/__tests__/prd207-live-voice.test.tsx:90-124]()
+- [frontend/components/chatbot/chat-mode-bar.tsx](../../frontend/components/chatbot/chat-mode-bar.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](../../frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/host-presence-orb.tsx](../../frontend/components/voice/host-presence-orb.tsx)
+- [frontend/components/chatbot/composer-voice.tsx](../../frontend/components/chatbot/composer-voice.tsx)
+
+## The voice button
+
+`VoiceButton` [frontend/components/voice/voice-button.tsx](../../frontend/components/voice/voice-button.tsx) is the one button Studio's composer and every theme use;
+the theme SDK exports it as `voice.VoiceButton` [frontend/lib/theme-sdk/host-cards/voice-button.tsx](../../frontend/lib/theme-sdk/host-cards/voice-button.tsx), next to
+`useVoice()` and `readVoiceLevels()` [frontend/lib/theme-sdk/voice.ts](../../frontend/lib/theme-sdk/voice.ts). Props: `mode` (`auto`, `quick`, `live`),
+`press` (`hold`, `toggle`), `hotkey` (a `KeyboardEvent.code`, `Space` by default, or null), `size` and `label`.
+
+- **The press** [frontend/components/voice/voice-press.ts](../../frontend/components/voice/voice-press.ts) is shared with the Live chip. Hold: pressing starts,
+  letting go sends (Live ignores the release). A click no pointer made (a key on the focused button, a screen
+  reader's activation) counts as a toggle, so hold-to-talk never shuts anyone out. A hold also ends when the window
+  loses focus.
+- **The hotkey** [frontend/components/voice/voice-hotkey.ts](../../frontend/components/voice/voice-hotkey.ts) presses the button from anywhere on the page, except
+  while the member types or while focus is on another control the key would press.
+- **While the session is the button's**, it draws the caption [frontend/components/voice/AiVoiceLabel.tsx](../../frontend/components/voice/AiVoiceLabel.tsx), the
+  microphone state and timer, the stop control and, for a call, mute and the device picker
+  [frontend/components/voice/voice-controls.tsx](../../frontend/components/voice/voice-controls.tsx), inside the protected surface `voice-control`, which no theme
+  stylesheet can hide. It names the browser's microphone prompt while it waits, and shows a failure with Try again.
+- **A theme styles it** by its data attributes (`data-voice-button`, `data-voice-state`, `data-voice-mode`,
+  `data-voice-press`, `data-voice-size`, `data-voice-mic`) and the `--voice-button-*` custom properties
+  [frontend/components/voice/voice-button-view.ts](../../frontend/components/voice/voice-button-view.ts). Outside a provider it is drawn disabled, saying voice isn't
+  available on the page.
+
+A theme never captures audio itself: the theme review flags `getUserMedia`, `SpeechRecognition` and
+`speechSynthesis` in a theme's code as an error (`orchestrator/services/themes/audio_capture.py`).
+
+Sources:
+- [frontend/components/voice/voice-button.tsx](../../frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/voice-press.ts](../../frontend/components/voice/voice-press.ts)
+- [frontend/components/voice/voice-hotkey.ts](../../frontend/components/voice/voice-hotkey.ts)
+- [frontend/lib/theme-sdk/voice.ts](../../frontend/lib/theme-sdk/voice.ts)
+
+## MicHealthControl and mic-health
+
+`mic-health.ts` [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts) is a pure detector for a capture that delivers digital silence
+(a dead or virtual device while the UI says "Mic live"): `feedMicLevel` folds each analyser reading in, any level at
+or above `MIC_SILENT_PEAK` clears `silent` at once, and a full `MIC_SILENT_AFTER_MS` window below it raises it.
+`MicHealthControl` [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx) draws the result: `MicDevicePicker` to choose
+the input device, and `MicSilentBanner`, which names the fault and offers another device. The Live engine feeds the
+detector; the call strip and the voice button show the banner during a call.
+
+Sources:
+- [frontend/lib/voice/mic-health.ts](../../frontend/lib/voice/mic-health.ts)
+- [frontend/components/voice/MicHealthControl.tsx](../../frontend/components/voice/MicHealthControl.tsx)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](../../frontend/components/__tests__/prd207-live-voice.test.tsx)
 
 ## VoiceErrorBoundary
 
-The `VoiceErrorBoundary` component [frontend/components/voice/VoiceErrorBoundary.tsx]() is a React Error Boundary specifically designed for the voice UI. It catches JavaScript errors that occur within its child components (e.g., `LiveVoiceMode` or `PresenceOrb`) and displays a fallback UI.
+`VoiceErrorBoundary` [frontend/components/voice/VoiceErrorBoundary.tsx](../../frontend/components/voice/VoiceErrorBoundary.tsx) wraps each voice surface (the call strip,
+the presence wave, the voice button). An exception inside is logged with the `[VoiceUI]` tag and the surface renders
+nothing, so the chat beneath keeps working.
 
-This ensures that a crash in the voice subsystem does not take down the entire application, providing a more robust user experience. It typically displays a message indicating that something went wrong and offers a way to reset or close the voice interface.
+## Presence state flow
 
-Sources:
-*   [frontend/components/voice/VoiceErrorBoundary.tsx]()
-*   [frontend/components/chatbot/chat.tsx:59]()
-
-## VoiceCallPanel
-
-The `VoiceCallPanel` component [frontend/components/voice/VoiceCallPanel.tsx]() is a UI panel that provides a compact view of the active voice call. It typically includes elements like the `PresenceOrb` in its compact `size` mode, displaying the call's status and basic controls.
-
-While the full-bleed `PresenceOrb` might be in the chat background, the `VoiceCallPanel` offers a dedicated, smaller area for voice interaction controls and visual feedback.
-
-Sources:
-*   [frontend/components/voice/VoiceCallPanel.tsx]()
-*   [frontend/components/voice/PresenceOrb.tsx:158-159]()
-
-## Orb State Flow
-
-The following diagram illustrates the state transitions of the `PresenceOrb` as managed by the `orbReducer` in `orb-state.ts`.
+`orbReducer` [frontend/lib/voice/orb-state.ts](../../frontend/lib/voice/orb-state.ts) derives the Live call's phase from Retell's events. "Thinking" is
+dead air: the member spoke, went quiet for `THINKING_AFTER_MS`, and Auto has not started talking.
 
 ```mermaid
 graph TD
-    subgraph "Voice Call Lifecycle"
-        Initial[Initial State] --> CallConnecting{Call Connecting}
-        CallConnecting --> Connecting[Connecting]
-        Connecting --> CallStarted{Call Started}
-        CallStarted --> Listening[Listening]
-        Listening -- "user_voice" --> Listening
-        Listening -- "dead air > THINKING_AFTER_MS" --> Thinking[Thinking]
-        Thinking -- "agent_start_talking" --> Speaking[Speaking]
-        Speaking -- "agent_stop_talking" --> Listening
-        Speaking -- "user_voice (barge-in)" --> Speaking
-        Listening -- "call_ended" --> Ended[Ended]
-        Thinking -- "call_ended" --> Ended
-        Speaking -- "call_ended" --> Ended
-        Connecting -- "call_ended" --> Ended
-        Connecting -- "error" --> Error[Error]
-        Listening -- "error" --> Error
-        Thinking -- "error" --> Error
-        Speaking -- "error" --> Error
-    end
-
-    subgraph "Mic Health Detection"
-        MicHealthy[Mic Healthy] --> MicSilent{Mic Silent Detected}
-        MicSilent -- "MIC_SILENT_AFTER_MS elapsed" --> MicSilentTrue[Mic Silent: True]
-        MicSilentTrue -- "real signal > MIC_SILENT_PEAK" --> MicHealthy
-    end
-
-    style Initial fill:#f9f,stroke:#333,stroke-width:2px
-    style Connecting fill:#ccf,stroke:#333,stroke-width:2px
-    style Listening fill:#cfc,stroke:#333,stroke-width:2px
-    style Thinking fill:#ffc,stroke:#333,stroke-width:2px
-    style Speaking fill:#fcc,stroke:#333,stroke-width:2px
-    style Ended fill:#eee,stroke:#333,stroke-width:2px
-    style Error fill:#f00,stroke:#333,stroke-width:2px
-    style MicHealthy fill:#cfc,stroke:#333,stroke-width:2px
-    style MicSilentTrue fill:#fcc,stroke:#333,stroke-width:2px
+    Idle[Idle] -- "call_connecting" --> Connecting[Connecting]
+    Connecting -- "call_started" --> Listening[Listening]
+    Listening -- "user quiet for THINKING_AFTER_MS" --> Thinking[Thinking]
+    Thinking -- "agent_start_talking" --> Speaking[Speaking]
+    Listening -- "agent_start_talking" --> Speaking
+    Speaking -- "agent_stop_talking" --> Listening
+    Connecting -- "call_ended" --> Ended[Ended]
+    Listening -- "call_ended" --> Ended
+    Thinking -- "call_ended" --> Ended
+    Speaking -- "call_ended" --> Ended
+    Connecting -- "error" --> Error[Error]
+    Listening -- "error" --> Error
+    Thinking -- "error" --> Error
+    Speaking -- "error" --> Error
 ```
-Title: Orb State Transitions and Mic Health Detection
-Sources:
-*   [frontend/lib/voice/orb-state.ts:100-122]()
-*   [frontend/lib/voice/mic-health.ts:22-40]()
-*   [frontend/components/__tests__/prd207-live-voice.test.tsx:41-87]()
-*   [frontend/components/__tests__/prd207-live-voice.test.tsx:90-124]()
 
-## Voice UI Component Interaction
-
-The following diagram illustrates the interaction between the main Voice UI components and their underlying hooks and modules.
+## How the pieces connect
 
 ```mermaid
 graph TD
-    subgraph "Frontend UI"
-        ChatWindow["Chat Window (frontend/components/chatbot/chat.tsx)"]
-        ChatModeBar["ChatModeBar (frontend/components/chatbot/chat-mode-bar.tsx)"]
-        LiveVoiceMode["LiveVoiceMode (frontend/components/voice/LiveVoiceMode.tsx)"]
-        VoiceCallPanel["VoiceCallPanel (frontend/components/voice/VoiceCallPanel.tsx)"]
-        PresenceOrb["PresenceOrb (frontend/components/voice/PresenceOrb.tsx)"]
-        MicHealthControl["MicHealthControl (frontend/components/voice/MicHealthControl.tsx)"]
-        VoiceErrorBoundary["VoiceErrorBoundary (frontend/components/voice/VoiceErrorBoundary.tsx)"]
+    subgraph "Studio and themes"
+        LiveChip["Live chip (chat-mode-bar.tsx)"]
+        Strip["LiveVoiceMode"]
+        Wave["HostPresenceOrb / PresenceOrb"]
+        Button["VoiceButton (composer, voice.VoiceButton)"]
     end
 
-    subgraph "Frontend Hooks & Utilities"
-        useRetellCall["useRetellCall (frontend/hooks/use-retell-call.ts)"]
-        orbState["orb-state (frontend/lib/voice/orb-state.ts)"]
-        micHealth["mic-health (frontend/lib/voice/mic-health.ts)"]
-        apiClient["apiClient (frontend/lib/api-client.ts)"]
+    subgraph "Host voice"
+        Provider["VoiceProvider (voice-provider.tsx)"]
+        Host["VoiceHost (voice-host.ts)"]
+        Live["Live engine (live-engine.ts)"]
+        Quick["Quick-ask engine (quick-ask/)"]
+        Turns["live-turns.ts"]
     end
 
-    subgraph "Backend API"
-        MintWebCall["POST /api/voice/web-call (orchestrator/api/voice_retell.py)"]
-        RetellLLMWebSocket["WS /api/voice/retell/llm-websocket/{call_id} (orchestrator/api/voice_retell.py)"]
-        RetellEventsWebhook["POST /api/voice/retell/events (orchestrator/api/voice_retell.py)"]
+    subgraph "Backend"
+        Mint["POST /api/voice/web-call"]
+        Status["GET /api/voice/live-status"]
+        Chat["POST /api/chat (spokenMode)"]
+        Socket["WS /api/voice/retell/llm-websocket/{call_id}"]
     end
 
-    ChatWindow -- "Renders" --> LiveVoiceMode
-    ChatWindow -- "Renders (background)" --> PresenceOrb
-    ChatModeBar -- "Toggle Live Voice" --> LiveVoiceMode
-    LiveVoiceMode -- "Manages call state" --> useRetellCall
-    LiveVoiceMode -- "Feeds presence (orbState, levelsRef)" --> PresenceOrb
-    LiveVoiceMode -- "Uses" --> MicHealthControl
-    VoiceCallPanel -- "Renders (compact)" --> PresenceOrb
-    VoiceErrorBoundary -- "Wraps" --> LiveVoiceMode
-    VoiceErrorBoundary -- "Wraps" --> PresenceOrb
-
-    useRetellCall -- "Initializes call via" --> MintWebCall
-    useRetellCall -- "Connects to" --> RetellLLMWebSocket
-    useRetellCall -- "Updates state via" --> orbState
-    useRetellCall -- "Monitors mic via" --> micHealth
-    useRetellCall -- "Makes API calls" --> apiClient
-
-    micHealth -- "Detects RMS levels" --> MicHealthControl
-
-    MintWebCall -- "Creates voice_calls row" --> RetellEventsWebhook
-    RetellLLMWebSocket -- "Streams agent responses" --> useRetellCall
-    RetellEventsWebhook -- "Updates voice_calls, voice_turns" --> BackendDB[Backend Database]
-
-    orbState -- "Defines states & reducer" --> PresenceOrb
-    micHealth -- "Calculates mic health" --> useRetellCall
+    LiveChip --> Provider
+    Button --> Provider
+    Provider --> Strip
+    Provider --> Wave
+    Provider -- "availability" --> Status
+    Provider --> Host
+    Host --> Live
+    Host --> Quick
+    Host -- "words in progress" --> Turns
+    Live --> Mint
+    Live -- "Retell WebRTC" --> Socket
+    Quick --> Chat
 ```
-Title: Voice UI Component Interaction Diagram
+
 Sources:
-*   [frontend/components/chatbot/chat.tsx:58-63]()
-*   [frontend/components/voice/LiveVoiceMode.tsx:3-242]()
-*   [frontend/components/voice/PresenceOrb.tsx:1-425]()
-*   [frontend/hooks/use-retell-call.ts:1-378]()
-*   [frontend/lib/voice/orb-state.ts]()
-*   [frontend/lib/voice/mic-health.ts]()
-*   [frontend/components/voice/MicHealthControl.tsx]()
-*   [frontend/components/voice/VoiceErrorBoundary.tsx]()
-*   [frontend/components/chatbot/chat-mode-bar.tsx:62-72]()
-*   [orchestrator/api/voice_retell.py:99-163]()
-*   [orchestrator/api/voice_retell.py:24-40]()
-*   [orchestrator/api/voice_retell.py:1-20]()
+- [frontend/lib/voice/orb-state.ts](../../frontend/lib/voice/orb-state.ts)
+- [frontend/components/voice/voice-provider.tsx](../../frontend/components/voice/voice-provider.tsx)
+- [frontend/lib/voice/host/voice-host.ts](../../frontend/lib/voice/host/voice-host.ts)
+- [orchestrator/api/voice_retell.py](../../orchestrator/api/voice_retell.py)
 
 ---

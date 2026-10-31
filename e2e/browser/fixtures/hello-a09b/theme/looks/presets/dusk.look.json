@@ -1,0 +1,10 @@
+{
+  "schema": "automatos-e2e-a09b-look/v1",
+  "interface": "hello-a09b",
+  "id": "dusk",
+  "name": "Dusk",
+  "sub": "Dark blue, green accent",
+  "ground": "dusk",
+  "accent": "green",
+  "glow": 24
+}

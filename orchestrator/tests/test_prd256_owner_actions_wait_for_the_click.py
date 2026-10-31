@@ -19,11 +19,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from modules.tools.discovery.owner_only import (
-    CLICKED_BY, OWNER_ONLY_ACTIONS, OWNERS_OWN_DECISION, asks_before_a_send, is_owner_only,
+    CLICKED_BY, OWNER_ONLY_ACTIONS, asks_before_a_send, is_owner_only,
 )
 
 CLICKER = "user:clicker-7"
 CANCEL = "platform_update_task_status"
+# The caller-context key the HARNESS's /approve once set to skip the ask (PRD-263 US-047).
+RETIRED_BYPASS_KEY = "owners_own_decision"
 
 
 # ── The list: Decision D1 ───────────────────────────────────────────────────────────
@@ -159,11 +161,15 @@ def test_the_owners_click_runs_the_call_once_signed_by_who_clicked(board):
 
 
 def test_typed_words_never_stand_in_for_the_click(board):
-    """'Approve it' typed after the ask makes the same call: it asks again, on the same card."""
+    """'Approve it' typed after the ask, in the same chat, makes the same call: it asks again, on the
+    same card (P256-FIX-N17-3: another chat's turn raises its own card; this chat's next turn is told
+    the card it already has)."""
     params = {"task_id": board.number, "status": "done"}
-    first = _call(board, params, _owners_chat())
-    second = _call(board, params, _owners_chat())
+    chat = _owners_chat()
+    first = _call(board, params, chat)
+    second = _call(board, params, {**chat, "turn_id": "t-2"})
     assert first["grant_id"] == second["grant_id"] and "approve" in second["message"]
+    assert second["already_waiting"]["grant_id"] == first["grant_id"]
     board.handler.assert_not_called()
 
 
@@ -176,11 +182,15 @@ def test_an_agent_run_a_playbook_step_or_a_heartbeat_is_unchanged(board, lane):
     board.handler.assert_called_once()
 
 
-def test_the_harness_approve_is_the_admins_own_decision(board):
+def test_no_caller_context_key_skips_the_click(board):
+    """Replaces test_the_harness_approve_is_the_admins_own_decision (PRD-263 US-047,
+    maintainer issue #1150). The HARNESS's /approve set ``owners_own_decision`` so an
+    owner-only change it applied was not asked about; that route and the key are gone,
+    and a person's turn carrying the key now waits for the click like any other."""
     reply = _call(board, {"task_id": board.number, "status": "cancelled"},
-                  {"driving_user_id": "7", OWNERS_OWN_DECISION: True})
-    assert reply["success"] is True
-    board.handler.assert_called_once()
+                  {**_owners_chat(), RETIRED_BYPASS_KEY: True})
+    assert reply["success"] is False and reply["requires_confirmation"] is True and reply["owner_only"] is True
+    board.handler.assert_not_called()
 
 
 def _unworked(board):

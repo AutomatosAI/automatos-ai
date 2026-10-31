@@ -40,6 +40,9 @@ vi.mock('@/hooks/use-page-api', () => ({ usePageAPI: () => {} }))
 // PRD-244: the admin pages now use the shared StatsBar, which reads the icon
 // config through react-query. This suite is about edition gating, not icons.
 vi.mock('@/hooks/use-system-config-api', () => ({ useSystemIcons: () => ({ data: {} }) }))
+// PRD-265: the dev reset page reads the trial balance through react-query; this
+// suite is about edition gating, not the balance.
+vi.mock('@/hooks/use-billing-summary', () => ({ useBillingSummary: () => ({ data: undefined }) }))
 vi.mock('@/components/team/team-management', () => ({
   TeamManagement: () => <div data-testid="team-management" />,
 }))

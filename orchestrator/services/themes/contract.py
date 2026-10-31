@@ -2,8 +2,8 @@
 
 One place for the host and SDK versions a package's ``engines`` is checked against, the
 names no package may take, the slots and pages a package may fill, and the files a cloned
-page is tracked against. It also holds the error shape every check returns and the JSON
-and plain-text rules they share.
+page is tracked against, and the lists theme.json's ``mobile`` block is checked against (M-01).
+It also holds the error shape every check returns and the JSON and plain-text rules they share.
 
 This module uses the standard library only, on purpose:
 
@@ -20,6 +20,7 @@ through ``config`` and falls back to the defaults below until B2-wire adds them.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from pathlib import Path
@@ -28,8 +29,40 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # PA-2: the host contract's version (slots, pages, routes, boot data) and the SDK's. They equal
 # frontend/lib/theme-host/shared-modules.json "hostVersion" and "sdkVersion"; the parity tests on
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
-THEME_HOST_VERSION = "1.0.0"
-SDK_VERSION = "1.0.0"
+# Theme voice (C5): the SDK is 1.2.0 for its voice area; the host contract stays 1.1.0.
+# PRD-268 US-C21e (K12): the SDK is 1.3.0 for its proactive area and default components; the host contract stays 1.1.0.
+# PRD-268 Wave K (K17): the SDK is 1.4.0 for a message's parts, the brief's speaking row and its thumbs; the host
+# contract stays 1.1.0 (no package-contract change).
+THEME_HOST_VERSION = "1.1.0"
+SDK_VERSION = "1.4.0"
+
+# PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
+# theme from (services/themes/mobile_manifest.py checks it; frontend/lib/theme-host/mobile-manifest.ts is
+# its twin, and validator-parity.test.ts reads every MOBILE_* name below as text). The tokens are the 24
+# Studio tokens lib/look-kit/studio-tokens.ts lookToStudioTokens writes as 'H S% L%' triplets, less its
+# status tokens (PRD-268 K13: STUDIO_STATUS_TOKEN_NAMES, a skin's from US-T01) and never its
+# eight pre-wrapped aliases; a scheme needs MOBILE_REQUIRED_TOKENS. MOBILE_CONTRAST_PAIRS are
+# (text or mark, fill, kind): a "text" pair is measured against MOBILE_AA_TEXT, a "ui" pair against
+# MOBILE_AA_UI (WCAG 2.x). A theme with a block must not admit a host below MOBILE_MIN_HOST.
+MOBILE_TOKEN_NAMES: Tuple[str, ...] = (
+    "--background", "--foreground", "--card", "--card-foreground", "--popover", "--popover-foreground",
+    "--primary", "--primary-foreground", "--secondary", "--secondary-foreground", "--muted", "--muted-foreground",
+    "--accent", "--accent-foreground", "--destructive", "--destructive-foreground", "--border", "--input", "--ring",
+    "--background-gradient-from", "--background-gradient-to", "--glass-border-hover", "--cc-hover", "--cc-hover-border",
+)
+MOBILE_REQUIRED_TOKENS: Tuple[str, ...] = ("--background", "--foreground")
+MOBILE_FONT_ROLES: Tuple[str, ...] = ("sans", "serif", "mono")
+MOBILE_MASCOT_MODES: Tuple[str, ...] = ("clips", "stills", "none")
+MOBILE_CONTRAST_PAIRS: Tuple[Tuple[str, str, str], ...] = (
+    ("--foreground", "--background", "text"), ("--card-foreground", "--card", "text"),
+    ("--popover-foreground", "--popover", "text"), ("--secondary-foreground", "--secondary", "text"),
+    ("--muted-foreground", "--muted", "text"), ("--primary-foreground", "--primary", "text"),
+    ("--accent-foreground", "--accent", "text"), ("--destructive-foreground", "--destructive", "text"),
+    ("--primary", "--background", "ui"), ("--ring", "--background", "ui"),
+)
+MOBILE_AA_TEXT = 4.5
+MOBILE_AA_UI = 3.0
+MOBILE_MIN_HOST = "1.1.0"
 
 MANIFEST_SCHEMA = "automatos-theme/v1"
 LOOK_SCHEMA_SCHEMA = "automatos-look-schema/v1"
@@ -38,10 +71,9 @@ MANIFEST_PATH = "theme.json"
 # PRD §4.2: a theme's own class on <html>.
 HTML_CLASS_PATTERN = re.compile(r"[a-z][a-z0-9-]{2,31}")
 # Classes the core owns on <html>: the Style axis, Classic, and next-themes' tones (and its
-# "system" name, which it never puts on <html> but a theme must not take either).
-RESERVED_HTML_CLASSES: Tuple[str, ...] = ("studio", "classic", "play", "dark", "light", "system")
-# PA-8: Play's package keeps html.play until A-20; no other id may take it.
-HTML_CLASS_OWNERS: Dict[str, str] = {"play": "automatos/play"}
+# "system" name, which it never puts on <html> but a theme must not take either). No theme's id
+# keeps one (A-20, QB-11): any other class that fits the pattern is any theme's.
+RESERVED_HTML_CLASSES: Tuple[str, ...] = ("studio", "classic", "dark", "light", "system")
 # C-01a: only an admin may submit under these publishers. Private uploads are not checked here.
 RESERVED_PUBLISHERS: Tuple[str, ...] = ("automatos",)
 
@@ -82,8 +114,9 @@ PAGE_SOURCES: Dict[str, Tuple[str, ...]] = {
     "/": ("app/page.tsx",),
 }
 # PRD §4.4: pages that are always the host's (sign-in, security and roles, admin, the
-# Marketplace, the theme menu and look pages, safe mode, the theme-only route root, the API).
-HOST_OWNED_ROUTES: Tuple[str, ...] = ("/sign-in", "/sign-up", "/auth", "/sso-callback", "/reset-password", "/accept-invitation", "/settings", "/team", "/admin", "/marketplace", "/looks", "/safe-mode", "/x", "/api", "/dev")
+# Marketplace, the theme menu and look pages, safe mode, the theme-only route root, the API,
+# and PRD-264 EUAI-10's public AI-content check, /verify).
+HOST_OWNED_ROUTES: Tuple[str, ...] = ("/sign-in", "/sign-up", "/auth", "/sso-callback", "/reset-password", "/accept-invitation", "/settings", "/team", "/admin", "/marketplace", "/looks", "/safe-mode", "/x", "/api", "/dev", "/verify")
 
 # PA-18: the sha256 of every PAGE_SOURCES file in this host release, {"files": {path: sha256}}.
 # The running image has no frontend/ folder, so the drift check (A-07b) reads this file;
@@ -114,13 +147,28 @@ class CapSetting(NamedTuple):
     unit: int
 
 
-# PRD §4.2 and Q25: the package as uploaded, JS plus CSS, the entry module, each mascot clip.
+# PRD §4.2 and Q25: the package as uploaded, JS plus CSS, the entry module, each mascot clip. The package
+# cap holds every screenshot a theme may list (24 web and 24 phone at 512 KB, 24 MB) beside its code.
 CAP_SETTINGS: Dict[str, CapSetting] = {
-    "package": CapSetting("THEME_MAX_PACKAGE_MB", 10, MB),
+    "package": CapSetting("THEME_MAX_PACKAGE_MB", 32, MB),
     "code": CapSetting("THEME_MAX_CODE_KB", 3072, KB),
     "entry": CapSetting("THEME_MAX_ENTRY_KB", 300, KB),
     "clip": CapSetting("THEME_MAX_CLIP_KB", 1024, KB),
 }
+
+# PRD-261 A-19c (host 1.1.0, plan §2.2.3): boot/prepaint.json may carry a tone rule under this key,
+# {"knob": <a choice knob of the table>, "values": {<every choice of it>: "light" | "dark"}}, so a
+# generic look runtime sets a look's tone from data (css_value.py checks it; css-value.ts is its twin).
+TONE_RULE_KEY = "tone"
+TONE_RULE_FIELDS: Tuple[str, ...] = ("knob", "values")
+TONE_RULE_TONES: Tuple[str, ...] = ("light", "dark")
+# The running boot's looks (serve.py boot_looks): at most this many presets, each file at most
+# BOOT_PRESET_MAX_BYTES (4 KB). frontend/lib/theme-host/boot-sanitize.ts holds the same two numbers.
+BOOT_PRESETS_MAX = 12
+BOOT_PRESET_MAX_BYTES = 4096
+# The longest prepaint value: the import grammar's cap (css_value.py CSS_VALUE_MAX) and the browser's first-paint
+# gate's (boot-sanitize.ts, which counts UTF-16 units). frontend/lib/theme-host/css-value.ts holds the same number.
+PREPAINT_VALUE_MAX = 200
 
 # ---------------------------------------------------------------------------
 # The error shape every check returns
@@ -184,9 +232,26 @@ def is_whole_number(value: Any) -> bool:
     return isinstance(value, int) or value.is_integer()
 
 
+def js_number(value: Any) -> Optional[float]:
+    """A JSON number as JavaScript's ``JSON.parse`` reads it, when that is finite; else None (a bool is no number).
+
+    Python keeps an integer literal whole however long it is, where JavaScript reads the nearest
+    double: past 2**53 a rounded one, past the double range Infinity. So the value is compared as
+    ``float(value)``, and one that overflows (a 310-digit literal) or is infinite (``1e400``) is not
+    finite, as ``Number.isFinite`` says of what ``JSON.parse`` gives for it.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def is_finite_number(value: Any) -> bool:
-    """A JSON number that is not a bool (the parser below refuses NaN and the infinities)."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) != float("inf")
+    """A JSON number that JavaScript reads as finite (``js_number``); never a bool. The parser below refuses NaN."""
+    return js_number(value) is not None
 
 
 # ---------------------------------------------------------------------------

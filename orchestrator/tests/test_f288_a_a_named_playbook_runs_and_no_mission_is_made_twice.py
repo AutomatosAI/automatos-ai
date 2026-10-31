@@ -88,3 +88,27 @@ def test_a_goal_none_of_whose_words_the_owner_said_is_not_made(shop):
     refusal = _refusal(shop, "Research our top 5 competitors, analyze their pricing, features, and market positioning.",
                        said)
     assert "isn't what the owner asked for" in refusal
+
+
+# ── P256-FIX-N17-2 (F444): the word rules run before the card; the click checks only for a copy ──
+
+def _refusal_on_the_click(shop, goal, *said):
+    from modules.tools.discovery.mission_create_checks import refusal_for_mission
+
+    return refusal_for_mission(shop.db, shop.ws, {"goal": goal}, list(said), clicked=True)
+
+
+def test_on_the_click_a_playbook_named_or_a_goal_not_in_the_words_no_longer_refuses(shop):
+    """The owner clicked a card that already passed these rules: words said after it do not undo it."""
+    assert _refusal_on_the_click(shop, "Onboard new wholesale cafe",
+                                 "Run my New Cafe Onboarding playbook for Bramble & Co: contact Jess Moore.") is None
+    assert _refusal_on_the_click(shop, "Research our top 5 competitors, analyze their pricing.",
+                                 "Thanks, that's all for tonight.") is None
+
+
+def test_on_the_click_a_copy_still_waiting_is_refused(shop):
+    card = _waiting_mission(shop, PRICE_LIST, made_ago=timedelta(minutes=3))
+
+    refusal = _refusal_on_the_click(shop, PRICE_LIST, "Yes, go ahead.")
+
+    assert refusal is not None and f"Mission #{card.workspace_seq:04d}" in refusal and "no copy was made" in refusal

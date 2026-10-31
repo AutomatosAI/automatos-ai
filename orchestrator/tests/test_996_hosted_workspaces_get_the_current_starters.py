@@ -121,8 +121,10 @@ def test_one_workspace_that_fails_does_not_stop_the_others():
 
 
 def test_the_boot_runs_it_after_the_core_phase_from_the_boot_leader():
+    """PRD-262 US-034: the starters pass runs in the background boot, after the core
+    phase (whose leader seeds it receives) and once the server listens."""
     import main
 
-    assert "_seed_document_starters_everywhere" in inspect.getsource(main._then_starters)
+    assert "_seed_document_starters_everywhere" in inspect.getsource(main._run_starters)
     assert "boot_leader_lock" in inspect.getsource(main._seed_document_starters_everywhere)
-    assert main._boot_phase_1_core.__wrapped__  # the core phase is wrapped by _then_starters
+    assert "_run_starters" in inspect.getsource(main._boot_in_background)

@@ -18,11 +18,21 @@ never in the queue and answers 404 here, exactly as a missing row does):
   say ``pass`` (the reproducible build is required, D3); the local edition never has the
   isolated stage, so there the person's approval is the review. Approval sets ``approved``
   and ``reviewed``, offers the version to the listing installs that run an older one
-  (``listing_updates.py``; an install never switches by itself) and records a signature
-  request (``signing.py``); it never signs;
+  (``listing_updates.py``), moves each of those that is not pinned to it
+  (``auto_update.apply_listed_update``, publish contract D1: an install it refuses keeps the
+  offer) and records a signature request (``signing.py``); it never signs;
+* **sign**: stores the signature the kit's sign workflow returned for the open request, only
+  when an active Automatos signing key verifies it (``signature_verify``, C-05b); the report's
+  ``signatureVerified`` and ``keyId`` are that check on the stored signature. In the local edition
+  a key the hosted feed revoked verifies nothing in either (``signature_state.feed_checked``, as on
+  load): its signature is never stored, and one it made may be replaced. A keys file that
+  does not load reads ``invalid`` in the report (it still answers), and the paste raises
+  ``SigningKeysError``, which the router answers as a 503 with its plain message;
 * **reject** with a reason, for a pending version;
 * **deactivate** an approved version with a reason: status ``deactivated`` and a ``disable``
-  revocation of its digest, so every install falls back to its base on the next load.
+  revocation of its digest. Each unpinned listing install that runs it moves back to the newest
+  listed version below it (``auto_update.roll_back_installs``); any other install of it falls
+  back to its base on the next load.
 
 The Marketplace's auto-publish rule for agents (``api/marketplace.py:798-805``, five approved
 items make an author trusted) never applies to themes: nothing here, or anywhere else, moves a
@@ -33,17 +43,22 @@ Every action writes a ``theme_review_events`` row. Synchronous; nothing here com
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from config import config
-from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
-from services.themes import signing
+from core.models.themes import THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeReviewEvent, ThemeRevocation
+from services.themes import signature_verify, signing
+from services.themes.auto_update import apply_listed_update, roll_back_installs
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
 from services.themes.listing_updates import offer_listed_update, withdraw_offers
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
+from services.themes.signature_state import feed_checked
+
+logger = logging.getLogger(__name__)
 
 MARKETPLACE_OWNER = "marketplace"
 STATUS_PENDING, STATUS_APPROVED = "pending", "approved"
@@ -69,7 +84,7 @@ NOTE_MISSING = (
 NOTE_FAILED = "The isolated review job's latest summary says it failed. Re-run it, or reject this version."
 NOT_APPROVED = "Only an approved version can be deactivated. Reject a pending one instead."
 NUL_IN_TEXT = "The text has a NUL character in it. Paste plain text."
-# The kit's summary lines (automatos-play scripts/review/summary.ts, ``header``): two spaces after
+# The kit's summary lines (automatos-design-kit scripts/review/summary.ts, ``header``): two spaces after
 # "Package digest:" so the digests line up.
 NOTE_DIGEST_LINE = "Package digest:  {digest}"
 NOTE_OUTCOME_PASS_LINE = "Outcome: pass"
@@ -212,17 +227,30 @@ def _history(db: Session, package_id: UUID) -> List[Dict[str, Any]]:
     ]
 
 
+def _stored_verdict(db: Session, package: ThemePackage) -> signature_verify.Verdict:
+    """The report's check on the stored signature; a key the hosted feed revoked reads ``invalid``
+    (``feed_checked``). A keys file that does not load reads ``invalid`` (as
+    ``listings._signature_verdict`` does), so the report still answers; the paste refuses."""
+    try:
+        verdict = signature_verify.package_verdict(package)
+    except signature_verify.SigningKeysError as bad:
+        logger.error("Theme signing keys did not load; the report shows %s unverified: %s", package.id, bad)
+        return signature_verify.Verdict(signature_verify.STATE_INVALID)
+    return feed_checked(db, verdict)
+
+
 def report(db: Session, package_id: UUID) -> Dict[str, Any]:
     """One version's report: summary, scan report, latest note, approval state, history, signing."""
     package = queued_package(db, package_id)
     note = latest_notes(db, [package.id]).get(package.id)
+    verdict = _stored_verdict(db, package)
     return {
         **package_summary(package),
         "manifest": package.manifest, "scanReport": package.scan_report,
         "reportNote": note_view(note), "approval": _approval(db, package, note),
         "history": _history(db, package.id),
         "signatureRequest": signing.request_view(signing.open_request(db, package.id)),
-        "signatureVerified": False,  # verification is C-05 (PRD §10); no edition verifies yet
+        "signatureVerified": verdict.verified, "keyId": verdict.key_id,
     }
 
 
@@ -279,7 +307,8 @@ def add_report_note(
 
 
 def approve(db: Session, package_id: UUID, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Approve a pending version that passed review, and record its signature request."""
+    """Approve a pending version that passed review, move the unpinned listing installs of an older
+    version to it (the rest keep the offer), and record its signature request."""
     package = queued_package(db, package_id, lock=True)
     note = latest_notes(db, [package.id]).get(package.id)
     refusal = approval_refusal(db, package, note)
@@ -287,11 +316,14 @@ def approve(db: Session, package_id: UUID, actor_pk: Optional[int]) -> Dict[str,
         raise ThemeReviewError(CONFLICT, refusal)
     signing.signing_payload(package)  # refuse before any write when the files can't be signed
     package.status, package.reviewed = STATUS_APPROVED, True
-    _record(db, package, EVENT_APPROVED, STATUS_PENDING, actor_pk,
-            detail={"scanVerdict": package.scan_verdict, "isolatedJob": _note_outcome(note)})
     offered = offer_listed_update(db, package)
+    applied = apply_listed_update(db, package)
+    _record(db, package, EVENT_APPROVED, STATUS_PENDING, actor_pk,
+            detail={"scanVerdict": package.scan_verdict, "isolatedJob": _note_outcome(note),
+                    "updatesOffered": offered, "updatesApplied": applied})
     request = signing.request_signature(db, package, actor_pk)
-    return {**package_summary(package), "signatureRequest": request, "updatesOffered": offered}
+    return {**package_summary(package), "signatureRequest": request, "updatesOffered": offered,
+            "updatesApplied": applied}
 
 
 def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
@@ -306,18 +338,26 @@ def reject(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) 
 
 
 def _has_live_disable(db: Session, digest: str) -> bool:
+    """A live ``local`` disable of ``digest`` stands already. A pulled (``feed``) one doesn't count:
+    the feed may lift it, and the deactivation would go with it. The row is locked: a lift of it
+    in flight finishes first and this then finds it lifted, or waits and then refuses (409)."""
     row = (
         db.query(ThemeRevocation.id)
         .filter(ThemeRevocation.digest == digest, ThemeRevocation.level == REVOKE_DISABLE,
-                ThemeRevocation.lifted_at.is_(None))
+                ThemeRevocation.lifted_at.is_(None), ThemeRevocation.origin == THEME_REVOCATION_ORIGIN_LOCAL)
+        .with_for_update()
         .first()
     )
     return row is not None
 
 
 def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest and
-    withdraw the update offers its approval made (``withdraw_offers``)."""
+    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest (unless
+    a live ``local`` one stands), withdraw the update offers its approval made (``withdraw_offers``) and
+    move the unpinned listing installs that run it back to the previous listed version
+    (``roll_back_installs``; with none, they stay and fall back to their base on the next load).
+    ``revocation_admin.lift_revocation`` refuses to lift the last live ``local`` disable of a
+    deactivated version, so the deactivation can't be undone by lifting a revocation."""
     package = queued_package(db, package_id, lock=True)
     if package.status != STATUS_APPROVED:
         raise ThemeReviewError(CONFLICT, NOT_APPROVED)
@@ -327,15 +367,27 @@ def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[in
         db.add(ThemeRevocation(digest=package.digest, level=REVOKE_DISABLE, reason=text, created_by=actor_pk))
     db.flush()
     withdrawn = withdraw_offers(db, package)
+    rolled_back = roll_back_installs(db, package)
     _record(db, package, EVENT_DEACTIVATED, STATUS_APPROVED, actor_pk, reason=text,
-            detail={"revocation": REVOKE_DISABLE, "digest": package.digest, "offersWithdrawn": withdrawn})
-    return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE}
+            detail={"revocation": REVOKE_DISABLE, "digest": package.digest, "offersWithdrawn": withdrawn,
+                    "installsRolledBack": rolled_back})
+    return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE,
+            "installsRolledBack": rolled_back}
+
+
+def _signature_check(db: Session) -> signing.SignatureCheck:
+    """``signature_verify.verify``, with a key the hosted feed revoked reading ``invalid`` (``feed_checked``)."""
+    def check(payload: Mapping[str, Any], signature: str) -> signature_verify.Verdict:
+        return feed_checked(db, signature_verify.verify(payload, signature))
+    return check
 
 
 def sign(db: Session, package_id: UUID, request_id: UUID, signature: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Store the signature the kit's sign workflow returned for this version's open request."""
+    """Store the signature the kit's sign workflow returned for this version's open request, once an
+    active Automatos signing key the hosted feed didn't revoke verifies it (``_signature_check``);
+    otherwise 400, nothing stored."""
     package = queued_package(db, package_id, lock=True)
-    stored = signing.store_signature(db, package, request_id, signature, actor_pk)
+    stored = signing.store_signature(db, package, request_id, signature, actor_pk, _signature_check(db))
     return {**package_summary(package), "signature": stored}
 
 

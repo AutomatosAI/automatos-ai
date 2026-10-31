@@ -6,9 +6,11 @@ upload, and its LLM check can make dozens of paid calls. Four limits cap that sp
 * **Stages at once** (``THEME_REVIEW_MAX_CONCURRENT``, default 2): a process-wide count taken
   with a try (never a wait) before the route holds any database connection for the stage; when
   it is full the route answers 503 with ``Retry-After``. Each uvicorn worker has its own count.
-* **Submissions per person** (``THEME_SUBMISSIONS_PER_DAY``, default 10) and **private uploads
-  per workspace** (``THEME_UPLOADS_PER_DAY``, default 20) in a rolling 24 hours, counted from
-  ``theme_packages`` rows and checked before the stage: past it, 429 with a plain sentence.
+* **Submissions per person** (``THEME_SUBMISSIONS_PER_DAY``, default 10), **private uploads
+  per workspace** (``THEME_UPLOADS_PER_DAY``, default 20) and **versions the theme publish key
+  publishes** (``THEME_PUBLISH_PER_DAY``, default 10, counted on its service user) in a rolling
+  24 hours, counted from ``theme_packages`` rows and checked before the stage: past it, 429 with
+  a plain sentence.
 * **LLM tokens per day** (``THEME_REVIEW_DAILY_TOKENS``, default 2,000,000) for every theme
   review together, in a rolling 24 hours. What was spent is read from the rows' own scan reports
   (``checks.llm.tokensUsed``), so no new table: ``llm_usage`` is a per-workspace billing ledger
@@ -47,6 +49,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_CONCURRENT = 2
 DEFAULT_SUBMISSIONS_PER_DAY = 10
 DEFAULT_UPLOADS_PER_DAY = 20
+DEFAULT_PUBLISHES_PER_DAY = 10
 DEFAULT_DAILY_TOKENS = 2_000_000
 WINDOW = timedelta(hours=24)
 BUSY_RETRY_SECONDS = 30
@@ -58,6 +61,9 @@ SUBMISSIONS_QUOTA = (
 )
 UPLOADS_QUOTA = (
     "This workspace has uploaded {limit} themes in the last 24 hours, the most allowed. Try again tomorrow."
+)
+PUBLISHES_QUOTA = (
+    "The publish key has published {limit} theme versions in the last 24 hours, the most allowed. Try again tomorrow."
 )
 
 
@@ -128,15 +134,29 @@ def _recent(db: Session, owner_type: str):
     return db.query(ThemePackage).filter(ThemePackage.owner_type == owner_type, ThemePackage.created_at >= _since())
 
 
+def _submitted_today(db: Session, user_pk: Optional[int]) -> int:
+    """Marketplace versions this user submitted in the last 24 hours (None: the local operator with no user row)."""
+    column = ThemePackage.submitted_by
+    mine = column.is_(None) if user_pk is None else column == user_pk
+    return _recent(db, OWNER_MARKETPLACE).filter(mine).count()
+
+
 def submission_quota_refusal(db: Session, user_pk: Optional[int]) -> Optional[str]:
     """Why this person may not submit again today, or None. The local operator with no user row counts as one person."""
     limit = positive_setting("THEME_SUBMISSIONS_PER_DAY", DEFAULT_SUBMISSIONS_PER_DAY)
-    column = ThemePackage.submitted_by
-    mine = column.is_(None) if user_pk is None else column == user_pk
-    if _recent(db, OWNER_MARKETPLACE).filter(mine).count() < limit:
+    if _submitted_today(db, user_pk) < limit:
         return None
     logger.info("[Themes] Submission refused: user %s reached %d submissions in 24 hours", user_pk, limit)
     return SUBMISSIONS_QUOTA.format(limit=limit)
+
+
+def publish_quota_refusal(db: Session, actor_pk: int) -> Optional[str]:
+    """Why the publish key's service user may not publish another version today, or None (``THEME_PUBLISH_PER_DAY``)."""
+    limit = positive_setting("THEME_PUBLISH_PER_DAY", DEFAULT_PUBLISHES_PER_DAY)
+    if _submitted_today(db, actor_pk) < limit:
+        return None
+    logger.info("[Themes] Publish refused: the publish key reached %d versions in 24 hours", limit)
+    return PUBLISHES_QUOTA.format(limit=limit)
 
 
 def upload_quota_refusal(db: Session, workspace_id: Any) -> Optional[str]:

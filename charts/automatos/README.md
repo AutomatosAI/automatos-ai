@@ -16,9 +16,9 @@ Redis are **external**: use managed services, or anything you run yourself.
 | Resource | What it does |
 |---|---|
 | Job `<release>-migrate` | A `pre-install`/`pre-upgrade` hook running `docker-entrypoint.sh migrate`: waits for PostgreSQL, builds an empty database, migrates, seeds, and (local edition) creates the workspace and operator. A failure fails the install or upgrade. |
-| Deployment `<release>-api` | The API. It starts uvicorn directly, so the Job is the only thing that changes the schema. **One replica**: the in-process schedulers use a per-container lock, so a second replica would run every scheduled job twice. |
+| Deployment `<release>-api` | The API. It starts uvicorn with `AUTOMATOS_SKIP_MIGRATIONS=true`, so the image's entrypoint runs no boot step and the Job is the only thing that changes the schema. **One replica**: the in-process schedulers use a per-container lock, so a second replica would run every scheduled job twice. |
 | Deployment `<release>-frontend` | The web app. |
-| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. |
+| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. Its entrypoint starts as root with four capabilities (`CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID`) to fix the volume's ownership, then drops to uid 1000 with no capabilities; nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). |
 | PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. |
 | Ingress (off by default) | `/api` and `/ws` to the API, everything else to the web app. Useful once the web app reads its API address at runtime. |
 
@@ -72,11 +72,29 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `existingSecret` | *(required)* | The Secret above. |
 | `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id. |
 | `config` | optional services off | Extra non-secret settings for the API and the Job: any name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. |
-| `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs. |
+| `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
+| `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
+| `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `ingress.*` | off | |
 | `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API, the worker and the web app's server side, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
+
+## Pinning the images
+
+`edge`, the default, moves with every main publish and every weekly OS rebuild, so
+the chart pulls it `Always`: with `IfNotPresent` each node would keep whichever
+`edge` it pulled first, and two pods could run different builds. For a repeatable
+install, pin one build instead, and the chart pulls it `IfNotPresent`:
+
+- **A fixed tag:** `--set api.image.tag=sha-1a2b3c4` (and the same for `frontend`
+  and `worker`). A `sha-<7>` tag is never re-pushed.
+- **A digest:** `--set api.image.digest=sha256:<64 hex>`. The pod runs
+  `repository@digest`; `crane digest` or `docker buildx imagetools inspect` prints
+  a tag's digest.
+- **At package time:** `helm package charts/automatos --app-version sha-1a2b3c4`
+  stamps the chart's `appVersion`, the tag every component uses when its own tag
+  and digest are empty.
 
 ## Tests
 

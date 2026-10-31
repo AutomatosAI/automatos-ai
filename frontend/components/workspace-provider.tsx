@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
-import type { WorkspaceSocialsState } from '@/lib/api-client'
+import type { WorkspaceSocialsState, WorkspaceVoiceLiveState } from '@/lib/api-client'
 
 const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
 
@@ -15,9 +15,12 @@ const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
 
 /**
  * PRD-222 W1S2: server-side Auto-led onboarding state, surfaced on
- * `GET /api/workspaces/current`. The stage machine + trial ledger live in the
+ * `GET /api/workspaces/current`. The stage machine lives in the
  * `workspaces.onboarding` JSONB; the frontend reads this snapshot (never
  * localStorage — D8). Consumed by the onboarding surfaces (US-012..US-015).
+ * Since PRD-265 the trial is credits in the credit ledger, not part of this
+ * snapshot: the balance comes from `GET /api/v1/billing/summary`
+ * (hooks/use-billing-summary.ts).
  */
 export type OnboardingStage =
     | 'not_started'
@@ -30,18 +33,8 @@ export type OnboardingStage =
     | 'completed'
     | 'skipped'
 
-export type TrialState = 'active' | 'warned' | 'exhausted' | 'converted'
-
-export interface WorkspaceTrial {
-    granted_usd: number
-    spent_usd: number
-    state: TrialState
-}
-
 export interface WorkspaceOnboarding {
     stage: OnboardingStage
-    /** null until the W1S9 trial is granted at provisioning. */
-    trial: WorkspaceTrial | null
 }
 
 /**
@@ -78,6 +71,8 @@ export interface Workspace {
     onboarding?: WorkspaceOnboarding
     /** PRD-251 D1: `available` is the platform master switch, `enabled` this workspace's. */
     socials?: WorkspaceSocialsState
+    /** `available` is the SaaS plan gate for Auto Live, `enabled` this workspace's own switch. */
+    voiceLive?: WorkspaceVoiceLiveState
     webhookUrl?: string
     webhookKey?: string
     settings?: {
@@ -154,6 +149,7 @@ function workspaceFrom(data: any): Workspace {
         exposure: data.exposure ?? undefined,
         onboarding: data.onboarding ?? undefined,
         socials: data.socials ?? undefined,
+        voiceLive: data.voice_live ?? undefined,
         webhookUrl: data.webhook_url,
         webhookKey: data.webhook_key,
         settings: data.settings || {},

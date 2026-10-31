@@ -20,48 +20,13 @@ from apscheduler.triggers.cron import CronTrigger
 
 from core.best_effort import off_loop
 
+from services.credits.asks import runs_as_an_ask
+from services.heartbeats.triage_shadow import (
+    shadow_heartbeat_triage as _shadow_heartbeat_triage,
+)
+from services.proactive.heartbeat_bridge import agent_job, orchestrator_job
+
 logger = logging.getLogger(__name__)
-
-
-def _shadow_heartbeat_triage(
-    *,
-    workspace_id: Any,
-    link_id: Any,
-    agent_id: Any,
-    agent_name: Optional[str],
-    title: str,
-    message: str,
-    status: str,
-    source_type: str,
-    platform_action: str,
-) -> None:
-    """PRD-248 S5 (shadow only): the decision engine says whether the owner
-    should act on this heartbeat today and how severe it is, logged beside the
-    route the platform takes. Lazy, off by default, fail-open."""
-    try:
-        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
-
-        engine = get_decision_engine()
-        if engine.dials().report_triage_mode == MODE_OFF:
-            return
-        engine.shadow(
-            judgements.shadow_report_triage(
-                engine,
-                workspace_id=workspace_id,
-                kind=f"heartbeat:{source_type}",
-                subject_id=link_id,
-                title=title,
-                summary=message,
-                status=status,
-                agent_name=agent_name,
-                agent_id=agent_id,
-                report_type=None,
-                platform_action=platform_action,
-            ),
-            purpose=judgements.PURPOSE_REPORT,
-        )
-    except Exception:  # noqa: BLE001 — never into a heartbeat
-        logger.debug("[decision] heartbeat triage shadow skipped", exc_info=True)
 
 
 def durable_probe_enabled(app_config: Any) -> bool:
@@ -437,7 +402,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._orchestrator_tick,
+            orchestrator_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[workspace_id, hb_config],
@@ -510,7 +475,7 @@ class HeartbeatService:
         trigger = self._interval_to_cron_trigger(interval_minutes)
 
         self._scheduler.add_job(
-            self._agent_tick,
+            agent_job(self),  # PRD-268 US-C04b: the tick, a check-in, or both, by mode
             trigger,
             id=job_id,
             args=[agent_id, workspace_id, hb_config],
@@ -670,42 +635,31 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     def _trial_skip(self, workspace_id: str) -> Optional[Dict[str, Any]]:
-        """PRD-222 US-005 — no background burn.
+        """No background burn (PRD-222 FR-17, on credits since PRD-265 US-004).
 
-        Trial workspaces (onboarding.trial.state active/warned/exhausted) get NO
-        heartbeat execution until the trial converts — an idle trial workspace
-        must burn $0. Returns a VISIBLE skip result (never a silent no-op) or
-        ``None`` to proceed. Converted / never-granted workspaces proceed.
+        A heartbeat starts only when something other than the trial can pay for
+        it: credits beyond the trial, keys of the workspace's own, an allowance
+        plan, or the local edition (``services.credits.routing.background_allowed``).
+        An idle trial workspace burns nothing. Returns a VISIBLE skip result (never
+        a silent no-op) or ``None`` to proceed; a failed check proceeds, because the
+        call-time credit gate still stops any platform call the tick makes.
         """
-        # PRD-234 S3: the local edition has no platform-paid trial credit to protect —
-        # keys are the operator's own and Claude Code agents run on their subscription —
-        # yet Auto-led onboarding grants a trial record there too, which silently
-        # switched every local heartbeat off (found 2026-09-03). Local runs.
-        try:
-            from config import config as _config
-            if getattr(_config, "AUTH_EDITION", "saas") == "local":
-                return None
-        except Exception:  # noqa: BLE001
-            pass
         try:
             from core.database.database import SessionLocal
-            from core.models.workspaces import Workspace
-            from services.trial_ledger import is_trial_active_workspace
+            from services.credits.routing import background_allowed
 
             db = SessionLocal()
             try:
-                ws = db.query(Workspace).get(workspace_id)
-                if is_trial_active_workspace(ws):
+                if not background_allowed(db, workspace_id):
                     logger.info(
-                        "[Heartbeat] Skipping trial workspace %s — no background "
-                        "burn until converted",
-                        workspace_id,
+                        "[Heartbeat] Skipping workspace %s — nothing but the trial "
+                        "could pay for background work", workspace_id,
                     )
-                    return {"status": "skipped", "reason": "trial_workspace"}
+                    return {"status": "skipped", "reason": "no_credits"}
             finally:
                 db.close()
-        except Exception as e:
-            logger.debug("[Heartbeat] trial-skip check failed for ws=%s: %s", workspace_id, e)
+        except Exception:  # noqa: BLE001 — a failed check proceeds; the call-time gate still holds
+            logger.warning("[Heartbeat] credit check failed for ws=%s", workspace_id, exc_info=True)
         return None
 
     async def _orchestrator_tick(self, workspace_id: str, hb_config: dict) -> Dict[str, Any]:
@@ -802,6 +756,7 @@ class HeartbeatService:
 
         return result
 
+    @runs_as_an_ask("heartbeat", background=True)  # PRD-265 US-003: one ask per tick
     async def _orchestrator_tick_llm(
         self, workspace_id: str, hb_config: dict, result: Dict[str, Any],
     ) -> None:

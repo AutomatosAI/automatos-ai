@@ -161,9 +161,9 @@ export interface ChatControllerOptions extends ChatStreamOptions {
 
 /** Everything a theme's chat screen needs for one conversation. */
 export interface ChatControllerView extends ChatActions {
-  /** The conversation as shown: the stopped replies kept. */
+  /** The conversation as shown: the stopped replies kept, a voice session's words in progress at the end. */
   readonly messages: readonly ChatMessage[]
-  /** useChat's own messages (a stopped reply it dropped is not here). */
+  /** useChat's own messages and the voice session's words (a stopped reply it dropped is not here). */
   readonly liveMessages: readonly ChatMessage[]
   readonly status: ChatWithReceipts['status']
   readonly errorCode: string | null

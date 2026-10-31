@@ -1,23 +1,68 @@
 /**
- * PRD-261 A-10a — SDK area `cards`: the host cards a theme places (PRD §4.3 item 7). Stubbed here; A-12a fills the bodies.
- * Until then every name throws "not in this SDK build" (internal/stub.ts), so a theme built
- * against a later SDK fails loudly. The names are the plan's (surface/cards.json): the
- * area's lane replaces bodies, never names, unless the A-10c surface map changes first.
+ * PRD-261 A-12a — SDK area `cards`: the host cards a theme places (PRD §4.3 item 7, §4.4).
+ *
+ * A theme places approval, task, withdraw and Mission cards and never draws its own versions of
+ * them; its frame renders the host's HeaderUtilities. Each name is the host's own component behind
+ * a small wrapper with the SDK's read-only props (host-cards/*), so the host can change its widgets
+ * without changing the SDK, and a theme can import nothing of the host but this module.
+ *
+ * - approvals: ToolApproval, MissionApproval (protected surfaces, A-12c);
+ * - chat reply cards: TaskCard, WithdrawOfferCard, MissionSuggestionCard, MissionCreatedCard;
+ * - content: FilePreview, MarkdownView, MadeBy;
+ * - chrome: HeaderUtilities, TrialExhaustedBanner, FirstRunNudge;
+ * - the composer: AiLabelFence, once the host's AI label fence, now its children alone (PRD-264 EUAI-11a);
+ * - CorePage: core's own page inside a theme's page;
+ * - the proactive defaults (SDK 1.3.0, PRD-268 US-C21e): BriefCard, SuggestionCard, StatusLabel, ReadinessList,
+ *   CalibrationCard and ReplyChips, the host's own (components/proactive/*), whose data the proactive area reads.
+ *
+ * The names are the plan's (surface/cards.json); the types are declared again for themes in
+ * packages/theme-sdk/areas/cards.d.ts.
  */
-import { notInThisBuild } from './internal/stub'
+export { MissionApproval, ToolApproval } from './host-cards/approvals'
+export type {
+  ApprovalAnswer,
+  ApprovalDecision,
+  ApprovalViewData,
+  CardOrigin,
+  MissionApprovalData,
+  MissionApprovalProps,
+  MissionApprovalTask,
+  OversightTier,
+  ToolApprovalData,
+  ToolApprovalProps,
+} from './host-cards/approvals'
 
-const AREA = 'cards'
+export { MissionCreatedCard, MissionSuggestionCard, TaskCard, WithdrawOfferCard } from './host-cards/chat-cards'
+export type {
+  MissionCreatedCardProps,
+  MissionSuggestionCardProps,
+  MissionSuggestionMessage,
+  TaskCardData,
+  TaskCardProps,
+  WithdrawOffer,
+  WithdrawOfferCardProps,
+  WithdrawRequest,
+} from './host-cards/chat-cards'
 
-export const ToolApproval = notInThisBuild(AREA, 'ToolApproval')
-export const MissionApproval = notInThisBuild(AREA, 'MissionApproval')
-export const TaskCard = notInThisBuild(AREA, 'TaskCard')
-export const WithdrawOfferCard = notInThisBuild(AREA, 'WithdrawOfferCard')
-export const MissionSuggestionCard = notInThisBuild(AREA, 'MissionSuggestionCard')
-export const MissionCreatedCard = notInThisBuild(AREA, 'MissionCreatedCard')
-export const FilePreview = notInThisBuild(AREA, 'FilePreview')
-export const MarkdownView = notInThisBuild(AREA, 'MarkdownView')
-export const MadeBy = notInThisBuild(AREA, 'MadeBy')
-export const TrialExhaustedBanner = notInThisBuild(AREA, 'TrialExhaustedBanner')
-export const FirstRunNudge = notInThisBuild(AREA, 'FirstRunNudge')
-export const HeaderUtilities = notInThisBuild(AREA, 'HeaderUtilities')
-export const CorePage = notInThisBuild(AREA, 'CorePage')
+export { FilePreview, MadeBy, MarkdownView } from './host-cards/content'
+export type { FilePreviewProps, FilePreviewType, MadeByProps, MarkdownViewProps } from './host-cards/content'
+
+export { FirstRunNudge, HeaderUtilities, TrialExhaustedBanner } from './host-cards/chrome'
+export type { TrialExhaustedBannerProps } from './host-cards/chrome'
+
+export { AiLabelFence } from './host-cards/ai-label-fence'
+export type { AiLabelFenceProps, AiLabelId } from './host-cards/ai-label-fence'
+
+export { CorePage } from './host-cards/core-page'
+export type { CorePageProps } from './host-cards/core-page'
+
+export { BriefCard, CalibrationCard, ReadinessList, ReplyChips, StatusLabel, SuggestionCard } from './host-cards/proactive-cards'
+export type {
+  BriefCardProps,
+  CalibrationCardProps,
+  ReadinessListProps,
+  ReplyChipsProps,
+  StatusLabelProps,
+  SuggestionCardProps,
+  SuggestionCardVariant,
+} from './host-cards/proactive-props'

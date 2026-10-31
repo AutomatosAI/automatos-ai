@@ -219,6 +219,7 @@ def _make_action(
         description=f"{name} description",
         category=category,
         parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
         admin_only=admin_only,
         promoted=promoted,
     )

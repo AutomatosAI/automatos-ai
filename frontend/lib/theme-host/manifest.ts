@@ -28,9 +28,9 @@ import {
   THEME_FILES_PATH,
   THEME_SLOT_IDS,
 } from './constants'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
 
-import { HTML_CLASS_OWNERS, MANIFEST_SCHEMA as PACKAGE_SCHEMA, RESERVED_HTML_CLASSES } from './package-manifest'
+import { MANIFEST_SCHEMA as PACKAGE_SCHEMA, RESERVED_HTML_CLASSES } from './package-manifest'
 import { DEFAULT_THEME_BASE } from './registry'
 import type { LookPreset, SpikeManifest } from './types'
 
@@ -129,14 +129,12 @@ function identityProblem(raw: Record<string, unknown>): string | null {
   return null
 }
 
-/** A reserved class is refused unless HTML_CLASS_OWNERS gives it to this theme's id (PA-8). */
-function htmlClassProblem(value: unknown, id: unknown): string | null {
+/** A class the core owns on <html> is refused, whatever the theme's id (A-20: no id keeps one). */
+function htmlClassProblem(value: unknown): string | null {
   if (typeof value !== 'string' || !HTML_CLASS_PATTERN.test(value)) {
     return 'htmlClass must be 3 to 32 lower-case letters, digits or hyphens, starting with a letter'
   }
-  if (!RESERVED_HTML_CLASSES.includes(value)) return null
-  const owner = HTML_CLASS_OWNERS.get(value)
-  return owner !== undefined && owner === id ? null : `htmlClass "${value}" is reserved`
+  return RESERVED_HTML_CLASSES.includes(value) ? `htmlClass "${value}" is reserved` : null
 }
 
 function slotsProblem(value: unknown): string | null {
@@ -198,7 +196,7 @@ function packageFiles(raw: Record<string, unknown>, root: string, defaultLook: u
  */
 export function parseThemeManifest(raw: unknown, root: string, defaultLook: unknown = null): ManifestParse {
   if (!isRecord(raw)) return failure('theme.json must be an object')
-  const problem = identityProblem(raw) ?? htmlClassProblem(raw.htmlClass, raw.id) ?? slotsProblem(raw.slots)
+  const problem = identityProblem(raw) ?? htmlClassProblem(raw.htmlClass) ?? slotsProblem(raw.slots)
   if (problem !== null) return failure(problem)
   const files = raw.schema === PACKAGE_SCHEMA ? packageFiles(raw, root, defaultLook) : spikeFiles(raw, root)
   if (!files.ok) return files

@@ -4,8 +4,8 @@
  * reply kept: as it was when Stop was pressed while useChat still holds it, put
  * back after the message it followed once useChat drops it (its catch on the
  * abort), and gone with that message when Try again takes it. The chat itself
- * is a plain object here; play-chat-approvals-stream.test.tsx runs Stop through
- * the core's real useChat.
+ * is a plain object here; lib/chat-controller's tests run Stop through the
+ * core's real useChat (Play's own chat tests moved to the theme kit, W-K6).
  */
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
@@ -17,6 +17,7 @@ import {
   useStoppedReplies,
   withStoppedReplies,
 } from '@/hooks/use-stopped-reply'
+import { VOICE_LIVE_ASSISTANT_ID, VOICE_LIVE_USER_ID } from '@/lib/chat/live-voice-turns'
 import type { ChatMessage } from '@/types'
 
 const message = (id: string, role: 'user' | 'assistant', text: string) =>
@@ -35,6 +36,13 @@ describe('the reply being written', () => {
     expect(replyBeingWritten({ messages: [HELLO, PARTIAL], status: 'idle' })).toBeNull()
     expect(replyBeingWritten({ messages: [HELLO], status: 'streaming' })).toBeNull()
     expect(replyBeingWritten({ messages: [PARTIAL], status: 'streaming' })).toBeNull()
+  })
+
+  it("is the typed reply, never a voice session's words in progress after it", () => {
+    const heard = message(VOICE_LIVE_USER_ID, 'user', 'And the weather?')
+    const saying = message(VOICE_LIVE_ASSISTANT_ID, 'assistant', 'Sunny, mostly')
+    expect(replyBeingWritten({ messages: [HELLO, PARTIAL, heard, saying], status: 'streaming' })).toEqual(STOPPED)
+    expect(replyBeingWritten({ messages: [HELLO, heard, saying], status: 'streaming' })).toBeNull()
   })
 
   it('is none while the page only awaits a reply the server finishes detached', () => {

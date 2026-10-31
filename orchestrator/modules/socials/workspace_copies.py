@@ -35,6 +35,7 @@ import anyio
 
 from core.storage import is_storage_configured
 from core.utils.background_tasks import launch_guarded
+from core.utils.slug import slugify
 from core.workspace_client import WorkspaceClient
 from modules.socials import media_store
 from modules.socials.media_urls import MediaFile, resolve_post_media
@@ -47,15 +48,11 @@ VIDEO_FORMAT = "video"
 TITLE_MAX_CHARS = 60
 TITLE_FALLBACK = "post"
 POST_ID_CHARS = 8
-_NOT_A_NAME = re.compile(r"[^a-z0-9]+")
 _NOT_A_FILE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 Plan = Sequence[Tuple[str, str]]  # (storage key, workspace path)
 
 
-def _slug(title: Any) -> str:
-    slug = _NOT_A_NAME.sub("-", str(title or "").lower()).strip("-")
-    return slug[:TITLE_MAX_CHARS].strip("-") or TITLE_FALLBACK
 
 
 def _day(post: Any, now: datetime) -> date:
@@ -72,7 +69,7 @@ def copy_path(post: Any, media: MediaFile, day: date) -> str:
     """Where ``media`` of ``post`` goes in the workspace (the module docstring)."""
     folder = VIDEOS_FOLDER if post.format == VIDEO_FORMAT else IMAGES_FOLDER
     name = _NOT_A_FILE_NAME.sub("-", (media.name or "").rsplit("/", 1)[-1]).strip("-") or "file"
-    return f"{folder}/{day.isoformat()}-{_slug(post.title)}-{str(post.id)[:POST_ID_CHARS]}-{name}"
+    return f"{folder}/{day.isoformat()}-{slugify(post.title, max_len=TITLE_MAX_CHARS, fallback=TITLE_FALLBACK)}-{str(post.id)[:POST_ID_CHARS]}-{name}"
 
 
 def copy_plan(post: Any, files: Sequence[MediaFile], now: datetime) -> List[Tuple[str, str]]:

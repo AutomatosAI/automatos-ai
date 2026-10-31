@@ -28,8 +28,11 @@ if str(ORCH_ROOT) not in sys.path:
 from config import config  # noqa: E402
 from services.themes import contract  # noqa: E402
 from services.themes.css_scope import CSS_ERROR_CODES, MAX_NESTING, css_scope_errors  # noqa: E402
-from services.themes.css_value import PREPAINT_ERROR_CODES, css_value_problem, prepaint_errors  # noqa: E402
+from services.themes.css_value import (  # noqa: E402
+    PREPAINT_ERROR_CODES, css_value_problem, prepaint_drop_errors, prepaint_errors,
+)
 from services.themes.digest import package_digest, sha256_hex  # noqa: E402
+from services.themes.first_paint import FIRST_PAINT_ERROR_CODES, first_paint_table_errors  # noqa: E402
 from services.themes.look_schema import LOOK_ERROR_CODES, validate_look, validate_look_schema  # noqa: E402
 from services.themes.manifest import MANIFEST_ERROR_CODES, validate_manifest  # noqa: E402
 from services.themes.package import PACKAGE_ERROR_CODES, ThemePackageError, read_theme_package  # noqa: E402
@@ -45,6 +48,11 @@ EOCD = b"PK\x05\x06"
 # PA-2: the browser's copy of the host and SDK versions. This path, named here literally, is what
 # makes the backend planner (scripts/ci/backend_test_plan.py) select this file on a frontend change.
 SHARED_MODULES = ORCH_ROOT.parent / "frontend/lib/theme-host/shared-modules.json"
+# A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
+HOST_HTML_CLASSES = ("studio", "classic", "dark", "light", "system")
+FREED_HTML_CLASS = "play"
+RESERVED_CODE = "RESERVED_HTML_CLASS"
+FREED_CLASS_IDS_MIN = 3
 
 
 def _patched(base: Mapping[str, Any], case: Mapping[str, Any]) -> Any:
@@ -103,9 +111,23 @@ def test_the_corpus_bases_are_the_hello_fixture():
 
 
 def test_every_corpus_code_is_a_known_code():
-    sections = ("manifests", "lookSchemas", "looks", "prepaint", "cssScope", "packages")
+    sections = ("manifests", "lookSchemas", "looks", "prepaint", "prepaintDrops", "firstPaint", "cssScope", "packages")
     codes = {case["code"] for name in sections for case in CASES[name]["cases"]} - {None}
     assert codes <= KNOWN_CODES
+
+
+def _html_class_cases(section: str, field: str, html_class: str) -> List[Mapping[str, Any]]:
+    return [case for case in CASES[section]["cases"] if case.get(field, {}).get("htmlClass") == html_class]
+
+
+def test_the_corpus_gives_play_to_any_theme_and_refuses_each_host_class():
+    # A-20: htmlClass 'play' is valid for any id, in theme.json and in a package; each class the host keeps is refused.
+    freed = _html_class_cases("manifests", "set", FREED_HTML_CLASS)
+    ids = {case["set"].get("id", CASES["manifests"]["base"]["id"]) for case in freed}
+    assert len(ids) >= FREED_CLASS_IDS_MIN and [case["code"] for case in freed] == [None] * len(freed)
+    assert [case["code"] for case in _html_class_cases("packages", "manifestSet", FREED_HTML_CLASS)] == [None]
+    for html_class in HOST_HTML_CLASSES:
+        assert {case["code"] for case in _html_class_cases("manifests", "set", html_class)} == {RESERVED_CODE}, html_class
 
 
 @pytest.mark.parametrize("case", CASES["manifests"]["cases"], ids=_ids(CASES["manifests"]))
@@ -142,7 +164,39 @@ def test_every_invalid_css_value_is_refused_with_a_reason(value):
 
 @pytest.mark.parametrize("case", CASES["prepaint"]["cases"], ids=_ids(CASES["prepaint"]))
 def test_every_prepaint_case_gives_its_code(case):
-    _assert_verdict(prepaint_errors(case["document"]), case["code"])
+    errors = prepaint_errors(case["document"])
+    _assert_verdict(errors, case["code"])
+    if "messages" in case:  # A-19c: the tone rule's sentences, the same in both languages
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+@pytest.mark.parametrize("case", CASES["prepaintDrops"]["cases"], ids=_ids(CASES["prepaintDrops"]))
+def test_every_prepaint_drop_case_gives_its_code_and_sentences(case):
+    # The values the browser's first paint drops (boot-sanitize.ts), which the reader refuses (first_paint.py).
+    errors = prepaint_drop_errors(case["document"])
+    _assert_verdict(errors, case["code"])
+    if "messages" in case:
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+@pytest.mark.parametrize("case", CASES["firstPaint"]["cases"], ids=_ids(CASES["firstPaint"]))
+def test_every_first_paint_case_gives_its_code_and_sentences(case):
+    # What the browser keeps of a table, against the looks section's schema (first_paint.py; first-paint.ts its twin).
+    schema, schema_errors = validate_look_schema(CASES["looks"]["schema"])
+    assert schema_errors == []
+    errors = first_paint_table_errors(schema, case["document"])
+    _assert_verdict(errors, case["code"])
+    assert {error["code"] for error in errors} <= set(FIRST_PAINT_ERROR_CODES)
+    if "messages" in case:
+        assert [error["message"] for error in errors] == case["messages"]
+
+
+def test_the_corpus_has_a_valid_tone_rule_and_each_refusal_kind():
+    tone_cases = [case for case in CASES["prepaint"]["cases"] if "tone" in (case["document"] or {})]
+    assert any(case["code"] is None for case in tone_cases)
+    refused = {message.split(": ", 1)[0] for case in tone_cases for message in case.get("messages", [])}
+    assert {"boot/prepaint.json#tone", "boot/prepaint.json#tone.knob"} <= refused
+    assert any(path.startswith("boot/prepaint.json#tone.values.") for path in refused)
 
 
 @pytest.mark.parametrize("case", CASES["cssScope"]["cases"], ids=_ids(CASES["cssScope"]))
@@ -352,11 +406,22 @@ def test_an_encrypted_member_is_refused():
 
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
-    assert contract.THEME_HOST_VERSION == "1.0.0"
+    # PB-3 (D7, QB-3): host 1.1.0 for the boot tone rule and looks presets. Theme voice (C5): SDK 1.2.0 for its
+    # voice area; PRD-268 (K12): SDK 1.3.0 for its proactive area; PRD-268 Wave K (K17): SDK 1.4.0 for a message's
+    # parts, the brief's speaking row and its thumbs. The host contract is unchanged.
+    assert contract.THEME_HOST_VERSION == "1.1.0"
+    assert contract.SDK_VERSION == "1.4.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
-    assert {"studio", "classic", "play", "dark", "light"} <= set(contract.RESERVED_HTML_CLASSES)
-    assert contract.HTML_CLASS_OWNERS == {"play": "automatos/play"}
+    assert contract.RESERVED_HTML_CLASSES == HOST_HTML_CLASSES
+    assert not hasattr(contract, "HTML_CLASS_OWNERS")  # A-20: no theme's id keeps a reserved class
     assert set(contract.REQUIRED_SLOTS) == {"lookEditor@1", "styleSheet@1"} <= set(contract.KNOWN_SLOTS)
+
+
+def test_the_contract_pins_the_tone_rule_and_the_boot_preset_caps():
+    # A-19c (plan §2.2.3): a tone rule of a knob and its choices' tones; at most 12 presets of 4 KB each.
+    assert (contract.TONE_RULE_KEY, contract.TONE_RULE_FIELDS, contract.TONE_RULE_TONES) == ("tone", ("knob", "values"), ("light", "dark"))
+    assert (contract.BOOT_PRESETS_MAX, contract.BOOT_PRESET_MAX_BYTES) == (12, 4 * KB)
+    assert "BAD_TONE_RULE" in PREPAINT_ERROR_CODES
 
 
 def test_the_frontend_carries_the_same_host_and_sdk_versions():

@@ -4,7 +4,11 @@ import type { ReactNode } from 'react'
 
 /**
  * PRD-261 A-12c (PA-15) — a protected surface: a card the owner must always see before deciding
- * (a tool approval, a Mission plan approval), whatever a theme's stylesheet says.
+ * (a tool approval, a Mission plan approval), whatever a theme's stylesheet says. Theme voice: the
+ * voice button's control (`voice-control`: the "AI voice assistant" caption and the stop control,
+ * components/voice/voice-button.tsx) is one too, so no theme hides them while the microphone is open.
+ * PRD-268 US-C21d: so is the brief's Listen (`brief-voice`: Listen, and while Auto reads the brief the
+ * caption and Stop, components/voice/brief-voice.tsx), so no theme hides how to stop it speaking.
  *
  * Theme CSS stays unlayered (docs/theme-host/css-layer-model.md), so the cards are protected by
  * placement, not by a cascade layer. Two elements wrap the card: the host (`data-protected-surface`)
@@ -30,7 +34,7 @@ export const PROTECTED_SURFACE_ATTR = 'data-protected-surface'
 export const PROTECTED_SURFACE_INNER_ATTR = 'data-protected-surface-inner'
 
 /** The cards a theme may never hide. */
-export type ProtectedSurfaceName = 'tool-approval' | 'mission-approval'
+export type ProtectedSurfaceName = 'tool-approval' | 'mission-approval' | 'voice-control' | 'brief-voice'
 
 const IMPORTANT = 'important'
 /** Both wrappers fill their parent, so the card's own `h-full` keeps working inside them. */
@@ -45,7 +49,8 @@ const FILL_CLASS = 'h-full w-full'
  * margin moves a static box); z-index (a flex item stacks even when static); and width and
  * height, the same 100% as FILL_CLASS, so a theme cannot collapse the box the card's `h-full`
  * reads. Both wrappers are the only child of a core element (WidgetWrapper's `h-full` div, Play's
- * card cell), so no core rule sets these on them and the guard changes no layout.
+ * card cell, the voice button's `w-fit` control slot), so no core rule sets these on them and the
+ * guard changes no layout.
  */
 export const PROTECTED_SURFACE_GUARD: Readonly<Record<string, string>> = Object.freeze({
   display: 'block',

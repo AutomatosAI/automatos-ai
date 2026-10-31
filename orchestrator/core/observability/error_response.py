@@ -24,6 +24,8 @@ from typing import Awaitable, Callable
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from core.monitoring.path_digests import redact_digest_segments
+
 logger = logging.getLogger(__name__)
 
 INTERNAL_ERROR_DETAIL = "Internal server error"
@@ -46,8 +48,9 @@ async def json_500_for_unhandled_errors(
         return await call_next(request)
     except Exception:  # noqa: BLE001 — this IS the catch-all; it logs and answers
         request_id = safe_request_id(request.headers.get("X-Request-ID"))
-        logger.exception(
-            "Unhandled error in %s %s (request_id=%s)", request.method, request.url.path, request_id
+        logger.exception(  # the path without a file hash in it (PRD-264 FR-17)
+            "Unhandled error in %s %s (request_id=%s)", request.method,
+            redact_digest_segments(request.url.path), request_id,
         )
         body = {"detail": INTERNAL_ERROR_DETAIL}
         if request_id:

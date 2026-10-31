@@ -14,6 +14,10 @@ import { LayoutGrid, LayoutList, Table2, Search } from 'lucide-react'
 
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useMissions } from '@/hooks/use-missions-api'
+import { RowStatusLabel } from '@/components/proactive/row-status'
+import { missionRetryTarget } from '@/components/proactive/use-row-retry'
+import { displayStateLabel } from '@/lib/proactive/display-state'
+import { needsYouFirst } from '@/lib/proactive/row-status'
 import type { MissionResponse, RunState } from '@/types/missions'
 
 import { StatusHead } from './status-head'
@@ -296,7 +300,8 @@ function GroupedView({
   return (
     <>
       {STATUS_GROUPS.map((g) => {
-        const items = missions.filter((m) => g.states.includes(m.state))
+        // PRD-268 US-W04: in each group, the Missions that need the person come first.
+        const items = needsYouFirst(missions.filter((m) => g.states.includes(m.state)))
         if (items.length === 0 && hideEmptyGroups) return null
         return (
           <section key={g.label}>
@@ -342,15 +347,15 @@ function TableView({
           <tr>
             <th style={{ width: 90 }}>ID</th>
             <th>Mission</th>
-            <th style={{ width: 130 }}>Status</th>
+            {/* PRD-268 US-W04: the status, its next step and Try again */}
+            <th style={{ width: 240 }}>Status</th>
             <th style={{ width: 140 }}>Created by</th>
             <th style={{ width: 110, textAlign: 'right' }}>Tokens</th>
             <th style={{ width: 110 }}>Updated</th>
           </tr>
         </thead>
         <tbody>
-          {missions.map((m) => {
-            const tone = STATE_TONE[m.state]
+          {needsYouFirst(missions).map((m) => {
             return (
               <tr key={m.id} onClick={() => onOpen(m.id)}>
                 <td className="mono">
@@ -372,9 +377,7 @@ function TableView({
                   </div>
                 </td>
                 <td>
-                  <span className={`studio-pill ${tone}`}>
-                    ● {STATE_LABEL[m.state]}
-                  </span>
+                  <MissionStatusCell mission={m} />
                 </td>
                 <td>
                   <span className="ag">{m.created_by || '—'}</span>
@@ -397,4 +400,15 @@ function TableView({
       </table>
     </div>
   )
+}
+
+/**
+ * PRD-268 US-W04: a Mission's status in the words every surface uses (glyph, word, ▸ next step, Try again) when the
+ * server says where it stands; otherwise its run state, as the table showed it before.
+ */
+function MissionStatusCell({ mission }: { mission: MissionResponse }) {
+  if (displayStateLabel(mission.display_state) !== null) {
+    return <RowStatusLabel row={mission} target={missionRetryTarget(mission)} title={mission.goal} />
+  }
+  return <span className={`studio-pill ${STATE_TONE[mission.state]}`}>● {STATE_LABEL[mission.state]}</span>
 }

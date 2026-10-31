@@ -1,6 +1,6 @@
 """How much of a call's value an approval card shows (PRD-193 S3), in one place.
 
-The card's digest (``ToolResultFormatter._tool_params_digest``) cuts a long value; the
+The card's digest (``params_digest``, ``ToolResultFormatter._tool_params_digest``) cuts a long value; the
 owner's click signs only what the card shows, so a check that lets a call's words reach
 the card on the strength of the click (PRD-256 FX-003, ``follows_the_owner``) reads the
 same limit. The card shows the ask's question too (``carries_the_question``, PRD-256 FX-008),
@@ -31,6 +31,26 @@ def fits_on_the_card(text: str) -> bool:
     return len(text) <= DIGEST_CHARS
 
 
+def params_digest(params: Any) -> Dict[str, Any]:
+    """PRD-193 S3: human-readable digest of a gated call's params.
+
+    Server-injected ``_``-prefixed plumbing is dropped; long values are
+    truncated. The approver sees the tool's real arguments (target ids,
+    keys, values) — not a raw JSON dump.
+    """
+    if not isinstance(params, dict):
+        return {}
+    digest: Dict[str, Any] = {}
+    for key, value in params.items():
+        if str(key).startswith("_"):
+            continue
+        if isinstance(value, (int, float, bool)) or value is None:
+            digest[str(key)] = value
+            continue
+        digest[str(key)] = shown_on_the_card(value if isinstance(value, str) else str(value))
+    return digest
+
+
 def carries_the_question(format_for_frontend: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
     """Wrap ToolResultFormatter.format_for_frontend: the chat's approval card
     (``tool_approval``) carries the ask's ``question_md``, the subject and the change
@@ -56,4 +76,4 @@ def _numbered(card: Dict[str, Any], numbers: Any) -> Dict[str, Any]:
     return {**card, PARAMS: {key: numbers.get(key, value) for key, value in shown.items()}}
 
 
-__all__ = ["DIGEST_CHARS", "carries_the_question", "fits_on_the_card", "shown_on_the_card"]
+__all__ = ["DIGEST_CHARS", "carries_the_question", "fits_on_the_card", "params_digest", "shown_on_the_card"]

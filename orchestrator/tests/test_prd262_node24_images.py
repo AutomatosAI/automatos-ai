@@ -6,12 +6,16 @@ This suite runs in the required orchestrator job and pins the definitions a late
 edit could quietly undo:
 
 - the frontend: the base stage on node:24-alpine3.24 with no apk build tools; the
-  runtime on the same Alpine release with only the node binary copied in (no npm,
-  yarn, corepack, C headers or curl); a busybox wget health check on /favicon.ico;
+  runtime on the same Alpine release with only the node binary copied in, from the
+  node-strip stage built on base (no npm, yarn, corepack, C headers or curl); a busybox
+  wget health check on /favicon.ico;
 - the worker and media-render: Node from a stage named `node`, pinned as tag@digest,
   never NodeSource; the C headers never copied; production last. The worker copies
   npm and corepack too; media-render the node binary alone, because Hyperframes
-  comes from its js stage's npm ci (US-053);
+  comes from its js stage's npm ci (US-053). A file may come through a stage built
+  FROM `node`: `node-stripped`, the same stage in both, strips the binary (PRD-262
+  #21 in the worker, test_prd262_worker_diet.py pins it; #22 in media-render,
+  test_prd262_media_render_node_strip.py pins it);
 - the worker's pnpm pinned exactly, its npm cache cleaned in the same RUN;
 - every Dockerfile that runs Node takes it through a named stage, never a bare
   `COPY --from=<image>`, because an updater reads FROM lines only;
@@ -36,13 +40,15 @@ DEBIAN_NODE_IMAGES = {
     "services/workspace-worker/Dockerfile": WORKER,
     "services/media-render/Dockerfile": MEDIA_RENDER,
 }
-# What each copies from the `node` stage.
+# What each copies of Node's own files from the `node` stage or a stage built FROM it.
 NODE_COPIES = {
     "services/workspace-worker/Dockerfile": [
         "/usr/local/bin/node",
         "/usr/local/lib/node_modules/corepack",
         "/usr/local/lib/node_modules/npm",
     ],
+    # PRD-262 #22: the binary alone, through its node-stripped stage
+    # (tests/test_prd262_media_render_node_strip.py).
     "services/media-render/Dockerfile": ["/usr/local/bin/node"],
 }
 NODE_DOCKERFILES = (
@@ -52,6 +58,10 @@ NODE_DOCKERFILES = (
     ".oss-scanner/Dockerfile",
 )
 DIGEST = r"@sha256:[0-9a-f]{64}"
+NODE_INSTALL = "/usr/local/"  # where the official image keeps node, npm and corepack
+# The node-stripped stage's tree, copied to /: Node's binary alone, at its own path
+# (test_prd262_worker_diet.py, test_prd262_media_render_node_strip.py).
+NODE_LAYER = {"/node-layer/": "/usr/local/bin/node"}
 BUILD_TOOLS = {"python3", "make", "g++", "curl"}
 
 _FROM = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", re.M | re.I)
@@ -91,6 +101,11 @@ def _apk_packages(instructions: list[str]) -> list[str]:
     ]
 
 
+def _node_stages(dockerfile: str) -> set[str]:
+    """The `node` stage and every stage built FROM it, such as `node-stripped`."""
+    return {"node"} | {name for image, name in _stages(dockerfile) if image.lower() == "node" and name}
+
+
 def _copies_from(instructions: list[str], source: str) -> list[str]:
     """The source paths of every `COPY --from=<source>`."""
     pattern = re.compile(rf"^COPY\s+(?:--\S+\s+)*--from={re.escape(source)}\s+(?:--\S+\s+)*(\S+)\s", re.I)
@@ -115,7 +130,12 @@ def test_the_frontend_runtime_is_alpine_plus_only_the_node_binary():
     assert alpine, "the base stage names no Alpine release"
     assert re.fullmatch(rf"alpine:{re.escape(alpine.group(1))}{DIGEST}", image), image
     body = _stage_body(FRONTEND, "production")
-    assert _copies_from(body, "base") == ["/usr/local/bin/node"]
+    # PRD-262 #24: base's binary, stripped in a stage built on base, so the Node pin stays base's.
+    assert _stage_images(FRONTEND)["node-strip"] == "base"
+    assert _copies_from(body, "node-strip") == ["/usr/local/bin/node"]
+    assert [line for line in body if re.match(r"COPY\s.*--from=", line) and "--from=builder" not in line] == [
+        "COPY --from=node-strip /usr/local/bin/node /usr/local/bin/node"
+    ]
     assert _apk_packages(body) == ["libstdc++"]
     code = "\n".join(body)
     for absent in ("npm", "yarn", "corepack", "curl"):
@@ -139,7 +159,12 @@ def test_the_debian_images_take_node_24_from_the_official_image(path):
     images = _stage_images(dockerfile)
     assert re.fullmatch(rf"node:24-trixie-slim{DIGEST}", images.get("node", "")), images
     assert _stages(dockerfile)[-1][1] == "production", "production must stay the last stage"
-    copied = sorted(_copies_from(_instructions(dockerfile), "node"))
+    instructions = _instructions(dockerfile)
+    # Node's own files, wherever a node-based stage keeps them; a stage like media-render's
+    # js also copies its build output out, which is not Node.
+    sources = [NODE_LAYER.get(source, source)
+               for stage in _node_stages(dockerfile) for source in _copies_from(instructions, stage)]
+    copied = sorted(source for source in sources if source.startswith(NODE_INSTALL))
     assert copied == NODE_COPIES[path]
     code = "\n".join(_instructions(dockerfile)).lower()
     for gone in ("nodesource", "/usr/local/include", "gnupg", "python3.13"):

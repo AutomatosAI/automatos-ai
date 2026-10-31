@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
 DELIVER_BOARD_TASK = "board_task"  # file a board ticket (assigned, or Inbox)
 DELIVERY_MODES = (DELIVER_CHAT, DELIVER_BOARD_TASK)
+# PRD-268 W3: a person's follow-up, fired once in the check-in lane. Not in DELIVERY_MODES:
+# only services/proactive/follow_ups.py inserts one, never create_task or platform_schedule_task.
+DELIVER_FOLLOW_UP = "follow_up"
 REVIEW_MODES = ("auto", "human", "llm")
 
 
@@ -73,28 +76,23 @@ def scheduled_message(
     return f"Scheduled {task_type} task (schedule {task_id}) for agent '{target_name or 'unknown'}'"
 
 
-def skipped_for_trial(db: Session, task: Any, task_id: int) -> bool:
-    """PRD-222 US-005 — no background burn: trial workspaces get no scheduled
-    execution until converted. Visible skip, never silent."""
+def skipped_for_credits(db: Session, task: Any, task_id: int) -> bool:
+    """No background burn (PRD-222 FR-17, on credits since PRD-265 US-004): a
+    scheduled task fires only when something other than the trial can pay for it
+    (``services.credits.routing.background_allowed`` — the local edition always
+    can). Visible skip, never silent."""
     try:
-        from core.models.workspaces import Workspace
-        from services.trial_ledger import is_trial_active_workspace
-        # PRD-234 S3: the local edition has no platform-paid trial credit to
-        # protect (operator keys / the user's own Claude subscription) — the
-        # onboarding trial record must not switch scheduled work off there.
-        from config import config as _config
-        _local_edition = getattr(_config, "AUTH_EDITION", "saas") == "local"
+        from services.credits.routing import background_allowed
 
-        _ws = db.query(Workspace).get(task.workspace_id)
-        if not _local_edition and is_trial_active_workspace(_ws):
+        if not background_allowed(db, task.workspace_id):
             logger.warning(
-                "[ScheduledTask] Skipping task %d — trial workspace %s "
-                "(no background burn until converted)",
+                "[ScheduledTask] Skipping task %d — workspace %s has nothing but the trial "
+                "to pay for background work",
                 task_id, task.workspace_id,
             )
             return True
-    except Exception:  # noqa: BLE001 — a failed trial check never stops a schedule firing
-        logger.warning("[ScheduledTask] trial-skip check failed for task %d; firing it", task_id, exc_info=True)
+    except Exception:  # noqa: BLE001 — a failed check never stops a schedule; the call gate still holds
+        logger.warning("[ScheduledTask] credit check failed for task %d; firing it", task_id, exc_info=True)
     return False
 
 

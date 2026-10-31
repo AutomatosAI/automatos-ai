@@ -272,14 +272,92 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     themes = (versions / "prd261_themes.py").read_text()
     assert 'down_revision = "prd258_voice_timings"' in themes
     # 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto prd261_themes — the HARNESS
-    # run table (harness_runs), a new table only; the guard follows it.
+    # run table (harness_runs), a new table only.
     harness_runs = (versions / "prd263_harness_runs.py").read_text()
     assert 'down_revision = "prd261_themes"' in harness_runs
     # 2026-10-19: auto_haiku_default_20261019 chains onto it — a data migration (the
-    # platform default for Auto becomes Haiku 5.5, the Auto rows on it move); the guard follows it.
+    # platform default for Auto becomes Haiku 5.5, the Auto rows on it move).
     haiku_default = (versions / "auto_haiku_default_20261019.py").read_text()
     assert 'down_revision = "prd263_harness_runs"' in haiku_default
-    assert 'EXPECTED_HEAD = "auto_haiku_default_20261019"' in guard
+    # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
+    # main.py's per-boot ALTERs (futureagi_eval_enabled, skills.content_hash) become a
+    # revision.
+    boot_columns = (versions / "prd262_boot_columns.py").read_text()
+    assert 'down_revision = "auto_haiku_default_20261019"' in boot_columns
+    # 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto it — the HARNESS
+    # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
+    ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
+    assert 'down_revision = "prd262_boot_columns"' in ledger_grants
+    # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+    # prd263_harness_ledger_grants — the provenance record (content_provenance), a
+    # new table only; the guard follows it.
+    provenance = (versions / "prd264_content_provenance.py").read_text()
+    assert 'down_revision = "prd263_harness_ledger_grants"' in provenance
+    # 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto it — blog_posts gains
+    # reviewed_by_user_id, reviewed_at and reviewed_content_sha256 (three nullable columns); the
+    # guard follows it.
+    blog_review = (versions / "prd264_blog_review.py").read_text()
+    assert 'down_revision = "prd264_content_provenance"' in blog_review
+    # 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
+    # prd264_blog_review — a new table only (the audit record of the one-time
+    # relink); the guard follows it.
+    relinks = (versions / "clerk_user_relinks_20261019.py").read_text()
+    assert 'down_revision = "prd264_blog_review"' in relinks
+    # 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto it — the credit ledger and
+    # balances (new tables), llm_usage.ask_id, and trials as credit grants; the guard follows it.
+    credit_ledger = (versions / "prd265_credit_ledger.py").read_text()
+    assert 'down_revision = "clerk_user_relinks_20261019"' in credit_ledger
+    # 2026-10-21 (PRD-266 W1 Connect): prd266_mobile_devices chains onto
+    # clerk_user_relinks_20261019 too — the Automatos Go backend's device-pairing
+    # tables, a new table only. A second, independent head alongside
+    # prd265_credit_ledger (both PRs branched the same parent without a merge
+    # revision); the guard follows it.
+    mobile_devices = (versions / "prd266_mobile_devices.py").read_text()
+    assert 'down_revision = "clerk_user_relinks_20261019"' in mobile_devices
+    # 2026-10-22: prd266_merge_heads joins the two — a production database already
+    # had both independently stamped (alembic upgrade heads, plural, before this
+    # merge revision existed); rewriting prd266_mobile_devices' down_revision to
+    # chain onto prd265_credit_ledger directly crashed that database ("Requested
+    # revision ... overlaps with other requested revisions ..."). Pure merge, no
+    # schema operations (mirrors prd203_merge_heads); the guard follows it.
+    merged = (versions / "prd266_merge_heads.py").read_text()
+    assert 'down_revision = (' in merged
+    assert '"prd265_credit_ledger"' in merged and '"prd266_mobile_devices"' in merged
+    # 2026-10-23 (PRD-265 W2): prd265_billing chains onto the merge — billing_accounts and
+    # billing_events (new tables only); the guard follows it.
+    billing = (versions / "prd265_billing.py").read_text()
+    assert 'down_revision = "prd266_merge_heads"' in billing
+    # 2026-10-23 (PRD-265 W2, payments in Studio): prd265_billing_in_studio chains onto it —
+    # four nullable billing_accounts columns, added by ALTER (prd265_billing had already run).
+    in_studio = (versions / "prd265_billing_in_studio.py").read_text()
+    assert 'down_revision = "prd265_billing"' in in_studio
+    # 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto
+    # prd265_billing_in_studio (re-chained from clerk_user_relinks_20261019, then from
+    # prd265_billing, as W-C3 merged main, 23 Oct) —
+    # theme_revocations.origin and the single-row theme_revocation_sync table; the guard
+    # follows it.
+    revocation_feed = (versions / "prd261_revocation_feed.py").read_text()
+    assert 'down_revision = "prd265_billing_in_studio"' in revocation_feed
+    # 2026-10-24 (PRD-266 W2 Push, US-010b): prd266_w2_push chains onto it —
+    # mobile_push_tickets and mobile_digest_posts, new tables only; the guard follows it.
+    w2_push = (versions / "prd266_w2_push.py").read_text()
+    assert 'down_revision = "prd261_revocation_feed"' in w2_push
+    # 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto it —
+    # proactive_suggestions, proactive_runs and proactive_person_settings, new tables only;
+    # the guard follows it.
+    proactive = (versions / "prd268_w1_proactive.py").read_text()
+    assert 'down_revision = "prd266_w2_push"' in proactive
+    # 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto it — the
+    # push-type CHECK widens to suggestion and mobile_devices gains push_categories; the guard
+    # follows it.
+    delivery = (versions / "prd268_w2_delivery.py").read_text()
+    assert 'down_revision = "prd268_w1_proactive"' in delivery
+    # 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto it — the
+    # deliver_as CHECK widens to follow_up, agent_scheduled_tasks gains for_user_id, the outcome
+    # CHECK gains posted and proactive_calibrations is new; the guard follows it.
+    follow_ups = (versions / "prd268_w3_follow_ups.py").read_text()
+    assert 'down_revision = "prd268_w2_delivery"' in follow_ups
+    assert 'EXPECTED_HEAD = "prd268_w3_follow_ups"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

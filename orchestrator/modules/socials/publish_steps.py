@@ -33,7 +33,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, MutableMapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Mapping, MutableMapping, Optional, Tuple
 from urllib.parse import quote
 
 from config import config
@@ -45,6 +45,9 @@ from modules.socials.media_urls import MediaFile, MediaHostingError
 from modules.socials.publish_sources import MediaParam, SourceMissing, TargetContext, resolve_params
 from modules.socials.recipes.toolkit import PLATFORM_AGENT_ID, output_of
 from modules.socials.step_results import DONE, ID, PERMALINK, poll_state, returned
+
+if TYPE_CHECKING:
+    from core.media_render_client import ConvertedJpeg
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +86,16 @@ class StepFailure(Exception):
 
 class Stager:
     """Stages a post's stored file as a local file the executor uploads; as a JPEG
-    when the platform takes nothing else (media-render converts it, US-303)."""
+    when the platform takes nothing else (media-render converts it, US-303). A
+    marked JPEG is a new file, so it gets its own provenance row, in the post's
+    workspace, before it is posted (PRD-264 EUAI-06b)."""
 
-    def __init__(self, workdir: Path, client: Any = None, converter: Optional[Callable[[bytes], Awaitable[bytes]]] = None) -> None:
+    def __init__(
+        self, workdir: Path, workspace_id: Any, client: Any = None,
+        converter: Optional[Callable[[bytes], Awaitable["ConvertedJpeg"]]] = None,
+    ) -> None:
         self.workdir = workdir
+        self.workspace_id = workspace_id
         self._client = client
         self._converter = converter
         self._staged: Dict[Tuple[str, bool], Path] = {}
@@ -106,6 +115,7 @@ class Stager:
         if (media.content_type or "") == JPEG or not (media.content_type or "").startswith(IMAGE_TYPE):
             return path
         from core.media_render_client import MediaRenderClient, MediaRenderError
+        from core.media_render_provenance import record_marked
 
         convert = self._converter or MediaRenderClient().to_jpeg
         try:
@@ -113,7 +123,8 @@ class Stager:
         except MediaRenderError as exc:
             raise StepFailure(f"{media.name} must reach the platform as a JPEG, and media-render could not convert it: {exc}", transient=False) from exc
         target = path.with_suffix(".jpg")
-        await asyncio.to_thread(target.write_bytes, jpeg)
+        await asyncio.to_thread(target.write_bytes, jpeg.data)
+        record_marked(self.workspace_id, jpeg.mark, target.name)
         return target
 
     async def stage(self, media: MediaFile, *, jpeg: bool = False) -> Path:

@@ -1,0 +1,23 @@
+{
+  "about": "PRD-268 US-C05: the 26 Oct VECTOR case (BUGS-FOR-FIXER-2026-10-26.md section 2). VECTOR's hourly heartbeat failed on every tick because the AI provider refused its key (HTTP 401); the tick filed one blocked board card per failure, 12 needing the owner's eyes (#0846, #0848, #0850, #0853 and more).",
+  "agent": "VECTOR",
+  "interval_minutes": 60,
+  "prompt": "Check the SEO tickets and the October report.",
+  "provider_status": 401,
+  "provider_error": "Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}",
+  "board_cards_filed_by_the_tick": 12,
+  "ticks": [
+    "2026-10-26T09:00:00+00:00",
+    "2026-10-26T10:00:00+00:00",
+    "2026-10-26T11:00:00+00:00",
+    "2026-10-26T12:00:00+00:00",
+    "2026-10-26T13:00:00+00:00",
+    "2026-10-26T14:00:00+00:00",
+    "2026-10-26T15:00:00+00:00",
+    "2026-10-26T16:00:00+00:00",
+    "2026-10-26T17:00:00+00:00",
+    "2026-10-26T18:00:00+00:00",
+    "2026-10-26T19:00:00+00:00",
+    "2026-10-26T20:00:00+00:00"
+  ]
+}

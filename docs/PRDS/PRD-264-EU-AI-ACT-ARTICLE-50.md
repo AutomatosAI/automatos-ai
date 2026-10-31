@@ -203,6 +203,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Acceptance criteria:**
 - [ ] The begin frame (response 0) carries `VOICE_AI_GREETING`, default "Hi, this is Auto, your AI assistant." It is never empty, so Auto speaks first.
 - [ ] After an automatic reconnect, and every `VOICE_AI_REMINDER_MINUTES` of call time (default 10), the next response starts with "Just so you know, I'm an AI assistant." (Guidelines ¶37).
+  - *Changed 23 Oct 2026 (product owner): the spoken notice is once per call. `VOICE_AI_REMINDER_MINUTES` defaults to 0, which never reminds; the greeting stays. The reminder runs only where a deployment sets it above 0. The on-screen label is a small caption, never a pill, and never locks the voice control.*
 - [ ] `VoiceCallPanel.tsx` shows "AI voice assistant" for the whole call, using theme tokens.
 - [ ] Pytest: the begin frame isn't empty and contains "AI"; a reconnect adds the reminder; a fake clock past the interval adds it once. Vitest: the panel label renders during a call.
 
@@ -239,9 +240,10 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - [ ] `frontend/app/chat/layout.tsx` renders `<AiLabel />` outside `PlayRouteSwitch` and outside the theme's page slot. It shows on the default chat (with Mission Mode, which lives in `components/chatbot/chat.tsx`), the Play chat and any theme-owned `/chat`. The default chat input doesn't render a second copy.
 - [ ] Play's other chat surfaces outside `/chat` (today `frontend/app/conversations/page.tsx`) render the same label.
 - [ ] `/x/` theme routes: if `frontend/app/x/` exists when this branch rebases, its layout renders the label for every theme whose manifest `uses` declares the chat area. If it doesn't exist yet, EUAI-11b's rule makes the PRD-261 wave that adds it render the label, and that wave's tests prove it.
-- [ ] The label is "Auto is an AI" (or "{agent name} is an AI" when another agent answers), uses theme tokens, never `dark:` classes, and has `role="note"` with the same words for screen readers.
-- [ ] **No theme can hide it.** On mount and when the theme changes, the label checks that it is displayed, visible, not zero-sized and inside the viewport. If not, the chat input is disabled with "This theme hides the AI notice, so chat is paused. Switch theme in Settings." No manifest field turns the label off.
-- [ ] Theme-host test (`ai-label.test.ts`): the label renders with builtin Play, with a fixture theme that registers `/chat`, and with a fixture theme whose CSS sets `display:none`, `visibility:hidden`, `opacity:0` or zero size on it, and in each hiding case the input is disabled.
+- [ ] The label is "Auto is an AI" (or "{agent name} is an AI" when another agent answers), uses theme tokens, never `dark:` classes, and has `role="note"` with the same words for screen readers. It is a tiny caption (about 11 px, the `muted-foreground` token, at least 4.5:1 on the surfaces it sits on), with no border, background or rounding: never a pill. *(Changed 28 Oct 2026: it was a bordered pill.)*
+- [ ] **No theme can hide it.** On mount, when the theme changes and every two seconds, the label checks that it is displayed, visible, opaque, not clipped, masked or filtered, at least 9 px, at least 3:1 against what is behind it (what the page paints under its words, read at every point it hit-tests, not only its own ancestors), that its words' own box is a real line inside the viewport and the label's box, and that nothing is drawn over them; anything it can't confirm counts as hidden. If hidden, the host draws the same words at the label's spot in a layer of its own that theme CSS can't reach (a closed shadow root on a guarded element of the host's, the words in the browser's top layer), rebuilt and raised again whenever something removes, edits, hides or covers it; logs a theme-host warning; and the chat keeps working. No manifest field turns the label off, and the theme review refuses CSS that names the label.
+  - *Changed 28 Oct 2026 (product owner): the chat lock is gone. It disabled the input with "This theme hides the AI notice, so chat is paused. Switch theme in Settings." The AI label is a small caption, never a pill and never a composer lock; the obligation is met by a copy no theme can hide (`frontend/components/ai-label/protected-caption.tsx`).*
+- [ ] Theme-host test (`ai-label.test.ts`): the label renders with builtin Play, with a fixture theme that registers `/chat`, and with a fixture theme whose CSS sets `display:none`, `visibility:hidden`, `opacity:0` or zero size on it, and in each hiding case the host's copy is on screen and the input stays enabled. A sheet aimed at the copy itself leaves it on screen.
 - [ ] Every agent's system prompt, Auto's, marketplace agents' and custom personas', ends with a platform rule: "If anyone asks whether they are talking to a person or an AI, say that you are an AI agent acting for {principal}. Never claim or imply that you are human." `{principal}` follows FR-15; with no public name the rule reads "say that you are an AI agent". It is appended after the persona text, so a persona can't remove it. A test asserts the rule in the assembled prompt for Auto, a marketplace agent and an agent with a custom persona.
 - [ ] **[UI]** Owner check on the deployed build: the label shows on `/chat` in the default look and in Play, in light and dark.
 
@@ -250,7 +252,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Repos · wave:** automatos-play (session, Wed 21); automatos-ai (`docs/theme-host/`, in EU-A2) · **Depends on:** —
 
 **Acceptance criteria:**
-- [ ] The theme skill (automatos-play `skills/build-automatos-interface/references/chat-stream.md`, tracked) says: the host renders the AI label on `/chat` and on every `/x/` route that uses the chat area; a theme can't remove, cover or restyle it away; chat pauses if it is hidden.
+- [ ] The theme skill (automatos-play `skills/build-automatos-interface/references/chat-stream.md`, tracked) says: the host renders the AI label on `/chat` and on every `/x/` route that uses the chat area; a theme can't remove, cover or restyle it away; if a theme hides it, the host draws it in its own layer and the review flags the theme. *(Changed 28 Oct 2026: it said "chat pauses if it is hidden".)*
 - [ ] The same rule goes in automatos-ai's theme-host docs (`docs/theme-host/`), which are tracked.
 - [ ] PRD-261 (`docs/prd/core/PRD-261-INSTALLABLE-THEMES.md`) gets the rule beside the `pages` field (`:192`), the `routes` field (`:193`) and the "own design" list (`:294`). That folder is kept out of git on purpose (`.git/info/exclude`), so the file is edited in place and is **not** committed unless Gerard says so.
 - [ ] The PRD-261 wave that builds `/x/` and the SDK chat area carries the rule as an acceptance criterion: the chat stream doesn't start until the host label is mounted.
@@ -395,14 +397,21 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 
 #### ART5-1: Generation refuses non-consensual intimate content and child sexual abuse material (M)
 **Description:** As Automatos, I want every image, video and voice generation path to refuse sexual content of real, identifiable people and any sexual content involving minors, so the platform has the effective safeguards the new Article 5 ban and its safe harbour expect.
-**Repo · wave:** automatos-ai · EU-F, Wed 4 – Fri 20 Nov · **Files:** `orchestrator/modules/socials/ai_options.py` (`make` at `:126`), `modules/socials/recipes/footage_toolkits.py` (`HF_FAILED` at `:426`), every other media-generation tool, a new `orchestrator/modules/policy/generation_guard.py`, tests · **Depends on:** D9 (counsel on scope)
+**Repo · wave:** automatos-ai · EU-F, Wed 4 – Fri 20 Nov · **Files:** `orchestrator/modules/socials/ai_options.py` (`make` at `:126`), `modules/socials/recipes/footage_toolkits.py` (`HF_FAILED` at `:426`), every other media-generation tool, a new `orchestrator/core/generation_guard.py` (in `core`, not `modules/policy`: `.importlinter` forbids Socials importing the policy module), tests · **Depends on:** —
 
 **Acceptance criteria:**
-- [ ] Every image, video and voice generation path calls `generation_guard` with the prompt and any reference images before calling a provider. It refuses sexual content showing a real, identifiable person and any sexual content involving minors.
-- [ ] A provider refusal (for example Higgsfield's `nsfw` status) ends as a refusal with a plain message. It is never retried on another provider.
-- [ ] Refusals are logged with the workspace, the path and the reason code, never with the prompt or the output.
-- [ ] A test per generation path, and a test that a provider refusal isn't retried.
-- [ ] Counsel confirms the scope against the Omnibus text (D9).
+- [x] Every image, video and voice generation feature Automatos offers (Socials footage and stills, the spoken script, the image tool) calls `generation_guard` with the prompt and any reference images before calling a provider. It refuses sexual content showing a real, identifiable person and any sexual content involving minors.
+- [x] A provider refusal (for example Higgsfield's `nsfw` status) ends as a refusal with a plain message. It is never retried on another provider.
+- [x] Refusals are logged with the workspace, the path and the reason code, never with the prompt or the output.
+- [x] A test per generation path, and a test that a provider refusal isn't retried.
+
+Built in #1250 (merged 20 Oct). The counsel check on scope was dropped by Gerard on 23 Oct. The hosted service runs the guard's read on `claude-haiku-5-5` (`GENERATION_GUARD_MODEL`, set 23 Oct); a local install uses its own model. Scope (Gerard, 23 Oct): an agent running a workspace's own connected generation app directly (`composio_execute` with the customer's fal.ai, Higgsfield or ElevenLabs connection) relies on that provider's own safeguards; Automatos adds no check there.
+
+**Model read switched off until after Web Summit (Gerard, 23 Oct 2026).** Automatos has no customers yet, and the read adds a model call to every Socials render and every image-tool image, and refuses the generation when that call fails: cost and failed demos for no customer benefit yet. So `GENERATION_GUARD_READ_ENABLED` ships `false`:
+- still on: the CSAM keyword block (no model call), and a provider's own refusal (Higgsfield `nsfw`) ending as a refusal that no other provider is asked;
+- off: the three-question model read, and fetching reference images for it.
+
+**To turn it back on** when PRD-264 is picked up again after the summit: set `GENERATION_GUARD_READ_ENABLED=true` on the hosted API service (`GENERATION_GUARD_MODEL=claude-haiku-5-5` is already set there) and deploy. The code and its tests are unchanged and stay proven in CI with the read on; nothing else needs building. Then change the default in `orchestrator/config.py` to `true`, and the test that pins it off (`tests/test_prd264_art5_generation_guard.py`).
 
 ## 6. Functional requirements
 
@@ -418,7 +427,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - **FR-10:** No mark, manifest or detection answer contains personal data or workspace identifiers.
 - **FR-11:** Socials labels realistic AI media as AI-generated by default; agent-written blog posts show "AI-generated" until a person marks them reviewed.
 - **FR-12:** Each network's own AI label is set at publish where its API supports one, and the receipt says what was set.
-- **FR-13:** Every image, video and voice generation path refuses sexual content of real, identifiable people and any sexual content involving minors (ART5-1, by Fri 20 Nov).
+- **FR-13:** Every image, video and voice generation feature Automatos offers refuses sexual content of real, identifiable people and any sexual content involving minors (ART5-1, by Fri 20 Nov).
 - **FR-14:** No public page states that a notice or mark is live before it has been checked in production (EUAI-15).
 - **FR-15:** A notice names its principal only by a public name. The widget uses the Site's `display_name`. Channel bots, agent-sent email and messages use, in order, the business profile's `company_name` (`orchestrator/core/models/business_profiles.py`), then the workspace name only when it is not the auto-created "{name or email}'s Workspace" form and contains no "@". Otherwise the notice carries no name. One module, `orchestrator/core/public_principal.py` (`public_principal_name`, `public_site_name`), decides this for every surface, and a test covers each case. (Added 19 Oct after a security review: the workspace name can carry the owner's name or email.)
 - **FR-16:** Every file that gets a provenance row also carries a random per-file instance id in its mark (`xmpMM:InstanceID` as a UUID, or the C2PA instance id), so two files made from identical input never share a SHA-256. Without it, a predictable file (a templated letter where only a name or amount varies) could be confirmed by hashing guesses against the public route, and the earliest-date answer would hint that another workspace made the same file. EUAI-06a, EUAI-06b and EUAI-09 each test that two renders of identical input give different hashes. (Added 19 Oct after the EUAI-10 security review.)
@@ -455,7 +464,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - **At first exposure:** the notice appears before or with the AI's first output, never after a scroll or a click.
 - **Perceivable:** a visible label with enough contrast in both themes, using theme tokens (not `dark:` classes, which are inert in this frontend). Screen readers get the same words through `aria-label`.
 - **Persistent where the AI keeps talking:** the badge and labels stay for the whole session. A voice call adds a spoken reminder after reconnect and at an interval (EUAI-04).
-- **Not hideable:** no setting, theme, deployer config or CSS removes it. Where a theme controls the DOM, the host renders the label outside the theme's slot (EUAI-11a).
+- **Not hideable:** no setting, theme, deployer config or CSS removes it. Where a theme controls the DOM, the host renders the label outside the theme's slot, and draws a label a theme hides again in a layer of its own that theme CSS can't reach (EUAI-11a). The label never locks the chat.
 - **Localised:** badge terms come from one table (D17). English is the fallback when a locale has no entry.
 
 ## 9. Technical considerations
@@ -469,7 +478,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - **Migrations:** two new revisions (EUAI-08b, EUAI-10), chained in merge order, both head pins moved each time, `IF NOT EXISTS` throughout.
 - **The public route** (D16) is the only unauthenticated endpoint this PRD adds. It reads one indexed column, returns no workspace data and is rate-limited. The `/verify` page is host-owned and public in both editions.
 - **Redis** holds the channel notice state with a TTL. Losing it only means a person sees the notice again.
-- **Theme host:** the label is rendered by the host outside the theme's slot, and the chat pauses if the label can't be seen. CSS alone can't guarantee visibility against arbitrary theme CSS, so the runtime check is the guarantee and the hostile-theme test is the proof.
+- **Theme host:** the label is rendered by the host outside the theme's slot. CSS on the label alone can't guarantee visibility against arbitrary theme CSS (a rule on an ancestor wins), so a runtime check finds a hidden label, and the host then draws it in its own layer: a shadow root no document selector reaches, an inline `!important` guard on its element, and the browser's top layer. The hostile-theme tests (jsdom, and installed Play in the browser lane) are the proof. *(Changed 28 Oct 2026: the chat paused instead.)*
 - **Widget SDK:** the chat-widget and blog-widget packages have no tests today. EUAI-02b and EUAI-08c add a vitest config to each, following `packages/loader/vitest.config.ts`.
 - **Composio schemas** for YouTube, LinkedIn, X and Instagram are read at build time, not assumed. Each finding is recorded in the PR.
 
@@ -515,7 +524,7 @@ Gerard approved D11, D12 and D14 to D18 on 19 Oct (§3). These stay open:
 |---|---|---|---|
 | 1 | Too much work for ten working days with four lanes (D18) | HIGH | Fixed lane plan (§4); 06a ships the mark on its own by Fri 23; checkpoint Mon 26 (D13) |
 | 2 | c2pa dependency or signing set-up slips (D14, D15) | HIGH | Approval on Mon 19; set-up on a scratch branch from Tue 20; self-signed fallback; 06a already marks every file |
-| 3 | A theme or deployer hides the notice | HIGH | The host renders it outside the theme slot; the chat stream won't start until it is mounted; a browser test with a hostile fixture theme (EUAI-11a) |
+| 3 | A theme or deployer hides the notice | HIGH | The host renders it outside the theme slot and draws a hidden one again in its own layer; the theme SDK's chat stream won't start until it is mounted; the theme review refuses CSS that names it; hostile-theme tests in jsdom and the browser (EUAI-11a) |
 | 4 | Public detection route abused or used to probe workspaces | MED | Hash only, no file upload, no workspace data in the answer, per-IP rate limit, security review (D16) |
 | 5 | Seams between parallel branches and PRD-261/262/263 work | HIGH | Fixed merge order, seam review, trial merge, alembic chain rebased on the live head (§4) |
 | 6 | A notice claimed publicly before it is live | HIGH | EUAI-15 flips status only after a production check |

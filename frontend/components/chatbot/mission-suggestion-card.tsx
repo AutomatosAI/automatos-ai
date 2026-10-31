@@ -8,12 +8,14 @@ import { useCreateMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { toast } from 'sonner'
 
-interface MissionSuggestionCardProps {
+export interface MissionSuggestionCardProps {
   goal: string
   complexity: string
   agentId?: number | string
   chatId: string
   recentMessages?: Array<{ role: string; content: string }>
+  /** PRD-268 US-W01b: the card was answered (its Mission launched, or dismissed). */
+  onAnswered?: () => void
 }
 
 export function MissionSuggestionCard({
@@ -22,6 +24,7 @@ export function MissionSuggestionCard({
   agentId,
   chatId,
   recentMessages,
+  onAnswered,
 }: MissionSuggestionCardProps) {
   const [dismissed, setDismissed] = useState(false)
   const router = useRouter()
@@ -29,6 +32,11 @@ export function MissionSuggestionCard({
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
 
   if (dismissed) return null
+
+  const dismiss = () => {
+    setDismissed(true)
+    onAnswered?.()
+  }
 
   const goalText = goal.length > 150 ? `${goal.slice(0, 150)}...` : goal
 
@@ -51,6 +59,7 @@ export function MissionSuggestionCard({
       },
       {
         onSuccess: (mission) => {
+          onAnswered?.()
           setActivePlanningMissionId(mission.id)
           toast.success('Mission created — review the plan', {
             action: {
@@ -80,7 +89,7 @@ export function MissionSuggestionCard({
           </span>
         </div>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={dismiss}
           className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
           aria-label="Dismiss suggestion"
         >
@@ -112,7 +121,7 @@ export function MissionSuggestionCard({
           variant="ghost"
           size="sm"
           className="text-muted-foreground hover:text-foreground"
-          onClick={() => setDismissed(true)}
+          onClick={dismiss}
         >
           No thanks
         </Button>

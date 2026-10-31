@@ -10,7 +10,16 @@
 #
 #   uv pip compile services/media-render/requirements.in \
 #     --universal --python-version 3.12 --generate-hashes \
+#     --no-emit-package protobuf --no-emit-package flatbuffers \
 #     -o services/media-render/requirements.lock
+#
+# PRD-262 #18: onnxruntime requires protobuf and flatbuffers, but only its
+# transformers, quantization and tools subpackages import them, and the image
+# deletes those; the service loads onnxruntime.capi alone. So they stay out of the
+# lock (about 3.1 MB). Dependabot's uv updater does not pass --no-emit-package, so
+# a lock it regenerates carries them again, and
+# orchestrator/tests/test_prd262_media_render_venv_trim.py fails until the lock is
+# compiled again with the command above.
 
 # HTTP service (the worker's server library)
 aiohttp==3.14.3
@@ -23,3 +32,9 @@ phonemizer==3.4.0
 onnxruntime==1.30.0
 numpy==2.5.3
 soundfile==0.14.0
+
+# PRD-264 EUAI-06b (D14, approved 19 Oct 2026): the Content Authenticity Initiative's SDK
+# (MIT OR Apache-2.0) signs and reads the C2PA manifest on every AI-made output: MP4,
+# PNG, JPEG and WAV are among its formats. It brings cryptography, which signing_keys.py
+# also uses to make a per-install signing certificate, and requests and toml.
+c2pa-python==0.38.0

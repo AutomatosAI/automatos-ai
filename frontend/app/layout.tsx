@@ -6,7 +6,7 @@ import { parseUiStyle, UI_STYLE_COOKIE } from '@/lib/ui-style'
 import { createThemeBootResolver, type CookieReader } from '@/lib/theme-host/boot'
 import { CORE_FONT_VARIABLE_CLASSES } from '@/app/core-fonts'
 import { installedThemeBootResolver } from '@/lib/theme-host/boot-server'
-import { PLAY_FONT_VARIABLE_CLASSES } from '@/lib/theme-host/builtin/play-fonts'
+import { installedThemeEntry } from '@/lib/theme-host/installed-entry'
 import { ThemeBootScripts } from '@/components/theme-host/theme-boot'
 import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
 import './globals.css'
@@ -20,18 +20,15 @@ export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'Automatos AI Platform',
-  description: 'Enterprise AI automation and agent management platform',
+  description: 'Automatos Studio: agents, documents, socials and a marketplace on the open-source Automatos OS',
 }
 
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so
 // a server re-render (router.refresh after a client-side style switch) never rewrites the class
 // attribute and drops next-themes' tone class. The style's classes come from the theme boot
-// (PRD-261 A-03). Builtin Play's face classes are host-generated and defined here for every
-// page; with preload off, a face file downloads only when a Play type style uses it.
-const HTML_FONT_CLASSES = [
-  ...CORE_FONT_VARIABLE_CLASSES,
-  ...PLAY_FONT_VARIABLE_CLASSES,
-].join(' ')
+// (PRD-261 A-03). Only the core's faces are defined here: no theme's font is compiled into the
+// app (A-19f1); an installed theme brings its own with its stylesheet.
+const HTML_FONT_CLASSES = CORE_FONT_VARIABLE_CLASSES.join(' ')
 
 export default async function RootLayout({
   children,
@@ -49,6 +46,9 @@ export default async function RootLayout({
   const readCookie: CookieReader = (name) => store.get(name)?.value
   const uiStyle = parseUiStyle(readCookie(UI_STYLE_COOKIE))
   const boot = await createThemeBootResolver(readCookie, installedThemeBootResolver)(uiStyle)
+  // PRD-261 W-A6b: an installed theme that runs is a registry entry from its boot, the same on the
+  // server render and the client's first render (null for every other style, and a base boot).
+  const installedTheme = installedThemeEntry(uiStyle, boot.entry)
 
   return (
     <html
@@ -64,7 +64,7 @@ export default async function RootLayout({
         <ThemeBootScripts boot={boot} />
       </head>
       <body>
-        <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined}>
+        <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined} initialTheme={installedTheme}>
           {children}
         </Providers>
       </body>

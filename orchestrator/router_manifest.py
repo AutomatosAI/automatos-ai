@@ -66,6 +66,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.heartbeat"),
     RouterSpec("api.channels"),
     RouterSpec("api.voice_retell"),  # PRD-203 V·S4 — Retell streaming custom-LLM webhook
+    RouterSpec("api.voice_speech"),  # Auto's server voice: speech as MP3 from voice-tts, and its voices
     RouterSpec("api.reports"),
     RouterSpec("api.deliverables"),
     RouterSpec("api.deliverable_thumbnails"),  # F353 — a document card's first-page picture
@@ -97,6 +98,38 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.session_tools"),
     # PRD-233 S6 -- the operator's profile (GET both editions, PUT local only).
     RouterSpec("api.profile"),
+    # PRD-264 EUAI-10 (D16) -- the public detection route: a SHA-256 in, yes or no out,
+    # rate-limited per IP. The one unauthenticated route of PRD-264.
+    RouterSpec("api.provenance"),
+    # PRD-266 US-016a -- content reports (POST /api/v1/reports): any member reports an
+    # Auto message or a Deliverable. Authenticated; not PRD-76's api.reports.
+    RouterSpec("api.content_reports"),
+    # PRD-266 W1 Connect -- the Automatos Go backend: device discovery, pairing,
+    # remote access (/api/v1/mobile/*).
+    RouterSpec("api.mobile_devices"),
+    # PRD-266 W2 Push -- the operator's Expo answer (/api/v1/mobile/push-consent, local only)
+    # and the workspace's question redaction (/api/v1/mobile/push-settings).
+    RouterSpec("api.mobile_push"),
+    # PRD-266 US-001 (§4.1) -- the discovery document (GET /.well-known/automatos.json).
+    RouterSpec("api.well_known"),
+    # PRD-268 W1 -- Proactive Auto: the suggestions (list, Start, Hide) and the check-in
+    # runs (/api/proactive/*).
+    RouterSpec("api.proactive"),
+    # PRD-268 US-C10b (§6.4) -- the brief on open, once per person per local date
+    # (POST /api/proactive/brief/open).
+    RouterSpec("api.proactive_brief"),
+    # PRD-268 US-C11e (§6.3) -- the person's own follow-ups: list and cancel
+    # (/api/proactive/follow-ups*).
+    RouterSpec("api.proactive_follow_ups"),
+    # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
+    # (/api/readiness, /api/readiness/check).
+    RouterSpec("api.readiness"),
+    # PRD-268 US-C20a (§6.11.4) -- an approval grant's ApprovalView@1
+    # (GET /api/v1/approval-grants/{grant_id}/view).
+    RouterSpec("api.approval_views"),
+    # PRD-268 US-C22b (§6.11.5) -- calibration on day one: consent, the posted card, reject
+    # and accept (/api/auto/calibration*). Ships off (CALIBRATION_ENABLED, K15).
+    RouterSpec("api.auto_calibration"),
 )
 
 

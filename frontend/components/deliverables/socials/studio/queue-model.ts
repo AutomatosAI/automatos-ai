@@ -5,6 +5,9 @@
  *
  * PRD-251C US-C204: a weekly or monthly plan's batch waiting for approval is one section,
  * "Week of 19 Oct · Countdown · 7 posts", its posts in slot order, approved in one sitting.
+ *
+ * P256-FIX-SOC-2 (F433): a plan's draft the render refused waits for the owner's input
+ * (the server's `service.waits_for_input`): listed apart as "Waits for you", never approved here.
  */
 import type { SocialPost } from '@/lib/api-client'
 import { hasChannels } from '../socials-review'
@@ -12,6 +15,8 @@ import { channelLabel } from '../socials-status'
 import { formatLabel, postTime } from './socials-calendar-model'
 
 export const QUEUE_STATUS = 'needs_approval'
+/** The review_log action of a post that waits for the owner's input (modules/socials/service.py ACTION_NEEDS_INPUT). */
+export const NEEDS_INPUT = 'needs_input'
 export const NO_SLOT = 'No slot'
 const MINUTE_MS = 60_000
 const DAY_MS = 86_400_000
@@ -31,6 +36,26 @@ export function queuedPosts(posts: ReadonlyArray<SocialPost>): SocialPost[] {
   return posts
     .filter((post) => post.status === QUEUE_STATUS)
     .sort((a, b) => slot(a).localeCompare(slot(b)) || a.created_at.localeCompare(b.created_at))
+}
+
+/** Whether the post is a draft waiting for the owner's input: its last history entry asks for it. */
+export function waitsForInput(post: Pick<SocialPost, 'status' | 'review_log'>): boolean {
+  const log = post.review_log ?? []
+  return post.status === 'draft' && log.length > 0 && log[log.length - 1].action === NEEDS_INPUT
+}
+
+/** The drafts waiting for the owner's input, the earliest slot first, then the oldest. */
+export function waitingForInput(posts: ReadonlyArray<SocialPost>): SocialPost[] {
+  const slot = (post: SocialPost) => slotOfQueued(post) ?? '9999'
+  return posts.filter(waitsForInput).sort((a, b) => slot(a).localeCompare(slot(b)) || a.created_at.localeCompare(b.created_at))
+}
+
+/** What a waiting draft asks for: the fields its last history entry names, else why. */
+export function inputAsked(post: Pick<SocialPost, 'review_log'>): string {
+  const log = post.review_log ?? []
+  const last = log[log.length - 1]
+  const fields = (last?.fields ?? []).filter(Boolean)
+  return fields.length ? `Fill in: ${fields.join(', ')}` : last?.comment ?? ''
 }
 
 /** "Wed 14 Oct". */

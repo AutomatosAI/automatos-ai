@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
 import logging
 import re
@@ -27,6 +26,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 from config import config
+from core.image_read import shrunk_for_read
 from modules.documents import brand_references as refs
 
 logger = logging.getLogger(__name__)
@@ -60,20 +60,9 @@ class StyleReadFailed(Exception):
 
 
 def _shrunk(data: bytes, content_type: str) -> Optional[Tuple[bytes, str]]:
-    """The image as a small JPEG for the read, or as it is when Pillow is not there and it is small."""
-    try:
-        from PIL import Image  # optional: without it the read takes small images as they are
-    except ImportError:
-        return (data, content_type) if len(data) <= SMALL_ENOUGH_BYTES else None
-    try:
-        image = Image.open(io.BytesIO(data)).convert("RGB")
-        image.thumbnail((READ_EDGE_PX, READ_EDGE_PX))
-        out = io.BytesIO()
-        image.save(out, "JPEG", quality=80)
-        return out.getvalue(), "image/jpeg"
-    except (OSError, ValueError):
-        logger.warning("[BrandStyle] a style reference could not be shrunk for the read; it is left out", exc_info=True)
-        return None
+    """The image as a small JPEG for the read, or as it is when Pillow is not there and it is
+    small; ``None`` (left out of the read) when it can't be read."""
+    return shrunk_for_read(data, content_type, edge_px=READ_EDGE_PX, small_enough_bytes=SMALL_ENOUGH_BYTES)
 
 
 def images_for_read(references: List[Dict[str, Any]]) -> List[Tuple[str, str, bytes, str]]:

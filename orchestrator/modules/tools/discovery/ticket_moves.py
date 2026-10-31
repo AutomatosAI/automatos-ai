@@ -43,6 +43,10 @@ BY_AN_AGENT = "platform_tool"
 AN_AGENTS_NOTE_BY = "an agent"
 MAX_NOTE_CHARS = 1000  # an operator note on the board (api/board_tasks.MAX_TASK_NOTE_CHARS)
 SENT_BACK_WITH_A_NOTE = "Sent back: its draft is kept in the ticket's history, and the redo works from your note."
+# F457: what a move to Assigned of a card with an agent does, in its answer (``_queued``).
+QUEUED = "queued_to_run"
+QUEUED_TO_RUN = ("In Assigned with its agent, the card is queued: the board's dispatcher starts it as soon as the "
+                 "agent can run, from its brief. It is not stopped; to stop it, cancel it.")
 SENT_BACK_WITHOUT_ONE = ("Sent back: its draft is kept in the ticket's history. With no note the agent "
                          "only knows to try again; add one to say what to fix.")
 
@@ -63,11 +67,28 @@ def keeps_the_board_rules(handler: Handler) -> Handler:
         if not decided:
             result = await handler(db, workspace_id, params)
             _keep_the_note(db, workspace_id, params, result)
-            return result
+            return _queued(db, workspace_id, params, result)
         if listed is None:
             return next(iter(decided.values()))
-        return await _the_rest(handler, db, workspace_id, params, listed, decided)
+        return _queued(db, workspace_id, params, await _the_rest(handler, db, workspace_id, params, listed, decided))
     return wrapped
+
+
+def _queued(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any) -> Any:
+    """F457 (night 18, ask 837): a card moved to Assigned with its agent wakes the board's
+    dispatcher, which starts it (``handlers_board_tasks._is_dispatch_claimable``). The
+    handler's answer said only ``triggered_execution: False``, and Auto told the owner
+    "nothing has started" while the card ran again. The answer names those cards now."""
+    from modules.tools.discovery.handlers_board_task_done import moved_to_done
+    from modules.tools.discovery.handlers_board_tasks import _is_dispatch_claimable
+
+    if params.get("status") != SEND_BACK or not isinstance(result, dict):
+        return result
+    queued = [task.id for task in _tickets(db, workspace_id, moved_to_done(result)) if _is_dispatch_claimable(task)]
+    if not queued:
+        return result
+    message = " ".join(part for part in (result.get("message"), QUEUED_TO_RUN) if part)
+    return {**result, QUEUED: queued, "message": message}
 
 
 async def _the_rest(handler: Handler, db: Session, workspace_id: Any, params: Dict[str, Any],
@@ -105,18 +126,19 @@ def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dic
     for task in _tickets(db, workspace_id, refs):
         if task.status == new_status:
             continue
-        if _sends_it_back(task, new_status, params):
+        if sends_it_back(task, new_status, params):
             answers[task.id] = _send_back(db, workspace_id, task, params)
             continue
-        refusal = _refusal(db, task, new_status)
+        refusal = board_refusal(db, task, new_status)
         if refusal:
             answers[task.id] = _refused(task, refusal)
     return answers
 
 
-def _sends_it_back(task: Any, new_status: str, params: Dict[str, Any]) -> bool:
+def sends_it_back(task: Any, new_status: str, params: Dict[str, Any]) -> bool:
     """An answered ticket moved to Assigned, or (F318) to In progress with a note: the
-    board's Reject, the note its correction."""
+    board's Reject, the note its correction. P256-FIX-N17-2: the chat's card reads it too
+    (``send_back_checks``), so it asks only about a send-back the Reject would take."""
     if task.status not in ANSWERED:
         return False
     return new_status == SEND_BACK or (new_status == RERUN and bool(str(params.get("note") or "").strip()))
@@ -132,10 +154,12 @@ def _tickets(db: Session, workspace_id: Any, refs: List[Any]) -> List[Any]:
     return db.query(BoardTask).filter(BoardTask.id.in_(ids), BoardTask.workspace_id == workspace_id).all()
 
 
-def _refusal(db: Session, task: Any, new_status: str) -> Optional[str]:
+def board_refusal(db: Session, task: Any, new_status: str) -> Optional[str]:
     """``move_refusal`` for this ticket: a running ticket waits or is cancelled, and a
     finished column needs work on the card. PRD-256 US-005: Done needs the artifact the
-    card was for (``services.done_needs_an_artifact``, the board's Approve's rule too)."""
+    card was for (``services.done_needs_an_artifact``, the board's Approve's rule too).
+    F457: the chat's card reads it too (``send_back_checks``), so it never asks about a
+    move the board would refuse."""
     from api.board_tasks import MISSION_TICKET_TYPES, _running_now
     from services.board_drag_rules import move_refusal
     from services.done_needs_an_artifact import done_refusal
@@ -217,4 +241,4 @@ def _bulk_answer(status: Any, requested: int, decided: Dict[int, Dict[str, Any]]
             "requested": requested, "updated_count": len(updated), "updated": updated, "failed": failed}
 
 
-__all__ = ["keeps_the_board_rules"]
+__all__ = ["QUEUED", "QUEUED_TO_RUN", "board_refusal", "keeps_the_board_rules", "sends_it_back"]

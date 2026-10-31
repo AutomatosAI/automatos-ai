@@ -52,7 +52,7 @@ def _registry():
                            ("platform_list_templates", "templates")):
         registry.register(ActionDefinition(
             name=name, description=f"{name} probe", category=category,
-            parameters={"type": "object", "properties": {}, "required": []}))
+            parameters={"type": "object", "properties": {}, "required": []}, permission_level="read"))
     return registry
 
 

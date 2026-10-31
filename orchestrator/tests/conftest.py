@@ -104,13 +104,56 @@ def _reset_composio_lookup_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_theme_boot_files():
+    """A theme package's checked boot files are kept in memory by digest and storage
+    prefix (services/themes/serve.py boot_files), and many tests store different bytes
+    under one package's digest, so no test may boot from another test's kept files.
+    Like the caches above, only a module already imported."""
+    def _reset():
+        forget = getattr(sys.modules.get("services.themes.serve"), "forget_boot_files", None)
+        if callable(forget):
+            forget()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
+def _generation_guard_reads_clean(request, monkeypatch):
+    """PRD-264 ART5-1: every image, video and voice path asks the generation guard
+    (core/generation_guard.py) before it calls a provider, and the guard's read is a
+    model call. Outside the tests that check the guard itself (marked
+    ``real_generation_guard``), the read answers clean, so a test of a generation path
+    tests that path. The read is switched on in every test (it ships off until after Web
+    Summit, GENERATION_GUARD_READ_ENABLED), so the guard as built stays proven; the tests of
+    the switch turn it off. A test that stubs packages in sys.modules so the guard can't be
+    imported never reaches a generation path: it is left alone."""
+    if request.node.get_closest_marker("real_generation_guard") is not None:
+        yield
+        return
+    try:
+        import core.generation_guard as guard
+    except Exception:
+        yield
+        return
+
+    async def clean(_request, _workspace_id):
+        return {"sexual": False, "minor": False, "real_person": False}
+
+    monkeypatch.setattr(guard, "read_answers", clean)
+    monkeypatch.setattr(guard.config, "GENERATION_GUARD_READ_ENABLED", True, raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _repair_stubbed_package_bindings():
     """Repair parent->child module attribute bindings that sibling tests broke.
 
     Many unit tests inject ``types.ModuleType`` stubs straight into
     ``sys.modules`` (for ``consumers``, ``consumers.chatbot``, ``modules``,
     ``modules.tools`` ...) to dodge a heavy package __init__ that pulls optional
-    deps (asyncpg / pdfplumber / tiktoken / camelot). A real ``import a.b`` binds
+    deps (asyncpg / pdfplumber / tiktoken). A real ``import a.b`` binds
     ``b`` as an attribute on package ``a``; a manual ``sys.modules['a.b'] = stub``
     does NOT. Worse, replacing ``sys.modules['a']`` with a bare stub drops every
     real child attribute it used to carry.
@@ -456,30 +499,3 @@ def new_session(engine):
     # Files with no sweep of their own must still not pin row locks for the
     # rest of the run -- a leak here would hang a LATER module's sweep.
     _release_sessions(created)
-
-
-@pytest.fixture
-def harness_ledger(monkeypatch):
-    """F156: an in-memory HARNESS task ledger, for suites that run HARNESS on fake
-    executors and databases. The real one (harness_task_ledger) is tested against
-    the database in test_f156_the_harness_ledger_is_in_the_database.py."""
-    from services.harness_service import HarnessService
-
-    class _Ledger:
-        def __init__(self):
-            self.applied, self.held, self.entries = set(), set(), []
-
-        def read(self, db, workspace_id):
-            return {"applied_task_ids": sorted(self.applied),
-                    "needs_approve_task_ids": sorted(self.held - self.applied)}
-
-        def write(self, db, workspace_id, newly_applied, newly_held):
-            for entry in newly_applied:
-                self.applied.add(str(entry["task_id"]))
-                self.entries.append(entry)
-            self.held |= {str(task_id) for task_id in newly_held}
-
-    ledger = _Ledger()
-    monkeypatch.setattr(HarnessService, "_read_applied_tasks", staticmethod(ledger.read))
-    monkeypatch.setattr(HarnessService, "_write_applied_tasks", staticmethod(ledger.write))
-    return ledger

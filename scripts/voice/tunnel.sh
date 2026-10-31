@@ -16,7 +16,7 @@ COMPOSE_ENV_FILE="$REPO_ROOT/.env"
 # Only Retell's routes pass the tunnel; everything else is refused at the edge.
 POLICY_FILE="$SCRIPT_DIR/ngrok-policy.yml"
 # The backend's published port: docker-compose.yml, service `backend`, under
-# `ports:` — the line `- "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"`.
+# `ports:` — the line `- "${API_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}:${API_PORT:-8000}:8000"`.
 # API_PORT overrides it there (shell, then .env), so it overrides it here;
 # otherwise the default is read from that line.
 PORT_MAPPING_PATTERN='\$\{API_PORT:-[0-9]+\}:8000'

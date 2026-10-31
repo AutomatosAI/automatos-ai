@@ -13,7 +13,7 @@ The following files were used as context for generating this wiki page:
 - [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 
 </details>
@@ -81,16 +81,19 @@ Sources: [docker-compose.yml:18-159](), [orchestrator/core/redis/client.py:14-31
 The orchestrator uses a Python 3.11-slim base with specialized system dependencies for document processing, OCR, and PDF generation.
 
 ### Build Stages
-- **pybuild**: This initial stage is responsible for compiling Python wheels. It installs `gcc`, `g++`, and `libffi-dev` which are necessary for building certain Python packages but are not needed at runtime, thus reducing the final image size [orchestrator/Dockerfile:19-27](). It also handles conditional installation of `graphifyy[leiden]` extras based on the `INSTALL_GRAPH_EXTRAS` build argument [orchestrator/Dockerfile:44-58]().
-- **base**: This stage copies the compiled Python packages from `pybuild` and installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `ghostscript`, `libpango-1.0-0`, `libcairo2`, and `libgdk-pixbuf-2.0-0` [orchestrator/Dockerfile:63-81]().
-- **development**: Configured for hot-reload using `uvicorn --reload` and mounts the local source directory [orchestrator/Dockerfile:91-131](), [docker-compose.yml:136-144](). It creates necessary directories like `/app/logs`, `/app/vector_stores`, `/app/projects`, `/app/exports`, and `/app/data` and sets ownership to a non-root `automatos` user [orchestrator/Dockerfile:101-108]().
-- **production**: Optimized image that removes dev tools and cleans `__pycache__` [orchestrator/Dockerfile:136-150](). It also creates the same necessary directories and sets up the `automatos` user [orchestrator/Dockerfile:148-150]().
+- **pybuild**: This initial stage is responsible for compiling Python wheels. It installs `gcc`, `g++`, and `libffi-dev` which are necessary for building certain Python packages but are not needed at runtime, thus reducing the final image size, and `binutils` for the strip below [orchestrator/Dockerfile:20-31](). It installs `requirements.lock` in every build, Railway's included; no build argument picks another set (PRD-262 US-027) [orchestrator/Dockerfile](). `orchestrator/scripts/split_lock.py` splits the lock into the two layers the base stage copies and leaves two sets out of both: the 12 tree-sitter grammars graphifyy requires that only `graphify.extract` imports, a module the app never loads (about 47 MB; no image installs them), and `watchfiles`, which only `uvicorn --reload` uses and which only the development stage copies. The lock still pins both, because CI installs it with `pip install --require-hashes`, which refuses a requirement the lock does not pin.
+  After the install it prunes site-packages to what runs (PRD-262 US-020): `strip --strip-unneeded` drops the debug sections (about 91 MB) and the static symbol table (`.symtab`, about 18 MB more) from every compiled library outside the auditwheel `*.libs` directories, leaving `.dynsym`, which the loader reads, and every directory named exactly `tests` goes (about 108 MB); `testing` packages such as `numpy.testing` stay. CI loads every library left and imports `main` inside the built image, on both arches and in the Railway build (`scripts/ci/image_site_packages.py`) [orchestrator/Dockerfile:66-76](). The C, C++ and Cython sources and headers in site-packages (`*.c`, `*.cpp`, `*.h`, `*.hpp`, `*.pyx`, `*.pxd`, `*.pxi`, about 11.6 MB) go too: only a compiler reads them, and the runtime has none; the same script fails on one left behind. scipy keeps only the subpackages the code reaches (`_lib`, `constants`, `integrate`, `linalg`, `optimize`, `sparse`, `spatial`, `special`, and `fft`, which nothing prunes): `stats`, `io`, `signal`, `interpolate`, `ndimage`, `cluster`, `odr`, `fftpack`, `differentiate`, `datasets` and `misc` go (about 29 MB). The code reaches scipy through datasketch (graphify's dedup), networkx's pagerank and `core/math/probability_theory.py`'s Student's t (`scipy.special.stdtrit`); `scripts/ci/image_scipy.py` runs each of those paths inside the built image.
+  Then botocore keeps the models of the services we call and no others (PRD-262 US-021): `botocore/data` holds one for every AWS service (437, about 18.6 MB), and only `s3`, `s3vectors` and `bedrock-runtime` (the app's clients) and `sts`, `sso` and `sso-oidc` (botocore's credential providers) stay, with the top-level endpoint, partition, retry and default-configuration files. A client for any other service raises `UnknownServiceError`, so `orchestrator/tests/test_prd262_botocore_services.py` fails when code names one. CI builds each kept client inside the image (`scripts/ci/image_botocore.py`), and the fresh-clone smoke stores a document in MinIO and fetches it back by its presigned URL [orchestrator/Dockerfile:78-95]().
+- **base**: This stage copies the compiled Python packages from `pybuild` and installs runtime-only system dependencies, each one something the code calls: `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0` with `libpangoft2-1.0-0` and `libharfbuzz-subset0` (WeasyPrint opens all three), `libcairo2`, `fonts-dejavu-core` and `fonts-urw-base35`. `fonts-urw-base35` gives a brand kit that names Helvetica, Times, Courier, Palatino or Bookman, with no font file, metric-compatible faces; it used to arrive with Debian `ghostscript`, which nothing called and which is gone. The same layer deletes tesseract's orientation model, which the default OCR page mode never loads, and git's server-side and mail binaries, and turns git-core's second copy of git into a link to `/usr/bin/git` (PRD-262 US-019) [orchestrator/Dockerfile:97-143](). It also deletes ICU's libraries and tesseract's 15 training tools (about 41 MB): only four training tools link ICU, while `/usr/bin/tesseract`, which `pytesseract` runs, and `libtesseract` do not, and the build fails if `ldd` then finds a library tesseract needs missing. And it deletes the Type1 copies of `fonts-urw-base35` (about 12.5 MB), which Pango cannot use; fontconfig serves the package's OpenType faces for Helvetica, Times, Courier, Palatino and Bookman. Both are deleted as files, so dpkg still lists the packages. `scripts/ci/image_system_tools.py` checks all of it inside the built image, OCR included, on both arches.
+- **development**: Hot reload with `uvicorn --reload`, for `make dev`. It carries no application code: `docker-compose.dev.yml` bind-mounts `./orchestrator` over `/app` (and the entrypoint and healthcheck over the image's copies), so the stage only creates the `automatos` user with `/app` and its writable directories (`logs`, `vector_stores`, `projects`, `exports`, `data`) owned by it, in the same layer as the production stage's, copies in `watchfiles` from pybuild's development part, so `--reload` watches the mounted source instead of polling it, and copies in the entrypoint and healthcheck. A source build therefore never stores the checkout's uploads or caches in an image layer (PRD-262 US-017) [orchestrator/Dockerfile:148-193](). Run it only with the source mounted.
+- **Build context**: `orchestrator/.dockerignore` leaves out what a checkout collects at runtime: nested `__pycache__` and bytecode, `/documents` (the default `DOCUMENT_STORAGE_DIR`; compose sets `/app/data/documents`, on the `backend_data` volume), the eval caches and results, and `.import_linter_cache`. Its patterns match from the context root, so it names `/documents` rather than `**/documents`, which would drop `modules/documents`, and keeps the root-only `*.md`, since the app loads the skill seeds in `core/seeds/*.md`.
+- **production**: The runtime image, and the stage the default compose stack runs, with nothing of the checkout mounted over it (PRD-262 US-035). It never had the test tools: they live in `orchestrator/requirements-dev.txt`, which only CI installs (PRD-262 US-014). It creates the `automatos` user first, with `/app` and its writable directories (`logs`, `vector_stores`, `projects`, `exports`, `data`) owned by it, then compiles the stdlib's bytecode once, as root (not `idlelib`, `tkinter`, `turtledemo`, `lib2to3` or `pydoc_data`, which never run in the API), and copies in the entrypoint and healthcheck. The app code comes last, as `COPY --chown=1000:1000 . .`, so a code-only update downloads that one layer and no `chown -R` stores `/app` twice (PRD-262 US-016) [orchestrator/Dockerfile:198-253]().
 
 ### Key Implementation Details
-- **Graph Extras**: The `INSTALL_GRAPH_EXTRAS` build argument controls whether the `[leiden]` extra for `graphifyy` is installed. This extra pulls in a significant number of dependencies (~660 MB) for advanced graph clustering. By default, it's `true` for production builds (Railway) and `false` for local development to keep images slim [orchestrator/Dockerfile:38-44]().
-- **Dependency Handling**: `futureagi` is installed with `--no-deps` to prevent version conflicts with core requirements like `requests` or `pandas` [orchestrator/Dockerfile:46-50]().
+- **Leiden clustering**: The Knowledge Graph's communities come from Leiden on `graspologic-native` (about 1 MB), through `orchestrator/modules/knowledge/leiden_partition.py`, in every build. `graphifyy` is installed without its `[leiden]` extra, whose `graspologic` brought about 585 MB (numba, llvmlite, POT, gensim, statsmodels, matplotlib, scikit-learn, pandas) to Railway's build only, so Railway, the published image and compose now install the same dependencies (PRD-262 US-027).
+- **Dependency Handling**: `pybuild` installs wheels only (`--only-binary :all: --no-binary pysher`), so a package that would compile from source fails the build; the one exception, `pysher`, is a pure-Python sdist. The API never installs the FutureAGI SDK: it calls `agent-opt-worker` over HTTP (PRD-262 US-015).
 - **Schema Safety**: The `CMD` for the development stage enforces `alembic upgrade heads` before starting `uvicorn`. This ensures the live schema never drifts from the code and handles multiple migration heads [orchestrator/Dockerfile:121-131](). The production stage also includes this in its entrypoint [orchestrator/Dockerfile:178-184]().
-- **Non-root User**: A dedicated `automatos` user with UID 1000 is created, and `/app` directories are chowned to this user for enhanced security [orchestrator/Dockerfile:103-109]().
+- **Non-root User**: A dedicated `automatos` user with UID 1000 runs the app. In the production stage the code is copied in already owned by it, and in both stages the directories the named volumes mount on (`/app/logs`, `/app/data`) are created owned by it, so a fresh volume starts writable [orchestrator/Dockerfile:164-199]().
 
 Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/core/redis/client.py:141-154]()
 
@@ -100,25 +103,25 @@ The frontend utilizes a 4-stage build process to handle Next.js static generatio
 
 | Stage | Description | Key Files / Commands |
 | :--- | :--- | :--- |
-| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary | `package.json` [frontend/Dockerfile:11-25]() |
-| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:27-47]() |
-| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:49-101]() |
-| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-145]() |
+| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary. Installs every dependency once with `npm ci`, from `package.json`, `package-lock.json` and `.npmrc` alone (`.npmrc` sets `legacy-peer-deps`, as it does for frontend-ci) | `npm ci --no-audit --no-fund` [frontend/Dockerfile:11-32]() |
+| **development** | Hot-reload dev server on base's install | `npm run dev` [frontend/Dockerfile:34-50]() |
+| **builder** | Production build stage on base's install: copies the source, then reads the `NEXT_PUBLIC_*` build args, then runs `npm run build`. The same layer deletes `.next/cache` and moves the dependencies Next traced out of `.next/standalone`, so the runtime copies them as a layer of their own | `npm run build` [frontend/Dockerfile:52-107]() |
+| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Creates the `nextjs` user, then copies the app as four layers, the one that changes least often first: the traced `node_modules`, `public/` (the builder's, so files the build generates there ship too), `.next/static`, then the server. BuildKit reuses a layer whose files and every layer below it are unchanged, so a code-only update downloads only the last two. Runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:109-163]() |
 
 ### Build-time Environment Variables
-Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:57-70](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:58-65]().
+Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:67-99](). They are declared after the dependency install and the source copy, so changing one rebuilds only the bundle and reuses the `npm ci` layer. The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:71-88]().
 
 ### Cache Invalidation
-A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:90-95]().
+A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:57-62](). The Dockerfile has no BuildKit cache mount: Railway fails a cache mount whose id lacks the service's id, and the frontend service's id is not known yet.
 
-Sources: [frontend/Dockerfile:1-145]()
+Sources: [frontend/Dockerfile:1-163]()
 
 ## 3. Worker Services & Auth (PRD-203)
 
 Specialized workers, such as the `workspace-worker` and `agent-opt-worker`, operate in isolated environments.
 
 ### `agent-opt-worker`
-This worker is responsible for prompt optimization and FutureAGI SDK integration [orchestrator/requirements.txt:136-143](). Its Dockerfile is not provided in the current context, but its URL is configured via `AGENT_OPT_WORKER_URL` [infrastructure/.env.example:120]().
+This worker is responsible for prompt optimization and FutureAGI SDK integration [orchestrator/requirements.in:136-143](). Its Dockerfile is not provided in the current context, but its URL is configured via `AGENT_OPT_WORKER_URL` [infrastructure/.env.example:120]().
 
 ### `workspace-worker`
 This worker handles sandboxed code execution and file operations. Its Dockerfile is located at `services/workspace-worker/Dockerfile`. It also supports conditional installation of a browser via `INSTALL_BROWSER` build argument, which is `true` by default for production and `false` for local development [orchestrator/tests/test_dockerfile_prod_parity.py:33]().
@@ -128,7 +131,7 @@ Workers utilize a centralized environment configuration via `worker_config.py` t
 - **model_auth_env()**: Retrieves `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` from the environment [services/workspace-worker/worker_config.py:21-39]().
 - **Fail-Fast Policy**: The worker is designed to fail clearly rather than idling silently if model credentials are missing [orchestrator/tests/test_prd203_cs8_worker_auth.py:97-114]().
 
-Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/tests/test_prd203_cs8_worker_auth.py:1-116](), [orchestrator/requirements.txt:136-143](), [infrastructure/.env.example:120](), [orchestrator/tests/test_dockerfile_prod_parity.py:33]()
+Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/tests/test_prd203_cs8_worker_auth.py:1-116](), [orchestrator/requirements.in:136-143](), [infrastructure/.env.example:120](), [orchestrator/tests/test_dockerfile_prod_parity.py:33]()
 
 ## 4. `media-render` — the Socials renderer (PRD-251)
 
@@ -162,6 +165,36 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 **CI.** The `media-render` job in `.github/workflows/media-render.yml`, run on demand, checks that `docker compose --profile media config` carries the service (and the default profile does not), builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and `/health`, renders the fixture bundle through the API with the token, and asserts the MP4 with ffprobe and its loudness with ebur128. `images.yml` builds the `production` stage for amd64 and arm64 on every pull request that touches `services/media-render/` and on `main` (PRD-262 US-054). It pushes the image only to a registry inside the job and never publishes it, because the image carries GPL-3.0 espeak-ng and phonemizer and GPL x264 (PRD-262 §9-Q6). It reports the image's size and layers, holds it to its compressed budget and, on amd64, to the 1.30 GB on-disk bar in `.github/image-budgets.json`, and scans it with Grype under the same policy as the published images. Its build cache is a private GHCR package, `automatos-media-render`, tagged `buildcache-<arch>`.
 
 Sources: [services/media-render/Dockerfile](), [services/media-render/README.md](), [orchestrator/core/media_render_client.py](), [orchestrator/modules/socials/render.py](), [docker-compose.yml]()
+
+## 5. `voice-tts`: Auto's server voice
+
+`voice-tts` speaks Auto's replies for the phone (Automatos Go) and the web quick-ask. Kokoro speaks each sentence and one LAME process streams the answer out as MP3, so the first sentence plays while the rest are spoken. It holds no data. Its Dockerfile is `services/voice-tts/Dockerfile`, and its API and settings are in `services/voice-tts/README.md`.
+
+| | |
+|---|---|
+| **Image** | `python:3.12-slim`, Kokoro v1.0 (the fp32 model and all 54 voices, checked against `kokoro/SHA256SUMS`, the same pins as media-render's), kokoro-onnx, onnxruntime and aiohttp from a hash-checked lock, and Debian's `lame` and `tini`. No Node, browser or ffmpeg. About 410 MB compressed. |
+| **Port** | 8100 (`VOICE_TTS_PORT`), internal only. `/healthz`, `/readyz` and `/voices` are open; `POST /speak` needs `Authorization: Bearer <VOICE_TTS_TOKEN>`. |
+| **Concurrency** | As many syntheses at once as the container has CPUs (its cgroup quota, `VOICE_TTS_MAX_CONCURRENT`); the next request is a 429 `tts_busy` at once, never queued. |
+| **GPL boundary** | As media-render's: phonemizer and espeak-ng live only in the image, which CI builds and scans but never publishes. |
+
+**How the backend uses it.** `POST /api/voice/speech` (`orchestrator/api/voice_speech.py`, `modules/voice/speech.py`) streams the MP3 through to any member who may chat, with refusals the clients treat as "use the device voice"; a voice-tts 500 `tts_failed` is `tts_unavailable` there. Its body is capped at 16 KiB on the wire (`main.PATH_BODY_LIMITS`). `GET /api/voice/voices` relays the voice list, cached for five minutes. Discovery lists the `tts` capability only while `VOICE_TTS_URL` is set.
+
+| Backend setting | Default | What it does |
+|---|---|---|
+| `VOICE_TTS_URL` | empty | Where the voice is (local: `http://voice-tts:8100`; Railway: `http://voice-tts.railway.internal:8100`). Empty = off: 503 `tts_off`, and discovery does not list `tts`. |
+| `VOICE_TTS_TOKEN` | empty | Sent as `Authorization: Bearer`; the same name and value on the service. |
+| `VOICE_TTS_TIMEOUT_SECONDS` | 15 | The most one answer may take, the stream included. |
+| `VOICE_TTS_CONNECT_TIMEOUT_SECONDS` | 2 | How long a connection may take before the voice counts as unavailable, so a client falls back at once. |
+| `VOICE_TTS_DEFAULT_VOICE` | `af_heart` | The voice when a request names none, used only when voice-tts lists it; otherwise voice-tts's own default (the hosted API still carries a value of this name from the voice service retired in #625). |
+| `VOICE_TTS_RATE_PER_MINUTE` | 60 | Sentences a workspace may have spoken a minute; past it, 429 `tts_busy`. 0 turns the limit off. |
+
+**Local edition.** The optional compose profile `voice` (`docker compose --profile voice up -d voice-tts`, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`), capped at 2 CPUs and 2 GB. See [self-hosting](../getting-started/self-hosting.md#7c-autos-server-voice-the-voice-profile).
+
+**SaaS.** Its own Railway service, 2 vCPU / 2 GB to start, one replica, health check `/readyz` (`infrastructure/railway-manifest.json`). The owner's setup steps are in [self-hosting](../getting-started/self-hosting.md#voice-tts-on-railway-saas).
+
+**CI.** `.github/workflows/voice-tts.yml`, on pull requests that touch `services/voice-tts/`, checks the compose profile, builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and speaks through the running container. `images.yml` builds, measures and scans the production stage for amd64 and arm64, and never publishes it.
+
+Sources: [services/voice-tts/Dockerfile](), [services/voice-tts/README.md](), [orchestrator/modules/voice/speech.py](), [orchestrator/api/voice_speech.py](), [docker-compose.yml]()
 
 ## Multi-Service Coordination
 

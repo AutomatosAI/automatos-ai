@@ -10,7 +10,9 @@ route (POST/PUT/PATCH/DELETE) must be classified **exactly one** way:
     families by S3–S6);
 (b) super-admin-locked router-wide (the PRD-143 obs tier — classified, never
     relaxed);
-(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed);
+(c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed), or
+    ``require_workspace_answerer``-gated (PRD-266 D16: the approval-grant verbs an
+    owner, admin or editor may take; revoke stays workspace-admin);
 (d) own non-hybrid auth (widget plane key auth, HMAC/secret webhooks, the
     Shopify machine lane) — enumerated explicitly, and structurally proven to
     NOT ride the shared hybrid dependency;
@@ -64,6 +66,11 @@ PUBLIC_BY_DESIGN = {
     # Verifies the Clerk JWT directly; the invitee may not be a member of any
     # workspace yet (api/team.py public_router, dossier §B).
     ("POST", "/api/team/accept-invitation"),
+    # PRD-266 §4.3 (AGENTS.md exception 1, approved 20 Oct 2026, #1253): a phone has no
+    # account yet, so the one-time code a workspace admin minted is its only credential.
+    # 404 unless AUTH_EDITION=local and LOCAL_REMOTE_ACCESS=paired; rate-limited per IP
+    # before the code is read (api/mobile_devices.py).
+    ("POST", "/api/v1/mobile/pair"),
 }
 
 # (d) Own non-hybrid auth. Structurally enforced below: none of these may
@@ -85,6 +92,11 @@ OWN_AUTH_ROUTES = {
     # transport contract) authenticated by the minted call_id — WS routes never
     # appear in this HTTP manifest.
     ("POST", "/api/voice/retell/events"),
+    # PRD-265 US-010: Stripe's webhook (api/billing_webhooks.py) — its credential is
+    # the Stripe-Signature HMAC over the raw body (STRIPE_WEBHOOK_SECRET, 5-minute
+    # tolerance, fail-closed 400/503), NOT the shared hybrid dependency: Stripe is
+    # not a signed-in person.
+    ("POST", "/api/v1/billing/webhooks/stripe"),
     # Shopify machine lane — _verify_internal_key shared-secret auth
     # (api/verticals.py provisioning + GDPR forwarding rides the same key).
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),
@@ -96,6 +108,11 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/shopify/events"),
     ("POST", "/api/shopify/provision"),
     ("POST", "/api/shopify/sync"),
+    # PRD-261 theme publish (api/marketplace_themes_publish.py): the Design Kit's publish job's
+    # bearer key, checked by require_publish_key against THEME_PUBLISH_KEY_SHA256 (sha256 +
+    # hmac.compare_digest, 503 fail-closed while unset), never the shared hybrid dependency; it may
+    # only list, approve and sign versions under THEME_PUBLISH_PUBLISHERS, as THEME_PUBLISH_ACTOR.
+    ("POST", "/api/marketplace/themes/publish"),
     # Widget SDK plane — its own key auth (api/widgets/auth.py widget_auth +
     # require_permission, empty=deny since S1).
     ("POST", "/api/widgets/api/widget/documents/search"),
@@ -182,6 +199,27 @@ ADMIN_GATED_IN_HANDLER = {
     ("POST", "/api/admin/themes/{package_id}/reject"),
     ("POST", "/api/admin/themes/{package_id}/report-note"),
     ("POST", "/api/admin/themes/{package_id}/signature"),
+    # PRD-261 C-05e/C-05h (C3-wire): theme revocations, platform-wide. Create and lift
+    # (api/admin_theme_revocations.py) call `_require_admin(ctx)` (`caller_is_admin`) first in
+    # the handler, behind the same admin check run as a dependency before a fresh step-up
+    # (`require_revocation_admin`); the local edition's Check now
+    # (api/admin_theme_revocation_sync.py) calls `_require_admin(ctx)` first, no step-up.
+    ("POST", "/api/admin/themes/revocations"),
+    ("POST", "/api/admin/themes/revocations/{revocation_id}/lift"),
+    ("POST", "/api/admin/themes/revocations/sync/pull"),
+    # PRD-265 US-007: grant/take-back a workspace's credits
+    # (api/admin_credits.py adjust_workspace_credits) — platform-admin gate in
+    # the handler body (`_require_platform_admin(ctx)` -> `caller_is_admin`,
+    # 403), not a shared dependency. Also GET /api/v1/billing/summary|ledger
+    # (api/billing.py) carry the credit read surface — both are GET-only, so
+    # the mutating-routes sweep below does not classify them.
+    ("POST", "/api/admin/workspaces/{workspace_id}/credits"),
+    # PRD-265 US-007 (W2 v2): a Business offer for one workspace, bought on the
+    # owner's own in-page Billing tab — no portal, no link (api/admin_credits.py
+    # create_business_invite) — the same in-handler `_require_platform_admin(ctx)`
+    # gate. POST /api/v1/billing/checkout and the api/billing_manage.py routes
+    # carry `require_workspace_admin` and classify as workspace-admin on their own.
+    ("POST", "/api/admin/workspaces/{workspace_id}/business-invite"),
 }
 
 # (g) Own explicit in-handler gate.
@@ -193,6 +231,24 @@ OWN_GATE_IN_HANDLER = {
     # armed creds, workspace toggle, cap, and a strict signed-in-user resolve
     # (403 "Live voice requires a signed-in user"); not a shared dependency.
     ("POST", "/api/voice/web-call"),
+    # PRD-266 §4.3 (api/mobile_devices.py): a device belongs to a PERSON, so no workspace
+    # permission or admin dependency fits. Each handler gates through ``_caller(db, ctx…)``
+    # (404 without a workspace, 403 when no person stands behind the caller), and
+    # services.mobile.devices confines the write to that person's devices in the caller's
+    # workspace: any other device, another workspace's included, is 404.
+    # register: device token or Clerk lane only (REGISTRAR_AUTH_TYPES, else 403); its own row.
+    ("POST", "/api/v1/mobile/devices"),
+    # update: the device's person only (devices._owned).
+    ("PATCH", "/api/v1/mobile/devices/{device_id}"),
+    # revoke: the device's person, or a workspace owner/admin (may_see_own_workspace_health).
+    ("DELETE", "/api/v1/mobile/devices/{device_id}"),
+    # rotate: the device lane on its own device, presenting its current token (else 404/409).
+    ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
+    # digest now (api/mobile_push.py _digest_asker): today's brief for the CALLER only, into
+    # their own Auto thread. 404 without a workspace, 403 when no person stands behind the
+    # caller or the person isn't a current member (services.mobile.digest.belongs, the
+    # scheduled digest's own read); the body names nobody. One per person per interval.
+    ("POST", "/api/v1/mobile/digest/now"),
 }
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
@@ -344,6 +400,8 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
             buckets.append("su-locked")
         if rec["wsadmin"]:
             buckets.append("workspace-admin")
+        if rec["wsanswer"]:
+            buckets.append("workspace-answerer")
         if key in OWN_AUTH_ROUTES:
             buckets.append("own-auth")
         if key in PUBLIC_BY_DESIGN:

@@ -13,8 +13,11 @@
  * actions (SocialsPostReview).
  * Wave 3 (US-308): scheduling and publishing (SocialsPublishControls) and each
  * channel's receipt, with Retry for the ones that failed (SocialsPostReceipts).
+ * P256-FIX-SOC-5 (F437): a rendering post says when its render started and when it gives up
+ * (the server's `render`), and a plan's draft that waits for you says what it waits for.
  */
 import { useEffect, useState } from 'react'
+import { format } from 'date-fns'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -30,6 +33,10 @@ import { SocialsApprovalResetBanner, SocialsPostHistory } from './socials-post-h
 import { SocialsPostReview } from './socials-post-review'
 import { SocialsPostReceipts } from './socials-post-receipts'
 import { SocialsPublishControls } from './socials-publish-controls'
+import { inputAsked, waitsForInput } from './studio/queue-model'
+
+/** What a rendering post says when the server gives no start time. */
+export const RENDERING_NOTE = 'Rendering. This can take a few minutes; the post moves to Needs approval when it is done.'
 
 interface SocialsPostDetailProps {
   post: SocialPost
@@ -43,14 +50,29 @@ function lastRenderFailure(post: SocialPost): string | null {
   return entry?.comment ?? null
 }
 
+/** P256-FIX-SOC-5: "Rendering. Started 16:22; it gives up at 16:47 if it has not finished.", in local time. */
+export function renderingLine(post: Pick<SocialPost, 'render'>): string {
+  const started = post.render?.started_at ? new Date(post.render.started_at) : null
+  const givesUp = post.render?.gives_up_at ? new Date(post.render.gives_up_at) : null
+  if (!started || !givesUp || Number.isNaN(started.getTime()) || Number.isNaN(givesUp.getTime())) return RENDERING_NOTE
+  return `Rendering. Started ${format(started, 'HH:mm')}; it gives up at ${format(givesUp, 'HH:mm')} if it has not finished.`
+}
+
+/** P256-FIX-SOC-5: what a plan's draft that waits for you waits for (SOC-2's `needs_input`), else null. */
+export function waitingLine(post: Pick<SocialPost, 'status' | 'review_log'>): string | null {
+  return waitsForInput(post) ? `Waiting for you: ${inputAsked(post)}` : null
+}
+
 function RenderNotices({ post }: { post: SocialPost }) {
   const renderFailure = lastRenderFailure(post)
+  const waiting = waitingLine(post)
   return (
     <>
       {post.status === 'rendering' && (
-        <p className="text-sm text-muted-foreground" role="status">
-          Rendering. This can take a few minutes; the post moves to Needs approval when it is done.
-        </p>
+        <p className="text-sm text-muted-foreground" role="status">{renderingLine(post)}</p>
+      )}
+      {waiting && (
+        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground" role="alert">{waiting}</p>
       )}
       {renderFailure && (
         <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">

@@ -5,8 +5,10 @@ Two duties on a live call, both kept by ``live_socket.LiveCallSocket``:
 * **Auto speaks first, and says it is an AI.** The begin frame (response 0)
   carries the greeting. Retell speaks the content of response 0 as the call's
   opening line, so it is never empty.
-* **Reminders in a longer call.** After an automatic reconnect, and every
-  ``config.VOICE_AI_REMINDER_MINUTES`` of call time, the next response opens
+* **Reminders, only when a deployment asks for them.** The notice is once per
+  call (the product owner's policy, 23 Oct 2026): ``VOICE_AI_REMINDER_MINUTES``
+  is 0 by default, and 0 or less never reminds. Above 0, after an automatic
+  reconnect and every that many minutes of call time, the next response opens
   with "Just so you know, I'm an AI assistant." This module holds that rule,
   its setting and the reconnect state.
 
@@ -45,17 +47,25 @@ REMINDER_SEPARATOR = " "
 
 
 def reminder_interval_seconds() -> float:
-    """``VOICE_AI_REMINDER_MINUTES`` in seconds (0 or less: every response)."""
+    """``VOICE_AI_REMINDER_MINUTES`` in seconds (0 or less: reminders are off)."""
     return float(config.VOICE_AI_REMINDER_MINUTES) * SECONDS_PER_MINUTE
+
+
+def reminders_on() -> bool:
+    """Whether this deployment reminds at all: ``VOICE_AI_REMINDER_MINUTES`` above 0."""
+    return reminder_interval_seconds() > 0
 
 
 def reminder_due(*, reconnected: bool, last_notice_at: float, now: float) -> bool:
     """Whether Auto's next spoken response opens with the reminder.
 
-    After an automatic reconnect, and once ``VOICE_AI_REMINDER_MINUTES`` of
-    call time have passed since the caller last heard that Auto is an AI. An
-    interval of 0 or less reminds on every response: the reminder never turns off.
+    Never while reminders are off (the default: the greeting is the call's one
+    notice). When they are on: after an automatic reconnect, and once
+    ``VOICE_AI_REMINDER_MINUTES`` of call time have passed since the caller last
+    heard that Auto is an AI.
     """
+    if not reminders_on():
+        return False
     if reconnected:
         return True
     return now - last_notice_at >= reminder_interval_seconds()

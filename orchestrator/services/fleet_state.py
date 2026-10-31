@@ -53,9 +53,9 @@ lane is the ``llm_usage`` table (:class:`core.models.core.LLMUsage`) — the sam
 source the credit/usage/billing surfaces read (``api/llm_analytics.py`` and
 ``api/kpi_api.py`` both aggregate ``func.sum(LLMUsage.total_cost)`` filtered by
 ``workspace_id`` + ``created_at``). ``agent.model_usage_stats`` is an explicit
-*fallback* written by the same tracker, not a rival store; ``trial_ledger`` is a
-platform-wide daily counter, not per-workspace. We reuse ``llm_usage`` directly;
-no new cost store is introduced.
+*fallback* written by the same tracker, not a rival store; the credit ledger
+(``services/credits``, PRD-265) records charges, not this cost. We reuse
+``llm_usage`` directly; no new cost store is introduced.
 """
 from __future__ import annotations
 

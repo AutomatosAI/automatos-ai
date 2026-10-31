@@ -370,6 +370,30 @@ export function describeSessionToolGap(gap: SessionToolGapEntry | null | undefin
   return sentences.join(' ')
 }
 
+/** PRD-256 F430: a gap that names a tool a session cannot use is said in the warning tone. */
+export const GAP_NOTE_CLASS = 'text-xs text-muted-foreground'
+export const GAP_WARNING_CLASS = 'text-xs text-[hsl(var(--warning))]'
+
+export interface SessionGapLine {
+  line: string
+  /** the skill calls a tool no session of this agent has: work it will fail at, not just name differently */
+  cannotUse: boolean
+}
+
+/**
+ * Each skill gap's line, and whether it names a tool the agent's sessions cannot use
+ * (F430: the Director's "cannot use" lines read as muted help while its posts failed).
+ * Lines with nothing to say are dropped. Pure.
+ */
+export function sessionGapLines(gaps: SessionToolGapEntry[] | null | undefined): SessionGapLine[] {
+  return (Array.isArray(gaps) ? gaps : []).flatMap((gap) => {
+    const line = describeSessionToolGap(gap)
+    const raw = gap?.kind === 'workspace' ? [] : gap?.tools
+    const cannotUse = (Array.isArray(raw) ? raw : []).some((name) => str(name).trim())
+    return line ? [{ line, cannotUse }] : []
+  })
+}
+
 /**
  * The tools a session may call, from the session-mode settings. [] until the
  * backend answers, on an older backend that does not carry the field, and when
@@ -483,9 +507,7 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
   const sessionTools = useSessionTools(sessionMode)
   // #942: the agent's session tool groups and the workspace gaps of the selection on screen.
   const toolPreview = useSessionToolPreview(useConfiguredAgentId(), value.cli_session_tool_groups, sessionMode)
-  const gapLines = (Array.isArray(sessionToolGaps) ? sessionToolGaps : [])
-    .map((gap) => describeSessionToolGap(gap))
-    .filter(Boolean)
+  const gapLines = sessionGapLines(sessionToolGaps)
   const provider = value.cli_provider || DEFAULT_CLI_PROVIDER
   const options = providerOptions(avail, provider)
   const entry = avail?.registry.find((e) => e.id === provider) ?? null
@@ -561,8 +583,9 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
           {/* PRD-245 S1.5: what this agent's own skills ask for that a session works differently on. */}
           {gapLines.length > 0 && (
             <div className="space-y-1" data-testid="session-tool-gaps">
-              {gapLines.map((line, index) => (
-                <p key={`${index}-${line}`} className="text-xs text-muted-foreground">
+              {gapLines.map(({ line, cannotUse }, index) => (
+                <p key={`${index}-${line}`} className={cannotUse ? GAP_WARNING_CLASS : GAP_NOTE_CLASS}
+                  data-tone={cannotUse ? 'warning' : 'note'}>
                   {line}
                 </p>
               ))}

@@ -8,6 +8,12 @@
   from five named variables to every entry: the frontend (3000), Adminer and
   Gotenberg had slipped through on all interfaces, and a visitor on the network
   could chat with the backend as the owner through the web app's chat proxy.
+  PRD-266 US-005a (K10): the backend may publish only on
+  ``${API_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}`` and the frontend only on
+  ``${WEB_PUBLISH_ADDRESS:-${BIND_ADDRESS:-127.0.0.1}}``, each defaulting to BIND and so
+  to loopback; every other service (the datastores) keeps exactly BIND and can never
+  follow a publish variable. The backend's boot check (``services.mobile.remote_access``)
+  then refuses a published install unless ``LOCAL_REMOTE_ACCESS`` says who may call it.
 * the fresh-clone smoke lane proves the same at run time
   (``docker compose port frontend 3000`` must print ``127.0.0.1:3000``).
 * the pairing token can never be an empty default (the ``WORKER_INTERNAL_TOKEN=""``
@@ -42,13 +48,21 @@ LOOPBACK_SH = REPO / "scripts" / "ci" / "smoke-loopback-ports.sh"
 SMOKE_YML = REPO / ".github" / "workflows" / "smoke-fresh-clone.yml"
 
 BIND = "${BIND_ADDRESS:-127.0.0.1}"
+# PRD-266 (K10): the API's and the web app's own publish variables, each defaulting to BIND.
+API_PUBLISH = "${API_PUBLISH_ADDRESS:-" + BIND + "}"
+WEB_PUBLISH = "${WEB_PUBLISH_ADDRESS:-" + BIND + "}"
+# The one service each publish variable may appear on; every other service publishes on BIND.
+_PUBLISH_HOST = {"backend": API_PUBLISH, "frontend": WEB_PUBLISH}
 # Compose file names: docker-compose*.yml and compose*.yml, stack files and overrides alike.
 _COMPOSE_NAME = re.compile(r"(?:^|/)(?:docker-)?compose(?:[.-][^/]*)?\.ya?ml$")
-# Short syntax: BIND, then an optional host port (a number, a range or ${VAR:-n}), then
-# the container port with an optional protocol.
+# Short syntax: the service's host address, then an optional host port (a number, a range
+# or ${VAR:-n}), then the container port with an optional protocol.
 _HOST_PORT = r"(?:\$\{[A-Z][A-Z0-9_]*(?::-\d+)?\}|\d+(?:-\d+)?)?"
 _CONTAINER_PORT = r"\d+(?:-\d+)?(?:/(?:tcp|udp|sctp))?"
-_SHORT_SYNTAX = re.compile("^" + re.escape(BIND) + ":" + _HOST_PORT + ":" + _CONTAINER_PORT + "$")
+
+
+def _short_syntax(host: str) -> "re.Pattern[str]":
+    return re.compile("^" + re.escape(host) + ":" + _HOST_PORT + ":" + _CONTAINER_PORT + "$")
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -87,23 +101,28 @@ def _published_ports(path: Path) -> list[tuple[str, object]]:
     ]
 
 
-def _bind_violation(entry: object) -> str | None:
-    """Why a ``ports:`` entry would listen beyond this machine; None when it is bound to BIND."""
+def _bind_violation(entry: object, service: str | None = None) -> str | None:
+    """Why a ``ports:`` entry would listen beyond this machine; None when it is bound to the
+    service's host: its own publish variable for the backend and the frontend, BIND for
+    every other service (and when no service is named)."""
+    host = _PUBLISH_HOST.get(service, BIND)
     if isinstance(entry, dict):
         host_ip = entry.get("host_ip")
-        return None if host_ip == BIND else f"host_ip is {host_ip!r}, expected {BIND!r}"
-    if isinstance(entry, str) and _SHORT_SYNTAX.match(entry):
+        return None if host_ip == host else f"host_ip is {host_ip!r}, expected {host!r}"
+    if isinstance(entry, str) and _short_syntax(host).match(entry):
         return None
-    return f"{entry!r} does not publish on {BIND}:<host port>:<container port>"
+    return f"{entry!r} does not publish on {host}:<host port>:<container port>"
 
 
 def test_every_published_port_listens_on_bind_address():
-    """PRD-262 US-005: every ``ports:`` entry of every service, in every compose file."""
+    """PRD-262 US-005: every ``ports:`` entry of every service, in every compose file.
+    PRD-266 K10: the backend and the frontend on their own publish variable, every other
+    service on BIND exactly."""
     offenders = [
         f"{path.relative_to(REPO)} · {service}: {reason}"
         for path in _compose_files()
         for service, entry in _published_ports(path)
-        if (reason := _bind_violation(entry))
+        if (reason := _bind_violation(entry, service))
     ]
     assert not offenders, "ports that listen beyond this machine:\n" + "\n".join(offenders)
 
@@ -111,11 +130,14 @@ def test_every_published_port_listens_on_bind_address():
 def test_the_port_check_reads_the_stack_it_guards():
     """Non-vacuity: a discovery or parse that found no ports would pass the test above
     for nothing. The canonical file is found, its core services publish, and the
-    frontend line this story fixed is the one compose reads."""
+    frontend line this story fixed is the one compose reads (PRD-266: on its own publish
+    variable, as the backend's is)."""
     assert COMPOSE in _compose_files()
     ports = _published_ports(COMPOSE)
     assert {"frontend", "backend", "postgres", "redis", "minio"} <= {svc for svc, _ in ports}
-    assert ("frontend", BIND + ":${FRONTEND_PORT:-3000}:3000") in ports
+    assert ("frontend", WEB_PUBLISH + ":${FRONTEND_PORT:-3000}:3000") in ports
+    assert ("backend", API_PUBLISH + ":${API_PORT:-8000}:8000") in ports
+    assert ("postgres", BIND + ":${POSTGRES_PORT:-5432}:5432") in ports
 
 
 @pytest.mark.parametrize(
@@ -151,6 +173,46 @@ def test_the_port_check_accepts_a_bind_address_publish(entry):
     assert _bind_violation(entry) is None
 
 
+@pytest.mark.parametrize(
+    "service,entry",
+    [
+        ("backend", "${API_PUBLISH_ADDRESS:-0.0.0.0}:8000:8000"),
+        ("backend", "${API_PUBLISH_ADDRESS}:8000:8000"),  # no default
+        ("backend", "${API_PUBLISH_ADDRESS:-127.0.0.1}:8000:8000"),  # ignores BIND
+        ("backend", "${API_PUBLISH_ADDRESS:-${BIND_ADDRESS:-0.0.0.0}}:8000:8000"),
+        ("backend", "0.0.0.0:8000:8000"),
+        ("backend", WEB_PUBLISH + ":8000:8000"),  # the web app's variable
+        ("backend", {"target": 8000, "published": 8000, "host_ip": "${API_PUBLISH_ADDRESS:-0.0.0.0}"}),
+        ("frontend", "${WEB_PUBLISH_ADDRESS:-0.0.0.0}:3000:3000"),
+        ("frontend", API_PUBLISH + ":3000:3000"),  # the API's variable
+        ("postgres", API_PUBLISH + ":${POSTGRES_PORT:-5432}:5432"),
+        ("postgres", WEB_PUBLISH + ":5432:5432"),
+        ("redis", API_PUBLISH + ":6379:6379"),
+        ("minio", {"target": 9000, "published": 9000, "host_ip": WEB_PUBLISH}),
+        ("qdrant", API_PUBLISH + ":6333:6333"),
+        ("adminer", WEB_PUBLISH + ":8080:8080"),
+        ("searxng", API_PUBLISH + ":8888:8080"),
+    ],
+)
+def test_the_port_check_refuses_a_publish_variable_off_its_service_or_its_default(service, entry):
+    """PRD-266 K10: each publish variable only on its own service, and only with BIND
+    (and so loopback) as its default; a datastore never follows one."""
+    assert _bind_violation(entry, service)
+
+
+@pytest.mark.parametrize(
+    "service,entry",
+    [
+        ("backend", API_PUBLISH + ":${API_PORT:-8000}:8000"),
+        ("frontend", WEB_PUBLISH + ":${FRONTEND_PORT:-3000}:3000"),
+        ("backend", {"target": 8000, "published": "${API_PORT:-8000}", "host_ip": API_PUBLISH}),
+        ("postgres", BIND + ":${POSTGRES_PORT:-5432}:5432"),
+    ],
+)
+def test_the_port_check_accepts_each_publish_variable_on_its_own_service(service, entry):
+    assert _bind_violation(entry, service) is None
+
+
 def test_the_smoke_lane_asserts_the_frontend_listens_on_loopback():
     """US-005's run-time half: once the frontend answers, the fresh-clone smoke runs
     smoke-loopback-ports.sh, which requires ``docker compose port frontend 3000`` to
@@ -158,7 +220,12 @@ def test_the_smoke_lane_asserts_the_frontend_listens_on_loopback():
     address. A failed check fails the smoke (``fail`` exits 1 through the report trap)."""
     smoke = SMOKE_SH.read_text(encoding="utf-8")
     assert re.search(r'bash scripts/ci/smoke-loopback-ports\.sh "\$COMPOSE_FILE" \\\n\s+\|\| fail ', smoke)
-    assert re.search(r"^\s+boot_frontend\n\s+check_loopback_ports$", smoke, re.M), "runs once the frontend is up"
+    # Runs once the frontend is up. Other steps may sit between the two since PRD-262
+    # US-036 (make up's exit) and US-037/US-038 (checks of what make up left behind).
+    main = re.search(r"^main\(\) \{\n(.*?)^\}", smoke, re.M | re.S).group(1)
+    steps = [line.strip() for line in main.splitlines()]
+    assert "boot_frontend" in steps and "check_loopback_ports" in steps
+    assert steps.index("boot_frontend") < steps.index("check_loopback_ports"), "runs once the frontend is up"
     check = LOOPBACK_SH.read_text(encoding="utf-8")
     assert 'LOOPBACK="127.0.0.1"' in check
     assert 'FRONTEND_EXPECTED="${LOOPBACK}:${FRONTEND_PORT:-3000}"' in check

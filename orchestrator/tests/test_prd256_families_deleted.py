@@ -293,8 +293,9 @@ def test_the_in_loop_check_and_the_first_reply_read_the_receipts_rule():
     check = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
     # RVW-7: the run's voice; P256-FIX-N15-1: the claim is taken out in place, never nudged (N15-2: claims_in_place)
     assert "return in_place(self, current)" in check
-    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
-        claims_in_place.in_place)
+    in_place = inspect.getsource(claims_in_place.in_place)        # N17-5: and whether the turn read before the loop
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises," in in_place
+    assert 'read_ahead=getattr(loop, "read_ahead", False))' in in_place
     assert "claims_work_done(response.content)" in inspect.getsource(
         StreamingChatService._first_reply_goes_through_the_loop)
 

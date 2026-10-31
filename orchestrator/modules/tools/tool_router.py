@@ -30,6 +30,8 @@ from modules.tools.registry import ToolCategory, get_tool_registry as registry_g
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.execution.card_raised import holds_the_signal, signals_unless_it_asked, the_model_reads_the_card
 from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
+from modules.tools.discovery.owner_only import the_card_decides
+from modules.tools.execution.owner_reasons import OWNER_REASON, intent_gate_error, intent_refused
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
@@ -2094,12 +2096,10 @@ async def execute_tool_with_validation(
         if not action_id and tool_name.startswith("composio_") and tool_name != "composio_execute":
             action_id = tool_name.replace("composio_", "")
 
-        if action_id:
-            eligible, reason = validate_action_for_intent(
-                action_id=action_id,
-                intent=original_intent,
-                allow_destructive=allow_destructive
-            )
+        # F459 (night 18): in a person's chat a send is decided by their click on its card, not their words.
+        if action_id and not the_card_decides(action_id, the_callers_context()):
+            eligible, reason = validate_action_for_intent(action_id=action_id, intent=original_intent,
+                                                          allow_destructive=allow_destructive)
 
             if not eligible:
                 logger.warning(
@@ -2108,11 +2108,10 @@ async def execute_tool_with_validation(
                 )
                 return {
                     "success": False,
-                    "error": f"Action not allowed for this intent: {reason}",
-                    "error_type": "validation_blocked",
-                    "blocked_by": "capability_validation",
-                    "action_id": action_id,
-                    "intent": original_intent[:100]
+                    "error": intent_gate_error(action_id, reason),  # F459: the gate's, never the app's
+                    "error_type": "validation_blocked", "blocked_by": "capability_validation",
+                    OWNER_REASON: intent_refused(action_id),  # P256-FIX-N17-10 (F449): what the owner reads
+                    "action_id": action_id, "intent": original_intent[:100],
                 }
 
     # Proceed with normal execution, in the router call's context: the owner's-click gate reads it (P256-FIX-RVW-2)

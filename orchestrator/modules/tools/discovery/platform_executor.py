@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Union
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -93,8 +93,8 @@ from modules.tools.discovery.handlers_monitoring import (
     get_alerts,
     get_system_health,
 )
+from modules.tools.discovery.chat_history_read import search_chat_history  # N17-11 (F443): by words or window
 from modules.tools.discovery.handlers_search import (
-    search_chat_history,
     search_memory,
     browse_memories,
     delete_memory,
@@ -137,9 +137,11 @@ from modules.tools.discovery.handlers_board_task_review import create_board_task
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 US-004: the owner's click
 from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
+from modules.tools.discovery.check_in_lane import carries_the_check_in, reads_only_in_a_check_in  # PRD-268 US-C02b/C03b
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
+from modules.tools.execution.owner_reasons import NO_SUCH_ACTION, SENT_WRONG, refused  # F449
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     get_board_task,
@@ -169,6 +171,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
     harness_history,
+    harness_apply,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
 from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
@@ -211,6 +214,17 @@ from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
     cancel_watch,
 )
 from modules.tools.discovery.handlers_fleet import fleet_status  # PRD-228
+from modules.tools.discovery.handlers_proactive import suggest_next_step  # PRD-268 US-C03b
+from modules.tools.discovery.mission_person import person_for_mission as _person_for_mission  # F166, moved (K3)
+from modules.tools.discovery.ask_orchestrator_binding import (  # P229-RVW-2, moved (K3)
+    bind_ask_orchestrator_context as _bind_ask_orchestrator_context,
+)
+from modules.tools.discovery.handlers_brief import carries_the_brief_caller, get_brief  # PRD-268 US-C19d
+from modules.tools.discovery.handlers_follow_ups import cancel_follow_up, list_follow_ups, schedule_follow_up  # US-C11c
+from modules.tools.discovery.follow_up_context import carries_the_follow_up  # PRD-268 US-C11c
+from modules.tools.discovery.handlers_replies import offer_replies  # PRD-268 US-C12a
+from services.board_consent import OPERATOR_CONSENT_ACTIONS  # PRD-234 D16, moved (K3)
+from modules.tools.discovery.super_admin_caller import caller_is_super_admin as _caller_is_super_admin  # moved (K3)
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -287,7 +301,7 @@ from modules.tools.discovery.handlers_socials import (  # PRD-251 US-116; PRD-25
     submit_social_post,
     get_social_history,
     get_social_post,
-    get_social_plan,
+    get_social_plan, get_social_plan_slots,  # P256-FIX-SOC-5: why a plan's slot is empty
     list_social_posts,
 )
 
@@ -357,51 +371,8 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
     "platform_my_actions", "platform_browse_memories", "platform_delete_memory", "platform_search_chat_history",  # N14-3/4, N15-4: the asker's chats, clicks, rules
+    "platform_get_task",   # N17-6 (F445): the card's send-backs, on the owner's own turn only
 )
-
-
-# PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
-# driving human so the local edition can record consent before dispatch.
-# platform_schedule_task joins them (calendar): a scheduled board ticket is
-# filed at fire time, and the operator who scheduled it is that consent.
-OPERATOR_CONSENT_ACTIONS = (
-    "platform_create_task",
-    "platform_assign_task",
-    "platform_update_task",
-    "platform_update_task_status",
-    "platform_schedule_task",
-)
-
-
-def _person_for_mission(db, caller_context: Optional[Dict[str, Any]]) -> Optional[str]:
-    """F166: who a mission action is made for, as the mission records it — the
-    chat's Clerk id, or on the local edition (no Clerk id) the person's email, read
-    from the server-threaded ``driving_user_id``. The email is what the local REST
-    API records (``created_by = ctx.user.id``). Never the bare ``users.id``: a digit
-    string in ``created_by`` is already an agent id wherever no person drove the
-    action. A widget turn is made for nobody (F155); an unreadable user is nobody."""
-    from core.security.driving_user import driving_user_id
-    from core.security.surface import widget_turn
-
-    if widget_turn():
-        return None
-    ctx = caller_context if isinstance(caller_context, dict) else {}
-    if ctx.get("user_id"):
-        return str(ctx["user_id"])
-    user = driving_user_id(ctx)
-    if user is None:
-        return None
-    try:
-        from core.models.core import User
-
-        with db.begin_nested():  # a failed lookup never poisons the caller's transaction
-            row = db.query(User.email).filter(User.id == user).first()
-    except Exception:  # noqa: BLE001 — fails closed: nobody, so F036 still leaves it to the owner
-        logger.warning("[PlatformExecutor] no email for driving user %s — the call is made for nobody", user,
-                       exc_info=True)
-        return None
-    email = str(row[0] or "").strip() if row else ""
-    return email or None
 
 
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
@@ -477,67 +448,6 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
     from core.security.driving_user import driver_is_workspace_admin
 
     return driver_is_workspace_admin(db, workspace_id, ctx)
-
-
-def _caller_is_super_admin(caller_context: Optional[Dict[str, Any]]) -> bool:
-    """PRD-143's super-admin predicate: only a literal system_role ==
-    'super_admin' passes. There is no fallback, and no caller_context refuses.
-    The gate and platform_list_tools' listing (F122) both read this one. A
-    public widget turn never passes, whatever its context names (F155)."""
-    from core.security.surface import widget_turn
-
-    if widget_turn():
-        return False
-    return (caller_context or {}).get("system_role") == "super_admin"
-
-
-def _bind_ask_orchestrator_context(
-    params: Dict[str, Any],
-    caller_context: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """Bind ``platform_ask_orchestrator`` to the SERVER-threaded clarification
-    subject, never a tool parameter (P229-RVW-2).
-
-    STRIP any client/LLM-supplied ``_run_id`` / ``_task_id`` / ``_field_id`` FIRST
-    — mirroring the ``_agent_id`` hardening in ``exec_platform`` — THEN inject the
-    server ``field_context`` values. A prompt-injected tool call therefore cannot
-    smuggle a FOREIGN task id past the binding: with an empty field_context (the
-    non-mission lanes — channels, webhooks, board, scheduled — where
-    agent_factory defaults the mode to TASK_EXECUTION but threads no run) the keys
-    stay ABSENT and the handler fails closed to proceed-with-assumption; with a
-    real field_context only the server values survive. Rebuild-don't-mutate.
-    """
-    bound = {
-        k: v for k, v in params.items()
-        if k not in ("_run_id", "_task_id", "_field_id")
-    }
-    fctx = (caller_context or {}).get("field_context") or {}
-    for src, dst in (("run_id", "_run_id"), ("task_id", "_task_id"), ("field_id", "_field_id")):
-        val = fctx.get(src)
-        if val is not None:
-            bound[dst] = val
-    return bound
-
-
-# Params that identify WHAT an action will act on, in the order a person reads them. An approval
-# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
-# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
-_SUBJECT_PARAMS: Tuple[str, ...] = (
-    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
-    "report_id", "id", "app_name", "query", "playbook_name",
-)
-
-
-def _subject_line(params: Dict[str, Any]) -> str:
-    """" on <what this will act on>", or "" when nothing identifies it."""
-    if not isinstance(params, dict):
-        return ""
-    named = [
-        f"{key}={params[key]!r}"
-        for key in _SUBJECT_PARAMS
-        if params.get(key) not in (None, "", [], {})
-    ]
-    return f" on {', '.join(named[:3])}" if named else ""
 
 
 # F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the full-autonomy dial.
@@ -717,6 +627,7 @@ class PlatformActionExecutor:
             )
             return False
 
+    @reads_only_in_a_check_in  # PRD-268 US-C02b: a check-in clears only what reads, before any gate
     @asks_at_the_confirmation_gate  # PRD-193 S1/S2, last: a grant on this exact call, or the ask
     def clear(
         self,
@@ -863,6 +774,9 @@ class PlatformActionExecutor:
     @answers_the_question_first  # F381 (night 11): a how-to question changes no agent, tool, task or setting
     @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
     @carries_the_session_ticket  # PRD-255 US-012: the session's ticket, server-side, to the tools that write there
+    @carries_the_check_in  # PRD-268 US-C03b: the check-in's run and reads, server-side, to the suggestion tool
+    @carries_the_follow_up  # PRD-268 US-C11c: the chat's own person and chat, server-side, to the follow-up tools
+    @carries_the_brief_caller  # PRD-268 US-C19d: the chat's own person and language, server-side, to get_brief
     async def execute(
         self,
         action_name: str,
@@ -890,10 +804,10 @@ class PlatformActionExecutor:
             try:
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
-                return {"success": False, "error": f"Invalid params format: expected dict, got string"}
+                return refused("Invalid params format: expected dict, got string", SENT_WRONG)  # F449
         handler = self._handlers.get(action_name)
         if not handler:
-            return {"success": False, "error": f"Unknown platform action: {action_name}"}
+            return refused(f"Unknown platform action: {action_name}", NO_SUCH_ACTION)  # F449
 
         # F179: the gates a call clears are one method, so the workspace tools
         # clear the same ones.
@@ -1301,7 +1215,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_get_social_post": get_social_post,
     "platform_list_social_posts": list_social_posts,
     # PRD-251B (US-B204): a plan's content bank, for the research playbook. Draft-only.
-    "platform_get_social_plan": get_social_plan,
+    "platform_get_social_plan": get_social_plan, "platform_get_social_plan_slots": get_social_plan_slots,  # P256-FIX-SOC-5
     "platform_add_social_topics": add_social_topics,
     "platform_get_social_history": get_social_history,  # PRD-251C US-C103: what the workspace posted
     "platform_get_workspace_info": get_workspace_info,
@@ -1440,6 +1354,12 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_cancel_watch": cancel_watch,
     # PRD-228: live floor read-model in one call
     "platform_fleet_status": fleet_status,
+    "platform_suggest_next_step": suggest_next_step,  # PRD-268 US-C03b: a check-in's one write
+    "platform_get_brief": get_brief,  # PRD-268 US-C19d: the person's Brief@1, in any chat
+    "platform_schedule_follow_up": schedule_follow_up,  # PRD-268 US-C11c: Auto keeps its word, chat only
+    "platform_list_follow_ups": list_follow_ups,  # PRD-268 US-C11c
+    "platform_cancel_follow_up": cancel_follow_up,  # PRD-268 US-C11c
+    "platform_offer_replies": offer_replies,  # PRD-268 US-C12a: reply chips, chat only
     # PRD-163 S1: mission lifecycle control
     "platform_approve_mission": approve_mission,
     "platform_reject_mission": reject_mission,
@@ -1477,6 +1397,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_harness_status": harness_status,
     "platform_harness_trigger": harness_trigger,
     "platform_harness_history": harness_history,
+    "platform_harness_apply": harness_apply,  # PRD-263 US-052: an owner-approved HARNESS change
     # PRD-142 Wave 4 (W4-S6): routing-rule creation
     "platform_create_routing_rule": create_routing_rule,
     # PRD-142 Wave 4 (W4-S5): workspace power-mode knob

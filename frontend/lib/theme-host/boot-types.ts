@@ -1,9 +1,9 @@
 /**
  * PRD-261 A-03 — the shape of a theme's first-paint data (plan §2.2), in a file of its own so
- * the modules that build a theme's prepaint table (lib/looks/prepaint.ts) can name the types
+ * the modules that read a theme's prepaint table (lib/theme-host/looks/**) can name the types
  * without loading the boot resolver. lib/theme-host/boot.ts re-exports every one of them.
  */
-import type { ThemeTonePolicy, UiStyle } from './registry-types'
+import type { SlotId, ThemeBase, ThemeNavItem, ThemeTonePolicy, UiStyle } from './registry-types'
 
 /** The tone next-themes is forced to from the first paint, when the theme sets one. */
 export type ThemeTone = 'light' | 'dark'
@@ -44,18 +44,31 @@ export interface PrepaintNumericRule {
 }
 
 /**
+ * PRD-261 A-19c (host 1.1.0) — the tone each choice of one choice knob gives a look
+ * (boot/prepaint.json `tone`), so a look runtime sets the tone from the look alone (A-19d2).
+ * The server refuses a rule whose knob is not a choice knob of the table or that leaves a
+ * choice without 'light' or 'dark' (css_value.py tone_rule_errors; css-value.ts toneRuleErrors).
+ */
+export interface PrepaintToneRule {
+  readonly knob: string
+  readonly values: Readonly<Record<string, ThemeTone>>
+}
+
+/**
  * Everything the boot script may paint for a look, keyed the way it reads a stored look: each
  * knob's table, the pair tables, the numeric rules, and the default look painted when nothing
- * valid is stored.
+ * valid is stored. `tone` (A-19c) is absent when the table sets no tone; the boot script never
+ * reads it.
  */
 export interface PrepaintTable {
   readonly knobs: Readonly<Record<string, PrepaintKnobTable>>
   readonly pairs: readonly PrepaintPair[]
   readonly numeric: readonly PrepaintNumericRule[]
   readonly defaults: Readonly<Record<string, string | number>>
+  readonly tone?: PrepaintToneRule
 }
 
-/** Where the boot script finds the cached active look (Play: lib/looks/storage.ts). */
+/** Where the boot script finds the cached active look (an installed theme's: lib/theme-host/looks/storage.ts). */
 export interface ThemeLookStorage {
   /** Holds the current scope; the scoped key is scopedPrefix + that scope. */
   readonly pointerKey: string
@@ -70,6 +83,46 @@ export interface ThemeLookGuard {
   readonly iface: string
 }
 
+/**
+ * PRD-261 A-19c — one preset as the boot carries it: a look document of the theme's format
+ * (`{schema, interface?, id, name, sub, <every knob>}`), checked by the server against the
+ * theme's looks/schema.json.
+ */
+export type ThemeBootPreset = Readonly<Record<string, string | number>>
+
+/**
+ * PRD-261 A-19c (host 1.1.0, plan §2.2.3) — a theme's presets, from its looks/presets/*.look.json:
+ * the default look first (`defaultLook` is its id), the rest in file-name order, at most
+ * BOOT_PRESETS_MAX of at most BOOT_PRESET_MAX_BYTES each (boot-sanitize.ts).
+ */
+export interface ThemeBootLooks {
+  readonly defaultLook: string
+  readonly presets: readonly ThemeBootPreset[]
+}
+
+/**
+ * PRD-261 W-A6b (gap G1) — what the theme registry needs of an installed theme that runs, as the
+ * backend's boot route answers it from the theme's checked theme.json (serve.py theme_entry).
+ * lib/theme-host/installed-entry.ts checks it (sanitizeInstalledEntry) and makes it the theme's
+ * registry entry (installedThemeEntry).
+ */
+export interface InstalledThemeEntryData {
+  /** The theme's id (theme.json `id`), which its looks are kept under, in this browser and on the server (W-A6b, G2). */
+  readonly themeId: string
+  readonly name: string
+  readonly base: ThemeBase
+  readonly htmlClass: string
+  /** The theme's own, from theme.json: the host draws the theme from this width up, the core's pages below it. */
+  readonly minWidth: number
+  readonly tone: ThemeTonePolicy
+  readonly reviewed: boolean
+  /** The core pages the theme draws (its theme.json `pages`). */
+  readonly ownsPages: readonly string[]
+  readonly routes: readonly string[]
+  readonly nav: readonly ThemeNavItem[]
+  readonly slots: readonly SlotId[]
+}
+
 export interface ThemeBoot {
   readonly addClasses: readonly string[]
   readonly removeClasses: readonly string[]
@@ -79,15 +132,13 @@ export interface ThemeBoot {
   readonly lookGuard: ThemeLookGuard | null
   /** Module URL → 'sha256-<base64>' for every module of the active theme (PA-13; filled by A-08c). */
   readonly integrity: Readonly<Record<string, string>> | null
-}
-
-/** A theme compiled into the app: its first-paint data, server-safe (no CSS, no client code). */
-export interface BuiltinThemeBootData {
-  readonly prepaint: PrepaintTable | null
-  readonly lookStorage: ThemeLookStorage | null
-  readonly lookGuard: ThemeLookGuard | null
-  /** The cookie the client writes the look's tone to, read on the server (PRD-260 K4); null: none. */
-  readonly toneCookie: string | null
+  /** An installed theme that runs: its registry entry's data (W-A6b). Null for every other boot. */
+  readonly entry: InstalledThemeEntryData | null
+  /**
+   * An installed theme that runs, with looks: its presets (A-19c). sanitizeThemeBoot always sets
+   * it, null for every other boot; a boot built in the app may leave it out.
+   */
+  readonly looks?: ThemeBootLooks | null
 }
 
 /** Reads one request cookie by name. */

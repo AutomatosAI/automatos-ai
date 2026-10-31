@@ -1,0 +1,5 @@
+{
+  "about": "The size budget for frontend/public, in bytes: the files git tracks or would track, so build-generated files the frontend .gitignore leaves out are not counted. scripts/check-public-assets.js fails frontend-ci when public/ is over it. Raise it only in the pull request that needs it, and say why in its reason.",
+  "max_bytes": 5900000,
+  "reason": "PRD-262 US-049; PRD-261 W-A8, 23 Oct 2026: public/ is 5,703,505 bytes in 1,159 files after builtin Play's mascot clips and stills left core (36 files, 4,261,671 bytes; Play's package ships them from the theme kit). The budget is that plus 2%, rounded up to 0.1 MB, the rule US-049 set (18 Oct: 10,600,000 for the logo diet). It still holds public/images, public/favicon_io and modal-fix.js (2.7 MB), which wait for the production database check of §9-Q12; the pull request that deletes them lowers this budget."
+}

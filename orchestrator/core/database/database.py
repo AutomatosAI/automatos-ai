@@ -97,6 +97,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # registered before any session begins (release_if_read_only relies on them).
 from core.database import read_release  # noqa: E402,F401
 
+# F458: when a checkout leaves the pool full, one WARNING names who holds it
+# (core/database/pool_watch.py; DB_POOL_FULL_LOG_SECONDS=0 attaches nothing).
+from core.database import pool_watch  # noqa: E402
+
+pool_holders = pool_watch.watch(engine)
+
 def create_tables():
     """Create all database tables"""
     try:

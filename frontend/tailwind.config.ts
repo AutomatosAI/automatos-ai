@@ -86,6 +86,9 @@ const config: Config = {
           DEFAULT: 'hsl(var(--info))',
           foreground: 'hsl(var(--info-foreground))',
         },
+        running: {
+          DEFAULT: 'hsl(var(--running))',
+        },
         agent: {
           DEFAULT: 'hsl(var(--agent))',
           foreground: 'hsl(var(--agent-foreground))',

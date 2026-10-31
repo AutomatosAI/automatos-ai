@@ -130,6 +130,35 @@ def parse_workspace_voice_live(settings: Optional[Dict[str, Any]]) -> WorkspaceV
     )
 
 
+def voice_live_plan_allows(plan: Optional[str]) -> bool:
+    """Whether ``plan`` may use Auto Live at all (D34's SaaS plan gate; the local edition
+    is never plan-gated) — delegates to the mint's own rule (``modules.voice.mint``, the
+    same module), so one rule decides it both at mint time and for the Settings switch.
+    """
+    from modules.voice.mint import plan_allows_voice_live
+
+    return plan_allows_voice_live(plan)
+
+
+def voice_live_state(workspace: Any) -> Dict[str, bool]:
+    """The ``voice_live`` block of ``GET /api/workspaces/current`` (mirrors
+    ``modules.socials.settings.socials_state``).
+
+    ``available`` is whether this workspace's plan may use Auto Live at all — not the
+    platform master switch or the Retell credentials, which an admin sets elsewhere
+    (Settings → System Settings → Voice), out of this workspace's control. ``enabled``
+    is the workspace's own switch, written through ``PUT /api/workspaces/current/voice-live``.
+    The Settings card reads only this: disabled with a plain reason while ``available``
+    is false, whatever the workspace stored.
+    """
+    settings = getattr(workspace, "settings", None) if workspace is not None else None
+    plan = getattr(workspace, "plan", None) if workspace is not None else None
+    return {
+        "available": voice_live_plan_allows(plan),
+        "enabled": parse_workspace_voice_live(settings).enabled,
+    }
+
+
 def validate_voice_live_update(value: Any) -> Dict[str, Any]:
     """Pure, fail-closed validation for a voice_live settings write.
 

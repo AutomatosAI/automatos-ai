@@ -60,6 +60,236 @@ interface MissionConstellationCardProps {
   onStart: () => void
 }
 
+interface ConstellationIds {
+  bgId: string
+  orbId: string
+  orbDimId: string
+  glowId: string
+}
+
+/** The traveling light pulses between orbs. */
+function ConstellationPulses() {
+  return (
+    <g fill="#fed7aa">
+      <circle r="2.2">
+        <animateMotion
+          dur="3.2s"
+          repeatCount="indefinite"
+          path={`M${ORB_BY_ID.a.cx} ${ORB_BY_ID.a.cy} Q 220 60 ${ORB_BY_ID.b.cx} ${ORB_BY_ID.b.cy}`}
+        />
+        <animate
+          attributeName="opacity"
+          values="0;1;1;0"
+          dur="3.2s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle r="2" fill="#fdba74">
+        <animateMotion
+          dur="4.1s"
+          begin="0.6s"
+          repeatCount="indefinite"
+          path={`M${ORB_BY_ID.e.cx} ${ORB_BY_ID.e.cy} Q 280 180 ${ORB_BY_ID.f.cx} ${ORB_BY_ID.f.cy}`}
+        />
+        <animate
+          attributeName="opacity"
+          values="0;1;1;0"
+          dur="4.1s"
+          begin="0.6s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle r="2" fill="#fed7aa">
+        <animateMotion
+          dur="3.6s"
+          begin="1.1s"
+          repeatCount="indefinite"
+          path={`M${ORB_BY_ID.c.cx} ${ORB_BY_ID.c.cy} Q 340 180 ${ORB_BY_ID.f.cx} ${ORB_BY_ID.f.cy}`}
+        />
+        <animate
+          attributeName="opacity"
+          values="0;1;1;0"
+          dur="3.6s"
+          begin="1.1s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle r="1.8" fill="#a5f3fc" opacity="0.7">
+        <animateMotion
+          dur="4.6s"
+          begin="0.3s"
+          repeatCount="indefinite"
+          path={`M${ORB_BY_ID.d.cx} ${ORB_BY_ID.d.cy} Q 180 240 ${ORB_BY_ID.e.cx} ${ORB_BY_ID.e.cy}`}
+        />
+        <animate
+          attributeName="opacity"
+          values="0;0.9;0.9;0"
+          dur="4.6s"
+          begin="0.3s"
+          repeatCount="indefinite"
+        />
+      </circle>
+    </g>
+  )
+}
+
+/** The agent orbs, each with a breathing glow halo. */
+function ConstellationOrbs({ orbId, orbDimId, glowId }: Omit<ConstellationIds, 'bgId'>) {
+  return (
+    <g>
+      {ORBS.map((o, i) => {
+        const isLead = o.id === 'e'
+        const fill = isLead
+          ? `url(#${orbId})`
+          : i % 2 === 0
+            ? `url(#${orbId})`
+            : `url(#${orbDimId})`
+        return (
+          <g key={o.id}>
+            {/* glow halo */}
+            <circle
+              cx={o.cx}
+              cy={o.cy}
+              r={o.r * 2.4}
+              fill={fill}
+              opacity="0.35"
+              filter={`url(#${glowId})`}
+            >
+              <animate
+                attributeName="opacity"
+                values="0.18;0.45;0.18"
+                dur={`${3 + (i % 4) * 0.6}s`}
+                begin={`${i * 0.3}s`}
+                repeatCount="indefinite"
+              />
+            </circle>
+            {/* core */}
+            <circle cx={o.cx} cy={o.cy} r={o.r} fill={fill} />
+            <circle
+              cx={o.cx - o.r * 0.3}
+              cy={o.cy - o.r * 0.3}
+              r={o.r * 0.35}
+              fill="rgba(255,255,255,0.55)"
+            />
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
+/** The background SVG: glow, orbital rings, connection arcs, pulses, orbs and dust. */
+function ConstellationArt({ bgId, orbId, orbDimId, glowId }: ConstellationIds) {
+  return (
+    <svg
+      viewBox="0 0 480 320"
+      preserveAspectRatio="xMidYMid slice"
+      className="absolute inset-0 w-full h-full"
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id={bgId} cx="55%" cy="55%" r="65%">
+          <stop offset="0%" stopColor="#2a1810" stopOpacity="0.55" />
+          <stop offset="60%" stopColor="#0e0d12" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={orbId} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#fed7aa" stopOpacity="1" />
+          <stop offset="55%" stopColor="#f97316" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#7c2d12" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={orbDimId} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#fde6c8" stopOpacity="0.9" />
+          <stop offset="55%" stopColor="#cbd5e1" stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#1e293b" stopOpacity="0" />
+        </radialGradient>
+        <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3.5" />
+        </filter>
+      </defs>
+
+      {/* atmospheric glow */}
+      <rect width="480" height="320" fill={`url(#${bgId})`} />
+
+      {/* faint orbital rings */}
+      <g stroke="rgba(249,115,22,0.10)" fill="none" strokeWidth="1">
+        <ellipse cx="240" cy="160" rx="190" ry="115" />
+        <ellipse cx="240" cy="160" rx="135" ry="80" />
+        <ellipse
+          cx="240"
+          cy="160"
+          rx="80"
+          ry="48"
+          strokeDasharray="2 4"
+          stroke="rgba(255,255,255,0.07)"
+        />
+      </g>
+
+      {/* connection arcs */}
+      <g stroke="rgba(249,115,22,0.18)" fill="none" strokeWidth="1">
+        {LINKS.map(([a, b], i) => {
+          const A = ORB_BY_ID[a]
+          const B = ORB_BY_ID[b]
+          const mx = (A.cx + B.cx) / 2
+          const my = (A.cy + B.cy) / 2 - 18
+          return (
+            <path
+              key={`${a}-${b}-${i}`}
+              d={`M${A.cx} ${A.cy} Q ${mx} ${my} ${B.cx} ${B.cy}`}
+            />
+          )
+        })}
+      </g>
+
+      {/* traveling pulses */}
+      <ConstellationPulses />
+
+      {/* orbs */}
+      <ConstellationOrbs orbId={orbId} orbDimId={orbDimId} glowId={glowId} />
+
+      {/* faint dust */}
+      <g fill="rgba(255,255,255,0.45)">
+        {DUST.map((d, i) => (
+          <circle key={i} cx={d.cx} cy={d.cy} r={d.r} opacity={d.opacity} />
+        ))}
+      </g>
+    </svg>
+  )
+}
+
+/** The card's copy and its Start button (bottom-left). */
+function MissionCardCopy({ onStart }: MissionConstellationCardProps) {
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-10 p-6 flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <div className="inline-flex items-center gap-1.5 mb-3 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-primary border border-primary/30 bg-primary/10">
+          <span className="w-1 h-1 rounded-full bg-primary shadow-[0_0_6px_rgba(249,115,22,0.9)]" />
+          MULTI-AGENT
+        </div>
+        <h3 className="text-3xl md:text-[2.25rem] font-semibold tracking-tight text-foreground leading-none">
+          Mission
+        </h3>
+        <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
+          Big, complex work. A team of agents, field memory, parallel reasoning.
+        </p>
+        <div className="hidden sm:flex items-center gap-2 mt-3 font-mono text-[10.5px] text-muted-foreground/80">
+          <span>Researcher</span>
+          <span className="text-muted-foreground/40">·</span>
+          <span>Analyst</span>
+          <span className="text-muted-foreground/40">·</span>
+          <span>Builder</span>
+          <span className="text-muted-foreground/40">+4</span>
+        </div>
+      </div>
+      <Button
+        onClick={onStart}
+        className="shrink-0"
+      >
+        Start <span aria-hidden="true">&rarr;</span>
+      </Button>
+    </div>
+  )
+}
+
 export function MissionConstellationCard({ onStart }: MissionConstellationCardProps) {
   // Unique gradient/filter IDs so multiple constellations on a page don't collide
   const uid = useId().replace(/:/g, '')
@@ -80,175 +310,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
     >
       <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-[#14110f] via-[#0e0d12] to-[#0c0c10] min-h-[280px] hover:border-primary/40 transition-colors group">
         {/* ── Constellation visual (background, fills card) ───────── */}
-        <svg
-          viewBox="0 0 480 320"
-          preserveAspectRatio="xMidYMid slice"
-          className="absolute inset-0 w-full h-full"
-          aria-hidden="true"
-        >
-          <defs>
-            <radialGradient id={bgId} cx="55%" cy="55%" r="65%">
-              <stop offset="0%" stopColor="#2a1810" stopOpacity="0.55" />
-              <stop offset="60%" stopColor="#0e0d12" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id={orbId} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#fed7aa" stopOpacity="1" />
-              <stop offset="55%" stopColor="#f97316" stopOpacity="0.95" />
-              <stop offset="100%" stopColor="#7c2d12" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id={orbDimId} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#fde6c8" stopOpacity="0.9" />
-              <stop offset="55%" stopColor="#cbd5e1" stopOpacity="0.55" />
-              <stop offset="100%" stopColor="#1e293b" stopOpacity="0" />
-            </radialGradient>
-            <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="3.5" />
-            </filter>
-          </defs>
-
-          {/* atmospheric glow */}
-          <rect width="480" height="320" fill={`url(#${bgId})`} />
-
-          {/* faint orbital rings */}
-          <g stroke="rgba(249,115,22,0.10)" fill="none" strokeWidth="1">
-            <ellipse cx="240" cy="160" rx="190" ry="115" />
-            <ellipse cx="240" cy="160" rx="135" ry="80" />
-            <ellipse
-              cx="240"
-              cy="160"
-              rx="80"
-              ry="48"
-              strokeDasharray="2 4"
-              stroke="rgba(255,255,255,0.07)"
-            />
-          </g>
-
-          {/* connection arcs */}
-          <g stroke="rgba(249,115,22,0.18)" fill="none" strokeWidth="1">
-            {LINKS.map(([a, b], i) => {
-              const A = ORB_BY_ID[a]
-              const B = ORB_BY_ID[b]
-              const mx = (A.cx + B.cx) / 2
-              const my = (A.cy + B.cy) / 2 - 18
-              return (
-                <path
-                  key={`${a}-${b}-${i}`}
-                  d={`M${A.cx} ${A.cy} Q ${mx} ${my} ${B.cx} ${B.cy}`}
-                />
-              )
-            })}
-          </g>
-
-          {/* traveling pulses */}
-          <g fill="#fed7aa">
-            <circle r="2.2">
-              <animateMotion
-                dur="3.2s"
-                repeatCount="indefinite"
-                path={`M${ORB_BY_ID.a.cx} ${ORB_BY_ID.a.cy} Q 220 60 ${ORB_BY_ID.b.cx} ${ORB_BY_ID.b.cy}`}
-              />
-              <animate
-                attributeName="opacity"
-                values="0;1;1;0"
-                dur="3.2s"
-                repeatCount="indefinite"
-              />
-            </circle>
-            <circle r="2" fill="#fdba74">
-              <animateMotion
-                dur="4.1s"
-                begin="0.6s"
-                repeatCount="indefinite"
-                path={`M${ORB_BY_ID.e.cx} ${ORB_BY_ID.e.cy} Q 280 180 ${ORB_BY_ID.f.cx} ${ORB_BY_ID.f.cy}`}
-              />
-              <animate
-                attributeName="opacity"
-                values="0;1;1;0"
-                dur="4.1s"
-                begin="0.6s"
-                repeatCount="indefinite"
-              />
-            </circle>
-            <circle r="2" fill="#fed7aa">
-              <animateMotion
-                dur="3.6s"
-                begin="1.1s"
-                repeatCount="indefinite"
-                path={`M${ORB_BY_ID.c.cx} ${ORB_BY_ID.c.cy} Q 340 180 ${ORB_BY_ID.f.cx} ${ORB_BY_ID.f.cy}`}
-              />
-              <animate
-                attributeName="opacity"
-                values="0;1;1;0"
-                dur="3.6s"
-                begin="1.1s"
-                repeatCount="indefinite"
-              />
-            </circle>
-            <circle r="1.8" fill="#a5f3fc" opacity="0.7">
-              <animateMotion
-                dur="4.6s"
-                begin="0.3s"
-                repeatCount="indefinite"
-                path={`M${ORB_BY_ID.d.cx} ${ORB_BY_ID.d.cy} Q 180 240 ${ORB_BY_ID.e.cx} ${ORB_BY_ID.e.cy}`}
-              />
-              <animate
-                attributeName="opacity"
-                values="0;0.9;0.9;0"
-                dur="4.6s"
-                begin="0.3s"
-                repeatCount="indefinite"
-              />
-            </circle>
-          </g>
-
-          {/* orbs */}
-          <g>
-            {ORBS.map((o, i) => {
-              const isLead = o.id === 'e'
-              const fill = isLead
-                ? `url(#${orbId})`
-                : i % 2 === 0
-                  ? `url(#${orbId})`
-                  : `url(#${orbDimId})`
-              return (
-                <g key={o.id}>
-                  {/* glow halo */}
-                  <circle
-                    cx={o.cx}
-                    cy={o.cy}
-                    r={o.r * 2.4}
-                    fill={fill}
-                    opacity="0.35"
-                    filter={`url(#${glowId})`}
-                  >
-                    <animate
-                      attributeName="opacity"
-                      values="0.18;0.45;0.18"
-                      dur={`${3 + (i % 4) * 0.6}s`}
-                      begin={`${i * 0.3}s`}
-                      repeatCount="indefinite"
-                    />
-                  </circle>
-                  {/* core */}
-                  <circle cx={o.cx} cy={o.cy} r={o.r} fill={fill} />
-                  <circle
-                    cx={o.cx - o.r * 0.3}
-                    cy={o.cy - o.r * 0.3}
-                    r={o.r * 0.35}
-                    fill="rgba(255,255,255,0.55)"
-                  />
-                </g>
-              )
-            })}
-          </g>
-
-          {/* faint dust */}
-          <g fill="rgba(255,255,255,0.45)">
-            {DUST.map((d, i) => (
-              <circle key={i} cx={d.cx} cy={d.cy} r={d.r} opacity={d.opacity} />
-            ))}
-          </g>
-        </svg>
+        <ConstellationArt bgId={bgId} orbId={orbId} orbDimId={orbDimId} glowId={glowId} />
 
         {/* ── Bottom gradient mask for copy legibility ───────────── */}
         <div
@@ -268,34 +330,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
         )}
 
         {/* ── Copy + CTA (bottom-left) ───────────────────────────── */}
-        <div className="absolute inset-x-0 bottom-0 z-10 p-6 flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-1.5 mb-3 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-primary border border-primary/30 bg-primary/10">
-              <span className="w-1 h-1 rounded-full bg-primary shadow-[0_0_6px_rgba(249,115,22,0.9)]" />
-              MULTI-AGENT
-            </div>
-            <h3 className="text-3xl md:text-[2.25rem] font-semibold tracking-tight text-foreground leading-none">
-              Mission
-            </h3>
-            <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
-              Big, complex work. 6&ndash;9 agents, field memory, parallel reasoning.
-            </p>
-            <div className="hidden sm:flex items-center gap-2 mt-3 font-mono text-[10.5px] text-muted-foreground/80">
-              <span>Researcher</span>
-              <span className="text-muted-foreground/40">·</span>
-              <span>Analyst</span>
-              <span className="text-muted-foreground/40">·</span>
-              <span>Builder</span>
-              <span className="text-muted-foreground/40">+4</span>
-            </div>
-          </div>
-          <Button
-            onClick={onStart}
-            className="shrink-0"
-          >
-            Start <span aria-hidden="true">&rarr;</span>
-          </Button>
-        </div>
+        <MissionCardCopy onStart={onStart} />
       </Card>
     </motion.div>
   )

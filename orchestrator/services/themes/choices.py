@@ -1,8 +1,10 @@
 """PRD-261 A-07b — a member's theme choice, and the lookups every install route shares.
 
 PA-12: the server is the one source of truth for the choice. ``theme_choices`` holds one
-row per member per workspace; the value is one of ``'classic'``, ``'studio'``, a builtin
-theme (``'builtin:play'``) or the lowercase uuid of an active install in that workspace.
+row per member per workspace; the value is one of ``'classic'``, ``'studio'`` or the
+lowercase uuid of an active install in that workspace. A row written before PRD-261 A-19,
+when Play was compiled into the app, may still name it; it reads as no choice
+(``defaults._pick``), and a new save of that value is refused like any other.
 
 Tenancy (the W-B2 review carry): ``theme_installations.package_id`` and
 ``theme_opt_ins.package_id`` have no database constraint against another workspace's
@@ -21,15 +23,15 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm.exc import UnmappedInstanceError
 
 from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, ThemeWorkspaceSettings
+from services.themes.records import SIGNED_UPLOAD_COUNTS_AS_REVIEWED
 
 logger = logging.getLogger(__name__)
 
 PLAIN_CHOICES = ("classic", "studio")
-# The themes compiled into the app (lib/theme-host/builtin/play-entry.ts) until A-19.
-BUILTIN_CHOICES = ("builtin:play",)
 FALLBACK_CHOICE = "studio"
 MARKETPLACE_OWNER = "marketplace"
 WORKSPACE_OWNER = "workspace"
@@ -44,7 +46,7 @@ PACKAGE_NOT_FOUND = "That theme version doesn't exist in this workspace."
 CHOICE_LOCKED = "This workspace's admins choose its theme; the workspace default applies."
 NEEDS_MEMBER = "Choosing a theme needs a signed-in member of this workspace."
 CHOICE_RACED = "Your theme choice changed in another tab at the same moment. Try again."
-BAD_CHOICE = "A theme choice is 'classic', 'studio', 'builtin:play' or an installed theme's id."
+BAD_CHOICE = "A theme choice is 'classic', 'studio' or an installed theme's id."
 
 
 class ThemeInstallError(Exception):
@@ -56,9 +58,43 @@ class ThemeInstallError(Exception):
         self.message = message
 
 
+def _session_of(package: ThemePackage) -> Optional[Session]:
+    """The session the row was loaded through (None for a detached row or a stand-in object)."""
+    try:
+        return object_session(package)
+    except UnmappedInstanceError:
+        return None
+
+
+def _vouched_for(package: ThemePackage) -> bool:
+    """An active Automatos key nobody revoked verifies the stored signature (C-05c's check, QB-24's question).
+
+    Imported here, not at the top: ``signature_state`` imports ``signature_verify``, which imports
+    ``signing``, which imports this module.
+    A row with no session can't read the keys the hosted feed revoked, so it vouches for nothing.
+    """
+    if not getattr(package, "signature", None):
+        return False
+    db = _session_of(package)
+    if db is None:
+        return False
+    from services.themes.signature_state import signature_vouches
+
+    return signature_vouches(db, package)
+
+
 def is_private(package: ThemePackage) -> bool:
-    """Unreviewed code (Q6): a workspace's own upload, or any package not reviewed yet."""
-    return package.owner_type == WORKSPACE_OWNER or not package.reviewed
+    """Code a member runs only after opting in to it (Q6).
+
+    A Marketplace package is private until it is reviewed. A workspace's own upload is private
+    unless Automatos vouched for it: QB-24 (``records.SIGNED_UPLOAD_COUNTS_AS_REVIEWED``, C-05d)
+    counts a private upload as reviewed while its stored signature verifies with an active key
+    that neither the keys file nor the hosted feed revoked (``signature_state.signature_vouches``,
+    C-05c), never because a signature is merely stored.
+    """
+    if package.owner_type == WORKSPACE_OWNER:
+        return not (SIGNED_UPLOAD_COUNTS_AS_REVIEWED and _vouched_for(package))
+    return not package.reviewed
 
 
 def package_is_visible(package: Optional[ThemePackage], workspace_id: UUID) -> bool:
@@ -134,7 +170,7 @@ def stored_choice(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> Op
 
 
 def _checked_choice(db: Session, workspace_id: UUID, choice: str) -> str:
-    if choice in PLAIN_CHOICES or choice in BUILTIN_CHOICES:
+    if choice in PLAIN_CHOICES:
         return choice
     install_id = install_id_of(choice)
     if install_id is None:

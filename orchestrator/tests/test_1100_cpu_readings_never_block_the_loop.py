@@ -8,9 +8,10 @@ every other request on the worker.
 
 Pinned statically (importing the routers builds the whole app): every
 ``cpu_percent`` call in those four modules must pass ``interval=None`` —
-psutil 5.9.6 records a starting reading on module import, so no startup
-priming is needed — and GET ``/api/system/metrics`` must no longer write
-metric rows to the database from the request handler.
+psutil records a starting reading on module import (5.9.6 did, and 7.2.2,
+pinned since PRD-262 US-015, still does), so no startup priming is needed —
+and GET ``/api/system/metrics`` must no longer write metric rows to the
+database from the request handler.
 """
 from __future__ import annotations
 

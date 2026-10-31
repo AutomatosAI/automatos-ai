@@ -13,6 +13,7 @@ the import map (`frontend/lib/theme-host/shared-modules.json`, shim `/theme-sdk/
 | `areas/<area>.d.ts` | One area of the SDK, as `frontend/lib/theme-sdk/<area>.ts` builds it (`pages/agents` is `areas/pages-agents.d.ts`). |
 | `internal/stub.d.ts` | `NotInThisBuild`: the type of a planned name whose area has not landed (calling it throws "not in this SDK build"). |
 | `internal/host.d.ts` | Host types the areas read but the SDK does not export by name (`SlotId`). |
+| `CHANGELOG.md` | What each version added (1.4.0: a chat message's known parts, the brief row Listen reads, the brief's thumbs). |
 
 Built in v1: `theme`, `context`, `navigation`, `notices`, `events`. Stubbed (every planned name declared as
 `NotInThisBuild` until its lane lands): `chat`, `deliverables`, `cards`, `looks`, `assets` (W-A4) and
@@ -49,7 +50,7 @@ npm install https://widgets.automatos.app/theme-sdk/v1/theme-sdk.tgz
 That is the newest `1.x`. For a lockfile that never changes under you, pin the exact version instead:
 
 ```sh
-npm install https://widgets.automatos.app/theme-sdk/v1.0.0/theme-sdk.tgz
+npm install https://widgets.automatos.app/theme-sdk/v1.4.0/theme-sdk.tgz
 ```
 
 `package-lock.json` records the tarball's integrity hash. The `v1` alias moves when a new `1.x` ships, so a lock

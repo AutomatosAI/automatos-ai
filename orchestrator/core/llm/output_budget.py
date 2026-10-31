@@ -67,6 +67,7 @@ DEFAULT_BUDGETS: Dict[str, int] = {
     "digest": 1024,                  # p99 196
     "watch": 1024,                   # p99 198
     "heartbeat": 1024,               # p99 211
+    "check_in": 800,                 # PRD-268 K9: a check-in writes at most 800 a call
     "thread_checkpoint": 1024,       # p99 286
     "consistency_verifier": 1024,    # p99 477
     "graph_community_title": 1024,   # p99 54

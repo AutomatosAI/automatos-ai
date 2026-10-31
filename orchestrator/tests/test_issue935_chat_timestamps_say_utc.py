@@ -35,7 +35,7 @@ class _FakeChatService:
     def __init__(self, db):
         self.db = db
 
-    def get_chat_history(self, user_id, limit, workspace_id):
+    def get_chat_history(self, user_id, limit, workspace_id, starting_after=None):
         return [_chat()]
 
     def get_chat(self, chat_id, workspace_id=None):

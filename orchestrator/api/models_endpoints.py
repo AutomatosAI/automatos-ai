@@ -56,13 +56,18 @@ async def list_models(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/platform-default", response_model=Dict[str, str])
+@router.get(
+    "/platform-default",
+    response_model=Dict[str, str],
+    dependencies=[Depends(require_workspace_permission("agents:read"))],  # F451: as /recommend
+)
 def get_platform_default_route(ctx: RequestContext = Depends(get_request_context_hybrid)) -> Dict[str, str]:
     """The model a new agent, and an Auto that follows the platform default, runs on:
     ``{"provider", "model_id"}`` from ``core/llm/new_agent_model.default_route``
-    (system_settings orchestrator_llm, set by a platform admin). Any signed-in user
-    may read it: the UI pre-fills new agents and Settings > Orchestrator's Reset with
-    it, so no model id is kept in the frontend. A plain ``def``: the settings read is
+    (system_settings orchestrator_llm, set by a platform admin). A member of the
+    workspace who may read its agents (``agents:read``, which every workspace role
+    holds) may read it: the UI pre-fills new agents and Settings > Orchestrator's Reset
+    with it, so no model id is kept in the frontend. A plain ``def``: the settings read is
     a synchronous query, run in the threadpool. Declared before ``/{model_id}``,
     which would otherwise take the path."""
     from core.llm.new_agent_model import default_route

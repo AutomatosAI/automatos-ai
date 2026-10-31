@@ -45,10 +45,20 @@ HOSTED_EDITION = (
 # System Settings is a platform admin's only). A test holds the two lists to the page.
 # PRD-251B US-B106 added Socials (the workspace's own Socials switch), in both editions.
 # PRD-261 A-07d added Appearance (Themes: install, opt in, choose), in both editions.
+# PRD-266 US-005c added Phones & devices (the device list; pairing on a local install in
+# paired mode), in both editions.
+# Voice holds the workspace's own Auto Live switch (real-time voice calls with Auto), in
+# both editions; the platform's own setup (Retell credentials, the platform-wide on/off)
+# is a platform admin's, under System Settings instead.
+# PRD-265 W2 added Billing (plan, credits, checkout, the ledger), in the hosted edition
+# only: the local edition never bills, so there it still has no such tab (#88).
 SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
-                 "Socials", "Appearance", "Widget SDK")
+                 "Phones & devices", "Voice", "Socials", "Appearance", "Widget SDK")
 LOCAL_SETTINGS_TABS = ("Profile", "Session mode")
+HOSTED_SETTINGS_TABS = ("Billing",)
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
+HOSTED_NO_SUCH_TAB = ("There is no Plans or Team Management tab: the plan, the credits and payments "
+                      "are on the Billing tab.")
 UNSURE = (
     "If you aren't sure Automatos has a page, a setting, a plan or a feature, say you don't know and offer "
     "to check. Never describe one you haven't seen in this prompt, a tool result or the owner's documents."
@@ -65,9 +75,10 @@ def edition_facts() -> str:
     from config import config
 
     local = config.IS_LOCAL_EDITION
-    tabs = (*LOCAL_SETTINGS_TABS, *SETTINGS_TABS) if local else SETTINGS_TABS
+    tabs = (*LOCAL_SETTINGS_TABS, *SETTINGS_TABS) if local else (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
     edition = LOCAL_EDITION if local else HOSTED_EDITION
-    return f"{edition} Settings has these tabs: {', '.join(tabs)}. {NO_SUCH_TAB}"
+    no_such = NO_SUCH_TAB if local else HOSTED_NO_SUCH_TAB
+    return f"{edition} Settings has these tabs: {', '.join(tabs)}. {no_such}"
 
 
 def helper_names(db: Any, workspace_id: Any) -> List[str]:

@@ -43,9 +43,10 @@ _conftest._restore_real_app_modules()
 
 from modules.codegraph.codegraph_service import CodeGraphService  # noqa: E402
 
-_SERVICE_SRC = (
+# PRD-268 P268W1-RVW-1: the service's query-log write moved to query_log.py.
+_QUERY_LOG_SRC = (
     Path(__file__).resolve().parents[1]
-    / "modules" / "codegraph" / "codegraph_service.py"
+    / "modules" / "codegraph" / "query_log.py"
 ).read_text(encoding="utf-8")
 
 
@@ -141,9 +142,9 @@ def _make_tools(code_graph):
 # ---------------------------------------------------------------------------
 def test_query_log_insert_uses_real_columns_not_execution_time_ms():
     inserts = re.findall(
-        r"INSERT INTO codegraph_query_logs\s*\(([^)]*)\)", _SERVICE_SRC
+        r"INSERT INTO codegraph_query_logs\s*\(([^)]*)\)", _QUERY_LOG_SRC
     )
-    assert inserts, "expected a codegraph_query_logs INSERT in the service"
+    assert inserts, "expected a codegraph_query_logs INSERT in the service's query log"
     for cols in inserts:
         assert "duration_ms" in cols, f"INSERT must target duration_ms: {cols!r}"
         assert "workspace_id" in cols, f"INSERT must include workspace_id: {cols!r}"

@@ -16,19 +16,28 @@
 #     --universal --python-version 3.12 --generate-hashes \
 #     -o services/workspace-worker/requirements-browser.lock
 
-# Redis (async)
-redis[hiredis]>=5.0.0,<8.0.0
+# Redis (async). No [hiredis] extra (PRD-262, row 47: 1.1 MB): redis-py parses replies
+# in Python instead, which the worker's queue rate never notices.
+redis>=5.0.0,<8.0.0
 
-# HTTP server for health check
-aiohttp>=3.9.0,<3.14.0
+# The HTTP server (health, metrics, files, tools, the canvas): Starlette on uvicorn,
+# which mcp brings anyway, instead of aiohttp and its six helper packages (PRD-262,
+# row 36). Listed because the worker imports them. starlette>=1.0.1 for
+# GHSA-86qp-5c8j-p5mr, as orchestrator/requirements.txt; uvicorn>=0.50.1, the release
+# the platform's tests run the worker's server on.
+starlette>=1.0.1,<2.0.0
+uvicorn>=0.50.1,<1.0.0
 
-# Shared with orchestrator (already in main requirements)
+# Shared with orchestrator (already in main requirements). No python-dotenv: no worker
+# module imports it (PRD-262, row 47).
 pydantic>=2.0.0,<3.0.0
-python-dotenv>=1.0.0,<2.0.0
 
 # Database (task status updates): the one UPDATE in task_executions_db.py, run
-# through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044).
-psycopg2-binary>=2.9.0,<3.0.0
+# through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044). psycopg2 from its
+# source, not psycopg2-binary (PRD-262, row 27): the Dockerfile's psycopg2 stage builds
+# it against Debian's libpq, which the image installs as libpq5, so the wheel's own
+# copies of libpq, OpenSSL, krb5, LDAP and SASL (16 MB) stay out. Same project and API.
+psycopg2>=2.9.0,<3.0.0
 
 # Observability
 prometheus_client>=0.20.0,<1.0.0

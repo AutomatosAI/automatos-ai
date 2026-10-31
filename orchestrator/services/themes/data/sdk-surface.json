@@ -5,6 +5,9 @@
       "assetUrl"
     ],
     "cards": [
+      "AiLabelFence",
+      "BriefCard",
+      "CalibrationCard",
       "CorePage",
       "FilePreview",
       "FirstRunNudge",
@@ -14,12 +17,17 @@
       "MissionApproval",
       "MissionCreatedCard",
       "MissionSuggestionCard",
+      "ReadinessList",
+      "ReplyChips",
+      "StatusLabel",
+      "SuggestionCard",
       "TaskCard",
       "ToolApproval",
       "TrialExhaustedBanner",
       "WithdrawOfferCard"
     ],
     "chat": [
+      "liveReceiptsOf",
       "movedSomethingOnTheBoard",
       "receiptLine",
       "receiptLink",
@@ -34,6 +42,7 @@
       "useMediaPreferences",
       "useOnline",
       "useRole",
+      "useThemeLayout",
       "useTone",
       "useTrial",
       "useWorkspace"
@@ -63,7 +72,8 @@
       "importLook",
       "listLooks",
       "saveLook",
-      "useLook"
+      "useLook",
+      "useLookScope"
     ],
     "navigation": [
       "BOARD_HREF",
@@ -139,9 +149,35 @@
       "useWorkflowPlaybook",
       "useWorkflowPlaybooks"
     ],
+    "proactive": [
+      "useAnswerCalibration",
+      "useBrief",
+      "useCalibration",
+      "useCheckReadiness",
+      "useHideSuggestion",
+      "useRateBrief",
+      "useReadiness",
+      "useStartSuggestion",
+      "useSuggestions"
+    ],
+    "storage": [
+      "THEME_STATE_LIMITS",
+      "readThemeState",
+      "removeThemeState",
+      "subscribeThemeState",
+      "useThemeState",
+      "writeThemeState"
+    ],
     "theme": [
+      "DISPLAY_STATE_LABELS",
       "SDK_VERSION",
       "defineTheme"
+    ],
+    "voice": [
+      "BriefVoice",
+      "VoiceButton",
+      "readVoiceLevels",
+      "useVoice"
     ]
   }
 }

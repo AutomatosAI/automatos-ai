@@ -19,6 +19,7 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
 from services.onboarding_state import public_snapshot
+from services.workspace_view import ai_providers_or_none, masked_settings
 from services.harness_mode import harness_settings_view, merge_harness_update, validate_harness_update
 from services.orchestrator_auto_agent import (
     AUTO_CONFIG_FIELDS,
@@ -67,7 +68,7 @@ _TRIGGER_MODE_INTEGRATION_KEYS = {"telegram_trigger_mode", "slack_trigger_mode"}
 
 
 @router.get("/current")
-async def get_current_workspace(
+def get_current_workspace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -95,15 +96,7 @@ async def get_current_workspace(
     webhook_url = f"{backend_url}/api/webhooks/ws/{workspace.webhook_key}" if workspace.webhook_key else None
 
     # Mask sensitive integration tokens for the GET response
-    settings = dict(workspace.settings or {})
-    integrations = dict(settings.get("integrations", {}))
-    masked = {}
-    for k, v in integrations.items():
-        if isinstance(v, str) and len(v) > 8 and "token" in k:
-            masked[k] = v[:4] + "..." + v[-4:]
-        else:
-            masked[k] = v
-    settings["integrations"] = masked
+    settings = masked_settings(workspace.settings)
 
     # PRD-195 S8 (C.1): this used to return the SYSTEM-role twin
     # (ctx.user.role) while the frontend typed it as a workspace role — the
@@ -120,6 +113,7 @@ async def get_current_workspace(
         member_role = resolve_workspace_role(db, ctx) or "viewer"
 
     from services.plan_tiers import exposure_for_local_edition, exposure_for_plan
+    from modules.voice.live_settings import voice_live_state
 
     return {
         "id": str(workspace.id),
@@ -148,9 +142,15 @@ async def get_current_workspace(
         # PRD-251 S0.1 (D1): the two Socials switches — `available` is the
         # platform master switch, `enabled` this workspace's. Field addition only.
         "socials": socials_state(workspace.settings),
+        # Settings → Voice → Auto Live: `available` is the plan gate, `enabled`
+        # the workspace's own switch. Field addition only.
+        "voice_live": voice_live_state(workspace),
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
         "settings": settings,
+        # PRD-266 US-017c (D23): the AI providers for the app's consent sheet; null
+        # on a read failure. Last, so a failed read leaves no later read to break.
+        "ai_providers": ai_providers_or_none(db, workspace.id),
     }
 
 
@@ -474,8 +474,16 @@ async def save_voice_live_settings(
     Body: ``{"voice_live": {"enabled": bool, "monthly_cap_minutes"?: int,
     "retell_voice_id"?: str}}`` — validated by the SAME fail-closed rules as
     the platform tool (one whitelist, two doors), merged never replace-blind.
+
+    Turning it ON is refused (403, the mint's own coded reason, D34) on SaaS
+    when the workspace's plan has no voice family: the mint would refuse every
+    call anyway, so storing ``enabled: true`` here would be a switch that lies
+    about what it does, not just one that is inert. Turning it OFF always
+    succeeds — a workspace downgraded off the plan must still be able to
+    switch itself off.
     """
-    from modules.voice.live_settings import validate_voice_live_update
+    from modules.voice.live_settings import validate_voice_live_update, voice_live_plan_allows
+    from modules.voice.mint import VOICE_LIVE_PLAN_REQUIRED, VOICE_LIVE_PLAN_REQUIRED_MESSAGE
 
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
@@ -485,6 +493,12 @@ async def save_voice_live_settings(
         normalized = validate_voice_live_update(payload.get("voice_live"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if normalized.get("enabled") is True and not voice_live_plan_allows(getattr(workspace, "plan", None)):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE},
+        )
 
     settings = dict(workspace.settings or {})
     merged = dict(settings.get("voice_live", {}))

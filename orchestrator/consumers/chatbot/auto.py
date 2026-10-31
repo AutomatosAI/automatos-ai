@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from consumers.chatbot import auto_decisions
 from consumers.chatbot.board_questions import about_the_board
-from consumers.chatbot.handoffs import agents_named_in, auto_always_answers, hands_off, social_media_role  # PRD-256 US-010/011
+from consumers.chatbot.handoffs import CHANGE_GOES_BACK, agents_named_in, auto_always_answers, hands_off, social_media_role  # PRD-256 US-010/011, F449
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -141,13 +141,13 @@ def build_assign_directive(
             "then state its supervision status by echoing the platform_create_task "
             "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
             "outcome). Do NOT claim it is supervised unless that field says so.\n"
-            f"\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
+            f"\n{CHANGE_GOES_BACK}\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
         )
     return (
         "\n\n## Manager directive — confirm the agent first\n"
         "The user wants a single agent to own this on the board, but no agent name "
         "resolved to your roster. Do NOT guess or auto-pick an agent. Call "
-        "platform_recommend_agent with the request (it ranks the roster by skills, "
+        "platform_recommend_agent {objective: the work in one or two sentences} (it ranks the roster by skills, "
         "tools, runtime and past outcomes and explains why; platform_list_agents is "
         "the plain roster), then PROPOSE the top candidate in one line with its "
         "reason — say whether it is a Claude Code session agent on the user's "
@@ -155,7 +155,7 @@ def build_assign_directive(
         "to confirm. Once they choose, file the ticket (platform_create_task with "
         "assigned_agent_name), written as the 4-part dispatch contract below, start "
         "it unless they deferred, and confirm in one line with the task id.\n"
-        f"\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
+        f"\n{CHANGE_GOES_BACK}\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
     )
 
 
@@ -361,7 +361,7 @@ _PLATFORM_KEYWORDS = {
         "what did we talk about", "what did i say about",
         "chat history search", "find conversation",
         "did i mention", "when did i say", "previous chat",
-        "search my chats", "look through chats",
+        "search my chats", "look through chats", "what did i ask first", "first thing i asked",
     ],
     # PRD-73: Monitoring tools
     "platform_query_loki_logs": [
@@ -637,12 +637,12 @@ _PLATFORM_KEYWORDS = {
     ],
     # PRD-251 US-116 (S4.1): Socials drafts. Agents draft; a person approves in the Socials tab.
     "platform_create_social_post": [
-        "draft a social post", "create a social post", "new social post",
-        "social media post about", "draft a linkedin post",
+        "draft a social post", "create a social post", "new social post", "social media post about", "draft a linkedin post",
     ],
     "platform_list_social_posts": [  # F379: the queue, as the owner asks for it
         "list social posts", "show social posts", "social posts awaiting approval", "posts waiting for approval",
     ],
+    "platform_get_social_plan_slots": ["plan slots", "empty slot", "slot is empty", "when will the plan make"],  # P256-FIX-SOC-5
     # PRD-82A: Missions
     "platform_create_mission": [
         "launch a mission", "start a mission", "create a mission",

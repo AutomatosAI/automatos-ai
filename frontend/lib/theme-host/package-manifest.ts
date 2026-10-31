@@ -8,6 +8,9 @@
  * (`orchestrator/tests/fixtures/themes/cases.json`, `manifests`) and reads contract.py as text, so
  * the lists below must equal the server's. The host version is `hostVersion` in
  * shared-modules.json (PA-2), next to the SDK's; a theme's `engines` is checked against both.
+ * M-01 (host 1.1.0): the optional `mobile` block is checked in `mobile-manifest.ts`, with its own lists.
+ * The storefront (30 Oct 2026): `phonePreviews` lists phone screenshots (`assets/previews/phone/*.png` or
+ * `*.jpg`), and it and `previews` hold up to MAX_PREVIEWS each.
  * Nothing here throws on bad input: every refusal is a ThemeError.
  */
 import { HTML_CLASS_PATTERN, THEME_HOST_VERSION } from './constants'
@@ -16,17 +19,19 @@ import {
   type JsonRecord, type ThemeError,
 } from './css-value'
 import { satisfiesSdkRange } from './engines'
-import { LOOK_ID_PATTERN } from '@/lib/looks/types'
+import { LOOK_ID_PATTERN } from '@/lib/look-kit/validate'
+import { mobileErrors, type ThemeMobileBlock } from './mobile-manifest'
 import { SDK_VERSION } from './sdk'
 
 /** PA-2: the host contract's version (slots, pages, routes, boot data). */
 export { THEME_HOST_VERSION }
 export const MANIFEST_SCHEMA = 'automatos-theme/v1'
 
-/** Classes the core owns on <html>: the Style axis, Classic and the tones (and next-themes' "system"). */
-export const RESERVED_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'play', 'dark', 'light', 'system']
-/** PA-8: Play's package keeps html.play until A-20; no other id may take it. */
-export const HTML_CLASS_OWNERS: ReadonlyMap<string, string> = new Map([['play', 'automatos/play']])
+/**
+ * Classes the core owns on <html>: the Style axis, Classic and the tones (and next-themes' "system").
+ * No theme's id keeps one (A-20, QB-11): any other class that fits the pattern is any theme's.
+ */
+export const RESERVED_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'dark', 'light', 'system']
 export const KNOWN_SLOTS: readonly string[] = [
   'frame@1', 'lookEditor@1', 'styleSheet@1', 'notFound@1', 'asleep@1', 'page-header.mascot@1', 'page-header.art@1',
   'empty-state.mascot@1',
@@ -52,10 +57,10 @@ export const PAGE_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   '/command-center': ['app/command-center/page.tsx', 'components/command-center/command-center-shell.tsx'],
   '/': ['app/page.tsx'],
 })
-/** PRD §4.4: pages that are always the host's. */
+/** PRD §4.4: pages that are always the host's. PRD-264 EUAI-10: /verify, the public AI-content check. */
 export const HOST_OWNED_ROUTES: readonly string[] = [
   '/sign-in', '/sign-up', '/auth', '/sso-callback', '/reset-password', '/accept-invitation', '/settings', '/team',
-  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev',
+  '/admin', '/marketplace', '/looks', '/safe-mode', '/x', '/api', '/dev', '/verify',
 ]
 
 export const MANIFEST_ERROR_CODES: readonly string[] = [
@@ -63,13 +68,14 @@ export const MANIFEST_ERROR_CODES: readonly string[] = [
   'BAD_ENGINES', 'ENGINES_MISMATCH', 'BAD_HTML_CLASS', 'RESERVED_HTML_CLASS', 'BAD_BASE', 'BAD_MIN_WIDTH',
   'BAD_TONE', 'BAD_SLOTS', 'UNKNOWN_SLOT', 'MISSING_SLOT', 'BAD_PAGE', 'BAD_PAGE_MODE', 'BAD_KEEP_CORE_PAGE',
   'BAD_CLONED_FROM', 'CLONED_FROM_OUT_OF_SCOPE', 'PAGE_OUT_OF_SCOPE', 'HOST_OWNED_PAGE', 'BAD_ROUTES', 'BAD_NAV',
-  'BAD_USES', 'BAD_ASSET_PATH', 'BAD_BRAND', 'BAD_LOOK_ID', 'BAD_MASCOT',
+  'BAD_USES', 'BAD_ASSET_PATH', 'BAD_BRAND', 'BAD_LOOK_ID', 'BAD_MASCOT', 'BAD_MOBILE',
 ]
 const REQUIRED_FIELDS: readonly string[] = [
   'schema', 'id', 'name', 'version', 'engines', 'base', 'htmlClass', 'minWidth', 'tone', 'slots',
 ]
 const OPTIONAL_FIELDS: readonly string[] = [
-  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'fonts', 'brand', 'look', 'mascot',
+  'description', 'pages', 'routes', 'nav', 'uses', 'pricing', 'previews', 'phonePreviews', 'fonts', 'brand', 'look',
+  'mascot', 'mobile',
 ]
 const ALL_FIELDS: readonly string[] = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]
 const ENGINE_FIELDS = ['automatos', 'sdk'] as const
@@ -80,30 +86,34 @@ const BRAND_FIELDS: readonly string[] = ['name', 'wordmark']
 const MASCOT_FIELDS: readonly string[] = ['states']
 const MANIFEST_OWNER = 'theme.json'
 
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
+/** A theme's id, `<publisher>/<name>`: the one its looks are kept under (installed-entry.ts reads it too). */
+export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9][a-z0-9-]{0,62}$/
 const VERSION_PATTERN = /^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/
 const RANGE_PATTERN = /^\^?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/
-const ROUTE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}(?:\/[a-z0-9][a-z0-9-]{0,31}){0,3}$/
-const NAV_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
-const NAV_PATH_PATTERN = /^\/(?:[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63}){0,7})?$/
+export const ROUTE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}(?:\/[a-z0-9][a-z0-9-]{0,31}){0,3}$/
+export const NAV_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+export const NAV_PATH_PATTERN = /^\/(?:[a-z0-9][a-z0-9-]{0,63}(?:\/[a-z0-9][a-z0-9-]{0,63}){0,7})?$/
 const PARAM_PATTERN = /^[a-z][A-Za-z0-9_-]{0,31}$/
 const USES_PATTERN = /^[a-z][A-Za-z0-9.-]{0,63}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const STATE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 const PREVIEW_PATTERN = /^assets\/previews\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.png$/
+const PHONE_PREVIEW_PATTERN = /^assets\/previews\/phone\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|jpg)$/
 const FONT_PATTERN = /^assets\/fonts\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.woff2$/
 const WORDMARK_PATTERN = /^assets\/brand\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|webp)$/
 const X_ROUTE_PREFIX = '/x/'
 
-const NAME_MAX = 60
+export const NAME_MAX = 60
 const DESCRIPTION_MAX = 280
-const LABEL_MAX = 40
-const MIN_WIDTH_MAX = 3840
-const MAX_ROUTES = 16
-const MAX_NAV = 16
+export const LABEL_MAX = 40
+export const MIN_WIDTH_MAX = 3840
+export const MAX_ROUTES = 16
+export const MAX_NAV = 16
 const MAX_KEEP = 16
 const MAX_USES = 64
 const MAX_FILES_LISTED = 16
+/** The Marketplace storefront shows screenshots per look: web and phone lists hold this many each. */
+const MAX_PREVIEWS = 24
 const MAX_STATES = 32
 
 export interface ThemeNavEntry { readonly id: string; readonly label: string; readonly path: string }
@@ -132,10 +142,12 @@ export interface ThemePackageManifest {
   readonly uses?: readonly string[]
   readonly pricing?: string
   readonly previews?: readonly string[]
+  readonly phonePreviews?: readonly string[]
   readonly fonts?: readonly string[]
   readonly brand?: { readonly name?: string; readonly wordmark?: string }
   readonly look?: string
   readonly mascot?: { readonly states: readonly string[] } | null
+  readonly mobile?: ThemeMobileBlock
 }
 
 /** The checked manifest (a frozen copy of the input) when `errors` is empty, else null. */
@@ -208,8 +220,7 @@ function htmlClassErrors(document: JsonRecord): ThemeError[] {
       '"htmlClass" must be 3 to 32 lower-case letters, digits or dashes, starting with a letter.'
     ))
   }
-  const owner = HTML_CLASS_OWNERS.get(htmlClass)
-  const reserved = RESERVED_HTML_CLASSES.includes(htmlClass) && (owner === undefined || owner !== own(document, 'id'))
+  const reserved = RESERVED_HTML_CLASSES.includes(htmlClass)
   return errorIf(reserved, 'RESERVED_HTML_CLASS', 'htmlClass', `"htmlClass" "${htmlClass}" is reserved by the host.`)
 }
 
@@ -351,21 +362,23 @@ function mascotErrors(mascot: unknown): ThemeError[] {
   ]
 }
 
-function listedFileErrors(document: JsonRecord, field: string, pattern: RegExp, shape: string): ThemeError[] {
-  const listOk = !hasOwn(document, field) || isStringList(document[field], pattern, MAX_FILES_LISTED)
-  return errorIf(!listOk, 'BAD_ASSET_PATH', field, `"${field}" must list up to ${MAX_FILES_LISTED} different ${shape} files.`)
+function listedFileErrors(document: JsonRecord, field: string, pattern: RegExp, shape: string, most: number): ThemeError[] {
+  const listOk = !hasOwn(document, field) || isStringList(document[field], pattern, most)
+  return errorIf(!listOk, 'BAD_ASSET_PATH', field, `"${field}" must list up to ${most} different ${shape} files.`)
 }
 
 function extraErrors(document: JsonRecord): ThemeError[] {
   const usesOk = !hasOwn(document, 'uses') || isStringList(document.uses, USES_PATTERN, MAX_USES)
   const lookOk = !hasOwn(document, 'look') || matches(document.look, LOOK_ID_PATTERN)
   return [
-    ...listedFileErrors(document, 'previews', PREVIEW_PATTERN, 'assets/previews/*.png'),
-    ...listedFileErrors(document, 'fonts', FONT_PATTERN, 'assets/fonts/*.woff2'),
+    ...listedFileErrors(document, 'previews', PREVIEW_PATTERN, 'assets/previews/*.png', MAX_PREVIEWS),
+    ...listedFileErrors(document, 'phonePreviews', PHONE_PREVIEW_PATTERN, 'assets/previews/phone/*.png or *.jpg', MAX_PREVIEWS),
+    ...listedFileErrors(document, 'fonts', FONT_PATTERN, 'assets/fonts/*.woff2', MAX_FILES_LISTED),
     ...errorIf(!usesOk, 'BAD_USES', 'uses', `"uses" must list up to ${MAX_USES} different SDK area names.`),
     ...(hasOwn(document, 'pricing') ? textErrors(document.pricing, 'pricing', LABEL_MAX) : []),
     ...errorIf(!lookOk, 'BAD_LOOK_ID', 'look', '"look" must be the id of one of the theme\'s presets.'),
     ...(hasOwn(document, 'brand') ? brandErrors(document.brand) : []),
+    ...(hasOwn(document, 'mobile') ? mobileErrors(document) : []),
     ...mascotErrors(own(document, 'mascot')),
   ]
 }

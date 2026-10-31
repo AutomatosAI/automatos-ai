@@ -3,6 +3,7 @@ import path from 'path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fulfillBackendJson } from '../support/backend-route'
 import { chooseStyle, serveInstalledTheme, THEME_E2E_PATH } from '../support/hello-theme'
+import { describeParity, openPlay } from '../support/play-parity'
 
 // PRD-261 A-12c (@host): protected surfaces and the CSS layer model (PA-15).
 //
@@ -13,10 +14,15 @@ import { chooseStyle, serveInstalledTheme, THEME_E2E_PATH } from '../support/hel
 //    ancestor), a tool approval card and a Mission approval card are still drawn, on screen, and
 //    their Approve & run button still posts the decision. The cards arrive the way they do in the
 //    app: a chat turn (recorded, fixtures/hello-a12c/chat-turns.json) carries the tool-data that
-//    chat.tsx turns into the widget on the canvas.
-// 2. Under the Play cookie, the body takes Play's page background (play-theme.css:204-209), not
-//    Studio's bg-background: theme CSS is unlayered, so a theme rule meets core's unlayered
-//    Tailwind output on specificity and order. In a cascade layer it would lose to it outright.
+//    chat.tsx turns into the widget on the canvas. Each test starts on a new chat, with no protected
+//    surface on the page until the turn draws its card: see startOnANewChat.
+// 2. Under installed Play (the Design Kit's package, support/play-parity.ts; A-19f4: since W-A8
+//    the only Play), the body takes Play's page background (the kit's
+//    themes/play/src/app/play-theme.css, its `:where(html.play) body` rule), not Studio's
+//    bg-background: theme CSS is unlayered, so a theme rule meets core's unlayered Tailwind output
+//    on specificity and order. In a cascade layer it would lose to it outright. It needs the
+//    package and stores the member's choice on the lane's one backend, so it is @package and runs
+//    in the package step, one test at a time.
 //
 // This proves what CSS can reach. For code a theme runs inside the page it is a review rule, not
 // a guarantee (PRD §4.4): see fixtures/hello-a12c/README.md.
@@ -27,6 +33,8 @@ const A12C_INSTALL_ID = '00000000-0000-4000-8000-0000000a12c0'
 const TURNS_FILE = path.resolve(__dirname, '..', 'fixtures', FIXTURE, 'chat-turns.json')
 const CHAT_PATH = '/chat'
 const CHAT_STREAM_PATH = '/api/chat'
+const CHAT_HISTORY_PATH = '/api/chat/history'
+const NO_CONVERSATIONS: readonly unknown[] = []
 const STATUS_ATTR = 'data-theme-host'
 const THEME_STYLE_LINK = 'link[data-theme-host-style]'
 const FRAME_TEST_ID = 'hello-a12c-frame'
@@ -40,15 +48,6 @@ const TEXT_LINE = '0:'
 const DATA_LINE = 'd:'
 const OK = 200
 
-const PLAY_STYLE = 'theme:builtin:play'
-const ACTIVE_ROUTE = '**/api/themes/active'
-/**
- * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
- * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
- * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
- */
-const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
-const PLAY_CLASS = /\bplay\b/
 const PLAY_PAGE_BACKGROUND = '--pl-page-background'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 const SENTINEL = 'rgb(1, 2, 3)'
@@ -155,8 +154,24 @@ async function recordDecisions(page: Page, card: CardCase): Promise<string[]> {
   return decided
 }
 
-/** Opens the chat under the hostile theme, once its stylesheet is on the page. */
+/**
+ * The precondition, stated: /chat opens on a new chat. A fresh browser's /chat lands on the newest conversation
+ * (PRD-237's cold start, app/chat/page.tsx). Since PRD-268 W2 a workspace whose proactive mode is on has one: the
+ * first page any spec loads opens the day's brief (BriefOnOpen), which posts it into a new Auto thread, and that
+ * thread's brief card carries Listen in the protected surface `brief-voice` (US-C21d). The hostile sheet's `:has`
+ * rule takes visibility from every ancestor of any protected surface, so landing there would leave Listen alone on
+ * the page, with no composer to ask from, before the turn's card is drawn. Answering the conversation list with none
+ * keeps the page as the empty workspace left it, whether the lane's mode is on or off (off by default: the open is
+ * refused `brief_off`, P268W2-RVW-3). specs/proactive-brief-thread.spec.ts holds the Auto thread itself (its brief
+ * card beside the composer) under an installed theme that attacks nothing.
+ */
+async function startOnANewChat(page: Page): Promise<void> {
+  await page.route((url) => url.pathname === CHAT_HISTORY_PATH, (route) => fulfillBackendJson(route, OK, NO_CONVERSATIONS))
+}
+
+/** Opens the chat on a new chat under the hostile theme, once its stylesheet is on the page. */
 async function openChatUnderHostileTheme(page: Page): Promise<void> {
+  await startOnANewChat(page)
   const served = await serveInstalledTheme(page, { installId: A12C_INSTALL_ID, fixture: FIXTURE })
   await chooseStyle(page, served.style, APP_URL)
   await page.goto(CHAT_PATH)
@@ -257,26 +272,25 @@ function backgrounds(page: Page, variable: string): Promise<{ body: string; vari
   }, variable)
 }
 
-test("under the Play cookie, the body takes Play's page background, not Studio's bg-background", { tag: '@host' }, async ({ page }) => {
-  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
-  await chooseStyle(page, PLAY_STYLE, APP_URL)
-  await page.goto(THEME_E2E_PATH)
-  await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
+describeParity('the CSS layer model under installed Play', (variant) => {
+  test("under installed Play, the body takes Play's page background, not Studio's bg-background", { tag: '@package' }, async ({ page, request }) => {
+    await openPlay(page, request, variant, THEME_E2E_PATH)
 
-  // Play's token is defined (not the transparent of an unset variable) and the body wears it.
-  await expect
-    .poll(async () => {
-      const seen = await backgrounds(page, PLAY_PAGE_BACKGROUND)
-      return seen.variable !== TRANSPARENT && seen.body === seen.variable
-    })
-    .toBe(true)
+    // Play's token is defined (not the transparent of an unset variable) and the body wears it.
+    await expect
+      .poll(async () => {
+        const seen = await backgrounds(page, PLAY_PAGE_BACKGROUND)
+        return seen.variable !== TRANSPARENT && seen.body === seen.variable
+      })
+      .toBe(true)
 
-  // The look writes Studio's --background from the same ground, so the colours alone could
-  // agree by design. A sentinel on Play's token, which core's body rule never reads, shows which
-  // rule paints the body: it follows the sentinel only if Play's rule wins the cascade.
-  await page.evaluate(
-    ({ name, value }) => document.documentElement.style.setProperty(name, value),
-    { name: PLAY_PAGE_BACKGROUND, value: SENTINEL },
-  )
-  await expect.poll(async () => (await backgrounds(page, PLAY_PAGE_BACKGROUND)).body).toBe(SENTINEL)
+    // The look writes Studio's --background from the same ground, so the colours alone could
+    // agree by design. A sentinel on Play's token, which core's body rule never reads, shows which
+    // rule paints the body: it follows the sentinel only if Play's rule wins the cascade.
+    await page.evaluate(
+      ({ name, value }) => document.documentElement.style.setProperty(name, value),
+      { name: PLAY_PAGE_BACKGROUND, value: SENTINEL },
+    )
+    await expect.poll(async () => (await backgrounds(page, PLAY_PAGE_BACKGROUND)).body).toBe(SENTINEL)
+  })
 })

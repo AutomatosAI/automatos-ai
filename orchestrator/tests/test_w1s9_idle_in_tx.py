@@ -32,12 +32,6 @@ ORCH_ROOT = Path(__file__).resolve().parent.parent
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
-# The heartbeat tool loop imports consumers.chatbot.personality, whose package
-# __init__ eagerly pulls the chatbot stack → RAG → camelot, an optional PDF dep
-# not installed in the unit-test env. Stub it so the import chain resolves.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
-
 def _stub(name, **attrs):
     """Register a stub module in sys.modules (only if absent) with attrs set."""
     if name in sys.modules:
@@ -467,6 +461,9 @@ async def test_heartbeat_commits_before_each_generate(monkeypatch):
 # itself in a harness_runs row (services.harness_runs) instead of last_run.json.
 # The lock and the run-row helpers are stubbed here; they have real-DB suites of
 # their own (test_prd263_harness_advisory_lock.py, test_prd263_harness_run_record.py).
+# PRD-263 US-053: the tick reconciles the ledger first, committing on its own before
+# any phase (services.harness_grants); stubbed the same way, its real-DB suite is
+# test_prd263_harness_reconcile_sweep.py.
 # ---------------------------------------------------------------------------
 
 
@@ -511,6 +508,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     monkeypatch.setattr(dbmod, "SessionLocal", lambda: _HarnessDB(ws, events))
 
+    from services.harness_changes import Prescribed
     from services.harness_service import HarnessService
 
     svc = HarnessService()
@@ -522,7 +520,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     import contextlib
 
-    from services import harness_runs
+    from services import harness_grants, harness_runs
 
     @contextlib.contextmanager
     def _lock(_engine, _ws):
@@ -531,6 +529,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
     closed: list[dict] = []
     monkeypatch.setattr(harness_runs, "workspace_lock", _lock)
     monkeypatch.setattr(harness_runs, "close_interrupted", lambda _db, _ws: 0)
+    monkeypatch.setattr(harness_grants, "reconcile", lambda _db, _ws: {})
     monkeypatch.setattr(harness_runs, "week_is_settled", lambda _db, _ws, _window: False)
     monkeypatch.setattr(harness_runs, "completed_runs", lambda _db, _ws: 0)
     monkeypatch.setattr(harness_runs, "open_run", lambda _db, _ws, _window: 1)
@@ -545,9 +544,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("diagnose")
         return {"coverage": None, "convergence": "insufficient_data", "counts": {}, "agents": {}, "issues": []}
 
-    async def _prescribe(_ws, _diag, _run_id):
+    async def _prescribe(_ws, _metrics, _diag, _run_id, _db):
         events.append("prescribe")
-        return []
+        return Prescribed(valid=(), dropped=())
 
     async def _report(_ws, _diag, _prescriptions, _db, _iteration):
         events.append("report")

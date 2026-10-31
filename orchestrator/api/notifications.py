@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -35,9 +35,12 @@ from core.auth.hybrid import (
     DEFAULT_NOTIFICATION_PREFERENCES,
     get_request_context_hybrid,
 )
+# PRD-266: the request's integer users.id comes from the ONE resolver (a paired
+# device resolves too); bound to the old name so the call sites are untouched.
+from core.auth.principal import resolve_user_pk as _resolve_user_id
 from core.database.database import get_db
-from core.models.core import User as UserModel
 from core.services.notification_dispatcher import VALID_EVENT_TYPES
+from services.push.preferences import push_row_allowed, push_types, refused_message, with_push_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +50,9 @@ preferences_router = APIRouter(
     prefix="/api/notification-preferences", tags=["notification-preferences"]
 )
 
+# PRD-266 K7: a 'push' row is a person's (or the workspace's) push switch for the event.
 _VALID_DESTINATIONS: frozenset[str] = frozenset(
-    {"in_app", "telegram", "slack", "webhook", "channel", "silent"}
+    {"in_app", "telegram", "slack", "webhook", "channel", "silent", "push"}
 )
 
 
@@ -99,31 +103,6 @@ class ReadAllResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _resolve_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
-    """
-    Resolve the current request's integer ``users.id`` (or ``None`` when the
-    caller cannot be mapped to a DB user — e.g. API key auth).
-
-    Matches first by ``clerk_user_id`` then by ``email``; mirrors the pattern
-    used in ``api/workflow_recipes.py``.
-    """
-    if not ctx.user or not ctx.user.id:
-        return None
-
-    user = (
-        db.query(UserModel)
-        .filter(UserModel.clerk_user_id == ctx.user.id)
-        .first()
-    )
-    if not user and ctx.user.email:
-        user = (
-            db.query(UserModel)
-            .filter(UserModel.email == ctx.user.email)
-            .first()
-        )
-    return user.id if user else None
 
 
 def _row_to_model(row: Any) -> NotificationRow:
@@ -314,10 +293,24 @@ class PreferenceRow(BaseModel):
 class PreferenceListResponse(BaseModel):
     success: bool
     preferences: List[PreferenceRow]
+    # PRD-266 US-014a: the app's switches (the three push types and the digest) and the
+    # events whose 'push' rows each one reads and writes (services/push/preferences.py).
+    push_types: Dict[str, List[str]]
 
 
 class PreferenceBulkUpdateRequest(BaseModel):
     preferences: List[PreferenceRow]
+
+    @model_validator(mode="after")
+    def _push_rows_are_push_switches(self) -> "PreferenceBulkUpdateRequest":
+        """PRD-266 US-014a (K7, K12): a 'push' row names a push event or daily_digest, else 422."""
+        refused = sorted({
+            pref.event_type for pref in self.preferences
+            if not push_row_allowed(pref.event_type, pref.destination)
+        })
+        if refused:
+            raise ValueError(refused_message(refused))
+        return self
 
 
 class PreferenceBulkUpdateResponse(BaseModel):
@@ -389,11 +382,15 @@ def _merge_preference_rows(
 
 @preferences_router.get("", response_model=PreferenceListResponse)
 @preferences_router.get("/", response_model=PreferenceListResponse)
-async def list_preferences(
+def list_preferences(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> PreferenceListResponse:
-    """Return merged notification preferences for the current workspace+user."""
+    """Return merged notification preferences for the current workspace+user.
+
+    PRD-266 US-014a: plus an enabled 'push' row for each push switch event that has none
+    yet (no row means on), and the push-type map the app's switches read.
+    """
     user_id = _resolve_user_id(db, ctx)
 
     try:
@@ -414,8 +411,9 @@ async def list_preferences(
             status_code=500, detail="Failed to list notification preferences"
         )
 
+    merged = [row.model_dump() for row in _merge_preference_rows(rows, user_id)]
     return PreferenceListResponse(
-        success=True, preferences=_merge_preference_rows(rows, user_id)
+        success=True, preferences=with_push_defaults(merged), push_types=push_types()
     )
 
 

@@ -6,6 +6,7 @@
  */
 
 import type { ComponentType, ReactNode } from 'react'
+import type { ApprovalView } from '@/lib/proactive/types'
 
 /**
  * All supported widget types
@@ -61,6 +62,8 @@ export interface MissionApprovalWidgetData {
   risk_class?: string
   oversight_rationale?: string
   requires_approval?: boolean
+  /** PRD-268 US-C20c: the exact action and the rule that held the plan (its grant_id is the mission_id). */
+  approval_view?: ApprovalView
 }
 
 /**
@@ -82,6 +85,8 @@ export interface ToolApprovalWidgetData {
   risk_class?: string
   oversight_rationale?: string
   requires_approval?: boolean
+  /** PRD-268 US-C20c: the exact action, its target and preview, and the rule that asked. */
+  approval_view?: ApprovalView
 }
 
 /**

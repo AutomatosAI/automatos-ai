@@ -35,6 +35,10 @@ actions:
     source: example
   - text: did I mention anything about Redis?
     source: example
+  - text: what did I ask you first tonight?
+    source: example
+  - text: what was the first thing I asked you today?
+    source: example
   - text: search chat
     source: phrase_map
   - text: search conversations
@@ -58,6 +62,10 @@ actions:
   - text: search my chats
     source: phrase_map
   - text: look through chats
+    source: phrase_map
+  - text: what did i ask first
+    source: phrase_map
+  - text: first thing i asked
     source: phrase_map
   - text: pull up our chat from last week about pricing
     source: authored

@@ -10,7 +10,9 @@ lists:
 * PR and branch builds push to the job's ``registry:2`` (buildx on the host
   network), main pushes to GHCR, and only publishing runs write the GHA cache,
   ``mode=min`` for the API (the picker writes the cache settings);
-* every image and arch has a budget with a reason.
+* every image and arch has a budget with a reason;
+* only the API builds reproducibly: a fixed SOURCE_DATE_EPOCH build arg and
+  ``rewrite-timestamp=true`` on its outputs (PRD-262 US-022).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import io
 import json
 import sys
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -81,11 +84,15 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
         assert "NEXT_PUBLIC_AUTH_EDITION=local\nNEXT_PUBLIC_API_URL=http://localhost:8000" in entry["build_args"]
 
 
-EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render"]
+EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render", "voice-tts"]
 
 
 @pytest.mark.parametrize("path,names", [
-    ("orchestrator/requirements.txt", ["api"]),
+    ("orchestrator/requirements.in", ["api"]),  # PRD-262 US-022: the input and its locks
+    ("orchestrator/requirements.lock", ["api"]),
+    ("orchestrator/requirements-dev.lock", ["api"]),
+    ("orchestrator/scripts/split_lock.py", ["api"]),
+    ("orchestrator/requirements-dev.txt", ["api"]),  # PRD-262 US-014
     ("services/workspace-worker/executor.py", ["workspace-worker"]),
     ("services/agent-opt-worker/main.py", ["agent-opt-worker"]),
     ("services/media-render/Dockerfile", ["media-render"]),
@@ -149,6 +156,37 @@ def test_pr_builds_push_to_the_jobs_own_registry():
     assert "name=${{ matrix.image }}" in outputs and "push-by-digest=true" in outputs and "push=true" in outputs
 
 
+# 2026-10-19T00:00:00Z: set once, never the lock's commit time (PRD-262 US-022).
+API_EPOCH = 1792368000
+
+
+def test_only_the_api_builds_reproducibly():
+    """PRD-262 US-022: a fixed SOURCE_DATE_EPOCH and rewrite-timestamp=true, on the API alone.
+
+    A constant epoch on the frontend would clamp its public/ mtimes, which its ETags read.
+    """
+    epochs = {image["name"]: image.get("source_date_epoch") for image in IMAGES}
+    assert epochs.pop("api") == API_EPOCH
+    assert datetime.fromtimestamp(API_EPOCH, timezone.utc) == datetime(2026, 10, 19, tzinfo=timezone.utc)
+    assert not any(epochs.values()), epochs
+    for entry in _pick([], publish=True, every=True):
+        args = entry["build_args"].splitlines()
+        if entry["name"] == "api":
+            assert args == [f"SOURCE_DATE_EPOCH={API_EPOCH}"], args  # no variant arg since US-027
+            assert entry["rewrite_timestamp"] == ",rewrite-timestamp=true"
+        else:
+            assert not [arg for arg in args if arg.startswith("SOURCE_DATE_EPOCH")], (entry["name"], args)
+            assert entry["rewrite_timestamp"] == "", entry["name"]
+
+
+def test_the_build_step_appends_rewrite_timestamp_to_its_outputs():
+    outputs = BUILD_STEP["with"]["outputs"]
+    assert outputs.endswith(",push=true${{ matrix.rewrite_timestamp }}"), outputs
+    assert BUILD_STEP["with"]["build-args"] == "${{ matrix.build_args }}"
+    assert "SOURCE_DATE_EPOCH" not in json.dumps(BUILD_STEP.get("env") or {}), (
+        "a build arg from the matrix, not the step's env, so only the API gets it")
+
+
 def test_only_publishing_runs_write_the_cache_and_the_api_writes_min():
     """The picker writes both cache settings; the GHA images keep one scope per image and arch."""
     assert BUILD_STEP["with"]["cache-from"] == "${{ matrix.cache_from }}"
@@ -156,7 +194,7 @@ def test_only_publishing_runs_write_the_cache_and_the_api_writes_min():
     modes = {image["name"]: image["cache_mode"] for image in IMAGES}
     assert modes["api"] == "min" and modes["frontend"] == "max"
     gha = {image["name"] for image in IMAGES if image.get("cache", "gha") == "gha"}
-    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker"}
+    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker", "voice-tts"}
     for publish in (False, True):
         for entry in _pick([], publish=publish, every=True):
             if entry["name"] not in gha:

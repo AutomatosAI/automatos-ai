@@ -14,6 +14,7 @@ class TestContextMode:
         "heartbeat_agent", "recipe",
         "router", "orchestrator_stage", "nl2sql",
         "coordinator", "planning",
+        "check_in",  # PRD-268 US-C02c
     }
 
     def test_all_expected_modes_exist(self):
@@ -85,7 +86,7 @@ class TestModeConfigs:
         assert MODE_CONFIGS[ContextMode.HEARTBEAT_AGENT].max_tokens == 128000
 
     def test_tool_loading_values_valid(self):
-        valid_strategies = {"full", "filtered", "dispatcher_only", "none"}
+        valid_strategies = {"full", "filtered", "dispatcher_only", "read_only", "none"}
         for mode, config in MODE_CONFIGS.items():
             assert config.tool_loading in valid_strategies, (
                 f"{mode} has invalid tool_loading: {config.tool_loading}"

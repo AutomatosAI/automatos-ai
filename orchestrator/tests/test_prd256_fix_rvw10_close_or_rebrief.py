@@ -32,6 +32,7 @@ class _Executor:
 
     def __init__(self, card):
         self.card = card
+        self.db, self.workspace_id = card.db, card.ws   # the board the gate reads (P256-FIX-N17-1)
 
     @owner_only.asks_the_owner_first
     async def _run_cleared(self, action_name, params, caller_context, cleared, handler):
@@ -72,13 +73,36 @@ def test_a_new_brief_that_closes_the_card_is_refused_before_any_card(in_review, 
     assert (in_review.card.status, in_review.card.description) == before            # nothing changed
 
 
-def test_a_new_brief_that_does_not_close_the_card_re_briefs_it_with_no_card(in_review, notes_in_this_session):
-    """FX-013 stands for a status that does not close the card (A440's call)."""
+def test_a_new_brief_that_does_not_close_the_card_waits_for_the_click(in_review, notes_in_this_session):
+    """FX-013 stands for a status that does not close the card (A440's call), and the Re-brief
+    it leaves sends the card back: from the owner's chat it waits for their click, and the card
+    shows no status move (P256-FIX-N17-1, F438)."""
+    before = (in_review.card.status, in_review.card.description)
+
     out = _run(in_review, {"task_id": in_review.number, "description": f241.NEW_BRIEF, "status": "in_progress"},
                _owners_chat())
 
-    assert out["success"] is True and out["status_ignored"] is True
-    assert "requires_confirmation" not in out and _grants(in_review) == 0
+    assert out["requires_confirmation"] is True and owner_only.is_owner_only(
+        EDIT, {"task_id": in_review.number, "description": f241.NEW_BRIEF}, db=in_review.db,
+        workspace_id=in_review.ws) is True
+    assert _grants(in_review) == 1 and "a new brief" in out["message"] and "- status:" not in out["question_md"]
+    in_review.db.refresh(in_review.card)
+    assert (in_review.card.status, in_review.card.description) == before
+
+
+def test_the_click_rebriefs_the_card_and_drops_its_status(in_review, notes_in_this_session):
+    """The owner's click runs the Re-brief once: the status dropped, the card back with its agent."""
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
+
+    params = {"task_id": in_review.number, "description": f241.NEW_BRIEF, "status": "in_progress"}
+    asked = _run(in_review, params, _owners_chat())
+    grant_grant(in_review.db.get(ApprovalGrant, asked["grant_id"]), granted_by="user:7")
+    in_review.db.flush()
+
+    out = _run(in_review, params, _owners_chat())
+
+    assert out["success"] is True and out["status_ignored"] is True and out["sent_back"] is True, out
     in_review.db.refresh(in_review.card)
     assert (in_review.card.status, in_review.card.description) == ("assigned", f241.NEW_BRIEF)
 

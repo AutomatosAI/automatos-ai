@@ -34,7 +34,15 @@ TAG="${E2E_IMAGE_TAG:-edge}"
 API_IMAGE=automatos-api:e2e
 FRONTEND_IMAGE="ghcr.io/automatosai/automatos-frontend:$TAG"
 WORKER_IMAGE="ghcr.io/automatosai/automatos-workspace-worker:$TAG"
-DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine otel/opentelemetry-collector-contrib:0.161.0)
+# The exact references datastores.yaml and otel-collector.yaml name, so what runs is what
+# is pinned here (test_prd262_kind_pins.py holds them equal). An entry pinned by digest
+# is left to the node's kubelet, which pulls it by that digest (prepare_images says why);
+# the rest are pulled here and loaded into the cluster.
+DATASTORE_IMAGES=(
+    pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    otel/opentelemetry-collector-contrib:0.161.0
+)
 WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 API_PORT=18000
 FRONTEND_PORT=13000
@@ -77,26 +85,35 @@ create_cluster() {
 }
 
 prepare_images() {
+    local preload=() image arch archive
     if [ "${E2E_SKIP_BUILD:-}" != "1" ] || ! docker image inspect "$API_IMAGE" >/dev/null 2>&1; then
         log "Building $API_IMAGE from this checkout"
-        docker build --target production --build-arg INSTALL_GRAPH_EXTRAS=false -t "$API_IMAGE" "$ROOT/orchestrator"
+        docker build --target production -t "$API_IMAGE" "$ROOT/orchestrator"
     fi
     # The web app and worker tags move (edge): pull them every run, or a cached
     # image older than the API under test answers with yesterday's contract.
     for image in "$FRONTEND_IMAGE" "$WORKER_IMAGE"; do
         docker pull -q "$image"
     done
+    # An image pinned by digest (name:tag@sha256:…) is left to the node's kubelet, which
+    # pulls it by that digest. Saved with `docker save`, its archive carries no name the
+    # digest resolves to: containerd records it as `import-<date>@sha256:…`, and every
+    # container create then fails "failed to check if this is a checkpoint image … not
+    # found" (containerd 2.x), as it did once PRD-262 pinned the datastores by digest.
+    for image in "$API_IMAGE" "$FRONTEND_IMAGE" "$WORKER_IMAGE" "${DATASTORE_IMAGES[@]}"; do
+        case "$image" in *@sha256:*) ;; *) preload+=("$image") ;; esac
+    done
     for image in "${DATASTORE_IMAGES[@]}"; do
+        case "$image" in *@sha256:*) continue ;; esac
         docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image"
     done
     log "Loading images into the cluster"
     # `kind load docker-image` imports every platform an image index lists, which
     # fails under Docker's containerd image store when attestations or other
     # architectures aren't stored locally. Save just the node's platform instead.
-    local arch archive
     arch="$(docker exec "$CLUSTER-control-plane" uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
     archive="$(mktemp "${TMPDIR:-/tmp}/automatos-e2e-image.XXXXXX")"
-    for image in "$API_IMAGE" "$FRONTEND_IMAGE" "$WORKER_IMAGE" "${DATASTORE_IMAGES[@]}"; do
+    for image in "${preload[@]}"; do
         docker save --platform "linux/$arch" "$image" -o "$archive"
         kind load image-archive "$archive" --name "$CLUSTER" >/dev/null
     done
@@ -122,8 +139,9 @@ create_secrets() {
         --from-literal=WORKER_INTERNAL_TOKEN="$(openssl rand -hex 24)" \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     kubectl -n "$NS" apply -f "$ROOT/deploy/kind/datastores.yaml" >/dev/null
-    kubectl -n "$NS" rollout status deploy/postgres --timeout=180s
-    kubectl -n "$NS" rollout status deploy/redis --timeout=120s
+    # Longer than a preloaded start needs: kubelet pulls the digest-pinned images itself.
+    kubectl -n "$NS" rollout status deploy/postgres --timeout=300s
+    kubectl -n "$NS" rollout status deploy/redis --timeout=180s
     install_otel_collector
 }
 

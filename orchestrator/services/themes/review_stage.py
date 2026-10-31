@@ -11,11 +11,22 @@ host can't make yet:
 
 * ``sizes``, ``cssScope``, ``looks``: the reader's checks (A-06a/A-07a, ``scan.py``); a package
   that failed one never gets here, so each is a pass with what it measured;
-* ``contrast`` (AA per preset): ``not_measured``. A look is knob values; neither
+* ``contrast`` (AA): for a theme whose theme.json has a ``mobile`` block (M-03, PB-35), the block's
+  ten colour pairs (``contract.MOBILE_CONTRAST_PAIRS``: eight text pairs at 4.5:1, two UI pairs at
+  3:1) per scheme of ``mobile.tokens``, or under ``fromLooks`` for the prepaint table's defaults and
+  each preset, painted as the web paints them (``mobile_contrast.py``): exactly what the phone's
+  answer can serve. A measured pair under its minimum, or a scheme or painting that gives no
+  ``--background`` or ``--foreground``, is an error naming it (``MOBILE_CONTRAST_FAIL_LEVEL``), every
+  measured pair passing is a pass, and any other pair whose two tokens are not both set is listed
+  ``not_measured``.
+  Without the block: ``not_measured`` per preset. A look is knob values; neither
   ``looks/schema.json`` nor ``boot/prepaint.json`` says which painted colour is text on which
   ground, so there is no pair to measure (``scan.CONTRAST_NOT_RUN``). The reviewer checks it by
   eye until the look schema declares pairs or axe runs (D3-b);
 * ``uses``: the declared SDK areas against the names the bundle imports (``sdk_uses.py``);
+* ``audioCapture`` (theme voice, TV-C7): the bundle opening the microphone, listening or speaking by
+  itself (``getUserMedia``, ``SpeechRecognition``, ``speechSynthesis``) instead of through the SDK's
+  voice area is an error naming each (``audio_capture.py``);
 * ``clonedFrom``: each cloned page's ``clonedFrom.sha`` against this release's core page files
   (``data/core-pages.json`` through ``drift.py``); a stale clone is a warning;
 * ``llm``: the LLM stage (``llm_stage.py``); when it can't run on all the code it is a warning
@@ -36,8 +47,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Mapping, Optional
 
+from services.themes.audio_capture import audio_capture_check
 from services.themes.drift import stale_clones
 from services.themes.llm_stage import ChunkCall, TokenBudget, llm_check, run_llm_stage
+from services.themes.mobile_contrast import OUTCOME_FAIL, OUTCOME_NOT_MEASURED, OUTCOME_PASS, measure_mobile
 from services.themes.package import ThemePackage
 from services.themes.scan import build_scan_report
 from services.themes.sdk_uses import SurfaceAreas, uses_check
@@ -48,6 +61,12 @@ REPORT_SCHEMA = "automatos-theme-scan/v2"
 STAGE = "C-02a"
 LEVEL_PASS, LEVEL_WARNING, LEVEL_ERROR, LEVEL_NOT_MEASURED = "pass", "warning", "error", "not_measured"
 LEVELS = (LEVEL_PASS, LEVEL_WARNING, LEVEL_ERROR, LEVEL_NOT_MEASURED)
+# PB-35: a mobile pair under AA blocks the review (a phone must read a theme that claims it); a warning
+# instead is this one constant (Gerard's call).
+MOBILE_CONTRAST_FAIL_LEVEL = LEVEL_ERROR
+CONTRAST_LEVELS = {
+    OUTCOME_FAIL: MOBILE_CONTRAST_FAIL_LEVEL, OUTCOME_PASS: LEVEL_PASS, OUTCOME_NOT_MEASURED: LEVEL_NOT_MEASURED,
+}
 VERDICT_PASS, VERDICT_REVIEW, VERDICT_BLOCKED = "pass", "review_required", "blocked"
 READER_CHECKS = ("sizes", "cssScope", "looks")
 # Checks only the reviewer sees: the LLM stage's score and findings (``member_view``).
@@ -61,11 +80,19 @@ STALE_CLONES = (
 )
 
 
+def contrast_check(checked: ThemePackage, unmeasured: Mapping[str, Any]) -> Dict[str, Any]:
+    """The ``contrast`` entry: the mobile block's pairs measured (M-03), else the scan's ``unmeasured`` one."""
+    measured = measure_mobile(checked.manifest, {path: item.data for path, item in checked.files.items()})
+    if measured is None:
+        return {**unmeasured, "level": LEVEL_NOT_MEASURED}
+    return {**measured, "level": CONTRAST_LEVELS[measured["status"]]}
+
+
 def _reader_checks(checked: ThemePackage, package_bytes: int) -> Dict[str, Dict[str, Any]]:
-    """The reader's checks (passed, with what they measured) and the unmeasured contrast."""
+    """The reader's checks (passed, with what they measured) and the contrast check."""
     base = build_scan_report(checked.files, package_bytes)["checks"]
     checks = {name: {**base[name], "level": LEVEL_PASS} for name in READER_CHECKS}
-    return {**checks, "contrast": {**base["contrast"], "level": LEVEL_NOT_MEASURED}}
+    return {**checks, "contrast": contrast_check(checked, base["contrast"])}
 
 
 def clone_check(manifest: Mapping[str, Any]) -> Dict[str, Any]:
@@ -111,6 +138,7 @@ def run_review_stage(
     checks = {
         **_reader_checks(checked, package_bytes),
         "uses": uses_check(checked.manifest, data, surface),
+        "audioCapture": audio_capture_check(data),
         "clonedFrom": clone_check(checked.manifest),
         "llm": llm_check(llm),
     }

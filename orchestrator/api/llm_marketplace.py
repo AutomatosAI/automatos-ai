@@ -138,6 +138,21 @@ def route_key(serving_provider: str, model_id: str) -> str:
     return f"{serving_provider}:{model_id}"
 
 
+def route_capabilities(m: LLMModel) -> Dict[str, Any]:
+    """The route's capability ratings ({"reasoning": "excellent", …}), or {} when the row holds none.
+
+    ``capabilities`` is untyped JSON. A row written outside the seeds and syncs once held a list
+    of names (``["chat"]``); passed straight to the schema it failed validation and took the
+    whole catalogue down with a 500 (23 Oct 2026). A list carries no ratings, so it reads as {}.
+    """
+    if isinstance(m.capabilities, dict):
+        return m.capabilities
+    if m.capabilities:
+        logger.warning("llm_models row %s (%s) has non-dict capabilities; showing none",
+                       m.id, route_key(m.serving_provider, m.model_id))
+    return {}
+
+
 def _model_to_out(
     m: LLMModel,
     installed_row_ids: set = None,
@@ -170,7 +185,7 @@ def _model_to_out(
         is_free=is_free,
         price_known=price_known,
         price_tier=price_tier_for(in_cost) if price_known else PRICE_TIER_UNKNOWN,
-        capabilities=m.capabilities or {},
+        capabilities=route_capabilities(m),
         recommended_for=m.recommended_for or [],
         supports_functions=m.supports_functions or False,
         supports_vision=m.supports_vision or False,

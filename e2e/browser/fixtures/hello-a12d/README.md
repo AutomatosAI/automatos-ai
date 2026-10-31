@@ -7,7 +7,7 @@ The fixture behind `specs/pages-agents.spec.ts`. It is served as an installed th
 |---|---|
 | `theme.json` | The manifest: `htmlClass` `hello-a12d`, base Studio, slot `frame@1`. |
 | `entry.js` | A frame that only wraps the page, and `registerPage('/agents', …)`: a section drawn from the SDK's `pages/agents` area alone (`useAgents()` for the roster, `useAgentStats()` for the counts) with a Refresh button that calls the roster's `refetch`. |
-| `responses.json` | Test data: the answers the spec gives `GET /api/agents/` and `GET /api/system/agent-statistics`. The stats count seven agents and the roster lists two, so each number on the page shows which read it came from. |
+| `responses.json` | Test data: the answers the spec gives `GET /api/agents/` and `GET /api/system/agent-statistics`. The stats count seven agents and the roster lists two, so each number on the page shows which read it came from. `iconMappings` answers `GET /api/system/config/system_icon_mappings`, which `useAgents` reads first, empty as on a fresh workspace, so the roster's query key stays put and the spec counts only the roster reads the page asks for. |
 | `theme.css` | Two rules, both under `html.hello-a12d`. |
 | `presets/default.look.json` | The preset the manifest needs. |
 

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { CHAT_HREF } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
-import { usePlayChatStore } from '@/stores/play-chat-store'
+import { useFreshDraftStore } from '@/stores/fresh-draft-store'
 
 /**
  * PRD-260 — Play's New chat (the sidebar's, the Conversations page's and the
@@ -14,7 +14,7 @@ import { usePlayChatStore } from '@/stores/play-chat-store'
  * idempotent) and does nothing until the store is hydrated: a draft written
  * before would be overwritten by the stored session, and in SaaS would save an
  * empty tab list to the server. It also tells Play's chat to show a fresh new
- * chat when one is already on screen (play-chat-store).
+ * chat when one is already on screen (stores/fresh-draft-store.ts).
  */
 
 export interface StartChat {
@@ -28,7 +28,7 @@ export function useStartChat(): StartChat {
   const router = useRouter()
   const { hydrated } = useChatSessionHydration()
   const newDraft = useChatSessionStore((s) => s.newDraft)
-  const freshDraft = usePlayChatStore((s) => s.freshDraft)
+  const freshDraft = useFreshDraftStore((s) => s.freshDraft)
   const startChat = useCallback(() => {
     if (!hydrated) return
     newDraft()

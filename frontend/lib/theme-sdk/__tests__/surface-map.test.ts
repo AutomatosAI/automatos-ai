@@ -1,14 +1,18 @@
 /**
- * PRD-261 A-10c (PA-16) — the SDK surface map, docs/theme-host/sdk-surface-map.md, held to the code.
+ * PRD-261 A-10c (PA-16) — the SDK surface map, docs/theme-host/sdk-surface-map.md, held to the SDK's
+ * surface files (lib/theme-sdk/surface/*.json) only.
  *
  * - Every `area.name` the map gives a module is planned in that area's surface file, and every
  *   surface name appears in the map: no SDK name without a reason, no reason without a name.
- * - A static scan of Play's folders (components/{play,looks,mascot}, lib/{play,looks,mascot}; their
- *   runtime files, not their tests) finds no `@/` import outside those folders, and no package
- *   import, that has no row. A new import there is planned in the map first.
- * - Each data hook the Q3 pages read (plan §0) has a row.
+ * - Each data hook the Q3 pages read (plan §0) has a row, and so does each shared module a theme
+ *   imports (React, the SDK, Play's icons).
+ *
+ * PRD-261 A-19f2: Play's code left core (A-19f1), so the static scan of Play's folders that held
+ * their imports to the map is the theme kit's now (themes/play/test/imports.test.ts: no `@/` import,
+ * only the host's shared modules); the map's **Read by** column records where Play read each module
+ * while it sat in core.
  */
-import { readdirSync, readFileSync, statSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
@@ -35,21 +39,11 @@ const FRONTEND = path.resolve(__dirname, '../../..')
 const MAP_FILE = path.resolve(FRONTEND, '../docs/theme-host/sdk-surface-map.md')
 const SURFACE_DIR = path.join(FRONTEND, 'lib/theme-sdk/surface')
 
-const PLAY_FOLDERS = ['components/play', 'components/looks', 'components/mascot', 'lib/play', 'lib/looks', 'lib/mascot']
-const PLAY_OWN = /^@\/(components\/(play|looks|mascot)|lib\/(play|looks|mascot))(\/|$)/
-const SOURCE_FILE = /\.(tsx?|jsx?)$/
-const TEST_FILE = /\.test\.[jt]sx?$/
-const TEST_DIR = '__tests__'
-/**
- * ` from '…'`, `import('…')` and a bare `import '…'`, in single or double quotes. The specifier has no
- * whitespace, and `from` follows whitespace, so a key such as `'--gradient-from': …` is not an import.
- */
-const IMPORT_SPECIFIER = /(?:\sfrom\s+|\bimport\s*\(\s*|^\s*import\s+)(['"])([@.\w][^'"\s]*)\1/gm
 const SDK_NAME = /`([a-z]+(?:\/[a-z-]+)?)\.([A-Za-z_$][\w$]*)`/g
 const MODULE_CELL = /^`([^`]+)`$/
 const WILDCARD = '/*'
 
-const MAP_VALUES = ['SDK', 'copied into Play', 'host-only', 'shared module']
+const MAP_VALUES = ['SDK', "a theme's own", 'host-only', 'shared module']
 const NO_NAMES = '—'
 /** The data hooks the Q3 pages read (plan §0, and the /missions/[id] hooks behind them). */
 const Q3_DATA_HOOKS = [
@@ -69,8 +63,8 @@ const Q3_DATA_HOOKS = [
   '@/hooks/use-watches-api',
   '@/components/workspace-provider',
 ]
-/** Imports the scan must see, so a broken pattern can never pass by finding nothing. */
-const KNOWN_IMPORTS = ['@/types', '@/lib/ticket-links', '@/hooks/use-deliverables-api', 'next/link', 'react']
+/** The shared modules a theme imports (Play's, since the W-A5 port reached the core through the SDK). */
+const SHARED_IMPORTS = ['@automatos/theme-sdk', 'lucide-react', 'react']
 
 function cellsOf(line: string): string[] {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
@@ -130,37 +124,16 @@ function uncovered(specifiers: readonly string[], modules: readonly string[]): s
   return specifiers.filter((specifier) => !modules.some((module) => covers(module, specifier)))
 }
 
-function runtimeFilesUnder(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = path.join(dir, entry)
-    if (statSync(full).isDirectory()) return entry === TEST_DIR ? [] : runtimeFilesUnder(full)
-    return SOURCE_FILE.test(entry) && !TEST_FILE.test(entry) ? [full] : []
-  })
-}
-
-/** The `@/` imports outside Play's folders, and the package imports, of one source text. */
-function externalImportsOf(source: string): string[] {
-  const specifiers = Array.from(source.matchAll(IMPORT_SPECIFIER), (match) => match[2])
-  return specifiers.filter((specifier) => (specifier.startsWith('@/') ? !PLAY_OWN.test(specifier) : !specifier.startsWith('.')))
-}
-
-function scanPlayFolders(): string[] {
-  const files = PLAY_FOLDERS.flatMap((folder) => runtimeFilesUnder(path.join(FRONTEND, folder)))
-  const found = files.flatMap((file) => externalImportsOf(readFileSync(file, 'utf8')))
-  return Array.from(new Set(found)).sort()
-}
-
 const SURFACES: readonly SurfaceFile[] = readdirSync(SURFACE_DIR)
   .filter((file) => file.endsWith('.json'))
   .map((file) => JSON.parse(readFileSync(path.join(SURFACE_DIR, file), 'utf8')) as SurfaceFile)
 const PLANNED = new Map(SURFACES.map((surface) => [surface.area, new Set(surface.names)]))
 const TABLES = tablesOf(readFileSync(MAP_FILE, 'utf8'))
 const ROWS = mapRowsOf(TABLES)
-const SCANNED = scanPlayFolders()
 
 describe('PRD-261 A-10c — the map file', () => {
   it('has a row per module, once each, with a known Map value', () => {
-    expect(ROWS.length).toBeGreaterThan(KNOWN_IMPORTS.length)
+    expect(ROWS.length).toBeGreaterThan(Q3_DATA_HOOKS.length)
     const modules = ROWS.map((row) => row.module)
     expect(modules.filter((module, index) => modules.indexOf(module) !== index)).toEqual([])
     expect(ROWS.filter((row) => !MAP_VALUES.includes(row.map)).map((row) => row.module)).toEqual([])
@@ -176,6 +149,10 @@ describe('PRD-261 A-10c — the map file', () => {
 
   it('has a row for each data hook the Q3 pages read', () => {
     expect(uncovered(Q3_DATA_HOOKS, ROWS.map((row) => row.module))).toEqual([])
+  })
+
+  it('has a row for each shared module a theme imports', () => {
+    expect(uncovered(SHARED_IMPORTS, ROWS.map((row) => row.module))).toEqual([])
   })
 })
 
@@ -193,37 +170,7 @@ describe('PRD-261 A-10c — the map and the surface files', () => {
   })
 })
 
-describe("PRD-261 A-10c — the scan of Play's folders", () => {
-  it('sees the imports it must see', () => {
-    expect(KNOWN_IMPORTS.filter((specifier) => !SCANNED.includes(specifier))).toEqual([])
-    expect(SCANNED.filter((specifier) => PLAY_OWN.test(specifier))).toEqual([])
-  })
-
-  it('finds no core or package import the map has no row for', () => {
-    expect(uncovered(SCANNED, ROWS.map((row) => row.module))).toEqual([])
-  })
-})
-
 describe('PRD-261 A-10c — the helpers', () => {
-  it('reads from, import() and bare imports, keeps core and package ones, drops relative and Play-own ones', () => {
-    const source = [
-      "import { a } from '@/lib/ticket-links'",
-      'import type { B } from "@/types"',
-      "export { c } from '@/hooks/use-online'",
-      "const lazy = () => import('@/components/shared/markdown-view')",
-      "import '@/app/side-effect.css'",
-      "import Link from 'next/link'",
-      "import { d } from './local'",
-      "import { e } from '@/lib/play/shelf'",
-      "import { f } from '@/components/looks/look-provider'",
-      "const tokens = { '--background-gradient-from':'x', '--to-from': triplet(bg) }",
-    ].join('\n')
-    expect(externalImportsOf(source)).toEqual([
-      '@/lib/ticket-links', '@/types', '@/hooks/use-online', '@/components/shared/markdown-view',
-      '@/app/side-effect.css', 'next/link',
-    ])
-  })
-
   it('reports an import no row covers, and lets a folder row cover what is under it', () => {
     const modules = ['@/types', '@/lib/look-kit/*']
     expect(uncovered(['@/types', '@/lib/look-kit/css', '@/lib/look-kits', '@/lib/sneaky'], modules))

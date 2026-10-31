@@ -96,9 +96,9 @@ def _the_gate(call: _Call, cleared: Any, card_subject: str) -> Any:
 def _the_cards_ask(call: _Call, action_def: Any, card_subject: str) -> Dict[str, Any]:
     """The plain card (F091: never about something that is not there, naming what it acts
     on), its agent bound to the id the click will run on."""
-    from modules.tools.discovery.platform_executor import _subject_line
     from modules.tools.execution import tool_grants
-    from modules.tools.execution.subject_targets import missing_targets_error, named_subject, resolve_targets
+    from modules.tools.execution.subject_targets import (missing_targets_error, named_subject,
+                                                         resolve_targets, subject_line)
 
     params, refused = bound_to_the_agent(call.db, call.workspace_id, call.action, call.params)
     if refused:
@@ -106,7 +106,7 @@ def _the_cards_ask(call: _Call, action_def: Any, card_subject: str) -> Dict[str,
     found, missing = resolve_targets(call.db, call.workspace_id, params, call.action)
     if missing:
         return missing_targets_error(call.action, missing)
-    subject = card_subject or named_subject(found) or _subject_line(params)
+    subject = card_subject or named_subject(found) or subject_line(params)
     level = action_def.permission_level
     message = (f"This action ({level}) requires confirmation. Action: {call.action}{subject} — "
                f"{action_def.description[:DESCRIPTION_SHOWN]}")

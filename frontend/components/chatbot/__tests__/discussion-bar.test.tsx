@@ -11,7 +11,8 @@ const nav = vi.hoisted(() => ({ query: 'ticket=612', replace: vi.fn() }))
 const board = vi.hoisted(() => ({ task: undefined as unknown, isError: false }))
 const session = vi.hoisted(() => ({ newDraft: vi.fn() }))
 // PRD-260 M67: which chat /chat shows (Play's at >= 1024 px under Play, else the core's).
-const look = vi.hoisted(() => ({ play: false, narrow: false, ownsChat: true }))
+// `name`: the active theme's (its entry's theme.json name), which the hint names.
+const look = vi.hoisted(() => ({ play: false, narrow: false, ownsChat: true, name: 'Play' }))
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.query),
@@ -20,12 +21,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
 // The theme's width source, the one ThemeSlot reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
-// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; builtin Play's does.
+// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; the fixture theme's does (A-19b).
 vi.mock('@/hooks/use-studio-theme', async () => {
-  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  const { FIXTURE_THEME_ENTRY } = await import('@/lib/theme-host/__tests__/fixture-theme-entry')
   return {
     useIsStudio: () => true,
-    useActiveTheme: () => (look.play ? { ...BUILTIN_PLAY_ENTRY, ownsPages: look.ownsChat ? BUILTIN_PLAY_ENTRY.ownsPages : [] } : null),
+    useActiveTheme: () => (look.play
+      ? { ...FIXTURE_THEME_ENTRY, name: look.name, ownsPages: look.ownsChat ? FIXTURE_THEME_ENTRY.ownsPages : [] }
+      : null),
     useThemeLayout: () => (look.play && !look.narrow ? 'theme' : 'fallback'),
   }
 })
@@ -72,6 +75,7 @@ beforeEach(() => {
   look.play = false
   look.narrow = false
   look.ownsChat = true
+  look.name = 'Play'
   useDiscussionStore.getState().end()
   ;(useChatSessionStore as any).setState({ session: OPEN_TAB })
 })
@@ -137,6 +141,7 @@ describe('DiscussionBar', () => {
 
 const STUDIO_HINT = 'You are talking to Auto. To ask Words instead, pick them in the message box.'
 const PLAY_HINT = "You are talking to Auto in Play's chat. To ask Words, switch to Studio from the theme menu."
+const HUD_HINT = "You are talking to Auto in HUD's chat. To ask Words, switch to Studio from the theme menu."
 
 describe("DiscussionBar's hint (PRD-260 M67)", () => {
   it("under Play, never sends the owner to an agent picker Play's message box doesn't have", () => {
@@ -144,6 +149,14 @@ describe("DiscussionBar's hint (PRD-260 M67)", () => {
     render(<DiscussionBar />)
     expect(screen.queryByText(/pick them in the message box/)).toBeNull()
     expect(screen.getByText(PLAY_HINT)).toBeInTheDocument()
+  })
+
+  it("names the active theme's chat under another theme (HUD), never Play's", () => {
+    look.play = true
+    look.name = 'HUD'
+    render(<DiscussionBar />)
+    expect(screen.getByText(HUD_HINT)).toBeInTheDocument()
+    expect(screen.queryByText(/Play's chat/)).toBeNull()
   })
 
   it("keeps Studio's hint under Studio, and under Play below 1024 px where /chat is the core's chat (D7)", () => {

@@ -30,6 +30,9 @@ REFUSAL_CHARS = 400
 # PRD-256 P256-FIX-RVW-4: an identical repeat of a call that asked for the owner's click is
 # skipped with the card's words (card_raised), never as a refusal (REFUSED_AGAIN) or as done (RAN_ONCE).
 WAITING_AGAIN = "this exact call already waits for the owner in this reply and was not asked again. {card}"
+# P256-FIX-N17-4 (night 17, F447, rows 54, 55, 427): the re-check browse after four deletes was
+# skipped as "the same request already ran in this reply". A read that ran before a write that
+# went through reads something else now: the write clears it, and the same read runs again.
 # PRD-256 US-001: the trackers made while a chat turn's tool loop runs, oldest first, so the
 # turn's receipts read the calls its own loop made (consumers/chatbot/receipts.py). None
 # outside one: an agent run's tracker is kept by nobody.
@@ -113,6 +116,9 @@ class ToolExecutionTracker:
         self.refused: Dict[Tuple[str, str], str] = {}
         # P256-FIX-RVW-4: each identical call that asked for the owner's click, with its card's words.
         self.waiting: Dict[Tuple[str, str], str] = {}
+        # P256-FIX-N17-4: each call run this turn, with the action it was recorded as (the inner
+        # action for platform_execute): a write that went through clears the reads before it.
+        self.ran_as: Dict[Tuple[str, str], str] = {}
         # PRD-256 US-001: each call not run this turn (a repeat, a cap), with why: a receipt.
         self.skipped: List[Tuple[str, Dict[str, Any], str]] = []
         # F120: how many queries per search tool came from EARLIER model responses;
@@ -227,6 +233,7 @@ class ToolExecutionTracker:
         """Record that a tool was executed (updates dedup + count + query state)."""
         args_hash = self._hash_args(tool_args)
         self.exact_executions.add((tool_name, args_hash))
+        self.ran_as[(tool_name, args_hash)] = self._recorded_as(tool_name, tool_args)
         key = self._counting_key(tool_name, tool_args)
         self.tool_counts[key] = self.tool_counts.get(key, 0) + 1
         if tool_name in self.SEARCH_TOOLS:
@@ -259,8 +266,22 @@ class ToolExecutionTracker:
             self.succeeded.update(refused_effects(action))
             return
         self.succeeded.add(action)
+        self._reads_cleared_after(action)
         # F308: whether a mission's steps wait for the owner; FX-013: a status the answer ignored is no move.
         self.succeeded.update(done_effects(action, call_params(tool_name, tool_args), result))
+
+    def _reads_cleared_after(self, action: str) -> None:
+        """P256-FIX-N17-4: after a write that went through, the reads that ran before it may run
+        again (they read what it changed); a search's dedupe (F085-A, F120) and every write's
+        stand. Run only on the success path: a refused or waiting write changed nothing."""
+        from .turn_account import is_read
+
+        if is_read(action):
+            return
+        self.exact_executions = {
+            key for key in self.exact_executions
+            if key[0] in self.SEARCH_TOOLS or key not in self.ran_as or not is_read(self.ran_as[key])
+        }
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

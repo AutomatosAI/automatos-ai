@@ -15,15 +15,25 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   newest version it can run (``latest``).
 * **Previews per preset** (PRD §7 item 5): a preview ``assets/previews/<preset>.png`` or
   ``assets/previews/<preset>-<screen>.png`` belongs to that preset (the longest preset id that
-  matches wins); any other preview is in ``otherPreviews``. Every URL is the files route
-  (``serve.module_url``), which serves an approved listing's files to any caller (A-08a).
+  matches wins); any other preview is in ``otherPreviews``. Previews keep theme.json's order, and
+  the card's ``cover`` is the first one it lists. Phone screenshots (theme.json's ``phonePreviews``,
+  ``assets/previews/phone/<preset>[-<screen>].png`` or ``.jpg``) follow the same rule into each
+  preset's ``phonePreviews``, ``otherPhonePreviews`` and the card's ``phoneCover``; a package without
+  them answers ``[]`` and ``null`` there. Every URL is the files route (``serve.module_url``), which
+  serves an approved listing's files to any caller (A-08a).
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
+* **Official** (QB-21): ``publisher.official`` is true only for a reserved publisher
+  (``automatos``, or a ``theme_publishers`` row marked reserved) whose shown version carries a
+  signature an active Automatos key verifies (``signature_verify``, C-05b). A reserved name alone
+  is never Official: a local edition's operator may submit and approve ``automatos/x`` unsigned.
+  The card, the detail and each entry of the versions map carry ``signature {state, keyId}``.
 * **Install** writes a ``theme_installations`` row that **references** the approved package:
   every workspace that installs a version shares its one package row. Update, compare and
   rollback of a listing install are A-07b's routes; this module only creates the row. An
   install of an older version gets the newest compatible one as its ``pending_package_id``, so
   ``GET /api/themes/installed`` shows the update too; a version approved later is offered to
-  existing installs by ``listing_updates.offer_listed_update``.
+  existing installs by ``listing_updates.offer_listed_update``, and the unpinned ones move to it
+  (``auto_update.apply_listed_update``).
 
 Services raise ``ThemeInstallError`` (status and plain message); nothing here commits.
 """
@@ -31,7 +41,7 @@ Services raise ``ThemeInstallError`` (status and plain message); nothing here co
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -39,6 +49,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.models.themes import ThemeInstallation, ThemePackage, ThemePublisher
+from services.themes import signature_verify
 from services.themes.choices import (
     CONFLICT,
     FORBIDDEN,
@@ -59,9 +70,8 @@ logger = logging.getLogger(__name__)
 APPROVED = "approved"
 LISTING_SEPARATOR = "."
 FREE_LABEL = "Free"
-PREVIEW_DIR = "assets/previews/"
-PREVIEW_SUFFIX = ".png"
 SCREEN_SEPARATOR = "-"
+EXTENSION_SEPARATOR = "."
 README_PATH, CHANGELOG_PATH = "README.md", "CHANGELOG.md"
 MARKETPLACE_SETTING = "THEMES_MARKETPLACE"
 SWITCH_ON, SWITCH_OFF = "on", "off"
@@ -162,11 +172,12 @@ def newer_compatible(versions: Sequence[ThemePackage], package: ThemePackage) ->
 # ---------------------------------------------------------------------------
 
 
-def _publisher(db: Session, theme_id: str) -> Dict[str, Any]:
+def _publisher(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
+    """The id's publisher; ``official`` only when it is reserved and the shown version's signature verifies."""
     name = publisher_of(theme_id)
     row = db.query(ThemePublisher).filter(ThemePublisher.publisher == name).first()
-    official = name in RESERVED_PUBLISHERS or bool(row is not None and row.reserved)
-    return {"name": name, "official": official}
+    reserved = name in RESERVED_PUBLISHERS or bool(row is not None and row.reserved)
+    return {"name": name, "official": reserved and verdict.verified}
 
 
 def _file_url(package: ThemePackage, path: str) -> Optional[str]:
@@ -174,9 +185,40 @@ def _file_url(package: ThemePackage, path: str) -> Optional[str]:
     return module_url(package.digest, path) if path in listed else None
 
 
-def _preview_paths(package: ThemePackage) -> List[str]:
-    named = (package.manifest or {}).get("previews") or []
-    return sorted(path for path in named if isinstance(path, str) and _file_url(package, path) is not None)
+class PreviewKind(NamedTuple):
+    """One theme.json list of screenshots: its field (also each preset's key in the detail), its folder, and
+    the detail's key for the ones no preset claims."""
+
+    field: str
+    folder: str
+    other_key: str
+
+
+WEB_PREVIEWS = PreviewKind("previews", "assets/previews/", "otherPreviews")
+PHONE_PREVIEWS = PreviewKind("phonePreviews", "assets/previews/phone/", "otherPhonePreviews")
+PREVIEW_KINDS: Tuple[PreviewKind, ...] = (WEB_PREVIEWS, PHONE_PREVIEWS)
+
+
+def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
+    """The screenshots theme.json lists under ``kind`` that the package holds, in theme.json's order.
+
+    The first one is the cover (``_cover``). The theme picks its order (Play lists ``ember.png`` first,
+    its default look's chat), so it is never re-sorted by name. ``manifest.validate_manifest`` refuses a
+    list that names a file twice.
+    """
+    named = (package.manifest or {}).get(kind.field) or []
+    return [path for path in named if isinstance(path, str) and _file_url(package, path) is not None]
+
+
+def _cover(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
+    """The files URL of the first screenshot of ``kind`` the package holds, or None."""
+    paths = _preview_paths(package, kind)
+    return module_url(package.digest, paths[0]) if paths else None
+
+
+def _stem(path: str, kind: PreviewKind) -> str:
+    """A screenshot's file name without its folder and extension (theme.json's patterns allow one of each)."""
+    return path[len(kind.folder):].rsplit(EXTENSION_SEPARATOR, 1)[0]
 
 
 def _owner_preset(stem: str, presets: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
@@ -189,23 +231,46 @@ def _owner_preset(stem: str, presets: Sequence[str]) -> Tuple[Optional[str], Opt
     return None, None
 
 
+def _claimed(
+    package: ThemePackage, presets: Sequence[str], kind: PreviewKind,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
+    """``({preset: [{screen, url}]}, [unclaimed url])`` for one list of screenshots, in theme.json's order."""
+    owned = [
+        (_owner_preset(_stem(path, kind), presets), module_url(package.digest, path))
+        for path in _preview_paths(package, kind)
+    ]
+    claimed = {
+        preset: [{"screen": screen, "url": url} for (owner, screen), url in owned if owner == preset]
+        for preset in presets
+    }
+    return claimed, [url for (owner, _), url in owned if owner is None]
+
+
 def previews_by_preset(package: ThemePackage) -> Dict[str, Any]:
-    """Each preset with its previews (per screen), and the previews no preset claims."""
+    """Each preset with its web and phone screenshots (per screen), and the screenshots no preset claims."""
     listed = package.file_manifest if isinstance(package.file_manifest, dict) else {}
     presets = sorted(preset_ids(listed))
     default_look = (package.manifest or {}).get("look")
-    claimed: Dict[str, List[Dict[str, Any]]] = {preset: [] for preset in presets}
-    other: List[str] = []
-    for path in _preview_paths(package):
-        preset, screen = _owner_preset(path[len(PREVIEW_DIR):-len(PREVIEW_SUFFIX)], presets)
-        if preset is None:
-            other.append(module_url(package.digest, path))
-        else:
-            claimed[preset].append({"screen": screen, "url": module_url(package.digest, path)})
+    lists = {kind: _claimed(package, presets, kind) for kind in PREVIEW_KINDS}
     return {
-        "presets": [{"id": preset, "default": preset == default_look, "previews": claimed[preset]} for preset in presets],
-        "otherPreviews": other,
+        "presets": [
+            {"id": preset, "default": preset == default_look,
+             **{kind.field: claimed[preset] for kind, (claimed, _) in lists.items()}}
+            for preset in presets
+        ],
+        **{kind.other_key: other for kind, (_, other) in lists.items()},
     }
+
+
+def _signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
+    """The version's signature verdict for a listing. A keys file that does not load fails closed: the
+    signature reads ``invalid`` (never Official) and the listings still answer; the paste route keeps
+    refusing loudly (C-05b)."""
+    try:
+        return signature_verify.package_verdict(package)
+    except signature_verify.SigningKeysError as bad:
+        logger.error("Theme signing keys did not load; %s is shown unverified: %s", package.theme_id, bad)
+        return signature_verify.Verdict(signature_verify.STATE_INVALID)
 
 
 def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
@@ -214,6 +279,7 @@ def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
         "engines": (package.manifest or {}).get("engines"),
         "compatible": is_compatible(package),
         "revoked": revocation_body(revocation_of(db, package)),
+        "signature": _signature_verdict(package).view(),
         "createdAt": None if package.created_at is None else package.created_at.isoformat(),
     }
 
@@ -242,19 +308,21 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
     latest = newest_compatible(versions)
     shown = latest or versions[0]
     manifest = shown.manifest or {}
-    cover = _preview_paths(shown)
+    verdict = _signature_verdict(shown)
     return {
         "listingId": listing_id_of(shown.theme_id),
         "themeId": shown.theme_id,
         "name": manifest.get("name"),
         "description": manifest.get("description"),
-        "publisher": _publisher(db, shown.theme_id),
+        "publisher": _publisher(db, shown.theme_id, verdict),
+        "signature": verdict.view(),
         "version": shown.version,
         "packageId": str(shown.id),
         "compatible": latest is not None,
         "uses": list(manifest.get("uses") or []),
         "pricing": manifest.get("pricing") or FREE_LABEL,
-        "cover": module_url(shown.digest, cover[0]) if cover else None,
+        "cover": _cover(shown, WEB_PREVIEWS),
+        "phoneCover": _cover(shown, PHONE_PREVIEWS),
         "revoked": revocation_body(revocation_of(db, shown)),
         "installed": installed_state(db, workspace_id, shown.theme_id, latest),
     }

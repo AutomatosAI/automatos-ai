@@ -13,7 +13,10 @@ workspace-permission gate (only the caller's workspace role is stubbed) and the 
 * update then rollback returns to the old package and keeps looks; uninstall is soft,
   keeps looks and moves members to the default; a pinned install refuses update;
 * a ``disable`` revocation makes ``active`` answer the base; a stale ``clonedFrom`` shows
-  ``needsUpdate``; ``builtin:play`` round-trips; members-may-choose off answers 403;
+  ``needsUpdate``; members-may-choose off answers 403;
+* A-19f3: Play's old stored choice (from when it was compiled into the app) reads as no choice
+  (the workspace default, else Studio as ``fallback``), and saving it again is 400 ``BAD_CHOICE``,
+  whose message names no theme of the app's own;
 * the answer carries what ``frontend/lib/theme-host/manifest.ts`` parseActiveInstall reads,
   including the default look a package's preset path is built from;
 * ``source`` says where the choice came from (the member's choice, the workspace default or
@@ -81,6 +84,9 @@ TABLES = [m.__table__ for m in (
 )]
 ENTRY_SHA = "ab" * 32
 WORDING = "runs with your access to all your workspaces"
+# Play's choice from when it was compiled into the app (before PRD-261 A-19). Spelt in parts:
+# test_prd261_no_builtin_play.py bans the joined literal anywhere in orchestrator/ but itself.
+RETIRED_PLAY_CHOICE = ":".join(("builtin", "play"))
 
 
 def _ctx(workspace_id=WS_A, clerk="clerk-7"):
@@ -211,15 +217,42 @@ def test_moving_an_install_to_another_workspaces_private_package_is_404(api, rou
 # ---------------------------------------------------------------------------
 
 
-def test_builtin_play_round_trips_as_a_choice(api):
+def _store_choice(api, choice, user_pk=MEMBER_PK):
+    api.db.add(ThemeChoice(workspace_id=WS_A, user_id=user_pk, choice=choice))
+    api.db.commit()
+
+
+def test_plain_choices_round_trip_and_anything_else_is_400(api):
     assert _active(api) == {"choice": "studio", "source": "fallback", "theme": None}
-    resp = _choose(api, "builtin:play")
+    resp = _choose(api, "classic")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"choice": "builtin:play", "source": "choice", "theme": None}
-    assert _active(api) == {"choice": "builtin:play", "source": "choice", "theme": None}
-    assert _choose(api, "classic").json()["choice"] == "classic"
-    for bad in ("play", "theme:builtin:play", str(uuid.uuid4()).upper()):
+    assert resp.json() == {"choice": "classic", "source": "choice", "theme": None}
+    assert _active(api) == {"choice": "classic", "source": "choice", "theme": None}
+    assert _choose(api, "studio").json()["choice"] == "studio"
+    for bad in ("play", "theme:" + RETIRED_PLAY_CHOICE, str(uuid.uuid4()).upper()):
         assert _choose(api, bad).status_code == 400, bad
+
+
+def test_choosing_plays_retired_choice_is_400_bad_choice_naming_no_builtin_theme(api):
+    resp = _choose(api, RETIRED_PLAY_CHOICE)
+    assert resp.status_code == 400, resp.text
+    assert resp.json() == {"detail": choices_mod.BAD_CHOICE}
+    assert not any(word in choices_mod.BAD_CHOICE.lower() for word in ("builtin", "play"))
+    assert api.db.query(ThemeChoice).count() == 0
+
+
+def test_a_stored_retired_play_choice_falls_back_to_studio(api):
+    _store_choice(api, RETIRED_PLAY_CHOICE)
+    assert _active(api) == {"choice": "studio", "source": "fallback", "theme": None}
+
+
+def test_a_stored_retired_play_choice_falls_back_to_the_workspace_default(api):
+    install = _install(api.db, _package(api.db))
+    assert api.client.put("/api/themes/default", json={"installId": str(install.id)}).status_code == 200
+    _store_choice(api, RETIRED_PLAY_CHOICE)
+    active = _active(api)
+    assert (active["choice"], active["source"]) == (str(install.id), "default")
+    assert active["theme"]["installId"] == str(install.id)
 
 
 def test_active_falls_back_from_the_choice_to_the_default_then_studio(api):
@@ -261,9 +294,9 @@ def test_a_concurrent_first_choice_ends_stored_not_500(api, monkeypatch):
         return None if len(calls) == 1 else real_row(*args)
 
     monkeypatch.setattr(choices_mod, "_choice_row", first_read_misses)
-    resp = _choose(api, "builtin:play")
+    resp = _choose(api, "studio")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["choice"] == "builtin:play"
+    assert resp.json()["choice"] == "studio"
     assert len(calls) >= 2  # the insert collided, then the row the other tab wrote was updated
     assert api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).count() == 1
 
@@ -281,17 +314,17 @@ def test_a_concurrent_choice_row_that_vanishes_is_inserted_again(api, monkeypatc
         return None
 
     monkeypatch.setattr(choices_mod, "_choice_row", reads)
-    resp = _choose(api, "builtin:play")
+    resp = _choose(api, "studio")
     assert resp.status_code == 200, resp.text
     rows = api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).all()
-    assert [row.choice for row in rows] == ["builtin:play"]
+    assert [row.choice for row in rows] == ["studio"]
 
 
 def test_a_choice_that_keeps_colliding_is_409_not_500(api, monkeypatch):
     api.db.add(ThemeChoice(workspace_id=WS_A, user_id=MEMBER_PK, choice="classic"))
     api.db.commit()
     monkeypatch.setattr(choices_mod, "_choice_row", lambda *args: None)
-    resp = _choose(api, "builtin:play")
+    resp = _choose(api, "studio")
     assert resp.status_code == 409 and resp.json() == {"detail": choices_mod.CHOICE_RACED}
 
 

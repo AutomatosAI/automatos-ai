@@ -9,6 +9,8 @@ export type HostEdition = 'local' | 'saas'
 export type HostWorkspaceRole = 'owner' | 'admin' | 'editor' | 'viewer' | 'member'
 export type HostSystemRole = 'super_admin' | 'admin' | 'user'
 export type HostTone = 'light' | 'dark'
+/** Where the active theme draws at this width; 'pending' until the width is known (the server, hydration). */
+export type HostThemeLayout = 'pending' | 'theme' | 'fallback'
 
 export interface HostHealth {
   readonly connection: 'checking' | 'connected' | 'down'
@@ -25,12 +27,14 @@ export interface HostHealthOptions {
   readonly poll?: boolean
 }
 
-/** The workspace the page is in: who it is, and its plan. */
+/** The workspace the page is in: who it is, its plan, and whether Socials is offered in it. */
 export interface HostWorkspace {
   readonly id: string
   readonly name: string
   readonly slug: string
   readonly plan: 'basic' | 'pro' | 'business' | 'enterprise'
+  /** The platform offers Socials to this workspace, as the host's Deliverables page reads it; false while unknown. */
+  readonly socialsAvailable: boolean
 }
 
 export interface HostWorkspaceState {
@@ -50,6 +54,11 @@ export interface HostRole {
   readonly canEdit: boolean
 }
 
+/**
+ * The workspace's trial. The trial is credits (1 credit = 1 US cent), so the dollars are its credits / 100.
+ * `state`: `converted` once the workspace runs on AI keys of its own, `exhausted` while work on Automatos's
+ * keys is paused, `warned` while the balance runs low, else `active`.
+ */
 export interface HostTrial {
   readonly state: 'active' | 'warned' | 'exhausted' | 'converted'
   readonly grantedUsd: number
@@ -70,7 +79,11 @@ export declare function useRole(): HostRole
 /** The edition; fixed for the life of the build. */
 export declare function useEdition(): HostEdition
 
-/** The workspace's trial ledger; null when it has none or has not loaded. */
+/**
+ * The workspace's trial, read off its credits; null in the local edition, while it loads, or on a plan billed
+ * outside credits. It reads the host's query cache, so it needs the host's QueryClientProvider, which every page
+ * and theme the host draws has.
+ */
 export declare function useTrial(): HostTrial | null
 
 /** Whether the backend answers. */
@@ -84,3 +97,10 @@ export declare function useMediaPreferences(): HostMediaPreferences
 
 /** The tone the page is painted in, forced or chosen; null before the host knows it (the server). */
 export declare function useTone(): HostTone | null
+
+/**
+ * Where the active theme draws at this width: 'theme' at or above its minWidth, 'fallback' below it (or when no
+ * theme is active), 'pending' on the server and while hydrating (render nothing of the theme and send nowhere
+ * until then). The same value the host's own slots and frame read.
+ */
+export declare function useThemeLayout(): HostThemeLayout

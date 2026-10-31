@@ -18,7 +18,16 @@ Pinned (plan §2.6 A-08a):
   reports), so it is no approved listing and an install runs it only after the member's opt-in;
 * tampered stored bytes → 404 and a logged error; ``Service-Worker: script`` → 403;
 * the integrity value is the base64 form of the stored hex; a ``disable`` revocation → 404 and
-  the base boot; the local edition's operator counts as owner of every workspace.
+  the base boot; the local edition's operator counts as owner of every workspace;
+* W-C3 seam fix A: a disabled row gives way to the caller's next authorised row of the digest, so a
+  listing whose signature fails (C-05c, its own row) leaves a workspace's own copy of the same
+  bytes serving, while a stored ``disable`` of the digest still covers every row;
+* PRD-261 W-A6b (gap G1): the boot of a theme that runs carries its registry entry from
+  ``theme.json`` (``entry``); the base boot's is null.
+* PRD-261 W-A6b (gap G2): the boot of a theme that runs names where its stored look is
+  (``lookStorage``, the host's per-theme keys, ``fixtures/themes/look-storage.json``) and the look
+  format that may paint (``lookGuard``, from ``looks/schema.json``); a schema that can't be read
+  gives neither, so the default look paints.
 """
 from __future__ import annotations
 
@@ -57,16 +66,17 @@ from config import config  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.themes import ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation  # noqa: E402
-from services.themes import serve  # noqa: E402
+from core.models.themes import (  # noqa: E402
+    ThemeInstallation, ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync,
+)
+from services.themes import serve, signature_state, signature_verify  # noqa: E402
 from services.themes.package import read_theme_package  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
-PREPAINT = {
-    "knobs": {"ground": {"paper": {"--hello-bg": "#fafafa"}, "ink": {"--hello-bg": "#101010"}}},
-    "pairs": [], "numeric": [], "defaults": {"ground": "paper"},
-}
+PREPAINT = build.hello_prepaint({"ground": {"paper": {"--hello-bg": "#fafafa"}, "ink": {"--hello-bg": "#101010"}}})
 ENTRY, CLIP, PREPAINT_PATH = "dist/entry.js", "assets/mascot/idle.mp4", "boot/prepaint.json"
+LOOK_SCHEMA_PATH = "looks/schema.json"
+LOOK_STORAGE_FIXTURE = _ORCH / "tests" / "fixtures" / "themes" / "look-storage.json"
 ALICE, BOB, CAROL, OPERATOR = 1, 2, 3, 9
 HOME, TEAM, ELSEWHERE, PAUSED = (uuid.UUID(int=n) for n in (0xA1, 0xA2, 0xA3, 0xA4))
 RAW_TABLES = (
@@ -74,7 +84,11 @@ RAW_TABLES = (
     "CREATE TABLE workspaces (id VARCHAR PRIMARY KEY, owner_id INTEGER, paused_at TIMESTAMP, deleted_at TIMESTAMP)",
     "CREATE TABLE workspace_members (workspace_id VARCHAR, user_id INTEGER, role VARCHAR, is_active BOOLEAN)",
 )
-THEME_TABLES = [model.__table__ for model in (ThemePackage, ThemeInstallation, ThemeOptIn, ThemeRevocation)]
+THEME_TABLES = [model.__table__ for model in (
+    ThemePackage, ThemeInstallation, ThemeOptIn, ThemeRevocation, ThemeRevocationSync,
+)]
+NO_ONES_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")  # 64 bytes no key signed
+LONG_AGO = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module")
@@ -239,7 +253,7 @@ def test_a_member_whose_install_is_in_the_non_default_workspace_gets_files_and_b
     assert boot.status_code == 200
     body = boot.json()
     assert body["addClasses"] == ["studio", "hello"]
-    assert body["removeClasses"] == ["play"]
+    assert body["removeClasses"] == []  # A-20: no theme's class is the host's to take off
     assert body["tone"] == {"policy": "user", "value": None}
     assert body["prepaint"] == PREPAINT
     assert boot.headers["cache-control"] == "private, no-store"
@@ -271,9 +285,96 @@ def test_a_member_who_has_not_opted_in_gets_404_for_files_and_the_base_boot(worl
     boot = _boot(world, _person("alice"), install.id)
     assert boot.status_code == 200
     assert boot.json() == {
-        "addClasses": ["studio"], "removeClasses": ["hello", "play"], "tone": {"policy": "user", "value": None},
-        "prepaint": None, "lookStorage": None, "lookGuard": None, "integrity": None,
+        "addClasses": ["studio"], "removeClasses": ["hello"], "tone": {"policy": "user", "value": None},
+        "prepaint": None, "lookStorage": None, "lookGuard": None, "looks": None, "integrity": None, "entry": None,
     }
+
+
+def test_the_boot_of_a_theme_that_runs_carries_its_registry_entry_from_theme_json(world):
+    _, install = _private(world, TEAM)
+    entry = _boot(world, _person("alice"), install.id).json()["entry"]
+    assert entry == {
+        "themeId": "automatos-e2e/hello", "name": "Hello theme", "base": "studio", "htmlClass": "hello", "minWidth": 0, "tone": "user",
+        "reviewed": False, "ownsPages": [], "routes": ["hello"],
+        "nav": [{"id": "hello", "label": "Hello", "path": "/x/hello"}],
+        "slots": ["frame@1", "lookEditor@1", "styleSheet@1"],
+    }
+
+
+def test_the_boot_of_a_theme_that_runs_names_its_own_look_keys(world):
+    _, install = _private(world, TEAM)
+    boot = _boot(world, _person("alice"), install.id).json()
+    assert boot["lookStorage"] == {
+        "pointerKey": "automatos-theme.automatos-e2e/hello.look.current",
+        "scopedPrefix": "automatos-theme.automatos-e2e/hello.look:",
+        "fallbackKey": "automatos-theme.automatos-e2e/hello.look",
+    }
+    assert boot["lookGuard"] is None  # the hello schema's looks name no interface
+    # A-19c: its presets ride the boot too, the default look first (test_prd261_boot_looks.py has the rest).
+    assert [preset["id"] for preset in boot["looks"]["presets"]] == ["default", "night"]
+    assert boot["looks"]["defaultLook"] == "default"
+
+
+def test_the_look_keys_are_the_ones_the_frontend_look_store_uses():
+    shared = json.loads(LOOK_STORAGE_FIXTURE.read_text(encoding="utf-8"))
+    assert serve.look_storage(shared["themeId"]) == shared["lookStorage"]
+
+
+def _schema_package(document: dict) -> tuple:
+    """A package row holding only ``looks/schema.json``, and a reader that serves it."""
+    data = json.dumps(document).encode("utf-8")
+    rows = {LOOK_SCHEMA_PATH: {"type": "application/json", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}}
+    row = ThemePackage(theme_id="automatos/play", manifest={"id": "automatos/play"}, file_manifest=rows, storage_prefix="p/")
+    return row, {("p/", LOOK_SCHEMA_PATH): data}
+
+
+def test_a_schema_with_an_interface_guards_the_stored_look_by_its_header():
+    schema = {
+        "schema": "automatos-look-schema/v1",
+        "look": {"schema": "automatos-interface-look/v1", "interface": "play"},
+        "knobs": {"ground": {"kind": "choice", "label": "Ground", "choices": ["graphite", "paper"], "default": "graphite"}},
+    }
+    row, stored = _schema_package(schema)
+    looks = serve.theme_looks(row, lambda prefix, path: stored.get((prefix, path)))
+    assert looks["lookGuard"] == {"schema": "automatos-interface-look/v1", "iface": "play"}
+    assert looks["lookStorage"] == serve.look_storage("automatos/play")
+    boot = serve.theme_boot(ThemePackage(manifest={"id": "automatos/play", "htmlClass": "play"}, file_manifest={}), None, looks)
+    assert (boot["lookStorage"], boot["lookGuard"]) == (looks["lookStorage"], looks["lookGuard"])
+
+
+@pytest.mark.parametrize("theme_id", ["automatos/play", "acme/ink"])
+def test_htmlclass_play_is_any_themes_own_class_in_its_boot(theme_id):
+    # A-20 (QB-11): the boot holds 'play' like any theme's class, for any id, and the host keeps only Studio's.
+    manifest = {"id": theme_id, "htmlClass": "play"}
+    assert serve.STYLE_HTML_CLASSES == ("studio",)
+    running = serve.theme_boot(ThemePackage(manifest=manifest, file_manifest={}), None)
+    base = serve.base_boot(manifest)
+    assert (running["addClasses"], running["removeClasses"]) == (["studio", "play"], [])
+    assert (base["addClasses"], base["removeClasses"]) == (["studio"], ["play"])
+
+
+def test_a_look_schema_that_cant_be_read_or_fails_its_check_gives_no_look_keys(caplog):
+    row, stored = _schema_package({"schema": "automatos-look-schema/v1", "look": {}, "knobs": {}})
+    tampered = {key: b'{"schema": "changed"}' for key in stored}
+    with caplog.at_level(logging.ERROR, logger="services.themes.serve"):
+        assert serve.theme_looks(row, lambda prefix, path: stored.get((prefix, path))) == {"lookStorage": None, "lookGuard": None, "looks": None}
+        assert serve.theme_looks(row, lambda prefix, path: tampered.get((prefix, path))) == {"lookStorage": None, "lookGuard": None, "looks": None}
+    assert sum(LOOK_SCHEMA_PATH in record.getMessage() for record in caplog.records) >= 2
+    no_schema = ThemePackage(theme_id="acme/ink", manifest={"id": "acme/ink"}, file_manifest={}, storage_prefix="p/")
+    assert serve.theme_looks(no_schema, lambda prefix, path: None) == {"lookStorage": None, "lookGuard": None, "looks": None}
+
+
+def test_the_entry_lists_the_pages_a_theme_draws_and_its_review(world):
+    manifest = {
+        **world.package.manifest, "htmlClass": "play", "minWidth": 1024, "tone": "from-look",
+        "pages": {"/deliverables": {"mode": "own", "keepCorePage": ["tab"]}, "/chat": {"mode": "own"}},
+    }
+    reviewed = ThemePackage(manifest=manifest, owner_type="marketplace", reviewed=True)
+    entry = serve.theme_entry(reviewed)
+    assert (entry["htmlClass"], entry["minWidth"], entry["tone"]) == ("play", 1024, "from-look")
+    assert entry["ownsPages"] == ["/chat", "/deliverables"]
+    assert entry["reviewed"] is True
+    assert serve.theme_entry(ThemePackage(manifest=manifest, owner_type="workspace", reviewed=True))["reviewed"] is False
 
 
 def test_an_uninstalled_install_serves_nothing(world):
@@ -351,6 +452,44 @@ def test_a_disable_revocation_is_404_and_the_base_boot_and_a_warn_still_serves(w
     world.db.commit()
     assert _file(world, _person("alice")).status_code == 404
     assert _boot(world, _person("alice"), install.id).json()["addClasses"] == ["studio"]
+
+
+@pytest.fixture
+def no_signing_keys(monkeypatch, tmp_path):
+    """A keys file holding no key, so every stored signature fails on load (C-05c)."""
+    keys = tmp_path / "signing-keys.json"
+    keys.write_text(json.dumps({"schema": 1, "keys": []}), encoding="utf-8")
+    monkeypatch.setattr(signature_verify, "KEYS_PATH", keys)
+    signature_state.clear_cache()
+    yield
+    signature_state.clear_cache()
+
+
+def _listing_whose_signature_fails(world) -> ThemePackage:
+    listing = _row(world, "marketplace", status="approved", reviewed=True)
+    listing.signature = NO_ONES_SIGNATURE
+    world.db.commit()
+    return listing
+
+
+def test_a_listing_whose_signature_fails_leaves_a_workspaces_own_copy_serving(world, no_signing_keys):
+    _listing_whose_signature_fails(world)
+    assert _file(world, _person("bob")).status_code == 404  # the listing itself serves nobody
+    _private(world, TEAM)  # Alice's team holds its own private copy of the same bytes; she opted in
+    assert _file(world, _person("alice")).status_code == 200
+    assert _file(world, _person("bob")).status_code == 404
+    world.db.add(ThemeRevocation(digest=world.package.digest, level="disable", reason="bad bytes"))
+    world.db.commit()
+    assert _file(world, _person("alice")).status_code == 404  # a stored disable covers every row of the digest
+
+
+def test_a_disabled_installed_row_gives_way_to_the_callers_next_installed_copy(world, no_signing_keys):
+    listing = _listing_whose_signature_fails(world)
+    first = _install(world, HOME, listing)  # Alice's own workspace runs the listing, installed first
+    first.installed_at = LONG_AGO
+    world.db.commit()
+    _private(world, TEAM)  # and her team runs its own copy of the same bytes
+    assert _file(world, _person("alice")).status_code == 200
 
 
 def test_an_approved_listing_serves_anyone_signed_in_and_a_pending_one_only_nobody(world):
@@ -446,6 +585,23 @@ def test_a_revocation_covers_its_digest_or_its_theme_versions_until_lifted(world
     db.add(ThemeRevocation(theme_id="acme/other", version_range=">=1", level="disable", reason="unreadable"))
     db.commit()
     assert revocation_level(db, "e" * 64, "acme/other", "9.9.9") == "disable"  # an unreadable range fails closed
+
+
+def test_the_rule_and_the_admins_lift_check_read_a_revocation_target_one_way():
+    from services.themes import revocation_admin
+    from services.themes.revocations import covers
+
+    rows = {
+        "digest": ThemeRevocation(digest="c" * 64, level="disable", reason="r"),
+        "theme": ThemeRevocation(theme_id="acme/ink", level="disable", reason="r"),
+        "range": ThemeRevocation(theme_id="acme/ink", version_range="^1.2.0", level="disable", reason="r"),
+        "unreadable": ThemeRevocation(theme_id="acme/ink", version_range=">=1", level="disable", reason="r"),
+        "other theme": ThemeRevocation(theme_id="acme/other", level="disable", reason="r"),
+    }
+    package = ThemePackage(theme_id="acme/ink", version="1.1.0", digest="c" * 64)
+    expected = {"digest": True, "theme": True, "range": False, "unreadable": True, "other theme": False}
+    assert {name: covers(row, package.digest, package.theme_id, package.version) for name, row in rows.items()} == expected
+    assert {name: revocation_admin._covers(row, package) for name, row in rows.items()} == expected
 
 
 class _Objects:

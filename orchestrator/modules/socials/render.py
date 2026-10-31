@@ -24,10 +24,10 @@ which runs in the background:
    answers once the job is staged, spoken, mixed and checked; a full renderer
    is asked again after its ``Retry-After``;
 2. poll the job every ``SOCIALS_RENDER_POLL_SECONDS`` until it ends;
-3. fetch every output, taking its sha256 on the way, then copy each into our
-   storage, ``social-media/{workspace}/{post}/{file}`` (D9), and register it as
-   a Deliverable, which records the music it mixed (S1.6). Nothing is stored
-   until every output has arrived whole;
+3. fetch every output, taking its sha256 on the way (a marked one must be the bytes
+   media-render marked), then store each, ``social-media/{workspace}/{post}/{file}``
+   (D9), write a marked file's provenance row (PRD-264 EUAI-06b) and register it as
+   a Deliverable with the music it mixed (S1.6). Nothing is stored until all arrive;
 4. finish the post with a compare-and-set: ``rendering`` → ``needs_approval``
    with the files as ``media`` (the content hash covers their digests) and, when
    the music is a CC BY track, its credit line appended to the copy
@@ -84,6 +84,7 @@ from core.media_render_client import (
     MediaRenderError,
     MediaRenderUnavailable,
 )
+from core.media_render_provenance import marked_file, record_marked
 from core.media_render_quota import (
     RenderReservation,
     book_render_seconds,
@@ -96,10 +97,11 @@ from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_cuts import cut_to_length, slots_cut_out
 from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
+from modules.socials.post_fields import resolved_fields
 from core.social_templates import (
-    SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
+    SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, validate_social_blocks,
 )
-from modules.socials import ai_media, channel_sizes, notify, service, spoken_fields
+from modules.socials import ai_media, channel_sizes, deepfake_label, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -138,7 +140,11 @@ class RendererUnavailable(service.SocialsError):
 
 
 class NotRenderable(service.SocialsError):
-    """The post has nothing a renderer can render."""
+    """The post has nothing a renderer can render; ``missing`` fields or a required ``photo``'s label: what to fill in."""
+
+    def __init__(self, message: str, *, missing: Tuple[str, ...] = (), photo: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.missing, self.photo = tuple(missing), photo
 
 
 class RenderFailure(Exception):
@@ -220,17 +226,12 @@ def bundle_for(
     blocks = at_chosen_length(blocks, post)
     empty = empty_required_slots(blocks, footage_slots) if require_photos else []
     if empty:
-        raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]))
+        raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]), photo=empty[0])
     if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
         blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
-    supplied = {
-        name: spec.get("value")
-        for name, spec in (getattr(post, "variables", None) or {}).items()
-        if isinstance(spec, dict)
-    }
-    resolved = resolve_variables(blocks["variables_schema"], supplied)
+    resolved = resolved_fields(blocks, post)
     if resolved.missing:
-        raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
+        raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering", missing=tuple(resolved.missing))
     if resolved.invalid:
         raise NotRenderable("; ".join(resolved.invalid))
     bundle = build_bundle(
@@ -245,7 +246,8 @@ def bundle_for(
         size=size,
         story_safe=is_story(post),
     )
-    return ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
+    bundle = ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
+    return deepfake_label.with_label(bundle, post)  # PRD-264 EUAI-08a: the AI-generated label
 
 
 def is_story(post: Any) -> bool:
@@ -438,9 +440,9 @@ async def _voice_links(
     """The script of ``bundle`` spoken by the post's voice toolkit when it chose one
     (US-111), as line id → (extension, presigned link): each line a file in our storage.
     Spoken ONCE per render, whatever its sizes (it is paid). Kokoro speaks inside
-    media-render: no links."""
+    media-render: no links. Either way the script is checked first (ART5-1, in speak)."""
     lines = voice_script(bundle)
-    if job.voice is None or not lines:
+    if not lines:
         return {}
     try:
         spoken = await voice_recipes.speak(
@@ -632,7 +634,7 @@ async def _fetch(
     if path.exists():
         raise RenderFailure("bad_output", f"The renderer returned two files for {file_name}.")
     try:
-        size, digest = await client.download(str(record["id"]), str(output["name"]), path)
+        size, digest = await client.download(str(record["id"]), str(output["name"]), path, mark=marked_file(output))
     except MediaRenderError as exc:
         raise RenderFailure(exc.code, f"The rendered file could not be fetched: {exc}") from exc
     if size <= 0:
@@ -653,6 +655,7 @@ async def _store_one(
     except Exception as exc:  # noqa: BLE001 — any storage error fails the render, loudly
         logger.exception("[Socials] storing %s for post %s failed", key, job.post_id)
         raise RenderFailure("storage_failed", "The rendered file could not be stored.") from exc
+    record_marked(job.workspace_id, marked_file(output), file_name)  # PRD-264 EUAI-06b/EUAI-10: its provenance row
     file_record: Dict[str, Any] = {"name": file_name, "sha256": digest, "bytes": size, "content_type": content_type}
     if not job.preview:
         entry: Dict[str, Any] = {"aspect": aspect, "bytes": size, "sha256": digest}

@@ -63,11 +63,13 @@ from core.models.orchestration_enums import (
     TaskState,
     TERMINAL_RUN_STATES,
 )
-from modules.coordination.owner_checks import checks_each_step
 from modules.coordination.planner import PlanValidationError
 
 from services.chat_messenger import strip_caller_narration_origin
 from services.coordinator_service import StaffingError, get_coordinator_service
+# A Mission's row (services/mission_view.py); the routes, and the tests that patch it,
+# still call it _run_to_response.
+from services.mission_view import mission_dict as _run_to_response
 from services.orchestration_state import (
     ConflictError,
     InvalidTransitionError,
@@ -252,6 +254,10 @@ class MissionResponse(BaseModel):
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # PRD-268 §6.11.1 (services/proactive/display_state.py mission_status)
+    display_state: Optional[str] = None
+    next_step: Optional[str] = None
+    retry: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -325,59 +331,6 @@ class AgentMissionHistoryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _run_to_response(run: OrchestrationRun) -> dict:
-    """Convert an OrchestrationRun ORM object to a dict matching MissionResponse."""
-    # Extract parallel groups and synthesis info from tasks in the plan JSONB
-    plan = run.plan or {}
-    plan_tasks = plan.get("tasks", [])
-    parallel_groups = sorted({
-        t.get("parallel_group")
-        for t in plan_tasks
-        if t.get("parallel_group")
-    })
-    has_synthesis_tasks = any(
-        t.get("task_type") == "synthesis" for t in plan_tasks
-    )
-
-    # Derive complexity tier from max_concurrent
-    max_concurrent = run.max_concurrent or 1
-    if max_concurrent >= 3:
-        complexity_tier = "complex"
-    elif max_concurrent >= 2:
-        complexity_tier = "moderate"
-    else:
-        complexity_tier = "simple"
-
-    return {
-        "id": str(run.id),
-        "workspace_id": str(run.workspace_id),
-        "goal": run.goal,
-        "state": run.state,
-        "state_type": run.state_type,
-        "plan": run.plan,
-        "config": run.config,
-        # F282: one normalised name for the owner's "check each step with me",
-        # whatever spelling it was written under (modules/coordination/owner_checks.py).
-        "check_each_step": checks_each_step(run.config),
-        "output_summary": run.output_summary,
-        "token_budget_estimate": run.token_budget_estimate,
-        "tokens_used": run.tokens_used or 0,
-        "max_retries": run.max_retries or 3,
-        "max_concurrent": max_concurrent,
-        "replan_count": run.replan_count or 0,
-        "complexity_tier": complexity_tier,
-        "parallel_groups": parallel_groups,
-        "has_synthesis_tasks": has_synthesis_tasks,
-        "created_by": run.created_by,
-        "stop_reason": getattr(run, "stop_reason", None),
-        "stop_detail": getattr(run, "stop_detail", None),
-        "started_at": run.started_at,
-        "completed_at": run.completed_at,
-        "created_at": run.created_at,
-        "updated_at": run.updated_at,
-    }
 
 
 # A task in one of these states will not run again — it is part of "done", even

@@ -34,8 +34,10 @@ from sqlalchemy.orm import Session
 
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
+from core.models.review_entries import REVIEW
 from services.agent_last_run import refreshes_the_flag
 from services.board_events import notify_board_event
+from services.notification_events.review_pending import announce as announce_review_pending
 from services.daily_spend_guard import release_spend_holds
 from services.pasted_data import pasted_data_rule
 from services.ticket_owner_ask import ticket_answers_block
@@ -463,6 +465,9 @@ def _notify_swept(db: Session, task_ids: List[int], status: str, event: str) -> 
 
     Best-effort: the sweeper's correctness never depends on the UI ping, so a
     failed lookup/notify is logged and skipped rather than raised.
+
+    PRD-266 US-012a: the sweep's move into ``review`` is a raw UPDATE the ORM
+    listener never sees, so those tickets are announced here, after its commit.
     """
     if not task_ids:
         return
@@ -471,6 +476,8 @@ def _notify_swept(db: Session, task_ids: List[int], status: str, event: str) -> 
             text("SELECT id, workspace_id FROM board_tasks WHERE id = ANY(:ids)"),
             {"ids": task_ids},
         ).fetchall()
+        if status == REVIEW:
+            announce_review_pending([(task_id, str(workspace_id)) for task_id, workspace_id in rows])
         for task_id, workspace_id in rows:
             notify_board_event(
                 db, workspace_id=workspace_id, task_id=task_id, status=status,

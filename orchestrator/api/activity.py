@@ -11,21 +11,24 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.workspace_admin import may_see_own_workspace_health
+from core.auth.workspace_admin import may_answer_workspace_questions
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from core.models.core import Agent, BoardTask, DigestFeedback
+from core.models.core import Agent, BoardTask
+from modules.proactive.locale import request_locale
 from services.activity_service import ActivityService
+from services.digest_feedback import STATE_HASH_MAX_LENGTH, rater_of, rating_of, record_rating
 from services.digest_service import generate_digest
 from services.needs_you import needs_you
+from services.proactive.display_state import needs_you_with_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/activity", tags=["Activity"])
@@ -89,7 +92,7 @@ async def get_workspace_digest(
 
 
 class DigestFeedbackRequest(BaseModel):
-    state_hash: str
+    state_hash: str = Field(min_length=1, max_length=STATE_HASH_MAX_LENGTH)
     rating: int  # -1 (down) or 1 (up)
 
 
@@ -97,28 +100,42 @@ class DigestFeedbackRequest(BaseModel):
     "/digest/feedback",
     dependencies=[Depends(require_workspace_permission("agents:execute"))],
 )
-async def submit_digest_feedback(
+def submit_digest_feedback(
     body: DigestFeedbackRequest,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Record a thumbs up/down on an Auto's Read digest (PRD-221 S10).
+    """Record a thumbs up/down on an Auto's Read digest or a brief (PRD-221 S10, PRD-268 §6.4).
 
-    Keyed by the digest's state_hash — feedback attaches to the workspace state
-    the read described. rating must be -1 or 1; anything else is a 422. Gated
-    with agents:execute — the same member-level "can use Auto" scope as chat.
+    Keyed by the state_hash the read described. One rating per person per
+    state: a second press updates it (services/digest_feedback.py). rating
+    must be -1 or 1; anything else is a 422. Gated with agents:execute, the
+    same member-level "can use Auto" scope as chat.
     """
     if body.rating not in (-1, 1):
         raise HTTPException(status_code=422, detail="rating must be -1 or 1")
-    row = DigestFeedback(
-        workspace_id=ctx.workspace_id,
-        user_id=ctx.user.clerk_user_id if ctx.user else None,
-        state_hash=body.state_hash,
-        rating=body.rating,
-    )
-    db.add(row)
-    db.commit()
+    record_rating(db, ctx.workspace_id, rater_of(db, ctx), body.state_hash, body.rating)
     return {"ok": True}
+
+
+@router.get(
+    "/digest/feedback",
+    dependencies=[Depends(require_workspace_permission("agents:execute"))],
+)
+def get_digest_feedback(
+    state_hash: str = Query(..., min_length=1, max_length=STATE_HASH_MAX_LENGTH),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The caller's own rating of the read or brief keyed by state_hash (PRD-268 §6.4).
+
+    ``{state_hash, rating}``: 1, -1, or null when this person hasn't rated it
+    (always null for a caller with no person behind it). Another person's
+    rating is never read. The brief card and the SDK's useRateBrief show the
+    remembered thumb from it.
+    """
+    rating = rating_of(db, ctx.workspace_id, rater_of(db, ctx), state_hash)
+    return {"state_hash": state_hash, "rating": rating}
 
 
 @router.get("/schedule")
@@ -317,7 +334,7 @@ def get_activity_stats(
     """
     try:
         svc = ActivityService(db, ctx.workspace_id)
-        return svc.get_stats(period=period, may_answer=may_see_own_workspace_health(db, ctx))
+        return svc.get_stats(period=period, may_answer=may_answer_workspace_questions(db, ctx))
     except Exception as e:
         logger.error("Activity stats error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch activity stats") from e
@@ -330,17 +347,21 @@ NEEDS_YOU_NOT_LOADED = "What needs you could not be loaded. Try again shortly."
 def get_needs_you(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    accept_language: Optional[str] = Header(None),
 ):
     """PRD-252 R5: the one Needs-you number and the rows behind it.
 
     The Board tab badge, ATTENTION and Auto's pill show ``total``; the Needs
-    you widget lists ``rows``. Questions and approval grants count only for a
-    workspace admin, who alone can answer them. A failure is a 503 with a
+    you widget lists ``rows``. Questions and approval grants count only for an
+    owner, admin or editor, who can answer them (PRD-266 D16). A failure is a 503 with a
     message, never "nothing needs you" (F207). It has no period (F246): what
-    waits for the owner waits until it is dealt with.
+    waits for the owner waits until it is dealt with. PRD-268 §6.11.1: each row
+    also says where it stands, its next step and what Try again does, in the
+    language ``Accept-Language`` asks for (English by default).
     """
     try:
-        return needs_you(db, ctx.workspace_id, may_answer=may_see_own_workspace_health(db, ctx))
+        found = needs_you(db, ctx.workspace_id, may_answer=may_answer_workspace_questions(db, ctx))
+        return needs_you_with_status(found, request_locale(accept_language))
     except Exception as e:
         logger.exception("Needs-you read failed for workspace %s", ctx.workspace_id)
         raise HTTPException(status_code=503, detail=NEEDS_YOU_NOT_LOADED) from e

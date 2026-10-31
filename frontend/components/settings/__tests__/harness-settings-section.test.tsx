@@ -1,10 +1,11 @@
 /**
- * PRD-263 US-017 — Settings offers the HARNESS modes that exist and says what each does.
+ * PRD-263 US-017, US-054 — Settings offers the HARNESS modes that exist and says what each does.
  *
  * The tab offered "Full Auto — low-risk changes applied automatically" and "Manual",
  * behind an "Enable HARNESS" switch, with a Run Schedule of weekly (Sunday 2 AM UTC),
- * biweekly or monthly. HARNESS now reports and changes nothing (US-016): one mode
- * select, always shown, with Report only and Disabled in P1, no switch and no schedule.
+ * biweekly or monthly. HARNESS now changes nothing itself (US-016): one mode select,
+ * always shown, with no switch and no schedule. P1 offered Report only and Disabled;
+ * US-054 adds Propose, whose suggested changes come as Approvals cards.
  *
  * The <Select> is mocked as a native <select> (Radix's listbox needs pointer capture
  * and scrollIntoView, which jsdom does not implement), and the collapsible renders
@@ -41,14 +42,15 @@ import { HARNESS_HELP_TEXT, HarnessConfig, fallbackOrchestratorConfig } from '..
 const config = (harness: HarnessConfig) => ({ ...fallbackOrchestratorConfig(), harness })
 const select = () => screen.getByTestId('harness-mode-select') as HTMLSelectElement
 
-describe('HarnessSettingsSection (PRD-263 US-017)', () => {
-  it('offers exactly the two modes P1 has, with no switch and no Full Auto', () => {
+describe('HarnessSettingsSection (PRD-263 US-017, US-054)', () => {
+  it('offers exactly the three modes that exist, with no switch and no Full Auto', () => {
     render(
       <HarnessSettingsSection orchConfig={config({ schedule: 'weekly', mode: 'report_only' })} onHarnessChange={vi.fn()} />,
     )
 
     expect(within(select()).getAllByRole('option').map((option) => option.textContent)).toEqual([
       'Report only',
+      'Propose',
       'Disabled',
     ])
     expect(screen.queryByText(/full auto/i)).toBeNull()
@@ -61,6 +63,27 @@ describe('HarnessSettingsSection (PRD-263 US-017)', () => {
 
     expect(select().value).toBe('report_only')
     expect(screen.getByText('HARNESS writes a weekly report on your agents and changes nothing.')).toBeTruthy()
+  })
+
+  it('shows Propose as itself, with what it does and when its cards appear', () => {
+    render(<HarnessSettingsSection orchConfig={config({ mode: 'propose' })} onHarnessChange={vi.fn()} />)
+
+    expect(select().value).toBe('propose')
+    expect(
+      screen.getByText(
+        'each change HARNESS suggests comes to you as an Approvals card, and nothing changes until you ' +
+          'approve it. Cards appear only when proposals are switched on for this installation.',
+      ),
+    ).toBeTruthy()
+  })
+
+  it('sends Propose when it is picked', () => {
+    const onHarnessChange = vi.fn()
+    render(<HarnessSettingsSection orchConfig={config({ mode: 'report_only' })} onHarnessChange={onHarnessChange} />)
+
+    fireEvent.change(select(), { target: { value: 'propose' } })
+
+    expect(onHarnessChange).toHaveBeenCalledWith('mode', 'propose')
   })
 
   it('sends the mode picked', () => {

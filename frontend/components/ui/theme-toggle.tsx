@@ -72,8 +72,10 @@ function CustomiseLookItem() {
 }
 
 /**
- * PRD-261 A-02b, A-02c: the theme registry's entries after Classic and Studio, then the workspace's
- * installed themes (`theme:install:<id>`), each install that nobody reviewed noted as such.
+ * PRD-261 A-02b, A-02c: after Classic and Studio, the workspace's installed themes
+ * (`theme:install:<id>`), each install that nobody reviewed noted as such, and one whose version
+ * this member has not opted in to noted 'Private · opt in first': choosing it opens the opt-in
+ * dialog, and the radio stays on the current style until the choice is stored.
  */
 function ThemeStyleItems({ entries }: { entries: readonly ThemeChoiceEntry[] }) {
   return (
@@ -90,8 +92,8 @@ function ThemeStyleItems({ entries }: { entries: readonly ThemeChoiceEntry[] }) 
 }
 
 /**
- * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | the registry's themes, PRD-261
- * A-02b) and Tone (Light | Dark | System). Picking on one axis never changes the other.
+ * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | the workspace's installed themes,
+ * PRD-261 A-02b) and Tone (Light | Dark | System). Picking on one axis never changes the other.
  * PRD-261 A-02c: a style pick is stored on the server as the member's choice (choice-sync.ts).
  */
 export function ThemeToggle() {
@@ -100,7 +102,7 @@ export function ThemeToggle() {
   const theme = forcedTheme ?? storedTone
   const { style, activeTheme, installedThemes } = useUiStyle()
   const chooseStyle = useChooseStyle()
-  const themeEntries = useMemo(() => themeChoiceEntries(installedThemes, style), [installedThemes, style])
+  const themeEntries = useMemo(() => themeChoiceEntries(installedThemes), [installedThemes])
   // PRD-260 K4: the look paints at every width, so it sets the tone at every width; its
   // editor, /looks, opens only where the theme's layout renders (D7), so 'Customise look…' shows only there.
   const layout = useThemeLayout()

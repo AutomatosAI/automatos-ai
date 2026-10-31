@@ -7,11 +7,12 @@
  * placement slots (A-12b), and on any failure falls back to Studio with a notice; in safe mode
  * it loads no theme code at all. When the server names no theme for the install (GET
  * /api/themes/active answers `theme: null`, another install or 404: a stale cookie) it turns
- * off, and Studio shows with no notice.
+ * off, and Studio shows with no notice; when that is because the install's version has a
+ * `disable` revocation (C-05l), the notice says the theme was withdrawn, with the reason.
  * Under an installed theme's style it reports 'loading' from the first render, before its effect
  * starts the load, so the frame slot never mounts the page in the fallback first (M69). Under
- * Classic, Studio and builtin Play (which keeps its compiled path until A-04b) it is off: it loads
- * nothing and puts no status on <html>, so those pages are exactly as without it.
+ * Classic and Studio it is off: it loads nothing and puts no status on <html>, so those pages are
+ * exactly as without it.
  *
  * The sources and the loader are reached only through import() inside the effect, after the
  * style and safe-mode checks, so safe mode and every other style never evaluate them or the
@@ -25,6 +26,10 @@
  * no theme code, and turns safe mode on for the rest of the tab. Safe mode also takes the theme's
  * first paint (the root layout's boot: its classes and prepaint variables) off <html>, so what
  * shows is Studio's look, not only Studio's code.
+ *
+ * PRD-261 W-A6b (gap G1): the installed theme's registry entry (contexts/ui-style-context.tsx,
+ * from the root layout's boot) stands while the host loads or runs the theme; when it fails,
+ * enters safe mode or turns off for the style, the host releases it and activeTheme is null again.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -34,8 +39,6 @@ import { writeCookie } from '@/lib/cookies'
 import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
 import {
   HTML_CLASS_PATTERN,
-  SAFE_MODE_PARAM,
-  SAFE_MODE_VALUE,
   THEME_HOST_REASON_ATTR,
   THEME_HOST_STATUS_ATTR,
   THEME_NOTICE_ID,
@@ -48,8 +51,15 @@ import {
   shouldRevert,
 } from '@/lib/theme-host/failure-ledger'
 import { isInstalledThemeStyle } from '@/lib/theme-host/registry'
-import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
-import type { ThemeFailureReason, ThemeHostStatus, ThemeLoadOk, ThemeLoadResult } from '@/lib/theme-host/types'
+import { isSafeModeHere } from '@/lib/theme-host/safe-mode'
+import {
+  THEME_HOST_RUNNING_STATUSES,
+  type ThemeFailureReason,
+  type ThemeHostStatus,
+  type ThemeLoadOk,
+  type ThemeLoadResult,
+  type ThemeRevocationDisable,
+} from '@/lib/theme-host/types'
 import {
   STYLE_HTML_CLASS_NAMES,
   styleHtmlClasses,
@@ -66,6 +76,8 @@ interface HostState {
   readonly active: ThemeLoadOk | null
   /** The installed theme's style this state is for; null when off for no style. */
   readonly style: UiStyle | null
+  /** Off because the install's version has a `disable` revocation (C-05l); absent otherwise. */
+  readonly withdrawn?: ThemeRevocationDisable
 }
 
 const OFF_STATE: HostState = { status: 'off', reason: null, active: null, style: null }
@@ -74,10 +86,15 @@ function loadingState(style: UiStyle): HostState {
   return { status: 'loading', reason: null, active: null, style }
 }
 
-/** A finished load as host state: active, off with no active install (no notice), or failed with its reason. */
+/**
+ * A finished load as host state: active, off with no active install (no notice, unless a `disable`
+ * revocation says why), or failed with its reason.
+ */
 function settledState(style: UiStyle, result: ThemeLoadResult): HostState {
   if (result.ok) return { status: 'active', reason: null, active: result, style }
-  if (result.reason === null) return { ...OFF_STATE, style }
+  if (result.reason === null) {
+    return result.revoked ? { ...OFF_STATE, style, withdrawn: result.revoked } : { ...OFF_STATE, style }
+  }
   return { status: 'failed', reason: result.reason, active: null, style }
 }
 
@@ -110,6 +127,8 @@ export const THEME_FAILURE_TEXT: Readonly<Record<ThemeFailureReason, string>> = 
 
 /** A `warn` revocation: the theme runs, and this notice says its version was withdrawn. */
 export const THEME_REVOKED_WARNING_NOTICE = 'This theme is still running, but its maintainer withdrew this version.'
+/** A `disable` revocation (C-05l): the theme does not run, and this notice says why, with the reason. */
+export const THEME_WITHDRAWN_NOTICE = 'This theme was withdrawn, so it is turned off for now.'
 
 /** The revert's notice has its own id, so the host turning off (which dismisses its notice) leaves it. */
 export const THEME_REVERT_NOTICE_ID = 'theme-host-revert'
@@ -118,18 +137,12 @@ export const THEME_REVERTED_TEXT = 'You can choose it again in Settings once it 
 /** Where the revert sends the member: the style, and the server choice of the same name. */
 const REVERT_STYLE: UiStyle = 'studio'
 
-/** The page that turns safe mode on for its tab (app/safe-mode/page.tsx). */
-export const SAFE_MODE_PATH = '/safe-mode'
-/** The query that asks for safe mode (PRD-261 §6), as the /safe-mode page asks for it. */
-export const SAFE_MODE_QUERY = `?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`
-
 /**
  * Safe mode shows Studio, so it takes the installed theme's first paint off <html>: the root
  * layout's boot (THEME_BOOT_SCRIPT) has already put the theme's classes and its prepaint
  * variables there before any page code runs. Studio's classes go on, every other style's class
  * and the boot's own classes come off, and so does every custom property on <html>'s inline
- * style: in safe mode nothing else writes one there (no theme look runs, and the Play look
- * document runs only under Play).
+ * style: in safe mode nothing else writes one there (no theme look runs).
  */
 export const SAFE_MODE_ADD_CLASSES: readonly string[] = styleHtmlClasses(REVERT_STYLE)
 export const SAFE_MODE_REMOVE_CLASSES: readonly string[] = STYLE_HTML_CLASS_NAMES.filter(
@@ -176,17 +189,6 @@ export function unpaintThemeBoot(): void {
   SAFE_MODE_ADD_CLASSES.forEach((name) => root.classList.add(name))
   const custom = Array.from(root.style).filter((name) => name.startsWith('--'))
   custom.forEach((name) => root.style.removeProperty(name))
-}
-
-/** Turns safe mode on for this tab, as `?safe_mode=themes` does; the /safe-mode page calls it. */
-export function requestSafeModeForThisTab(): void {
-  isSafeModeRequested(SAFE_MODE_QUERY, safeSessionStorage())
-}
-
-/** Safe mode here: asked for by the query, by being the /safe-mode page, or by an earlier page in this tab. */
-function isSafeModeHere(): boolean {
-  const { pathname, search } = window.location
-  return isSafeModeRequested(pathname === SAFE_MODE_PATH ? SAFE_MODE_QUERY : search, safeSessionStorage())
 }
 
 function failedStart(reason: ThemeFailureReason, error: unknown): ThemeLoadResult {
@@ -295,9 +297,15 @@ function useThemeHostAttributes(status: ThemeHostStatus, reason: ThemeFailureRea
 
 /**
  * The one notice: the fallback with its reason, or safe mode; gone again once the theme is off or
- * active, except for an active theme whose version has a `warn` revocation (`warning` is its reason).
+ * active, except for an active theme whose version has a `warn` revocation (`warning` is its reason)
+ * and a theme off because of a `disable` one (`withdrawn` is its reason, C-05l).
  */
-function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | null, warning: string | null): void {
+function useThemeNotice(
+  status: ThemeHostStatus,
+  reason: ThemeFailureReason | null,
+  warning: string | null,
+  withdrawn: string | null,
+): void {
   useEffect(() => {
     if (status === 'active' && warning !== null) {
       const description = warning || THEME_FAILURE_TEXT.revoked
@@ -307,13 +315,16 @@ function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | nu
       toast.error(THEME_FALLBACK_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description: THEME_FAILURE_TEXT[reason] })
     } else if (status === 'safe-mode') {
       toast(THEME_SAFE_MODE_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity })
+    } else if (status === 'off' && withdrawn !== null) {
+      const description = withdrawn || THEME_FAILURE_TEXT.revoked
+      toast.warning(THEME_WITHDRAWN_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description })
     } else if (status === 'off') {
       toast.dismiss(THEME_NOTICE_ID)
     } else if (status === 'active') {
       toast.dismiss(THEME_NOTICE_ID)
       toast.dismiss(THEME_REVERT_NOTICE_ID)
     }
-  }, [status, reason, warning])
+  }, [status, reason, warning, withdrawn])
 }
 
 type SetStyle = UiStyleContextValue['setStyle']
@@ -352,6 +363,21 @@ function useFailureRevert(state: HostState, setStyle: SetStyle | null): void {
   }, [state, setStyle])
 }
 
+type ReleaseInstalledTheme = UiStyleContextValue['releaseInstalledTheme']
+
+/**
+ * W-A6b: names to the style context the installed theme's style the host cannot run (failed, safe
+ * mode, off with no install to run), and null while it loads or runs one, so the theme's registry
+ * entry stands exactly while the theme does.
+ */
+function useInstalledThemeRelease(state: HostState, release: ReleaseInstalledTheme | null): void {
+  const running = THEME_HOST_RUNNING_STATUSES.includes(state.status)
+  const released = state.style !== null && !running ? state.style : null
+  useEffect(() => {
+    release?.(released)
+  }, [released, release])
+}
+
 /** The style the host loads a theme for: an installed theme's, else null (off). */
 function installedThemeStyle(uiStyle: UiStyleContextValue | null): UiStyle | null {
   const style = uiStyle?.style ?? null
@@ -363,8 +389,9 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
   const uiStyle = useUiStyleOptional()
   const { state, reportRenderFailure } = useThemeLoad(installedThemeStyle(uiStyle))
   useThemeHostAttributes(state.status, state.reason)
-  useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null)
+  useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null, state.withdrawn?.reason ?? null)
   useFailureRevert(state, uiStyle?.setStyle ?? null)
+  useInstalledThemeRelease(state, uiStyle?.releaseInstalledTheme ?? null)
   const value = useMemo<ThemeHostContextValue>(
     () => ({
       status: state.status,

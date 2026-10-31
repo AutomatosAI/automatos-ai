@@ -9,16 +9,19 @@
  * PRD-251C US-C202: the Rhythm. Daily keeps the above; Weekly makes the next 7 days' posts
  * on its day at the make time, Monthly the next month's on its date, each approved in one
  * sitting in the Queue; the evening reminder's time; and when the next batch is made.
+ *
+ * P256-FIX-SOC-5 (F436): where the current batch stands, and the server's warnings (a batch day
+ * that splits the calendar week: which days the next batch makes).
  */
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { SocialPlanRhythm, SocialWeekday } from '@/lib/socials-plan-types'
+import type { SocialPlanCurrentBatch, SocialPlanRhythm, SocialWeekday } from '@/lib/socials-plan-types'
 import { Segmented } from '../studio/editor-ui'
 import {
   LATE_CHOICES, MAX_BATCH_DATE, MIX_PRESETS, WEEKDAYS, WEEKDAY_LABELS, cadenceSummary, type MixKey, type PlanDraft,
 } from './plan-model'
 import { PlanAiTools } from './plan-ai-tools'
-import { RHYTHM_CHOICES, batchDayChange, nextBatchLine, ordinal, rhythmSummary } from './plan-rhythm'
+import { RHYTHM_CHOICES, batchDayChange, currentBatchLine, nextBatchLine, ordinal, rhythmSummary } from './plan-rhythm'
 import { PlanStepHeading } from './plan-ui'
 
 const SELECT = 'h-[42px] w-full rounded-md border border-input bg-background px-2 text-sm'
@@ -93,20 +96,36 @@ interface MakingProps {
   set: SetDraft
   /** The saved plan's next batch (ISO), from the server; none for a daily or new plan. */
   nextBatchAt?: string | null
+  /** P256-FIX-SOC-5: where the saved plan's current batch stands, and the server's warnings. */
+  currentBatch?: SocialPlanCurrentBatch | null
+  warnings?: ReadonlyArray<string>
 }
 
-export function PlanStepMaking({ draft, set, nextBatchAt = null }: MakingProps) {
+function BatchStanding({ next, current, warnings }: { next: string | null; current: string | null; warnings: ReadonlyArray<string> }) {
+  return (
+    <>
+      {current && <span className="text-[12.5px] text-muted-foreground" role="status">{current}</span>}
+      {next && <span className="text-[12.5px] text-muted-foreground">{next}</span>}
+      {warnings.map((warning) => (
+        <p key={warning} className="m-0 rounded-md border border-border bg-muted/40 px-3 py-2 text-[12.5px] text-foreground" role="note">{warning}</p>
+      ))}
+    </>
+  )
+}
+
+export function PlanStepMaking({ draft, set, nextBatchAt = null, currentBatch = null, warnings = [] }: MakingProps) {
   const summary = cadenceSummary(draft)
   const mix = MIX_PRESETS.find((preset) => preset.key === draft.mix) ?? MIX_PRESETS[0]
   const batched = draft.rhythm !== 'daily'
   const next = batched ? nextBatchLine(nextBatchAt, draft.timezone) : null
+  const current = batched ? currentBatchLine(currentBatch) : null
   return (
     <div className="flex flex-col gap-4">
       <PlanStepHeading title="Making and approving" lead={rhythmSummary(draft)} />
       <div className="flex flex-col gap-1.5">
         <span className="text-sm font-medium text-foreground">Rhythm</span>
         <Segmented<SocialPlanRhythm> label="Rhythm" choices={RHYTHM_CHOICES} value={draft.rhythm} onChange={(rhythm) => set({ rhythm })} />
-        {next && <span className="text-[12.5px] text-muted-foreground">{next}</span>}
+        <BatchStanding next={next} current={current} warnings={batched ? warnings : []} />
       </div>
       {batched ? <BatchTiming draft={draft} set={set} /> : <DailyTiming draft={draft} set={set} />}
       <div className="flex flex-col gap-1.5">

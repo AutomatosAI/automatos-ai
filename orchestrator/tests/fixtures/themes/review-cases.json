@@ -1,0 +1,515 @@
+{
+  "schema": "automatos-theme-review-corpus/v1",
+  "_comment": "PRD-261 B-03e1: the shared review corpus. Core's review stage (orchestrator/services/themes/review_stage.py, run by orchestrator/tests/test_prd261_review_corpus.py) and the kit's automatos-theme check (which vendors this file from core byte for byte) each review every case and must give the level in expected for each check named in checks. A case is the hello package (orchestrator/tests/fixtures/themes/hello, which the kit vendors from the same commit) changed as orchestrator/tests/fixtures/themes/build.py changes it: manifestSet sets top-level theme.json fields over hello's, manifestUnset removes them, and the result is written as JSON with two-space indent and a final newline; replace sets a file's text (a path hello lacks adds the file) or, with null, drops it. Files are packed in path order. Every case is a package the reader accepts, so sizes, cssScope and looks are the reader's checks recorded as passed (a refused package never reaches the review; cases.json's packages section holds the refusals). The SDK names are the host's own list, services/themes/data/sdk-surface.json at the same commit; a case whose host is {\"sdkSurface\": \"missing\"} is reviewed as on a host that has no readable SDK name list. Anywhere in a case, {\"$corePageSha\": path} stands for that core page file's sha256 as services/themes/data/core-pages.json at the same commit gives it, so no page edit changes this file. The LLM stage is not part of the corpus (core runs it with a fake answering risk 0; it is the server's own check), and neither is contrast (its mobile cases are in test_prd261_review_stage.py). The file is held to its canonical form, json.dumps with indent 2 and a final newline, so its sha256 changes only when a case does.",
+  "package": "hello",
+  "checks": [
+    "sizes",
+    "cssScope",
+    "looks",
+    "uses",
+    "clonedFrom"
+  ],
+  "levels": [
+    "pass",
+    "warning",
+    "error",
+    "not_measured"
+  ],
+  "cases": [
+    {
+      "name": "the hello package as it ships",
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "hello without a uses field",
+      "manifestUnset": [
+        "uses"
+      ],
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "hello declaring the theme area",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "no style sheet",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/theme.css": null
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "an import the SDK doesn't export",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, stealSession as s } from '@automatos/theme-sdk'\n\nexport const steal = () => s()\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "error",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "an area the code uses that uses doesn't declare",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, useChatController } from '@automatos/theme-sdk'\n\nexport const chat = () => useChatController()\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a minified import",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "pages-agents"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import{defineTheme as e,useAgents as t}from\"@automatos/theme-sdk\";export const agents=()=>t();export default e({register(){},unregister(){}});\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a page area written with a dot",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "pages.agents"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, useAgents } from '@automatos/theme-sdk'\n\nexport const agents = () => useAgents()\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a uses entry that is no SDK area",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "pages-agents",
+          "telepathy"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, useAgents } from '@automatos/theme-sdk'\n\nexport const agents = () => useAgents()\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a declared area the code never uses",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "chat"
+        ]
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a namespace import",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "chat"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import * as sdk from '@automatos/theme-sdk'\n\nconst { defineTheme } = sdk\nexport const chat = () => sdk.useStartChat()\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a dynamic import",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "chat"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme } from '@automatos/theme-sdk'\n\nexport const chat = () => import('@automatos/theme-sdk').then((sdk) => sdk.useStartChat())\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a star re-export of the SDK",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme } from '@automatos/theme-sdk'\n\nexport * from '@automatos/theme-sdk'\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a named re-export of an SDK name",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "pages-agents"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme } from '@automatos/theme-sdk'\n\nexport { useAgents } from '@automatos/theme-sdk'\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "an undeclared area imported in a chunk",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/chunks/chat.js": "import { useStartChat } from '@automatos/theme-sdk'\n\nexport const chat = () => useStartChat()\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK storage calls declared in uses",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "storage"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, readThemeState, writeThemeState } from '@automatos/theme-sdk'\n\nexport const keep = (value) => writeThemeState('note', value).then(() => readThemeState('note'))\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK storage calls without storage in uses",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, readThemeState, writeThemeState } from '@automatos/theme-sdk'\n\nexport const keep = (value) => writeThemeState('note', value).then(() => readThemeState('note'))\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK voice calls declared in uses",
+      "manifestSet": {
+        "uses": [
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, VoiceButton, readVoiceLevels, useVoice } from '@automatos/theme-sdk'\n\nexport const talk = () => [VoiceButton, useVoice, readVoiceLevels]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK voice calls without voice in uses",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, VoiceButton, readVoiceLevels, useVoice } from '@automatos/theme-sdk'\n\nexport const talk = () => [VoiceButton, useVoice, readVoiceLevels]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK proactive calls declared in uses",
+      "manifestSet": {
+        "uses": [
+          "cards",
+          "proactive",
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions } from '@automatos/theme-sdk'\n\nexport const proactive = () => [DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "SDK proactive calls without proactive in uses",
+      "manifestSet": {
+        "uses": [
+          "cards",
+          "theme",
+          "voice"
+        ]
+      },
+      "replace": {
+        "dist/entry.js": "import { defineTheme, DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions } from '@automatos/theme-sdk'\n\nexport const proactive = () => [DISPLAY_STATE_LABELS, BriefCard, SuggestionCard, BriefVoice, useBrief, useSuggestions]\n\nexport default defineTheme({ register() {}, unregister() {} })\n"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a host with no SDK name list",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ]
+      },
+      "host": {
+        "sdkSurface": "missing"
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "warning",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a page the theme owns",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "pages": {
+          "/chat": {
+            "mode": "own"
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a clone of the current core page",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "pages": {
+          "/chat": {
+            "mode": "clone",
+            "clonedFrom": {
+              "path": "app/chat/page.tsx",
+              "sha": {
+                "$corePageSha": "app/chat/page.tsx"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "pass"
+      }
+    },
+    {
+      "name": "a clone of a core page this host changed",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "pages": {
+          "/chat": {
+            "mode": "clone",
+            "clonedFrom": {
+              "path": "app/chat/page.tsx",
+              "sha": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "warning"
+      }
+    },
+    {
+      "name": "two clones, one of a core page this host changed",
+      "manifestSet": {
+        "uses": [
+          "theme"
+        ],
+        "pages": {
+          "/agents": {
+            "mode": "clone",
+            "clonedFrom": {
+              "path": "app/agents/page.tsx",
+              "sha": {
+                "$corePageSha": "app/agents/page.tsx"
+              }
+            }
+          },
+          "/chat": {
+            "mode": "clone",
+            "clonedFrom": {
+              "path": "components/chatbot/studio-chat-shell.tsx",
+              "sha": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      "expected": {
+        "sizes": "pass",
+        "cssScope": "pass",
+        "looks": "pass",
+        "uses": "pass",
+        "clonedFrom": "warning"
+      }
+    }
+  ]
+}

@@ -247,11 +247,26 @@ def _likeness(topic: SocialTopic, best: Sequence[frozenset]) -> Tuple[float, ...
     return tuple(repeats.overlap(mine, theirs) for theirs in best)
 
 
+def fitting(candidates: Sequence[Any], post_format: str, day: date) -> List[Any]:
+    """The unused topics among ``candidates`` a slot of ``post_format`` on ``day`` may be made from,
+    in their order: not pinned to another day, and suiting the format (no formats suits any). The
+    one rule :func:`next_topic` and a slot's "stalled" (P256-FIX-SOC-5, ``slot_phases``) both read."""
+    return [
+        t for t in candidates
+        if t.used_at is None and t.pinned_on in (None, day) and (not t.formats or post_format in t.formats)
+    ]
+
+
+def unused_topics(db: Any, plan: SocialCampaign) -> List[SocialTopic]:
+    """The plan's unused topics, oldest first."""
+    return db.query(SocialTopic).filter(SocialTopic.campaign_id == plan.id, SocialTopic.used_at.is_(None)).order_by(SocialTopic.created_at).all()
+
+
 def next_topic(db: Any, plan: SocialCampaign, post_format: str, day: date) -> Optional[SocialTopic]:
     """The topic a slot of ``post_format`` on ``day`` is made from: an unused one pinned to
     that day first; then the unused one not pinned to another day most like the plan's best
     performers (US-C405), the oldest of equals (the oldest, without results). Either must suit
-    the format (no formats suits any)."""
+    the format (no formats suits any: :func:`fitting`)."""
     candidates = (
         db.query(SocialTopic)
         .filter(SocialTopic.campaign_id == plan.id, SocialTopic.used_at.is_(None))
@@ -259,11 +274,11 @@ def next_topic(db: Any, plan: SocialCampaign, post_format: str, day: date) -> Op
         .order_by(SocialTopic.pinned_on.is_(None), SocialTopic.created_at)
         .all()
     )
-    fitting = [t for t in candidates if not t.formats or post_format in t.formats]
-    if not fitting or fitting[0].pinned_on == day:
-        return fitting[0] if fitting else None
+    found = fitting(candidates, post_format, day)
+    if not found or found[0].pinned_on == day:
+        return found[0] if found else None
     best = best_performers(db, plan)
-    return max(enumerate(fitting), key=lambda item: (_likeness(item[1], best), -item[0]))[1] if best else fitting[0]
+    return max(enumerate(found), key=lambda item: (_likeness(item[1], best), -item[0]))[1] if best else found[0]
 
 
 def mark_used(topic: SocialTopic, post: SocialPost, now: datetime) -> None:

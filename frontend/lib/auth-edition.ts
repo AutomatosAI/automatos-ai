@@ -46,9 +46,9 @@ export const isLocal: boolean = authEdition === 'local'
  * Why a list and not the role: the local operator is deliberately `super_admin`
  * (role-context.tsx; hybrid.py's anonymous lane), so a role gate would either
  * show every hosted-only surface on the operator's machine or demote the
- * operator. Hiding is by this list ONLY — nothing else decides. Plan/trial
- * pills are not routes: they read the trial ledger, which a local workspace
- * never has.
+ * operator. Hiding is by this list ONLY — nothing else decides. The credit
+ * balance chip is not a route: it is mounted for `saas` only and reads the
+ * billing summary, which the local edition never serves (nothing is metered).
  *
  * Matching is on a path-segment boundary (`/team` covers `/team/x`, never
  * `/teams`); query and hash are ignored.

@@ -39,6 +39,9 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'social_plan', // PRD-251B US-B205: modules/socials/plan_notify.py (a plan's notices)
   'social_batch', // PRD-251C US-C204: plan_notify.notify_review (a batch to review)
   'social_posted', // PRD-251C US-C403: plan_notify.notify_weekly_note (the weekly note)
+  'content_report', // PRD-266 US-016a: services/content_reports/service.py (the owner's notice)
+  'chat', // PRD-266 US-012b: services/notification_events/auto_message.py (Auto messaged you)
+  'suggestion', // PRD-268 US-C08a: services/proactive/delivery.py (suggestion_ready)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {
@@ -79,6 +82,13 @@ describe('PRD-227 US-003 — bell deep-link drift guard', () => {
     expect(linkFor(row('social_plan', 'p1'))).toBe('/deliverables?tab=socials&view=plans&plan=p1')
     expect(linkFor(row('social_batch', 'p1'))).toBe('/deliverables?tab=socials&view=queue')
     expect(linkFor(row('social_posted', 'p1'))).toBe('/deliverables?tab=socials&view=posted&plan=p1')
+  })
+
+  it('PRD-266 US-012b: Auto messaged you opens that chat, or the chat page without one', () => {
+    expect(linkFor(row('chat', '0d9f2c51-7a43-4b8e-9c61-2e5f7a1b3c4d'))).toBe(
+      '/chat?chatId=0d9f2c51-7a43-4b8e-9c61-2e5f7a1b3c4d',
+    )
+    expect(linkFor(row('chat'))).toBe('/chat')
   })
 
   it('routes question → the Questions tab (PRD-225)', () => {

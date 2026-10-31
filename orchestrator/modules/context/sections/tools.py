@@ -1,5 +1,5 @@
 """
-ToolsSection — Unified tool loading with four strategies.
+ToolsSection — Unified tool loading with five strategies.
 
 Priority 3. Does NOT contribute text to the system prompt (render() returns
 empty string). Instead, provides ``load_tools()`` which the ContextService
@@ -9,6 +9,8 @@ Strategies:
     FULL           — All assigned tools (core + dispatcher + composio).
     FILTERED       — Intent-based filtering via SmartToolRouter.
     DISPATCHER_ONLY — Only the platform_execute dispatcher schema.
+    READ_ONLY      — The check-in lane (PRD-268): read platform actions plus
+                     platform_suggest_next_step, each first-class.
     NONE           — Empty tool list, tool_choice="none".
 
 Replaces:
@@ -35,6 +37,7 @@ class ToolLoadingStrategy(str, Enum):
     FULL = "full"
     FILTERED = "filtered"
     DISPATCHER_ONLY = "dispatcher_only"
+    READ_ONLY = "read_only"
     NONE = "none"
 
 
@@ -90,6 +93,9 @@ class ToolsSection(BaseSection):
 
             if strategy == ToolLoadingStrategy.DISPATCHER_ONLY:
                 return await self._load_dispatcher_only(query=query, workspace_id=workspace_id, db_session=db_session)
+
+            if strategy == ToolLoadingStrategy.READ_ONLY:
+                return self._load_read_only(workspace_id, db_session)
 
             if strategy == ToolLoadingStrategy.FULL:
                 return await self._load_full(
@@ -180,6 +186,33 @@ class ToolsSection(BaseSection):
 
         with hidden_scope(hidden):
             return with_first_class([schema], workspace_id, db_session), "auto"
+
+    @staticmethod
+    def _load_read_only(
+        workspace_id: Optional[str],
+        db_session: Any = None,
+    ) -> tuple[list[dict[str, Any]], str]:
+        """PRD-268 US-C02c (§6.2.3): the check-in lane's surface, from the registry alone.
+
+        Each platform action labelled read, plus ``platform_suggest_next_step``, as a
+        first-class tool (the rule is ``offered_in_a_check_in``). Never built through
+        ``get_tools_for_agent``, which adds the agent's Composio, plugin and workspace
+        tools, and never the ``platform_execute`` dispatcher. The categories the workspace
+        is not shown stay out, as on every other surface. A registry that cannot be read
+        loads no tools, and the model is told to call none.
+        """
+        from modules.tools.discovery.action_registry import get_action_registry
+        from modules.tools.discovery.check_in_lane import offered_in_a_check_in
+        from modules.tools.discovery.hidden_categories import hidden_categories_for_workspace, without_hidden
+
+        try:
+            hidden = hidden_categories_for_workspace(workspace_id, db_session)
+            actions = without_hidden(get_action_registry().get_all(), hidden)
+            tools = [action.to_openai_schema() for action in actions if offered_in_a_check_in(action)]
+        except Exception:
+            logger.exception("ToolsSection: the check-in tools could not be loaded (workspace=%s)", workspace_id)
+            return [], "none"
+        return tools, ("auto" if tools else "none")
 
     async def _load_full(
         self,

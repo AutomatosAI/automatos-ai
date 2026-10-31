@@ -3,7 +3,8 @@
  * declaration inline with `!important`, and the two approval widgets render their card inside
  * one, wherever they are drawn (the canvas, a chat reply), with the card's buttons inside the
  * guard. The cascade itself (a hostile theme sheet losing to the guard) is a browser fact:
- * e2e/browser/specs/protected-surfaces.spec.ts proves it in Chromium and WebKit.
+ * e2e/browser/specs/protected-surfaces.spec.ts proves it in Chromium and WebKit. PRD-268 US-C20c:
+ * the approval view's rule and preview render inside the guard too, with no hook of their own.
  */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
@@ -21,6 +22,7 @@ vi.mock('@/hooks/use-missions-api', () => ({
 import { MissionApprovalWidget } from '@/components/widgets/MissionApprovalWidget'
 import { ToolApprovalWidget } from '@/components/widgets/ToolApprovalWidget'
 import type { WidgetMetadata } from '@/components/widgets/types'
+import type { ApprovalView } from '@/lib/proactive/types'
 
 import {
   guardProtectedElement,
@@ -36,6 +38,21 @@ const IMPORTANT = 'important'
 const PA15_PROPERTIES = ['display', 'visibility', 'opacity', 'pointer-events', 'position']
 const APPROVE_BUTTON = /Approve & run/
 const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_action' }, createdAt: new Date() }
+/** PRD-268 US-C20c: the approval view's rule and preview, the parts a theme must never hide. */
+const DELETE_RULE = "Ask before anything that deletes or can't be undone"
+const PLAN_RULE = 'Ask before any Mission or task runs'
+const TOOL_PREVIEW = 'document_id: 12'
+const PLAN_PREVIEW = '1. Issue refund'
+function viewOf(grantId: string, verb: string, sentence: string, body: string): ApprovalView {
+  return {
+    grant_id: grantId,
+    asked_by: { kind: 'auto', name: 'Auto' },
+    action: { verb, summary: 'What the owner approves' },
+    preview: { kind: 'text', body },
+    rule: { id: 'rule', sentence },
+    answers: ['refuse', 'allow_once'],
+  }
+}
 
 /**
  * The guarded properties the CI jsdom's CSSStyleDeclaration does not know, so setProperty
@@ -45,6 +62,11 @@ const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_actio
 const JSDOM_UNKNOWN = new Set(['-webkit-mask', 'zoom'])
 /** The ones a theme moves, shrinks, masks or skips a card with, beyond PA-15's five (review M2). */
 const MOVE_AND_HIDE_PROPERTIES = ['translate', 'scale', 'rotate', 'offset-path', 'mask', '-webkit-mask', 'content-visibility', 'zoom']
+
+/** A part holds no data attribute of its own: nothing a theme selector could name it by. */
+function expectNoHookOfItsOwn(element: HTMLElement): void {
+  expect(element.getAttributeNames().filter((name) => name.startsWith('data-'))).toEqual([])
+}
 
 function expectGuarded(element: HTMLElement): void {
   const checked = Object.entries(PROTECTED_SURFACE_GUARD).filter(([property]) => !JSDOM_UNKNOWN.has(property))
@@ -135,5 +157,43 @@ describe('ProtectedSurface (PRD-261 A-12c)', () => {
     )
     expectInsideSurface(screen.getByRole('button', { name: APPROVE_BUTTON }), 'mission-approval')
     expectInsideSurface(screen.getByRole('button', { name: /Reject/ }), 'mission-approval')
+  })
+
+  it("renders the tool card's approval view, its rule and its preview, inside the guarded surface (PRD-268 US-C20c)", () => {
+    render(
+      <ToolApprovalWidget
+        id="w-tool"
+        title="Action approval needed"
+        data={{ grant_id: 7, action: 'platform_delete_document', approval_view: viewOf('7', 'delete', DELETE_RULE, TOOL_PREVIEW) }}
+        metadata={metadata}
+      />,
+    )
+    for (const part of [screen.getByText(DELETE_RULE), screen.getByText(TOOL_PREVIEW)]) {
+      expectInsideSurface(part, 'tool-approval')
+      expectNoHookOfItsOwn(part)
+    }
+    expectInsideSurface(screen.getByRole('group', { name: /^Action approval needed/ }), 'tool-approval')
+  })
+
+  it("renders the Mission card's approval view, its rule and its preview, inside the guarded surface (PRD-268 US-C20c)", () => {
+    render(
+      <MissionApprovalWidget
+        id="w-mission"
+        title="Mission plan — approval needed"
+        data={{
+          mission_id: 'm-1',
+          goal: 'Refund the customer',
+          task_count: 1,
+          tasks: [{ title: 'Issue refund' }],
+          approval_view: viewOf('m-1', 'run', PLAN_RULE, PLAN_PREVIEW),
+        }}
+        metadata={metadata}
+      />,
+    )
+    for (const part of [screen.getByText(PLAN_RULE), screen.getByText(PLAN_PREVIEW)]) {
+      expectInsideSurface(part, 'mission-approval')
+      expectNoHookOfItsOwn(part)
+    }
+    expectInsideSurface(screen.getByRole('group', { name: /^Mission plan — approval needed/ }), 'mission-approval')
   })
 })

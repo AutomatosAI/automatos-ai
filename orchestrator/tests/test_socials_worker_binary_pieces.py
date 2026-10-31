@@ -1,6 +1,6 @@
 """A binary file reaches the workspace a piece at a time (3 Oct 2026, the Socials copies).
 
-The worker's ``/files/write`` takes text, under aiohttp's 1 MB body limit. A picture or a
+The worker's ``/files/write`` takes text, under its 1 MiB body limit. A picture or a
 video now goes through the same route as base64 pieces (``executor._write_chunk``):
 
 * pieces are written to ``<path>.part`` (the first over it, the rest after it) and the

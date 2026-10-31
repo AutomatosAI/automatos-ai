@@ -7,6 +7,7 @@ Routes (plan §2.2; C1-wire registers the router, lists the routes in
 =========================================================  ===========================
 ``GET  /api/admin/themes/pending``                          the queue, oldest first
 ``GET  /api/admin/themes/{packageId}/report``               scan report, note, history
+``GET  /api/admin/themes/{packageId}/review-package``       ``{url, digest, expiresAt}`` (C-03c)
 ``POST /api/admin/themes/{packageId}/report-note``          ``{summary, outcome}``
 ``POST /api/admin/themes/{packageId}/approve``              records a signature request
 ``POST /api/admin/themes/{packageId}/reject``               ``{reason}``
@@ -45,8 +46,9 @@ from core.auth.principal import resolve_user_pk
 from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.database.database import get_db
-from services.themes import review
+from services.themes import review, review_package
 from services.themes.choices import CONFLICT, ThemeInstallError
+from services.themes.signature_verify import SigningKeysError
 from services.themes.signing import SIGNATURE_TEXT_MAX
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/themes", tags=["Admin Themes"])
 
 FORBIDDEN = 403
+SERVICE_UNAVAILABLE = 503
 ADMIN_REQUIRED = "Only an Automatos admin can review Marketplace themes."
 CONCURRENT_CHANGE = "Someone changed this version at the same moment. Reload and try again."
 REASON_MAX = 2000
@@ -104,7 +107,8 @@ ADMIN_STEP_UP = [Depends(require_theme_admin), Depends(STEP_UP)]
 
 
 def _run(db: Session, work: Callable[[], T], commit: bool) -> T:
-    """Run one review call; commit a write once, and answer a refusal with its own status."""
+    """Run one review call; commit a write once, and answer a refusal with its own status. A signing
+    keys file that does not load is a 503 with its plain message (it echoes nothing from the file)."""
     try:
         result = work()
         if commit:
@@ -113,6 +117,10 @@ def _run(db: Session, work: Callable[[], T], commit: bool) -> T:
     except ThemeInstallError as refusal:
         db.rollback()
         raise HTTPException(status_code=refusal.status_code, detail=refusal.message) from refusal
+    except SigningKeysError as broken:
+        db.rollback()
+        logger.error("theme signing keys did not load: %s", broken)
+        raise HTTPException(status_code=SERVICE_UNAVAILABLE, detail=str(broken)) from broken
     except IntegrityError as clash:
         db.rollback()
         logger.warning("theme review write lost a race: %s", clash.orig.__class__.__name__)
@@ -137,6 +145,16 @@ def get_theme_report(
     """One version's scan report, the isolated-job note, its history and its signature request."""
     _require_admin(ctx)
     return _run(db, lambda: review.report(db, package_id), commit=False)
+
+
+@router.get("/{package_id}/review-package")
+def get_theme_review_package(
+    package_id: UUID, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """A 15-minute link to the version's package, rebuilt from its stored files, for the kit's
+    isolated review job (``package_url`` and ``expected_digest`` of theme-review.yml, C-03c)."""
+    _require_admin(ctx)
+    return _run(db, lambda: review_package.review_link(db, package_id), commit=False)
 
 
 @router.post("/{package_id}/report-note", dependencies=ADMIN_STEP_UP)
@@ -191,7 +209,8 @@ def store_theme_signature(
     package_id: UUID, body: SignatureBody,
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Store the Ed25519 signature the kit's sign workflow returned (not verified until C-05)."""
+    """Store the Ed25519 signature the kit's sign workflow returned, once an active Automatos key
+    verifies it (``signature_verify``, C-05b); otherwise 400 and nothing is stored."""
     _require_admin(ctx)
     actor = resolve_user_pk(db, ctx)
     return _run(db, lambda: review.sign(db, package_id, body.requestId, body.signature, actor), commit=True)

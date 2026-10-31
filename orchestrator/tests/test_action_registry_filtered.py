@@ -43,6 +43,7 @@ def _make_action(
             "properties": properties or {},
             "required": required or [],
         },
+        permission_level="read",
         admin_only=admin_only,
         promoted=promoted,
     )

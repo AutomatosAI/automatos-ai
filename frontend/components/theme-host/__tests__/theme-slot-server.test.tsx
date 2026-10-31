@@ -13,7 +13,8 @@
  * e2e/browser/specs/default-build.spec.ts checks the real server's HTML for /agents, /chat and
  * /deliverables.
  *
- * Where a theme may draw the page (builtin Play's /chat, an installed theme), ThemeSlot renders
+ * Where a theme may draw the page (a theme's registered /chat, here the fixture theme's, PRD-261
+ * A-19b; an installed theme still loading), ThemeSlot renders
  * nothing on the server, where the width and an installed theme's pages are not known: no HTML at
  * all, not even an empty boundary. At the theme layout it renders the theme's page.
  */
@@ -47,7 +48,7 @@ vi.mock('@/components/layout/main-layout', () => ({
   ),
 }))
 
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { FIXTURE_THEME_ENTRY, fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
 import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-context'
@@ -65,7 +66,7 @@ const NOTHING = ''
 /** The theme page's text: no character the server escapes, so it reads as written in the HTML. */
 const THEME_TEXT = 'The installed theme page'
 const INSTALLED_ENTRY: ThemeEntry = {
-  ...BUILTIN_PLAY_ENTRY,
+  ...FIXTURE_THEME_ENTRY,
   ref: 'install:00000000-0000-4000-8000-0000000a04b2',
   kind: 'installed',
   ownsPages: ['/chat'],
@@ -132,11 +133,11 @@ const NO_THEME_PAGE_CASES: ReadonlyArray<readonly [string, () => ThemeHostContex
     },
   ],
   [
-    'under builtin Play, which registered no page on /agents, the width not known',
+    'under a theme that registered no page on /agents (the fixture theme), the width not known',
     () => {
-      state.entry = BUILTIN_PLAY_ENTRY
+      state.entry = FIXTURE_THEME_ENTRY
       state.layout = 'pending'
-      return null
+      return fixtureThemeHost()
     },
   ],
   [
@@ -168,11 +169,11 @@ describe('ThemeSlot on the server, where no theme may draw the page', () => {
 })
 
 describe("ThemeSlot on the server, where a theme may draw the page: nothing yet, or the theme's page", () => {
-  it("renders nothing for builtin Play's registered /chat page while the width is not known", () => {
-    state.entry = BUILTIN_PLAY_ENTRY
+  it("renders nothing for the theme's registered /chat page while the width is not known", () => {
+    state.entry = FIXTURE_THEME_ENTRY
     state.layout = 'pending'
     state.pathname = '/chat'
-    expect(serverHtml('/chat')).toBe(NOTHING)
+    expect(serverHtml('/chat', fixtureThemeHost())).toBe(NOTHING)
   })
 
   it("renders nothing while an installed theme's code loads, whose pages are not known yet", () => {

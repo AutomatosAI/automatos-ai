@@ -1,8 +1,7 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -14,7 +13,12 @@ import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { SessionModeTab } from './SessionModeTab'
 import { WorkspaceSocialsCard } from './WorkspaceSocialsCard'
+import { WorkspaceVoiceLiveCard } from './WorkspaceVoiceLiveCard'
 import { AppearanceTab } from './themes/appearance-tab'
+import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
+import { BillingTab } from './billing/billing-tab'
+import { WhatAutoDependsOn } from './what-auto-depends-on'
+import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -34,8 +38,18 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  * Socials (PRD-251B US-B106) is the WORKSPACE switch, in both editions: the
  * platform master stays under System Settings (super-admin).
  *
+ * Voice is the workspace's own Auto Live switch, in both editions: the platform's
+ * setup (Retell credentials, the platform-wide on/off) stays under System Settings → Voice
+ * (super-admin); this tab only shows and flips `workspace.settings.voice_live.enabled`.
+ *
  * Appearance (PRD-261 A-07d) holds Themes, in both editions: installing a private theme is
  * on by default in the local edition (THEMES_PRIVATE_UPLOAD=auto).
+ *
+ * Phones & devices (PRD-266 US-005c) is in both editions: the device list everywhere, pairing
+ * only on a local install in paired mode.
+ *
+ * Billing (PRD-265 US-011) is hosted-only — the local edition never meters — so it is not in
+ * this list. The open tab is read from and written to `?tab=` (./use-settings-tab.ts).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -45,14 +59,15 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'credentials',
   'channels',
   'notifications',
+  'voice',  // the workspace's own Auto Live switch (Settings → Voice → Auto Live)
   'socials',  // PRD-251B US-B106 — the workspace's own Socials switch
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
   'appearance',  // PRD-261 A-07d — Themes: install, opt in, choose
+  'phones-devices',  // PRD-266 US-005c — the device list; pairing in paired mode
 ])
 
 export function SettingsPanel() {
   const { isAdmin } = useSystemRole()
-  const [activeTab, setActiveTab] = useState(isAdmin ? 'system-settings' : 'orchestrator')
 
   const allTabs = [
     ...(isLocal ? [{ value: 'profile', label: 'Profile', icon: UserCircle }] : []),
@@ -61,14 +76,18 @@ export function SettingsPanel() {
     { value: 'orchestrator', label: 'Orchestrator', icon: Brain },
     { value: 'webhooks', label: 'Webhooks', icon: Webhook },
     { value: 'api-keys', label: 'API Keys', icon: KeyRound },
+    { value: 'billing', label: 'Billing', icon: CreditCard },
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
+    { value: 'phones-devices', label: 'Phones & devices', icon: Smartphone },
+    { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
+  const [activeTab, setActiveTab] = useSettingsTab(tabs, isAdmin ? 'system-settings' : 'orchestrator')
 
   return (
     <div className="space-y-6">
@@ -124,8 +143,12 @@ export function SettingsPanel() {
           </TabsContent>
         )}
 
+        {/* PRD-268 US-W05: what Auto depends on, above the orchestrator's settings */}
         <TabsContent value="orchestrator">
-          <SystemLLMSettingsTab />
+          <div className="space-y-6">
+            <WhatAutoDependsOn />
+            <SystemLLMSettingsTab />
+          </div>
         </TabsContent>
 
         {/* Webhooks Tab */}
@@ -136,6 +159,11 @@ export function SettingsPanel() {
         {/* PRD-54: BYOK API Keys Tab */}
         <TabsContent value="api-keys">
           <ApiKeysSettingsTab />
+        </TabsContent>
+
+        {/* PRD-265 US-011: Billing — plan, credits, checkout and the ledger (hosted edition only) */}
+        <TabsContent value="billing">
+          <BillingTab />
         </TabsContent>
 
         {/* PRD-18: Credentials Management Tab */}
@@ -151,6 +179,16 @@ export function SettingsPanel() {
         {/* PRD-128: Notification Preferences */}
         <TabsContent value="notifications">
           <NotificationsSettingsTab />
+        </TabsContent>
+
+        {/* PRD-266 US-005c: Phones & devices — the device list, Revoke, and pairing in paired mode */}
+        <TabsContent value="phones-devices">
+          <PhonesDevicesTab />
+        </TabsContent>
+
+        {/* The workspace's own Auto Live switch (the platform's setup is under System Settings → Voice) */}
+        <TabsContent value="voice">
+          <WorkspaceVoiceLiveCard />
         </TabsContent>
 
         {/* PRD-251B US-B106: the workspace's own Socials switch (the master is under System Settings) */}

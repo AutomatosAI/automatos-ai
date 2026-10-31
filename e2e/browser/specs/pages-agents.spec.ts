@@ -10,7 +10,9 @@ import { watchPage } from '../support/watch'
 // and useAgentStats() alone. This spec answers the two reads the core page makes, GET /api/agents/
 // (the roster) and GET /api/system/agent-statistics (the counts), from fixtures/hello-a12d/responses.json
 // (test data), so what the theme draws can only have come through the SDK's hooks, the core hooks
-// they wrap and the host's backend client:
+// they wrap and the host's backend client. The icon-mapping read useAgents makes first
+// (GET /api/system/config/system_icon_mappings) is answered empty too, so the roster's query key
+// never changes under the spec and every roster read it counts is one the page asked for:
 //
 // 1. /agents renders the theme's page inside its frame, with the intercepted roster (names and
 //    statuses) and the counts (seven agents, three active: the stats read, not the roster's two),
@@ -26,6 +28,7 @@ interface AgentRow {
 interface Responses {
   readonly agents: readonly AgentRow[]
   readonly stats: { readonly total_agents: number; readonly active_agents: number }
+  readonly iconMappings: { readonly config_key: string }
 }
 
 /** How many times the roster was read: GETs of /api/agents/ without the system agents. */
@@ -40,6 +43,7 @@ const RESPONSES = JSON.parse(fs.readFileSync(RESPONSES_FILE, 'utf8')) as Respons
 const AGENTS_PAGE = '/agents'
 const AGENTS_PATH = '/api/agents/'
 const STATS_PATH = '/api/system/agent-statistics'
+const ICON_MAPPINGS_PATH = `/api/system/config/${RESPONSES.iconMappings.config_key}`
 /** The query parameter the assignee pickers add (useAssignableAgents); the roster never sends it. */
 const SYSTEM_AGENTS_PARAM = 'include_workspace_system'
 const STATUS_ATTR = 'data-theme-host'
@@ -49,7 +53,7 @@ const CORE_HEADING = /^Agent Management$/
 const OK = 200
 const SHARING_FAILURE = /Invalid hook call|Minified React error|not in this SDK build/i
 
-/** Answers the agents page's two reads; counts the roster reads. */
+/** Answers the agents page's reads (the roster, the counts, the icon mappings); counts the roster reads. */
 async function serveAgentData(page: Page): Promise<RosterReads> {
   const reads: RosterReads = { count: 0 }
   await page.route((url) => url.pathname === AGENTS_PATH, async (route) => {
@@ -59,6 +63,7 @@ async function serveAgentData(page: Page): Promise<RosterReads> {
     await fulfillBackendJson(route, OK, RESPONSES.agents)
   })
   await page.route((url) => url.pathname === STATS_PATH, (route) => fulfillBackendJson(route, OK, RESPONSES.stats))
+  await page.route((url) => url.pathname === ICON_MAPPINGS_PATH, (route) => fulfillBackendJson(route, OK, RESPONSES.iconMappings))
   return reads
 }
 

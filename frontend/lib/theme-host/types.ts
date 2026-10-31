@@ -42,7 +42,8 @@ export interface ThemeDefinition {
  *   counts toward the three-failure revert (A-04c).
  * - `revoked`: the installed version was revoked. A `warn` revocation never fails the load (the
  *   theme runs and the host shows a notice, ThemeLoadOk.revoked); a `disable` one names no theme
- *   (ThemeLoadAbsent), as the server's own choice rewrite does.
+ *   (ThemeLoadAbsent, with its reason as `revoked` for the host's notice, C-05l), as the server's
+ *   own choice rewrite does.
  * - `opt-in`: private code the member has not opted in to (PRD-261 Q6): GET /api/themes/active
  *   says `optIn.required`, so no theme file is asked for (the files proxy would 404 each one).
  * - `unavailable`: the theme's files could not be reached (a 5xx from the files proxy, a network
@@ -54,6 +55,9 @@ export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 
 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'
+
+/** The host's states in which an installed theme owns the page: it is loading or running. */
+export const THEME_HOST_RUNNING_STATUSES: readonly ThemeHostStatus[] = ['loading', 'active']
 
 /** The props of slot 'frame@1': the page, and the two things MainLayout hands every chrome. */
 export interface FrameProps {
@@ -105,8 +109,8 @@ export interface ThemeRevocationWarning {
 export interface ThemeLoadOk extends ThemeRegistrations {
   readonly ok: true
   readonly ref: ThemeRef
-  /** The installed theme's checked manifest; null for a builtin theme, which has a registry entry instead. */
-  readonly manifest: SpikeManifest | null
+  /** The installed theme's checked manifest. */
+  readonly manifest: SpikeManifest
   /** A `warn` revocation of this installed version, for the host's notice; absent or null for none. */
   readonly revoked?: ThemeRevocationWarning | null
   /** Removes the theme's class, stylesheet and variables, then runs its unregister; safe to call twice. */
@@ -120,15 +124,28 @@ export interface ThemeLoadFailure {
 }
 
 /**
+ * A `disable` revocation of the chosen install (GET /api/themes/active `theme: null` with a
+ * top-level `revoked`, defaults.py resolve_active): the theme does not run on this load.
+ */
+export interface ThemeRevocationDisable {
+  readonly level: 'disable'
+  /** The reason the admin (or the signature check, C-05c) gave, shown as text; empty when none. */
+  readonly reason: string
+}
+
+/**
  * No theme to load: GET /api/themes/active names no theme for the install (`theme: null`, a
  * `disable` revocation, another install, or a 404 from a backend without A-07b's route), as for a
- * stale `theme:install:` cookie. Not a failure: the host
- * turns off and Studio shows, with no notice. `reason` is null so it never reads as a failure's.
+ * stale `theme:install:` cookie. Not a failure: the host turns off and Studio shows. `reason` is
+ * null so it never reads as a failure's. With no notice, except for a `disable` revocation of this
+ * install (C-05l): `revoked` carries it, so the member reads why the theme is off.
  */
 export interface ThemeLoadAbsent {
   readonly ok: false
   readonly reason: null
   readonly detail: string
+  /** Present only for a `disable` revocation of this install. */
+  readonly revoked?: ThemeRevocationDisable
 }
 
 export type ThemeLoadResult = ThemeLoadOk | ThemeLoadFailure | ThemeLoadAbsent
@@ -160,7 +177,7 @@ export const THEME_DIGEST_COOKIE = 'automatos-theme-digest'
 /** Between the install id and the digest in THEME_DIGEST_COOKIE (neither contains it). */
 export const THEME_DIGEST_HINT_SEPARATOR = '.'
 
-/** Where a theme comes from: compiled into the app (`builtin:`) or installed in the workspace (`install:`). */
+/** Where a theme comes from: installed in the workspace (`install:`); no theme is compiled into the app (A-19f1). */
 export interface ThemeSource {
   readonly ref: ThemeRef
   load(deps: LoaderDeps): Promise<ThemeLoadResult>

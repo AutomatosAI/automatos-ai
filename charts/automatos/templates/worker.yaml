@@ -23,11 +23,13 @@ spec:
       serviceAccountName: {{ include "automatos.serviceAccountName" . }}
       automountServiceAccountToken: false
       # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
-      # volume's ownership, then drops to the `worker` user (uid 1000) with gosu.
+      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv
+      # --no-new-privs. The container's securityContext keeps that root start narrow,
+      # and a uid other than 0 holds none of the capabilities below.
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
-          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.worker.image) }}
           env:
             - name: WORKSPACE_VOLUME_PATH
               value: /workspaces
@@ -75,6 +77,31 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
+          # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
+          # (a setuid-root binary such as su or passwd runs without root), every capability
+          # is dropped but the four the root entrypoint needs, and the runtime's default
+          # seccomp profile applies (compose already runs the worker under Docker's).
+          # This passes PodSecurity "baseline", not "restricted": the pod starts as root
+          # and keeps capabilities beyond NET_BIND_SERVICE, for the entrypoint above.
+          #
+          # NOTE (fix/f452-worker-extra-privs, reconcile against #1309/#1311 before merge):
+          # #1311 measured this exact set against the built image (see its PR description's
+          # table) and kept DAC_OVERRIDE, not DAC_READ_SEARCH -- without DAC_OVERRIDE the
+          # volume walk failed with EACCES on a mode-700 folder. An earlier, unmeasured
+          # draft of this change (13c03f89f) used DAC_READ_SEARCH instead; that capability
+          # set is NOT kept here because it was never run against the built image. Confirm
+          # DAC_OVERRIDE is still right now that the Dockerfile also strips every setuid/
+          # setgid bit (below) before dropping either set further.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # chown -h re-owns the volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't
+              # own), then setpriv drops to uid 1000 (SETUID, SETGID). Measured: without
+              # DAC_OVERRIDE the walk fails on a mode-700 folder; FOWNER isn't needed.
+              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
       volumes:

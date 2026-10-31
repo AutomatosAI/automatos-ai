@@ -31,11 +31,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, nudge_about  # F306, F297
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
-from .claims_in_place import in_place, its_answer_is_checked  # N15-1, N15-2: the not-done line only in place
+from .claims_in_place import in_place, its_answer_is_checked, reads_ahead  # N15-1, N15-2: the line only in place
 from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
 from .draft_here import shows_the_work  # F413, F419: the work the owner asked to see, or for here, is in the reply
-from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
+from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG, UNRUN_SOURCE_NOTICE as UNRUN_SOURCE_NOTICE  # moved (K3)
 from .cap_answer import answers_at_the_cap  # F328
+from .reply_chips_turn import ends_on_reply_chips  # PRD-268 US-C12b
 from .tool_execution_tracker import ToolExecutionTracker
 from core.utils.stuck_detector import StuckDetector, action_key
 from .turn_account import said_or_accounted
@@ -192,22 +193,23 @@ class ToolLoopExecutor:
         content_truncate_tokens: int = 2000,
         tracker: Optional[ToolExecutionTracker] = None,
         promises: Optional[bool] = None,
+        read_ahead: bool = False,
     ) -> None:
         self._tool = tool_callback
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
-        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides.
-        self.promises = promises
+        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides. N17-5:
+        self.promises, self.read_ahead = promises, reads_ahead() or read_ahead  # the turn read before the loop
         self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
-        # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
-        self._stuck = StuckDetector()
+        self._stuck = StuckDetector()  # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     @its_answer_is_checked  # P256-FIX-N15-2: however the run ended, its answer holds no unbacked claim
+    @ends_on_reply_chips  # PRD-268 US-C12b: a round that offered reply chips ends the run on its own text
     @answers_at_the_cap  # F328: a run stopped by its round cap still ends on its answer
     async def run(
         self,
@@ -619,11 +621,7 @@ class ToolLoopExecutor:
 # Helpers — pure, stdlib only.
 # ---------------------------------------------------------------------------
 
-# The nudges themselves (F099, F108, the narration rule) are in nudges.py (F295).
-UNRUN_SOURCE_NOTICE = (
-    "No search ran for this reply — it gives {tool} as its source, but repeats an "
-    "earlier answer that may be out of date. Ask me to search again."
-)
+# The nudges themselves (F099, F108, the narration rule) are in nudges.py (F295), and F099's notice.
 _SOURCE_CLAIM = re.compile(
     r"(?:\bsources?\s*[:=–-]|\((?:source|via|from|per)\b)[^\n)]{0,120}?\b(?P<tool>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b",
     re.IGNORECASE,

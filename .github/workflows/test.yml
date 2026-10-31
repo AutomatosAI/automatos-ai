@@ -18,8 +18,9 @@ name: test
 # Concurrency cancels superseded runs on the same ref so rapid pushes don't queue.
 #
 # The path-gated lanes (the backend test shards, the image build, the frontend,
-# the CLI host, the sim units, agent-opt-worker) run on a PR only when it touches
-# what they read — the `changes` job decides — and always on main.
+# the CLI host, the sim units, agent-opt-worker, the W3 reference goldens) run on a
+# PR only when it touches what they read — the `changes` job decides — and always
+# on main.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -64,6 +65,7 @@ jobs:
       cli_host: ${{ steps.match.outputs.cli_host }}
       sim: ${{ steps.match.outputs.sim }}
       agent_opt: ${{ steps.match.outputs.agent_opt }}
+      references: ${{ steps.match.outputs.references }}
       backend_mode: ${{ steps.match.outputs.backend_mode }}
       backend_keywords: ${{ steps.match.outputs.backend_keywords }}
       backend_shards: ${{ steps.match.outputs.backend_shards }}
@@ -85,16 +87,34 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image.
+          # manifests and locks (with the splitter the API's pybuild runs, PRD-262
+          # US-022), the frontend's install config (.npmrc, PRD-262 US-047), the
+          # frontend edition literal, the worker image; the scripts that check the
+          # frontend builds (PRD-262 US-046, US-048); the scripts that look inside the
+          # backend image (packages, system tools, the Helvetica render, the test
+          # image, site-packages' native libraries, botocore's services, the app's
+          # bytecode), the one that reads the API's build context off its log, the list
+          # of boot modules the API's compile stage compiles, and the tests the test
+          # image runs: the clone tests, and the code-graph parser's language tests
+          # with the parser and their fixtures (PRD-262 US-028); and the Leiden
+          # adapter, which the backend step clusters with inside the image (US-027).
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
-          # The frontend lane also reads the committed route manifest (route-contract), and
-          # PRD-261's theme corpus, host contract and the validators lib/theme-host's
-          # validator-parity.test.ts reads as text.
-          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(contract|manifest|look_schema|css_value)\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-(standalone-image|layer-reuse)\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore|image_scipy|image_app_bytecode)\.py$|^orchestrator/scripts/boot_modules\.py$|^orchestrator/tests/test_prd262_codegraph_(clone|languages)\.py$|^orchestrator/tests/fixtures/codegraph_languages/|^orchestrator/modules/codegraph/parsers/|^orchestrator/modules/knowledge/leiden_partition\.py$|^\.github/workflows/test\.yml$
+          # The frontend lane also reads server files, so a change to one of them alone runs it:
+          # the committed route manifest (route-contract) and page manifest, PRD-261's theme
+          # corpus, and what its tests read as text to catch drift: the theme modules (the
+          # validators, the review stage's and the scan's check keys, levels and verdicts, the
+          # opt-in wording, the signature, revocation and update dicts), the step-up codes, the
+          # CLI presets and the e2e theme fixtures. Keep it on one line:
+          # frontend/scripts/__tests__/frontend-ci-lane-paths.test.ts reads it, and fails when a
+          # frontend test names a theme module it leaves out.
+          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/contracts/page-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(audio_capture|contract|css_value|listings|look_schema|manifest|optin|review|review_package|review_stage|revocation_admin|revocation_pull|scan|signature_verify|signing|updates)\.py$|^orchestrator/core/(auth/step_up|cli_presets)\.py$|^e2e/browser/fixtures/hello-a(04d|09b)/|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$
+          # PRD-262 W3: the goldens each code swap is judged against, the fixtures they
+          # are recorded from, and the pinned libraries that record them.
+          REFERENCE_PATHS: ^scripts/ci/reference/|^orchestrator/tests/fixtures/pdf_table|^orchestrator/tests/fixtures/text_splitter|^orchestrator/tests/fixtures/leiden_|^\.github/workflows/test\.yml$
         run: |
           set -euo pipefail
           full_backend() {
@@ -104,7 +124,7 @@ jobs:
             echo "backend_shard_count=$BACKEND_SHARDS"
           }
           all() {
-            { printf '%s=true\n' prod_images frontend cli_host sim agent_opt; full_backend; } | tee -a "$GITHUB_OUTPUT"
+            { printf '%s=true\n' prod_images frontend cli_host sim agent_opt references; full_backend; } | tee -a "$GITHUB_OUTPUT"
             echo "every lane runs: $1"
           }
           if [ "$EVENT" != "pull_request" ]; then all "$EVENT"; exit 0; fi
@@ -120,6 +140,7 @@ jobs:
             lane cli_host "$CLI_HOST_PATHS"
             lane sim "$SIM_PATHS"
             lane agent_opt "$AGENT_OPT_PATHS"
+            lane references "$REFERENCE_PATHS"
           } | tee -a "$GITHUB_OUTPUT"
           scope=$(python3 scripts/ci/backend_test_plan.py scope <<< "$files")
           echo "backend scope: $scope"
@@ -189,7 +210,7 @@ jobs:
       DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
       SHARD: ${{ matrix.shard }}/${{ needs.changes.outputs.backend_shard_count }}
       KEYWORDS: ${{ needs.changes.outputs.backend_keywords }}
-      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 ghostscript fonts-dejavu-core
+      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 fonts-dejavu-core fonts-urw-base35
 
     defaults:
       run:
@@ -204,11 +225,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: orchestrator/requirements.txt
+          cache-dependency-path: |
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       # The downloaded .debs, kept a week: on 7 Oct (run 37689615384) the Azure
       # Ubuntu mirror served ghostscript and its libraries at 58 kB/s, 5 min 18 s
-      # for 18.5 MB, and the job hit its timeout. The week in the key refreshes them.
+      # for 18.5 MB, and the job hit its timeout (ghostscript has since left the list,
+      # PRD-262 US-019). The week in the key refreshes them.
       - name: The week, for the system-library cache key
         id: week
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
@@ -233,6 +257,8 @@ jobs:
           # partial update is fine — install fails loudly if THAT index is stale.
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           # fonts-dejavu-core: the image's PDF font, so F298's checklist boxes print here too.
+          # fonts-urw-base35: the faces the image gives a brand kit naming Helvetica, Times,
+          # Courier, Palatino or Bookman (PRD-262 US-019), so its PDFs lay out here as there.
           # A .deb already in ~/apt-archives at the wanted version is not downloaded again.
           mkdir -p ~/apt-archives/partial
           # shellcheck disable=SC2086 # the package list splits on spaces on purpose
@@ -240,10 +266,14 @@ jobs:
           sudo rm -f ~/apt-archives/lock
           sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
+      # The locks, exactly (PRD-262 US-022): every pin with its hashes, the versions the
+      # API image installs. One command: a hashed lock puts pip in hash-checking mode for
+      # the whole command, and a dev install of its own could move a locked version.
       - name: Install Python dependencies
+        id: deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       # PRD-140 hierarchy audit (F147): every mutating platform action is
       # hierarchy-gated or allow-listed with its reason. A new unlisted
@@ -327,6 +357,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+      # PRD-262 US-032 (FR-6): `import main`, which every API process runs before it
+      # serves, loads none of camelot, cv2, matplotlib, pandas, nltk,
+      # google.generativeai or googleapiclient; a failure names the import chain that
+      # loaded one. Its 25 slowest imports (cumulative, from `python -X importtime`) and
+      # its wall time go to the step summary (scripts/ci/import_main_report.py). Once
+      # per run, on the first shard, after the tests and their coverage, so a failure
+      # here never hides theirs. IMPORT_MAIN_BUDGET_SECONDS is empty until the first
+      # week of main runs sets it; while empty, the time is reported, not judged.
+      - name: import main loads no FR-6 module, and its import time
+        if: ${{ !cancelled() && matrix.shard == 0 && steps.deps.outcome == 'success' }}
+        env:
+          IMPORT_MAIN_BUDGET_SECONDS: ""
+        run: python ../scripts/ci/import_main_report.py --budget-seconds "$IMPORT_MAIN_BUDGET_SECONDS" --summary "$GITHUB_STEP_SUMMARY"
 
   # The required check (the Protect-Main ruleset names `orchestrator-tests`). It
   # always reports: green when every shard passed, or when no backend test reads
@@ -472,7 +516,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: orchestrator/requirements.txt
+          cache-dependency-path: |
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -484,12 +530,12 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       - name: Run NL2SQL eval
         run: |
@@ -756,7 +802,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: orchestrator/requirements.txt
+          cache-dependency-path: |
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -768,12 +816,12 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       # Gate 1 — the single-head invariant (Step 1, green now, no DB needed).
       - name: Assert exactly one Alembic head
@@ -858,6 +906,33 @@ jobs:
           echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
+      # PRD-262 US-030: the entrypoint runs no alembic when alembic_version already holds
+      # the code's head(s), which scripts/alembic_heads.py reads from the migration
+      # scripts with no import. Its heads must be the ones `alembic heads` prints, the
+      # database init_fresh_db just stamped must read as at head through the same
+      # `psql -tA` the entrypoint pipes in, and a version this code does not know (a
+      # database ahead of it) must not.
+      - name: The entrypoint's static head check agrees with alembic
+        env:
+          PGPASSWORD: test
+        run: |
+          STATIC="$(python scripts/alembic_heads.py --print | sort)"
+          ALEMBIC="$(alembic heads 2>/dev/null | awk '{print $1}' | sort)"
+          echo "static heads: [${STATIC}] alembic heads: [${ALEMBIC}]"
+          if [ -z "${STATIC}" ] || [ "${STATIC}" != "${ALEMBIC}" ]; then
+            echo "::error::scripts/alembic_heads.py reads the heads [${STATIC}], alembic heads prints [${ALEMBIC}]"
+            exit 1
+          fi
+          STAMPED="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version')"
+          if ! printf '%s\n' "${STAMPED}" | python scripts/alembic_heads.py; then
+            echo "::error::the database init_fresh_db stamped at heads does not read as at head"
+            exit 1
+          fi
+          if printf 'a_revision_this_code_does_not_know\n' | python scripts/alembic_heads.py; then
+            echo "::error::a database ahead of the code read as at head, so alembic would not run and fail loudly"
+            exit 1
+          fi
+
       # A first boot whose build dies partway (Postgres restarting, the host
       # stopping) leaves alembic_version behind. The next boot must finish the
       # build, not serve it: before the incomplete-build marker it skipped the
@@ -909,8 +984,11 @@ jobs:
   # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
   # three Dockerfiles with NO build args (railway.json: DOCKERFILE; the last
   # stage, production), so this lane builds exactly that and checks what got baked:
-  # the frontend's edition literal, the backend's graph extras, the worker's
-  # browser. Non-required like the other lanes; the required flip is the repo
+  # the frontend's edition literal, the backend's Leiden clustering (graspologic-native,
+  # no graspologic, since PRD-262 US-027), the worker's browser. The one arg the
+  # frontend gets is a dummy Clerk publishable key, which Railway passes for real; the
+  # local edition is built too, with images.yml's args, and both frontends are booted
+  # (PRD-262 US-046). Non-required like the other lanes; the required flip is the repo
   # admin's call.
   prod-image-parity:
     name: Prod images built with default args carry production behaviour (non-required)
@@ -920,9 +998,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Frontend — edition baked with no args must be saas
+      # PRD-262 US-046: no CI build passes Clerk keys, and clerkMiddleware and ClerkProvider
+      # throw without them, so the build gets a format-valid production-instance publishable
+      # key, made here and never committed. The edition is still the Dockerfile's default.
+      - name: Frontend — edition baked with no edition arg must be saas
         run: |
-          docker build --target production -t parity-fe frontend/
+          pk="pk_live_$(printf 'clerk.example.com$' | base64)"
+          echo "PARITY_CLERK_PK=${pk}" >> "$GITHUB_ENV"
+          start=$SECONDS
+          docker build --target production --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$pk" -t parity-fe frontend/
+          # PRD-262 US-047: the build time goes to the run summary, report-only (§7).
+          { echo "### Frontend parity builds (report-only)"
+            echo "- SaaS build, no layer cache: $((SECONDS - start)) s (the whole step: 336-370 s before PRD-262 US-047)"
+          } >> "$GITHUB_STEP_SUMMARY"
           # lib/auth-edition.ts compiles to `"local"===<INLINED>.trim().toLowerCase()?"local":"saas"`
           # (Next folds the `|| ''` away), so the baked edition is the literal on the right.
           LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"local\".trim()" .next 2>/dev/null | wc -l')
@@ -947,32 +1035,281 @@ jobs:
             fi
           done
           exit "$bad"
-      # PRD-262 US-009: the lock records each native build's C library, so the Alpine
-      # builder installs, and Next traces, only the musl sharp, at the lock's release.
-      - name: Frontend — sharp at the lock's release, and no glibc build
+      # PRD-262 US-046: the SaaS build, run with no network and a dummy secret key (made here,
+      # never committed: gitleaks' Stripe rule matches sk_live_…), answers /sign-in with 200
+      # and carries no sharp, libvips or TypeScript (frontend/scripts/check-standalone-image.sh).
+      - name: Frontend — the SaaS build serves /sign-in with no network, without sharp, libvips or TypeScript
         run: |
+          sk="sk_live_$(openssl rand -hex 16)"
+          bash frontend/scripts/check-standalone-image.sh parity-fe /sign-in -e CLERK_SECRET_KEY="$sk"
+      # PRD-262 US-009: the lock records each native build's C library, so the Alpine
+      # builder installs only the musl sharp, at the lock's release. US-046 keeps sharp out of
+      # the runtime image, so this looks in the builder stage, a cache hit of the build above.
+      - name: Frontend — the builder's sharp at the lock's release, and no glibc build
+        run: |
+          docker build --target builder --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$PARITY_CLERK_PK" -t parity-fe-builder frontend/
           want=$(jq -r '.packages["node_modules/sharp"].version' frontend/package-lock.json)
-          builds=$(docker run --rm parity-fe sh -c 'ls node_modules/@img 2>/dev/null')
+          builds=$(docker run --rm parity-fe-builder sh -c 'ls node_modules/@img 2>/dev/null')
           echo "node_modules/@img:" $builds
           bad=0
-          if docker run --rm parity-fe sh -c 'test -d node_modules/sharp'; then
-            got=$(docker run --rm parity-fe node -p 'require("/app/node_modules/sharp/package.json").version')
-            echo "sharp $got (lock: $want)"
-            if [ "$got" != "$want" ]; then echo "::error::the image's sharp $got is not the lock's $want"; bad=1; fi
-          else
-            echo "::notice::sharp is not in the standalone trace"
-          fi
+          got=$(docker run --rm parity-fe-builder node -p 'require("/app/node_modules/sharp/package.json").version') || got="none"
+          echo "sharp $got (lock: $want)"
+          if [ "$got" != "$want" ]; then echo "::error::the builder's sharp $got is not the lock's $want"; bad=1; fi
           for build in $builds; do
             case "$build" in
-              sharp-linux-*|sharp-libvips-linux-*) echo "::error::the Alpine image carries the glibc build @img/$build"; bad=1 ;;
-              sharp-wasm32) echo "::warning::the image carries @img/sharp-wasm32, the WebAssembly fallback" ;;
+              sharp-linux-*|sharp-libvips-linux-*) echo "::error::the Alpine builder installed the glibc build @img/$build"; bad=1 ;;
+              sharp-wasm32) echo "::warning::the builder installed @img/sharp-wasm32, the WebAssembly fallback" ;;
             esac
           done
           exit "$bad"
-      - name: Backend — graph extras present with no args
+      # PRD-262 US-046: the local edition, built with the args images.yml publishes it with,
+      # answers /chat with 200 with no network and carries no sharp, libvips or TypeScript.
+      - name: Frontend — the local build serves /chat with no network, without sharp, libvips or TypeScript
         run: |
-          docker build --target production -t parity-be orchestrator/
-          docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+          set -o pipefail
+          start=$SECONDS
+          docker build --progress=plain --target production \
+            --build-arg NEXT_PUBLIC_AUTH_EDITION=local \
+            --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 \
+            --build-arg NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws \
+            --build-arg NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000 \
+            -t parity-fe-local frontend/ 2>&1 | tee "$RUNNER_TEMP/parity-fe-local.log"
+          echo "- Local build, after the SaaS one: $((SECONDS - start)) s" >> "$GITHUB_STEP_SUMMARY"
+          bash frontend/scripts/check-standalone-image.sh parity-fe-local /chat
+      # PRD-262 US-047: the local build differs from the SaaS one only in its build args, which
+      # the Dockerfile reads after the install, so BuildKit reuses the npm ci layer (CACHED).
+      - name: Frontend — a build that changes only build args reuses the npm ci layer
+        run: |
+          log="$RUNNER_TEMP/parity-fe-local.log"
+          step=$(grep -m1 -oE '^#[0-9]+ \[[^]]* [0-9]+/[0-9]+\] RUN npm ci( |$)' "$log" | cut -d' ' -f1 || true)
+          if [ -z "$step" ]; then echo "::error::the local build's log shows no npm ci step"; exit 1; fi
+          if ! grep -qx "$step CACHED" "$log"; then
+            grep -E "^$step " "$log" | tail -n 5
+            echo "::error::npm ci ran again for a build that changed only build args"; exit 1
+          fi
+          echo "npm ci: CACHED ($step)"
+      # PRD-262 US-048: the runtime's app layers go node_modules, public, .next/static, server,
+      # and BuildKit keys a COPY on its files' content. The local build has the SaaS build's lock
+      # and public/ files and a different bundle, so it reuses every layer up to public and makes
+      # its own server layer (frontend/scripts/check-layer-reuse.sh).
+      - name: Frontend — the local build reuses the SaaS build's node_modules and public layers
+        run: bash frontend/scripts/check-layer-reuse.sh parity-fe parity-fe-local
+      # PRD-262 US-048: frontend/.dockerignore keeps tests, docs and tsconfig.tsbuildinfo out of
+      # the build context. The development stage is the install plus `COPY . .`, so its /app
+      # outside node_modules is the context exactly as the builder copies it. The listing runs
+      # from /app (`find .`), so `find /app` stays the backend ownership step's own (US-016).
+      - name: Frontend — the build context leaves out tests, docs and tsconfig.tsbuildinfo
+        run: |
+          docker build --target development -t parity-fe-context frontend/
+          found=$(docker run --rm -w /app parity-fe-context sh -c 'find . -path ./node_modules -prune -o \( -name __tests__ -o -name "*.test.*" -o -name "*.md" -o -name tsconfig.tsbuildinfo \) -print')
+          if [ -n "$found" ]; then
+            echo "$found" | head -n 20
+            echo "::error::the frontend build context carries files frontend/.dockerignore leaves out"; exit 1
+          fi
+          echo "no tests, docs or tsconfig.tsbuildinfo in the build context"
+      # PRD-262 US-017: generated documents under orchestrator/documents, nested
+      # __pycache__ and the eval and import-linter caches, each a file of random bytes
+      # as large as the context budget, before the backend build below.
+      - name: Backend — seed dummy uploads and caches in the build context
+        run: python3 scripts/ci/build_context.py seed orchestrator
+      # PRD-262 US-027: the Knowledge Graph's Leiden clustering comes from graspologic-native
+      # through modules/knowledge/leiden_partition.py, in this build as in every other.
+      # The adapter clusters two triangles joined by an edge inside the image, and
+      # graspologic, which Railway's [leiden] extra installed with about 585 MB, does not
+      # import.
+      - name: Backend — Leiden through graspologic-native, and no graspologic
+        env:
+          LEIDEN: |
+            import graspologic_native
+            import networkx as nx
+            from modules.knowledge.leiden_partition import cluster
+            graph = nx.Graph([("a", "b"), ("b", "c"), ("c", "a"), ("d", "e"), ("e", "f"), ("f", "d"), ("c", "d")])
+            found = cluster(graph)
+            assert found == {0: ["a", "b", "c"], 1: ["d", "e", "f"]}, found
+            print("graspologic-native clusters in the image:", found)
+        run: |
+          set -o pipefail
+          docker build --target production -t parity-be orchestrator/ 2>&1 | tee "$RUNNER_TEMP/parity-be-build.log"
+          docker run --rm parity-be python -c "$LEIDEN"
+          if docker run --rm parity-be python -c "import graspologic"; then
+            echo "::error::the production backend image imports graspologic (PRD-262 US-027)"; exit 1
+          fi
+          echo "import graspologic fails in the image, as it should"
+      # The compile stage copies the whole context (the production stage copies /app from
+      # it, PRD-262 US-032), so what the build sent is what orchestrator/.dockerignore let
+      # in (scripts/ci/build_context.py reads it off the log).
+      - name: Backend — the build context left the uploads and caches out
+        run: python3 scripts/ci/build_context.py check "$RUNNER_TEMP/parity-be-build.log"
+      # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
+      # installs, so `import pytest` fails in the image and no distribution that
+      # file names is installed there (scripts/ci/image_dists_absent.py reads the
+      # image's package metadata with the image's own Python).
+      - name: Backend — no test tools in the production image
+        run: |
+          if docker run --rm parity-be python -c 'import pytest'; then
+            echo "::error::the production backend image imports pytest"; exit 1
+          fi
+          echo "import pytest fails in the image, as it should"
+          mapfile -t tools < <(sed -E 's/#.*//; s/[[:space:]]+//g; s/[][<>=!~;].*//' orchestrator/requirements-dev.txt | grep -v '^$')
+          echo "requirements-dev.txt names: ${tools[*]}"
+          if [ "${#tools[@]}" -eq 0 ]; then echo "::error::no tool read from orchestrator/requirements-dev.txt"; exit 1; fi
+          docker run --rm -i --entrypoint python parity-be - "${tools[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 US-015, US-018 and US-023: no package the code never imports is
+      # installed, nor camelot and its opencv, which pdfplumber replaced. US-025: nor
+      # pandas. US-026: nor langchain's splitters and core, which were vendored, with
+      # langsmith and zstandard. This is the Railway build, which since US-027 installs
+      # the same lock as the GHCR build smoke-images.yml's smoke-images-pr checks: its
+      # [leiden] extra, which kept scikit-learn and pandas, is gone, with graspologic and
+      # the heavy rest it brought (numba, llvmlite, POT, gensim, statsmodels, matplotlib,
+      # seaborn, umap-learn). US-028: nor tree-sitter-language-pack, which downloaded its
+      # grammars; the code graph parses with each language's own package.
+      - name: Backend — no package the code never imports
+        env:
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn tree-sitter-language-pack
+        run: |
+          read -ra names <<< "$REMOVED"
+          docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 rows #11 and #47: the lock pins them (CI's pip --require-hashes needs every
+      # requirement pinned) but orchestrator/scripts/split_lock.py leaves them out of the
+      # production image: LEFT_OUT, the 12 tree-sitter grammars only graphify.extract
+      # imports, and DEVELOPMENT_ONLY, watchfiles, which only the development stage's
+      # --reload uses (tests/test_prd262_left_out_packages.py holds this list equal to both).
+      - name: Backend — the lock's left-out and development-only packages are not in the image
+        env:
+          LEFT_OUT: tree-sitter-bash tree-sitter-elixir tree-sitter-fortran tree-sitter-groovy tree-sitter-json tree-sitter-julia tree-sitter-lua tree-sitter-objc tree-sitter-powershell tree-sitter-scala tree-sitter-verilog tree-sitter-zig watchfiles
+        run: |
+          read -ra names <<< "$LEFT_OUT"
+          docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 US-020: pybuild strips the debug sections from site-packages' compiled
+      # libraries and deletes its tests/ directories. Every file the strip touched still
+      # loads (an extension module is imported, any other library opened with ctypes), none
+      # keeps a .debug_* section, numpy's, SQLAlchemy's and alembic's testing packages stay,
+      # and `import main` works (scripts/ci/image_site_packages.py, which lists the failures
+      # this build has always had, each with its reason). This is the Railway build;
+      # images.yml runs the same check on the GHCR build, on both arches.
+      - name: Backend — every native library in site-packages loads, without debug info
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_site_packages.py
+      # PRD-262 US-021: pybuild keeps botocore's models for the services we call (s3,
+      # s3vectors, bedrock-runtime, sts, sso, sso-oidc) and its top-level files, and
+      # deletes the rest. boto3 builds a client for each kept service, the s3 one presigns
+      # a GET, and any other service is unknown (scripts/ci/image_botocore.py). This is
+      # the Railway build; images.yml runs the same check on the GHCR build, on both
+      # arches, and the fresh-clone smoke stores a document in MinIO through the pruned
+      # botocore and fetches it back by its presigned URL.
+      - name: Backend — botocore keeps the services we call, and builds a client for each
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_botocore.py
+      # PRD-262 row #17: pybuild deletes the scipy subpackages no code path loads. The kept
+      # ones import, every path by which the code reaches scipy runs (datasketch's
+      # MinHashLSH, graphify's dedup, the code graph's pagerank, the Knowledge Graph's
+      # Leiden chain, core.math's Student's t), and none of it loads a deleted subpackage
+      # or graphify.extract (scripts/ci/image_scipy.py). This is the Railway build;
+      # images.yml runs the same check on the GHCR build, on both arches.
+      - name: Backend — scipy keeps what the code reaches, and it runs
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_scipy.py
+      # PRD-262 US-032: the compile stage compiles the boot modules (the image's own
+      # scripts/boot_modules.py lists them), and the production stage copies them in with
+      # the code. Every .pyc under /app is this Python's unchecked-hash bytecode of the
+      # source beside it, the compiled set is exactly that list, and `import main` rewrites
+      # none of it; the modules it compiles at start-up anyway are reported
+      # (scripts/ci/image_app_bytecode.py). Runs as the image's own user.
+      - name: Backend — the boot modules ship as bytecode of their own source
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_app_bytecode.py
+      # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
+      # gid 1000) instead of through a `chown -R /app` layer, and /app and the
+      # directories the named volumes mount on are the user's own, so the app writes
+      # there as before. Runs as the image's own user.
+      - name: Backend — the app and its writable directories belong to the automatos user
+        run: |
+          docker run --rm --entrypoint sh parity-be -c '
+            set -eu
+            echo "runs as $(id -un) ($(id -u):$(id -g))"
+            if [ "$(id -u):$(id -g)" != "1000:1000" ]; then echo "::error::the image runs as $(id -u):$(id -g), not 1000:1000"; exit 1; fi
+            for dir in /app /app/logs /app/vector_stores /app/projects /app/exports /app/data; do
+              if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then echo "::error::$dir is not a directory the automatos user can write"; exit 1; fi
+            done
+            others=$(find /app \( ! -user 1000 -o ! -group 1000 \) -print | head -n 5 | tr "\n" " ")
+            if [ -n "$others" ]; then echo "::error::not owned by 1000:1000 under /app: $others"; exit 1; fi
+            echo "every path under /app is owned by 1000:1000, and the writable directories are writable"
+          '
+      # PRD-262 US-040: /workspaces, where the workspaces volume mounts, is the automatos
+      # user's in the image, so a fresh automatos_workspaces_data volume is uid 1000 when
+      # the backend mounts it before the worker does (the core stack has no worker).
+      - name: Backend — /workspaces belongs to the automatos user
+        run: |
+          owner=$(docker run --rm --entrypoint stat parity-be -c '%u:%g' /workspaces) \
+            || { echo "::error::the production backend image has no /workspaces"; exit 1; }
+          if [ "$owner" != "1000:1000" ]; then echo "::error::/workspaces is owned by $owner, not 1000:1000"; exit 1; fi
+          echo "/workspaces: owned by 1000:1000"
+      # PRD-262 US-019: Debian ghostscript left the image; nothing called gs.
+      - name: Backend — no ghostscript
+        run: |
+          if ! docker run --rm --entrypoint sh parity-be -c '! command -v gs'; then
+            echo "::error::the production backend image has gs on its PATH"; exit 1
+          fi
+          echo "gs: absent"
+      # PRD-262 US-019: the packages the apt layer drops are gone and the ones it names are
+      # installed, tesseract reads an OCR fixture without its orientation model, and git's
+      # trim left its builtins and HTTPS helper working (scripts/ci/image_system_tools.py).
+      # Rows #13 and #35 of the 19 Oct breakdown: ICU and tesseract's training tools are
+      # gone and nothing links them, and fontconfig serves fonts-urw-base35's OpenType
+      # faces with its Type1 copies gone. images.yml runs it on both arches.
+      - name: Backend — the system packages the code calls work, and the rest are gone
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_system_tools.py
+      - name: Backend — git clones a public repository over HTTPS
+        run: |
+          docker run --rm --entrypoint sh parity-be -c '
+            set -eu
+            git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/hello
+            test "$(git -C /tmp/hello rev-list --count HEAD)" = 1
+            echo "cloned $(git -C /tmp/hello rev-parse --short HEAD), one commit deep"
+          '
+      # PRD-262 US-019: fonts-urw-base35 came with ghostscript and is now named. A brand kit
+      # naming Helvetica, with no font file, prints the same pages and line breaks as in the
+      # published `edge` image, set in Nimbus Sans (scripts/ci/image_pdf_fixture.py). The new
+      # image writes the page once; each image lays it out with its own WeasyPrint and fonts,
+      # off the network, so only the fonts and libraries can move a line. Pull requests only:
+      # on main, `edge` is still the image this push replaces until smoke-images promotes it.
+      - name: Backend — a Helvetica brand font prints as it does in edge
+        if: github.event_name == 'pull_request'
+        env:
+          EDGE: ghcr.io/automatosai/automatos-api:edge
+        run: |
+          out="$RUNNER_TEMP/helvetica"
+          mkdir -p "$out"
+          docker pull --quiet "$EDGE"
+          docker run --rm -i --network none -w /app --entrypoint python parity-be - html < scripts/ci/image_pdf_fixture.py > "$out/page.txt"
+          layout() {
+            docker run --rm -i --network none -v "$out/page.txt:/tmp/page.txt:ro" --entrypoint python "$1" - layout /tmp/page.txt < scripts/ci/image_pdf_fixture.py
+          }
+          layout "$EDGE" > "$out/edge.txt"
+          layout parity-be > "$out/new.txt"
+          docker image rm "$EDGE" > /dev/null
+          python3 scripts/ci/image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"
+      # PRD-262 US-019: pytest inside the image runs in a throwaway image built FROM it with
+      # requirements-dev.lock installed as its user, hashes required (PRD-262 US-022;
+      # scripts/ci/image_test_image.py). It is never pushed, and orchestrator/Dockerfile
+      # has no stage for it. The clone tests run there, with the tests mounted read-only
+      # and the throwaway database settings `import main` gets in image_site_packages.py:
+      # git's trim must leave the code graph's and the skill loader's clones working.
+      # They clone a repository made on the spot, but they run on the network: importing
+      # the skill loader loads modules/rag/service.py, which fetches tiktoken's encoding
+      # when imported until PRD-262 US-033.
+      - name: Backend — the clone tests pass in the test image
+        run: |
+          python3 scripts/ci/image_test_image.py build parity-be parity-be-test
+          python3 scripts/ci/image_test_image.py pytest parity-be-test \
+            -q --timeout=120 tests/test_prd262_codegraph_clone.py
+      # PRD-262 US-028: the code graph parses each language with the grammar of its own
+      # installed tree_sitter_* package; tree-sitter-language-pack, which downloaded its
+      # grammars on first use, is gone. In the same test image, off the network, the parser
+      # reads one fixture per supported extension and returns its symbols, so a grammar
+      # the image lacked would fail here instead of being fetched. The test image goes
+      # after this, its last run.
+      - name: Backend — the code-graph parser reads every language off the network, in the test image
+        run: |
+          python3 scripts/ci/image_test_image.py pytest parity-be-test --network none \
+            -q --timeout=120 tests/test_prd262_codegraph_languages.py
+          docker image rm parity-be-test > /dev/null
       # PRD-262 US-043: Railway's worker carries Chromium's headless shell only, every
       # library it links resolves after Mesa's drivers are purged, and Playwright runs
       # on the image's Node rather than its own bundled copy.
@@ -1150,7 +1487,14 @@ jobs:
       # the worker already owns is left alone (its ctime holds), and projects/ is skipped.
       # Then a read-only volume: every chown fails, the block logs that, and the script
       # still starts the worker. A stand-in `python`, first on PATH, takes the worker's
-      # place and prints the uid gosu dropped it to.
+      # place and prints the uid and gid setpriv dropped it to and its HOME, which the
+      # entrypoint sets because setpriv, unlike the gosu it replaced (PRD-262, row 47),
+      # leaves root's. Then deliverables folders uid 1000 cannot write (US-040): one an
+      # image account owns, www-data, which the worker never becomes; one the host's uid
+      # 1001 owns, whose uid and gid the worker takes; one in root's group, whose uid
+      # alone it takes (the security review's fixes). F452: the stand-in also prints the
+      # NoNewPrivs that setpriv --no-new-privs set, and no file in the image keeps a setuid
+      # or setgid bit (the Dockerfile strips them; images.yml checks the GHCR build too).
       - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
         run: |
           docker volume create parity-wk-readonly > /dev/null
@@ -1162,9 +1506,11 @@ jobs:
           check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
           owner() { stat -c %U "$1"; }  # no -L: a symlink's own owner
           mkdir -p /tmp/stand-in
-          printf '#!/bin/sh\necho "worker started as uid $(id -u)"\n' > /tmp/stand-in/python
+          printf '#!/bin/sh\necho "worker started as uid $(id -u) gid $(id -g) with HOME=$HOME no_new_privs=$(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)"\n' > /tmp/stand-in/python
           chmod 755 /tmp/stand-in/python
           boot() { WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
+          setid=$(find / -xdev -perm /6000 -type f)
+          check "files with a setuid or setgid bit" "${setid:-none}" none
 
           vol=/tmp/volume
           mkdir -p "$vol/ws/projects" "$vol/ws/sub"
@@ -1185,6 +1531,8 @@ jobs:
           check "a file in projects/" "$(owner "$vol/ws/projects/mine")" root
           check "the ctime of a file the worker already owned" "$(stat -c %z "$vol/ws/owned")" "$owned_ctime"
           check "the worker" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "the worker's HOME" "$(grep -o 'HOME=[^ ]*' <<< "$out")" "HOME=/home/worker"
+          check "the worker's no_new_privs" "$(grep -o 'no_new_privs=[0-9]*' <<< "$out")" "no_new_privs=1"
           check "failed-chown lines on a writable volume" "$(grep -c 'could not be re-owned' <<< "$out")" 0
 
           out=$(boot /srv/readonly); code=$?
@@ -1193,6 +1541,44 @@ jobs:
           check "the log line" "$(grep -c '^\[entrypoint\] some files could not be re-owned$' <<< "$out")" 1
           check "the worker after the failed chown" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the read-only file" "$(owner /srv/readonly/ws/file)" root
+
+          # PRD-262 US-040's security review: a folder an image account owns, www-data (33),
+          # never makes the worker that account. It stays uid 1000, and the log says why.
+          theirs=/tmp/volume3/local
+          mkdir -p "$theirs"
+          chown 33:33 "$theirs"
+          out=$(LOCAL_WORKSPACE_ROOT="$theirs" boot /tmp/volume3); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder www-data owns" "$code" 0
+          check "the worker with a folder www-data owns" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "the log line for that folder" "$(grep -c "cannot take that uid (www-data's in the worker's image)" <<< "$out")" 1
+
+          # PRD-262 US-040: a deliverables folder uid 1000 cannot write, as on a Linux host whose
+          # user is uid 1001. The worker runs as the folder's owner, and the walk leaves the folder
+          # alone. This case and the next change the worker's uid in this container: they run last.
+          mine=/tmp/volume2/local
+          mkdir -p "$mine/projects"
+          touch "$mine/file" "$mine/older"
+          chown -R 1001:1001 "$mine"
+          chown 1000:1000 "$mine/older"
+          out=$(LOCAL_WORKSPACE_ROOT="$mine" boot /tmp/volume2); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder uid 1000 cannot write" "$code" 0
+          check "the worker with that folder" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1001"
+          check "a file in that folder" "$(stat -c %u "$mine/file")" 1001
+          check "a uid 1000 file in that folder" "$(stat -c %u "$mine/older")" 1000
+          check "the volume root with that folder" "$(stat -c %u /tmp/volume2)" 1001
+          check "the worker's gid with that folder" "$(grep -o 'started as uid [0-9]* gid [0-9]*' <<< "$out")" "started as uid 1001 gid 1001"
+
+          # The security review: a folder in root's group, 1002:0. The worker takes uid 1002
+          # and keeps its own gid, 1001 since the case above, never root's group.
+          rootgroup=/tmp/volume4/local
+          mkdir -p "$rootgroup"
+          chown 1002:0 "$rootgroup"
+          out=$(LOCAL_WORKSPACE_ROOT="$rootgroup" boot /tmp/volume4); code=$?
+          echo "$out"
+          check "entrypoint exit with a folder in root's group" "$code" 0
+          check "the worker with a folder in root's group" "$(grep -o 'started as uid [0-9]* gid [0-9]*' <<< "$out")" "started as uid 1002 gid 1001"
           exit "$bad"
           SH
 
@@ -1258,10 +1644,6 @@ jobs:
   # NON-REQUIRED at introduction (the workflow's established posture); flip to a
   # required check in branch protection once it has run green — that flip is the
   # repo admin's call (see S5 / F057 in the PRD).
-  #
-  # Install uses `npm install`, not `npm ci`: the committed package-lock.json is
-  # out of sync with package.json today (missing entries), which makes `npm ci`
-  # fail on install. `npm install` reconciles the lockfile so the lane can run.
   frontend-ci:
     name: Frontend CI (tsc baselined, vitest, eslint, route-contract) (non-required)
     needs: changes
@@ -1284,8 +1666,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # PRD-262 US-047: npm ci, as the Dockerfile runs it, with the same frontend/.npmrc, so
+      # a lock out of step with package.json fails here too, and both install the same tree.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       # HARD gate — the real enforcement win. Must stay green.
       - name: Vitest
@@ -1313,6 +1697,14 @@ jobs:
           git fetch --no-tags --unshallow origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}" \
             || git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
           node scripts/check-changed-lines-eslint.js "origin/${GITHUB_BASE_REF:-main}"
+
+      # PRD-262 US-049: HARD gate. public/ ships in the frontend image, so it stays within
+      # scripts/public-budget.json, and every file under public/logos is a real PNG or SVG by
+      # its magic bytes, at most 256 px. Plain Node, no install needed, so it reports even
+      # when an earlier step failed.
+      - name: public/ within its budget, and every logo a real PNG or SVG
+        if: ${{ !cancelled() }}
+        run: node scripts/check-public-assets.js
 
   # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
   # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)
@@ -1368,7 +1760,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: orchestrator/requirements.txt
+          cache-dependency-path: |
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
 
       - name: Install system libraries
         run: |
@@ -1380,12 +1774,12 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
       - name: Initialise test database schema
         run: python scripts/init_test_db.py
@@ -1574,3 +1968,85 @@ jobs:
         run: pip install pytest==8.3.4
       - name: Run sim unit tests
         run: python -m pytest tests/sim/tests --noconftest --import-mode=importlib -q -p no:cacheprovider
+
+  # PRD-262 W3: each code swap is judged against a golden that the library it replaces
+  # records on committed fixtures. The goldens are committed, and the permanent tests
+  # read only them. This job installs each replaced library, pinned and hashed, in a
+  # throwaway venv, records the goldens again and fails on any difference, so every
+  # reference is proven in the run that ships its swap. A failed run uploads what was
+  # recorded. 15 minutes: US-027's reference installs graspologic's closure (about 520 MB
+  # unzipped: numba, llvmlite, POT, gensim, statsmodels, matplotlib).
+  reference-goldens:
+    name: W3 reference goldens re-recorded with the replaced libraries (PRD-262) (non-required)
+    needs: changes
+    if: needs.changes.outputs.references == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: PDF table grids (US-023) are what camelot-py 0.11.0's stream mode records
+        env:
+          RECORDED: ${{ runner.temp }}/references
+          VENV: ${{ runner.temp }}/pdf-tables
+          LOCK: scripts/ci/reference/requirements-pdf-tables.lock
+          GRIDS: orchestrator/tests/fixtures/pdf_table_grids.json
+        run: |
+          set -euo pipefail
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --no-deps --require-hashes --only-binary :all: -r "$LOCK"
+          mkdir -p "$RECORDED"
+          "$VENV/bin/python" scripts/ci/reference/pdf_tables.py --out "$RECORDED/pdf_table_grids.json"
+          if ! diff -u <(jq -S . "$GRIDS") <(jq -S . "$RECORDED/pdf_table_grids.json"); then
+            echo "::error file=$GRIDS::the committed grids are not what the reference extractor records (diff above; the recorded file is this run's reference-goldens artifact)"
+            exit 1
+          fi
+          echo "the committed PDF table grids are what the reference extractor records: PASS"
+      # Runs after a failed step above too, so each reference is judged on its own.
+      - name: Golden chunks (US-026) are what langchain-text-splitters 1.0.0 records
+        if: ${{ !cancelled() }}
+        env:
+          RECORDED: ${{ runner.temp }}/references
+          VENV: ${{ runner.temp }}/text-splitters
+          LOCK: scripts/ci/reference/requirements-text-splitters.lock
+          CHUNKS: orchestrator/tests/fixtures/text_splitter_chunks.json
+        run: |
+          set -euo pipefail
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --no-deps --require-hashes --only-binary :all: -r "$LOCK"
+          mkdir -p "$RECORDED"
+          "$VENV/bin/python" scripts/ci/reference/text_splitters.py --out "$RECORDED/text_splitter_chunks.json"
+          if ! diff -u <(jq -S . "$CHUNKS") <(jq -S . "$RECORDED/text_splitter_chunks.json"); then
+            echo "::error file=$CHUNKS::the committed chunks are not what the reference splitters record (diff above; the recorded file is this run's reference-goldens artifact)"
+            exit 1
+          fi
+          echo "the committed golden chunks are what the reference splitters record: PASS"
+      # Runs after a failed step above too. graspologic 3.3.0 is published as an sdist only
+      # (a pure-Python setuptools build) and requires Python below 3.12: this job's 3.11.
+      - name: Reference partitions (US-027) are what graspologic 3.3.0 records through graphify 0.8.31
+        if: ${{ !cancelled() }}
+        env:
+          RECORDED: ${{ runner.temp }}/references
+          VENV: ${{ runner.temp }}/leiden-partitions
+          LOCK: scripts/ci/reference/requirements-leiden-partitions.lock
+          PARTITIONS: orchestrator/tests/fixtures/leiden_partitions.json
+        run: |
+          set -euo pipefail
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --no-deps --require-hashes --only-binary :all: --no-binary graspologic -r "$LOCK"
+          mkdir -p "$RECORDED"
+          "$VENV/bin/python" scripts/ci/reference/leiden_partitions.py --out "$RECORDED/leiden_partitions.json"
+          if ! diff -u <(jq -S . "$PARTITIONS") <(jq -S . "$RECORDED/leiden_partitions.json"); then
+            echo "::error file=$PARTITIONS::the committed partitions are not what graspologic records (diff above; the recorded file is this run's reference-goldens artifact)"
+            exit 1
+          fi
+          echo "the committed reference partitions are what graspologic records: PASS"
+      - name: Upload what the references recorded
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reference-goldens
+          path: ${{ runner.temp }}/references/
+          if-no-files-found: ignore

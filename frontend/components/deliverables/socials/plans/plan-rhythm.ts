@@ -3,8 +3,11 @@
  * one means in a line, the batch day's pull on the research day (C4: a weekly plan researches
  * the day before its batch, until the owner picks another day), and when the next batch is
  * made, in the plan's timezone.
+ *
+ * P256-FIX-SOC-5 (F436): where the current batch stands, in a line, so a batch being made never
+ * looks like one that failed, and a stalled one says why.
  */
-import type { SocialPlanRhythm, SocialWeekday } from '@/lib/socials-plan-types'
+import type { SocialPlanCurrentBatch, SocialPlanRhythm, SocialWeekday } from '@/lib/socials-plan-types'
 import { WEEKDAY_LABELS, dayBefore, type PlanDraft } from './plan-model'
 
 export const RHYTHM_CHOICES: ReadonlyArray<{ value: SocialPlanRhythm; label: string }> = [
@@ -45,4 +48,20 @@ export function nextBatchLine(at: string | null | undefined, timezone: string): 
   } catch {
     return `The next batch is made ${when.toLocaleString('en-GB', { ...options, timeZone: 'UTC' })} UTC.`
   }
+}
+
+const BATCH_STATE_WORDS: Record<SocialPlanCurrentBatch['state'], string> = {
+  building: 'is being made',
+  stalled: 'is stalled',
+  late: 'is late',
+  ready: 'is ready in your Queue',
+  complete: 'is made',
+}
+
+/** "The week of 19 Oct is being made: 3 made, 4 to go." / "… is stalled: no unused topic in the bank suits a video." */
+export function currentBatchLine(batch: SocialPlanCurrentBatch | null | undefined): string | null {
+  if (!batch) return null
+  const head = `${batch.label.charAt(0).toUpperCase()}${batch.label.slice(1)} ${BATCH_STATE_WORDS[batch.state]}`
+  if (batch.why) return `${head}: ${batch.why}.`
+  return batch.left > 0 ? `${head}: ${batch.made} made, ${batch.left} to go.` : `${head}: ${batch.made} made.`
 }

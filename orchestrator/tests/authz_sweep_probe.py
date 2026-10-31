@@ -8,11 +8,14 @@ served route+method with the authorization facts the sweep asserts on:
 - ``hybrid``   — ``get_request_context_hybrid`` in the flattened dependency tree
 - ``su``       — ``require_super_admin`` present (PRD-143 obs lock)
 - ``wsadmin``  — ``require_workspace_admin`` present (PRD-185 S12)
+- ``wsanswer`` — ``require_workspace_answerer`` present (PRD-266 D16: owner, admin or editor)
 - ``perm``     — the ``require_workspace_permission`` marker string, if gated
 - ``admin_in_handler`` — the endpoint body asserts the shared admin check
-  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)``)
+  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)`` /
+  ``_require_platform_admin(ctx)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
-  auth-type gate (today: credentials resolve)
+  auth-type gate (credentials resolve, the voice mint, the mobile device routes,
+  digest now)
 
 Usage (from ``orchestrator/``)::
 
@@ -47,7 +50,7 @@ def main() -> None:
 
     from core.auth.hybrid import get_request_context_hybrid
     from core.auth.super_admin import require_super_admin
-    from core.auth.workspace_admin import require_workspace_admin
+    from core.auth.workspace_admin import require_workspace_admin, require_workspace_answerer
     from core.auth.workspace_permission import PERMISSION_MARKER_ATTR
     from main import app
 
@@ -81,6 +84,7 @@ def main() -> None:
                     "hybrid": get_request_context_hybrid in calls,
                     "su": require_super_admin in calls,
                     "wsadmin": require_workspace_admin in calls,
+                    "wsanswer": require_workspace_answerer in calls,
                     "perm": perm,
                     "admin_in_handler": (
                         "assert_admin(ctx)" in src
@@ -90,11 +94,19 @@ def main() -> None:
                         or "_require_workspace_admin(ctx)" in src
                         # PRD-207 voice/arm: platform-admin gate in the handler.
                         or "_is_platform_admin(ctx)" in src
+                        # PRD-265 US-007: api/admin_credits.py's platform-admin
+                        # gate in the handler body (caller_is_admin, 403).
+                        or "_require_platform_admin(ctx)" in src
                     ),
                     "own_gate_in_handler": (
                         "Admin access required to resolve credentials" in src
                         # PRD-207 voice/web-call: the mint's own signed-in-user gate.
                         or "Live voice requires a signed-in user" in src
+                        # PRD-266 api/mobile_devices.py: the device routes' person gate.
+                        or "caller = _caller(db, ctx" in src
+                        # PRD-266 api/mobile_push.py digest now: the caller's own
+                        # person and membership gate (404 / 403 before anything runs).
+                        or "user_pk = _digest_asker(db, ctx)" in src
                     ),
                 }
             )

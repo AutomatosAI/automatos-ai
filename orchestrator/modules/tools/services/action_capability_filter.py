@@ -14,12 +14,11 @@ Design Principles:
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Set, Dict, Any
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, or_
 
 from ..capabilities.taxonomy import (
-    INTENT_TO_CAPABILITIES,
     DESTRUCTIVE_CAPABILITIES,
     get_capabilities_for_intent,
     intent_is_destructive,
@@ -161,23 +160,10 @@ class ActionCapabilityFilter:
 
     def _intent_to_capabilities(self, intent: str) -> List[str]:
         """
-        Map user intent to capability tags.
-
-        Uses the predefined INTENT_TO_CAPABILITIES mapping for deterministic,
-        fast capability extraction.
+        Map user intent to capability tags: the taxonomy's one reading
+        (``get_capabilities_for_intent``, which also reads 'email' as the verb, F459).
         """
-        intent_lower = intent.lower()
-        matched_caps: Set[str] = set()
-
-        for keyword, capabilities in INTENT_TO_CAPABILITIES.items():
-            if keyword in intent_lower:
-                matched_caps.update(capabilities)
-
-        # If no matches, return general query capabilities
-        if not matched_caps:
-            return ["data.query", "search.general"]
-
-        return list(matched_caps)
+        return get_capabilities_for_intent(intent)
 
     def _rank_actions(
         self,

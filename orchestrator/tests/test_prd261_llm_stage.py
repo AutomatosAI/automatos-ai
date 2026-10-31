@@ -5,7 +5,8 @@ test reaches the network. Proven here: a large bundle is cut into chunks, one ca
 one combined score; ``dist/`` is always read and ``source/`` too when shipped and asked for
 (never instead); each part sits between delimiters carrying a fresh nonce; reviewer-directed text
 holds the score at the review threshold; the day's token budget is reserved before any call; one
-shared thread pool; the plugin scanner's thresholds; and every way the stage can fail to run is a
+shared thread pool; the plugin scanner's thresholds; the prompt's fair use of the SDK's storage area
+(E3d) and voice area, with a theme's own audio its category 8 (theme voice); and every way the stage can fail to run is a
 warning "LLM stage did not run", never a pass.
 """
 from __future__ import annotations
@@ -134,6 +135,53 @@ def test_the_thresholds_are_the_plugin_scanners():
     source = (ORCH_ROOT / "core/services/plugin_security_scanner.py").read_text(encoding="utf-8")
     assert "risk_score >= 70" in source and "risk_score >= 20" in source
     assert (llm_stage.BLOCK_AT, llm_stage.REVIEW_AT) == (70, 20)
+
+
+# ---------------------------------------------------------------------------
+# The prompt: the SDK's storage area is fair use, raw browser storage still is not (E3d)
+# ---------------------------------------------------------------------------
+
+STORAGE_CALLS = ("readThemeState", "writeThemeState", "removeThemeState", "subscribeThemeState", "useThemeState")
+RAW_BROWSER_STORAGE = ("localStorage", "sessionStorage", "IndexedDB")
+
+
+def _prompt_paragraph(starts: str) -> str:
+    return next(part for part in llm_stage.THEME_SCAN_PROMPT.split("\n") if part.startswith(starts))
+
+
+def test_the_prompt_calls_the_sdk_storage_area_expected_for_the_themes_own_ui_state():
+    fair = _prompt_paragraph("Be fair:")
+    assert "The SDK's storage area" in fair and "is expected for the theme's own UI state" in fair
+    assert all(name in fair for name in STORAGE_CALLS)
+
+
+def test_the_prompt_keeps_tokens_cookies_or_foreign_data_stored_through_it_in_category_1():
+    fair = _prompt_paragraph("Be fair:")
+    assert "storing tokens, cookies or foreign data through it" in fair and "is still category 1" in fair
+    exfiltration = _prompt_paragraph("1. ")
+    assert exfiltration.startswith("1. **Exfiltration**")
+    assert all(name in exfiltration for name in RAW_BROWSER_STORAGE)
+
+
+def test_the_prompt_names_hiding_or_covering_the_hosts_ai_label_as_deception():
+    # PRD-264 EUAI-11a: the host draws a hidden label again in its own layer, and the review still flags the try.
+    deception = _prompt_paragraph("4. ")
+    assert deception.startswith("4. **Deception**")
+    assert "the host's AI label" in deception and "Auto is an AI" in deception
+    assert "removes, moves or restyles that label" in deception
+
+
+VOICE_CALLS = ("VoiceButton", "useVoice", "readVoiceLevels")
+AUDIO_APIS = ("getUserMedia", "SpeechRecognition", "webkitSpeechRecognition", "speechSynthesis")
+
+
+def test_the_prompt_calls_the_sdk_voice_area_fair_use_and_a_themes_own_audio_category_8():
+    # Theme voice (TV-C7): the voice area is what a theme's voice controls are for; audio of its own is not.
+    fair = _prompt_paragraph("Be fair:")
+    assert "The SDK's voice area" in fair and all(name in fair for name in VOICE_CALLS)
+    capture = _prompt_paragraph("8. ")
+    assert capture.startswith("8. **Capturing audio**") and all(name in capture for name in AUDIO_APIS)
+    assert "instead of through the SDK's voice area" in capture
 
 
 # ---------------------------------------------------------------------------

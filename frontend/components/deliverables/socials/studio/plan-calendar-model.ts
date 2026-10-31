@@ -4,9 +4,14 @@
  * the slot (slot_overrides), never the cadence. On the grid it is a `social` item whose post id
  * is `plan-slot:<plan id>:<slot key>`, so the calendar's one drag path can tell it from a post.
  * A made slot is its post, which the calendar already shows.
+ *
+ * P256-FIX-SOC-5 (F436): a planned slot also says why it has no post yet, from the server's phase:
+ * "made Wed 21 Oct, 13:44" (its batch has not come), "being made now", or why it is stalled, late
+ * or skipped.
  */
 import type { ScheduleItem } from '@/hooks/use-activity-api'
-import type { SocialPlan, SocialPlanSlot, SocialPlanSlotsResponse } from '@/lib/socials-plan-types'
+import type { SocialPlan, SocialPlanSlot, SocialPlanSlotPhase, SocialPlanSlotsResponse } from '@/lib/socials-plan-types'
+import { wallInZone } from '@/lib/social-time'
 import { occurrence, type CalEvent, type WindowSpan } from '@/components/command-center/calendar-model'
 import { ALL_CHANNELS, SOCIAL_EVENT_MIN, VIDEO_ONLY, type ChannelFilter } from './socials-calendar-model'
 
@@ -45,8 +50,31 @@ export function plannedSlots(answers: ReadonlyArray<SocialPlanSlotsResponse>, pl
   })
 }
 
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const PHASE_LABELS: Partial<Record<SocialPlanSlotPhase, string>> = { stalled: 'Stalled', late: 'Late', skipped: 'Skipped' }
+export const BEING_MADE = 'being made now'
+
+/** "Wed 21 Oct, 13:44": a UTC instant on the wall clock of `tz`. */
+export function zonedDayTime(iso: string, tz: string): string {
+  const wall = wallInZone(iso, tz)
+  const day = new Date(`${wall.slice(0, 10)}T00:00:00Z`)
+  return `${SHORT_DAYS[day.getUTCDay()]} ${day.getUTCDate()} ${SHORT_MONTHS[day.getUTCMonth()]}, ${wall.slice(11, 16)}`
+}
+
+/** P256-FIX-SOC-5: why a planned slot has no post yet, in a line; null when the server says nothing. */
+export function plannedPhaseLine(planned: PlannedSlot): string | null {
+  const { phase, why, batch } = planned.slot
+  if (phase === 'waiting' && batch?.made_at) return `made ${zonedDayTime(batch.made_at, planned.timezone)}`
+  if (phase === 'building') return BEING_MADE
+  const label = phase ? PHASE_LABELS[phase] : undefined
+  return label && why ? `${label}: ${why}` : null
+}
+
 export function plannedTitle(planned: PlannedSlot): string {
-  return planned.slot.topic?.title ?? `Planned: ${planned.planName}`
+  const title = planned.slot.topic?.title ?? `Planned: ${planned.planName}`
+  const line = plannedPhaseLine(planned)
+  return line ? `${title} · ${line}` : title
 }
 
 export function plannedItem(planned: PlannedSlot): ScheduleItem {

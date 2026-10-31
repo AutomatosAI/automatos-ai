@@ -68,6 +68,8 @@ def usage_scope(
     execution_id: Optional[str] = None,
     agent_id: Optional[int] = None,
     workspace_id: Any = None,
+    ask_id: Optional[str] = None,
+    charge_class: Optional[str] = None,
     inherit: bool = True,
 ) -> Iterator[Dict[str, Any]]:
     """Attribute every LLM call made inside the block.
@@ -78,6 +80,12 @@ def usage_scope(
     starts clean: F321 (night 9b) — a Playbook run Auto started from chat
     inherited the chat's scope, so run exec-45d8ac862a79's 16 model calls were
     booked as ``chat:dd0b6649…`` and its report said "LLM calls: 0".
+
+    ``ask_id`` (PRD-265) names the ask — one user turn, or one run of scheduled
+    work — every call in the block belongs to; ``services.credits.asks.ask_scope``
+    sets it. ``execution_id`` can span many asks (``chat:<conversation>``).
+    ``charge_class`` (``customer`` / ``overhead``) is set by ``LLMManager`` around
+    the write of each model call's row, so the credit meter knows what to charge.
     """
     merged: Dict[str, Any] = dict(current_usage_scope()) if inherit else {}
     for key, value in (
@@ -85,6 +93,8 @@ def usage_scope(
         ("execution_id", execution_id),
         ("agent_id", agent_id),
         ("workspace_id", workspace_id),
+        ("ask_id", ask_id),
+        ("charge_class", charge_class),
     ):
         if value is not None:
             merged[key] = value

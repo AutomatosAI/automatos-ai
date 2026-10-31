@@ -4,7 +4,7 @@ templates:
 set:
   existingSecret: automatos-secrets
 tests:
-  - it: starts uvicorn directly, so only the migration Job changes the schema
+  - it: starts uvicorn with the entrypoint's boot steps off, so only the migration Job changes the schema
     asserts:
       - equal:
           path: spec.template.spec.containers[0].args[0]
@@ -12,10 +12,25 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].args
           content: migrate
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AUTOMATOS_SKIP_MIGRATIONS
+            value: "true"
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
             name: AUTOMATOS_MIGRATE_ON_BOOT
+            value: "true"
+  - it: keeps the boot steps off even when config sets the flag
+    set:
+      config:
+        AUTOMATOS_SKIP_MIGRATIONS: "false"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[-1]
+          value:
+            name: AUTOMATOS_SKIP_MIGRATIONS
             value: "true"
   - it: runs one replica by default (the schedulers use a per-container lock)
     asserts:

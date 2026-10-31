@@ -11,6 +11,9 @@ fetch: ``core/auth/hybrid.py`` then resolves a default workspace). So they never
 * The local edition's one anonymous operator (``AUTH_EDITION=local``): the owner of every
   workspace on the instance (PRD-175, ``hybrid.py``'s local lane). Gated by the edition,
   never by role.
+* A paired phone or browser (``auth_type`` ``device``, PRD-266): exactly the workspace its
+  row is bound to (``core/auth/device.py`` checked that it is usable), never every
+  workspace, the operator's own phone included.
 * Anyone else (an API key, an SDK key, SaaS's anonymous fallback): no workspace.
 
 The user id is always ``core.auth.principal.resolve_user_pk``, never ``ctx.user.id``.
@@ -28,7 +31,8 @@ from core.auth.principal import resolve_user_pk
 
 LOCAL_EDITION = "local"
 ANONYMOUS_AUTH = "anonymous"
-PERSON_AUTH_TYPES = frozenset({"clerk"})
+DEVICE_AUTH = "device"  # core.auth.device.DEVICE_AUTH_TYPE
+PERSON_AUTH_TYPES = frozenset({"clerk", DEVICE_AUTH})
 
 # Bound parameters only. A paused or deleted workspace serves nothing, as the request
 # context refuses it (hybrid.py _assert_workspace_usable, _workspace_exists).
@@ -74,8 +78,19 @@ def member_workspace_ids(db: Any, user_pk: int) -> FrozenSet[UUID]:
     return frozenset(UUID(str(row[0])) for row in rows)
 
 
+def _bound_membership(user_pk: int, ctx: Any) -> Membership:
+    """A paired device's membership: the one workspace its row is bound to (the lane's ``workspace_id``)."""
+    bound = getattr(ctx, "workspace_id", None)
+    workspace_ids = frozenset({UUID(str(bound))}) if bound is not None else frozenset()
+    return Membership(user_pk=user_pk, workspace_ids=workspace_ids, every_workspace=False)
+
+
 def caller_membership(db: Any, ctx: Any) -> Membership:
-    """The caller's membership, read from the database, never from ``ctx.workspace_id``."""
+    """The caller's membership, read from the database, never from ``ctx.workspace_id``.
+
+    The one exception is a paired device: the lane sets ``ctx.workspace_id`` from the
+    device's row and refuses a request naming any other, so that IS its binding.
+    """
     if is_local_operator(ctx):
         return Membership(user_pk=resolve_user_pk(db, ctx), workspace_ids=frozenset(), every_workspace=True)
     if getattr(ctx, "auth_type", None) not in PERSON_AUTH_TYPES:
@@ -83,6 +98,8 @@ def caller_membership(db: Any, ctx: Any) -> Membership:
     user_pk = resolve_user_pk(db, ctx)
     if user_pk is None:
         return NO_MEMBERSHIP
+    if ctx.auth_type == DEVICE_AUTH:
+        return _bound_membership(user_pk, ctx)
     return Membership(user_pk=user_pk, workspace_ids=member_workspace_ids(db, user_pk), every_workspace=False)
 
 

@@ -202,5 +202,6 @@ Sources: [orchestrator/api/marketplace.py:37-50](), [frontend/components/marketp
 - [Browsing & Installing Items](#14.2) — Item cards, detail modals, install flow, cascade installer for dependencies, install_count tracking
 - [Publishing to Marketplace](#14.3) — Clone-to-workspace pattern, owner_type, dependency cloning, marketplace S3 asset storage, publish/developer pages
 - [Marketplace Backend & LLM Catalog](#14.4) — marketplace.py, marketplace_plugins.py, llm_marketplace.py, user_api_keys, usage tracker, workspace isolation and cloning logic
+- [Marketplace › Themes](themes-tab.md) — the Themes tab: reviewed theme listings, Add to my workspace, Publish theme
 
 ---

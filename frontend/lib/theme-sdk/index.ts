@@ -11,7 +11,8 @@
  * __tests__/surface.test.ts holds this module to exactly their union, so an export nobody
  * planned fails CI. Areas built by A-10a: theme, context, navigation, notices, events. The rest
  * are stubs that throw "not in this SDK build" until their lane lands (chat, deliverables, cards,
- * looks and assets in W-A4; the pages/* data hooks in W-A4P).
+ * looks and assets in W-A4; the pages/* data hooks in W-A4P). E3b added `storage` (SDK 1.1.0), theme voice
+ * (TV-C5) `voice` (SDK 1.2.0), and PRD-268 (US-C21e) `proactive` (SDK 1.3.0).
  */
 export * from './theme'
 export * from './context'
@@ -28,3 +29,6 @@ export * from './pages/assignments'
 export * from './pages/documents'
 export * from './pages/playbooks'
 export * from './pages/command-center'
+export * from './storage'
+export * from './voice'
+export * from './proactive'

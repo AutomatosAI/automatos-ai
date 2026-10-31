@@ -26,13 +26,20 @@ _TARGETS: Dict[str, Tuple[str, str, str]] = {
     "task_id": ("board_tasks", "title", "ticket"),
     "playbook_id": ("workflow_recipes", "name", "playbook"),  # F185: the delete card named none
 }
+SCHEDULED_TASKS = "agent_scheduled_tasks"
 # Where an action's id points when it is not the default table above.
 _ACTION_TARGETS: Dict[str, Dict[str, Tuple[str, str, str]]] = {
-    "platform_cancel_scheduled_task": {"task_id": ("agent_scheduled_tasks", "description", "scheduled task")},
+    "platform_cancel_scheduled_task": {"task_id": (SCHEDULED_TASKS, "description", "scheduled task")},
 }
 NAME_CHARS = 80
 TICKETS = "board_tasks"
 TICKET = "ticket"
+# PRD-268 K8: a person's follow-up is theirs alone. No card names its reason and no generic
+# call acts on it: to every other caller its id names no scheduled task.
+_A_FOLLOW_UP = text(
+    "SELECT 1 FROM agent_scheduled_tasks "
+    "WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND deliver_as = :follow_up"
+)
 
 
 @dataclass(frozen=True)
@@ -79,11 +86,12 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
                 text(f"SELECT {label} FROM {table} WHERE id = :id AND workspace_id = CAST(:ws AS uuid)"),
                 {"id": ident, "ws": str(workspace_id)},
             ).first()
+            hidden = row is not None and _a_follow_up(db, workspace_id, table, ident)
         except Exception:  # noqa: BLE001 — cannot tell: stage the card as before
             logger.warning("[subject-targets] could not look up %s %s", noun, ident, exc_info=True)
             found.append(Target(param, ident, noun))
             continue
-        if row is None:
+        if row is None or hidden:
             missing.append(Target(param, ident, noun))
         else:
             name = str(row[0])[:NAME_CHARS] if row[0] is not None else None
@@ -112,12 +120,44 @@ def _row_id(db: Any, workspace_id: Any, table: str, raw: Any) -> Optional[int]:
         return None
 
 
+def _a_follow_up(db: Any, workspace_id: Any, table: str, ident: int) -> bool:
+    """Whether the scheduled task ``ident`` is a person's follow-up (PRD-268 K8)."""
+    if table != SCHEDULED_TASKS:
+        return False
+    from services.scheduled_task_steps import DELIVER_FOLLOW_UP
+
+    found = db.execute(_A_FOLLOW_UP, {"id": ident, "ws": str(workspace_id), "follow_up": DELIVER_FOLLOW_UP})
+    return found.first() is not None
+
+
 def _ticket_called(db: Any, workspace_id: Any, table: str, ident: int) -> Optional[str]:
     if table != TICKETS:
         return None
     from services.ticket_numbers import ticket_label_for
 
     return ticket_label_for(db, workspace_id, ident)
+
+
+# Params that identify WHAT an action will act on, in the order a person reads them. An approval
+# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
+# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
+SUBJECT_PARAMS: Tuple[str, ...] = (
+    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
+    "report_id", "id", "app_name", "query", "playbook_name",
+)
+
+
+def subject_line(params: Dict[str, Any]) -> str:
+    """" on <what this will act on>", or "" when nothing identifies it: the card's subject
+    when no looked-up target names one."""
+    if not isinstance(params, dict):
+        return ""
+    named = [
+        f"{key}={params[key]!r}"
+        for key in SUBJECT_PARAMS
+        if params.get(key) not in (None, "", [], {})
+    ]
+    return f" on {', '.join(named[:3])}" if named else ""
 
 
 def named_subject(found: List[Target]) -> str:

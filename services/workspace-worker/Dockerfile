@@ -7,51 +7,140 @@
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
 FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
 
-# PRD-262 US-044: uv from its own image, in a named stage for the same reason.
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
+# and services/media-render/Dockerfile, so the two images share one node layer on a host.
+# The binary goes into the /node-layer tree, every directory of it at the binary's upstream
+# time, and the images copy that tree to /. A COPY of the file alone stamps /usr/local/bin
+# with the time of the build, so each build made a different layer.
+FROM node AS node-stripped
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends binutils \
+ && mkdir -p /node-layer/usr/local/bin \
+ && strip --strip-unneeded --preserve-dates -o /node-layer/usr/local/bin/node /usr/local/bin/node \
+ && touch -r /usr/local/bin/node /node-layer/usr/local/bin /node-layer/usr/local /node-layer/usr /node-layer \
+ && rm -rf /var/lib/apt/lists/*
 
-# PRD-262 US-044: requirements.lock in two parts, claude-agent-sdk alone and
-# everything else (the SDK's own dependencies included). The production stage
-# copies each part by its content, so an SDK bump that leaves the rest of the
-# lock alone re-runs only the SDK's install: from the build cache, the stable
-# layer keeps its digest. awk keeps or drops a whole entry: the pin line, and
-# the indented hash and `# via` lines under it. The build fails unless the SDK
-# part holds the SDK and nothing else.
+# npm without its docs and man pages (PRD-262, row 47: 2.67 MB). The image has no `man`,
+# so `npm help` never showed them; `npm <command> --help` prints from npm's own code.
+FROM node AS npm
+RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
+
+# PRD-262 US-044: uv from its own image, in a named stage for the same reason.
+FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+
+# PRD-262 US-044: requirements.lock in three parts: claude-agent-sdk alone, psycopg2
+# alone (the psycopg2 stage below builds it from source, PRD-262 row 27) and everything
+# else (the SDK's own dependencies included). The production stage copies each part
+# by its content, so an SDK bump that leaves the rest of the lock alone re-runs only
+# the SDK's install: from the build cache, the stable layer keeps its digest. awk
+# keeps or drops a whole entry: the pin line, and the indented hash and `# via` lines
+# under it. The build fails unless the SDK and psycopg2 parts each hold their one
+# package and nothing else, and the stable part holds neither.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS locks
 WORKDIR /locks
 COPY requirements.lock .
-RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/ } !sdk' requirements.lock > stable.lock \
+RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/; pg = /^psycopg2==/ } !sdk && !pg' requirements.lock > stable.lock \
     && awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/ } sdk' requirements.lock > sdk.lock \
+    && awk '/^[A-Za-z0-9]/ { pg = /^psycopg2==/ } pg' requirements.lock > psycopg2.lock \
     && test "$(grep -c '^[A-Za-z0-9]' sdk.lock)" = 1 \
     && grep -q '^claude-agent-sdk==' sdk.lock \
-    && ! grep -q '^claude-agent-sdk==' stable.lock
+    && test "$(grep -c '^[A-Za-z0-9]' psycopg2.lock)" = 1 \
+    && grep -q '^psycopg2==' psycopg2.lock \
+    && ! grep -q '^claude-agent-sdk==' stable.lock \
+    && ! grep -q '^psycopg2==' stable.lock
+
+# psycopg2 compiled against Debian's libpq (PRD-262, row 27: 15.7 MB). psycopg2-binary's
+# wheel carried its own libpq and two OpenSSLs, krb5, LDAP and SASL (16.1 MB), libraries
+# Debian already installs in this image; the production stage installs libpq5 (0.4 MB)
+# instead, so libpq gets the weekly OS rebuild's fixes too. Same project, version and
+# API. The compiler and headers stay in this stage. Every file the build runs is
+# hash-checked: the build backend (setuptools) comes from requirements-build.lock,
+# installed first with --require-hashes, and psycopg2 builds with --no-build-isolation
+# on it, because an isolated build would fetch its backend unpinned and unhashed, past
+# --require-hashes. The lock's psycopg2 entry is the hash-checked sdist, installed into
+# /install, which the production stage copies whole; its extension's debug info and
+# uv's lock file are left behind here.
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS psycopg2
+COPY --from=uv /uv /usr/local/bin/uv
+COPY requirements-build.lock /locks/
+COPY --from=locks /locks/psycopg2.lock /locks/
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libpq-dev binutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
+        --only-binary :all: -r /locks/requirements-build.lock \
+    && uv pip install --python /usr/local/bin/python --prefix /install --no-cache --compile-bytecode \
+        --require-hashes --no-deps --no-binary psycopg2 --no-build-isolation -r /locks/psycopg2.lock \
+    && find /install -type f -name '*.so*' -exec strip --strip-debug {} + \
+    && rm -f /install/.lock
 
 # Railway builds no target, so the last stage is what it ships: keep it last.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS production
 
+# Node.js 24's binary, stripped of its symbol tables and debug sections (PRD-262, row 21:
+# 20 MB). .dynsym stays, so native addons still resolve Node's N-API symbols
+# (scripts/ci/image_worker_toolchain.py loads one). First, and with --link, so the layer
+# is the same blob, on the same base, as media-render's: a host with both keeps one copy.
+COPY --link --from=node-stripped /node-layer/ /
+
 WORKDIR /app
 
-# System dependencies — DevOps toolchain for agent workspaces
+# System dependencies — DevOps toolchain for agent workspaces. The same layer drops
+# what no agent build or clone runs, and the two parts of gcc that §3-D5 gave up
+# (scripts/ci/image_worker_toolchain.py proves the rest still works):
+# - PRD-262 (row 16): gcc's lto-dump (29.4 MB on arm64). `gcc -flto` runs lto1,
+#   lto-wrapper and the linker plugin, never lto-dump, which only prints LTO objects.
+# - PRD-262 (row 19), the API's git trim (US-019): git's server-side and mail
+#   binaries, both copies, which an agent workspace never serves. git-core's second
+#   copy of git, which every builtin there links to, becomes a link to /usr/bin/git.
+#   git-remote-http (clone, pull and push over HTTPS) and ssh stay.
+# - PRD-262 (row 47): no gosu (2.9 MB). entrypoint.sh drops to the worker with
+#   setpriv, which util-linux in the base image already carries.
+# - PRD-262 (row 27): libpq5, the libpq the psycopg2 stage's build links. Its own
+#   dependencies (libssl3t64, libgssapi-krb5-2, libldap2) are already here.
+# - PRD-262 §3-D5 (row 12): the sanitizer runtimes, their .a and gcc's links; -fsanitize stops linking.
+#   libhwasan_preinit.o is the compiler package's (gcc-14-<triplet>), not libgcc-14-dev's.
+# - PRD-262 §3-D5 (row 31): libc.a and libstdc++.a; gcc -static and -static-libstdc++ stop linking.
+#   dpkg -L lists both on each arch, and a list that comes back empty fails the RUN. Only
+#   files go, no package, so dpkg records no broken dependency for a later apt-get install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
-    jq tree gosu \
+    jq tree libpq5 \
+    && rm -f /usr/bin/*lto-dump* \
+    && rm -f /usr/bin/git-shell /usr/bin/scalar \
+        /usr/lib/git-core/git-daemon /usr/lib/git-core/git-http-backend \
+        /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
+        /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
+    && ln -sf /usr/bin/git /usr/lib/git-core/git \
+    && sanitizers=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' \
+            'libgcc-[0-9]*-dev' 'gcc-[0-9]*-*-linux-gnu' \
+            'libasan[0-9]*' 'libhwasan[0-9]*' 'liblsan[0-9]*' 'libtsan[0-9]*' 'libubsan[0-9]*' 2>/dev/null \
+        | awk '$1 == "ii" {print $2}' | xargs -r dpkg -L \
+        | grep -E '^/usr/lib/.+/lib(asan|hwasan|lsan|tsan|ubsan)[._][^/]*$') \
+    && rm -f $sanitizers \
+    && libc_a=$(dpkg -L libc6-dev | grep '/libc\.a$') \
+    && libstdcxx_a=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' 'libstdc++-[0-9]*-dev' 2>/dev/null \
+        | awk '$1 == "ii" {print $2}' | xargs -r dpkg -L | grep '/libstdc++\.a$') \
+    && rm -f $libc_a $libstdcxx_a \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js 24 with npm and corepack, from the `node` stage: no NodeSource, so no
-# extra apt updates, Debian python3.13 or gnupg. Not /usr/local/include: node-gyp
-# downloads the headers on its first native build. The binary's libraries beyond
-# glibc (libstdc++6, libgcc-s1) come with build-essential above.
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+# npm (from the `npm` stage, without its docs) and corepack for Node.js 24, whose binary
+# is copied first, above. All from the official image: no NodeSource, so no extra apt
+# updates, Debian python3.13 or gnupg. Not /usr/local/include: node-gyp downloads the
+# headers on its first native build. The binary's libraries beyond glibc (libstdc++6,
+# libgcc-s1) come with build-essential above.
+COPY --from=npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
-# pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and the npm cache the
-# install leaves in /root/.npm cleaned in the same layer.
+# pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and what the install leaves
+# behind gone in the same layer: npm's cache in /root/.npm, its logs there, and Node 24's
+# compile cache, which npm writes to /tmp/node-compile-cache (PRD-262, row 47: 1.4 MB).
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
     && npm install -g --no-fund --no-audit pnpm@12.14.0 \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && rm -rf /tmp/node-compile-cache /root/.npm
 
 # The Claude Code CLI is NOT installed here: claude-agent-sdk ships its own copy
 # (site-packages/claude_agent_sdk/_bundled/claude) and resolves it FIRST —
@@ -82,9 +171,23 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 # yet (PRD-262 §10). With it, each install becomes
 # RUN --mount=type=cache,id=s/<worker-service-id>-/root/.cache/uv,target=/root/.cache/uv
 # without --no-cache.
+# Then what runs, and nothing else (PRD-262, rows 40 and 47, the API's US-020 rule):
+# strip --strip-debug drops the .debug_* sections from every compiled library the lock
+# installed (8.1 MB, most of it cryptography's) and leaves .dynsym, which the loader
+# resolves symbols through. It skips the auditwheel *.libs directories, libraries
+# auditwheel rewrote with patchelf, the kind of file strip has broken before. Then every
+# directory named exactly `tests` goes (0.62 MB: jsonschema's, referencing's and
+# certifi's suites). scripts/ci/image_worker_site_packages.py loads every file the
+# strip touched.
 COPY --from=locks /locks/stable.lock /opt/worker-locks/
 RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
-    -r /opt/worker-locks/stable.lock
+    -r /opt/worker-locks/stable.lock \
+    && find /usr/local/lib/python3.12/site-packages -type f -name '*.so*' -not -path '*.libs/*' \
+        -exec strip --strip-debug {} + \
+    && find /usr/local/lib/python3.12/site-packages -type d -name tests -prune -exec rm -rf {} +
+
+# psycopg2, built above against libpq5 (PRD-262, row 27), as a layer of its own.
+COPY --from=psycopg2 /install /usr/local
 
 # The worker user first, so everything after it can be created worker-owned:
 # /app (the code lands below with --chown), the volume mount point and HOME's
@@ -161,6 +264,15 @@ RUN set -eu; \
 COPY --from=locks /locks/sdk.lock /opt/worker-locks/
 RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
     -r /opt/worker-locks/sdk.lock
+
+# F452: no setuid or setgid file, after every install so none brings one back. The
+# base image and openssh-client brought su, mount, umount, passwd, chsh, chfn, newgrp,
+# gpasswd and ssh-keysign setuid root; the same find clears any setgid bit too. Nothing
+# the worker or an agent runs needs one: the worker drops to uid 1000 with
+# --no-new-privs (entrypoint.sh), and git over ssh signs with the workspace's key, not
+# ssh-keysign's host key. -xdev keeps find on the image's own filesystem.
+# scripts/ci/image_worker_toolchain.py finds no such file in the built image.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 
 # Entrypoint fixes volume ownership then drops to worker user. --chmod sets the mode
 # in the copy itself; a separate chmod RUN published an empty layer, since git already

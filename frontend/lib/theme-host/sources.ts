@@ -6,9 +6,8 @@
  *   file under `/api/themes/files/<digest>/` (a package's by its fixed layout and the answer's
  *   `defaultLook`, manifest.ts), then imports the entry with the browser's own
  *   import(), so its bare imports resolve through the page's import map to the host's modules.
- * - **builtin** (`builtin:<id>`): a module compiled into the app, loaded with a webpack import();
- *   its frame registers synchronously as soon as that import resolves. Builtin Play keeps its
- *   compiled path until A-04b registers it here.
+ *   It is the only source: no theme is compiled into the app since A-19f1 (builtin Play left
+ *   core; Play ships as a package from the theme kit).
  *
  * The active-theme request goes through apiClient's named method (getActiveTheme), so the
  * route-contract check sees it. When it names no theme for this install (a stale
@@ -30,7 +29,8 @@
  * The answer's other fields: `optIn.required` (private code this member has not opted in to)
  * fails the load as `opt-in` before any theme file is asked for, since the files proxy would
  * 404 each one; a `warn` revocation (`theme.revoked`) loads the theme and hands the warning on
- * (ThemeLoadOk.revoked) for the host's notice. A 5xx from the files proxy, or a network failure,
+ * (ThemeLoadOk.revoked) for the host's notice; a `disable` one of this install (`theme: null`
+ * and a top-level `revoked`) loads nothing and hands its reason on (ThemeLoadAbsent.revoked, C-05l). A 5xx from the files proxy, or a network failure,
  * fails as `unavailable`: the files could not be reached, which is not the theme's fault.
  */
 import { apiClient } from '@/lib/api-client'
@@ -40,12 +40,11 @@ import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
 import { isRecord } from './css-value'
 import { exposeHostModules } from './host-modules'
-import { cleanupOnce, definitionOf, loadFromManifest, registerTheme, settleLoad, step, withTimeout } from './loader'
+import { loadFromManifest, settleLoad, step, withTimeout } from './loader'
 import { parseActiveInstall, parseThemeManifest } from './manifest'
 import { importThemeModule } from './native-import'
-import { isInstalledThemeStyle, themeRefOf } from './registry'
+import { installIdOfStyle } from './registry'
 import type { ThemeRef } from './registry-types'
-import { SDK_VERSION } from './sdk'
 import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 import type {
   LoaderDeps,
@@ -53,6 +52,7 @@ import type {
   ThemeLoadAbsent,
   ThemeLoadOk,
   ThemeLoadResult,
+  ThemeRevocationDisable,
   ThemeRevocationWarning,
   ThemeSource,
 } from './types'
@@ -71,6 +71,8 @@ const STATUS_PROBE_RANGE = 'bytes=0-0'
 const UNAVAILABLE_FROM_STATUS = 500
 /** The revocation level that still runs the theme (orchestrator/services/themes/revocations.py). */
 const REVOKE_WARN = 'warn'
+/** The revocation level that stops it: the active answer names no theme (defaults.py resolve_active). */
+const REVOKE_DISABLE = 'disable'
 
 /** The HTTP status apiClient puts on the error it throws, if it has one. */
 function httpStatusOf(error: unknown): unknown {
@@ -116,8 +118,8 @@ export async function fetchActiveInstall(): Promise<unknown> {
   }
 }
 
-function noActiveInstall(detail: string): ThemeLoadAbsent {
-  return { ok: false, reason: null, detail }
+function noActiveInstall(detail: string, revoked: ThemeRevocationDisable | null): ThemeLoadAbsent {
+  return revoked === null ? { ok: false, reason: null, detail } : { ok: false, reason: null, detail, revoked }
 }
 
 /**
@@ -150,6 +152,18 @@ export function optInRequired(answer: unknown): boolean {
   return isRecord(optIn) && optIn.required === true
 }
 
+/**
+ * The answer's `disable` revocation of `installId` (`theme: null` and a top-level `revoked` that
+ * names this install), or null: none, another level, or another install's.
+ */
+export function revocationDisableOf(answer: unknown, installId: string): ThemeRevocationDisable | null {
+  if (!isRecord(answer) || answer.theme !== null) return null
+  const revoked = answer.revoked
+  if (!isRecord(revoked) || revoked.level !== REVOKE_DISABLE) return null
+  if (typeof revoked.installId === 'string' && revoked.installId !== installId) return null
+  return { level: REVOKE_DISABLE, reason: typeof revoked.reason === 'string' ? revoked.reason : '' }
+}
+
 /** The answer's `warn` revocation of the running version, or null (a `disable` one names no theme). */
 export function revocationWarningOf(answer: unknown): ThemeRevocationWarning | null {
   const revoked = activeThemeOf(answer)?.revoked
@@ -159,7 +173,7 @@ export function revocationWarningOf(answer: unknown): ThemeRevocationWarning | n
 
 type ActiveManifest =
   | { readonly manifest: SpikeManifest; readonly revoked: ThemeRevocationWarning | null }
-  | { readonly absent: string }
+  | { readonly absent: string; readonly revoked: ThemeRevocationDisable | null }
 
 /**
  * A theme file's JSON, from the files proxy on the page's own origin; a failure carries its
@@ -243,7 +257,7 @@ async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<
   const timedOut = `GET ${THEME_ACTIVE_ENDPOINT} did not answer within ${deps.timeoutMs} ms`
   const answer = await withTimeout(refusedAsAuth(() => deps.fetchActive()), deps.timeoutMs, timedOut)
   const absent = absenceOf(answer, installId)
-  if (absent !== null) return { absent }
+  if (absent !== null) return { absent, revoked: revocationDisableOf(answer, installId) }
   if (optInRequired(answer)) {
     return failAs<ActiveManifest>('opt-in', new Error(`GET ${THEME_ACTIVE_ENDPOINT}: the member has not opted in to the install ${installId}`))
   }
@@ -264,41 +278,16 @@ export function installedThemeSource(installId: string): ThemeSource {
       settleLoad(async (): Promise<ThemeLoadOk | ThemeLoadAbsent> => {
         const host = await step('load', () => deps.exposeHost())
         const active = await step('manifest', () => readActiveManifest(installId, deps))
-        if ('absent' in active) return noActiveInstall(active.absent)
+        if ('absent' in active) return noActiveInstall(active.absent, active.revoked)
         const loaded = await loadFromManifest(ref, active.manifest, host.sdkVersion, deps)
         return active.revoked === null ? loaded : { ...loaded, revoked: active.revoked }
       }),
   }
 }
 
-/**
- * A theme compiled into the app. `importDefinition` is a webpack `import()` of its module (a
- * default export made with defineTheme). It renders with the app's own React, so the host's
- * module global is not installed, and its look comes with its chunk and the boot data (A-03).
- */
-export function builtinThemeSource(ref: `builtin:${string}`, importDefinition: () => Promise<unknown>): ThemeSource {
-  return {
-    ref,
-    load: (deps) =>
-      settleLoad(async (): Promise<ThemeLoadOk> => {
-        const timedOut = `the builtin theme ${ref} did not load within ${deps.timeoutMs} ms`
-        const definition = await step('load', async () => definitionOf(await withTimeout(importDefinition(), deps.timeoutMs, timedOut)))
-        const registrations = await step('register', () => registerTheme(definition, SDK_VERSION))
-        return { ok: true, ref, manifest: null, ...registrations, cleanup: cleanupOnce(() => undefined, definition) }
-      }),
-  }
-}
-
-/** The install a style names, or null for Classic, Studio and a builtin theme. */
-export function installIdOf(style: UiStyle): string | null {
-  if (!isInstalledThemeStyle(style)) return null
-  const ref = themeRefOf(style)
-  return ref === null ? null : ref.slice(INSTALL_REF_PREFIX.length)
-}
-
-/** The source the host loads for a style: only an installed theme in A-04a (builtin Play: A-04b). */
+/** The source the host loads for a style: an installed theme's; Classic and Studio have none. */
 export function sourceForStyle(style: UiStyle): ThemeSource | null {
-  const installId = installIdOf(style)
+  const installId = installIdOfStyle(style)
   return installId === null ? null : installedThemeSource(installId)
 }
 

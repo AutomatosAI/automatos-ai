@@ -35,13 +35,16 @@ import {
 import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
 import { SAFE_MODE_STORAGE_KEY } from '@/lib/theme-host/constants'
 import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
+import { STUDIO_HTML_CLASS, STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 import SafeModePage from '../page'
 
 /** The installed theme's own class and a prepaint variable, as the root layout's boot leaves them. */
 const THEME_CLASS = 'hello-a04c'
 const PREPAINT_VAR = '--background'
+/** next-themes' tone class: safe mode never touches the tone. */
+const TONE_CLASS = 'dark'
 
-/** <html> as THEME_BOOT_SCRIPT leaves it for an installed theme: its classes, another style's, and its prepaint. */
+/** <html> as THEME_BOOT_SCRIPT leaves it for an installed theme: the classes its boot added (Studio's and its own) and its prepaint. */
 function paintInstalledThemeBoot(): void {
   const boot = document.createElement('script')
   boot.type = 'application/json'
@@ -100,12 +103,20 @@ describe('PRD-261 A-04c — the /safe-mode page', () => {
     expect(screen.getByTestId('safe-mode-back')).toHaveAttribute('href', '/chat?safe_mode=themes')
   })
 
-  it('takes the installed theme\'s first paint off <html> and shows Studio\'s', () => {
-    expect(SAFE_MODE_ADD_CLASSES.length).toBeGreaterThan(0)
-    expect(SAFE_MODE_REMOVE_CLASSES.length).toBeGreaterThan(0)
+  it("puts Studio's classes on and takes off every other style class the axis knows", () => {
+    // Studio is the revert style: its class goes on. No other core style puts a class on <html> (Classic
+    // has none), so the fixed list of classes to take off is empty; the theme's own come from its boot.
+    expect(SAFE_MODE_ADD_CLASSES).toEqual([STUDIO_HTML_CLASS])
+    expect(SAFE_MODE_REMOVE_CLASSES).toEqual(STYLE_HTML_CLASS_NAMES.filter((name) => !SAFE_MODE_ADD_CLASSES.includes(name)))
+    expect(SAFE_MODE_REMOVE_CLASSES).toEqual([])
+  })
+
+  it('takes the installed theme\'s first paint off <html> and shows Studio\'s, leaving the tone\'s class', () => {
     paintInstalledThemeBoot()
+    document.documentElement.classList.add(TONE_CLASS)
     render(<SafeModePage />)
     expectStudioPaint()
+    expect(document.documentElement.classList.contains(TONE_CLASS)).toBe(true)
   })
 
   it('puts the constant script first in its HTML, and it does the same before the page paints', () => {
@@ -122,7 +133,7 @@ describe('PRD-261 A-04c — the /safe-mode page', () => {
     expectStudioPaint()
   })
 
-  it('still takes every other style\'s class off where the boot element cannot be read', () => {
+  it("still shows Studio's paint where the boot element cannot be read", () => {
     render(<SafeModePage />)
     const boot = document.createElement('script')
     boot.id = THEME_BOOT_ELEMENT_ID
@@ -130,9 +141,15 @@ describe('PRD-261 A-04c — the /safe-mode page', () => {
     boot.type = 'application/json'
     boot.textContent = '{not json'
     document.head.appendChild(boot)
-    document.documentElement.classList.add(...SAFE_MODE_REMOVE_CLASSES)
+    const root = document.documentElement
+    root.className = ''
+    root.classList.add(...SAFE_MODE_REMOVE_CLASSES, TONE_CLASS)
+    root.style.setProperty(PREPAINT_VAR, '0 0% 0%')
     expect(() => new Function(SAFE_MODE_UNPAINT_SCRIPT)()).not.toThrow()
-    SAFE_MODE_REMOVE_CLASSES.forEach((name) => expect(document.documentElement.classList.contains(name)).toBe(false))
+    SAFE_MODE_ADD_CLASSES.forEach((name) => expect(root.classList.contains(name)).toBe(true))
+    SAFE_MODE_REMOVE_CLASSES.forEach((name) => expect(root.classList.contains(name)).toBe(false))
+    expect(root.classList.contains(TONE_CLASS)).toBe(true)
+    expect(root.style.getPropertyValue(PREPAINT_VAR)).toBe('')
   })
 
   it('calls no backend route', async () => {

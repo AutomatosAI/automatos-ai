@@ -8,8 +8,8 @@
 * Every admin path that changes the platform default moves the Auto rows on it:
   POST /api/system-settings/reset-to-defaults and the platform_update_system_setting
   tool, beside Part 1's PUT and bulk-update; a failed move puts the setting back.
-* GET /api/models/platform-default gives any signed-in user ``default_route()``, so
-  the frontend keeps no model id.
+* GET /api/models/platform-default gives a workspace member who may read its agents
+  ``default_route()`` (F451: agents:read, test_f451_*), so the frontend keeps no model id.
 PURE: rows, settings and sessions are faked.
 """
 from __future__ import annotations

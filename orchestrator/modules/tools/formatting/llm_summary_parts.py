@@ -11,11 +11,19 @@ Deliverable's id", and search_knowledge's text named each passage's file but nev
 document id (kept only for the frontend's source cards). Each source line now carries
 its document id, "[Source 1: wholesale-terms.md] (document 717; 61.0%)", for citing it
 as a fact's source, never for the owner.
+
+F460 (night 18): the same question about the database got 14, 30 and 17. A query that lists rows
+reached the model as indent=2 JSON cut at ``ROWS_PREVIEW_CHARS`` part-way through a row, and the
+model counted the rows it could see; the SQL was cut at 300 characters, so its WHERE was hidden; and
+the answer's notes (F301: a count of the top groups only, dates past the data) never reached it.
+Now the notes are printed, the SQL's WHERE clause is shown, and rows that would be cut come as one
+whole line each, as many as fit, then "Rows shown k of N", with Total Rows as the count.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List
 
 from services.contested_facts import RANKING_RULE, ranked, standing_note
@@ -37,6 +45,12 @@ SEARCH_INSTRUCTION = (
 CODE_PREVIEW_CHARS = 500
 SQL_PREVIEW_CHARS = 300
 ROWS_PREVIEW_CHARS = 2000
+WHERE_PREVIEW_CHARS = 600
+# The WHERE clause of a query, up to the clause after it (or the end).
+_WHERE = re.compile(r"\bwhere\b.*?(?=\b(?:group\s+by|order\s+by|having|limit|union|window)\b|$)", re.I | re.S)
+CELL = " | "
+NOTE_LINE = "Note: {note}"
+ROWS_SHOWN = "Rows shown {shown} of {total}. The count is Total Rows, not the rows you can see."
 COMPOSIO_PREVIEW_ITEMS = 3
 COMPOSIO_PREVIEW_CHARS = 1800
 COMPOSIO_LOG_CHARS = 500
@@ -78,15 +92,55 @@ def code_lines(results: List[Dict[str, Any]]) -> List[str]:
     return lines
 
 
+def _sql_preview(sql: str) -> str:
+    """The SQL's first ``SQL_PREVIEW_CHARS``, and its WHERE clause when the cut hides it (F460)."""
+    preview = sql[:SQL_PREVIEW_CHARS]
+    where = _WHERE.search(sql)
+    if len(sql) <= SQL_PREVIEW_CHARS or where is None or where.end() <= SQL_PREVIEW_CHARS:
+        return preview
+    return f"{preview} … {' '.join(where.group(0).split())[:WHERE_PREVIEW_CHARS]}"
+
+
+def _columns(rows: List[Any], columns: Any) -> List[str]:
+    """The answer's column names, else the first row's keys."""
+    if columns:
+        return [str(column) for column in columns]
+    return [str(key) for key in rows[0]] if isinstance(rows[0], dict) else []
+
+
+def _row_line(row: Any, columns: List[str]) -> str:
+    if isinstance(row, dict):
+        return CELL.join(json.dumps(row.get(column), default=str, ensure_ascii=False) for column in columns)
+    return json.dumps(row, default=str, ensure_ascii=False)
+
+
+def _rows_lines(rows: List[Any], columns: Any, total: Any) -> List[str]:
+    """All the rows as JSON when they fit ``ROWS_PREVIEW_CHARS``; else one whole line per row while
+    they fit, then how many of ``total`` were shown (F460: never a row cut part-way)."""
+    whole = json.dumps(rows, default=str, indent=2)
+    if len(whole) <= ROWS_PREVIEW_CHARS:
+        return [f"Complete data ({len(rows)} rows):", whole]
+    names = _columns(rows, columns)
+    head = f"Columns: {CELL.join(names)}"
+    lines, used = [], len(head)
+    for row in rows:
+        line = _row_line(row, names)
+        if used + len(line) + 1 > ROWS_PREVIEW_CHARS:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    return [head, *lines, ROWS_SHOWN.format(shown=len(lines), total=total)]
+
+
 def database_lines(standardized: Dict[str, Any]) -> List[str]:
-    """A database query's SQL, its rows and PandasAI's reading of them."""
-    lines = [f"\n🗄️ SQL: {standardized.get('sql', '')[:SQL_PREVIEW_CHARS]}",
-             f"Total Rows: {standardized.get('row_count', 0)}"]
-    # Include ALL data (already limited at query level) - don't truncate here
+    """A database query's SQL, its notes, its rows and PandasAI's reading of them."""
+    total = standardized.get('row_count', 0)
+    lines = [f"\n🗄️ SQL: {_sql_preview(str(standardized.get('sql') or ''))}", f"Total Rows: {total}"]
+    lines += [NOTE_LINE.format(note=note) for note in standardized.get('notes') or []]
+    # The rows are already limited at query level; ones that would be cut come one per line.
     all_data = standardized.get('data', [])
     if all_data:
-        lines.append(f"Complete data ({len(all_data)} rows):")
-        lines.append(json.dumps(all_data, default=str, indent=2)[:ROWS_PREVIEW_CHARS])
+        lines += _rows_lines(all_data, standardized.get('columns'), total or len(all_data))
     # Include PandasAI insight if available
     pandas_insight = standardized.get('pandas_ai', {})
     if pandas_insight:
@@ -113,6 +167,15 @@ def composio_lines(standardized: Dict[str, Any]) -> List[str]:
     return ["\nAPI result preview (use this to answer):", preview_json]
 
 
+def count_lines(tool_name: str, standardized: Dict[str, Any]) -> List[str]:
+    """The header's "Results: N items" line. F460 (night 18): none for a database tool, whose answer
+    has no ``results`` list, so the header said "Results: 0 items" above "Total Rows: 30" on every
+    count; its own lines give the count (``database_lines``)."""
+    if tool_name in DATABASE_TOOLS:
+        return []
+    return [f"Results: {standardized['metadata']['count']} items"]
+
+
 def tool_lines(tool_name: str, standardized: Dict[str, Any], results: List[Dict[str, Any]]) -> List[str]:
     """The lines ``format_for_llm`` writes for ``tool_name``'s results after its header."""
     if tool_name in SEARCH_TOOLS:
@@ -126,4 +189,4 @@ def tool_lines(tool_name: str, standardized: Dict[str, Any], results: List[Dict[
     return []
 
 
-__all__ = ["SEARCH_INSTRUCTION", "source_line", "tool_lines"]
+__all__ = ["SEARCH_INSTRUCTION", "count_lines", "source_line", "tool_lines"]

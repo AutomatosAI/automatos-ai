@@ -1,9 +1,10 @@
 // PRD-207 S5 — the presence orb's pure state machine + the live-mode UX
 // states. The SDK never runs here: the reducer is pure, and LiveVoiceMode is
-// rendered with its transport hook mocked.
+// rendered over a stand-in for the host voice provider (theme voice: the call
+// is the provider's, the strip only shows it).
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import React from 'react'
 
 import {
@@ -127,67 +128,64 @@ describe('PRD-207 — feedMicLevel', () => {
 // LiveVoiceMode — every failure state has designed copy; controls are named
 // ---------------------------------------------------------------------------
 
-const hookState = {
-  orbState: 'listening',
-  stateLabel: 'Auto is listening',
-  levelsRef: { current: { agent: 0, user: 0 } },
-  captions: [] as Array<{ role: string; text: string }>,
-  durationSec: 5,
-  muted: false,
-  refusal: null as string | null,
-  error: null as string | null,
-  isLive: true,
-  micSilent: false,
-  inputDevices: [] as Array<{ deviceId: string; label: string }>,
-  start: vi.fn(async () => {}),
-  stop: vi.fn(),
-  toggleMute: vi.fn(),
-}
-
-vi.mock('@/hooks/use-retell-call', () => ({
-  useRetellCall: () => hookState,
-}))
-vi.mock('@/components/voice/PresenceOrb', () => ({
-  PresenceOrb: ({ state }: { state: string }) => <div data-testid="orb" data-orb-state={state} />,
-}))
+const voice = vi.hoisted(() => ({ current: null as unknown }))
+vi.mock('@/components/voice/voice-provider', () => ({ useHostVoice: () => voice.current }))
 
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
+import { LIVE_REASON_SENTENCES } from '@/lib/voice/live/refusal'
+import { type HostVoiceStubPatch, hostVoiceStub } from '@/components/voice/__tests__/support/host-voice-stub'
+
+function onTheCall(patch: HostVoiceStubPatch = {}) {
+  const stub = hostVoiceStub(patch)
+  voice.current = stub
+  render(<LiveVoiceMode />)
+  return stub
+}
+
+const TWO_MICS = [
+  { deviceId: 'default', label: 'MacBook Pro Microphone' },
+  { deviceId: 'usb-1', label: 'USB Interface' },
+]
 
 describe('PRD-207 — LiveVoiceMode', () => {
   it('live: mic-live indicator + named mute and end controls (the wave lives in the chat background, not here)', () => {
-    Object.assign(hookState, {
-      refusal: null, error: null, isLive: true, orbState: 'listening',
-      stateLabel: 'Auto is listening',
-    })
-    render(<LiveVoiceMode onExit={() => {}} />)
+    const stub = onTheCall({ snapshot: { phase: 'listening', durationSec: 5 } })
     expect(screen.getByText(/Mic live/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Mute microphone' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'End call' })).toBeTruthy()
+    expect(screen.getByText('0:05')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Mute microphone' }))
+    expect(stub.live.toggleMute).toHaveBeenCalled()
+    const end = screen.getByRole('button', { name: 'End call' })
+    expect(end.textContent).toBe('End call')
+    fireEvent.click(end)
+    expect(stub.stop).toHaveBeenCalled()
   })
 
-  it('a refused mint shows the server\'s honest reason and a way out', () => {
-    Object.assign(hookState, {
-      refusal: 'Voice budget used: 100/100 min this month',
-      isLive: false,
-      orbState: 'error',
-      stateLabel: 'Voice connection error',
-    })
-    render(<LiveVoiceMode onExit={() => {}} />)
+  it('the strip wraps, so its facts and End call fit a phone', () => {
+    onTheCall({ snapshot: { phase: 'listening', durationSec: 5 }, live: { inputDevices: TWO_MICS } })
+    const strip = screen.getByTestId('ai-voice-label').parentElement as HTMLElement
+    expect(strip.className).toContain('flex-wrap')
+    expect(strip).toContainElement(screen.getByRole('button', { name: 'End call' }))
+  })
+
+  it("a refused mint shows the member's sentence (never the plan refusal's JSON) and a way out", () => {
+    const sentence = LIVE_REASON_SENTENCES.voice_live_plan_required
+    const stub = onTheCall({ snapshot: { phase: 'error', micOpen: false, error: sentence } })
+    expect(screen.getByText(sentence)).toBeTruthy()
+    expect(screen.getByTestId('live-voice-mode').textContent).not.toMatch(/[{}]|voice_live_plan_required/)
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(stub.start).toHaveBeenCalledWith({ mode: 'live' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(stub.stop).toHaveBeenCalled()
+  })
+
+  it("a gate's honest reason shows as the server wrote it", () => {
+    onTheCall({ snapshot: { phase: 'error', micOpen: false, error: 'Voice budget used: 100/100 min this month' } })
     expect(screen.getByText(/100\/100 min/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
   it('renders NO caption lines — the thread is the one source of words', () => {
-    Object.assign(hookState, {
-      refusal: null, error: null, isLive: true, orbState: 'speaking',
-      stateLabel: 'Auto is speaking',
-      captions: [
-        { role: 'user', text: 'where did we leave off' },
-        { role: 'agent', text: 'We were mid-way through the social pack.' },
-      ],
-    })
-    render(<LiveVoiceMode onExit={() => {}} />)
+    onTheCall({ snapshot: { phase: 'speaking', heard: 'where did we leave off', reply: 'We were mid-way through the social pack.' } })
     // the words belong to the chat's live-typing bubbles, not a second
     // caption strip under the wave (Gerard: "why am I seeing two sources")
     expect(screen.queryByText(/where did we leave off/)).toBeNull()
@@ -195,44 +193,52 @@ describe('PRD-207 — LiveVoiceMode', () => {
   })
 
   it('a silent capture raises the honest banner with a way to pick another mic', () => {
-    Object.assign(hookState, {
-      refusal: null, error: null, isLive: true, muted: false,
-      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
-      micSilent: true,
-      inputDevices: [
-        { deviceId: 'default', label: 'MacBook Pro Microphone' },
-        { deviceId: 'iphone-1', label: "Gerard's iPhone" },
-      ],
+    onTheCall({
+      live: {
+        micSilent: true,
+        inputDevices: [
+          { deviceId: 'default', label: 'MacBook Pro Microphone' },
+          { deviceId: 'iphone-1', label: "Gerard's iPhone" },
+        ],
+      },
     })
-    render(<LiveVoiceMode onExit={() => {}} />)
     expect(screen.getByTestId('mic-silent-banner')).toBeTruthy()
     expect(screen.getByText(/microphone is silent/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Pick another mic' })).toBeTruthy()
   })
 
   it('a healthy capture shows no banner; the strip offers the device picker', () => {
-    Object.assign(hookState, {
-      refusal: null, error: null, isLive: true, muted: false,
-      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
-      micSilent: false,
-      inputDevices: [
-        { deviceId: 'default', label: 'MacBook Pro Microphone' },
-        { deviceId: 'usb-1', label: 'USB Interface' },
-      ],
-    })
-    render(<LiveVoiceMode onExit={() => {}} />)
+    onTheCall({ live: { micSilent: false, inputDevices: TWO_MICS } })
     expect(screen.queryByTestId('mic-silent-banner')).toBeNull()
     expect(screen.getByRole('button', { name: 'Choose microphone' })).toBeTruthy()
   })
 
   it('one input device = nothing to choose, no picker chrome', () => {
-    Object.assign(hookState, {
-      refusal: null, error: null, isLive: true, muted: false,
-      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
-      micSilent: false,
-      inputDevices: [{ deviceId: 'default', label: 'MacBook Pro Microphone' }],
-    })
-    render(<LiveVoiceMode onExit={() => {}} />)
+    onTheCall({ live: { inputDevices: [{ deviceId: 'default', label: 'MacBook Pro Microphone' }] } })
     expect(screen.queryByRole('button', { name: 'Choose microphone' })).toBeNull()
+  })
+
+  it('a muted call says so, and a muted silence raises no banner', () => {
+    onTheCall({ snapshot: { muted: true, micOpen: false }, live: { micSilent: true } })
+    expect(screen.getByText('Mic muted')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unmute microphone' })).toBeTruthy()
+    expect(screen.queryByTestId('mic-silent-banner')).toBeNull()
+  })
+
+  it('a call Retell ended says so, with Close', () => {
+    const stub = onTheCall({ snapshot: { phase: 'ended', micOpen: false } })
+    expect(screen.getByText('Call ended')).toBeTruthy()
+    const close = screen.getByRole('button', { name: 'Close live voice' })
+    expect(close.textContent).toBe('Close')
+    fireEvent.click(close)
+    expect(stub.stop).toHaveBeenCalled()
+  })
+
+  it('draws nothing while the session is not a live call', () => {
+    onTheCall({ snapshot: { mode: null, phase: 'idle', micOpen: false } })
+    expect(screen.queryByTestId('live-voice-mode')).toBeNull()
+    cleanup()
+    onTheCall({ snapshot: { mode: 'quick', phase: 'listening' } })
+    expect(screen.queryByTestId('live-voice-mode')).toBeNull()
   })
 })

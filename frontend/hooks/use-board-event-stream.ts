@@ -12,29 +12,28 @@
  * (which CAN carry `apiClient.getAuthHeaders()`), parses SSE frames, and drives
  * cache invalidation. It reconnects with backoff if the stream drops, and tears
  * the connection down on unmount.
+ *
+ * PRD-268 US-W01b: where each frame goes (board_changed, chat_changed and
+ * suggestion_changed) is lib/live/route-frame.ts; opening the stream and its
+ * read loop are the module-level helpers below, so the hook stays short.
  */
 
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { boardQueryKeys } from '@/hooks/use-board-tasks'
+import { routeFrame, type FrameSinks, type StreamFrame } from '@/lib/live/route-frame'
 
 const STREAM_ENDPOINT = '/api/v1/tasks/stream'
 const RECONNECT_MIN_MS = 1000
 const RECONNECT_MAX_MS = 30000
 
-/** One parsed SSE frame (event name + JSON-decoded data, if any). */
-interface SSEEvent {
-  event: string
-  data: unknown
-}
-
 /**
  * Parse a chunk of accumulated SSE text into complete frames, returning the
  * frames plus any trailing partial frame still in the buffer. Pure — no I/O.
  */
-export function parseSSEFrames(buffer: string): { events: SSEEvent[]; rest: string } {
-  const events: SSEEvent[] = []
+export function parseSSEFrames(buffer: string): { events: StreamFrame[]; rest: string } {
+  const events: StreamFrame[] = []
   // Frames are separated by a blank line. Keep the trailing (possibly partial)
   // segment in the buffer for the next chunk.
   const segments = buffer.split('\n\n')
@@ -68,10 +67,50 @@ export function parseSSEFrames(buffer: string): { events: SSEEvent[]; rest: stri
   return { events, rest }
 }
 
+/** Open the stream with the caller's auth headers; throws when it isn't answered with a body. */
+async function openStream(signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  const headers = await apiClient.getAuthHeaders()
+  const url = `${apiClient.getBaseUrl()}${STREAM_ENDPOINT}`
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { ...headers, Accept: 'text/event-stream' },
+    signal,
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`board stream failed: ${response.status}`)
+  }
+  return response.body
+}
+
+/** Read the stream's frames, handing each to `onFrame`, until it ends or `cancelled()` says stop. */
+async function readFrames(
+  body: ReadableStream<Uint8Array>,
+  onFrame: (frame: StreamFrame) => void,
+  cancelled: () => boolean,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (!cancelled()) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const { events, rest } = parseSSEFrames(buffer)
+    buffer = rest
+    events.forEach(onFrame)
+  }
+}
+
+/** The wait before reconnect attempt `attempt`: capped exponential backoff. */
+function backoffMs(attempt: number): number {
+  return Math.min(RECONNECT_MIN_MS * 2 ** attempt, RECONNECT_MAX_MS)
+}
+
 /**
  * Subscribe the current view to real-time board events. On each pushed
  * `board_changed`, the board react-query cache is invalidated so the board
- * refetches once, immediately — no interval polling.
+ * refetches once, immediately — no interval polling. Every named frame is
+ * also told to the page as a window event (lib/live/route-frame.ts).
  *
  * @param enabled — gate the subscription (e.g. only while the board is mounted).
  */
@@ -89,59 +128,19 @@ export function useBoardEventStream(enabled: boolean = true): void {
     let controller: AbortController | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let attempt = 0
-
-    const invalidateBoard = () => {
-      void queryClientRef.current.invalidateQueries({ queryKey: boardQueryKeys.all })
+    const sinks: FrameSinks = {
+      invalidateBoard: () => void queryClientRef.current.invalidateQueries({ queryKey: boardQueryKeys.all }),
+      dispatch: (event) => window.dispatchEvent(event),
     }
 
     const connect = async () => {
       if (cancelled) return
       controller = new AbortController()
       try {
-        const headers = await apiClient.getAuthHeaders()
-        const url = `${apiClient.getBaseUrl()}${STREAM_ENDPOINT}`
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: { ...headers, Accept: 'text/event-stream' },
-          signal: controller.signal,
-        })
-        if (!response.ok || !response.body) {
-          throw new Error(`board stream failed: ${response.status}`)
-        }
-
+        const body = await openStream(controller.signal)
         // Connected — reset backoff.
         attempt = 0
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (!cancelled) {
-          const { value, done } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const { events, rest } = parseSSEFrames(buffer)
-          buffer = rest
-          for (const evt of events) {
-            if (evt.event === 'board_changed') {
-              invalidateBoard()
-              // PRD-228: fan the same signal out as a window event so views
-              // that aren't on the board query cache — the Agents fleet tab —
-              // can refetch on an agent move without owning an SSE connection.
-              window.dispatchEvent(
-                new CustomEvent('automatos:board-changed', { detail: evt.data }),
-              )
-            }
-            // PRD-205 S7: a background message landed in a chat. Fan out as a
-            // window event — the open conversation (useChat) merges it in and
-            // history surfaces refresh. Payload carries user_id; consumers
-            // drop events for other users (workspace filtering is server-side).
-            else if (evt.event === 'chat_changed') {
-              window.dispatchEvent(
-                new CustomEvent('automatos:chat-changed', { detail: evt.data }),
-              )
-            }
-          }
-        }
+        await readFrames(body, (frame) => routeFrame(frame, sinks), () => cancelled)
       } catch (err) {
         // AbortError is our own teardown — not a failure to log or retry.
         if (cancelled || (err instanceof DOMException && err.name === 'AbortError')) {
@@ -153,9 +152,8 @@ export function useBoardEventStream(enabled: boolean = true): void {
       }
 
       if (!cancelled) {
-        const delay = Math.min(RECONNECT_MIN_MS * 2 ** attempt, RECONNECT_MAX_MS)
+        reconnectTimer = setTimeout(connect, backoffMs(attempt))
         attempt += 1
-        reconnectTimer = setTimeout(connect, delay)
       }
     }
 

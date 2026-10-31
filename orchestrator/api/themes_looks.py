@@ -7,8 +7,10 @@ looks are never reachable, and a theme that isn't installed in the caller's work
 (also when another workspace has it). Both editions: the local edition's anonymous owner
 resolves to the operator's row; SaaS resolves the Clerk user.
 
-``themeId`` is the theme's ``publisher/slug`` (``automatos/play`` for builtin Play), so the
-path parameter takes the slash. Plain ``def`` routes: the schema read blocks on storage.
+``themeId`` is the theme's ``publisher/slug`` (``automatos/play`` for Play), so the path
+parameter takes the slash; it is 404 until that theme is installed in the caller's workspace,
+then answers the looks saved under that id before. Plain ``def`` routes: the schema read
+blocks on storage.
 
 Errors are ``{"detail": "<one plain sentence>", "errors": [{code, path, message}]}``; ``path``
 names the field (``looks[2].glow``, ``active.name``). A body that isn't

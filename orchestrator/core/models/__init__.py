@@ -17,11 +17,13 @@ from .composio_cache import *  # Redesign: Composio metadata cache
 from .tool_routing import *  # PRD-139: Tool Routing Graph (edges, affinities, intent clusters)
 from .approval_grants import ApprovalGrant, GrantStatus  # noqa: F401  # PRD-181 S2 (F060)
 from .cli_hosts import CliHost, CliHostStatus  # noqa: F401  # PRD-234 S1a (session mode)
+from .mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus  # noqa: F401  # PRD-266 §4.2
+from .mobile_push import PUSH_TYPES, MobileDigestPost, MobilePushTicket  # noqa: F401  # PRD-266 §4.4, §4.5
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .marketplace_packages import *  # PRD-230: Marketplace Packages
-from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, installs, choices, looks)
+from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, installs, choices, looks, revocations)
     THEME_INSTALL_ROLE_DEFAULT,
     THEME_OWNER_TYPES,
     THEME_PACKAGE_STATUS_DEFAULT,
@@ -29,6 +31,10 @@ from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, in
     THEME_PRIVATE_UPLOAD_VALUES,
     THEME_REVIEW_EVENTS,
     THEME_REVOCATION_LEVELS,
+    THEME_REVOCATION_ORIGIN_FEED,
+    THEME_REVOCATION_ORIGIN_LOCAL,
+    THEME_REVOCATION_ORIGINS,
+    THEME_REVOCATION_SYNC_ROW_ID,
     THEME_SCAN_VERDICT_DEFAULT,
     THEME_SCAN_VERDICTS,
     ThemeChoice,
@@ -39,6 +45,7 @@ from .themes import (  # noqa: F401  # PRD-261: installable themes (packages, in
     ThemePublisher,
     ThemeReviewEvent,
     ThemeRevocation,
+    ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
 from .personas import *  # PRD-42: Agent Personas
@@ -102,7 +109,13 @@ from .socials import (  # noqa: F401
     SocialVoiceExample,
 )
 from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger; PRD-263 run table
+from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
+from . import review_entries  # noqa: F401  # PRD-266 US-012a: a ticket entering Review is announced after its commit
+from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
+from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
+from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
+from .proactive import ProactiveCalibration, ProactivePersonSettings, ProactiveRun, ProactiveSuggestion  # noqa: F401  # PRD-268 W1: suggestions, runs, person settings; W3: calibrations
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

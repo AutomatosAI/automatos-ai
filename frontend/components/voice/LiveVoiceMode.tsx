@@ -1,188 +1,58 @@
 'use client'
 
 /**
- * LiveVoiceMode — the call's control strip + presence feed (PRD-207 S5).
+ * LiveVoiceMode — Studio's Auto Live strip (PRD-207 S5), drawn from the host voice provider (theme voice).
  *
- * The wave is NOT a widget anymore — it renders as the chat window's
- * BACKGROUND (Gerard: "a live feeling background that only comes alive when
- * speaking"). This component owns the call (the one useRetellCall instance)
- * and feeds presence upward: `onPresence` (state) + `onLevelsRef` (the live
- * audio levels ref) let the chat render the ambient background itself.
- * What remains visible here is a slim strip above the message box —
- * state · timer · mic · mute · end — plus honest failure copy.
+ * The call is the host's (components/voice/voice-provider.tsx: one session per tab, run outside React by the Live
+ * engine, lib/voice/live/live-engine.ts), so the strip only shows it: it is on screen while the tab's session is a
+ * live call (connecting, on the call, ended by Retell, or failed) and gone once the session stops. Studio's Live chip
+ * starts the call (chat-mode-bar.tsx); the wave is the chat's background (host-presence-orb.tsx); the words are the
+ * thread's own (lib/chat/live-voice-turns.ts). What remains here is a slim strip above the message box (state,
+ * timer, mic, mute, device, end) and a failure in plain words with Try again.
  *
- * PRD-264 EUAI-04 (EU AI Act Art. 50(1)): the strip opens with "AI voice
- * assistant" for the whole call. The mute toggle and the failure box are
- * small components below, so this one stays inside the component size limit.
+ * PRD-264 EUAI-04: the strip opens with the small "AI voice assistant" caption for the whole call, a failure
+ * included. Its small controls (mic state, mute, end, the failure) are voice-controls.tsx's, shared with the voice
+ * button core draws for themes.
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
-import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
-import type { MutableRefObject } from 'react'
-import { Button } from '@/components/ui/button'
+import { AnimatePresence, motion } from 'framer-motion'
 import { AiVoiceLabel } from '@/components/voice/AiVoiceLabel'
 import { MicDevicePicker, MicSilentBanner } from '@/components/voice/MicHealthControl'
-import { useRetellCall, type VoiceLevels } from '@/hooks/use-retell-call'
-import type { OrbState } from '@/lib/voice/orb-state'
+import { VoiceErrorBoundary } from '@/components/voice/VoiceErrorBoundary'
+import { EndOrClose, LiveCallFailure, MicState, MuteToggle, formatDuration } from '@/components/voice/voice-controls'
+import { type HostVoice, useHostVoice } from '@/components/voice/voice-provider'
+import type { VoicePhase } from '@/lib/voice/engine'
+import { LIVE_UNAVAILABLE } from '@/lib/voice/live/refusal'
+import { ORB_STATE_LABELS } from '@/lib/voice/orb-state'
 
-/** The capture device survives page loads — a mic that worked stays picked. */
-const CAPTURE_DEVICE_STORAGE_KEY = 'automatos.voice.capture-device'
+const ON_THE_CALL: ReadonlySet<VoicePhase> = new Set<VoicePhase>(['listening', 'thinking', 'speaking'])
 
-function readStoredCaptureDevice(): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage.getItem(CAPTURE_DEVICE_STORAGE_KEY)
-  } catch {
-    return null
-  }
-}
-
-interface LiveVoiceModeProps {
-  /** The on-screen thread to bind — omit when the chat has no server row yet. */
-  chatId?: string | null
-  agentId?: number | null
-  /** The call's thread id (created server-side when none was bound). */
-  onChatId?: (chatId: string) => void
-  /** The current exchange as it streams — the chat types it out live. */
-  onLiveTurn?: (turn: { userText: string; agentText: string }) => void
-  /** Presence feed for the ambient background: state transitions… */
-  onPresence?: (state: OrbState) => void
-  /** …and the (stable) live audio-levels ref, sent once on mount. */
-  onLevelsRef?: (levels: MutableRefObject<VoiceLevels>) => void
-  onExit: () => void
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
+/** The call's quiet facts and controls: state and timer, the mic, mute, the device, end. */
+function LiveCallControls({ voice }: { voice: HostVoice }) {
+  const { snapshot, live } = voice
+  const onTheCall = ON_THE_CALL.has(snapshot.phase)
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-7 w-7 rounded-full"
-      onClick={onToggle}
-      aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
-      aria-pressed={muted}
-    >
-      {muted ? (
-        <MicOff className="h-3.5 w-3.5 text-destructive" />
-      ) : (
-        <Mic className="h-3.5 w-3.5" />
+    <>
+      <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
+        {ORB_STATE_LABELS[snapshot.phase]}
+        {onTheCall && (
+          <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">{formatDuration(snapshot.durationSec)}</span>
+        )}
+      </p>
+      {onTheCall && <MicState muted={snapshot.muted} />}
+      {onTheCall && <MuteToggle muted={snapshot.muted} onToggle={live.toggleMute} />}
+      {onTheCall && (
+        <MicDevicePicker devices={live.inputDevices} activeDeviceId={live.captureDeviceId} onPickDevice={live.pickDevice} />
       )}
-    </Button>
+      <EndOrClose running={onTheCall || snapshot.phase === 'connecting'} onStop={voice.stop} />
+    </>
   )
 }
 
-/** Failure states — honest copy, always a way out. */
-function LiveCallFailure({
-  message,
-  onRetry,
-  onClose,
-}: {
-  message: string
-  onRetry: () => void
-  onClose: () => void
-}) {
-  return (
-    <div className="mx-auto max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-center">
-      <p className="text-xs text-destructive">{message}</p>
-      <div className="mt-2 flex justify-center gap-2">
-        <Button size="sm" variant="outline" onClick={onRetry}>
-          Try again
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-export function LiveVoiceMode({
-  chatId,
-  agentId,
-  onChatId,
-  onLiveTurn,
-  onPresence,
-  onLevelsRef,
-  onExit,
-}: LiveVoiceModeProps) {
-  const [captureDeviceId, setCaptureDeviceId] = useState<string | null>(readStoredCaptureDevice)
-
-  const {
-    orbState,
-    stateLabel,
-    levelsRef,
-    durationSec,
-    muted,
-    refusal,
-    error,
-    isLive,
-    micSilent = false,
-    inputDevices = [],
-    start,
-    stop,
-    toggleMute,
-  } = useRetellCall({ chatId, agentId, captureDeviceId, onChatId, onLiveTurn })
-
-  // Live mode IS the call: mounting connects, one gesture from the Live pill.
-  useEffect(() => {
-    onLevelsRef?.(levelsRef)
-    void start()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    onPresence?.(orbState)
-  }, [orbState, onPresence])
-
-  // A stored device that no longer exists must not pin the call to nothing.
-  useEffect(() => {
-    if (!captureDeviceId || inputDevices.length === 0) return
-    if (inputDevices.some((d) => d.deviceId === captureDeviceId)) return
-    try {
-      window.localStorage.removeItem(CAPTURE_DEVICE_STORAGE_KEY)
-    } catch {
-      // storage is a nicety
-    }
-    setCaptureDeviceId(null)
-  }, [captureDeviceId, inputDevices])
-
-  const pickDevice = (deviceId: string) => {
-    try {
-      window.localStorage.setItem(CAPTURE_DEVICE_STORAGE_KEY, deviceId)
-    } catch {
-      // storage is a nicety
-    }
-    setCaptureDeviceId(deviceId)
-  }
-
-  // Rebinding the SDK's capture needs a fresh call — restart on device change
-  // (skipping mount, where the stored device rides the initial start()).
-  const deviceRunRef = useRef(true)
-  useEffect(() => {
-    if (deviceRunRef.current) {
-      deviceRunRef.current = false
-      return
-    }
-    stop()
-    const timer = setTimeout(() => void start(), 200)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [captureDeviceId])
-
-  const handleExit = () => {
-    stop()
-    onExit()
-  }
-
-  const failure = refusal || error
-
+function LiveStrip({ voice }: { voice: HostVoice }) {
+  const { snapshot, live } = voice
+  const failure = snapshot.phase === 'error' ? snapshot.error ?? LIVE_UNAVAILABLE : null
+  const silent = !failure && ON_THE_CALL.has(snapshot.phase) && live.micSilent && !snapshot.muted
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -191,77 +61,35 @@ export function LiveVoiceMode({
       transition={{ duration: 0.25 }}
       className="relative w-full"
       data-testid="live-voice-mode"
+      data-voice-phase={snapshot.phase}
     >
-      {/* Whisper strip — no card, no border: the room glows behind the whole
-          chat, the words stream in the thread like any typed reply; up here
-          only the quiet facts and the two buttons that matter. The AI label
-          stays for the whole call, a failure included (PRD-264 §8). */}
-      <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
+      {/* Whisper strip — no card, no border: the room glows behind the whole chat, the words stream in the thread
+          like any typed reply; up here only the quiet facts and the buttons that matter. It wraps on a phone. */}
+      <div className="mx-auto flex w-fit flex-wrap items-center justify-center gap-x-3 gap-y-1 px-2 py-0.5">
         <AiVoiceLabel />
-        {!failure && (
-          <>
-            <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
-              {stateLabel}
-              {isLive && (
-                <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
-                  {formatDuration(durationSec)}
-                </span>
-              )}
-            </p>
-            {isLive && (
-              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    muted ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'
-                  }`}
-                />
-                {muted ? 'Mic muted' : 'Mic live'}
-              </span>
-            )}
-            {isLive && <MuteToggle muted={muted} onToggle={toggleMute} />}
-            {isLive && (
-              <MicDevicePicker
-                devices={inputDevices}
-                activeDeviceId={captureDeviceId}
-                onPickDevice={pickDevice}
-              />
-            )}
-            {isLive || orbState === 'connecting' ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
-                onClick={handleExit}
-                aria-label="End call"
-              >
-                <PhoneOff className="h-3.5 w-3.5" />
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-full"
-                onClick={handleExit}
-                aria-label="Close live voice"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </>
-        )}
+        {!failure && <LiveCallControls voice={voice} />}
       </div>
-
-      {/* The mic is bound to a device delivering silence — name it, fix it
-          here. The #1 cause of "recording forever, Auto never answers". */}
-      {!failure && isLive && micSilent && !muted && (
-        <MicSilentBanner
-          devices={inputDevices}
-          activeDeviceId={captureDeviceId}
-          onPickDevice={pickDevice}
-        />
+      {/* The mic is bound to a device delivering silence: name it, fix it here. */}
+      {silent && (
+        <MicSilentBanner devices={live.inputDevices} activeDeviceId={live.captureDeviceId} onPickDevice={live.pickDevice} />
       )}
-
-      {failure && <LiveCallFailure message={failure} onRetry={() => void start()} onClose={handleExit} />}
+      {failure && (
+        <LiveCallFailure message={failure} onRetry={() => void voice.start({ mode: 'live' })} onClose={voice.stop} />
+      )}
     </motion.div>
+  )
+}
+
+/** Studio's Live strip: shown while the tab's voice session is a live call. */
+export function LiveVoiceMode() {
+  const voice = useHostVoice()
+  return (
+    <AnimatePresence>
+      {voice.snapshot.mode === 'live' && (
+        <VoiceErrorBoundary key="live-voice-strip">
+          <LiveStrip voice={voice} />
+        </VoiceErrorBoundary>
+      )}
+    </AnimatePresence>
   )
 }

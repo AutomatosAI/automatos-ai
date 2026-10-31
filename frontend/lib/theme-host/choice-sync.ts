@@ -3,10 +3,13 @@
  * its first-paint cache.
  *
  * - Choosing (the theme menu, ⌘K): `useChooseStyle` stores the pick with `PUT /api/themes/choice`
- *   ('classic' | 'studio' | 'builtin:<name>' | an install id) and writes the cookie. Classic,
- *   Studio and a builtin theme apply at once; an installed theme is stored first, then the page
- *   reloads into it (PA-13: its first paint comes from the server). A refused or failed PUT puts
- *   the tab and the cookie back on the style it had, unless a newer pick has replaced it.
+ *   ('classic' | 'studio' | an install id) and writes the cookie. Classic and Studio apply at
+ *   once; an installed theme is stored first, then the page reloads into it (PA-13: its first
+ *   paint comes from the server). A refused or failed PUT puts the tab and the cookie back on the
+ *   style it had, unless a newer pick has replaced it. An install whose version this member has
+ *   not opted in to is never stored here: it goes to the chooser Settings shares
+ *   (components/settings/themes/choose-install.tsx), which opens the opt-in dialog and stores the
+ *   choice only once the server recorded the opt-in; cancelling it leaves the style as it was.
  * - Checking (`ThemeChoiceSync`, mounted once inside the workspace and query providers): once per
  *   workspace and tab, `GET /api/themes/active`. A server choice that differs from this tab's
  *   style rewrites the cookie; an installed one reloads the page, at most once per tab (R16: the
@@ -23,39 +26,45 @@
  *   default never overrides it. A tab on Studio, the build's own default, follows the default. A
  *   refused PUT (members may not choose, the install is gone) follows the server as below.
  * - Without `source` (a backend before it), 'studio' is both a stored Studio and "no choice, no
- *   default"; so a server Studio never moves a tab off Classic or a builtin theme (a pick made
- *   before PA-12; builtin Play until A-18 moves it). It does move a tab off an installed theme,
- *   which only the server can give. Any other server choice wins.
- * - The installs (`/api/themes/installed`) are asked for only once the theme menu, ⌘K or the
- *   Play note needs them (`wantInstalledThemes` / `useWantInstalledThemes`), never in safe mode;
- *   until then the menu shows what Settings › Appearance already fetched, if anything.
- * - The menu's entries (`themeChoiceEntries`): the builtin themes, then the workspace's installs
- *   as `theme:install:<id>`, "Private · not reviewed" when unreviewed. D1-c (Gerard, 18 Oct):
- *   once a builtin theme's own package (`automatos/<name>`) is installed, the builtin entry is
- *   hidden, except from a member still on it, who keeps it until A-18 moves them.
+ *   default"; so a server Studio never moves a tab off Classic (a pick made before PA-12). It does
+ *   move a tab off an installed theme, which only the server can give. Any other server choice
+ *   wins; one this build does not know (a builtin theme's, since A-19f1) moves nothing.
+ * - The installs (`/api/themes/installed`) are asked for only once the theme menu or ⌘K needs
+ *   them (`wantInstalledThemes` / `useWantInstalledThemes`), never in safe mode; until then the
+ *   menu shows what Settings › Appearance already fetched, if anything.
+ * - The menu's entries (`themeChoiceEntries`): the workspace's installs as `theme:install:<id>`,
+ *   "Private · opt in first" while this member has not opted in to its version (choosing it asks
+ *   first), else "Signed by Automatos" when an active Automatos key verifies its signature, else
+ *   "Private · not reviewed" when unreviewed: the same rule as its row in Settings › Appearance
+ *   (C-05k). No theme is compiled into the app (A-19f1).
  */
 import { createElement, useCallback, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import { defaultContext } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { PRIVATE_NOT_REVIEWED, isDisabled, themeName } from '@/components/settings/themes/theme-labels'
+import { useChooseInstallOptional, type ChooseInstall } from '@/components/settings/themes/choose-install'
+import {
+  PRIVATE_NOT_REVIEWED,
+  PRIVATE_OPT_IN_FIRST,
+  SIGNED_BY_AUTOMATOS,
+  isDisabled,
+  isPrivateNotReviewed,
+  isSignedByAutomatos,
+  needsOptIn,
+  themeName,
+} from '@/components/settings/themes/theme-labels'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
-import { persistUiStyle, useUiStyleOptional, type UiStyleContextValue } from '@/contexts/ui-style-context'
+import { persistUiStyle, useUiStyleOptional, type StyleSwitchOptions, type UiStyleContextValue } from '@/contexts/ui-style-context'
 import { choiceOf, choiceSourceOf, themeQueryKeys, useInstalledThemes } from '@/hooks/use-installed-themes'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
-import { BUILTIN_THEMES, isInstalledThemeStyle, themeRefOf, themeStyleOf } from '@/lib/theme-host/registry'
-import type { ThemeRef, UiStyle } from '@/lib/theme-host/registry-types'
+import { isInstalledThemeStyle, themeRefOf, themeStyleOf } from '@/lib/theme-host/registry'
+import type { UiStyle } from '@/lib/theme-host/registry-types'
 import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
 import { DEFAULT_UI_STYLE } from '@/lib/ui-style'
 
 const LOG_PREFIX = '[theme-choice]'
-const BUILTIN_REF_PREFIX = 'builtin:'
 const INSTALL_REF_PREFIX = 'install:'
-/** The publisher of the packages the builtin themes ship as (D1-c). */
-export const FIRST_PARTY_PUBLISHER = 'automatos'
-/** The note on a builtin entry its own installed package has replaced, shown only to a member still on it. */
-export const BUILT_IN_NOTE = 'Built in'
 export const CHOICE_NOT_SAVED = 'Your theme choice was not saved.'
 const CORE_STYLES: ReadonlySet<string> = new Set(['classic', 'studio'])
 
@@ -73,14 +82,10 @@ export function choiceOfStyle(style: UiStyle): string {
   return ref.startsWith(INSTALL_REF_PREFIX) ? ref.slice(INSTALL_REF_PREFIX.length) : ref
 }
 
-/** The style a server choice names, or null for one this build does not know. */
+/** The style a server choice names, or null for one this build does not know (a builtin theme's, since A-19f1). */
 export function styleOfChoice(choice: string | null): UiStyle | null {
   if (choice === null) return null
   if (CORE_STYLES.has(choice)) return choice as UiStyle
-  if (choice.startsWith(BUILTIN_REF_PREFIX)) {
-    const style = themeStyleOf(choice as ThemeRef)
-    return BUILTIN_THEMES.some((entry) => themeStyleOf(entry.ref) === style) ? style : null
-  }
   const installed = themeStyleOf(`${INSTALL_REF_PREFIX}${choice}`)
   return isInstalledThemeStyle(installed) ? installed : null
 }
@@ -113,8 +118,11 @@ export function reconcileTarget(current: UiStyle, active: unknown): UiStyle | nu
 export interface ThemeChoiceEntry {
   readonly style: UiStyle
   readonly name: string
-  readonly kind: 'core' | 'builtin' | 'installed'
-  /** 'Private · not reviewed' for an unreviewed install, 'Built in' for a replaced builtin; else null. */
+  readonly kind: 'core' | 'installed'
+  /**
+   * 'Private · opt in first' for a version this member has not opted in to, else 'Signed by
+   * Automatos' for a verified signature, else 'Private · not reviewed' for an unreviewed install; else null.
+   */
   readonly note: string | null
 }
 
@@ -124,41 +132,36 @@ export const CORE_STYLE_CHOICES: readonly ThemeChoiceEntry[] = [
   { style: 'studio', name: 'Studio', kind: 'core', note: null },
 ]
 
-/** D1-c: the package a builtin theme ships as, `builtin:<name>` → `automatos/<name>`. */
-export function packageIdOfBuiltin(ref: ThemeRef): string | null {
-  return ref.startsWith(BUILTIN_REF_PREFIX) ? `${FIRST_PARTY_PUBLISHER}/${ref.slice(BUILTIN_REF_PREFIX.length)}` : null
+/**
+ * The install's note: that choosing it asks for the opt-in first, else its trust note as its Settings
+ * row badges it (a verified signature stands in place of not reviewed).
+ */
+function installNote(install: InstalledTheme): string | null {
+  if (needsOptIn(install)) return PRIVATE_OPT_IN_FIRST
+  if (isSignedByAutomatos(install)) return SIGNED_BY_AUTOMATOS
+  return isPrivateNotReviewed(install) ? PRIVATE_NOT_REVIEWED : null
 }
 
 function installedEntry(install: InstalledTheme): ThemeChoiceEntry | null {
   const style = themeStyleOf(`${INSTALL_REF_PREFIX}${install.installId}`)
   if (!isInstalledThemeStyle(style)) return null
-  return { style, name: themeName(install), kind: 'installed', note: install.reviewed ? null : PRIVATE_NOT_REVIEWED }
-}
-
-/** The builtin entries, less those whose own package is installed (D1-c) unless `current` is on one. */
-function builtinEntries(installedIds: ReadonlySet<string>, current: UiStyle | null): ThemeChoiceEntry[] {
-  return BUILTIN_THEMES.flatMap((entry) => {
-    const style = themeStyleOf(entry.ref)
-    const replaced = installedIds.has(packageIdOfBuiltin(entry.ref) ?? '')
-    if (replaced && style !== current) return []
-    return [{ style, name: entry.name, kind: 'builtin' as const, note: replaced ? BUILT_IN_NOTE : null }]
-  })
+  return { style, name: themeName(install), kind: 'installed', note: installNote(install) }
 }
 
 /**
- * The themes the menu and ⌘K offer, after Classic and Studio: the builtin ones, then the
- * workspace's installs. A disabled (withdrawn) install is neither offered nor replaces a builtin.
+ * The themes the menu and ⌘K offer, after Classic and Studio: the workspace's installs. A
+ * disabled (withdrawn) install is not offered.
  */
-export function themeChoiceEntries(installs: readonly InstalledTheme[], current: UiStyle | null): ThemeChoiceEntry[] {
-  const usable = installs.filter((install) => !isDisabled(install))
-  const installedIds = new Set(usable.map((install) => install.themeId))
-  const installed = usable.map(installedEntry).filter((entry): entry is ThemeChoiceEntry => entry !== null)
-  return [...builtinEntries(installedIds, current), ...installed]
+export function themeChoiceEntries(installs: readonly InstalledTheme[]): ThemeChoiceEntry[] {
+  return installs
+    .filter((install) => !isDisabled(install))
+    .map(installedEntry)
+    .filter((entry): entry is ThemeChoiceEntry => entry !== null)
 }
 
 /** Every style ⌘K can switch to: Classic, Studio, then `themeChoiceEntries`. */
-export function styleChoices(installs: readonly InstalledTheme[], current: UiStyle | null): ThemeChoiceEntry[] {
-  return [...CORE_STYLE_CHOICES, ...themeChoiceEntries(installs, current)]
+export function styleChoices(installs: readonly InstalledTheme[]): ThemeChoiceEntry[] {
+  return [...CORE_STYLE_CHOICES, ...themeChoiceEntries(installs)]
 }
 
 // ============= THE TAB'S CHECK =============
@@ -168,7 +171,7 @@ const checkedInThisDocument = new Set<string>()
 /** Picks made in this document; a check answered after a pick is dropped (the pick is newer). */
 let picksMade = 0
 
-/** Whether the menu, ⌘K or the Play note has asked for the installs in this document. */
+/** Whether the menu or ⌘K has asked for the installs in this document. */
 let installsWanted = false
 const installsWantedListeners = new Set<() => void>()
 
@@ -180,8 +183,8 @@ export function forgetChecksInThisDocumentForTests(): void {
 }
 
 /**
- * The theme menu (on open), ⌘K (on open) and the Play note call this when they need the
- * workspace's installs: ThemeChoiceSync then fetches them, once, outside safe mode.
+ * The theme menu (on open) and ⌘K (on open) call this when they need the workspace's installs:
+ * ThemeChoiceSync then fetches them, once, outside safe mode.
  */
 export function wantInstalledThemes(): void {
   if (installsWanted) return
@@ -347,16 +350,18 @@ interface StoreChoice {
   /** This pick's number in `picksMade`: a newer pick is never undone by this one's failure. */
   readonly pick: number
   readonly workspaceId: string
-  readonly setStyle: (style: UiStyle) => void
+  readonly setStyle: (style: UiStyle, options?: StyleSwitchOptions) => void
   readonly refresh: () => void
+  /** What the pick carries across the reload into an installed theme (G3), handed to setStyle. */
+  readonly options?: StyleSwitchOptions
 }
 
 /**
- * PUT the choice; Classic, Studio and a builtin theme are already showing, an installed one reloads
- * after. When the PUT fails, a pick already showing is undone (style and cookie), so the tab never
- * keeps a choice the server does not hold.
+ * PUT the choice; Classic and Studio are already showing, an installed one reloads after. When
+ * the PUT fails, a pick already showing is undone (style and cookie), so the tab never keeps a
+ * choice the server does not hold.
  */
-async function storeChoice({ next, previous, pick, workspaceId, setStyle, refresh }: StoreChoice): Promise<void> {
+async function storeChoice({ next, previous, pick, workspaceId, setStyle, refresh, options }: StoreChoice): Promise<void> {
   const installed = isInstalledThemeStyle(next)
   if (!installed) setStyle(next)
   try {
@@ -368,29 +373,54 @@ async function storeChoice({ next, previous, pick, workspaceId, setStyle, refres
   }
   recordCheck(workspaceId, CHECKED)
   refresh()
-  if (installed) setStyle(next)
+  if (installed) setStyle(next, options)
+}
+
+/** The workspace's install a pick of `style` names, when its version needs this member's opt-in first; else null. */
+function installNeedingOptIn(installs: readonly InstalledTheme[], style: UiStyle): InstalledTheme | null {
+  if (!isInstalledThemeStyle(style)) return null
+  const installId = choiceOfStyle(style)
+  return installs.find((install) => install.installId === installId && needsOptIn(install)) ?? null
+}
+
+/** Hands the pick to the shared chooser, whose opt-in dialog asks first; without one (an isolated mount) nothing is stored. */
+function askOptInFirst(chooser: ChooseInstall | null, install: InstalledTheme): void {
+  if (chooser === null) {
+    console.warn(LOG_PREFIX, 'a theme that needs an opt-in was picked with no opt-in dialog mounted; nothing was stored')
+    return
+  }
+  chooser.chooseInstall(install)
 }
 
 /**
  * The theme menu's and ⌘K's pick: stored on the server in a workspace, then applied (above).
- * Outside a workspace (isolated mounts) it only applies the style, as before PA-12.
+ * Outside a workspace (isolated mounts) it only applies the style, as before PA-12. `options` go
+ * to setStyle with the pick (G3: what the pick carries across the reload into an installed theme).
+ * An install whose version this member has not opted in to goes to the shared chooser instead
+ * (choose-install.tsx: the opt-in dialog, then the choice), never straight to the server.
  */
-export function useChooseStyle(): (next: UiStyle) => void {
+export function useChooseStyle(): (next: UiStyle, options?: StyleSwitchOptions) => void {
   const ui = useUiStyleOptional()
   const workspaceId = useWorkspaceOptional()?.workspace?.id ?? null
   const queryClient = useContext(defaultContext)
+  const chooser = useChooseInstallOptional()
 
   return useCallback(
-    (next: UiStyle) => {
+    (next: UiStyle, options?: StyleSwitchOptions) => {
       if (ui === null || next === ui.style) return
+      const optInFirst = installNeedingOptIn(ui.installedThemes, next)
+      if (optInFirst !== null) {
+        askOptInFirst(chooser, optInFirst)
+        return
+      }
       picksMade += 1
       if (workspaceId === null) {
-        ui.setStyle(next)
+        ui.setStyle(next, options)
         return
       }
       const refresh = () => void queryClient?.invalidateQueries({ queryKey: themeQueryKeys.active(workspaceId) })
-      void storeChoice({ next, previous: ui.style, pick: picksMade, workspaceId, setStyle: ui.setStyle, refresh })
+      void storeChoice({ next, previous: ui.style, pick: picksMade, workspaceId, setStyle: ui.setStyle, refresh, options })
     },
-    [ui, workspaceId, queryClient],
+    [ui, workspaceId, queryClient, chooser],
   )
 }

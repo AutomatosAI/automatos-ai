@@ -17,8 +17,14 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+# media-render's own version: the claim generator of every Content Credentials manifest it
+# signs names it, "Automatos AI media-render/<version>" (PRD-264 EUAI-06b). Raise it when what
+# the service writes into a file changes.
+SERVICE_VERSION = "1.0.0"
 NODE_PACKAGES = ("hyperframes", "gsap")
-PYTHON_PACKAGES = ("aiohttp", "kokoro-onnx", "espeakng-loader", "phonemizer", "onnxruntime", "numpy", "soundfile")
+PYTHON_PACKAGES = (
+    "aiohttp", "kokoro-onnx", "espeakng-loader", "phonemizer", "onnxruntime", "numpy", "soundfile", "c2pa-python",
+)
 TOOL_TIMEOUT_SECONDS = 30
 
 
@@ -42,6 +48,7 @@ def collect_versions(browser_path: str, node_modules: Path) -> Dict[str, str]:
     versions = {
         name: json.loads((node_modules / name / "package.json").read_text())["version"] for name in NODE_PACKAGES
     }
+    versions["media-render"] = SERVICE_VERSION
     versions["node"] = _run(["node", "--version"])
     versions["ffmpeg"] = _run(["ffmpeg", "-version"]).splitlines()[0].split()[2]
     versions["exiftool"] = _run(["exiftool", "-ver"])  # PRD-264 EUAI-06a: the AI mark's writer and reader

@@ -187,7 +187,7 @@ def _manager(provider):
     mgr.config = LLMConfig(provider=LLMProvider.OPENROUTER, model=SONNET_5, api_key="k")
     mgr.service_name = "orchestrator"
     mgr._tracking_ctx = {"workspace_id": None, "agent_id": 1, "execution_id": None,
-                         "request_type": "chat", "is_byok": False, "trial": False}
+                         "request_type": "chat", "is_byok": False}
     mgr.provider = provider
     return mgr
 

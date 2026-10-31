@@ -39,6 +39,8 @@ P256-FIX-N15-2: the not-done line is said only in place of the claims it answers
 N15-1), and names them whether or not another write went through; a verb in no family ("sorted",
 "rejected", "made the changes") is still read as unbacked here (``unbacked``) but never taken out, so it
 draws no line. Nothing puts the line above the reply.
+P256-FIX-N17-5 (F446): after a read only (``TASKS_LISTED``), a third-person shape says what it found: no line; with
+no call it is caught, and Auto's own reports ("Email sent.") are caught after a read too (recall: the owner's call).
 """
 from __future__ import annotations
 
@@ -119,20 +121,22 @@ def test_a697_a_saved_memory_does_not_back_a_revert_no_call_made():
 def test_j_inject_a_a_plan_word_far_from_the_claim_exempts_nothing():
     answer = "I'll just confirm that the card has been approved."
     assert claims_work_done(answer)
-    assert _said(answer, TASKS_LISTED) == [_named("approved")]
+    assert _said(answer) == [_named("approved")]
+    assert _said(answer, TASKS_LISTED) == []                 # N17-5: after a read, a third-person shape is a finding
 
 
-@pytest.mark.parametrize("answer, verb", [
-    ("The card has been approved.", "approved"),
-    ("Your two cards have now been approved.", "approved"),
-    ("The email has been sent to Declan.", "sent"),
-    ("Mission launched ✅", "launched"),
-    ("It's been sent to the Analyst.", "sent"),
-    ("They've been created for you.", "created"),
+@pytest.mark.parametrize("answer, verb, after_a_read", [
+    ("The card has been approved.", "approved", False),
+    ("Your two cards have now been approved.", "approved", False),
+    ("The email has been sent to Declan.", "sent", False),
+    ("Mission launched ✅", "launched", True),                      # N17-5: a tick is Auto's own report
+    ("It's been sent to the Analyst.", "sent", False),
+    ("They've been created for you.", "created", False),
 ])
-def test_passive_and_third_person_shapes_are_claims(answer, verb):
+def test_passive_and_third_person_shapes_are_claims(answer, verb, after_a_read):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert _said(answer, TASKS_LISTED) == [_named(verb)]
+    assert _said(answer) == [_named(verb)]                           # no call at all: caught
+    assert _said(answer, TASKS_LISTED) == ([_named(verb)] if after_a_read else [])   # N17-5: else a read's finding
     assert _said(answer, MEMORY_STORED) == [_named(verb)]
 
 
@@ -332,7 +336,8 @@ def test_rvw6_a_plan_word_exempts_the_coordinated_participles_with_their_claim()
 def test_rvw6_heres_the_update_then_a_claim_is_a_claim():
     answer = "Here's the update: the card has been approved."                         # verified at b7fcc419f
     assert [verb for verb, _ in claims(answer)] == ["approved"]
-    assert _said(answer, TASKS_LISTED) == [_named("approved")]
+    assert _said(answer) == [_named("approved")]
+    assert _said(answer, TASKS_LISTED) == []                 # N17-5: after a read, a third-person shape is a finding
     assert _said(answer, CARD_DONE) == []
 
 
@@ -366,7 +371,8 @@ MAIL_SENT = _composio("GMAIL_SEND_EMAIL")
 ])
 def test_rvw20_a_simple_past_passive_with_no_past_time_is_a_claim(answer, verb):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert _said(answer, TASKS_LISTED) == [_named(verb)]
+    assert _said(answer) == [_named(verb)]
+    assert _said(answer, TASKS_LISTED) == []                 # N17-5: after a read, a third-person shape is a finding
 
 
 def test_rvw20_was_approved_is_backed_by_the_move_to_done():
@@ -447,11 +453,7 @@ def test_rvw20_a_send_does_not_back_refunded():
 SOCIAL_POSTED = POST_SUBMITTED
 # (the sentence, its verb, a done write of its own kind)
 ESCAPED = [
-    ("The post is published.", "published", SOCIAL_POSTED),
-    ("The post is scheduled for 5pm.", "scheduled", REPORT_SCHEDULED),
-    ("The ticket is created.", "created", CARD_MADE),
-    ("The post got sent.", "sent", SOCIAL_POSTED),
-    ("It went out.", "sent", EMAIL_SENT),
+    ("The post got sent.", "sent", SOCIAL_POSTED),           # N17-5: the bare "<noun> <participle>." shape, Auto's own
     ("Email sent.", "sent", EMAIL_SENT),
     ("Posted!", "posted", SOCIAL_POSTED),
     ("I sent the email to Declan.", "sent", EMAIL_SENT),
@@ -459,24 +461,32 @@ ESCAPED = [
     ("I just paused the heartbeat.", "paused", HEARTBEAT_SET),
     ("I turned off the heartbeat for Scout.", "turned off", HEARTBEAT_SET),
     ("Heartbeat turned off.", "turned off", HEARTBEAT_SET),
+    ("I dm’d Declan the pickup time.", "dm'd", _composio("SLACK_SEND_MESSAGE")),
+    ("The post is published.", "published", SOCIAL_POSTED),
+    ("The post is scheduled for 5pm.", "scheduled", REPORT_SCHEDULED),
+    ("The ticket is created.", "created", CARD_MADE),
+    ("It went out.", "sent", EMAIL_SENT),
     ("Your weekly report is set up.", "set up", REPORT_SCHEDULED),
     ("That's cancelled for you.", "cancelled", _platform("platform_cancel_mission", {"mission_id": "m-1"})),
-    ("I dm’d Declan the pickup time.", "dm'd", _composio("SLACK_SEND_MESSAGE")),
 ]
+ESCAPED_THIRD_PERSON = {"The post is published.", "The post is scheduled for 5pm.", "The ticket is created.",
+                        "It went out.", "Your weekly report is set up.", "That's cancelled for you."}   # N17-5
 
 
 @pytest.mark.parametrize("answer, verb, own", ESCAPED, ids=[case[0] for case in ESCAPED])
 def test_rvw25_an_escaped_shape_is_a_claim_of_its_verb(answer, verb, own):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert _said(answer, TASKS_LISTED) == [_named(verb)]
+    assert _said(answer) == [_named(verb)]                           # no call at all: caught
+    assert _said(answer, TASKS_LISTED) == ([] if answer in ESCAPED_THIRD_PERSON else [_named(verb)])   # a read's finding
     assert _said(answer, MEMORY_STORED) == [_named(verb)]
     assert _said(answer, own) == []
 
 
-@pytest.mark.parametrize("answer", ["The task is done.", "That's done.", "Everything done."])
-def test_rvw25_a_stative_done_says_only_that_work_happened(answer):
+@pytest.mark.parametrize("answer, after_a_read", [("The task is done.", 0), ("That's done.", 0), ("Everything done.", 1)])
+def test_rvw25_a_stative_done_says_only_that_work_happened(answer, after_a_read):
     assert [said for said, _ in claims(answer)] == ["done"]
-    assert _said(answer, TASKS_LISTED) == [NOTHING_DONE_LINE]
+    assert _said(answer) == [NOTHING_DONE_LINE]                      # no call at all: caught
+    assert _said(answer, TASKS_LISTED) == ([NOTHING_DONE_LINE] if after_a_read else [])   # N17-5: a bare one is Auto's
     assert _said(answer, CARD_DONE) == []
 
 
@@ -677,12 +687,14 @@ ESCAPED_RVW35 = [
     ("Task #0931 has been successfully created.", ["created"], [CARD_MADE]),
     ("The card's been approved.", ["approved"], [CARD_DONE]),
 ]
+THIRD_PERSON_RVW35 = ("Task #0931 has been successfully created.", "The card's been approved.")   # N17-5: read's finding
 
 
 @pytest.mark.parametrize("answer, verbs, own", ESCAPED_RVW35, ids=[case[0] for case in ESCAPED_RVW35])
 def test_rvw35_an_escaped_shape_is_a_claim(answer, verbs, own):
     assert [verb for verb, _ in claims(answer)] == verbs
-    assert _said(answer, TASKS_LISTED) == [_in_place_line(verbs)]
+    assert _said(answer) == [_in_place_line(verbs)]                  # no call at all: caught
+    assert _said(answer, TASKS_LISTED) == ([] if answer in THIRD_PERSON_RVW35 else [_in_place_line(verbs)])
     assert nudged(answer) == (verbs[0] or "done")
     assert _said(answer, *own) == []
     assert nudged(answer, *own) is None
@@ -764,8 +776,8 @@ def test_rvw36_a_loaded_skill_backs_no_post_said_live():
     answer = "Your post is now live on LinkedIn."
     (loaded,) = _receipts(SKILL_LOADED)
     assert loaded["kind"] == READ
-    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]
-    assert nudged(answer, SKILL_LOADED) == "done"
+    assert _said(answer) == _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]   # night 18: a skill observed nothing
+    assert nudged(answer, SKILL_LOADED) == "done"                       # …and the loaded skill still backs nothing
 
 
 @pytest.mark.parametrize("answer, backing", NO_FAMILY_RVW36, ids=[answer for answer, _ in NO_FAMILY_RVW36])
@@ -784,5 +796,5 @@ def test_rvw36_a_saved_memory_backs_no_rejection_and_the_reject_write_does():
 
 @pytest.mark.parametrize("answer", ONLY_WORK_HAPPENED)
 def test_rvw36_a_claim_that_says_only_work_happened_takes_any_done_write(answer):
-    assert _said(answer, MEMORY_STORED) == []
-    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]
+    assert _said(answer, MEMORY_STORED) == [] and _said(answer) == [NOTHING_DONE_LINE]      # no call at all: caught
+    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]           # night 18: a loaded skill found nothing

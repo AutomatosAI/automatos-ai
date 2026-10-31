@@ -39,6 +39,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from config import config
+from core.monitoring.path_digests import redact_digest_segments
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ OTLP_TRACES_PATH = "/v1/traces"
 ATTR_REQUEST_ID = "automatos.request_id"
 ATTR_WORKSPACE_ID = "automatos.workspace_id"
 # The server span's URL attributes, under the old and the stable HTTP conventions.
-URL_ATTRIBUTES = ("http.url", "http.target", "url.full", "url.query")
+URL_ATTRIBUTES = ("http.url", "http.target", "url.full", "url.path", "url.query")
 # What a query value becomes on a span: the key stays, the value never leaves.
 REDACTED = "REDACTED"
 # When OTEL_TRACES_SAMPLER_RATIO is not a number: keep every trace, and say so.
@@ -61,6 +62,13 @@ DEFAULT_SAMPLER_RATIO = 1.0
 # All an exception event keeps on a span (#1107): its type, never its text, nor any
 # attribute a caller passed to record_exception.
 EXCEPTION_KEPT = ("exception.type", "exception.escaped")
+# FastAPI 0.142+ traces requests itself, on by default whenever a global tracer provider
+# exists (which start_tracing sets up): a server span with ``url.query`` in clear, a span
+# each for dependencies, endpoint and serialization, and exception messages for a logger
+# provider. Built with this, the app leaves all of it to instrument_app, whose spans
+# redact query values (Principle 5) and keep only an error's type (#1107) (#1306).
+FASTAPI_TELEMETRY = {"tracing": False, "metrics": False, "logs": False, "operation_spans": False,
+                     "auto_configure": False}
 
 
 class _State:
@@ -109,17 +117,27 @@ def redact_query(url: str) -> str:
     return f"{head}?{scrubbed}{hash_sep}{fragment}"
 
 
+def _scrubbed_url_value(name: str, value: str) -> str:
+    """One URL attribute's value with no query value and no file hash in its path."""
+    if name == "url.query":
+        return redact_query("?" + value)[1:] if value else value
+    return redact_digest_segments(redact_query(value))
+
+
 def _scrub_url_attributes(span: Any, scope: Any = None) -> None:
     """The request hook of the server span and of every HTTP client span: no query value
     leaves on a URL attribute. The ASGI layer redacts only a few signature keys, not
-    ``code`` or ``token``; the HTTP client redacts none (a ``?key=`` API key would go)."""
+    ``code`` or ``token``; the HTTP client redacts none (a ``?key=`` API key would go).
+    Nor does a SHA-256 path segment: the public provenance route's path is the hash of a
+    visitor's file (PRD-264 FR-17); the span name is the route template already."""
     attributes = getattr(span, "attributes", None) or {}
     for name in URL_ATTRIBUTES:
         value = attributes.get(name)
-        if isinstance(value, str) and "?" in value:
-            span.set_attribute(name, redact_query(value))
-        elif name == "url.query" and isinstance(value, str) and value:
-            span.set_attribute(name, redact_query("?" + value)[1:])
+        if not isinstance(value, str):
+            continue
+        scrubbed = _scrubbed_url_value(name, value)
+        if scrubbed != value:
+            span.set_attribute(name, scrubbed)
 
 
 async def _scrub_url_attributes_async(span: Any, request: Any = None) -> None:
@@ -441,7 +459,8 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 
 __all__ = [
-    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
+    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "FASTAPI_TELEMETRY", "REDACTED",
+    "annotate_request", "build_provider",
     "error_type_only", "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
     "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "type_only_exporter",
     "with_tracing",

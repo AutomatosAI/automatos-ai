@@ -4,7 +4,7 @@
  *
  * Every action rides an endpoint or route that already exists:
  *   routine   → the agent page, or pause the heartbeat (PATCH /api/heartbeat/{agent}/toggle)
- *   task      → pause / cancel the scheduled task (PATCH /api/v1/scheduled-tasks/{id}/status)
+ *   task      → pause (resume, when paused) / cancel the scheduled task (PATCH /api/v1/scheduled-tasks/{id}/status)
  *   recipe    → the playbook in the Assignments hub
  *   mission   → the mission page
  *   task_due  → the board, with the card opened (?task_id=)
@@ -35,6 +35,11 @@ export function isDeadlineItem(item: Pick<ScheduleItem, 'type'>): boolean {
   return item.type === 'mission' || item.type === 'task_due'
 }
 
+/** A scheduled task the user paused (PRD-266 D27): it stays on the calendar, greyed. */
+export function isPausedItem(item: Pick<ScheduleItem, 'type' | 'paused'>): boolean {
+  return item.type === 'task' && item.paused === true
+}
+
 export function agentHref(agentId: number): string {
   return `/agents?agent=${agentId}`
 }
@@ -57,15 +62,17 @@ const routineActions: KindActions = (item, deps, openAgent) => {
   return [...(openAgent ? [openAgent] : []), ...pause]
 }
 
+/** A paused task offers Resume where an active one offers Pause; both can be cancelled. */
+function taskStatusActions(taskId: number, paused: boolean, deps: EventActionDeps): EventAction[] {
+  const toggle: EventAction = paused
+    ? { label: 'Resume', run: () => deps.setScheduledTaskStatus(taskId, 'active') }
+    : { label: 'Pause', run: () => deps.setScheduledTaskStatus(taskId, 'paused') }
+  return [toggle, { label: 'Cancel', tone: 'danger', run: () => deps.setScheduledTaskStatus(taskId, 'cancelled') }]
+}
+
 const taskActions: KindActions = (item, deps, openAgent) => {
   const taskId = item.scheduled_task_id
-  const own: EventAction[] =
-    taskId != null
-      ? [
-          { label: 'Pause', run: () => deps.setScheduledTaskStatus(taskId, 'paused') },
-          { label: 'Cancel', tone: 'danger', run: () => deps.setScheduledTaskStatus(taskId, 'cancelled') },
-        ]
-      : []
+  const own = taskId != null ? taskStatusActions(taskId, isPausedItem(item), deps) : []
   return [...own, ...(openAgent ? [openAgent] : [])]
 }
 

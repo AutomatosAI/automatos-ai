@@ -14,6 +14,24 @@ import {
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import type { BoardFilters } from '@/hooks/use-board-tasks'
 import { cn } from '@/lib/utils'
+import { FROM_SUGGESTIONS_LABEL } from './from-suggestions'
+
+/** "From suggestions", on or off; pressed, it keeps only the tickets a suggestion's Start filed. */
+export function FromSuggestionsToggle({ on, onChange }: { readonly on: boolean; readonly onChange: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={() => onChange(!on)}
+      className={cn(
+        'h-8 rounded-md border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        on ? 'border-foreground/40 bg-secondary text-foreground' : 'border-input bg-secondary/30 text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {FROM_SUGGESTIONS_LABEL}
+    </button>
+  )
+}
 
 interface BoardFiltersBarProps {
   filters: BoardFilters
@@ -82,6 +100,11 @@ export function BoardFiltersBar({
             <SelectItem value="task">Task</SelectItem>
           </SelectContent>
         </Select>
+
+        <FromSuggestionsToggle
+          on={Boolean(filters.from_suggestions)}
+          onChange={(on) => onFiltersChange({ ...filters, from_suggestions: on })}
+        />
 
         {/* Agent filter */}
         <Select

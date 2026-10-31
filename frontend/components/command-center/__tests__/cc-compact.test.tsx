@@ -76,7 +76,6 @@ vi.mock('../board-tab', () => ({ BoardTab: () => <div>board</div> }))
 vi.mock('../watchlist-tab', () => ({ WatchlistTab: () => <div>watchlist</div> }))
 vi.mock('../governance-tab', () => ({ GovernanceTab: () => <div>governance</div> }))
 vi.mock('../questions-tab', () => ({ QuestionsTab: () => <div>questions</div> }))
-vi.mock('@/components/onboarding/trial-balance-pill', () => ({ TrialBalancePill: () => <div /> }))
 vi.mock('@/components/onboarding/setup-checklist-card', () => ({ SetupChecklistCard: () => <div /> }))
 
 import { CommandCenterShell } from '../command-center-shell'

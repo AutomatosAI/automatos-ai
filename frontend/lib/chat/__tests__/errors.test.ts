@@ -26,9 +26,9 @@ describe('parseErrorFrame', () => {
 
 describe('errorFromDataPayload', () => {
   it('prefers error over message and accepts error_code', () => {
-    expect(errorFromDataPayload({ type: 'error', error: 'spent', error_code: 'trial_exhausted' })).toEqual({
+    expect(errorFromDataPayload({ type: 'error', error: 'spent', error_code: 'credits_exhausted' })).toEqual({
       message: 'spent',
-      code: 'trial_exhausted',
+      code: 'credits_exhausted',
     })
     expect(errorFromDataPayload({ type: 'error', message: 'm' })).toEqual({ message: 'm', code: null })
     expect(errorFromDataPayload(null)).toEqual({ message: FALLBACK_TURN_ERROR, code: null })

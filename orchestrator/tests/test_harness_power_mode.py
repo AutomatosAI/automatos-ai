@@ -8,11 +8,15 @@ three units under test:
      and writes the workspace setting via a fresh dict (JSONB mutation detection);
   2. ``coordinator_service._workspace_power_mode_default`` — the per-task read
      a Mission run uses to inherit the default, best-effort (never raises);
-  3. the HARNESS apply branch — ``power_mode_*`` prescriptions map onto the
-     action, and the action is registered as a platform tool.
+  3. the action's registration as a platform tool.
 
-Dummy POSTGRES_* + the apscheduler stub let the harness_service / coordinator
-import chains load without a real DB or the prod-only scheduler.
+The HARNESS apply branch that mapped ``power_mode_*`` prescriptions onto the action
+went with HARNESS's direct apply helper (PRD-263 US-048). In HARNESS's change-kind
+registry (services.harness_changes, US-049) power mode is a report kind, never
+applied: test_prd263_harness_changes_registry.py covers it.
+
+Dummy POSTGRES_* + the apscheduler stub let the coordinator import chain load
+without a real DB or the prod-only scheduler.
 """
 import asyncio
 import os
@@ -54,7 +58,6 @@ _install_fake_apscheduler()
 
 from modules.tools.discovery.handlers_power import set_power_mode  # noqa: E402
 from services.coordinator_service import _workspace_power_mode_default  # noqa: E402
-from services.harness_service import get_harness_service  # noqa: E402
 
 _WS = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -96,15 +99,6 @@ class _WSDB:
 
     def rollback(self):
         self.rolledback = True
-
-
-class _FakeExecutor:
-    def __init__(self):
-        self.calls = []
-
-    async def execute(self, name, params, caller_context=None):
-        self.calls.append((name, params))
-        return {"success": True}
 
 
 # --- the handler -----------------------------------------------------------
@@ -180,18 +174,6 @@ def test_workspace_default_best_effort_on_db_error():
 
     # Best-effort: a lookup failure degrades to the default, never fails the task.
     assert _workspace_power_mode_default(_WS, _BoomDB()) is None
-
-
-# --- the HARNESS apply branch ---------------------------------------------
-
-def test_power_mode_downgrade_maps_to_set_power_mode():
-    svc = get_harness_service()
-    ex = _FakeExecutor()
-    rx = {"change_type": "power_mode_downgrade", "target_id": None,
-          "proposed_value": {"power_mode": "light"}}
-    out = _run(svc._auto_apply_prescription(ex, rx))
-    assert out.get("success") is True
-    assert ex.calls == [("platform_set_power_mode", {"power_mode": "light"})]
 
 
 # --- registration ----------------------------------------------------------

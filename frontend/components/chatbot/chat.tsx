@@ -7,10 +7,10 @@ import { WORKSPACE_ROOT, canvasTitleFor, normalizeCodeRoot } from '@/components/
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useChatWithReceipts as useChat } from '@/lib/chat/use-chat-with-receipts' // PRD-256: + the turn's receipts
+import { useStudioChat as useChat } from '@/lib/chat/use-studio-chat' // PRD-256: + the turn's receipts; PRD-265: + the paused state on load
 import { usePageContext } from '@/lib/page-context'
 import { MessageWithReceipts as Message } from './message-with-receipts' // PRD-256: the receipts above the reply
-import { FencedMultimodalInput as MultimodalInput } from '@/components/ai-label/fenced-multimodal-input' // PRD-264: paused while the AI label is hidden
+import { MultimodalInput } from '@/components/proactive/composer-with-suggestion' // PRD-264: its box and controls pause while the AI label is hidden; voice never does. PRD-268: + the suggestion pinned above it in the Auto thread
 import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'
@@ -29,9 +29,9 @@ import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
 import { OnboardingConnectCards } from '@/components/onboarding/onboarding-connect-cards'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
-import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
-import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+// PRD-265: the paused code is credits-based. Chat keeps its local name until it is split under the code-shape limit.
+import { CREDITS_EXHAUSTED_CODE as TRIAL_EXHAUSTED_CODE } from '@/lib/credits'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -51,19 +51,18 @@ import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
 import { usePinnedAgents } from '@/hooks/use-pinned-agents'
 import { useAgents } from '@/hooks/use-agent-api'
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
-import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
+import { MissionSuggestionCard } from '@/components/proactive/mission-suggestion-with-presence' // PRD-268: the pinned suggestion hides while it is open
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
 // PRD-207 S5: Auto Live — the wave renders as the chat's ambient BACKGROUND
-// (alive only while someone speaks); LiveVoiceMode owns the call and feeds
-// presence up. The SSE lane also mounts here so voice/background messages
-// land live (chat_changed → the useChat merge listener).
+// (alive only while someone speaks). Theme voice: the call is the host voice
+// provider's (app/chat/layout.tsx); the Live chip (chat-mode-bar), the strip
+// (LiveVoiceMode) and the wave read it, and the spoken words reach the thread
+// through useChat (lib/chat/live-voice-turns.ts). The SSE lane also mounts here
+// so voice/background messages land live (chat_changed → the useChat merge listener).
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
 import { VoiceErrorBoundary } from '@/components/voice/VoiceErrorBoundary'
-import { PresenceOrb } from '@/components/voice/PresenceOrb'
-import type { VoiceLevels } from '@/hooks/use-retell-call'
-import type { OrbState } from '@/lib/voice/orb-state'
-import type { MutableRefObject } from 'react'
+import { HostPresenceOrb as PresenceOrb } from '@/components/voice/host-presence-orb' // theme voice: the wave reads the host voice provider
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -240,11 +239,6 @@ export function Chat({
 
   const [activeChatId, setActiveChatId] = useState(id)
 
-  // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
-  const [isLiveMode, setIsLiveMode] = useState(false)
-  // PRD-207: presence feed from the call → the ambient background wave.
-  const [voicePresence, setVoicePresence] = useState<OrbState>('idle')
-  const [voiceLevels, setVoiceLevels] = useState<MutableRefObject<VoiceLevels> | null>(null)
   // PRD-207 S6 (closing a PRD-205 gap): the chat page subscribes to the SSE
   // lane so chat_changed reaches the useChat merge listener HERE — not only
   // while Command Center happens to be open.
@@ -646,44 +640,6 @@ export function Chat({
     },
   })
 
-  // PRD-207 (Gerard: "same as old, she just talks it"): spoken words are
-  // upserted as REAL entries in the messages array — the identical render
-  // path as typed streaming. When chat_changed lands the persisted copies,
-  // the ephemeral voice-live entries are dropped and the server rows follow.
-  // MUST live below the useChat call: the dependency arrays read setMessages
-  // during render, so hoisting this above useChat is a first-render
-  // ReferenceError (TDZ) that takes down the whole chat page.
-  const handleLiveTurn = useCallback(
-    (turn: { userText: string; agentText: string }) => {
-      setMessages((prev) => {
-        const next = [...prev]
-        const upsert = (mid: string, role: 'user' | 'assistant', text: string) => {
-          if (!text) return
-          const idx = next.findIndex((m) => m.id === mid)
-          const entry = {
-            id: mid,
-            role,
-            content: text,
-            parts: [{ type: 'text', text }],
-          } as ChatMessage
-          if (idx >= 0) next[idx] = { ...next[idx], ...entry }
-          else next.push(entry)
-        }
-        upsert('voice-live-user', 'user', turn.userText)
-        upsert('voice-live-assistant', 'assistant', turn.agentText)
-        return next
-      })
-    },
-    [setMessages]
-  )
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const onPersisted = () =>
-      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('voice-live-')))
-    window.addEventListener('automatos:chat-changed', onPersisted)
-    return () => window.removeEventListener('automatos:chat-changed', onPersisted)
-  }, [setMessages])
-
   const regenerate = () => reload()
 
   // PRD-82A US-008: Handle /mission slash command + US-003: Mission mode intercept
@@ -1046,14 +1002,10 @@ export function Chat({
   // last send returned. Either owns the callout slot; the standalone power-up
   // card steps aside so the workspace never sees two credential cards at once.
   const trialExhausted =
-    workspace?.onboarding?.trial?.state === 'exhausted' ||
     errorCode === TRIAL_EXHAUSTED_CODE
 
   return (
     <>
-      {/* PRD-222 US-014: the trial balance pill — visible on the chat surface
-          while a trial is active/warned/exhausted, hidden once converted. */}
-      <TrialBalancePill className="absolute top-3 right-4 z-30" />
       {/* PRD-222 US-014: deterministic exhausted banner (embeds the power-up
           card, no model call). Renders on the exhausted snapshot OR the typed
           trial_exhausted error from the last send. */}
@@ -1351,8 +1303,6 @@ export function Chat({
               State intensity, envelopes, and the text-protecting vignette
               live INSIDE PresenceOrb; the wave sinks lower when the thread
               is on screen so words own the upper field. */}
-          <AnimatePresence>
-            {isLiveMode && voiceLevels && (
               <motion.div
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
@@ -1363,14 +1313,10 @@ export function Chat({
               >
                 <VoiceErrorBoundary>
                   <PresenceOrb
-                    state={voicePresence}
-                    levelsRef={voiceLevels}
                     horizon={showWelcomeCard ? 0.56 : 0.74}
                   />
                 </VoiceErrorBoundary>
               </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
@@ -1418,27 +1364,10 @@ export function Chat({
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
                 {/* PRD-207: the voice wave docks ON the message box — one
                     conversation surface, spoken or typed. */}
-                <AnimatePresence>
-                  {isLiveMode && (
                     <VoiceErrorBoundary>
                     <LiveVoiceMode
-                      chatId={hasSentMessage ? activeChatId : undefined}
-                      agentId={selectedAgentId}
-                      onChatId={(cid) => {
-                        setActiveChatId(cid)
-                        useChatSessionStore.getState().chatIdAssigned(cid)
-                      }}
-                      onLiveTurn={handleLiveTurn}
-                      onPresence={setVoicePresence}
-                      onLevelsRef={setVoiceLevels}
-                      onExit={() => {
-                        setIsLiveMode(false)
-                        setVoicePresence('ended')
-                      }}
                     />
                     </VoiceErrorBoundary>
-                  )}
-                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1491,8 +1420,6 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
-                    isLiveActive={isLiveMode}
-                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1605,27 +1532,10 @@ export function Chat({
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
                 {/* PRD-207: the voice wave docks ON the message box — one
                     conversation surface, spoken or typed. */}
-                <AnimatePresence>
-                  {isLiveMode && (
                     <VoiceErrorBoundary>
                     <LiveVoiceMode
-                      chatId={hasSentMessage ? activeChatId : undefined}
-                      agentId={selectedAgentId}
-                      onChatId={(cid) => {
-                        setActiveChatId(cid)
-                        useChatSessionStore.getState().chatIdAssigned(cid)
-                      }}
-                      onLiveTurn={handleLiveTurn}
-                      onPresence={setVoicePresence}
-                      onLevelsRef={setVoiceLevels}
-                      onExit={() => {
-                        setIsLiveMode(false)
-                        setVoicePresence('ended')
-                      }}
                     />
                     </VoiceErrorBoundary>
-                  )}
-                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1680,8 +1590,6 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
-                    isLiveActive={isLiveMode}
-                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}

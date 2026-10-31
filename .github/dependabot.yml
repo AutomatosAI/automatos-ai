@@ -20,8 +20,11 @@
 # files, and both recompile without uv's --overrides. They cannot update
 # services/agent-opt-worker/requirements.lock or the workspace worker's
 # requirements.lock and requirements-browser.lock (PRD-262 US-044), so those have
-# no entry here; the test lists each with its reason. Security alerts and security
-# updates for the npm and pip manifests are repository settings and stay on.
+# no entry here; the test lists each with its reason. The same goes for the API's
+# requirements.lock and requirements-dev.lock (PRD-262 US-022): an entry for
+# /orchestrator would bump requirements.in and leave the locks behind. Security
+# alerts and security updates for the npm and pip manifests are repository
+# settings and stay on.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -42,16 +45,15 @@ updates:
         patterns: ["*"]
         update-types: [major]
 
-  # Every directory that holds a tracked Dockerfile. `/` is Dockerfile.backend
-  # until US-018 deletes it (then `/` leaves this list).
+  # Every directory that holds a tracked Dockerfile.
   - package-ecosystem: docker
     directories:
-      - /
       - /.oss-scanner
       - /frontend
       - /orchestrator
       - /services/agent-opt-worker
       - /services/media-render
+      - /services/voice-tts
       - /services/workspace-worker
     schedule:
       interval: weekly
@@ -68,8 +70,10 @@ updates:
       base-images:
         patterns: ["*"]
 
-  # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer, gotenberg and
-  # searxng. The published-images override's own images follow AUTOMATOS_IMAGE_TAG.
+  # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer and searxng.
+  # This repository's own app images are not third-party pins: docker-compose.yml's
+  # follow AUTOMATOS_IMAGE_TAG, and docker-compose.dev.yml's automatos-*:dev are
+  # local build names that are never pulled (PRD-262 US-036), so both are ignored.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
@@ -83,6 +87,8 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "automatos-*"
+      - dependency-name: "ghcr.io/automatosai/automatos-*"
     groups:
       compose-images:
         patterns: ["*"]
@@ -123,4 +129,23 @@ updates:
       include: scope
     groups:
       media-render-js:
+        patterns: ["*"]
+
+  # voice-tts's Python dependencies (Auto's server voice). As for media-render, the pip
+  # updater moves the pins in requirements.in and requirements-test.txt and cannot
+  # rewrite requirements.lock, so its pull request fails
+  # orchestrator/tests/test_voice_tts_image.py, which holds the lock to requirements.in,
+  # until the lock is compiled again with the command at the top of requirements.in.
+  - package-ecosystem: pip
+    directory: /services/voice-tts
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      voice-tts-python:
         patterns: ["*"]

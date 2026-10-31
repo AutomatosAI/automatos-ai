@@ -21,11 +21,11 @@ export interface SearchResult {
   keywords?: string
 }
 
-/** PRD-261 A-02c: a style ⌘K switches to (Classic, Studio, a builtin or installed theme). */
+/** PRD-261 A-02c: a style ⌘K switches to (Classic, Studio or an installed theme). */
 export interface ThemeSearchResult {
   id: string
   label: string
-  /** 'Private · not reviewed' for an install nobody reviewed. */
+  /** The entry's note (choice-sync.ts themeChoiceEntries): 'Private · opt in first', 'Signed by Automatos' or 'Private · not reviewed'. */
   description?: string
   style: UiStyle
 }

@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { useMissions, type MissionFilters } from '@/hooks/use-missions-api'
 import { useWorkspace } from '@/components/workspace-provider'
 import type { RunState } from '@/types/missions'
+import { needsYouFirst } from '@/lib/proactive/row-status'
 
 // ── Filter config ─────────────────────────────────────────────
 
@@ -129,7 +130,7 @@ export function MissionList({ emptyAction }: MissionListProps = {}) {
       {/* Mission grid */}
       {!isLoading && filtered.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((mission, i) => (
+          {needsYouFirst(filtered).map((mission, i) => (
             <MissionCard key={mission.id} mission={mission} index={i} />
           ))}
         </div>

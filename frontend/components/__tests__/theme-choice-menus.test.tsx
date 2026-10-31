@@ -1,11 +1,13 @@
 /**
  * PRD-261 A-02c — installed themes in the theme menu and ⌘K, and every pick stored on the server.
  *
+ * - Both lists are Classic, Studio and the workspace's installs, nothing else: no theme is compiled
+ *   into the app (A-19f1). The menu's Tone items follow its Style items.
  * - An install the workspace has joins both lists as theme:install:<id>, labelled "Private · not
  *   reviewed" when nobody reviewed it; choosing it stores the choice (its id), then reloads.
- * - Choosing builtin Play sends 'builtin:play' and applies it at once.
- * - D1-c (Gerard, 18 Oct): once automatos/play is installed, builtin Play leaves the menu and ⌘K,
- *   except for a member still on it (A-18 moves them).
+ * - Choosing Classic or Studio applies it at once (the <html> class and the cookie, never the tone)
+ *   and stores 'classic' or 'studio'.
+ * - Play's package installed is one entry, its install, like any other theme.
  *
  * The installs reach the style context the way ThemeChoiceSync hands them over (setInstalledThemes).
  */
@@ -36,7 +38,6 @@ import { GlobalSearch } from '@/components/shared/global-search'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
-import { BUILTIN_PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { forgetChecksInThisDocumentForTests } from '@/lib/theme-host/choice-sync'
 import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
@@ -44,6 +45,7 @@ import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS
 const GARDEN_ID = '11111111-1111-4111-8111-111111111111'
 const PLAY_PACKAGE_INSTALL_ID = '44444444-4444-4444-8444-444444444444'
 const PRIVATE_NOT_REVIEWED = 'Private · not reviewed'
+const TONES = ['Light', 'Dark', 'System']
 
 function installRow(overrides: Partial<InstalledTheme>): InstalledTheme {
   return {
@@ -51,7 +53,7 @@ function installRow(overrides: Partial<InstalledTheme>): InstalledTheme {
     version: '1.0.0', ownerType: 'workspace', reviewed: false, private: true, isDefault: false,
     pinnedVersion: null, previousPackageId: null, pendingPackageId: null, pendingVersion: null,
     installedAt: null, optIn: { required: false, wording: '', packageId: '' }, revoked: null, needsUpdate: false,
-    ...overrides,
+    signature: { state: 'unsigned', keyId: null }, ...overrides,
   }
 }
 
@@ -109,7 +111,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   forgetChecksInThisDocumentForTests()
-  document.documentElement.classList.remove(STUDIO_HTML_CLASS, BUILTIN_PLAY_HTML_CLASS)
+  tone.setTheme.mockClear()
+  document.documentElement.classList.remove(STUDIO_HTML_CLASS)
   document.cookie = `${UI_STYLE_COOKIE}=; Max-Age=0; Path=/`
   window.localStorage.clear()
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -122,13 +125,20 @@ afterEach(() => {
 })
 
 describe('the theme menu (A-02c)', () => {
-  it('lists an installed theme after the builtin ones, noted when nobody reviewed it', async () => {
+  it('lists an installed theme after Classic and Studio, noted when nobody reviewed it, then the tones', async () => {
     renderWith(<ThemeToggle />, [GARDEN])
     const menu = await openMenu()
     const garden = within(menu).getByRole('menuitemradio', { name: /Garden/ })
     expect(garden).toHaveTextContent(PRIVATE_NOT_REVIEWED)
     const names = within(menu).getAllByRole('menuitemradio').map((item) => item.textContent)
-    expect(names.slice(0, 3)).toEqual(['Classic', 'Studio', 'Play'])
+    expect(names).toEqual(['Classic', 'Studio', `Garden${PRIVATE_NOT_REVIEWED}`, ...TONES])
+  })
+
+  it('lists only Classic and Studio, then the tones, when the workspace has no install', async () => {
+    renderWith(<ThemeToggle />, [])
+    const menu = await openMenu()
+    const names = within(menu).getAllByRole('menuitemradio').map((item) => item.textContent)
+    expect(names).toEqual(['Classic', 'Studio', ...TONES])
   })
 
   it('choosing an installed theme stores its id, then reloads into it', async () => {
@@ -142,18 +152,27 @@ describe('the theme menu (A-02c)', () => {
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=theme:install:${GARDEN_ID}`)
   })
 
-  it("choosing builtin Play sends 'builtin:play' and applies it at once", async () => {
+  it('choosing Classic, then Studio, applies each at once, never the tone, and stores it', async () => {
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    document.documentElement.classList.add(STUDIO_HTML_CLASS)
     const reload = renderWith(<ThemeToggle />, [])
     const menu = await openMenu()
-    act(() => { fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Play' })) })
-    expect(document.documentElement.classList.contains(BUILTIN_PLAY_HTML_CLASS)).toBe(true)
+    act(() => { fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Classic' })) })
+    expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(false)
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
     await settle()
-    expect(put).toHaveBeenCalledWith('builtin:play')
+    expect(put).toHaveBeenLastCalledWith('classic')
+    expect(within(await openMenu()).getByRole('menuitemradio', { name: 'Classic' })).toHaveAttribute('aria-checked', 'true')
+    act(() => { fireEvent.click(screen.getByRole('menuitemradio', { name: 'Studio' })) })
+    expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(true)
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
+    await settle()
+    expect(put).toHaveBeenLastCalledWith('studio')
     expect(reload).not.toHaveBeenCalled()
+    expect(tone.setTheme).not.toHaveBeenCalled()
   })
 
-  it('D1-c: with automatos/play installed, the one Play entry is the installed one', async () => {
+  it("lists Play's package, installed, once: its install, whose id a pick stores", async () => {
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
     renderWith(<ThemeToggle />, [INSTALLED_PLAY])
     const menu = await openMenu()
@@ -162,14 +181,6 @@ describe('the theme menu (A-02c)', () => {
     act(() => { fireEvent.click(plays[0]) })
     await settle()
     expect(put).toHaveBeenCalledWith(PLAY_PACKAGE_INSTALL_ID)
-  })
-
-  it('D1-c: a member still on builtin Play keeps its entry, checked and noted "Built in"', async () => {
-    renderWith(<ThemeToggle />, [INSTALLED_PLAY], BUILTIN_PLAY_STYLE)
-    const menu = await openMenu()
-    const builtin = within(menu).getByRole('menuitemradio', { name: /Built in/ })
-    expect(builtin).toHaveAttribute('aria-checked', 'true')
-    expect(within(menu).getAllByRole('menuitemradio', { name: /Play/ })).toHaveLength(2)
   })
 })
 
@@ -186,25 +197,37 @@ describe('⌘K (A-02c)', () => {
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it("'theme' lists every style: Classic, Studio, builtin Play and the installs", async () => {
+  it("'theme' lists every style: Classic, Studio and the installs, nothing else", async () => {
     renderWith(<GlobalSearch />, [GARDEN])
     const dialog = await searchFor('theme')
     await within(dialog).findByText('Garden')
     const listed = themeItems(dialog).map((item) => item.textContent)
-    expect(listed).toHaveLength(4)
-    expect(listed).toEqual(expect.arrayContaining(['Classic', 'Studio', 'Play', `Garden${PRIVATE_NOT_REVIEWED}`]))
+    expect(listed).toHaveLength(3)
+    expect(listed).toEqual(expect.arrayContaining(['Classic', 'Studio', `Garden${PRIVATE_NOT_REVIEWED}`]))
   })
 
-  it("choosing builtin Play from ⌘K sends 'builtin:play'", async () => {
-    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+  it("'theme' lists only Classic and Studio when the workspace has no install", async () => {
     renderWith(<GlobalSearch />, [])
-    const dialog = await searchFor('play')
-    fireEvent.click(await within(dialog).findByText('Play'))
-    await settle()
-    expect(put).toHaveBeenCalledWith('builtin:play')
+    const dialog = await searchFor('theme')
+    await within(dialog).findByText('Classic')
+    const listed = themeItems(dialog).map((item) => item.textContent)
+    expect(listed).toHaveLength(2)
+    expect(listed).toEqual(expect.arrayContaining(['Classic', 'Studio']))
   })
 
-  it('D1-c: with automatos/play installed, ⌘K offers only the installed Play', async () => {
+  it("choosing Classic from ⌘K applies it at once and stores 'classic'", async () => {
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    document.documentElement.classList.add(STUDIO_HTML_CLASS)
+    const reload = renderWith(<GlobalSearch />, [])
+    const dialog = await searchFor('classic')
+    fireEvent.click(await within(dialog).findByText('Classic'))
+    expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(false)
+    await settle()
+    expect(put).toHaveBeenCalledWith('classic')
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it("⌘K offers Play's package, installed, once: its install", async () => {
     const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
     renderWith(<GlobalSearch />, [INSTALLED_PLAY])
     const dialog = await searchFor('play')

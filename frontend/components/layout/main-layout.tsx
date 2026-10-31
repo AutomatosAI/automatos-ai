@@ -7,12 +7,12 @@ import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
-import { StudioSidebar } from './studio-sidebar'
+import { StudioSidebar, type StudioSidebarProps } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
-import { ThemeSlotScope } from '@/components/theme-host/theme-slot-registrations'
+import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
 
@@ -63,6 +63,15 @@ function useStudioSidebarCollapsed(): [boolean, () => void] {
   return [collapsed, toggle]
 }
 
+/**
+ * Studio's rail, its workspace card naming the current workspace. With no workspace (none loaded
+ * yet, or no provider) or a blank name, the card keeps its default.
+ */
+function StudioRail(props: Omit<StudioSidebarProps, 'workspaceName'>) {
+  const workspaceName = useWorkspaceOptional()?.workspace?.name?.trim() || undefined
+  return <StudioSidebar {...props} workspaceName={workspaceName} />
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Studio shell — render the CD round-4 chrome (sidebar + header)
 // when .studio is active and we're on desktop. Mobile keeps the existing
@@ -76,7 +85,7 @@ function StudioDesktopShell({ children, fullBleed, autoWidget }: DesktopShellPro
   // so the inset comes out of its height.
   return (
     <div className="sh-shell safe-bottom">
-      <StudioSidebar collapsed={collapsed} onToggle={toggleCollapsed} />
+      <StudioRail collapsed={collapsed} onToggle={toggleCollapsed} />
       <div className="sh-main">
         <StudioHeader />
         {fullBleed ? (
@@ -122,7 +131,6 @@ const PAGE_BY_ROUTE: ReadonlyArray<readonly [string, string]> = [
   ['/settings', 'settings'],
   ['/team', 'team'],
   ['/chat', 'chat'],
-  ['/conversations', 'chat'],
   ['/x/conversations', 'chat'],
   ['/looks', 'looks'],
 ]
@@ -193,7 +201,7 @@ function ClassicShell({ children, fullBleed, autoWidget, isMobileLayout, isStudi
             }
           >
             {isStudio ? (
-              <StudioSidebar />
+              <StudioRail />
             ) : (
               <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
             )}
@@ -232,6 +240,9 @@ function ClassicShell({ children, fullBleed, autoWidget, isMobileLayout, isStudi
 }
 
 export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
+  // Known on a browser mount's first render (false on the server and while hydrating): a client
+  // navigation on a phone never takes the desktop branch below for a render, where the theme host
+  // would hand an installed theme's frame to ThemeFrameSlot (M69).
   const isMobileLayout = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const themeLayout = useThemeLayout()
@@ -243,11 +254,11 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   )
 
   // PRD-260 D7, PRD-261 A-04b: under a theme, from its entry's minWidth up, the theme's frame
-  // (frame@1) draws through ThemeFrameSlot, a builtin theme's handed to it by ThemeSlotScope and an
-  // installed theme's by the theme host; below it, the fallback chrome as for Studio. Under a theme
-  // while the width isn't known (the server, hydration), nothing: a page mounted in one chrome and
-  // again in the other runs its effects twice (P260-FX-25, M69). ThemeFrameSlot draws nothing
-  // while the host loads an installed theme, for the same reason.
+  // (frame@1) draws through ThemeFrameSlot, handed to it by the theme host; below it, the fallback
+  // chrome as for Studio. Under a theme while the width isn't known (the server, hydration),
+  // nothing: a page mounted in one chrome and again in the other runs its effects twice
+  // (P260-FX-25, M69). ThemeFrameSlot draws nothing while the host loads an installed theme, for
+  // the same reason.
   if (themeLayout === 'pending') return null
 
   const studioDesktop = isStudio && !isMobileLayout
@@ -261,10 +272,8 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   if (themeLayout !== 'theme' && !studioDesktop) return chrome
 
   return (
-    <ThemeSlotScope>
-      <ThemeFrameSlot fallback={chrome} fullBleed={fullBleed} autoWidget={autoWidget}>
-        {children}
-      </ThemeFrameSlot>
-    </ThemeSlotScope>
+    <ThemeFrameSlot fallback={chrome} fullBleed={fullBleed} autoWidget={autoWidget}>
+      {children}
+    </ThemeFrameSlot>
   )
 }

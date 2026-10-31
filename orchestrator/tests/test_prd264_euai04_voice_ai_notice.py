@@ -1,17 +1,21 @@
-"""PRD-264 EUAI-04 — Auto Live says it is an AI at the start of the call and reminds during it.
+"""PRD-264 EUAI-04 — Auto Live says it is an AI at the start of the call (and reminds only when asked to).
 
-EU AI Act Art. 50(1), Guidelines ¶37: a voice says in words, at the start,
-that it is an AI, and reminds in longer calls.
+EU AI Act Art. 50(1): a voice says in words, at the start, that it is an AI.
+The product owner's policy (23 Oct 2026, a deliberate change from the first
+PRD-264 build): the spoken notice is once per call. ``VOICE_AI_REMINDER_MINUTES``
+defaults to 0, and 0 or less never reminds; the greeting is always spoken. A
+deployment that sets it above 0 gets the Guidelines ¶37 reminders below.
 
 * The begin frame (response 0) carries ``VOICE_AI_GREETING`` (default "Hi,
   this is Auto, your AI assistant."). Retell speaks it as the opening line,
   so it is never empty, and a configured greeting without the AI term is
   never spoken.
-* After an automatic reconnect (a new socket for a call that already had one,
-  marked in Redis) the next response opens with "Just so you know, I'm an AI
-  assistant."
-* With a fake clock past ``VOICE_AI_REMINDER_MINUTES`` the next response opens
-  with the reminder, once.
+* With the shipped default (0) no response ever opens with the reminder: not
+  after a reconnect, not after a long call.
+* With reminders on: after an automatic reconnect (a new socket for a call that
+  already had one, marked in Redis) the next response opens with "Just so you
+  know, I'm an AI assistant."; with a fake clock past
+  ``VOICE_AI_REMINDER_MINUTES`` the next response opens with it, once.
 
 The route (``api/voice_retell.py``) builds the greeting and the reminder in
 ``modules/policy/ai_disclosure.py`` and lends them to the socket through
@@ -27,6 +31,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import dataclasses
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -54,11 +59,16 @@ def edition(request, monkeypatch):
     return request.param
 
 
+# The reminder cases run with reminders on, at the interval the first PRD-264 build shipped.
+REMINDERS_ON_MINUTES = 10.0
+
+
 @pytest.fixture(autouse=True)
 def voice_settings(monkeypatch):
-    """The shipped defaults, and no slow-turn ack, so every frame here is ours."""
+    """The shipped greeting, reminders on (each test of the default turns them off), and no
+    slow-turn ack, so every frame here is ours."""
     monkeypatch.setattr(app_config, "VOICE_AI_GREETING", DEFAULT_GREETING)
-    monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", 10.0)
+    monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", REMINDERS_ON_MINUTES)
     monkeypatch.setattr(app_config, "VOICE_LIVE_LANGUAGE", "en-GB")
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0)
 
@@ -365,15 +375,43 @@ def test_the_interval_follows_the_setting(monkeypatch):
     assert _contents(ws, 1)[0].startswith(REMINDER)
 
 
-def test_the_reminder_rule_never_turns_off(monkeypatch):
+def test_the_reminder_rule_with_reminders_on():
     due = ai_notice.reminder_due
+    assert ai_notice.reminders_on() is True
     assert due(reconnected=True, last_notice_at=T0, now=T0) is True
     assert due(reconnected=False, last_notice_at=T0, now=T0 + 599) is False
     assert due(reconnected=False, last_notice_at=T0, now=T0 + 600) is True
-    # 0 (or less) is not an off switch: every response reminds
-    for minutes in (0.0, -1.0):
-        monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", minutes)
-        assert due(reconnected=False, last_notice_at=T0, now=T0) is True
+
+
+# ---------------------------------------------------------------------------
+# The shipped default: the greeting is the call's one notice (policy, 23 Oct 2026)
+# ---------------------------------------------------------------------------
+
+def test_the_shipped_default_is_zero():
+    """The class default, as an unset environment leaves it (the autouse fixture sets the instance's)."""
+    shipped = float(os.environ.get("VOICE_AI_REMINDER_MINUTES", "0"))
+    assert type(app_config).VOICE_AI_REMINDER_MINUTES == shipped
+
+
+@pytest.mark.parametrize("minutes", (0.0, -1.0))
+def test_zero_or_less_never_reminds(monkeypatch, minutes):
+    monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", minutes)
+    due = ai_notice.reminder_due
+    assert ai_notice.reminders_on() is False
+    assert due(reconnected=True, last_notice_at=T0, now=T0) is False
+    assert due(reconnected=False, last_notice_at=T0, now=T0 + 60 * MINUTE) is False
+
+
+def test_with_the_default_a_long_call_and_a_reconnect_hear_only_the_greeting(edition, monkeypatch):
+    monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", 0.0)
+    clock = Clock(T0)
+    script = [CALL_DETAILS, _turn(1), clock.advance(30 * MINUTE), _turn(2)]
+    ws = _run_call(script, clock=clock, socket_reconnected=_reconnect_says(True))
+
+    assert _begin(ws)["content"] == DEFAULT_GREETING, "the greeting stays: Auto still speaks first and says it is an AI"
+    assert _contents(ws, 1) == ["answer 1", ""]
+    assert _contents(ws, 2) == ["answer 2", ""]
+    assert not [m for m in ws.sent if str(m.get("content", "")).startswith(REMINDER)]
 
 
 # ---------------------------------------------------------------------------

@@ -14,8 +14,10 @@ ROSTER_IN_ERROR = 20
 
 
 def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
-    """Resolve agent by ID or name within a workspace. Returns (agent, error_dict)."""
+    """Resolve agent by ID or name within a workspace. Returns (agent, error_dict). A name is
+    read by agent_binding.one_named (N17-8): a name several agents carry is refused naming them."""
     from core.models import Agent
+    from modules.tools.discovery.agent_binding import one_named
 
     agent_id = params.get("agent_id")
     agent_name = params.get("agent_name")
@@ -24,37 +26,45 @@ def resolve_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]):
         return None, {"success": False, "error": "Provide agent_id or agent_name"}
 
     query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
+    asked = f"agent_id={agent_id!r}" if agent_id else f"agent_name={agent_name!r}"
     if agent_id:
         query = query.filter(Agent.id == agent_id)
     else:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
+        named_id, refusal = one_named(db, workspace_id, str(agent_name))
+        if refusal or named_id is None:
+            return None, refusal or _no_agent_matches(db, workspace_id, asked)
+        query = query.filter(Agent.id == named_id)
 
     agent = query.first()
     if not agent:
-        # Name the roster. Night 1: Auto passed a TICKET number as an agent id
-        # and got a bare "Agent not found" eight times in a row on T64 — with
-        # nothing in the message to tell it what a valid agent looks like, it
-        # simply tried again (F032).
-        roster = [
-            f"{a.id}:{a.name}"
-            for a in db.query(Agent)
-            .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
-            .order_by(Agent.id)
-            .limit(ROSTER_IN_ERROR)
-            .all()
-        ]
-        asked = f"agent_id={agent_id!r}" if agent_id else f"agent_name={agent_name!r}"
-        hint = (
-            f"No agent matches {asked} in this workspace. "
-            "Agent ids and TICKET ids are different numbering — if that number came "
-            "from a task, it is not an agent id. "
-        )
-        hint += f"This workspace's agents are: {', '.join(roster)}." if roster else (
-            "This workspace has no active agents."
-        )
-        return None, {"success": False, "error": hint}
-
+        return None, _no_agent_matches(db, workspace_id, asked)
     return agent, None
+
+
+def _no_agent_matches(db: Session, workspace_id: UUID, asked: str) -> Dict[str, Any]:
+    """The refusal of a call that names no agent here, with the roster. Night 1: Auto passed a
+    TICKET number as an agent id and got a bare "Agent not found" eight times in a row on T64:
+    with nothing in the message to tell it what a valid agent looks like, it simply tried
+    again (F032)."""
+    from core.models import Agent
+
+    roster = [
+        f"{a.id}:{a.name}"
+        for a in db.query(Agent)
+        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
+        .order_by(Agent.id)
+        .limit(ROSTER_IN_ERROR)
+        .all()
+    ]
+    hint = (
+        f"No agent matches {asked} in this workspace. "
+        "Agent ids and TICKET ids are different numbering — if that number came "
+        "from a task, it is not an agent id. "
+    )
+    hint += f"This workspace's agents are: {', '.join(roster)}." if roster else (
+        "This workspace has no active agents."
+    )
+    return {"success": False, "error": hint}
 
 
 def _connection(db: Session, workspace_id: UUID, app_name: str, said: str) -> Dict[str, Any]:

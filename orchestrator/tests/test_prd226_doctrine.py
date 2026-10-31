@@ -106,15 +106,20 @@ def _skill_doctrine_section() -> str:
 def test_substantive_doctrine_consistent_across_auto_facing_homes():
     """AC3: ask-length, lane names, and awareness tools must read consistently
     across the skill's §17 and MANAGER_DOCTRINE_BLOCK — not just the nine
-    titles. A silent drift in either Auto-facing home fails CI."""
+    titles. A silent drift in either Auto-facing home fails CI.
+
+    PRD-263 US-066: the lanes are the router's (consumers/chatbot/auto.py: respond,
+    assign, mission). PRD-256 removed DELEGATE (a specialist answering the chat), so
+    RESPOND replaces it in both homes and DELEGATE must not come back."""
     section = _skill_doctrine_section()
     block = seed_mod.MANAGER_DOCTRINE_BLOCK
     for home_name, home in (("skill §17", section), ("doctrine block", block)):
         # point 7 ask-length ceiling — the value that drifted ("short" vs "≤ ~700")
         assert "700" in home, f"{home_name} lost the ~700-char ask ceiling (point 7)"
         # point 2 — the three lanes, named
-        for lane in ("DELEGATE", "ASSIGN", "MISSION"):
+        for lane in ("RESPOND", "ASSIGN", "MISSION"):
             assert lane in home, f"{home_name} missing lane {lane!r} (point 2)"
+        assert "DELEGATE" not in home, f"{home_name} still names the removed DELEGATE lane (point 2)"
         # point 1 — the awareness tool names
         for tool in (
             "platform_board_summary",
@@ -225,12 +230,25 @@ def _boot_phase_1_body() -> str:
 
 def test_boot_phase_invokes_sync_auto_personas():
     """AC1: a NON-test production path runs the backfill when Auto rows already
-    exist. Fails if the boot wiring is ever removed (reachability regression)."""
+    exist. Fails if the boot wiring is ever removed (reachability regression).
+
+    PRD-262 US-031: the leader's seed block moved to core/seeds/leader_stage.py, which
+    _boot_phase_1_core runs as the boot leader; a new doctrine is a change to
+    seed_auto_agent.py, which the leader stage's fingerprint hashes."""
+    import inspect
+
+    from core.seeds import fingerprint, leader_stage
+
     body = _boot_phase_1_body()
-    assert "sync_auto_personas" in body, (
-        "_boot_phase_1_core no longer invokes sync_auto_personas — the doctrine "
+    assert body.index("if not is_leader") < body.index("run_leader_seeds()"), (
+        "_boot_phase_1_core no longer runs the leader's seeds — the doctrine "
         "backfill is unreachable for existing workspaces again"
     )
+    sections = [inspect.getsource(section) for _name, section in leader_stage.SECTIONS]
+    assert any("sync_auto_personas(db)" in source for source in sections), (
+        "the leader stage no longer invokes sync_auto_personas"
+    )
+    assert "core/seeds" in fingerprint.INPUT_TREES, "a doctrine change must change the leader's fingerprint"
 
 
 def test_backfill_reaches_pre_existing_alembic_row_via_real_caller():

@@ -24,6 +24,7 @@ import { missionHref } from '@/lib/ticket-links'
 import { ticketCalled } from '@/lib/ticket-number'
 import type { BoardTask } from '@/types/board'
 import { canAssign, canCancel, isMissionTicket } from './ticket-actions'
+import { toastAssignmentWarning } from './assignment-warning'
 
 export interface AgentChoice {
   id: number
@@ -46,7 +47,10 @@ export function useTicketActions(task: BoardTask) {
   const cancel = useCancelTask()
   const assignTo = (agent: AgentChoice) =>
     update.mutate({ taskId: task.id, payload: { assigned_agent_id: agent.id } }, {
-      onSuccess: () => toast.success(`${ticketCalled(task, true)} is assigned to ${agent.name}.`),
+      onSuccess: (answer) => {
+        toast.success(`${ticketCalled(task, true)} is assigned to ${agent.name}.`)
+        toastAssignmentWarning(answer)  // PRD-256 F430: what a CLI-session agent cannot call
+      },
       onError: (err) => toast.error(failure(err, 'Could not assign the ticket')),
     })
   const cancelIt = () =>

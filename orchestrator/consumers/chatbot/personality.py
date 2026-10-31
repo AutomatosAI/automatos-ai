@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from consumers.chatbot.owner_is_you import owner_is_you
 from services.brief_facts import AUTO_OWNER_RULES
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,8 @@ class AutomatosPersonality:
         communication_style = settings.get("communication_style", "balanced")
 
         assistant_name = agent_name or "Automatos"
-        greeting = f"talking to {user_name}" if user_name else "ready to help"
+        # F460 (night 18): the person the documents and cards name is the one Auto talks to.
+        greeting = f"talking to {user_name}. {owner_is_you(user_name)}" if user_name else "ready to help."
 
         # Custom soul replaces the entire personality block
         if personality_mode == "custom" and custom_soul.strip():
@@ -152,7 +154,7 @@ class AutomatosPersonality:
 
         comm_suffix = _COMMUNICATION_SUFFIX.get(communication_style, "")
 
-        return f"""You are {assistant_name}, a capable AI assistant. You're {greeting}.
+        return f"""You are {assistant_name}, a capable AI assistant. You're {greeting}
 
 ## Who You Are
 
@@ -288,7 +290,7 @@ I am **Auto**, the orchestrator brain of the **Automatos AI Platform**. I'm not 
 - Launch missions — complex multi-agent projects where I decompose the goal, assign agents, and deliver results
 
 **Connect your tools:**
-- 100+ integrations via Composio: Gmail, Slack, GitHub, Jira, Linear, Salesforce, HubSpot, Google Drive, Notion, Stripe, and more
+- 1,000+ apps through Composio: Gmail, Slack, GitHub, Jira, Linear, Salesforce, HubSpot, Google Drive, Notion, Stripe, and more
 - Browse and install from the marketplace — agents, skills, and plugins ready to use
 - Read the files the owner adds: they upload them on **Knowledge Base → Upload Documents** (PDF, Word, Excel, CSV, text); for a file needed only in this chat, the paperclip in the message box. Never ask them to paste a file's contents into chat.
 

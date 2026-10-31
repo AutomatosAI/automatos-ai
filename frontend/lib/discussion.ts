@@ -55,18 +55,35 @@ export function discussionLabel(discussion: Pick<Discussion, 'number' | 'ticketI
   return `ticket ${discussion.number ?? discussion.ticketId}`
 }
 
+/** An installed theme's own chat on screen (components/chatbot/discussion-bar.tsx), by the theme's
+ * name (its theme.json `name`, from the active theme's registry entry); null when there is none to show. */
+export interface ThemeChatOnScreen {
+  readonly themeName: string | null
+}
+
+/** Where the hint says the chat is when the theme's name is unknown. */
+const UNNAMED_THEME_CHAT = "this theme's chat"
+
+/** "Play's chat" under Play, "HUD's chat" under HUD; the neutral words without a name. */
+function themeChatPlace(themeName: string | null): string {
+  const name = themeName?.trim()
+  return name ? `${name}'s chat` : UNNAMED_THEME_CHAT
+}
+
 /** The line under the bar on an agent's ticket: the chat answers as Auto, so it says how to
- * ask the ticket's agent instead. Play's chat has no agent picker (PRD-260 M67; a picker there
- * is decision F3), so under it the way is Studio. Null on a mission's ticket or with no agent. */
+ * ask the ticket's agent instead. `themeChat`: an installed theme's own chat is on screen, or null
+ * for the core's. A theme's message box has no agent picker (installed Play's, PRD-260 M67; a
+ * picker there is decision F3), so the way there is Studio. The words are M67's, naming the active
+ * theme's chat. Null on a mission's ticket or with no agent. */
 export function discussionHint(
   discussion: Pick<Discussion, 'agentName' | 'missionId'>,
-  inPlayChat: boolean,
+  themeChat: ThemeChatOnScreen | null,
 ): string | null {
   const agent = discussion.agentName
   if (!agent || discussion.missionId) return null
-  return inPlayChat
-    ? `You are talking to Auto in Play's chat. To ask ${agent}, switch to Studio from the theme menu.`
-    : `You are talking to Auto. To ask ${agent} instead, pick them in the message box.`
+  if (!themeChat) return `You are talking to Auto. To ask ${agent} instead, pick them in the message box.`
+  const place = themeChatPlace(themeChat.themeName)
+  return `You are talking to Auto in ${place}. To ask ${agent}, switch to Studio from the theme menu.`
 }
 
 // The brief Auto proposes comes in one fenced block (services/page_context.py).

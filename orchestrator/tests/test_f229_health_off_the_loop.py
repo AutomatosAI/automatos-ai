@@ -6,34 +6,43 @@ main.py ``health_check`` → ``psutil.cpu_percent(interval=0.1)`` → ``cpu_time
 database probe on the loop, which fed a 99 s /health and scheduler slips of up to 218 s.
 
 Pinned statically (importing main.py builds the whole app): the route is a plain ``def``,
-so FastAPI runs it in the threadpool (F105), and no CPU reading in it sleeps.
+so FastAPI runs it in the threadpool (F105), and no CPU reading in it sleeps. Its probes
+live in core/health_probe.py (F458); they are plain defs too.
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-MAIN = Path(__file__).resolve().parents[1] / "main.py"
+ORCH = Path(__file__).resolve().parents[1]
+MAIN = ORCH / "main.py"
+PROBES = ORCH / "core" / "health_probe.py"
 
 
-def _route(name: str) -> ast.AST:
-    tree = ast.parse(MAIN.read_text(encoding="utf-8"))
+def _function(path: Path, name: str) -> ast.AST:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     found = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
-    assert len(found) == 1, f"one {name} in main.py, found {len(found)}"
+    assert len(found) == 1, f"one {name} in {path.name}, found {len(found)}"
     return found[0]
 
 
 def test_the_health_route_is_a_plain_def():
-    route = _route("health_check")
+    route = _function(MAIN, "health_check")
     assert isinstance(route, ast.FunctionDef), "health_check must be a plain def: it probes the database and /proc synchronously"
     assert not any(isinstance(node, ast.Await) for node in ast.walk(route))
 
 
+def test_the_probes_are_plain_defs():
+    tree = ast.parse(PROBES.read_text(encoding="utf-8"))
+    assert not [node.name for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef)]
+    for name in ("database_status", "_select_one", "host_metrics"):
+        assert isinstance(_function(PROBES, name), ast.FunctionDef)
+
+
 def test_no_cpu_reading_in_the_health_route_sleeps():
-    # The route reads the CPU through _health_metrics (a plain def it calls).
-    assert isinstance(_route("_health_metrics"), ast.FunctionDef) and isinstance(_route("_health_database"), ast.FunctionDef)
+    # The route reads the CPU through health_probe.host_metrics (a plain def it calls).
     calls = [
-        node for node in ast.walk(_route("_health_metrics"))
+        node for node in ast.walk(_function(PROBES, "host_metrics"))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "cpu_percent"
     ]
     assert calls, "the route reports the CPU"

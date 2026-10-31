@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 
+import { isLiveVoiceEntry } from '@/lib/chat/live-voice-turns'
 import type { ChatMessage } from '@/types'
 
 /**
@@ -47,9 +48,12 @@ export interface StoppedReplies {
 
 const NONE_STOPPED: readonly StoppedReply[] = []
 
-/** The reply being written on this page (the newest message, a reply, while the chat streams), with the message before it. */
+/**
+ * The reply being written on this page (the newest message, a reply, while the chat streams), with the message before
+ * it. A voice session's words in progress sit after it (lib/chat/live-voice-turns.ts) and are never it.
+ */
 export function replyBeingWritten(chat: Omit<StoppableChat, 'stop'>): StoppedReply | null {
-  const { messages } = chat
+  const messages = chat.messages.filter((message) => !isLiveVoiceEntry(message))
   const reply = messages[messages.length - 1]
   const before = messages[messages.length - 2]
   if (chat.status !== 'streaming' || chat.awaitingReply || reply?.role !== 'assistant' || !before) return null

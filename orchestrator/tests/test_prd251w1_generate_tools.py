@@ -25,16 +25,21 @@ Pins:
   aspect ratio asked for, saves it to the same image store and registers an
   image Deliverable; no blog post is read or written. With a post_id it is the
   blog cover, attached as before, and no Deliverable is added. Every image
-  takes the cover model's one cost path.
+  takes the cover model's one cost path. PRD-264 EUAI-09: what the store keeps
+  is the model's image with the AI mark, its hash is recorded, and an image that
+  cannot be read to mark it is never kept.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
+import struct
 import sys
 import uuid
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -53,11 +58,13 @@ if str(_ORCH) not in sys.path:
 
 import httpx  # noqa: E402
 
+import core.generation_guard as generation_guard  # noqa: E402
 import core.llm  # noqa: E402
 import core.media_render_client as media_render_client  # noqa: E402
 import core.services.blog_service as blog_service  # noqa: E402
 import core.services.image_store as image_store  # noqa: E402
 import modules.documents.generation_service as generation_service  # noqa: E402
+import services.content_provenance as content_provenance  # noqa: E402
 import services.deliverable_service as deliverable_service  # noqa: E402
 import services.knowledge_flywheel as knowledge_flywheel  # noqa: E402
 from api import recipe_executor as rex  # noqa: E402
@@ -505,7 +512,18 @@ def test_structured_reads_only_a_json_object_or_array():
 # ---------------------------------------------------------------------------
 
 IMAGE_ID = "9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"
-IMAGE_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"pixels" * 20).decode("ascii")
+
+
+def _png_chunk(kind: bytes, body: bytes) -> bytes:
+    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+
+# A real 2x2 PNG: PRD-264 EUAI-09 marks the model's image chunk by chunk before it is kept.
+IMAGE_PNG = (b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+             + _png_chunk(b"IDAT", zlib.compress((b"\x00" + b"\x10\x20\x30" * 2) * 2))
+             + _png_chunk(b"IEND", b""))
+IMAGE_B64 = base64.b64encode(IMAGE_PNG).decode("ascii")
+AI_SOURCE_TYPE = b"http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
 IMAGE_MODEL = "image-model-under-test"
 BACKEND = "https://api.example"
 COST_PATH = {
@@ -536,7 +554,8 @@ class _ImageModel:
 
 @pytest.fixture
 def image_env(monkeypatch):
-    state = SimpleNamespace(model=_ImageModel(), saved=[], registered=[], blog=[])
+    state = SimpleNamespace(model=_ImageModel(), saved=[], registered=[], blog=[], recorded=[])
+    monkeypatch.setattr(content_provenance, "record_produced_file", lambda *row: state.recorded.append(row))
     monkeypatch.setattr(core.llm, "create_llm_manager", state.model.create)
     monkeypatch.setattr(type(config), "BLOG_COVER_MODEL", IMAGE_MODEL)
     monkeypatch.setattr(config, "BACKEND_URL", BACKEND)
@@ -591,7 +610,12 @@ def test_without_a_post_the_image_is_an_image_deliverable_and_no_blog_post_is_to
     # No blog post was opened, read or written; the session only read the workspace, for
     # its brand kit's style profile (PRD-251B US-B303).
     assert image_env.blog == [] and db.method_calls == [call.get(Workspace, WS)]
-    assert image_env.saved == [(IMAGE_B64, "image/png", str(WS))]
+    ((saved_b64, saved_mime, saved_ws),) = image_env.saved
+    assert (saved_mime, saved_ws) == ("image/png", str(WS))
+    # PRD-264 EUAI-09: what is kept is the model's image with the AI mark, and its hash is recorded.
+    saved = base64.b64decode(saved_b64)
+    assert saved != IMAGE_PNG and AI_SOURCE_TYPE in saved and saved.startswith(IMAGE_PNG[:33])
+    assert image_env.recorded == [(WS, hashlib.sha256(saved).hexdigest(), "image", "Automatos AI image generation")]
     (registered,) = image_env.registered
     assert registered == {
         "file_path": f"generated-images/{WS}/{IMAGE_ID}.png",
@@ -602,7 +626,7 @@ def test_without_a_post_the_image_is_an_image_deliverable_and_no_blog_post_is_to
         "artifact_type": "image",
         "storage_type": "s3",
         "file_type": "png",
-        "file_size_bytes": len(base64.b64decode(IMAGE_B64)),
+        "file_size_bytes": len(saved),
         "preview_url": f"/api/generated-images/{IMAGE_ID}",
         "preview_type": "image",
         "extra": {"image_id": IMAGE_ID, "prompt": "a lighthouse at dusk", "aspect_ratio": "4:5"},
@@ -677,7 +701,15 @@ def test_a_model_answer_without_an_image_saves_and_registers_nothing(image_env):
     image_env.model.content = "Sorry, I can only describe it."
     result = _image(MagicMock(), {"prompt": "x"})
     assert result == {"success": False, "error": "Image model did not return base64 image data — try a clearer prompt"}
-    assert image_env.saved == [] and image_env.registered == []
+    assert image_env.saved == [] and image_env.registered == [] and image_env.recorded == []
+
+
+def test_an_image_that_cannot_be_read_to_mark_it_is_never_kept(image_env):
+    """PRD-264 EUAI-09: a PNG cut short cannot carry the AI mark, so it is not saved unmarked."""
+    image_env.model.content = f"![image](data:image/png;base64,{base64.b64encode(IMAGE_PNG[:20]).decode()})"
+    result = _image(MagicMock(), {"prompt": "x"})
+    assert result == {"success": False, "error": "The image model returned an image that could not be read — try again"}
+    assert image_env.saved == [] and image_env.registered == [] and image_env.recorded == []
 
 
 def test_an_image_that_cannot_join_deliverables_says_where_it_was_saved(image_env, monkeypatch):
@@ -706,3 +738,26 @@ def test_the_image_key_is_where_the_store_saves_it():
     assert image_store.image_key("i-1", "image/jpeg", "ws-1") == "generated-images/ws-1/i-1.jpg"
     assert image_store.image_key("i-1", "image/unknown") == "generated-images/default/i-1.png"
     assert image_store.generated_image_path("i-1") == "/api/generated-images/i-1"
+
+
+def test_art5_a_refused_image_prompt_never_reaches_the_image_model(image_env, monkeypatch):
+    """PRD-264 ART5-1: the image tool's whole prompt (with a blog post, its title too) goes through the
+    generation guard before the image model; a refusal makes, saves and registers nothing."""
+    asked = []
+
+    async def read(request, workspace_id):
+        asked.append((request, workspace_id))
+        return {"sexual": True, "minor": False, "real_person": True}
+
+    monkeypatch.setattr(generation_guard, "read_answers", read)
+    db = MagicMock()
+    for params in ({"prompt": "a named actor, undressed", "aspect_ratio": "4:5"},
+                   {"prompt": "the founder, undressed", "post_id": str(uuid.uuid4())}):
+        assert _image(db, params) == {"success": False, "error": generation_guard.REFUSED_MESSAGE}
+
+    assert image_env.model.prompts == [] and image_env.saved == [] and image_env.registered == []
+    assert not [entry for entry in image_env.blog if entry[0] == "update"], "no cover attached"
+    assert [(request.path, workspace_id) for request, workspace_id in asked] == [("tools.image", WS)] * 2
+    (still, cover) = (request.texts[0] for request, _ in asked)
+    assert "a named actor, undressed" in still
+    assert "the founder, undressed" in cover and "RAG in production" in cover

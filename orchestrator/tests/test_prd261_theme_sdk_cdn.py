@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import stat
 import subprocess
 from typing import Dict, List
@@ -396,3 +397,11 @@ def test_readme_documents_the_install_line():
     readme = (_PACKAGE / "README.md").read_text(encoding="utf-8")
     assert _INSTALL_LINE in readme
     assert "scripts/theme-sdk/deploy-cdn.sh" in readme
+
+
+def test_readme_pins_the_version_the_package_publishes():
+    # PB-3: the exact-version install line names the version the CDN publishes, so a bump moves it too.
+    readme = (_PACKAGE / "README.md").read_text(encoding="utf-8")
+    version = json.loads((_PACKAGE / "package.json").read_text(encoding="utf-8"))["version"]
+    pinned = re.findall(r"widgets\.automatos\.app/theme-sdk/v(\d+\.\d+\.\d+)/theme-sdk\.tgz", readme)
+    assert pinned == [version]

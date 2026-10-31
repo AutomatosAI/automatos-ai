@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { NOT_IN_THIS_BUILD } from '../internal/stub'
+import { NOT_IN_THIS_BUILD, notInThisBuild } from '../internal/stub'
 
 interface SurfaceFile {
   readonly area: string
@@ -25,14 +25,30 @@ const SURFACE_DIR = path.join(SDK_DIR, 'surface')
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
+/**
+ * A story id: Phase A's (`A-13c`), the E area's (`E3b`, plan §2.6), theme voice's core items (`TV-C5`, the voice area)
+ * or a PRD's core story (`US-C21`, PRD-268's proactive area).
+ */
+const STORY_ID = /^(?:A-\d+[a-z]?|E\d+[a-z]?|TV-C\d+|US-C\d+)$/
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
-/** The stubbed areas whose W-A4P lane has landed since (A-12d, A-12e, A-12f, A-12g, A-12h). */
+/**
+ * The areas built after A-10a: W-A4 (A-11b, A-12a, A-13c), W-A4P (A-12d to A-12h), W-E3 (E3b, storage), theme voice
+ * (TV-C5, voice) and PRD-268 (US-C21, proactive).
+ */
 const BUILT_BY_LATER_LANES = [
+  'chat',
+  'deliverables',
+  'cards',
+  'looks',
+  'assets',
   'pages/agents',
   'pages/assignments',
   'pages/documents',
   'pages/playbooks',
   'pages/command-center',
+  'storage',
+  'voice',
+  'proactive',
 ]
 /** A stub's body: an area still calling it is not built. */
 const STUB_CALL = /\bnotInThisBuild\(/
@@ -54,6 +70,9 @@ const AREA_MODULES: Readonly<Record<string, ModuleLoader>> = {
   'pages/documents': () => import('../pages/documents'),
   'pages/playbooks': () => import('../pages/playbooks'),
   'pages/command-center': () => import('../pages/command-center'),
+  storage: () => import('../storage'),
+  voice: () => import('../voice'),
+  proactive: () => import('../proactive'),
 }
 
 const SURFACE_FILES = readdirSync(SURFACE_DIR).filter((file) => file.endsWith('.json')).sort()
@@ -99,10 +118,19 @@ describe('PRD-261 A-10a — the surface files', () => {
 
   it.each(SURFACES.map(areaCase))('%s lists sorted, distinct identifiers', (_area, surface) => {
     expect(STATUSES).toContain(surface.status)
-    expect(surface.story).toMatch(/^A-\d+[a-z]?$/)
+    expect(surface.story).toMatch(STORY_ID)
     expect(surface.names.length).toBeGreaterThan(0)
     expect(surface.names.filter((name) => !IDENTIFIER.test(name))).toEqual([])
     expect([...surface.names]).toEqual([...new Set(surface.names)].sort())
+  })
+
+  it("reads Phase A's story ids, the E area's, theme voice's and a PRD's core story's, and no other kind", () => {
+    expect(['A-10a', 'A-13c', 'E3b', 'E4', 'TV-C5', 'US-C21'].filter((story) => !STORY_ID.test(story))).toEqual([])
+    expect(
+      ['B-05a', 'e3b', 'A13c', 'E-3b', 'E3bc', '', 'C5', 'TV-5', 'tv-c5', 'TV-C5a', 'US-21', 'us-c21', 'US-W01', 'US-C'].filter(
+        (story) => STORY_ID.test(story),
+      ),
+    ).toEqual([])
   })
 
   it('never plans one name in two areas (export * would drop it)', () => {
@@ -110,7 +138,8 @@ describe('PRD-261 A-10a — the surface files', () => {
   })
 
   // The areas after A-10a are built by their own lanes (W-A4, W-A4P): each lane marks its area built in its
-  // surface file and adds it to BUILT_BY_LATER_LANES, and no built area may still call a stub.
+  // surface file and adds it to BUILT_BY_LATER_LANES; A-10a's five stay built, no built area may still call a
+  // stub, and every area still a stub must call one.
   it('marks the five areas A-10a builds and the area of each landed lane as built, and every other area as a stub', () => {
     const built = SURFACES.filter((surface) => surface.status === 'built').map((surface) => surface.area)
     expect(built.sort()).toEqual([...BUILT_BY_THIS_STORY, ...BUILT_BY_LATER_LANES].sort())
@@ -157,6 +186,15 @@ describe('PRD-261 A-10a — the surface snapshot', () => {
 
 describe('PRD-261 A-10a — stubbed areas', () => {
   const stubs = SURFACES.filter((surface) => surface.status === 'stub')
+
+  // Every area is built once W-A4 and W-A4P both land, so the it.each below can register no test; this one keeps
+  // the suite non-empty (vitest fails an empty suite) and proves the stub a future area would start from.
+  it('a stub is named after its name, and throws "not in this SDK build" naming its name and area', () => {
+    const stub = notInThisBuild('pages/agents', 'useAgentRoster')
+    expect(stub.name).toBe('useAgentRoster')
+    expect(() => stub()).toThrow(`Automatos theme SDK: useAgentRoster (pages/agents) is ${NOT_IN_THIS_BUILD}.`)
+    expect(STUB_CALL.test("notInThisBuild('pages/agents', 'useAgentRoster')")).toBe(true)
+  })
 
   it.each(stubs.map(areaCase))('%s: every name throws "not in this SDK build"', async (area, surface) => {
     const module = await loadArea(area)

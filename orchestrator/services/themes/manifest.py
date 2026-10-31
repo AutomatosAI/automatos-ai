@@ -2,17 +2,20 @@
 
 Required: ``schema``, ``id`` (``publisher/slug``), ``name``, ``version`` (``MAJOR.MINOR.PATCH``),
 ``engines`` (``{automatos, sdk}``, each exact or caret, ``*`` refused, and met by this host),
-``base``, ``htmlClass`` (the pattern, and no reserved name: ``play`` only for ``automatos/play``,
-PA-8), ``minWidth``, ``tone`` and ``slots`` (known, versioned slots that include
+``base``, ``htmlClass`` (the pattern, and none of the host's reserved names, whatever the id:
+A-20), ``minWidth``, ``tone`` and ``slots`` (known, versioned slots that include
 ``lookEditor@1`` and ``styleSheet@1``, PA-14).
 
 Optional: ``description``; ``pages`` (only the Q3 routes, each ``{mode: own|clone,
 keepCorePage?, clonedFrom?}``, a clone naming one of its route's ``PAGE_SOURCES`` files and that
 file's sha256; host-owned pages refused); ``routes`` (theme-only pages at ``/x/<route>``);
 ``nav`` (``{id, label, path}``, a ``/x/`` path naming a declared route); ``uses`` (SDK areas);
-``pricing`` (a label only, Q12); ``previews`` and ``fonts`` (package files); ``brand``
+``pricing`` (a label only, Q12); ``previews`` (web screenshots, ``assets/previews/<NAME>.png``),
+``phonePreviews`` (phone screenshots, ``assets/previews/phone/<NAME>.png`` or ``.jpg``), up to
+``MAX_PREVIEWS`` each, and ``fonts`` (package files); ``brand``
 (``{name?, wordmark?}``); ``look`` (the default preset's id); ``mascot`` (``null`` or
-``{states}``). Every other field is refused.
+``{states}``); ``mobile`` (M-01, host 1.1.0: the data a phone draws the theme from, checked by
+``services/themes/mobile_manifest.py``; its fonts are package files). Every other field is refused.
 
 The TypeScript twin (``frontend/lib/theme-host/package-manifest.ts``, A-06b) is held to the
 same corpus (``tests/fixtures/themes/cases.json``, ``manifests``).
@@ -24,23 +27,25 @@ import re
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from services.themes.contract import (
-    HOST_OWNED_ROUTES, HTML_CLASS_OWNERS, HTML_CLASS_PATTERN, KNOWN_SLOTS, MANIFEST_SCHEMA, PAGE_MODES,
+    HOST_OWNED_ROUTES, HTML_CLASS_PATTERN, KNOWN_SLOTS, MANIFEST_SCHEMA, PAGE_MODES,
     PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS, RESERVED_HTML_CLASSES, SDK_VERSION, THEME_BASES,
     THEME_HOST_VERSION, THEME_TONES, ThemeError, echo, is_whole_number, plain_text_problem, theme_error,
 )
+from services.themes.mobile_manifest import mobile_errors, mobile_font_files
 
 MANIFEST_ERROR_CODES: Tuple[str, ...] = (
     "NOT_AN_OBJECT", "UNKNOWN_FIELD", "MISSING_FIELD", "BAD_SCHEMA", "BAD_ID", "BAD_TEXT", "BAD_VERSION",
     "BAD_ENGINES", "ENGINES_MISMATCH", "BAD_HTML_CLASS", "RESERVED_HTML_CLASS", "BAD_BASE", "BAD_MIN_WIDTH",
     "BAD_TONE", "BAD_SLOTS", "UNKNOWN_SLOT", "MISSING_SLOT", "BAD_PAGE", "BAD_PAGE_MODE", "BAD_KEEP_CORE_PAGE",
     "BAD_CLONED_FROM", "CLONED_FROM_OUT_OF_SCOPE", "PAGE_OUT_OF_SCOPE", "HOST_OWNED_PAGE", "BAD_ROUTES", "BAD_NAV",
-    "BAD_USES", "BAD_ASSET_PATH", "BAD_BRAND", "BAD_LOOK_ID", "BAD_MASCOT",
+    "BAD_USES", "BAD_ASSET_PATH", "BAD_BRAND", "BAD_LOOK_ID", "BAD_MASCOT", "BAD_MOBILE",
 )
 REQUIRED_FIELDS: Tuple[str, ...] = (
     "schema", "id", "name", "version", "engines", "base", "htmlClass", "minWidth", "tone", "slots",
 )
 OPTIONAL_FIELDS: Tuple[str, ...] = (
-    "description", "pages", "routes", "nav", "uses", "pricing", "previews", "fonts", "brand", "look", "mascot",
+    "description", "pages", "routes", "nav", "uses", "pricing", "previews", "phonePreviews", "fonts", "brand", "look",
+    "mascot", "mobile",
 )
 ENGINE_FIELDS: Tuple[str, ...] = ("automatos", "sdk")
 PAGE_FIELDS: Tuple[str, ...] = ("mode", "keepCorePage", "clonedFrom")
@@ -62,6 +67,7 @@ STATE_PATTERN = re.compile(r"[a-z][a-z0-9-]{0,31}")
 LOOK_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 ASSET_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 PREVIEW_PATTERN = re.compile(rf"assets/previews/{ASSET_NAME}\.png")
+PHONE_PREVIEW_PATTERN = re.compile(rf"assets/previews/phone/{ASSET_NAME}\.(?:png|jpg)")
 FONT_PATTERN = re.compile(rf"assets/fonts/{ASSET_NAME}\.woff2")
 WORDMARK_PATTERN = re.compile(rf"assets/brand/{ASSET_NAME}\.(?:png|webp)")
 X_ROUTE_PREFIX = "/x/"
@@ -75,6 +81,8 @@ MAX_NAV = 16
 MAX_KEEP = 16
 MAX_USES = 64
 MAX_FILES_LISTED = 16
+# The Marketplace storefront shows screenshots per look: web and phone lists hold this many each.
+MAX_PREVIEWS = 24
 MAX_STATES = 32
 
 
@@ -160,8 +168,7 @@ def _html_class_errors(document: Mapping[str, Any]) -> List[ThemeError]:
         return _error("BAD_HTML_CLASS", "htmlClass", (
             '"htmlClass" must be 3 to 32 lower-case letters, digits or dashes, starting with a letter.'
         ))
-    owner = HTML_CLASS_OWNERS.get(html_class)
-    if html_class in RESERVED_HTML_CLASSES and (owner is None or owner != document.get("id")):
+    if html_class in RESERVED_HTML_CLASSES:
         return _error("RESERVED_HTML_CLASS", "htmlClass", f'"htmlClass" "{html_class}" is reserved by the host.')
     return []
 
@@ -293,11 +300,19 @@ def _mascot_errors(mascot: Any) -> List[ThemeError]:
     return errors
 
 
+# The file lists theme.json names: (field, pattern, the shape a message gives, the most it lists).
+LISTED_FILES: Tuple[Tuple[str, "re.Pattern[str]", str, int], ...] = (
+    ("previews", PREVIEW_PATTERN, "assets/previews/*.png", MAX_PREVIEWS),
+    ("phonePreviews", PHONE_PREVIEW_PATTERN, "assets/previews/phone/*.png or *.jpg", MAX_PREVIEWS),
+    ("fonts", FONT_PATTERN, "assets/fonts/*.woff2", MAX_FILES_LISTED),
+)
+
+
 def _file_list_errors(document: Mapping[str, Any]) -> List[ThemeError]:
     errors: List[ThemeError] = []
-    for field, pattern, shape in (("previews", PREVIEW_PATTERN, "assets/previews/*.png"), ("fonts", FONT_PATTERN, "assets/fonts/*.woff2")):
-        if field in document and not _is_string_list(document[field], pattern, MAX_FILES_LISTED):
-            errors += _error("BAD_ASSET_PATH", field, f'"{field}" must list up to {MAX_FILES_LISTED} different {shape} files.')
+    for field, pattern, shape, most in LISTED_FILES:
+        if field in document and not _is_string_list(document[field], pattern, most):
+            errors += _error("BAD_ASSET_PATH", field, f'"{field}" must list up to {most} different {shape} files.')
     return errors
 
 
@@ -311,6 +326,7 @@ def _extra_errors(document: Mapping[str, Any]) -> List[ThemeError]:
     if "look" in document and (not isinstance(look, str) or LOOK_ID_PATTERN.fullmatch(look) is None):
         errors += _error("BAD_LOOK_ID", "look", '"look" must be the id of one of the theme\'s presets.')
     errors += _brand_errors(document["brand"]) if "brand" in document else []
+    errors += mobile_errors(document) if "mobile" in document else []
     return errors + _mascot_errors(document.get("mascot"))
 
 
@@ -331,6 +347,8 @@ def validate_manifest(document: Any) -> ManifestResult:
 
 
 def referenced_files(manifest: Mapping[str, Any]) -> List[str]:
-    """The package files a checked manifest names: its previews, fonts and wordmark."""
+    """The package files a checked manifest names: its web and phone previews, fonts, wordmark and mobile fonts (M-01)."""
     wordmark = (manifest.get("brand") or {}).get("wordmark")
-    return [*manifest.get("previews", []), *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
+    previews = [*manifest.get("previews", []), *manifest.get("phonePreviews", [])]
+    named = [*previews, *manifest.get("fonts", []), *([wordmark] if wordmark else [])]
+    return [*named, *mobile_font_files(manifest)]

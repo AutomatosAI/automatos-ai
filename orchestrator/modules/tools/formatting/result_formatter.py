@@ -12,8 +12,9 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from modules.tools.formatting import document_brand_note, generated_document_summary, tickets_by_number
-from modules.tools.formatting.card_digest import carries_the_question, shown_on_the_card
+from modules.tools.formatting import board_page, document_brand_note, generated_document_summary, tickets_by_number
+from modules.tools.formatting.approval_view import carries_the_approval_view
+from modules.tools.formatting.card_digest import carries_the_question, params_digest
 
 logger = logging.getLogger(__name__)
 
@@ -442,7 +443,6 @@ class ToolResultFormatter:
     def format_database(result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Format database query results consistently.
-        
         Input: Raw database query result
         Output: Standardized format
         """
@@ -454,6 +454,7 @@ class ToolResultFormatter:
             'columns': result.get('columns', []),
             'execution_time_ms': result.get('execution_time_ms', 0),
             'pandas_ai': result.get('pandas_ai'),  # Optional insight
+            'notes': result.get('notes') or [],  # F460: F301's notes reach the model
         }
     
     @staticmethod
@@ -557,6 +558,7 @@ class ToolResultFormatter:
             }
 
     @staticmethod
+    @carries_the_approval_view  # PRD-268 US-C20a: ApprovalView@1 (target, preview, the rule that asked)
     @carries_the_question  # PRD-256 FX-008: the approval card shows what it approves
     def format_for_frontend(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
         """
@@ -821,30 +823,14 @@ class ToolResultFormatter:
 
         return frontend_data
 
-    @staticmethod
-    def _tool_params_digest(params: Any) -> Dict[str, Any]:
-        """PRD-193 S3: human-readable digest of a gated call's params.
-
-        Server-injected ``_``-prefixed plumbing is dropped; long values are
-        truncated. The approver sees the tool's real arguments (target ids,
-        keys, values) — not a raw JSON dump.
-        """
-        if not isinstance(params, dict):
-            return {}
-        digest: Dict[str, Any] = {}
-        for key, value in params.items():
-            if str(key).startswith("_"):
-                continue
-            if isinstance(value, (int, float, bool)) or value is None:
-                digest[str(key)] = value
-                continue
-            digest[str(key)] = shown_on_the_card(value if isinstance(value, str) else str(value))
-        return digest
+    # PRD-193 S3: the gated call's digest, now in card_digest (the approval view reads it too).
+    _tool_params_digest = staticmethod(params_digest)
     
     @staticmethod
     @document_brand_note.the_documents_brand_check_is_read  # brand kit at generation: banned words, last
     @generated_document_summary.summarises_generated_documents
     @tickets_by_number.names_tickets_by_number  # 7 Oct: the model reads a ticket by its board number only
+    @board_page.reads_a_board_page_whole  # F442: a board page the chat would cut, as whole lines
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
         """
         Format tool result for LLM context (truncated summary).
@@ -891,13 +877,12 @@ class ToolResultFormatter:
 
         summary_parts = [f"Tool: {tool_name}"]
         summary_parts.append(f"Status: {standardized['status']}")
-        summary_parts.append(f"Results: {standardized['metadata']['count']} items")
-        
+        from modules.tools.formatting.llm_summary_parts import count_lines, tool_lines  # F383; F460: count_lines
+
+        summary_parts.extend(count_lines(tool_name, standardized))
         # Add preview of results
         results = standardized['results'][:4]  # Top 4 to fit token limits
-        
         # F383: each branch's lines live in llm_summary_parts (a search's sources carry their document id).
-        from modules.tools.formatting.llm_summary_parts import tool_lines
 
         summary_parts.extend(tool_lines(tool_name, standardized, results))
 

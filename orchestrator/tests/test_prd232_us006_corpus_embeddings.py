@@ -36,6 +36,10 @@ from modules.tools.discovery.action_registry import ActionDefinition, get_action
 from modules.tools.discovery.action_semantic_index import ActionSemanticIndex
 from modules.tools.discovery import utterance_corpus
 
+# rank_actions bounds the index build by SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S (2.5 s); a busy
+# CI runner can miss it on a cold index and the ranking comes back empty. <= 0 waits instead.
+WAIT_FOR_INDEX = 0
+
 _ORCH_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -114,7 +118,7 @@ def _index_with(em, cache, registry):
 
 def _stub_action(name, description, category):
     return ActionDefinition(name=name, description=description, category=category,
-                            parameters={"type": "object", "properties": {}})
+                            parameters={"type": "object", "properties": {}}, permission_level="read")
 
 
 class _StubRegistry:
@@ -150,6 +154,7 @@ def test_build_embedding_text_includes_utterances_and_enums(monkeypatch):
         }},
         examples=["mark task 3 as done"],
         tags=["tasks", "write"],
+        permission_level="write",
     )
     monkeypatch.setattr(
         utterance_corpus, "utterances_for",
@@ -197,7 +202,8 @@ def _first_class(name):
 def _dispatcher_ranking(query):
     async def _run():
         idx = _index_with(_LexEM(), _TextCache(), get_action_registry())
-        ranked = await idx.rank_actions(query, top_k=5, exclude_admin=True, exclude_promoted=True)
+        ranked = await idx.rank_actions(query, top_k=5, exclude_admin=True, exclude_promoted=True,
+                                       embed_timeout_s=WAIT_FOR_INDEX)
         return [n for n, _ in ranked]
 
     return asyncio.run(_run())

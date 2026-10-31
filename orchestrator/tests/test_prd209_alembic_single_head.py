@@ -107,7 +107,44 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # run table (harness_runs) that replaces the last_run and trace JSON files.
 # 2026-10-19: auto_haiku_default_20261019 chains onto prd263_harness_runs — a data
 # migration: the platform default for Auto becomes Haiku 5.5 and the Auto rows on it move.
-EXPECTED_HEAD = "auto_haiku_default_20261019"
+# 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
+# the two columns main.py added with an ALTER on every boot (system_prompts.futureagi_eval_enabled,
+# skills.content_hash) become a revision.
+# 2026-10-20 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto prd262_boot_columns
+# — harness_task_ledger gains the governed apply columns, and its held rows become expired.
+# 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto
+# prd263_harness_ledger_grants — the provenance record (content_provenance) the
+# public detection route reads.
+# 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto prd264_content_provenance
+# — blog_posts.reviewed_by_user_id, reviewed_at and reviewed_content_sha256: who took editorial
+# responsibility, when, and for which text.
+# 2026-10-19 (Clerk production cutover): clerk_user_relinks_20261019 chains onto
+# prd264_blog_review — a new table only, the audit record of the one-time relink
+# of returning users to production IDs.
+# 2026-10-20 (PRD-265 W1): prd265_credit_ledger chains onto clerk_user_relinks_20261019
+# — credit_ledger + credit_balances (new tables), llm_usage.ask_id (a nullable column and a
+# concurrent partial index), and the dollar trials converted into credit grants.
+# 2026-10-23 (PRD-265 W2): prd265_billing chains onto prd266_merge_heads — billing_accounts
+# and billing_events (new tables only).
+# 2026-10-23 (PRD-265 W2, payments in Studio): prd265_billing_in_studio chains onto it —
+# four nullable billing_accounts columns (a scheduled downgrade, a Business offer).
+# 2026-10-21 (PRD-261 W-C3, C-05f): prd261_revocation_feed chains onto prd265_billing_in_studio
+# (re-chained from clerk_user_relinks_20261019, then from prd265_billing, as W-C3 merged main,
+# 23 Oct) —
+# theme_revocations.origin ('local' | 'feed'), the live-local unique index and the
+# single-row theme_revocation_sync table the local edition's feed pull writes.
+# 2026-10-24 (PRD-266 W2 Push, US-010b): prd266_w2_push chains onto prd261_revocation_feed —
+# mobile_push_tickets and mobile_digest_posts (new tables only).
+# 2026-10-28 (PRD-268 W1 Check-ins, US-C01): prd268_w1_proactive chains onto prd266_w2_push —
+# proactive_suggestions, proactive_runs and proactive_person_settings (new tables only).
+# 2026-10-28 (PRD-268 W2 Delivery, US-C19a): prd268_w2_delivery chains onto prd268_w1_proactive —
+# ck_mobile_push_tickets_push_type widens to the suggestion push type, and mobile_devices gains
+# push_categories (JSONB NOT NULL DEFAULT '[]'); no existing row changes.
+# 2026-10-29 (PRD-268 W3 Follow-ups, US-C11a): prd268_w3_follow_ups chains onto prd268_w2_delivery —
+# ck_scheduled_task_deliver_as widens to follow_up, agent_scheduled_tasks gains for_user_id and a
+# partial index, ck_proactive_runs_outcome gains posted, and proactive_calibrations is new; no
+# existing row changes.
+EXPECTED_HEAD = "prd268_w3_follow_ups"
 
 
 def _literal(node: ast.AST):

@@ -89,6 +89,13 @@ def is_out_of_credit(error: Any) -> bool:
     return bool(_CREDIT.search(str(error or "")))
 
 
+def provider_status(error: Any) -> Optional[str]:
+    """The HTTP status a provider refused ``error``'s request with, as its SDK's
+    message gives it ("Error code: 401 - {…}"), or None when it names none."""
+    refused = _PROVIDER_STATUS.search(str(error or ""))
+    return refused.group(1) if refused else None
+
+
 def plain_failure(error: Any, *, scheduled: bool = False) -> str:
     """What the owner reads for a run that failed on ``error``. A credit failure
     is one sentence. Another provider refusal gives its status, not its payload.
@@ -96,9 +103,9 @@ def plain_failure(error: Any, *, scheduled: bool = False) -> str:
     text = str(error or "")
     if is_out_of_credit(text):
         return OUT_OF_CREDIT_SCHEDULED_TEXT if scheduled else OUT_OF_CREDIT_TEXT
-    refused = _PROVIDER_STATUS.search(text)
-    if refused:
-        return PROVIDER_REFUSED_TEXT.format(status=refused.group(1))
+    status = provider_status(text)
+    if status:
+        return PROVIDER_REFUSED_TEXT.format(status=status)
     return _ACCOUNT_ID.sub("user_…", text)
 
 
@@ -245,8 +252,10 @@ async def _tell_credit_back(workspace_id: str, reruns: int) -> None:
         await NotificationDispatcher(db, workspace_id).dispatch(
             event_type=CREDIT_BACK_EVENT, title=CREDIT_BACK_TITLE, message=credit_back_notice(reruns),
         )
+        db.commit()  # the dispatcher never commits: closing alone would roll the bell row back
     except Exception:
         logger.exception("[F197] could not say that credit is back for %s", workspace_id)
+        db.rollback()
     finally:
         db.close()
 

@@ -186,6 +186,7 @@ def _make(name: str, *, category: str = "agents", description: str = "", admin_o
         description=description or f"{name} description",
         category=category,
         parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
         admin_only=admin_only,
         promoted=promoted,
         tags=list(tags or []),

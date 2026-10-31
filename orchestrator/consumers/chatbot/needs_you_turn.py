@@ -21,6 +21,13 @@ fails says so, so the answer can't be "all clear" either. An answer that still s
 nothing needs them while Needs you holds something gets one plain line with the count
 (``says_the_board_is_clear``, on the saved answer's additions).
 
+F442 (nights 16-17): "Thanks for tonight, that's been useful." got "Nothing's pending on my
+side that needs you tonight" with no call, and two minutes later "201 items need you". A
+sign-off asks nothing, so nothing was read. Now a turn that signs off reads Needs you's
+count first (``needs_you_counts``, the board's number): the model is told the count and
+that it never says nothing waits unless it is 0, the read is on the activity trail and in
+the turn's receipts, and an answer that still says nothing is pending gains the count.
+
 A widget visitor's turn reads nothing: the board is the owner's (F155).
 """
 from __future__ import annotations
@@ -49,6 +56,12 @@ NOTE_RULE = ("Answer from this list: give the total and name each item by its nu
 NOTE_UNREAD = ("The owner is asking what needs them, and the board's Needs you could not be read just now. "
                "Don't say nothing needs them: say you couldn't read the board and that Needs you on the board "
                "lists what waits for them.")
+SIGN_OFF_NOTE = ("The owner is signing off. The board's Needs you holds {total} for them right now{by_kind}, "
+                 "read just now. If you say anything about what is waiting, give that number; never say nothing "
+                 "is waiting or pending unless it is 0.")
+SIGN_OFF_UNREAD = ("The owner is signing off, and the board's Needs you could not be read just now: don't say "
+                   "whether anything is waiting for them.")
+SIGN_OFF_CHARS = 60
 MORE = "- and {more} more on the board"
 SUMMARY = "{total} waiting for you, read from your board's Needs you"
 CLEAR_LINE = ("Just to be clear: your board's Needs you has {total} waiting for you right now ({by_kind}). "
@@ -63,7 +76,15 @@ _ASKS = re.compile(
 )
 _ALL_CLEAR = re.compile(
     r"\ball clear\b|\bnothing (?:needs|requires|is waiting|waits)\b"
-    r"|\bno\b[^.!?\n]{0,40}\b(?:needs?|requires?|waiting)\b[^.!?\n]{0,25}\byour?\b",
+    r"|\bnothing(?:’s|'s| is)? (?:else )?(?:pending|waiting|outstanding)\b[^.!?\n]{0,40}\b(?:you|your|my side)\b"
+    r"|\bno\b[^.!?\n]{0,40}\b(?:needs?|requires?|waiting|pending)\b[^.!?\n]{0,25}\byour?\b",
+    re.IGNORECASE,
+)
+# F442: a sign-off. A thanks opener counts only short and with no question in it.
+_THANKS = re.compile(r"^(?:thanks|thank you|thx|cheers|ta)\b", re.IGNORECASE)
+_SIGNS_OFF = re.compile(
+    r"\bgood ?night\b|\bsigning off\b|\bthat(?:'|’)?s me done\b"
+    r"|\bthat(?:'|’)?s (?:me|all|it)(?: done)? for (?:tonight|today|now|the night|the day)\b",
     re.IGNORECASE,
 )
 # The Needs-you total read for this turn (None: not asked, or not read).
@@ -73,6 +94,14 @@ _WAITING: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.Context
 def asks_what_needs_me(text: object) -> bool:
     """Whether the owner's message asks what needs them, or what waits for them."""
     return bool(_ASKS.search(str(text or "").strip()))
+
+
+def signs_off(text: object) -> bool:
+    """Whether the owner's message signs off for now: a short thanks, a goodnight, 'that's me done'."""
+    said = str(text or "").strip()
+    if _SIGNS_OFF.search(said):
+        return True
+    return len(said) <= SIGN_OFF_CHARS and "?" not in said and bool(_THANKS.match(said))
 
 
 def _by_kind(counts: Dict[str, int]) -> str:
@@ -116,8 +145,10 @@ def _reads_needs_you(chat: Any, latest_text: str, llm_messages: List[Dict[str, A
                      prefetched: List[Any]) -> List[Any]:
     """For a 'what needs me' turn: the note in last, the read in ``prefetched``; the frames to yield."""
     _WAITING.set(None)
-    if getattr(chat, "widget_mode", False) or not asks_what_needs_me(latest_text):
+    if getattr(chat, "widget_mode", False):
         return []
+    if not asks_what_needs_me(latest_text):
+        return _reads_the_count(chat, llm_messages, prefetched) if signs_off(latest_text) else []
     started = time.monotonic()
     waiting = _read(chat)
     if waiting is None:
@@ -127,6 +158,28 @@ def _reads_needs_you(chat: Any, latest_text: str, llm_messages: List[Dict[str, A
     llm_messages.append({"role": SYSTEM_ROLE, "content": needs_you_note(waiting)})
     prefetched.append((READ_TOOL, dict(READ_ARGS)))
     logger.info("[F307] 'what needs me' read Needs you first: %d waiting", waiting["total"])
+    return _frames(chat, waiting, int((time.monotonic() - started) * 1000))
+
+
+def _reads_the_count(chat: Any, llm_messages: List[Dict[str, Any]], prefetched: List[Any]) -> List[Any]:
+    """F442, a sign-off: Needs you's count in last, the read in ``prefetched``; the frames to yield."""
+    from services.needs_you import needs_you_counts
+
+    started = time.monotonic()
+    try:
+        with chat.db.begin_nested():
+            counts = needs_you_counts(chat.db, chat.workspace_id)
+    except Exception:
+        logger.exception("[F442] Needs you could not be read for a sign-off")
+        llm_messages.append({"role": SYSTEM_ROLE, "content": SIGN_OFF_UNREAD})
+        return []
+    waiting = {"total": counts["total"], "by_kind": {kind: n for kind, n in counts.items() if kind != "total"}}
+    _WAITING.set(waiting)
+    by_kind = _by_kind(waiting["by_kind"])
+    llm_messages.append({"role": SYSTEM_ROLE, "content": SIGN_OFF_NOTE.format(
+        total=waiting["total"], by_kind=f" ({by_kind})" if by_kind else "")})
+    prefetched.append((READ_TOOL, dict(READ_ARGS)))
+    logger.info("[F442] a sign-off read Needs you first: %d waiting", waiting["total"])
     return _frames(chat, waiting, int((time.monotonic() - started) * 1000))
 
 
@@ -172,4 +225,4 @@ def never_all_clear_unread(answer_additions: Additions) -> Additions:
 
 
 __all__ = ["answers_what_needs_you", "asks_what_needs_me", "needs_you_note", "never_all_clear_unread",
-           "says_the_board_is_clear"]
+           "says_the_board_is_clear", "signs_off"]

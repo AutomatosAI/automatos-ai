@@ -94,4 +94,10 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
     from services.socials_results import register as register_results
 
     register_results(scheduler)  # PRD-251C (US-C402): posts' numbers are read on the leader
+    from services.push import receipts as push_receipts
+
+    push_receipts.register(scheduler)  # PRD-266 US-010e: Expo's push receipts are read on the leader
+    from services.mobile import digest as daily_digest
+
+    daily_digest.register(scheduler)  # PRD-266 US-013: the daily digest is posted on the leader
     return True

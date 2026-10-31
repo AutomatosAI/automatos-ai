@@ -18,8 +18,9 @@ with plain string args (the post and its workspace), never a closure: the
   fire racing a person's publish now, publishes once; then the US-301 publisher
   runs. A job registered late fires at once (``misfire_grace_time=None``) and decides.
 * **A missed slot.** Fired more than ``SOCIALS_MISFIRE_GRACE_SECONDS`` after its slot
-  (the backend was down), with Socials off for the workspace, or with an approval
-  that no longer matches, the post goes to ``missed`` and the workspace is told
+  (the backend was down), with Socials off for the workspace, with an approval that no
+  longer matches, or with a video whose AI-generated label disagrees with the post's
+  (PRD-264 EUAI-08a), the post goes to ``missed`` and the workspace is told
   (``social_post_missed``). Stale content is never posted silently. A missed post can
   be rescheduled or published now while its approval still matches.
 * **A lost publish.** The same pass ends a post still publishing well past a run's
@@ -41,7 +42,7 @@ from sqlalchemy import update
 from config import config
 from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
-from modules.socials import notify, plan_late, publish_lifecycle, publisher, service
+from modules.socials import ai_media, notify, plan_late, publish_lifecycle, publisher, service
 from modules.socials.publish_records import PublishJob, end_lost
 from modules.socials.publishing import run_publish
 from modules.socials.settings import socials_off_reason
@@ -60,8 +61,12 @@ MISSED_OFF = "Socials was off for this workspace at its slot ({why}): nothing wa
 # Past a run's own limit, before a publishing post counts as lost: its end is written.
 LOST_MARGIN_SECONDS = 300
 MISSED_STALE = "Its approval no longer matched its content at its slot ({why}): nothing was published."
+# PRD-264 EUAI-08a: the video shows the AI-generated label other than the post sets it (ai_media.label_mismatch).
+MISSED_UNLABELLED = "Nothing was published at its slot. {why}"
 # PRD-251B (B11, US-B105): a planned slot that passed with the post still unapproved.
 PLANNED_PASS_STATUSES = (service.DRAFT, service.NEEDS_APPROVAL, service.CHANGES_REQUESTED)
+# P256-FIX-SOC-5: and a plan's failed post that never tried to publish (``_never_published``).
+SWEPT_STATUSES = (*PLANNED_PASS_STATUSES, service.FAILED)
 MISSED_UNAPPROVED = (
     "Its planned slot ({slot}) passed with no approval (the grace is {grace} minutes): nothing was posted. "
     "Give it a new slot to try again."
@@ -172,19 +177,39 @@ def reconcile(scheduler: Any, db: Any) -> Dict[str, Any]:
     return {"added": added, "moved": moved, "removed": removed, "ended": ended, "passed": passed, "late": late}
 
 
+def _never_published(post: SocialPost) -> bool:
+    """A failed post of a plan that never tried to publish: no ``publish`` entry in its history
+    (``publish_lifecycle.start_publish`` logs one for every attempt). ``approved_hash`` cannot tell:
+    it is never cleared, so a post approved, edited, then failed still holds one."""
+    entries = post.review_log or []
+    return post.campaign_id is not None and not any(
+        isinstance(entry, dict) and entry.get("action") == service.ACTION_PUBLISH for entry in entries
+    )
+
+
+def _passes(post: Optional[SocialPost]) -> bool:
+    """Whether the sweep may end ``post``: unapproved, or (P256-FIX-SOC-5) a plan's failed post that
+    never tried to publish; a failed post that did stays failed, for its retry."""
+    if post is None or post.planned_for is None or post.status not in SWEPT_STATUSES:
+        return False
+    return post.status in PLANNED_PASS_STATUSES or _never_published(post)
+
+
 def pass_planned_slots(db: Any, now: datetime) -> int:
     """PRD-251B (B11): each unapproved post whose planned slot passed the grace ends
     ``missed``, once, and the workspace is told as for any missed slot. Approved,
-    scheduled and published posts are never touched. A compare-and-set per post, so
-    two passes racing on one post leave one transition. How many it ended."""
+    scheduled and published posts are never touched. P256-FIX-SOC-5: so does a plan's post that
+    failed before it ever tried to publish (its render refused or failed), or the plan's
+    ``next_slot`` moves it on. A compare-and-set per post, so two passes racing on one post leave
+    one transition. How many it ended."""
     cutoff = now - timedelta(seconds=config.SOCIALS_MISFIRE_GRACE_SECONDS)
     ids = [row.id for row in db.query(SocialPost.id).filter(
-        SocialPost.status.in_(PLANNED_PASS_STATUSES), SocialPost.planned_for.isnot(None), SocialPost.planned_for < cutoff,
+        SocialPost.status.in_(SWEPT_STATUSES), SocialPost.planned_for.isnot(None), SocialPost.planned_for < cutoff,
     ).all()]
     passed = 0
     for post_id in ids:
         post = db.get(SocialPost, post_id)
-        if post is None or post.status not in PLANNED_PASS_STATUSES or post.planned_for is None:
+        if not _passes(post):
             continue
         if plan_late.moved_on(db, post, now):  # PRD-251B (US-B206): the plan's next_slot policy
             continue
@@ -277,6 +302,9 @@ def _claim(db: Any, post: SocialPost, now: datetime) -> Tuple[Optional[PublishJo
     reason = _missed_reason(db, post, slot, now)
     if reason is None and not publish_lifecycle.approval_matches(post):
         reason = MISSED_STALE.format(why="the content changed after it was approved")
+    unlabelled = ai_media.label_mismatch(post) if reason is None else None
+    if unlabelled is not None:
+        reason = MISSED_UNLABELLED.format(why=unlabelled)
     if reason is not None:
         return None, _miss(db, post, reason)
     try:

@@ -14,12 +14,16 @@ as its own part, never as the answer. The final response is the answer: the
 saved text, and what memory and the next turn read. A reply the loop nudged
 and retried (F108: it claimed work no action backed) is neither, and is left
 out. When the answer is empty, the narration stands in for it.
+
+PRD-268 US-C12c: a round whose reply chips ended the run on its own text, with no
+model call after it (US-C12b), is the answer, not narration (``turn_parts.is_its_round``).
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from consumers.chatbot.receipts import saves_the_turns_receipts
+from consumers.chatbot.turn_parts import is_its_round
 
 
 def called_tools(response: Any) -> bool:
@@ -29,8 +33,10 @@ def called_tools(response: Any) -> bool:
 def split_reply(rounds: Sequence[Any], final: Optional[Any], final_text: str) -> Tuple[List[str], str]:
     """``(narration, answer)`` for a turn: ``rounds`` are its streamed model
     responses in order, ``final`` the one that answered (None when the answer
-    was made outside them), ``final_text`` the answer's text."""
-    narration = [r.content for r in rounds if r is not final and called_tools(r) and (r.content or "").strip()]
+    was made outside them), ``final_text`` the answer's text. A round whose own
+    text ``final`` is (its reply chips ended the run on it) is the answer too."""
+    narration = [r.content for r in rounds if r is not final and not is_its_round(final, r.content)
+                 and called_tools(r) and (r.content or "").strip()]
     if (final_text or "").strip():
         return narration, final_text
     return [], "\n\n".join(narration)

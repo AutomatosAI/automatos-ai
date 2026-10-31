@@ -6,11 +6,20 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+```bash
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git   # the current commit only: under 80 MB, not 700 MB of history
+cd automatos-ai
+```
+
+You need Docker Engine 25 or later with Docker Compose 2.24.4 or later (a
+current Docker Desktop on macOS and Windows); `make up` checks both first and
+stops, naming that floor, on an older Docker.
+
 **On Windows, or setting up with an AI coding agent?** Use [SETUP.md](SETUP.md):
 the step-by-step install for macOS, Linux and Windows (WSL2), with a check
 after each step.
 
-## 1. Set the three required secrets
+## 1. The three required secrets
 
 Compose refuses to start until these three are set (they have no built-in
 defaults, on purpose — a public image must not ship with known passwords):
@@ -19,15 +28,16 @@ defaults, on purpose — a public image must not ship with known passwords):
 - `REDIS_PASSWORD` — the Redis password
 - `API_KEY` — the backend's own API key
 
-Copy the example env file and fill them in (any non-empty values work locally):
+`make up` writes them for you: its first step, `make env`, creates `.env` from
+`.env.example` and gives each one a random value (`openssl rand -hex 24`) while
+it is empty or still the `CHANGE_ME` placeholder, before the first start only.
+`git clone` and `make up` (step 2) are the whole install. To choose your own
+values, run `make env` (or `cp .env.example .env`) and set them in `.env` before
+the first `make up`.
 
-```bash
-cp .env.example .env
-# then edit .env and set:
-#   POSTGRES_PASSWORD=<choose-any-value>
-#   REDIS_PASSWORD=<choose-any-value>
-#   API_KEY=<choose-any-value>
-```
+The stack never runs on the `CHANGE_ME` placeholders: the backend refuses to
+start on one, and `make env` stops on an install that already started with one.
+Both say how to rotate it.
 
 That is the whole requirement — everything else (edition, workspace id, storage,
 ports) already has a working default in the compose file and `envs/*.defaults`.
@@ -71,9 +81,10 @@ the models you want — "Kimi K3 · NVIDIA" is a different route from
 route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, model
 *Kimi K3*. (PRD-236)
 
-**Skills.** A fresh install has none. **Marketplace → Capabilities → Import from
-GitHub**, then *Use baseline repo* to import the free library at
-`https://github.com/AutomatosAI/automatos-skills`.
+**Skills.** A fresh install ships the platform's 12 built-in skills (Auto's
+platform skill and the Socials and design skills). For more, **Marketplace →
+Capabilities → Import from GitHub**, then *Use baseline repo* to import the free
+library of 140+ skills at `https://github.com/AutomatosAI/automatos-skills`.
 
 **Your files.** Everything your agents write lives in one folder on your
 machine: `AUTOMATOS_WORKSPACE_DIR` in `.env` (default `./workspaces` next to
@@ -96,36 +107,42 @@ for you, once.
 make up
 ```
 
-That builds what changed, starts the stack, and clears the images and build
-cache the rebuild superseded — Docker keeps those forever otherwise, which is
-what quietly turns a 3.7 GB stack into 12 GB of disk. `make status` shows what
-is running and what it costs; `make down` stops it; `make clean` reclaims space
-at any time (it never touches your data). Plain `docker compose up` still works
-if you prefer it.
+`make up` downloads the images CI builds, scans and publishes for your
+checkout's commit (`ghcr.io/automatosai/automatos-api`, `-frontend`,
+`-workspace-worker`; multi-arch and signed) instead of building them, then
+starts the stack. It says which tag it picked and why (`sha-<7>` of your commit,
+or `edge` when that is a rebuild of it), and writes it to `.env` as
+`AUTOMATOS_IMAGE_TAG=…`, so later `docker compose` commands run the same images.
+On a checkout with your own changes it builds only the images whose folder you
+changed and pulls the rest.
 
-### Or: run the published images (no build)
+The first run downloads about 1.3 GB (the whole stack, compressed, amd64;
+1.28 GB on arm64): about a minute at 200 Mbit/s, three to four at 50 Mbit/s,
+plus unpacking and the first boot. CI times `make up` to a working UI on every
+main publish against a 150-second bar. Updates download only the layers that
+changed.
 
-```bash
-make up-images
-```
+**OS security fixes.** Every Monday CI rebuilds the images with fresh OS
+packages and moves `edge` to the rebuild once it boots. A checkout keeps the OS
+packages its `sha-<7>` was built with; `git pull && make up` picks up the
+weekly fixes. `AUTOMATOS_IMAGE_TAG=edge make up` follows `edge` and pulls on
+every call; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up` pins one build.
 
-This pulls the images CI publishes from `main` to GHCR
-(`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
-multi-arch and signed) instead of building them: about a minute instead of ten.
-The default tag is `edge`, the latest `main` build whose published images have
-booted in CI; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images` pins one build.
-Every Monday CI rebuilds them with fresh OS packages (`weekly-<yyyymmdd>`) and
-moves `edge` there once they boot, so OS security fixes arrive on `edge` too.
-Everything else is the same as `make up`: your
-`.env`, the database, the workspace folder and session mode. Your checkout's
-source code isn't used. The published web app calls the API at
-`http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
-8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
+The published web app calls the API at `http://localhost:8000` and MinIO at
+`http://localhost:9000`, fixed when it was built. If `.env` changes those
+(`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`),
+`make up` builds the web app on your machine instead, a few minutes, and says
+why. `make build` builds all three images from your checkout; `make dev` is for
+editing the code with hot reload. `make status` shows what is running and what
+it costs; `make down` stops it; `make clean` reclaims space at any time (it
+never touches your data). Plain `docker compose up` works too, once `.env` has
+the three secrets (`make env`): it runs the tag in `.env`, or `edge`.
 
-First run builds the images, builds the database schema, runs the seeds and
-then serves. `http://localhost:8000/health` answers as soon as the API process
-is up; `http://localhost:8000/health/ready` returns 503 until the full boot has
-finished and 200 once the instance is usable.
+The first boot builds the database schema, runs the seeds and then serves.
+`http://localhost:8000/health` answers once the API's core is up (the schema, the
+seeds and the database check); `http://localhost:8000/health/ready` returns 503
+while the rest of the boot (the starters, the integrations catalogue, the scheduler
+and channels) runs in the background, and 200 once the instance is fully up.
 
 ## 3. Open it
 
@@ -141,10 +158,11 @@ finished and 200 once the instance is usable.
 - **No login.** `AUTH_EDITION=local` — you land straight in a single default
   workspace, no accounts to create. The one operator is you: set your name
   under **Settings → Profile** and Auto greets you by it.
-- **Something to run on the first boot.** The local edition seeds Auto, a
-  starter roster (Researcher, Writer, Analyst), one Playbook — *Two-minute
-  brief* — and a welcome Deliverable under **Deliverables → Blogs**. Run the
-  Playbook from the Playbooks page with a topic of your own.
+- **Something to run on the first boot.** The local edition seeds five agents
+  (Auto, a Brand Designer and a starter roster of Researcher, Writer and
+  Analyst), one Playbook — *Two-minute brief* — and a welcome Deliverable under
+  **Deliverables → Blogs**. Run the Playbook from the Playbooks page with a
+  topic of your own.
 - **Web access for your agents (PRD-240).** Reading a page works out of the
   box — every agent has `platform_web_fetch`, no key, no app to connect, nothing to
   assign. Private and internal addresses are always refused. Searching the
@@ -190,10 +208,10 @@ finished and 200 once the instance is usable.
   billed to an API key) needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
   in `.env` — it reads env only, not Settings → API Keys. The **Runtime
   Canvas** for session agents (below) needs no key at all: it is your own
-  Claude Code, launched by the host on your machine. On a Linux host the files
-  under `./workspaces` end up owned by uid 1000, the worker's user.
-  `docker compose --profile all up` adds Gotenberg document rendering (3001)
-  and Adminer (8080).
+  Claude Code, launched by the host on your machine. On a Linux host the worker
+  writes under `./workspaces` as that folder's owner, your user; it cannot write
+  a folder root owns (the self-hosting guide's Linux ownership note).
+  `docker compose --profile all up` adds Adminer, a database GUI (8080).
 
 ## Optional: your own Claude Code as an agent (session mode)
 
@@ -230,6 +248,87 @@ Tokens per session are recorded on the ticket and in Analytics as
 *Claude Code · Subscription* at $0 — your plan pays, there is no dollar
 figure to invent. The full reference is the
 [self-hosting guide](docs/getting-started/self-hosting.md#session-mode--your-own-claude-code-sessions-managed-prd-234).
+
+## Reach your install from your phone (optional)
+
+Automatos Go, the phone app, and browsers on other machines can use a local
+install once it has an https address and every device proves who it is. With
+`LOCAL_REMOTE_ACCESS=paired` a request with no credential is refused
+(`401 device_pairing_required`), from the browser on this machine too: each phone
+and each browser pairs once, with a one-time code. Turn that on before the
+install is reachable, then put TLS in front.
+
+1. **Turn on paired mode and give the stack its public addresses**: two https
+   addresses, one for the web app and one for the API (below, Caddy's
+   `studio.example.com` and `api.example.com`). In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://api.example.com
+   NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+   ```
+   and in `envs/api.local` (`.env` reaches only the variables compose names; this
+   file reaches every backend setting):
+   ```bash
+   PUBLIC_API_HOST=api.example.com
+   FRONTEND_URL=https://studio.example.com
+   CORS_ALLOW_ORIGINS=https://studio.example.com,http://localhost:3000
+   ```
+   A phone is handed the API as `https://<PUBLIC_API_HOST>`. When the proxy will
+   run on another machine, also publish the API and the web app, and only those:
+   `API_PUBLISH_ADDRESS=0.0.0.0` and `WEB_PUBLISH_ADDRESS=0.0.0.0` in `.env`.
+   Leave `BIND_ADDRESS` unset, so Postgres, Redis, MinIO and the other datastores
+   stay on `127.0.0.1`. Then `make up`: it builds the web app here, because its
+   API address changed.
+2. **Put TLS in front:**
+   - **Caddy** on this machine, with both DNS names pointing at it (it fetches
+     the certificates itself):
+     ```
+     studio.example.com {
+         reverse_proxy 127.0.0.1:3000
+     }
+     api.example.com {
+         reverse_proxy 127.0.0.1:8000
+     }
+     ```
+   - **Tailscale**, for devices on your tailnet only: `tailscale serve --bg 3000`
+     serves the web app at `https://<machine>.<tailnet>.ts.net`, and
+     `tailscale serve --bg --https=8443 8000` the API on port 8443. In step 1
+     the web address is then `https://<machine>.<tailnet>.ts.net` and
+     `PUBLIC_API_HOST` is `<machine>.<tailnet>.ts.net:8443`.
+
+   A proxy on this machine reaches the ports on `127.0.0.1`, so nothing more is
+   published.
+3. **Mint the first code on the server** and type it into *Pair this browser*,
+   which every unpaired browser now shows in place of the app:
+   ```bash
+   docker compose exec backend python -m scripts.mint_pairing_code
+   ```
+   It prints the code (it works once, for ten minutes) and its pairing link.
+   For App Review, `--review --ttl-hours N` mints one code that lasts N hours (at most 336,
+   two weeks); it still works once, and minting it is written to the audit log.
+4. **Pair phones from Studio.** **Settings → Phones & devices → Get a pairing
+   code** shows a code, its ten-minute countdown and the pairing link; enter the
+   code in Automatos Go. Another browser opens the web address and enters a code
+   minted there. The same page lists every paired device, with Revoke.
+
+**Notifications.** Automatos Go's notifications go through Expo's push service:
+each one leaves this install for Expo, which hands it to the phone. Nothing leaves
+until you agree. Studio asks once, the first time you open *Pair a phone*, and
+the app asks when it pairs; change the answer later under **Settings → Phones &
+devices**. A question's text and its options travel in its notification unless
+the workspace redacts questions (they are then sent as a generic line, with Open
+only); every other notification is a generic line. Self-hosted notifications rely
+on Expo's "enhanced push security" staying off on the Automatos EAS project: with
+it on, Expo refuses every send that does not carry the project's own access token.
+
+**An install that already set `BIND_ADDRESS=0.0.0.0`** publishes the API and the
+web app beyond this machine, so while `LOCAL_REMOTE_ACCESS` is unset (`off`) the
+backend refuses to start, and `docker compose logs backend` says why and names the
+fix: `LOCAL_REMOTE_ACCESS=paired` (above); `LOCAL_REMOTE_ACCESS=open`, which keeps
+the old behaviour (whoever reaches the install is its operator) and logs a warning
+at every boot; or removing `BIND_ADDRESS`, which keeps the install on this machine.
+A tunnel or proxy on this machine is invisible to that check, so behind one run
+`paired`. Details: [self-hosting guide → Network exposure](docs/getting-started/self-hosting.md#network-exposure-bind_address).
 
 ## What does *not* work out of the box
 
@@ -286,6 +385,10 @@ Database migrations run on every backend boot.
 - **"POSTGRES_PASSWORD is required" / "REDIS_PASSWORD is required" /
   "API_KEY is required":** one of the three required secrets is missing from
   `.env` — see step 1.
+- **"Placeholder secrets: … Each still starts with CHANGE_ME":** `.env` still
+  holds an `.env.example` placeholder on an install that has already started.
+  Rotate it as the message shows ([guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)),
+  or, with no data to keep, `docker compose down -v` and `make up` again.
 - **"password authentication failed" after changing `POSTGRES_PASSWORD`:** the
   existing Postgres volume keeps the password it was initialised with — reset
   with `docker compose down -v` or `ALTER USER` it; see the guide.

@@ -18,6 +18,7 @@ Memory page listed both while the rules said 10.
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -336,6 +337,64 @@ def test_replaces_never_hides_a_memory_that_is_not_a_standing_rule(qdrant, owner
     owner_says.append(TEN)
     answer = _store(TEN, replaces=note)
     assert "retired" not in answer and "retired_at" not in _row(qdrant, note).payload["metadata"]
+
+
+# P256-FIX-N17-4 (night 17, F447): 'forget the other posting rules … replace the lot'.
+WEDNESDAY = "Club dispatch day is Wednesday."
+THE_LOT = "Forget the other dispatch rules. The only one that counts: club dispatch day is Wednesday."
+THE_LOT_THEIRS = "The only one that counts: club dispatch day is Wednesday."
+
+
+@pytest.mark.parametrize("as_text", [False, True])
+def test_replace_the_lot_retires_every_rule_named_once_the_new_one_is_theirs(qdrant, owner_says, as_text):
+    owner_says.extend([MONDAY, TUESDAY])
+    _store(MONDAY)
+    _store(TUESDAY)
+    owner_says.append(THE_LOT)
+    replaces = json.dumps([MONDAY, TUESDAY]) if as_text else [MONDAY, TUESDAY]
+    first = _store(WEDNESDAY, replaces=replaces)                         # their lead-in left out: no rule
+    assert first["standing_rule"] is False and "retired" not in first and first["store_as"] == THE_LOT_THEIRS
+    assert sorted(_rules()) == sorted([MONDAY, TUESDAY])
+    assert not any(p.payload["metadata"].get("retired_at") for p in qdrant.points)
+
+    again = _store(first["store_as"], replaces=replaces)
+    assert again["standing_rule"] is True and sorted(again["retired"]) == sorted([MONDAY, TUESDAY])
+    assert _rules() == [THE_LOT_THEIRS]
+
+
+def test_replace_the_lot_by_ids_and_an_ordinary_memory_in_the_list_is_kept(qdrant, owner_says):
+    note = "Quay pays on thirty day terms, from the invoice."
+    _store(note)                                                          # Auto's wording: owned, no rule
+    owner_says.extend([MONDAY, TUESDAY])
+    _store(MONDAY)
+    _store(TUESDAY)
+    owner_says.append(THE_LOT)
+    named = [_row(qdrant, MONDAY).id, _row(qdrant, TUESDAY).id, note]
+    answer = _store(THE_LOT_THEIRS, replaces=named)
+    assert sorted(answer["retired"]) == sorted([MONDAY, TUESDAY]) and _rules() == [THE_LOT_THEIRS]
+    assert "retired_at" not in _row(qdrant, note).payload["metadata"]
+
+
+def test_replaces_is_read_as_text_or_a_list_by_the_schema_and_the_handler():
+    from modules.tools.discovery.actions_memory_store import _STORE_MEMORY_PARAMETERS
+    from modules.tools.discovery.rule_replaces import _named
+    from modules.tools.execution.schema_reads import _takes_a_container
+
+    replaces = _STORE_MEMORY_PARAMETERS["properties"]["replaces"]
+    assert replaces["type"] == ["string", "array"] and replaces["items"] == {"type": "string"}
+    assert _takes_a_container(replaces) is False                            # the executor leaves text as text
+    assert _named(MONDAY) == _named([MONDAY]) == _named(json.dumps([MONDAY]))
+    assert _named(None) == _named([]) == _named(True) == (frozenset(), frozenset())
+    assert _named(["abc-1", " "])[0] == frozenset({"abc-1"})
+
+
+def test_the_delete_and_store_descriptions_say_how_to_replace_a_rule():
+    from modules.tools.discovery.action_registry import get_action_registry
+
+    registry = get_action_registry()
+    assert "list each in replaces" in registry.get("platform_store_memory").description
+    delete = registry.get("platform_delete_memory").description
+    assert "Not for replacing a standing rule" in delete and "standing_rule true" in delete
 
 
 def test_another_write_of_a_retired_rule_leaves_it_retired(qdrant, owner_says):

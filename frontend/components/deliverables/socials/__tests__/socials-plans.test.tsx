@@ -15,6 +15,8 @@
  *   the proposal's changes through the plan's PUT, and nothing is applied by itself (US-C404, C407).
  * * The editor's Music picker saves the post's music (a render setting).
  * * An owner or admin deletes a plan from its page after one question; an editor sees no Delete.
+ * * P256-FIX-SOC-5 (F436): the Making step shows where the current batch stands and the server's
+ *   week-split warning (which days the next batch makes).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -217,6 +219,17 @@ describe('a saved plan', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Save plan' })[0])
     await waitFor(() => expect(api.updateSocialPlan).toHaveBeenCalled())
     expect(api.updateSocialPlan.mock.calls[0][1].make).toMatchObject({ rhythm: 'monthly', batch_date: 1, time: '17:00' })
+  })
+
+  it('its Making step shows the current batch and the week-split warning (P256-FIX-SOC-5)', async () => {
+    const warning = 'Your Wednesday 13:44 batch makes Thursday to Wednesday: Thu 22 and Fri 23 Oct are made in the batch of Wed 21 Oct.'
+    const current = { key: '2026-W42', label: 'the week of 15 Oct', since: '2026-10-14T12:44:00Z', state: 'building', made: 1, left: 2, why: null }
+    state.plans = [{ ...PLAN, make: { ...PLAN.make, rhythm: 'weekly', batch_day: 'wed', time: '13:44' }, next_batch_at: '2026-10-21T12:44:00Z',
+      current_batch: current, warnings: [warning] }]
+    renderWithClient(<SocialsPlansView role="owner" posts={[]} planId="p1" go={state.go} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Making and approving' }))
+    expect(await screen.findByRole('note')).toHaveTextContent(warning)
+    expect(screen.getByText('The week of 15 Oct is being made: 1 made, 2 to go.')).toBeInTheDocument()
   })
 
   it('a topic close to a post the workspace has says so, with a link that opens the post', async () => {

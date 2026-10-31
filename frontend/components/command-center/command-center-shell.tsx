@@ -33,7 +33,6 @@ import { useNeedsYou } from '@/hooks/use-needs-you'
 import { useWatches } from '@/hooks/use-watches-api'
 import { useQuestions } from '@/hooks/use-approval-grants'
 
-import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 
 import { StatsStrip } from './stats-strip'
@@ -46,6 +45,7 @@ import { ActivityTab } from './activity-tab'
 import { WatchlistTab } from './watchlist-tab'
 import { GovernanceTab } from './governance-tab'
 import { QuestionsTab } from './questions-tab'
+import { isPausedItem } from './calendar-actions'
 
 type TabKey =
   | 'summary'
@@ -67,7 +67,8 @@ const TABS: { key: TabKey; label: string }[] = [
   // cascade behind it. The badge is a live count of open questions.
   { key: 'questions', label: 'Questions' },
   // PRD-196 (P2-15): the governance pillar (Approvals · Audit · Policy ·
-  // Compliance), ws-admin-only. The human surface for the policy plane.
+  // Compliance), ws-admin-only but Approvals, which editors answer too
+  // (PRD-266 D16). The human surface for the policy plane.
   { key: 'governance', label: 'Governance' },
 ]
 
@@ -129,7 +130,8 @@ export function CommandCenterShell() {
       // PRD-252 R5: the one Needs-you number sits on Board; it counted every open ticket.
       summary: 0,
       board: needsYou?.total ?? 0,
-      calendar: schedule?.scheduled?.length ?? 0,
+      // PRD-266 D27: a paused task stays in the feed, but only work that will run counts.
+      calendar: schedule?.scheduled?.filter((item) => !isPausedItem(item)).length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
       watchlist: watchlist?.total ?? 0,
       // PRD-225: the count of open questions — the wave's most user-visible
@@ -186,9 +188,6 @@ export function CommandCenterShell() {
         </div>
         <div className="cc-actions">
           <PeriodSelect value={period} onChange={setPeriod} />
-          {/* PRD-222 US-014: trial balance, honest on the Command Center too —
-              same snapshot the chat pill reads; self-hides once converted. */}
-          <TrialBalancePill />
           <button
             type="button"
             className="cc-btn"

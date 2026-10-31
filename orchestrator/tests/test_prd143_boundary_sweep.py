@@ -45,7 +45,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
-# tests/test_harness_self_management.py) — the port points at nothing so the
+# tests/test_harness_routing_rule.py) — the port points at nothing so the
 # modules.tools import chain's fail-soft DB connect refuses instantly instead
 # of hanging on a wedged local proxy. CI exports real POSTGRES_* so these
 # setdefaults no-op there. Nothing in this file touches a DB.
@@ -57,7 +57,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 
 def _install_fake_apscheduler():
-    """Stub apscheduler ONLY when truly absent (camelot-shim philosophy).
+    """Stub apscheduler ONLY when truly absent (stub a missing leaf, never a real one).
 
     This file collects alphabetically FIRST in the prd143 family — an
     unconditional fake would shadow the real package for every later test
@@ -93,18 +93,6 @@ def _install_fake_apscheduler():
 _install_fake_apscheduler()
 
 
-# Lean-venv shim: modules/tools/__init__ pulls modules.rag's ingestion chain
-# (camelot at module top). Stub the missing leaf only when truly absent.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
-
 from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -132,6 +120,10 @@ from modules.tools.discovery.action_registry import ActionRegistry  # noqa: E402
 from modules.tools.discovery.platform_actions import register_all_actions  # noqa: E402
 from modules.tools.discovery.platform_executor import PlatformActionExecutor  # noqa: E402
 from modules.tools.execution.telemetry import write_telemetry  # noqa: E402
+
+# rank_actions bounds the index build by SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S (2.5 s); a busy
+# CI runner can miss it on a cold index and the ranking comes back empty. <= 0 waits instead.
+WAIT_FOR_INDEX = 0
 
 # ===========================================================================
 # Sources of truth (built at collection time — parametrization needs them)
@@ -359,7 +351,7 @@ def test_absent_from_semantic_ranking(su_action, semantic_index, monkeypatch):
     query = _REGISTRY.get(su_action).description
 
     ranked = asyncio.run(
-        semantic_index.rank_actions(query, top_k=500, exclude_promoted=False)
+        semantic_index.rank_actions(query, top_k=500, exclude_promoted=False, embed_timeout_s=WAIT_FOR_INDEX)
     )
     names = [n for n, _ in ranked]
     assert names, "ranking returned nothing — fixture broken"
@@ -367,7 +359,8 @@ def test_absent_from_semantic_ranking(su_action, semantic_index, monkeypatch):
 
     ranked_su = asyncio.run(
         semantic_index.rank_actions(
-            query, top_k=500, exclude_promoted=False, include_super_admin=True
+            query, top_k=500, exclude_promoted=False, include_super_admin=True,
+            embed_timeout_s=WAIT_FOR_INDEX,
         )
     )
     assert su_action in [n for n, _ in ranked_su], (

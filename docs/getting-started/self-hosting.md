@@ -17,9 +17,9 @@ disagree, the file wins — open an issue.
 
 | Need | Notes |
 |---|---|
-| Docker Desktop (macOS / Windows) or Docker Engine (Linux) | with the Compose v2 plugin — the `docker compose` subcommand. The compose file uses v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. |
-| Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
-| Git | to clone and to pull updates. |
+| Docker Engine 25 or later with Docker Compose 2.24.4 or later: Docker Desktop (macOS / Windows) or Docker Engine (Linux) | Check with `docker version --format '{{.Server.Version}}'` and `docker compose version --short`. The compose file probes each service every second while it starts (healthcheck `start_interval`), which Compose refuses on an engine older than 25, and it uses Compose v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. `make up` checks both versions first and stops, naming this floor, on an older Docker. A Linux distribution's own `docker.io` package can be older: install from Docker's repository (docs.docker.com/engine/install). |
+| Disk | The first `make up` downloads about 1.33 GB of images on amd64 and 1.28 GB on arm64, compressed: the API 521 MB, the workspace worker 507 MB and the web app 94 MB (CI's measurement, 16 Oct 2026), Postgres 159 MB, MinIO 64 MB and Redis 16 MB (the digests `docker-compose.yml` pins), less about 30 MB of base layers the API and the worker share. Docker unpacks what it downloads, so the images take more disk than that; `make status` shows the figure on your machine. `make up CORE=1` leaves out the worker and its image (§1b). Your data volumes come on top and grow with use. |
+| Git | to clone and to pull updates. `git clone --depth 1` fetches only the current commit, under 80 MB, where the full history is about 700 MB; `git pull` updates a shallow clone as usual, and `git fetch --unshallow` fetches the history if you ever want it. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
 | Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode runs inside WSL2, or natively on Windows 10 1809 or later (§1a). |
 
@@ -106,7 +106,7 @@ Desktop (the *Docker Desktop, native Windows* row in the table below).
    this distro works too. With Docker Engine inside the distro, the containers
    stop whenever the distro stops (step 7).
 4. **Clone inside the distro,** in your Linux home: `cd ~` and then
-   `git clone https://github.com/AutomatosAI/automatos-ai.git`. Not under
+   `git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git`. Not under
    `/mnt/c`: file access across the Windows drive is slow, and session file
    paths stop lining up with Deliverables → Explorer.
 5. **Create `.env`** with the three secrets (§2), then set the paths and ports
@@ -167,25 +167,43 @@ what each target runs, from the repository root. On native Windows, run the
 the repository when it is not set.
 
 ```bash
-# make up: build if needed, start, then tidy up
+# make env: the Docker floor, then .env with the three secrets (section 2). make up, make build and
+# make dev run it first.
+sh scripts/stack_docker_floor.sh     # stops unless Docker Engine is 25 or later and Compose 2.24.4 or later
+sh scripts/stack_env.sh              # creates .env from .env.example; fills the three while empty or CHANGE_ME,
+                                     # before the first start only
+
+# make up: the published images for this checkout, then start and tidy up
 mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory -Force <deliverables>\projects
-docker compose up -d --build --remove-orphans
+python3 scripts/stack_images.py up   # picks the tag (below), gets the images, writes AUTOMATOS_IMAGE_TAG to .env
+docker compose up -d --no-build --remove-orphans
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
-# make up-images: the published images, no build
-docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
-docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build --remove-orphans
+# make up CORE=1: the core five (postgres, redis, minio, backend, frontend), without the
+# workspace worker. Every compose command reads docker-compose.core.yml too, through COMPOSE_FILE.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.core.yml   # PowerShell: $env:COMPOSE_FILE="docker-compose.yml;docker-compose.core.yml"
+python3 scripts/stack_images.py up   # the same tag; gets the backend and frontend images only
+docker compose -f docker-compose.yml rm --stop --force workspace-worker   # one an earlier make up started
+docker compose up -d --no-build --remove-orphans
+# The plain command, without make or the tag picker:
+docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
 
-# make dev: hot reload from your source
+# make build: the three app images built from your checkout instead, as local-<sha7>
+python3 scripts/stack_images.py build   # writes AUTOMATOS_IMAGE_TAG=local-<sha7> to .env
+docker compose up -d postgres redis minio   # first, so they start while the images build
+docker compose build backend frontend workspace-worker
+docker compose up -d --no-build --remove-orphans
+
+# make dev: for editing the code (the development stages, your source mounted, hot reload)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 
 # make down: stop, keep your data
 docker compose down --remove-orphans
 
-# make clean: dangling images and unused build cache, never your data
+# make clean: dangling images and build cache unused for a week, never your data
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
 # make status: what is running, and the disk it uses
 docker compose ps
@@ -199,11 +217,132 @@ docker compose logs -f --tail=200 $(s)
 docker compose down -v --remove-orphans
 ```
 
-`make up` and `make up-images` do three more things. They move a
+`make env` first runs `scripts/stack_docker_floor.sh` (POSIX sh and the `docker`
+CLI), so it is the first thing `make up`, `make build` and `make dev` check. It
+stops when Docker does not answer, or when it is older than the floor in §1:
+the engine's API older than 1.44 (Docker Engine 25), or Compose older than
+2.24.4. Without it, check the two by hand:
+`docker version --format '{{.Server.Version}}'` prints 25 or later, and
+`docker compose version --short` prints 2.24.4 or later.
+
+Then `make env` runs `scripts/stack_env.sh` (POSIX sh, `openssl` and the `docker`
+CLI). Without it, the same by hand, from the repository root:
+
+```bash
+[ -f .env ] || { cp .env.example .env && chmod 600 .env; }
+# Only before the first start: once the automatos_postgres_data volume exists, skip this
+# (Postgres keeps its first password; section 2 says how to rotate one).
+docker volume inspect automatos_postgres_data > /dev/null 2>&1 || for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
+  if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=$(openssl rand -hex 24)|" .env && rm -f .env.bak
+  fi
+done
+```
+
+In PowerShell, without a POSIX shell: `Copy-Item .env.example .env`, then
+replace each of the three `CHANGE_ME_…` values in `.env` with the output of
+`$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`,
+one run per secret. A key missing from `.env` gets a line of its own.
+
+`make build` starts `postgres`, `redis` and `minio` before it builds, so their
+image pull happens first and their first-run initialisation and health checks
+pass while the app images build; the backend still waits for all three to be
+healthy. If the build fails, those three keep running until `make down`.
+
+`make up` and `make build` do three more things. They move a
 deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
 does this too); a fresh install never needs it. They print `make status`. And
 they tell a running session host to pick up the new code
-(`make cli-host-nudge`, below).
+(`make cli-host-nudge`, below). `make up`, `make build` and `make dev` also pass
+`AUTOMATOS_REVISION` (`git rev-parse HEAD`, with `-dirty` when `orchestrator`,
+`frontend` or `services/workspace-worker` has uncommitted changes) to compose,
+which stamps it on every image it builds as `org.opencontainers.image.revision`,
+the label CI's images carry too. A build without it is stamped `unknown`.
+
+**The core stack, five containers.** `make up CORE=1` runs postgres, redis,
+minio, the backend and the frontend, and leaves out the workspace worker and
+its image: `docker-compose.core.yml` puts the worker behind a profile of its
+own, and `make` passes that file to every compose command through
+`COMPOSE_FILE`. Without the worker, agents' workspace tools, the Deliverables
+file browser and Code Canvas answer *Workspace worker not running*; the rest
+works as before. A worker an earlier `make up` started is stopped and removed,
+and its files stay in the `automatos_workspaces_data` volume. To start it
+later, name it with the same two files:
+`docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker`,
+or run `make up` without `CORE=1`, which brings back all six. Plain
+`docker compose up` always runs six, whatever your `.env` holds: no key turns the
+worker off. `make build CORE=1` still builds all three images and then runs
+five; `make dev` always runs six.
+
+### The tag `make up` picks
+
+The three app images run one tag, `AUTOMATOS_IMAGE_TAG`: `backend` is
+`ghcr.io/automatosai/automatos-api`, `frontend` is
+`ghcr.io/automatosai/automatos-frontend` and `workspace-worker` is
+`ghcr.io/automatosai/automatos-workspace-worker`. `make up` prints the tag it
+picked and why, by this rule (`scripts/stack_images.py`, Python 3.9 or later,
+nothing to install):
+
+1. **A tag you set** in the shell or on the command line
+   (`AUTOMATOS_IMAGE_TAG=sha-1a2b3c4 make up`) is used as given. An official tag
+   that is neither on this machine nor on GHCR stops `make up`; a `local-*` tag
+   that is not on this machine is built. `AUTOMATOS_IMAGE_TAG=edge make up`
+   follows `edge` and pulls it on every call. The line `make up` writes to `.env`
+   is not a pin: it is rewritten on every run.
+2. **On a clean checkout** (`git status --porcelain -- orchestrator frontend
+   services/workspace-worker` prints nothing): `edge`, pulled first because
+   compose never re-pulls a tag it already has, when `edge`'s images are a build
+   of this very commit (their `org.opencontainers.image.revision` label is
+   `git rev-parse HEAD`), such as the weekly rebuild with fresh OS packages.
+   Otherwise `sha-<7>`, the first seven characters of `git rev-parse HEAD`, when
+   CI has published it. A `sha-*` or `tree-*` image already on this machine
+   counts as published, so a machine that has its images starts offline.
+3. **Otherwise** `local-<sha7>`, or `local-<sha7>-dirty` when one of those
+   folders has uncommitted changes. Each image whose folder is unchanged and
+   whose `tree-<12>` CI has published (the first twelve characters of
+   `git rev-parse HEAD:<folder>`; CI publishes one per tree) is pulled and
+   re-tagged; the others are built here, and `make up` names them. That covers a
+   `[skip ci]` merge and the few minutes before CI publishes a new commit.
+
+The web app has its addresses built in: the published one is the local edition,
+calling the API at `http://localhost:8000` and loading media from
+`http://localhost:9000`. When `.env` sets `NEXT_PUBLIC_API_URL`,
+`NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`, `NEXT_PUBLIC_AUTH_EDITION` or
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to anything else, `make up` builds the
+frontend here (under step 3's tag, with the other two re-tagged) and says why.
+A moved `API_PORT` or `MINIO_PORT` whose `NEXT_PUBLIC_*` values still point at
+8000 or 9000 stops `make up` before it starts anything: set them as SETUP.md
+step 3 shows.
+
+Without `make` or Python, do the same by hand. For a clean checkout of a main
+commit CI has published:
+
+```bash
+tag=sha-$(git rev-parse HEAD | cut -c1-7)
+docker manifest inspect ghcr.io/automatosai/automatos-api:$tag > /dev/null && echo published
+# make keeps exactly one such line at the end of .env, and replaces it each run
+echo "AUTOMATOS_IMAGE_TAG=$tag" >> .env
+docker compose up -d --no-build --remove-orphans
+```
+
+For `edge`, run `docker compose pull backend frontend workspace-worker` before
+`up`. For a `local-<sha7>` tag, re-tag each published tree and build the rest:
+
+```bash
+docker pull ghcr.io/automatosai/automatos-api:tree-<first 12 of git rev-parse HEAD:orchestrator>
+docker tag ghcr.io/automatosai/automatos-api:tree-<…> ghcr.io/automatosai/automatos-api:local-<sha7>
+AUTOMATOS_IMAGE_TAG=local-<sha7> AUTOMATOS_REVISION=$(git rev-parse HEAD) docker compose build frontend
+```
+
+Plain `docker compose up` without `make` runs the tag in `.env`, or `edge` when
+`.env` has none, and builds an image only when it cannot pull it. Running your
+own unmerged code next to it, as a retest stack does:
+`AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d --build` builds the
+production stages under a tag no pull ever replaces (no `local-*` tag is
+published). Image names are shared by every stack on one Docker engine, so a
+second stack sets its own `local-<ref>` in its own `.env`, not only in the shell.
+A plain `docker compose up --build` with no tag at all names its build `:edge`,
+which the next `make up` that picks `edge` pulls over.
 
 The session-host targets run Python 3.9 or later, with nothing to install, on
 macOS, Linux, WSL2 or Windows 10 1809 and later (there, type `py` for `python3`
@@ -242,15 +381,48 @@ empty value stops `docker compose up` with the message shown:
 
 **Channels (Settings → Channels).** Available in the local edition. Telegram runs in *polling* mode by default here, so a bot works — and answers agent questions from Telegram replies (PRD-225) — with no public URL. Slack, Discord and WhatsApp receive inbound messages only through webhooks, so their inbound needs a public URL in front of the orchestrator (a tunnel); outbound delivery works for every platform without one.
 
-Any non-empty values work on a private machine. They have no defaults on
-purpose: a public repository must not ship known passwords.
+`make up` writes them for you. Its first step, `make env` (§1b), creates `.env`
+from `.env.example` and gives each of the three a random value
+(`openssl rand -hex 24`) while it is empty or still the `CHANGE_ME_…` placeholder
+`.env.example` ships. It does that only before the first start, while the
+`automatos_postgres_data` volume does not exist, because Postgres keeps the
+password it was created with; it never changes any other value, nor one you
+export in the shell. So the whole install is:
 
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env      # fill in section 1 (the three secrets)
-docker compose up
+make up
 ```
+
+Your own values work too: set them in `.env` before the first `make up`. Keep
+`.env` with your data: the database opens only with the `POSTGRES_PASSWORD` it
+was created with.
+
+**No install runs on a placeholder.** The values in `.env.example` are public, so
+the backend refuses to start a command while any of the three starts with
+`CHANGE_ME`, and `make env` stops on an install that has already started with
+one. Both print the same message: which secrets, and how to rotate them. An
+unset or empty value passes the backend's check (Helm and Railway set
+`DATABASE_URL` and `REDIS_URL` instead of the two passwords); compose's own
+`${VAR:?}` stops an empty one. To rotate on an install whose data you keep:
+
+- `POSTGRES_PASSWORD`: change it in Postgres first, then put the same value in
+  `.env`:
+
+  ```bash
+  new=$(openssl rand -hex 24)
+  docker compose exec postgres psql -U postgres -d orchestrator_db -c "ALTER USER postgres PASSWORD '$new'"
+  sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$new|" .env && rm -f .env.bak
+  ```
+
+- `REDIS_PASSWORD` and `API_KEY`: a new value in `.env` alone
+  (`openssl rand -hex 24`). Both are read at every start
+  (`redis-server --requirepass`, and the backend's environment).
+
+Then `make up` (or `docker compose up -d`) restarts what changed. An install with
+no data to keep can start over instead: `docker compose down -v` deletes its
+volumes, and the next `make up` generates all three.
 
 **One model key** makes the agents think. The platform boots and serves without
 one, but chat, agents and embeddings have no model to call until you set one of
@@ -273,8 +445,9 @@ there is also what embeddings use (`PLATFORM_KEY_WORKSPACE_ID` in
 document uploads index with it; without any embedding provider an upload is
 accepted but its processing ends `failed`.
 
-**Skills.** A fresh install ships with no skills in the marketplace. Start with
-the free baseline library: in **Marketplace → Capabilities** press *Import from
+**Skills.** A fresh install ships the platform's 12 built-in skills (Auto's
+platform skill and the Socials and design skills). For more, start with the free
+baseline library of 140+ skills: in **Marketplace → Capabilities** press *Import from
 GitHub* (the local operator is the instance's super admin, so the button is
 there) and import `https://github.com/AutomatosAI/automatos-skills` — the
 modal offers it as *Use baseline repo*. Every `SKILL.md` in the repo becomes a
@@ -282,41 +455,56 @@ marketplace skill you can enable per agent; re-import later to pick up updates.
 
 ## 3. What runs where
 
-`docker compose up` starts the default profile. Nothing in it needs the
-internet after the images are built, except the LLM provider you chose (and
-Composio, if you add a key).
+`make up` and plain `docker compose up` start the default stack: six
+long-running containers, and `minio-volume-owner`, a one-shot that runs before
+MinIO and exits. Nothing in it needs the internet after the images are pulled,
+except the LLM provider you chose (and Composio, if you add a key).
 
 | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|
 | `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store the local RAG leg searches (`S3_VECTORS_ENABLED=false`). |
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
-| `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
-| `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
-| `backend` | `automatos_backend` | built from `./orchestrator` (`development` target) | 8000 (`API_PORT`) | The FastAPI API. Source is bind-mounted and served by `uvicorn --reload`. |
-| `frontend` | `automatos_frontend` | built from `./frontend` (`development` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (`npm run dev`, source bind-mounted). Starts once the backend health check passes. |
-| `workspace-worker` | `automatos_workspace_worker` | built from `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
+| `minio-volume-owner` | `automatos_minio_volume_owner` | `redis:7-alpine`, the same image as `redis` | none, and no network | One-shot, before MinIO starts: when root owns MinIO's volume, as on an install made while MinIO still ran as root, it re-owns the volume to uid 65532 once, says so in its log and exits; otherwise it exits at once. It runs as root with only the capabilities `chown` needs. MinIO starts only after it succeeds. |
+| `minio` | `automatos_minio` | `cgr.dev/chainguard/minio` (Chainguard's maintained MinIO build) | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. Runs as the image's own user, uid 65532, never root. The backend creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and the others the first time it uses them. |
+| `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
+| `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
+| `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
-`docker compose --profile all up` adds two more:
+**The core stack.** An override file runs the default stack without the
+workspace worker, five containers instead of six (§1b, §5):
 
-| Service | Host port (variable) | What it does |
-|---|---|---|
-| `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
-| `gotenberg` | 3001 (`GOTENBERG_PORT`) | DOCX/XLSX → PDF conversion. The backend reaches it at `http://gotenberg:3000`; without the profile, document conversions that need it fail, everything else is unaffected. |
+| Override | Command | Leaves out | Profile that brings it back |
+|---|---|---|---|
+| `docker-compose.core.yml` | `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d` | `workspace-worker` | `workspace`: name the service with the same two files (`... up -d workspace-worker`), or run `make up` without `CORE=1` |
 
-`docker compose --profile media up -d media-render` adds the Socials renderer:
+**Optional profiles.** Each profile adds its services to the default stack:
+`docker compose --profile <profile> up -d`, or name the service, as below. All
+but `media` and `voice` pull a published image.
 
-| Service | Host port | What it does |
-|---|---|---|
-| `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
+| Profile | Service | Container | Image / build | Host port (variable) | What it does |
+|---|---|---|---|---|---|
+| `all` | `adminer` | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
+| `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
+| `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
+| `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
+| `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
+
+Every third-party image above is pinned by digest in `docker-compose.yml`, and
+Dependabot moves the pins once a week. The CI test
+`orchestrator/tests/test_prd262_self_host_docs.py` holds these three tables to
+`docker compose config --services`, profile by profile and with the core
+override.
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
 `automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
 and `backend_data`, which holds the auto-generated credential-encryption key
-(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`). Your workspace's directory is a
-**bind mount** of a host folder, not a volume (§5). `automatos_workspaces_data`
-holds the files of every other workspace on the stack (a second or a test
-workspace), so they survive `docker compose up --build`; `make reset` removes
-it with the rest.
+(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`), uploaded documents and the local
+copy of generated documents (object storage keeps theirs). The `memory` profile
+adds `automatos_qdrant_data`, the `search` profile `searxng_cache`. Your
+workspace's directory is a **bind mount** of a host folder, not a volume (§5).
+`automatos_workspaces_data` holds the files of every other workspace on the
+stack (a second or a test workspace), so they survive recreating the
+containers; `make reset` removes it with the rest.
 
 ### Where configuration lives
 
@@ -332,13 +520,27 @@ You should not need to open the last three for a standard install.
 
 ## 4. First boot — what happens and how long it takes
 
-1. **Image builds.** Backend (Python dependencies plus system libraries for
-   OCR and PDF rendering), frontend (`npm install`), workspace-worker (Node,
-   Claude Code CLI, Python tooling, Chromium). This is the slow part and only
-   happens once per dependency change.
+1. **Images.** `make up` pulls the app images CI built, scanned and published
+   for your commit (§1b). The whole default stack is about 1.33 GB compressed on
+   amd64 and 1.28 GB on arm64 (measured 16 Oct 2026; the target is under 1 GB),
+   so the download is the slow part: about a minute at 200 Mbit/s, three to four
+   at 50 Mbit/s, plus unpacking. CI times `make up` to a working UI on every
+   main publish against a 150-second bar. A later update downloads only the
+   layers that changed. `make build` builds the images from your checkout
+   instead (Python dependencies plus system libraries for OCR and PDF
+   rendering, `npm ci`, the worker's Node and Claude Code CLI), which takes
+   several minutes.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
-   (see §10). MinIO starts and `minio-init` creates the documents bucket.
+   (see §10). `minio-volume-owner` checks MinIO's volume and exits (§3), then
+   MinIO starts; the backend creates the documents bucket the first time it
+   stores a file.
+   While a service starts, Docker probes its health every second
+   (`start_interval: 1s` in `docker-compose.yml`, Docker Engine 25 or later), so
+   a service that waits on another starts within a second or two of it being
+   ready; CI holds Redis and MinIO to 2 s from start to healthy. Postgres's
+   probe goes over TCP (`pg_isready -h 127.0.0.1`), so on a fresh volume it passes
+   only once the real server runs, after initdb's temporary one has stopped.
 3. **Backend entrypoint** (`docker-entrypoint.sh`), in order, each step
    fail-closed unless noted:
    - wait for Postgres, verify the connection;
@@ -361,8 +563,18 @@ You should not need to open the last three for a standard install.
      Workspace*) and the operator user exist;
    - start `uvicorn`. The application then runs its own boot stages,
      including the Composio catalogue bootstrap (§7).
-4. **Frontend** starts after the backend's health check passes (the check
-   allows 40 s of start-up and probes every 30 s).
+4. **Frontend** starts after the backend's health check passes. The check
+   probes every second while the backend starts, so the backend turns healthy
+   about a second after it first answers `/health`, and compose starts the
+   frontend about a second after that (CI holds this to 3 s). The check allows
+   up to 300 s of start-up for a first boot (F228), then probes every 30 s.
+
+**How long, measured.** On CI's runners on 16 Oct 2026, before the one-second
+probes of step 2, the datastores turned healthy 5.5 to 6.1 s after they started,
+and the backend's first boot on an empty database took 30 to 50 s from its start
+to `/health` 200, 45 s at the median. A laptop can take longer: one Mac took
+147 s (F228), which is why the frontend's wait allows 300 s. The targets are 2 s
+for the datastores and 30 s for the backend's first boot.
 
 Readiness, not liveness, is the signal that it is usable:
 
@@ -431,11 +643,24 @@ profile and its files live **on your machine**:
   no key, because the terminal it shows is your own Claude Code, launched by
   the host on your machine.
 - **Linux ownership note.** The worker process runs as uid 1000 (`worker`).
-  Its entrypoint `chown -R`s the mounted directory to that uid whenever it is
-  owned by anyone else, so on a Linux host the files under
-  `AUTOMATOS_WORKSPACE_DIR` end up owned by uid 1000. If that is not your
-  user, expect to need `sudo` to edit or delete them, or pre-create the
-  directory owned by uid 1000.
+  Your deliverables folder (`AUTOMATOS_WORKSPACE_DIR`) keeps its owner: when
+  uid 1000 cannot write it, because your Linux user has another uid, the worker
+  runs as the folder's owner instead, so what agents write there is yours, as it
+  is on macOS and Windows. Its entrypoint re-owns the rest of `/workspaces` (the
+  `automatos_workspaces_data` volume) to the worker's uid whenever the volume's
+  root belongs to anyone else; it never enters your deliverables folder or
+  `projects/`. When root owns the folder (`make up` run as root), the worker
+  stays uid 1000 and cannot write it, and its log says so: give the folder to
+  another user with `sudo chown -R <user>: <folder>` and restart the worker.
+  The same holds for a folder owned by an account the worker's image already
+  has, such as `www-data` (33) or `nobody` (65534): the worker never becomes
+  it. When the folder's group is root's (gid 0) or one of the image's own
+  groups, the worker takes your uid and keeps its own group.
+- **Running without it.** `make up CORE=1` (or
+  `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
+  the five other containers and not the worker (§1b). Code Canvas, the
+  Deliverables file browser and agents' workspace tools then answer *Workspace
+  worker not running*.
 - Limits and knobs: the service is capped at 2 CPUs and 2 GB;
   `WORKER_CONCURRENCY` (default 3) and `WORKSPACE_DEFAULT_QUOTA_GB` (default
   5) are overridable in `.env`. `WORKER_INTERNAL_TOKEN` is an optional shared
@@ -493,7 +718,7 @@ the Composio catalogue) run through Composio. In the local edition that is a
 4. To pull the catalogue on demand instead of waiting for a boot, press
    **Sync** on **Marketplace → Tools** (or `POST /api/tools/sync?sync_type=full`).
    It fetches every toolkit and its actions into the cache; a full catalogue is
-   several hundred apps, so it takes a few minutes. Without a valid key the
+   over 1,000 apps, so it takes a few minutes. Without a valid key the
    request returns 400 with the reason rather than reporting a sync of 0 apps.
 
 Without a key the platform is honest rather than empty:
@@ -569,6 +794,9 @@ docker compose --profile media up -d media-render
 ```
 
 Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` / `docker compose up -d`.
+No registry publishes this image, and `make up` starts the stack with `--no-build`, so
+it never builds it: run the command above once first, and again with `--build` after a
+`git pull` that changes `services/media-render` (§10).
 
 - **Wiring.** The backend already points at it: `SOCIALS_RENDER_URL=http://media-render:8090`
   in `envs/api.defaults`. An optional shared secret, `SOCIALS_RENDER_TOKEN` in `.env`,
@@ -673,13 +901,92 @@ The hosted edition runs the renderer as its own Railway service (owner sizing,
    *Needs approval*, and the file shows in Deliverables. The tab shows
    *Render minutes: used / quota this month*.
 
+## 7c. Auto's server voice (the `voice` profile)
+
+The phone (Automatos Go) and the web quick-ask play Auto's replies in a natural
+voice instead of the device's or the browser's own. The voice is `voice-tts`, a
+small service (`services/voice-tts`): Kokoro speaks each reply and it streams as
+MP3. It is off until you start it and point the backend at it:
+
+```bash
+docker compose --profile voice up -d voice-tts
+```
+
+Then set `VOICE_TTS_URL=http://voice-tts:8100` in `.env` and recreate the
+backend (`docker compose up -d backend`). No registry publishes this image
+either, so after a `git pull` that changes `services/voice-tts`, run
+`docker compose --profile voice up -d --build voice-tts`.
+
+- **Off is a normal state.** While `VOICE_TTS_URL` is empty, the backend's
+  discovery document (`/.well-known/automatos.json`) does not list `tts`, and
+  `POST /api/voice/speech` answers 503 `tts_off`. Clients then use the device's
+  voice, as they do on any answer that is not audio.
+- **Wiring.** `VOICE_TTS_TOKEN` in `.env` reaches both containers, and the backend
+  sends it as `Authorization: Bearer`. `make env` (and so `make up`) generates it with
+  `openssl rand -hex 24`, on an install that has already started too. Without `make`,
+  set it yourself: voice-tts refuses to start without one.
+- **Languages.** It speaks Kokoro's nine languages: English (US and UK),
+  Spanish, French, Italian, Portuguese (Brazil), Hindi, Japanese and Mandarin.
+  Japanese and Mandarin are phonemized with espeak and sound weaker. The phone
+  listens and speaks English and Portuguese (Brazil), chosen in its
+  **Settings → Voice**. It recognises your voice on the iPhone for the iPhone's
+  own language; for another language, on the iPhone when its dictation model is
+  installed, otherwise by Apple's speech recognition. The web quick-ask speaks in
+  the browser's language: the default voice for any variety of its language (any
+  English, by default), else a voice for exactly that language and region
+  (`pt-BR`, `fr-FR`), else the browser's own voice. Automatic language detection
+  (about 100 languages, speech recognition on the server) is planned and needs a
+  GPU; nothing in this stack does it yet
+  ([PRD-269](../PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).
+- **Resources.** Compose caps it at 2 CPUs and 2 GB. It holds the 310 MB Kokoro
+  model in memory, about 500 MB idle. It speaks as many replies at once as it has
+  CPUs and refuses the next with 429 `tts_busy` rather than queueing it.
+- **Tuning** (optional): `VOICE_TTS_DEFAULT_VOICE` (`af_heart`; a voice the service
+  does not hold falls back to its own default), and
+  `VOICE_TTS_RATE_PER_MINUTE` (60 sentences a minute per workspace), in
+  `envs/api.local`. The service's own settings are in `services/voice-tts/README.md`.
+- **The model that answers aloud.** A spoken turn (the quick-ask, the phone, Auto
+  Live) answers on `SPOKEN_MODE_MODEL` from `SPOKEN_MODE_PROVIDER`
+  (`claude-haiku-5-5` on `anthropic`), so the answer starts sooner; a typed turn
+  keeps the agent's own model. With no key for that provider, or with
+  `SPOKEN_MODE_MODEL` empty, spoken turns use the agent's model too. This applies
+  whether or not `voice-tts` runs.
+
+### voice-tts on Railway (SaaS)
+
+The hosted edition runs the voice as its own Railway service. The entry is
+`voice-tts` in `infrastructure/railway-manifest.json`.
+
+1. **Create the service** in the Automatos AI project: *New → GitHub repo →
+   AutomatosAI/automatos-ai*, with **root directory `services/voice-tts`**. It
+   builds the Dockerfile with no build args (the last stage, `production`).
+2. **Size it: 2 vCPU / 2 GB to start, one replica.** It speaks as many replies at
+   once as it has vCPUs; raise the vCPUs, not the replicas, when it answers
+   `tts_busy`.
+3. **No public domain.** It is reached over Railway's private network only. Set
+   the health check path to `/readyz`, which answers 200 only once the model has
+   loaded, so a deploy takes traffic only when it can speak.
+4. **Set its variables:**
+   - `VOICE_TTS_TOKEN`: a long random secret (boot refuses production without one);
+   - `ENVIRONMENT=production`, `SERVICE_NAME=voice-tts`;
+   - optional: `LOG_LEVEL`, `LOG_RELAY_ENABLED`, `VOICE_TTS_MAX_CONCURRENT` (the
+     container's vCPUs by default).
+5. **Point the API at it** (the `automatos-ai-api` service):
+   - `VOICE_TTS_URL=http://voice-tts.railway.internal:8100`;
+   - `VOICE_TTS_TOKEN`: the same secret;
+   - optional: `VOICE_TTS_DEFAULT_VOICE` (`af_heart`), `VOICE_TTS_RATE_PER_MINUTE`
+     (60), `VOICE_TTS_TIMEOUT_SECONDS` (15), `VOICE_TTS_CONNECT_TIMEOUT_SECONDS` (2).
+6. **Check it.** `/.well-known/automatos.json` lists `tts` among its
+   `capabilities`, and a reply in the phone's spoken mode plays in the server voice.
+
 ## 8. What a fresh instance contains
 
 Every boot in the local edition runs an idempotent first-run seed
 (`orchestrator/core/seeds/seed_local_first_run.py`), scoped to the local
 workspace:
 
-- **Auto**, the assistant, through the same seeder the hosted edition uses.
+- **Auto**, the assistant, through the same seeder the hosted edition uses,
+  and the workspace's **Brand Designer**, which that seeder adds alongside it.
 - **A starter roster** on the Agents page — *Researcher* (Research Analyst),
   *Writer* (Content Writer) and *Analyst* (Business Analyst). They use native
   platform tools only, so they run with nothing but your LLM key.
@@ -732,38 +1039,85 @@ Deliverable feature that exists in the code runs locally.
 ## 10. Updating
 
 ```bash
-docker compose stop backend                  # 1. stop the API before the code changes
 git pull
-docker compose up -d --build                 # 2. rebuild; migrations run as the backend boots
-docker compose exec backend alembic current  # 3. one revision, marked (head)
+make up                                      # 1. the new commit's images; migrations run as the new backend boots
+docker compose exec backend alembic current  # 2. one revision, marked (head)
 ```
 
-**Stop the backend before you pull.** The backend runs in reload mode with
-`./orchestrator` bind-mounted, so a pull under a running backend loads the
-new code at once, and its startup `create_all` builds any new tables before
-the new migrations run. Migrations are written to survive that
-([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first keeps the
-order they expect: migrations first, then the code that uses them.
+The default stack runs the published images, with the code inside them, so a
+pull changes nothing until `make up` fetches the new commit's images (§1b) and
+recreates the containers; the new backend migrates before it serves.
 
-`--build` rebuilds the images when dependencies or Dockerfiles changed.
+**OS security fixes.** Every Monday CI rebuilds the images with fresh Debian and
+Alpine packages (`weekly-<yyyymmdd>`) and moves `edge` to that rebuild once it
+boots. A checkout keeps the OS packages its `sha-<7>` was built with;
+`git pull && make up` picks up the weekly fixes, because `make up` then runs
+`edge` when it is a rebuild of your commit, or the newer commit's `sha-<7>`,
+which CI built on the fresh packages. `AUTOMATOS_IMAGE_TAG=edge make up` follows
+`edge` and pulls it on every call; `AUTOMATOS_IMAGE_TAG=sha-<7> make up` pins one
+build.
 
-**Running the published images** (`make up-images`, see
-[QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
-with `make up-images` again: it pulls the newer `edge` (or the
-`AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
-bind-mounted from your checkout, so there's no reload-mode ordering to worry
-about; migrations run as the new backend boots. Every Monday CI also rebuilds
-the images with fresh Debian and Alpine packages and moves `edge` to that
-rebuild (`weekly-<yyyymmdd>`) once it boots, so updating on `edge` picks up
-OS security fixes; a pinned `sha-<7>` keeps the packages it was built with.
+**Under `make dev`, stop the backend before you pull.** That stack runs the
+backend in reload mode with `./orchestrator` bind-mounted, so a pull under a
+running backend loads the new code at once, and its startup `create_all`
+builds any new tables before the new migrations run. Migrations are written to
+survive that ([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first
+keeps the order they expect: migrations first, then the code that uses them.
+
+```bash
+docker compose stop backend   # under make dev: stop the API before the code changes
+git pull
+make dev
+```
+
+Building from source (`make build`)? Update with `git pull && make build`.
+Nothing is bind-mounted from your checkout outside `make dev`, so there's no
+reload-mode ordering to worry about; migrations run as the new backend boots.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
 rendering, rebuild that service as well:
-`docker compose --profile media up -d --build media-render` (§7b).
+`docker compose --profile media up -d --build media-render` (§7b), and the
+voice: `docker compose --profile voice up -d --build voice-tts` (§7c).
 Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
+
+### The first update of an install that built its own images
+
+Before `make up` pulled the published images, it built the three app images from
+your checkout and ran the backend from your source. The first `git pull && make up`
+after that change differs in four ways. Your data stays where it is.
+
+- **`make up` pulls instead of building.** It downloads the images CI published
+  for your commit (§1b; about 1.33 GB the first time, §1) and builds only one CI
+  has not published. The images your checkout built stay on disk under their old
+  names, `<folder>-backend`, `<folder>-frontend` and `<folder>-workspace-worker`,
+  where `<folder>` is the directory you cloned into; with the default name,
+  `docker image rm automatos-ai-backend automatos-ai-frontend automatos-ai-workspace-worker`
+  removes them (`docker image ls` lists them). `make up-images` is gone: `make up`
+  does what it did. `make build` builds from your checkout, as `make up` used to.
+- **The source mount moves to `make dev`.** `make up` and plain `docker compose up`
+  run the code inside the images, so an edit in your checkout changes nothing
+  there; `make dev` runs the development stages with your source mounted and
+  reloading (§13). Generated documents now live on the `backend_data` volume: the
+  files the old backend wrote into `orchestrator/documents` in your checkout are
+  no longer read, and a download falls back to MinIO's copy of a document that
+  is not on the volume.
+- **`.env` gains one line,** `AUTOMATOS_IMAGE_TAG=…`: the tag the last `make up` or
+  `make build` ran, so later plain `docker compose` commands run the same images.
+  `make` owns that line, rewrites it on every run and changes no other value in
+  `.env`. Pin a tag in the shell or on the command line instead (§1b).
+- **MinIO's volume is re-owned, once.** MinIO now runs as uid 65532, not root.
+  On the first start `minio-volume-owner` finds the volume owned by root, changes
+  its owner to 65532, logs
+  `minio-volume-owner: /data was owned by 0:0; re-owned it to 65532:65532`
+  (`docker compose logs minio-volume-owner`) and exits; every later start, it exits
+  at once. Your buckets and objects stay as they were. Plain `docker compose up`
+  does the same, so it needs no `make`.
+
+An `.env` written before the change still runs all six containers; `make up CORE=1`
+runs five (§3).
 
 ## 11. Stopping and resetting
 
@@ -786,6 +1140,22 @@ two together.
 missing or empty. `.env` must sit next to `docker-compose.yml`; a value of
 nothing counts as unset.
 
+**`Placeholder secrets: … Each still starts with CHANGE_ME`** from `make env`, or
+in the backend's log with the backend restarting. `.env` still holds a
+placeholder from `.env.example`, on an install that has already started, so
+nothing generated a value for it. Rotate it as §2 shows, or, with no data to
+keep, `docker compose down -v` and `make up` again. `make env` changes nothing
+on its own once the database volume exists.
+
+**`Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later`**
+from `make up` (or `make env`, `make build`, `make dev`), or **`can't set
+healthcheck.start_interval as feature require Docker Engine v25 or later`**
+from plain `docker compose up`. This Docker is older than the floor (§1): the
+compose file probes each service every second while it starts, which needs
+Engine 25. Update Docker Desktop, or on Linux install Docker Engine and its
+compose plugin from Docker's repository (docs.docker.com/engine/install); a
+distribution's `docker.io` package can be older. Your data volumes are kept.
+
 **Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
 service). The same with plain compose: `docker compose logs -f backend` (boot
 steps, migrations, seeds), `docker compose logs -f workspace-worker`,
@@ -802,11 +1172,13 @@ the repository root:
 git ls-files --eol orchestrator/docker-entrypoint.sh services/workspace-worker/entrypoint.sh
 ```
 
-If either reports `w/crlf`, change its line-ending setting to LF in your editor
-and save, preserving any local edits. Then run
-`docker compose up -d --build backend workspace-worker`. Rebuilding alone
-cannot repair the backend script: Compose bind-mounts the host's copy over
-the image's entrypoint.
+The published images that `make up` pulls carry CI's copies, so this hits only
+images built from your checkout (`make build`, `make dev`). If either reports
+`w/crlf`, change its line-ending setting to LF in your editor and save,
+preserving any local edits. Then run `make build` (or `make dev`) again.
+Rebuilding alone cannot repair the backend script: the build copies your
+checkout's file into the image, and `make dev` also mounts it over the image's
+copy.
 
 **`password authentication failed for user "postgres"` after changing
 `POSTGRES_PASSWORD`.** Postgres applies the password only when it initialises
@@ -862,13 +1234,16 @@ You flipped the edition without the identity provider. The local edition is
 `AUTH_EDITION=local` (`envs/api.defaults`); leave it unless you are running
 your own Clerk instance.
 
+**A phone won't pair, or a paired phone is refused.** See
+[Connect a phone → When it goes wrong](#when-it-goes-wrong).
+
 ## 13. How the editions relate
 
 There is **one codebase**. The edition is a runtime flag:
 
-| | Local edition (this guide) | Hosted edition (automatos.app) | Enterprise |
+| | Local edition (this guide) | Hosted edition (Automatos Studio, beta opens November 2026) | Enterprise |
 |---|---|---|---|
-| Flag | `AUTH_EDITION=local` (backend) / `NEXT_PUBLIC_AUTH_EDITION=local` (frontend), set by `envs/*.defaults` | `AUTH_EDITION=saas` — the code default; the boot guard then **requires** Clerk (`CLERK_JWKS_URL`, `CLERK_SECRET_KEY`) and fails fast without it, so a hosted boot can never fall through to the anonymous local identity | Parked. No `ee/` directory, no license keys, nothing built. |
+| Flag | `AUTH_EDITION=local` (backend) / `NEXT_PUBLIC_AUTH_EDITION=local` (frontend), set by `envs/*.defaults` | `AUTH_EDITION=saas` — the code default; the boot guard then **requires** Clerk (`CLERK_JWKS_URL`, `CLERK_SECRET_KEY`) and fails fast without it, so a hosted boot can never fall through to the anonymous local identity | Coming soon · [contact Automatos](https://automatos.app/contact). A Helm chart exists and is tested in CI; no `ee/` directory or licence keys yet. |
 | Identity | one operator, no login | Clerk accounts, workspaces, teams, plans | — |
 | Configuration | `docker-compose.yml` + `envs/*.defaults` + `.env` | Railway sets each service's environment itself and **never reads** the compose file or `envs/*` — local defaults cost the hosted edition nothing | — |
 | Storage / RAG | MinIO + pgvector | AWS S3 + S3 Vectors | — |
@@ -878,21 +1253,37 @@ The same CI gates both: every change is compose-only, fresh-clone-only, or
 guarded by `AUTH_EDITION`, and the fresh-clone smoke lane boots this exact
 stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ### Keeping it small
 
-Rebuilding leaves the previous image untagged and grows the build cache, and
-Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
-of disk. `make up` and `make dev` clean up after themselves, so this stays flat
-on its own. To reclaim at any time:
+Rebuilding (`make build`, `make dev`) leaves the previous image untagged and
+grows the build cache, and Docker keeps both until something prunes them, so a
+source-built install grows on disk with every rebuild. `make up`, `make build`
+and `make dev` clean up after themselves, so this stays bounded on its own. To
+reclaim at any time:
 
 ```bash
-make clean     # or: docker image prune -f && docker builder prune -f
+make clean     # or: docker image prune -f && docker builder prune -f --filter until=168h
 ```
 
-`make clean` removes only untagged images and unused build cache. It never
-prunes volumes: a stopped stack's database volume looks "unused" to Docker, so
-`docker volume prune` would delete your data. Only `make reset` removes data,
-and it asks first.
+`make clean` removes only untagged images and the build cache nothing has used
+for a week. The week is deliberate: the dependency installs (the web app's
+`npm install`, the API's `pip install`) run in build stages no image keeps, so
+a plain `docker builder prune -f` deletes them, and the next `make build` or
+`make dev` after a `git pull` would install every dependency again (several
+minutes). Kept, a rebuild after a code change reuses them. A week of frequent
+dependency changes can hold a few copies; `docker builder prune -f` reclaims
+all of it, at the price of that reinstall. `make up` on published images builds
+nothing, so it has no build cache to keep.
+
+`make clean` never prunes volumes: a stopped stack's database volume looks
+"unused" to Docker, so `docker volume prune` would delete your data. Only
+`make reset` removes data, and it asks first.
+
+On a small machine, `make up CORE=1` runs five containers instead of six and
+never downloads the workspace worker's image; Code Canvas, the Deliverables
+file browser and agents' workspace tools need the worker (§1b, §5).
 
 **Docker Desktop's own cache limit.** Docker garbage-collects the build cache
 only once it passes `defaultKeepStorage` — 20 GB by default, so in practice it
@@ -905,29 +1296,31 @@ Docker Engine:
 
 ### Working on the code instead of with it
 
-The default stack runs the shipped production images — the Next.js standalone
-build and a compiler-free Python runtime — because that is what a user installs.
-For hot reload while editing:
+The default stack (`make up`, plain `docker compose up`) runs the published
+production images, pulled from GHCR: the Next.js standalone build and a
+compiler-free Python runtime, with the code inside them, because that is what a
+user installs. Nothing is mounted over the code and nothing reloads. To edit the
+code, run `make dev`:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+make dev    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 ```
 
-That swaps the frontend and backend to their development stages and mounts your
-source. It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
+That builds the frontend's and the backend's development stages from your
+checkout and mounts your source over `/app`: the backend runs `uvicorn
+--reload` and the frontend the Next.js dev server, so edits reload live. The
+backend's entrypoint and healthcheck scripts are mounted from the checkout too.
+It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
 
-Two things are opt-in to keep the default install small:
+One thing is opt-in to keep the default install small:
 
 ```bash
 # headless Chromium for the workspace_html_to_png tool (+1.2 GB)
 docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
-
-# Leiden clustering for the Knowledge Graph (+660 MB; without it the graph
-# still clusters, using networkx's Louvain — lower partition quality)
-docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ```
 
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+The Knowledge Graph's Leiden clustering is in every install: it runs on
+graspologic-native, about 1 MB, so it needs no build option (PRD-262 US-027).
 
 ## Session mode — your own Claude Code sessions, managed (PRD-234)
 
@@ -1146,11 +1539,360 @@ choice; the phrase above is the ceiling to keep in mind.
 
 ## Network exposure (`BIND_ADDRESS`)
 
-Every port the stack publishes listens on `127.0.0.1` by default: the web app
-(3000), the API (8000), Postgres, Redis, MinIO and the services of the optional
-profiles. They are reachable from this machine only. To reach them from another
-device on your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the
-local edition an anonymous request is the operator (through the web app's chat as
-much as through the API), and with session mode (PRD-234) the API can start
-Claude Code sessions that run commands on this machine — do not expose it to a
-network you do not control.
+Every port the stack publishes listens on `127.0.0.1` by default (the web app on 3000, the API on 8000,
+Postgres, Redis, MinIO and the optional profiles), so only this machine reaches them. `BIND_ADDRESS=0.0.0.0`
+in `.env` publishes them all; `API_PUBLISH_ADDRESS` and `WEB_PUBLISH_ADDRESS` publish only the API and the web
+app. In the local edition a request with no credential is the operator, and session mode (PRD-234) runs
+commands on this machine, so while either reaches beyond it the backend refuses to start unless
+`LOCAL_REMOTE_ACCESS=paired` (every phone and browser pairs with a one-time code; the first comes from
+`docker compose exec backend python -m scripts.mint_pairing_code`) or `open` (whoever reaches it is the operator;
+a warning at every boot). A tunnel or reverse proxy on this machine is invisible to that check: run paired.
+To reach the install from a phone, see [Connect a phone (Automatos Go)](#connect-a-phone-automatos-go).
+
+## Connect a phone (Automatos Go)
+
+Automatos Go is the iPhone app. On the local edition a phone does not sign in.
+It **pairs** once, with a one-time code from this install, and then uses a device
+token that it keeps in the iPhone's Keychain. The server keeps only a SHA-256 hash
+of each code and each token. A phone needs two things from the install:
+
+- **Paired mode:** `LOCAL_REMOTE_ACCESS=paired`. No other mode lets a phone pair.
+- **An address the phone can reach:** https, or plain http on a home network only.
+
+[QUICKSTART.md](../../QUICKSTART.md#reach-your-install-from-your-phone-optional)
+and [SETUP.md](../../SETUP.md#reach-your-install-from-your-phone-optional) have the
+short steps. This section is the reference: what each setting does, the two setups
+we recommend, how to check the result, and how to remove a phone. The phone calls
+the web app *Studio*, so its messages say "Studio → Settings → Phones & devices".
+
+### Reach your install from your phone
+
+**The three modes.** `LOCAL_REMOTE_ACCESS` goes in `.env`. Any other value stops
+the backend from starting.
+
+| Mode | A request with no credential | Phones |
+|---|---|---|
+| `off` (the default) | is the operator. The backend refuses to start while `API_PUBLISH_ADDRESS` or `WEB_PUBLISH_ADDRESS` reaches beyond this machine. | cannot pair |
+| `paired` | is refused: `401 device_pairing_required`. Every phone **and every browser**, the one on this machine included, pairs once with a code. | pair with a code |
+| `open` | is the operator, whoever sends it. A warning at every boot while the API or the web app is published beyond this machine. | cannot pair |
+
+**The settings.** `.env` reaches only the variables compose names; `envs/api.local`
+reaches every backend setting (§3, *Where configuration lives*). `.env.example`
+lists only `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`: change those two lines,
+and add the others yourself.
+
+| Setting | File | What it does for a phone |
+|---|---|---|
+| `LOCAL_REMOTE_ACCESS=paired` | `.env` | Turns pairing on (`POST /api/v1/mobile/pair`) and refuses requests with no credential. |
+| `PUBLIC_API_HOST` | `envs/api.local` | The API's host name, with its port when that is not 443, and no scheme. The phone is handed `https://<PUBLIC_API_HOST>` in every pairing link and as `api_url` in discovery (below). It always means https. Left unset, the API names the address each request arrived on. The same setting is also the host of channel webhooks and of Auto Live's Retell callbacks: with a tailnet-only name, Slack, Telegram and Retell cannot reach them. |
+| `FRONTEND_URL` | `envs/api.local` | The web app's address: the host of every pairing link, and `web_url` in discovery. The default is `http://localhost:3000`. |
+| `CORS_ALLOW_ORIGINS` | `envs/api.local` | Add the web app's address, for browsers on other machines. The phone does not need it. |
+| `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL` | `.env` | The API address the web app uses in a browser. `make up` builds the web app here when they change (§1b). The phone does not read them. |
+| `API_PUBLISH_ADDRESS`, `WEB_PUBLISH_ADDRESS` | `.env` | Publish only the API and the web app beyond `127.0.0.1`. You need them only when the proxy runs on another machine, or on a plain home network (below). Leave `BIND_ADDRESS` unset, so the datastores stay on `127.0.0.1`. |
+
+**The address the phone types.** The phone's **Server address** is the API's
+address, not the web app's. The phone reads `/.well-known/automatos.json` there and
+sends every call to it. The app accepts:
+
+- `https://` to any host;
+- `http://` only to 10.x, 172.16–31.x, 192.168.x, and names that end in `.local`;
+- never `localhost` or `127.x`: on a phone, that is the phone itself.
+
+Tailscale's `100.x` addresses do not count as a home network. Use the https
+`*.ts.net` name instead.
+
+#### Recommended: Tailscale, with nothing on the internet
+
+The install stays on your tailnet. Only your own devices that run Tailscale reach
+it, and nothing is published.
+
+1. Install Tailscale on this machine and on the phone, signed in to the same
+   tailnet. `tailscale serve` needs MagicDNS and HTTPS certificates turned on for
+   the tailnet.
+2. Serve the web app and the API from this machine (use your `FRONTEND_PORT` and
+   `API_PORT` if you changed them):
+   ```bash
+   tailscale serve --bg 3000                # the web app: https://<machine>.<tailnet>.ts.net
+   tailscale serve --bg --https=8443 8000   # the API:     https://<machine>.<tailnet>.ts.net:8443
+   ```
+3. In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://<machine>.<tailnet>.ts.net:8443
+   NEXT_PUBLIC_WS_URL=wss://<machine>.<tailnet>.ts.net:8443/ws
+   ```
+   and in `envs/api.local`:
+   ```bash
+   PUBLIC_API_HOST=<machine>.<tailnet>.ts.net:8443
+   FRONTEND_URL=https://<machine>.<tailnet>.ts.net
+   CORS_ALLOW_ORIGINS=https://<machine>.<tailnet>.ts.net,http://localhost:3000
+   ```
+   Then `make up`.
+4. Publish nothing. `tailscale serve` reaches the ports on `127.0.0.1`.
+
+The phone's Server address is `https://<machine>.<tailnet>.ts.net:8443`. Use
+`tailscale serve`, not `tailscale funnel`: Funnel puts the address on the internet.
+
+#### Recommended: a domain of your own, on 443 behind Caddy
+
+For phones that are not on a tailnet. The web app and the API are then on the
+internet, and paired mode is what refuses everyone without a paired device.
+
+1. Make two names under your domain, both pointing at this machine: one for the
+   web app (`studio.example.com` below) and one for the API (`api.example.com`).
+   Ports 80 and 443 must reach Caddy, which uses them to get its certificates and
+   serve them. Give the API a name of its own: the web app has its own
+   `/api/chat` and `/api/themes/files` routes, so one name split by path sends some
+   of the phone's calls to the wrong server.
+2. Caddy on this machine fetches the certificates itself:
+   ```
+   studio.example.com {
+       reverse_proxy 127.0.0.1:3000
+   }
+   api.example.com {
+       reverse_proxy 127.0.0.1:8000
+   }
+   ```
+3. In `.env`:
+   ```bash
+   LOCAL_REMOTE_ACCESS=paired
+   NEXT_PUBLIC_API_URL=https://api.example.com
+   NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+   ```
+   and in `envs/api.local`:
+   ```bash
+   PUBLIC_API_HOST=api.example.com
+   FRONTEND_URL=https://studio.example.com
+   CORS_ALLOW_ORIGINS=https://studio.example.com,http://localhost:3000
+   ```
+   Then `make up`.
+4. With Caddy on this machine, publish nothing: it reaches the ports on
+   `127.0.0.1`. With Caddy on another machine, set `API_PUBLISH_ADDRESS` and
+   `WEB_PUBLISH_ADDRESS` to this machine's address on the network between them,
+   and let only the proxy reach those ports (*What not to do*, below).
+
+The phone's Server address is `https://api.example.com`.
+
+#### On a home network only, without TLS
+
+This works, but nothing between the phone and the server is encrypted.
+
+- In `.env`: `LOCAL_REMOTE_ACCESS=paired` and `API_PUBLISH_ADDRESS` set to this
+  machine's address on the home network, such as `192.168.1.20`. `0.0.0.0` also
+  works, but it publishes the API on every network this machine joins, a café's
+  Wi-Fi included. Leave `PUBLIC_API_HOST` unset: it always means https.
+- With no proxy in front, any client that reaches the API can write its own
+  `X-Forwarded-For` and get round the pairing limit (*What not to do*). Pair only
+  on a network you trust.
+- On the phone, type `http://192.168.1.20:8000` (your `API_PORT`) and the code. The
+  confirm card warns "Unencrypted home network … Pair only on a network you trust",
+  and a one-line banner, "Unencrypted home network · <address>", stays over every
+  screen.
+- The web app's pairing link, and its QR image, name the API address your browser uses
+  (`http://localhost:8000` by default), which a phone cannot use. The console's
+  hint about `PUBLIC_API_HOST` is there for the same reason. Type the address in
+  the app instead.
+- Links from the phone into the web app (such as *Open in Studio*) open
+  `FRONTEND_URL`, which stays `http://localhost:3000` here, and the phone cannot
+  load that. Use the web app on this computer instead.
+
+### Check what the phone will see
+
+From a machine on the phone's network (or open the same address in the phone's
+browser):
+
+```bash
+curl -s https://api.example.com/.well-known/automatos.json
+```
+
+The API answers this without a credential, in paired mode too:
+
+```json
+{"schema":"automatos-discovery/v1","name":"Automatos","edition":"local","api_url":"https://api.example.com","web_url":"https://studio.example.com","auth":{"modes":["device"],"clerk":null},"pairing":{"enabled":true},"push":{"expo":false},"capabilities":["digest","mobile_theme","push","spoken_mode","voice_live"]}
+```
+
+Check four things:
+
+- `"edition":"local"` and `"pairing":{"enabled":true}`. `false` means the mode is
+  not `paired`.
+- `api_url` is the address the server names for itself: `https://<PUBLIC_API_HOST>`,
+  or, while that is unset, the address the request came in on. It is also the API
+  address in the pairing links Studio shows (the console script's link names
+  `BACKEND_URL` while `PUBLIC_API_HOST` is unset). The phone sends every call to
+  the Server address you typed (or the pairing link's), the one that answered, and
+  never switches to `api_url`. When `api_url` names another address, the confirm card shows it as
+  "Address the server lists".
+- `web_url` is the web app's address (`FRONTEND_URL`), not `localhost` (with
+  https; the home-network setup leaves it at `localhost`).
+- `capabilities` lists what this version of the server can do. A listed feature can
+  still need setting up: Auto Live also needs Retell's credentials and its switch
+  (`voice.live_enabled`), which the local stack does not configure (§9), and a theme
+  shows only once one with a phone block is installed. The app turns a feature on
+  only when its name is listed:
+
+  | Capability | What it turns on in the app |
+  |---|---|
+  | `digest` | The daily digest time in the phone's notification settings. |
+  | `mobile_theme` | Installed workspace themes on the phone, as data only, never code: colours (the member's own look, for themes that paint from looks), fonts (`.ttf` or `.otf`, up to 400 KB each) and Auto's clips and stills (`.mp4` up to `THEME_MAX_CLIP_KB`, 1024 KB by default; `.png` up to 512 KB; the phone loads none over 2 MB). Each theme the member may use that has a phone block is listed under Studio in the phone's style picker. A theme that is not reviewed (an upload to this workspace without Automatos's signature, or a Marketplace theme still in review) shows only after the member opts in to it in the web app, and a theme revoked with `disable` is not shown. Play and HUD are the phone's own styles. A paired phone gets the themes of the one workspace it paired to. See Themes: [On your phone](../themes/on-your-phone.md) for members, and [the phone's side of a theme](../theme-host/mobile.md) for the answer and who may call. |
+  | `push` | Notifications, but only while `push.expo` is `true` (below). |
+  | `spoken_mode` | Spoken replies when you talk to Auto by voice. |
+  | `tts` | Auto's natural voice for those replies (§7c), in place of the phone's own. Listed only while `VOICE_TTS_URL` is set. |
+  | `voice_live` | Auto Live, a live voice conversation with Auto. |
+
+  Today's Automatos Go uses none of them yet. The notifications, styles (themes)
+  and voice updates are being built.
+
+`push.expo` says whether this install sends notifications to phones through Expo's
+push service. It is `false` until the operator agrees and `true` after. The web app
+asks once, *Send notifications to phones through Expo's push service?* (Yes / Not
+now), the first time an owner or admin gets a pairing code there (below), and
+**Settings → Phones & devices** has a switch to change the answer. The answer is
+install-wide and kept in the database (system setting
+`notifications.push_via_expo`), not in `.env`.
+Until it is `true`, nothing is sent to Expo. Once it is, the install needs outbound
+https to `exp.host`.
+
+A `500` with "Discovery is not set up on this server: …" names the setting to fix,
+for example `FRONTEND_URL must be an http(s) URL with a host`.
+
+### Pair the first browser, then phones
+
+1. **The first code comes from the server console.** In paired mode the browser on
+   this machine pairs too: every unpaired browser shows *Pair this browser* in
+   place of the app. Mint a code:
+   ```bash
+   docker compose exec backend python -m scripts.mint_pairing_code
+   ```
+   It prints the code (`XXXX-XXXX`, which works once, for ten minutes), when it
+   expires, and its pairing link. `--name "Office laptop"` labels the device until
+   it pairs with a name of its own. `--review --ttl-hours N` mints App Review's
+   code, which lasts N hours (at most 336), still works once, and is written to the
+   audit log. The code belongs to the operator
+   (`LOCAL_OPERATOR_EMAIL`) in the local workspace (`DEFAULT_WORKSPACE_ID`). Type
+   it into *Pair this browser*, or pair a phone with it (step 3).
+
+   The script refuses (exit 2) unless the install runs `paired`, and says how to
+   turn it on. Exit 1 means it could not mint, and the message says why. Most
+   often the operator's user row is missing: start the stack once (`make up`),
+   then run it again.
+2. **Then from the web app.** In a paired browser: **Settings → Phones & devices →
+   Pair a phone → Get a pairing code**. It shows the code, "Expires in m:ss", and
+   the pairing link, which carries the API's address and the code, as text and as a
+   QR image. Only a workspace owner or admin gets codes; the operator always can. A
+   code pairs the phone to the person who got it, in this workspace. The first time,
+   before the code, it asks the notifications question (`push.expo`, above).
+3. **On the phone.** Open Automatos Go and tap **Connect to your own server**. Type
+   the Server address (the API's) and the code, then tap **Continue**. Check the
+   card, *Pair with this server?*, and tap **Pair**. Nothing pairs before that
+   tap. The phone then shows in **Settings → Phones & devices** as "Automatos Go on
+   iPhone".
+
+The app's **Scan the code in Studio** reads the QR image, which the web app shows
+only while the code is live. The web app's line says "Scan the QR code with the
+phone"; scan it from inside Automatos Go: the iPhone's Camera app opens the link's web
+page (`/go/pair`), which shows the server and the code but never pairs, because a
+self-hosted address is not one of the app's linked domains.
+
+A wrong guess never uses up a code. A phone that pairs again (the same phone and
+the same person) keeps its one row in the list, and its new token replaces the old
+ones.
+
+### What a paired phone can do
+
+- It acts as the person whose code paired it, with that person's role, on the same
+  routes the web app uses. A phone paired with the operator's code (from the
+  console, or from the operator's own browser) has the operator's full rights.
+- It is bound to its workspace. A request that names another workspace is `403`.
+- When its person is removed from the workspace or deactivated, its next call is a
+  plain `401`, and the phone asks to pair again. The operator is exempt.
+- It swaps its token for a new one every 30 days (`MOBILE_TOKEN_ROTATE_DAYS`), and
+  the old token keeps working for 600 seconds
+  (`MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS`). Both go in `envs/api.local`. The app
+  does this by itself.
+- The token stays in the Keychain on that iPhone. It does not move to another
+  phone with a backup.
+
+### Remove a phone
+
+- **From the web app:** **Settings → Phones & devices → Revoke**, which asks first.
+  A person revokes their own devices; a workspace owner or admin, and the
+  operator, sees and revokes everyone's. The phone's next call is
+  `401 device_revoked`, and the phone says "This phone was removed from <server>.
+  Pair it again from Studio → Settings → Phones & devices." The row stays in the
+  list, marked revoked.
+- **From the phone:** in the app's **Settings**, **Remove this phone and forget this
+  server**, which asks first. The phone revokes itself on the server, then forgets
+  it. If the server can't be reached, the phone still forgets it, and the web app
+  lists it until you revoke it there.
+- **A lost phone:** revoke it in the web app.
+- **No phones at all any more:** stop Caddy or `tailscale serve` first
+  (`tailscale serve reset`), then remove `API_PUBLISH_ADDRESS` and
+  `WEB_PUBLISH_ADDRESS` from `.env` (or set them to `127.0.0.1`), set
+  `LOCAL_REMOTE_ACCESS=off` and `make up`. Keep that order: in `off`, a request
+  with no credential is the operator again, and a proxy still running on this
+  machine would hand that to whoever reaches it.
+
+### What not to do
+
+- **`open` on an install the internet can reach.** In `open`, a request with no
+  credential is the operator, and session mode runs commands on this machine.
+  Whoever reaches the address owns the install. Phones cannot pair in `open`
+  anyway.
+- **`off` behind a proxy or a tunnel on this machine.** Caddy, `tailscale serve`
+  or any tunnel reaches the ports on `127.0.0.1`, so the boot check cannot see it.
+  In `off`, the proxy then makes anyone who reaches it the operator. Run `paired`.
+- **Plain http over the internet.** The app refuses `http://` to any address
+  outside a home network, and a browser on plain http sends its device token
+  unencrypted. Use one of the two https setups.
+- **`BIND_ADDRESS=0.0.0.0` for a phone.** It publishes Postgres, Redis, MinIO and
+  every other port too. A phone needs only the API. Publish only the API and the
+  web app, and only when the proxy is on another machine, or on a plain home
+  network (above).
+- **An API port that clients can reach around the proxy.**
+  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. It
+  reads that address from the first `X-Forwarded-For` hop, so a client that reaches
+  the API directly can write the header itself. Caddy replaces the header by default.
+  Let only the proxy reach the published ports. The limit changes with
+  `RATE_LIMIT_MOBILE_PAIR_IP_MAX` and `RATE_LIMIT_MOBILE_PAIR_IP_WINDOW_SECONDS` in
+  `envs/api.local`.
+
+### When it goes wrong
+
+**"This server isn't taking phones yet…"** on the phone. Discovery says
+`"pairing":{"enabled":false}`, or `POST /api/v1/mobile/pair` answered `404`: the
+install is not in paired mode. Set `LOCAL_REMOTE_ACCESS=paired` in `.env`, then
+`make up`.
+
+**"This address doesn't answer like an Automatos server that pairs phones."**
+Nothing answered `/.well-known/automatos.json` at that address. Most often it is
+the web app's address: type the API's.
+
+**"That code didn't work. Codes last 10 minutes and work once."**
+`401 invalid_pairing_code`: the code is wrong, expired or used. Get a new one.
+
+**"Too many pairing tries from this network."** `429` with `Retry-After`: that
+address has used its 10 tries for the 10 minutes (*What not to do*). Wait, or
+raise the limit.
+
+**"Can't reach <server>"** on a paired phone. The phone got no answer, or the proxy
+answered `502` or `504`. The stack may be stopped (`make status`), or the phone is
+not on the network. With Tailscale, check that the Tailscale app on the phone is
+connected.
+
+**`401 {"code":"device_pairing_required", …}`** in a browser or a log. A request
+with no credential reached an install in paired mode. Pair that browser or phone.
+
+**`401 {"code":"device_revoked"}`.** The device was revoked. Pair it again with a
+new code.
+
+**`500` "Pairing is not set up on this install: …"** from *Get a pairing code*,
+or "Discovery is not set up on this server: …". `FRONTEND_URL` or
+`PUBLIC_API_HOST` is not a usable address, and the message names which. Fix it in
+`envs/api.local`, then `make up`.
+
+**The backend does not start, and `docker compose logs backend` says
+"LOCAL_REMOTE_ACCESS=off, but API_PUBLISH_ADDRESS=… publishes this install beyond
+this machine".** Set `paired` (this section), or publish on `127.0.0.1` again.
+
+**The console says "This install runs LOCAL_REMOTE_ACCESS=off…"** (exit 2). The
+script mints codes only in paired mode. Its message says how to turn it on.

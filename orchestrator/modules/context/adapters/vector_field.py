@@ -25,8 +25,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import (
+from config import config
+from core.llm.embedding_manager import EmbeddingManager
+from core.ports.context import SharedContextPort
+from core.qdrant import (
     Distance,
     FieldCondition,
     Filter,
@@ -35,12 +37,9 @@ from qdrant_client.models import (
     MatchValue,
     PayloadSchemaType,
     PointStruct,
+    QdrantRestClient,
     VectorParams,
 )
-
-from config import config
-from core.llm.embedding_manager import EmbeddingManager
-from core.ports.context import SharedContextPort
 from core.qdrant_writes import upsert_retrying_a_timeout_once
 from modules.context import field_scoring
 
@@ -84,7 +83,7 @@ class VectorFieldSharedContext(SharedContextPort):
         # dialling a host that does not exist on every operation.
         if not config.QDRANT_URL:
             raise RuntimeError("field memory not configured (QDRANT_URL empty)")
-        self._client = AsyncQdrantClient(
+        self._client = QdrantRestClient(
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY or None,
             timeout=30,  # Default 5s too short for index creation with wait=True
@@ -420,17 +419,20 @@ class VectorFieldSharedContext(SharedContextPort):
         agent_id: int = 0,
         top_k: int = 0,
         query_vector: Optional[list[float]] = None,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
         """PRD-166 S1: workspace-persistent recall — rank patterns accumulated
         across every mission in the workspace (filter on ``workspace_id``, not a
         single ``field_id``). Powers cross-mission learning.
 
         PRD-164 S2 (Q21): pass ``query_vector`` to reuse an embedding the caller
-        already computed (keeps agent dispatch at one embedding call)."""
+        already computed (keeps agent dispatch at one embedding call).
+        PRD-268: ``record_access=False`` (a check-in's context, which changes
+        nothing) skips Hebbian reinforcement, as on ``query``."""
         return await self._scored_search(
             self._workspace_filter(workspace_id), query, top_k,
             label=f"ws={workspace_id}", query_vector=query_vector,
-            workspace_id=workspace_id,
+            workspace_id=workspace_id, record_access=record_access,
         )
 
     async def _scored_search(
@@ -838,16 +840,9 @@ class VectorFieldSharedContext(SharedContextPort):
                 continue
 
             new_count = point.payload["access_count"] + 1
-            initial_strength = point.payload["strength"]
-
-            # Co-access bonus
-            if len(point_ids) > 1:
-                boosted = min(
-                    initial_strength * (1.0 + 0.02 * (len(point_ids) - 1)),
-                    initial_strength * self._reinforce_cap,
-                )
-            else:
-                boosted = initial_strength
+            boosted = field_scoring.co_accessed_strength(
+                point.payload["strength"], len(point_ids), self._reinforce_cap,
+            )
 
             await self._client.set_payload(
                 collection_name=SHARED_COLLECTION,

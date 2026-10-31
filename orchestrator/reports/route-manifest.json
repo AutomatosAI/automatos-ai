@@ -1,9 +1,13 @@
 {
-  "route_count": 943,
+  "route_count": 1004,
   "routes": [
     {
       "method": "GET",
       "path": "/"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/automatos.json"
     },
     {
       "method": "GET",
@@ -24,6 +28,10 @@
     {
       "method": "GET",
       "path": "/api/activity/digest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/digest/feedback"
     },
     {
       "method": "POST",
@@ -142,6 +150,26 @@
       "path": "/api/admin/themes/pending"
     },
     {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/themes/revocations/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/sync/pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/themes/revocations/{revocation_id}/lift"
+    },
+    {
       "method": "POST",
       "path": "/api/admin/themes/{package_id}/approve"
     },
@@ -162,6 +190,10 @@
       "path": "/api/admin/themes/{package_id}/report-note"
     },
     {
+      "method": "GET",
+      "path": "/api/admin/themes/{package_id}/review-package"
+    },
+    {
       "method": "POST",
       "path": "/api/admin/themes/{package_id}/signature"
     },
@@ -180,6 +212,14 @@
     {
       "method": "GET",
       "path": "/api/admin/workspaces/{workspace_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/business-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/credits"
     },
     {
       "method": "POST",
@@ -598,6 +638,22 @@
       "path": "/api/attachments/{attachment_id}"
     },
     {
+      "method": "GET",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/accept"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto/calibration/{calibration_id}/lines/{line_id}/reject"
+    },
+    {
       "method": "POST",
       "path": "/api/blog/cover-image/upload"
     },
@@ -628,6 +684,10 @@
     {
       "method": "POST",
       "path": "/api/blog/posts/{post_id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts/{post_id}/review"
     },
     {
       "method": "POST",
@@ -1358,14 +1418,6 @@
       "path": "/api/github/webhook"
     },
     {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/approve"
-    },
-    {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/reject"
-    },
-    {
       "method": "GET",
       "path": "/api/harness/self-learning"
     },
@@ -1779,6 +1831,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/marketplace/themes/publish"
+    },
+    {
+      "method": "POST",
       "path": "/api/marketplace/themes/submit"
     },
     {
@@ -2046,12 +2102,60 @@
       "path": "/api/policy/{policy_id}/assemble"
     },
     {
+      "method": "POST",
+      "path": "/api/proactive/brief/open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/follow-ups"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/follow-ups/{follow_up_id}/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/proactive/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/proactive/suggestions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/suggestions/{suggestion_id}/hide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/proactive/suggestions/{suggestion_id}/start"
+    },
+    {
       "method": "GET",
       "path": "/api/profile"
     },
     {
       "method": "PUT",
       "path": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/provenance/{sha256}"
     },
     {
       "method": "POST",
@@ -2068,6 +2172,14 @@
     {
       "method": "GET",
       "path": "/api/rag/feedback/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness"
+    },
+    {
+      "method": "POST",
+      "path": "/api/readiness/check"
     },
     {
       "method": "POST",
@@ -2360,6 +2472,10 @@
     {
       "method": "PATCH",
       "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/socials/posts/{post_id}/ai-label"
     },
     {
       "method": "GET",
@@ -2699,6 +2815,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/themes/mobile/{install_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/revocations"
+    },
+    {
+      "method": "GET",
       "path": "/api/themes/settings"
     },
     {
@@ -2800,6 +2924,70 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/approval-grants/{grant_id}/view"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/checkout"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/invoices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/invoices/{invoice_id}/pdf"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/ledger"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/payment-method"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/payment-method"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/payment-method/setup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/plan-change/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/plans"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/subscription/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/subscription/resume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/billing/summary"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/billing/webhooks/stripe"
     },
     {
       "method": "GET",
@@ -2928,6 +3116,54 @@
     {
       "method": "DELETE",
       "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mobile/devices"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/devices"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/mobile/devices/{device_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/mobile/devices/{device_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/devices/{device_id}/rotate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/digest/now"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/pair"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/pairing-codes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mobile/push-consent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/mobile/push-consent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/mobile/push-settings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/reports"
     },
     {
       "method": "GET",
@@ -3140,6 +3376,14 @@
     {
       "method": "",
       "path": "/api/voice/retell/llm-websocket/{call_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/speech"
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/voices"
     },
     {
       "method": "POST",

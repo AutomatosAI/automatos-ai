@@ -13,11 +13,13 @@
  * style switches in place (M69). A slot: the theme's version where it registered one, else the core's.
  *
  * An installed theme's registrations come from the theme host (provided here as the provider
- * provides it, with its pages); builtin Play's from its module constants, through the chat layout
- * (its chat comes through its lazy slot, so it arrives a moment after the first render: findBy*).
- * A-04d: an installed theme's page draws full bleed inside MainLayout (the theme's frame, stood in
- * for here); builtin Play's pages draw MainLayout themselves, so ThemeSlot never frames them, and
- * a slot is drawn where it is placed, never framed.
+ * provides it, with its pages); the chat layout's cases run under the fixture theme
+ * (lib/theme-host/__tests__/fixture-theme-entry.ts, PRD-261 A-19b), whose /chat page the host hands
+ * over the same way. A-04d: an installed theme's page draws full bleed inside MainLayout (the
+ * theme's frame, stood in for here), once, and a slot is drawn where it is placed, never framed.
+ * A-12a: a page entry hands the core page down to the theme's page, so the theme's
+ * `cards.CorePage` (re-exported from host-cards/core-page) draws the real core page there; a slot
+ * has none, so CorePage in it draws its own children.
  */
 import React, { Suspense, useEffect } from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
@@ -48,7 +50,6 @@ vi.mock('@/hooks/use-studio-theme', () => ({
   useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
 }))
-vi.mock('@/components/play/chat/play-chat', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <div data-testid="discussion-bar" /> }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
@@ -59,7 +60,8 @@ vi.mock('@/components/layout/main-layout', () => ({
 }))
 
 import ChatLayout from '@/app/chat/layout'
-import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { FIXTURE_THEME_ENTRY, FIXTURE_THEME_TEST_IDS, fixtureThemeHost } from '@/lib/theme-host/__tests__/fixture-theme-entry'
+import { CorePage } from '@/lib/theme-sdk/host-cards/core-page'
 import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
 import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-context'
@@ -68,7 +70,7 @@ import { INSTALLED_FRAME_MIN_WIDTH_PX } from '../theme-slot-registrations'
 
 /** An installed theme's registry entry (A-02c): its own width, the theme layout from 1024 px. */
 const INSTALLED_ENTRY: ThemeEntry = {
-  ...BUILTIN_PLAY_ENTRY,
+  ...FIXTURE_THEME_ENTRY,
   ref: 'install:00000000-0000-4000-8000-0000000a04b0',
   kind: 'installed',
   ownsPages: ['/chat'],
@@ -102,7 +104,7 @@ function installedHost(status: ThemeHostStatus = 'active'): HostValue {
   }
 }
 
-let host: HostValue | null = null
+let host: ThemeHostContextValue | null = null
 
 interface PageProps {
   readonly page?: string
@@ -341,8 +343,9 @@ function renderCounted(props: PageProps) {
 
 describe('ThemeSlot keeps the core page in one place: it mounts once (P260-FX-25, M69)', () => {
   it('when the width becomes known, on a link into a surface only the core page has', () => {
-    state.entry = BUILTIN_PLAY_ENTRY
+    state.entry = FIXTURE_THEME_ENTRY
     state.layout = 'pending'
+    host = fixtureThemeHost()
     state.search = 'repo=projects%2Fsite'
     const view = renderCounted({ keepCorePage: ['repo'] })
     shows('page')
@@ -369,10 +372,10 @@ describe('ThemeSlot keeps the core page in one place: it mounts once (P260-FX-25
   })
 
   // A style switch reaches ThemeSlot as the active theme's entry (useActiveTheme) and the host's status.
-  it("when the style switches in place between Studio and builtin Play, below Play's width", () => {
+  it("when the style switches in place between Studio and a theme, below the theme's width", () => {
     const view = renderCounted({})
     shows('page')
-    for (const entry of [BUILTIN_PLAY_ENTRY, null]) {
+    for (const entry of [FIXTURE_THEME_ENTRY, null]) {
       state.entry = entry
       view.rerender()
       shows('page')
@@ -392,6 +395,58 @@ describe('ThemeSlot keeps the core page in one place: it mounts once (P260-FX-25
     view.rerender()
     shows('page')
     expect(state.mounts).toBe(1)
+  })
+})
+
+describe("ThemeSlot hands the core page down to the theme's page (A-12a cards.CorePage)", () => {
+  function ThemeKeepsCore() {
+    return (
+      <div data-testid="theme">
+        <CorePage>
+          <div data-testid="own-fallback">The theme's own fallback</div>
+        </CorePage>
+      </div>
+    )
+  }
+
+  function ThemeLostKeepsCore() {
+    return (
+      <div data-testid="theme">
+        <CorePage>
+          <div data-testid="own-fallback">The theme's own 404</div>
+        </CorePage>
+      </div>
+    )
+  }
+
+  it("renders the real core page where the theme's page places CorePage, not the theme's fallback", () => {
+    underInstalledTheme()
+    host = { ...installedHost(), pages: new Map<string, unknown>([['/chat', ThemeKeepsCore]]) }
+    renderPage()
+    expect(screen.getByTestId('theme')).toContainElement(screen.getByTestId('page'))
+    expect(screen.queryByTestId('own-fallback')).toBeNull()
+  })
+
+  it("draws the handed-down core page inside the installed theme's frame, once (A-04d)", () => {
+    underInstalledTheme()
+    host = { ...installedHost(), pages: new Map<string, unknown>([['/chat', ThemeKeepsCore]]) }
+    renderPage()
+    expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId('page'))
+    expect(screen.getAllByTestId('page')).toHaveLength(1)
+  })
+
+  it('renders CorePage\'s own children in a slot, which has no core page to hand down', () => {
+    underInstalledTheme()
+    host = { ...installedHost(), slots: new Map<SlotId, unknown>([['notFound@1', ThemeLostKeepsCore]]) }
+    render(
+      <ThemeHostContext.Provider value={host}>
+        <ThemeSlot slot="notFound@1">
+          <div data-testid="page">The core 404</div>
+        </ThemeSlot>
+      </ThemeHostContext.Provider>,
+    )
+    expect(screen.getByTestId('own-fallback')).toBeInTheDocument()
+    expect(screen.queryByTestId('page')).toBeNull()
   })
 })
 
@@ -435,63 +490,68 @@ describe('ThemeSlot, a slot', () => {
   })
 })
 
-describe('app/chat/layout.tsx under builtin Play (its chat registered by lib/theme-host/builtin/play-slots.tsx)', () => {
-  function underPlay(layout: ThemeLayout = 'theme') {
-    state.entry = BUILTIN_PLAY_ENTRY
+describe("app/chat/layout.tsx under a theme that registered a /chat page (the fixture theme, A-19b)", () => {
+  const THEME_CHAT = FIXTURE_THEME_TEST_IDS.chat
+
+  function underTheme(layout: ThemeLayout = 'theme') {
+    state.entry = FIXTURE_THEME_ENTRY
     state.layout = layout
+    host = fixtureThemeHost()
   }
 
   function renderLayout() {
-    return render(
+    const layout = (
       <ChatLayout>
         <div data-testid="page">The chat page</div>
-      </ChatLayout>,
+      </ChatLayout>
     )
+    return render(host === null ? layout : <ThemeHostContext.Provider value={host}>{layout}</ThemeHostContext.Provider>)
   }
 
-  it("renders Play's chat instead of the chat page under Play at desktop width, with the DiscussionBar", async () => {
-    underPlay()
+  it("renders the theme's chat instead of the chat page at desktop width, with the DiscussionBar", async () => {
+    underTheme()
     renderLayout()
-    expect(await screen.findByTestId('play-chat')).toBeInTheDocument()
+    expect(await screen.findByTestId(THEME_CHAT)).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.getByTestId('discussion-bar')).toBeInTheDocument()
   })
 
-  it("never frames Play's chat a second time: PlayChat draws MainLayout itself (A-04d)", async () => {
-    underPlay()
+  it("frames the theme's chat once: full bleed inside one MainLayout, the theme's frame (A-04d)", async () => {
+    underTheme()
     renderLayout()
-    expect(await screen.findByTestId('play-chat')).toBeInTheDocument()
-    expect(screen.queryByTestId('main-layout')).toBeNull()
+    expect(await screen.findByTestId(THEME_CHAT)).toBeInTheDocument()
+    expect(screen.getAllByTestId('main-layout')).toHaveLength(1)
+    expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId(THEME_CHAT))
   })
 
   it('renders neither chat while the width is not known, the DiscussionBar still there (M69)', () => {
-    underPlay('pending')
+    underTheme('pending')
     renderLayout()
     expect(screen.queryByTestId('page')).toBeNull()
-    expect(screen.queryByTestId('play-chat')).toBeNull()
+    expect(screen.queryByTestId(THEME_CHAT)).toBeNull()
     expect(screen.getByTestId('discussion-bar')).toBeInTheDocument()
   })
 
-  it('renders the existing chat page under Classic or Studio, and under Play below 1024 px', () => {
+  it("renders the existing chat page under Classic or Studio, and under the theme below 1024 px", () => {
     renderLayout()
     expect(screen.getByTestId('page')).toHaveTextContent('The chat page')
-    expect(screen.queryByTestId('play-chat')).toBeNull()
+    expect(screen.queryByTestId(THEME_CHAT)).toBeNull()
     expect(screen.getByTestId('discussion-bar')).toBeInTheDocument()
     cleanup()
-    underPlay('fallback')
+    underTheme('fallback')
     renderLayout()
     expect(screen.getByTestId('page')).toBeInTheDocument()
-    expect(screen.queryByTestId('play-chat')).toBeNull()
+    expect(screen.queryByTestId(THEME_CHAT)).toBeNull()
   })
 
   it.each(['repo=projects%2Fsite', 'ticket=42&repo=x&runtime=1', 'mode=plan&from=assignments'])(
-    'keeps the existing chat page for ?%s under Play',
+    'keeps the existing chat page for ?%s under the theme',
     (search) => {
-      underPlay()
+      underTheme()
       state.search = search
       renderLayout()
       expect(screen.getByTestId('page')).toBeInTheDocument()
-      expect(screen.queryByTestId('play-chat')).toBeNull()
+      expect(screen.queryByTestId(THEME_CHAT)).toBeNull()
     },
   )
 })

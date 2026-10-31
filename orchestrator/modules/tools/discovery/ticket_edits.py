@@ -30,6 +30,10 @@ note kept as platform_update_task_status keeps one: #1866's approval note was lo
 the edit tool refused ``status`` and Auto split the call in two. Beside a Re-brief the
 status is dropped and the answer says so (PRD-256 FX-013).
 
+P256-FIX-N17-1 (F438): the Re-brief is a send-back (``send_backs.moved_to`` reads ``new_brief``,
+so on a Review or Done card from the owner's chat it waits for their click), and its answer
+says the card was sent back (``sent_back``), so its receipt reads "sent back to its agent".
+
 ``_user_id`` is the server-injected driver (platform executor, OPERATOR_CONSENT_ACTIONS),
 never a model argument.
 """
@@ -111,16 +115,25 @@ def briefs_like_the_board(handler: Handler) -> Handler:
         brief, _ = without_status_orders(params.get(DESCRIPTION))   # F265: the board moves the card
         edit = {k: v for k, v in params.items() if k != SEND_BACK}
         edit = {**edit, DESCRIPTION: brief} if DESCRIPTION in edit else edit
-        worked = (_worked_ticket(db, workspace_id, params.get("task_id"))
-                  if isinstance(brief, str) and brief.strip() else None)
+        rebrief = new_brief(params)
+        worked = _worked_ticket(db, workspace_id, params.get("task_id")) if rebrief else None
         if worked is None:
             return await handler(db, workspace_id, edit)
         rest = {k: v for k, v in edit.items() if k != DESCRIPTION}
         out = await handler(db, workspace_id, rest) if any(rest.get(f) for f in OTHER_FIELDS) else {}
         if out and out.get("success") is not True:
             return out
-        return _rebrief(db, workspace_id, params, brief.strip(), out.get("updated") or {})
+        return _rebrief(db, workspace_id, params, rebrief, out.get("updated") or {})
     return wrapped
+
+
+def new_brief(params: Dict[str, Any]) -> str:
+    """The call's new brief without the sentences that only move its card (F265), or ''
+    when it gives none: on a card its agent has worked on, the board's Re-brief."""
+    from modules.tools.discovery.new_card_checks import without_status_orders
+
+    brief, _ = without_status_orders((params or {}).get(DESCRIPTION))
+    return brief.strip() if isinstance(brief, str) else ""
 
 
 async def _sent_back(handler: Handler, db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -172,6 +185,7 @@ def _rebrief(db: Session, workspace_id: Any, params: Dict[str, Any], brief: str,
     from fastapi import HTTPException
 
     from api.board_task_rebrief import rebrief
+    from modules.tools.execution.call_effects import SENT_BACK_SAID
     from services.board_consent import actor_from_user_id
     from services.ticket_numbers import ticket_label
     from services.ticket_redo import MAX_BRIEF_CHARS
@@ -187,7 +201,7 @@ def _rebrief(db: Session, workspace_id: Any, params: Dict[str, Any], brief: str,
         db.rollback()
         return {"success": False, "error": str(refused.detail)}
     _note_it(db, workspace_id, task.id)
-    return {"success": True, "task_id": task.id, "status": task.status,
+    return {"success": True, "task_id": task.id, "status": task.status, SENT_BACK_SAID: True,  # N17-1: the receipt
             "updated": {**updated, DESCRIPTION: "the new brief", "back_to_its_agent": True},
             "message": REBRIEFED.format(label=ticket_label(task, capital=True))}
 
@@ -219,4 +233,4 @@ def _note_it(db: Session, workspace_id: Any, task_id: int) -> None:
     note_change(db, workspace_id, task_id, SENT_BACK)
 
 
-__all__ = ["BY_THE_PERSON", "briefs_like_the_board", "notes_say_who_asked"]
+__all__ = ["BY_THE_PERSON", "WORKED", "briefs_like_the_board", "new_brief", "notes_say_who_asked"]

@@ -147,14 +147,14 @@ ALLOWED = {
     (SCHEDULED, APPROVED): lambda p: service.unschedule(p, REVIEWER),
     (APPROVED, NEEDS_APPROVAL): _edit_copy,
     (SCHEDULED, NEEDS_APPROVAL): _edit_copy,
-    # Wave 1 (S1.1c): a post that holds no approval renders; the render ends it
-    # in needs_approval or failed.
+    # Wave 1 (S1.1c): a post that holds no approval renders; the render ends it in needs_approval or failed.
     (DRAFT, RENDERING): lambda p: service.start_render(p, AUTHOR),
     (CHANGES_REQUESTED, RENDERING): lambda p: service.start_render(p, AUTHOR),
     (NEEDS_APPROVAL, RENDERING): lambda p: service.start_render(p, AUTHOR),
     (FAILED, RENDERING): lambda p: service.start_render(p, AUTHOR),
     (RENDERING, NEEDS_APPROVAL): lambda p: service.finish_render(p, AUTHOR, _RENDERED),
     (RENDERING, FAILED): lambda p: service.fail_render(p, AUTHOR, "The check failed."),
+    (DRAFT, FAILED): lambda p: service.refuse_render(p, AUTHOR, "The renderer cannot be reached."),  # P256-FIX-SOC-5
 }
 
 
@@ -178,8 +178,8 @@ PUBLISH_MOVES = {
 
 
 # PRD-251B (B11, US-B105): a planned slot that passes unapproved ends missed; a missed post
-# without an approval restarts as a draft with a new slot.
-SLOT_MOVES = {(DRAFT, "missed"), (NEEDS_APPROVAL, "missed"), (CHANGES_REQUESTED, "missed"), ("missed", DRAFT)}
+# without an approval restarts as a draft with a new slot; P256-FIX-SOC-5: so does a plan's failed post that never published.
+SLOT_MOVES = {(DRAFT, "missed"), (NEEDS_APPROVAL, "missed"), (CHANGES_REQUESTED, "missed"), (FAILED, "missed"), ("missed", DRAFT)}
 
 
 def test_the_table_is_exactly_the_machine_through_wave_3():
@@ -195,14 +195,14 @@ def test_the_table_is_exactly_the_machine_through_wave_3():
         "edit": {APPROVED: NEEDS_APPROVAL, SCHEDULED: NEEDS_APPROVAL, "missed": NEEDS_APPROVAL},
         "render": {DRAFT: RENDERING, CHANGES_REQUESTED: RENDERING, NEEDS_APPROVAL: RENDERING, FAILED: RENDERING},
         "render_done": {RENDERING: NEEDS_APPROVAL},
-        "render_failed": {RENDERING: FAILED},
+        "render_failed": {RENDERING: FAILED, DRAFT: FAILED},
         "publish": {APPROVED: "publishing", SCHEDULED: "publishing", "missed": "publishing"},
         "retry": {FAILED: "publishing", "partially_published": "publishing"},
         "published": {"publishing": "published"},
         "partially_published": {"publishing": "partially_published"},
         "publish_failed": {"publishing": FAILED},
         "missed": {SCHEDULED: "missed"},
-        "slot_passed": {DRAFT: "missed", NEEDS_APPROVAL: "missed", CHANGES_REQUESTED: "missed"},
+        "slot_passed": {DRAFT: "missed", NEEDS_APPROVAL: "missed", CHANGES_REQUESTED: "missed", FAILED: "missed"},
         "reslot": {"missed": DRAFT},
     }
 
@@ -346,6 +346,18 @@ def test_hash_changes_when_any_one_content_field_changes(field, changed):
     before = service.compute_content_hash(_with(**_CONTENT))
     after = service.compute_content_hash(_with(**{**_CONTENT, field: changed}))
     assert before != after
+
+
+def test_the_ai_label_setting_is_content_once_a_person_sets_it():
+    """PRD-264 EUAI-08a: a person's "label as AI-generated" choice (the newest ``ai_label``
+    entry of the review log) joins the six fields; a post nobody set hashes as above."""
+    post = _with(**_CONTENT)
+    unset = service.compute_content_hash(post)
+    post.review_log = [{"at": "2026-10-20T09:00:00+00:00", "by": AUTHOR, "action": "ai_label", "comment": None, "on": False}]
+    six = {"copy": _CONTENT["copy"], "variables": _CONTENT["variables"], "sources": _CONTENT["sources"], "format": "fact_card",
+           "template_id": "11111111-2222-3333-4444-555555555555", "media": _CONTENT["media"]}
+    canonical = json.dumps({**six, "ai_label": False}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    assert service.compute_content_hash(post) == hashlib.sha256(canonical.encode("utf-8")).hexdigest() != unset
 
 
 def test_title_and_brief_are_labels_not_content():
@@ -547,6 +559,19 @@ def test_voiding_an_approval_clears_the_override():
     service.approve(post, REVIEWER, content_hash=post.content_hash, override_unsourced=True)
     _edit_copy(post)
     assert post.override_unsourced is False
+
+
+def test_f433_a_template_claim_counts_unflagged_but_never_blank_and_a_stored_flag_still_counts():
+    post = _draft(variables={"stat_value": {"value": "987"}, "blank": {"value": " "}, "users": {"value": 1, "claim": True}})
+    assert service.unsourced_claims(post, template_claims={"stat_value", "blank"}) == ["stat_value", "users"]
+    assert service.unsourced_claims(post) == ["users"]  # no template: the stored flags, as before
+
+
+def test_f433_with_template_claims_returns_a_new_dict_and_never_unclaims():
+    given = {"stat_value": {"value": "987", "claim": False}, "was": {"value": "", "claim": True}, "name": {"value": "Rye"}}
+    marked = service.post_claims.with_template_claims(given, {"stat_value", "was"})
+    assert marked == {**given, "stat_value": {"value": "987", "claim": True}} and marked is not given
+    assert given["stat_value"]["claim"] is False and service.post_claims.with_template_claims(None, {"was"}) is None
 
 
 # ---------------------------------------------------------------------------

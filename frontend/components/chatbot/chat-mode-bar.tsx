@@ -1,6 +1,8 @@
 'use client'
 
 import { Code2, FileText, Mic, Target } from 'lucide-react'
+import { useHostVoice } from '@/components/voice/voice-provider'
+import { type VoicePressOptions, useVoicePress } from '@/components/voice/voice-press'
 import { cn } from '@/lib/utils'
 import { pillBase, inactiveStyle } from './chat-mode-styles'
 
@@ -18,9 +20,6 @@ interface ChatModeBarProps {
   onCodeClick: () => void
   onPlanClick: () => void
   onMissionClick: () => void
-  /** PRD-207 S5: live voice on the chat screen. */
-  isLiveActive?: boolean
-  onLiveClick?: () => void
   pinnedAgentIds?: number[]
   agents?: PinnedAgent[]
   selectedAgentId?: number | null
@@ -36,6 +35,33 @@ const agentActiveStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/9
 
 const iconClass = 'h-4 w-4 md:h-3.5 md:w-3.5 text-primary'
 const labelClass = 'hidden md:inline'
+const LIVE_LABEL = 'Live'
+const LIVE_PRESS: VoicePressOptions = Object.freeze({ mode: 'live', press: 'toggle' })
+
+/**
+ * Live voice (PRD-207 S5), on the host voice provider (theme voice): pressed while the tab's session is a live call;
+ * a press starts Auto Live on the conversation on screen, or ends the call. When live-status says Live can't start
+ * now, the chip says why (its title) and still tries: the mint is the truth, and the strip shows its refusal in
+ * plain words. Nothing fences it on the AI label (the product owner's policy, 23 Oct 2026). The press is the one
+ * every voice control shares (components/voice/voice-press.ts), as a toggle that starts Live.
+ */
+function LiveChip() {
+  const voice = useHostVoice()
+  const { active, handlers } = useVoicePress(voice, LIVE_PRESS)
+  return (
+    <button
+      type="button"
+      onClick={handlers.onClick}
+      title={voice.available.reason ?? LIVE_LABEL}
+      aria-pressed={active}
+      data-live-available={voice.available.live}
+      className={cn(pillBase, active ? liveActiveStyle : inactiveStyle)}
+    >
+      <Mic className={cn(iconClass, active && 'text-warning')} />
+      <span className={labelClass}>{LIVE_LABEL}</span>
+    </button>
+  )
+}
 
 export function ChatModeBar({
   isCodeActive,
@@ -44,8 +70,6 @@ export function ChatModeBar({
   onCodeClick,
   onPlanClick,
   onMissionClick,
-  isLiveActive = false,
-  onLiveClick,
   pinnedAgentIds = [],
   agents = [],
   selectedAgentId,
@@ -59,18 +83,7 @@ export function ChatModeBar({
   return (
     <div className="flex flex-wrap justify-center gap-3 md:gap-2">
       {/* Live voice (PRD-207) */}
-      {onLiveClick && (
-        <button
-          type="button"
-          onClick={onLiveClick}
-          title="Live"
-          aria-pressed={isLiveActive}
-          className={cn(pillBase, isLiveActive ? liveActiveStyle : inactiveStyle)}
-        >
-          <Mic className={cn(iconClass, isLiveActive && 'text-warning')} />
-          <span className={labelClass}>Live</span>
-        </button>
-      )}
+      <LiveChip />
 
       {/* Code mode */}
       <button
