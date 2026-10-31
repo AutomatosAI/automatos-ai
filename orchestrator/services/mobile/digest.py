@@ -29,9 +29,10 @@
 5. ``deliver_background_message`` posts it as Auto's message in the person's Auto thread:
    ``[text(Auto's Read), brief@1]``, origin ``daily_digest``, its local date and via
    ``schedule``. That raises ``auto_message`` (US-012b; never coalesced), so the phone's push
-   carries it (D24). A build or post that fails gives back the claim it holds (``release``
-   with its ``posted_at``), so a later tick in the window, or the person's next open, tries
-   again.
+   carries it (D24), with the posted message's id beside the chat's link, so the phone opens
+   the Auto thread at the brief (PRD-268 US-G03; ids only, never the brief's words). A build or
+   post that fails gives back the claim it holds (``release`` with its ``posted_at``), so a
+   later tick in the window, or the person's next open, tries again.
 
 ``run_digests`` is async, on the leader's loop; every database step (and the digest's own
 snapshot) runs in a worker thread through ``anyio.to_thread.run_sync``, each on a session of

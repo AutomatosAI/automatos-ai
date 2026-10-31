@@ -10,6 +10,10 @@ number and the workspace's settings, and calls this module once per phone.
   it can be answered from the lock screen; redaction (``redact_questions_enabled``) and every
   other event carry a generic line instead. ``with_redact_questions`` is the switch's writer
   (``PUT /api/v1/mobile/push-settings``, US-014b), so the settings shape lives here only.
+* A daily brief's push (``auto_message``, PRD-268 US-G03) also carries ``message_id``, the
+  posted brief's id, so the phone opens the linked chat at it. An id only, never the brief's
+  words, and not signed: the signed fields stay PRD-266's, so every phone's check is unchanged,
+  and a phone uses it only to scroll within the chat the signed link names.
 * The fourth push type, ``suggestion`` (PRD-268 §6.5.3, K9; shipped off behind
   ``config.SUGGESTION_PUSH_ENABLED``, read by the fan-out): its body is the generic line in the
   phone's language, or the suggestion's title when the workspace shows titles
@@ -230,6 +234,7 @@ def build_payload(
     notification_id: Any = None,
     link_type: Optional[str] = None,
     link_id: Any = None,
+    message_id: Any = None,
     grant: Any = None,
     ticket_number: Optional[str] = None,
     redact: bool = False,
@@ -237,8 +242,10 @@ def build_payload(
 ) -> dict[str, Any]:
     """K9's signed v2 payload for one phone.
 
-    ``grant`` is the question's (or approval's) ``ApprovalGrant``; ``ticket_number`` is
-    ``services.ticket_numbers``' number ("#0419"); ``redact`` is
+    ``message_id`` is the posted message the push opens the linked chat at (a daily brief's,
+    PRD-268 US-G03): carried as given, never signed (``canonical_message`` reads PRD-266's
+    fields only). ``grant`` is the question's (or approval's) ``ApprovalGrant``;
+    ``ticket_number`` is ``services.ticket_numbers``' number ("#0419"); ``redact`` is
     ``redact_questions_enabled(workspace.settings)``; ``now`` sets ``iat``. Every id is a
     string; a field with no value is left out, never sent as null. Raises ValueError for an
     event outside PUSH_EVENT_TYPES or a device without a push key.
@@ -255,6 +262,7 @@ def build_payload(
         "grant_id": _text(getattr(grant, "id", None)),
         "link_type": _text(link_type),
         "link_id": _text(link_id),
+        "message_id": _text(message_id),  # not signed: a place in the signed link's chat
         "ticket_number": _text(ticket_number),
         "question": question,
         "options": list(options) or None,
@@ -355,7 +363,7 @@ def to_message(
     Title "<agent or Auto> · <badge>" (FR-9: the PRD-264 D17 badge for the phone's locale);
     the body is the question, a suggestion's title (``suggestion_title``, which the fan-out
     reads only when the workspace shows titles), or the generic line; ``data`` is the signed
-    payload, which never holds the title.
+    payload (with a brief's unsigned ``message_id``), which never holds the title.
     """
     push_type = payload["type"]
     sender = (agent_name or "").strip() or SENDER_AUTO
