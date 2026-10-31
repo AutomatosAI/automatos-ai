@@ -11,8 +11,9 @@
  * Local edition only: every route answers 404 on the hosted edition, so the callers ask only when
  * `isLocal`. The calls go through apiClient's generic `get`, so api-client.ts doesn't grow (K3). A failed
  * read throws the client's error, and an items answer that isn't the shape above throws too: the badges
- * and the install gate (US-270-14d) never treat an answer they can't read as "no Cloud items". Every
- * text in an answer is the server's, rendered as text (K30).
+ * and the install gate (US-270-14d) never treat an answer they can't read as "no Cloud items". The
+ * disclosure dialog reads a disclosure through `cloudDisclosureOf` (US-270-14c), so it never offers Add on
+ * an answer it can't show whole. Every text in an answer is the server's, rendered as text (K30).
  */
 import { apiClient } from '@/lib/api-client'
 
@@ -20,6 +21,7 @@ export const CLOUD_ITEMS_BASE = '/api/marketplace/cloud-sync'
 export const CLOUD_ITEMS_ENDPOINT = `${CLOUD_ITEMS_BASE}/items`
 export const CLOUD_UPDATES_ENDPOINT = `${CLOUD_ITEMS_BASE}/updates`
 export const CLOUD_ITEMS_UNREADABLE = "Couldn't read which items came from Automatos Cloud."
+export const CLOUD_DISCLOSURE_UNREADABLE = "Couldn't read what this item will use."
 
 export type CloudItemKind = 'agent' | 'playbook' | 'package' | 'plugin'
 /** The local key an install route takes: an agent's or a Playbook's id, a package's slug, a plugin's uuid. */
@@ -208,6 +210,50 @@ export async function getCloudItems(): Promise<CloudItems> {
 
 export function cloudDisclosurePath(kind: CloudItemKind, key: CloudItemKey): string {
   return `${CLOUD_ITEMS_ENDPOINT}/${encodeURIComponent(kind)}/${encodeURIComponent(String(key))}/disclosure`
+}
+
+/** Each kind's lists the disclosure dialog shows: lists of rows, and lists of names. */
+const DISCLOSURE_LISTS: Readonly<Record<CloudItemKind, readonly [rows: readonly string[], names: readonly string[]]>> = {
+  agent: [['apps', 'skills', 'plugins'], []],
+  playbook: [['steps'], ['agents', 'apps']],
+  package: [['members', 'connects', 'agents', 'playbooks'], []],
+  plugin: [[], ['skills']],
+}
+
+function listsOf(answer: Json, fields: readonly string[], isEntry: (entry: unknown) => boolean): boolean {
+  return fields.every((field) => {
+    const list = answer[field]
+    return Array.isArray(list) && list.every(isEntry)
+  })
+}
+
+/** A plugin's report as the Sync kept it: none, or one whose findings are a list of rows. */
+function reportOf(report: unknown): boolean {
+  return report === null || (isJson(report) && Array.isArray(report.findings) && report.findings.every(isJson))
+}
+
+function kindParts(answer: Json, kind: CloudItemKind): boolean {
+  if (kind === 'agent') return isJson(answer.prompt) && (answer.model === null || isJson(answer.model))
+  // `agents` is a list of rows (checked first): each carries its prompt.
+  if (kind === 'package') return (answer.agents as unknown[]).every((agent) => isJson(agent) && isJson(agent.prompt))
+  if (kind === 'plugin') return isJson(answer.contents) && reportOf(answer.scan) && reportOf(answer.localCheck)
+  return true
+}
+
+/**
+ * A disclosure answer as the dialog reads it, for the `kind` it asked about; throws when it is another kind's
+ * or lacks what the dialog shows (its name, version, what didn't resolve, its kind's lists), so the dialog
+ * says it couldn't read it and offers no Add rather than show part of an item.
+ */
+export function cloudDisclosureOf(answer: unknown, kind: CloudItemKind): CloudDisclosure {
+  if (!isJson(answer) || answer.kind !== kind) throw new Error(CLOUD_DISCLOSURE_UNREADABLE)
+  const [rows, names] = DISCLOSURE_LISTS[kind]
+  const readable = typeof answer.name === 'string' && typeof answer.version === 'string'
+    && listsOf(answer, ['unresolved', ...rows], isJson)
+    && listsOf(answer, names, (entry) => typeof entry === 'string')
+    && kindParts(answer, kind)
+  if (!readable) throw new Error(CLOUD_DISCLOSURE_UNREADABLE)
+  return answer as unknown as CloudDisclosure
 }
 
 export function getCloudDisclosure(kind: CloudItemKind, key: CloudItemKey): Promise<CloudDisclosure> {
