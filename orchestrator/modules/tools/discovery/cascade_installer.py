@@ -413,9 +413,10 @@ def _copy_tool_assignments(
     if not tool_names:
         return []
 
-    # Ensure workspace has a Composio entity for tool connections
+    # Ensure workspace has a Composio entity for tool connections. Flushed, never committed here: the cascade
+    # runs inside its caller's transaction (a package install's savepoint), and its caller commits.
     entity_manager = EntityManager(db)
-    entity = entity_manager.get_or_create_entity(workspace_id)
+    entity = entity_manager.get_or_create_entity(workspace_id, commit=False)
     entity_id = entity["id"]
 
     for tool_name in tool_names:
