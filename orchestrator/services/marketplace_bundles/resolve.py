@@ -12,7 +12,11 @@ import finds each one here, among the rows any workspace may use:
 * a model by its model id, an ``llm_models`` row (what the disclosure calls ``here``);
 * an agent by a reference: ``{slug}`` a marketplace agent with that slug (a seeded one), ``{item}``
   the Cloud agent a ``marketplace_cloud_items`` mapping holds for that externalId, ``{name}`` never a
-  row. Only an approved marketplace row, with no workspace, ever answers.
+  row. Only an approved marketplace row, with no workspace, ever answers;
+* a Playbook by a reference (US-270-13c, a package's member): ``{templateId}`` a marketplace Playbook
+  with that template id (a seeded one), ``{item}`` the Cloud Playbook mapped to that externalId; again
+  only an approved marketplace row with no workspace, answered by its template id (what
+  ``package_installer.install_playbook`` finds it by).
 
 What is not found is recorded, never guessed: ``unresolved`` builds the mapping's list of
 ``{kind, name}`` (at most ``UNRESOLVED_MAX``) that the disclosure shows, and the item is still written;
@@ -26,7 +30,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from core.models.core import Agent, LLMModel, Skill
+from core.models.core import Agent, LLMModel, Skill, WorkflowTemplate
 from core.models.marketplace_cloud import MarketplaceCloudItem
 from core.models.marketplace_plugins import MarketplacePlugin
 from core.models.personas import Persona
@@ -36,6 +40,7 @@ PLUGIN_APPROVED = "approved"
 SHARED_PERSONA_SCOPE = "global"
 WORKSPACE_PERSONA_SCOPE = "workspace"
 AGENT_ITEM = "agent"
+PLAYBOOK_ITEM = "playbook"
 
 # The kinds of what didn't resolve, as the mapping's `unresolved` records them.
 SKILL, PERSONA, PLUGIN, MODEL, HELPER = "skill", "persona", "plugin", "model", "helper"
@@ -135,6 +140,28 @@ def agent_for_ref(db: Session, ref: Mapping[str, Any]) -> Optional[LocalAgent]:
     return LocalAgent(row.id, row.name) if row is not None else None
 
 
+def playbook_for_ref(db: Session, ref: Mapping[str, Any]) -> Optional[str]:
+    """The template id of the approved marketplace Playbook ``ref`` names: ``{templateId}`` one with that
+    template id, ``{item}`` the Cloud Playbook mapped to that externalId; any other kind, None."""
+    query = db.query(WorkflowTemplate.template_id)
+    if "templateId" in ref:
+        query = query.filter(WorkflowTemplate.template_id == ref["templateId"])
+    elif "item" in ref:
+        query = query.join(MarketplaceCloudItem, MarketplaceCloudItem.recipe_id == WorkflowTemplate.id).filter(
+            MarketplaceCloudItem.item_type == PLAYBOOK_ITEM, MarketplaceCloudItem.external_id == ref["item"],
+        )
+    else:
+        return None
+    row = (
+        query.filter(
+            WorkflowTemplate.owner_type == MARKETPLACE_OWNER, WorkflowTemplate.is_approved.is_(True),
+            WorkflowTemplate.workspace_id.is_(None),
+        )
+        .first()
+    )
+    return row.template_id if row is not None else None
+
+
 def unresolved(entries: Iterable[Tuple[str, str]]) -> List[Dict[str, str]]:
     """The mapping's ``unresolved``: each distinct (kind, name), in order, as ``{kind, name}``, at most
     UNRESOLVED_MAX."""
@@ -143,7 +170,7 @@ def unresolved(entries: Iterable[Tuple[str, str]]) -> List[Dict[str, str]]:
 
 
 __all__ = [
-    "AGENT_ITEM", "HELPER", "MARKETPLACE_OWNER", "MODEL", "PERSONA", "PLUGIN", "SKILL", "UNRESOLVED_MAX",
-    "LocalAgent", "SkillKey", "agent_for_ref", "global_skills", "model_held", "plugins_by_slug",
-    "shared_persona_by_slug", "unresolved",
+    "AGENT_ITEM", "HELPER", "MARKETPLACE_OWNER", "MODEL", "PERSONA", "PLAYBOOK_ITEM", "PLUGIN", "SKILL",
+    "UNRESOLVED_MAX", "LocalAgent", "SkillKey", "agent_for_ref", "global_skills", "model_held", "playbook_for_ref",
+    "plugins_by_slug", "shared_persona_by_slug", "unresolved",
 ]
