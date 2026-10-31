@@ -14,7 +14,10 @@ leave by accident:
 * an application its ``actionCount`` and ``triggerCount``; a plugin its ``version`` and its
   ``skillsCount``, ``commandsCount``, ``agentsCount`` and ``hooksCount``; a skill its ``version``;
 * an LLM route its ``provider`` (the serving provider's slug, the catalogue's ``provider`` filter),
-  ``vendor``, ``contextWindow``, ``priceTier`` and ``capabilities``, each only its ``name`` and ``rating``.
+  ``vendor``, ``contextWindow``, ``priceTier`` and ``capabilities``, each only its ``name`` and ``rating``;
+* a Featured or Popular item (``featured.py``: an agent or a Playbook on the page's hero, rail and Popular
+  strip) also its ``type`` (``agents`` or ``playbooks``), ``version`` and ``installCount``, the catalogue
+  row's own aggregate count; the counts read (``counts.py``) answers only ``items`` and ``installs``.
 
 No workspace, user, owner, install, clone or connection id is on any list, nor a workspace's connected,
 enabled, installed or key state. Text is answered as the row holds it, trimmed; a list keeps only its
@@ -47,6 +50,9 @@ PLUGIN_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {
 SKILL_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"version"}
 LLM_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"provider", "vendor", "contextWindow", "priceTier", "capabilities"}
 LLM_CAPABILITY_FIELDS: FrozenSet[str] = frozenset({"name", "rating"})
+FEATURED_FIELDS: FrozenSet[str] = DISPLAY_FIELDS | {"type", "version", "installCount"}
+FEATURED_ANSWER_FIELDS: FrozenSet[str] = frozenset({"featured", "popular"})
+COUNTS_FIELDS: FrozenSet[str] = frozenset({"items", "installs"})
 HTTPS = "https"
 SCHEME_RELATIVE = "//"  # a browser loads it on the page's own scheme, from any host
 # What a browser's URL parser drops before it reads a URL: tab, LF and CR anywhere, C0 controls and spaces in front.
@@ -159,8 +165,9 @@ def display_item(
 
 
 __all__ = [
-    "AGENT_FIELDS", "ANSWER_FIELDS", "APPLICATION_FIELDS", "DEFAULT_PUBLISHER", "DISPLAY_FIELDS", "FieldNotAllowed",
-    "ITEM_FIELDS", "LLM_CAPABILITY_FIELDS", "LLM_FIELDS", "MARKETPLACE_OWNER", "NESTED_FIELDS", "PACKAGE_FIELDS",
+    "AGENT_FIELDS", "ANSWER_FIELDS", "APPLICATION_FIELDS", "COUNTS_FIELDS", "DEFAULT_PUBLISHER", "DISPLAY_FIELDS",
+    "FEATURED_ANSWER_FIELDS", "FEATURED_FIELDS", "FieldNotAllowed", "ITEM_FIELDS", "LLM_CAPABILITY_FIELDS",
+    "LLM_FIELDS", "MARKETPLACE_OWNER", "NESTED_FIELDS", "PACKAGE_FIELDS",
     "PACKAGE_MEMBER_FIELDS", "PLAYBOOK_FIELDS", "PLUGIN_FIELDS", "SKILL_FIELDS",
     "allowed_item", "app_slugs", "count_of", "display_item", "https_url_or_none", "icon_or_none", "strings",
     "text_or_none",

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { useMarketplaceAccess } from './access/marketplace-access'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,23 +151,29 @@ export function routeActionPath(model: LLMModel, action: 'install' | 'uninstall'
   return `/api/marketplace/llm/models/${encodedId}/${action}${provider}`
 }
 
+/** The key a Marketplace link names this route by, `<serving provider>:<model id>` (`?tab=llms&item=`). */
+export function routeKeyOf(model: LLMModel): string {
+  return `${model.serving_provider || model.provider}:${model.model_id}`
+}
+
+const LLMS_TAB = 'llms'
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function LLMModelCard({
-  model,
-  onInstall,
-  onCompareToggle,
-  isComparing = false,
-  onClick,
-  viewMode = 'grid',
-}: LLMModelCardProps) {
+/**
+ * Install or remove THIS route. Signed out on SaaS it adds nothing: it goes to sign-in carrying the
+ * route's Marketplace link (PRD-270 §5.7, useMarketplaceAccess).
+ */
+function useRouteInstallToggle(model: LLMModel, onInstall?: (modelId: string) => void) {
   const queryClient = useQueryClient()
+  const { requireSignIn } = useMarketplaceAccess()
   const [installing, setInstalling] = useState(false)
 
-  const handleInstallToggle = async (e: React.MouseEvent) => {
+  const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (requireSignIn(LLMS_TAB, routeKeyOf(model))) return
     setInstalling(true)
     try {
       if (model.is_installed) {
@@ -188,66 +195,323 @@ export function LLMModelCard({
       setInstalling(false)
     }
   }
+  return { installing, toggle }
+}
+
+interface InstallToggleProps {
+  model: LLMModel
+  installing: boolean
+  onToggle: (e: React.MouseEvent) => void
+}
+
+function LLMModelListRow({ model, installing, onToggle, onClick }: InstallToggleProps & { onClick?: () => void }) {
+  const { signedIn } = useMarketplaceAccess()
+  return (
+    <Card
+      className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
+      onClick={onClick}
+    >
+      <CardContent className="p-3">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm truncate">{model.display_name}</span>
+              <Badge
+                variant="outline"
+                className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(routeBadges(model).routeKey)}`}
+              >
+                {routeBadges(model).route}
+              </Badge>
+              {routeBadges(model).vendor && (
+                <span className="text-[10px] text-muted-foreground shrink-0">{routeBadges(model).vendor}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              <span>{formatTokenCount(model.context_window)} ctx</span>
+              {/* Signed out, the public read has no prices: only a free route says so. */}
+              {(signedIn || model.is_free) && <span>&middot;</span>}
+              {(signedIn || model.is_free) && (
+                <span>{model.is_free ? 'Free' : `In: ${formatCostPer1M(model.input_cost_per_1k)}/1M`}</span>
+              )}
+              {model.key_available === false && (
+                <span className="text-[10px] text-warning">· add a {routeBadges(model).route} key</span>
+              )}
+            </div>
+          </div>
+          {model.is_installed ? (
+            <Button size="sm" variant="secondary"
+              className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10 shrink-0"
+              disabled={installing}
+              onClick={onToggle}
+            >
+              {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline"
+              className="h-7 text-xs shrink-0"
+              disabled={installing}
+              onClick={onToggle}
+            >
+              {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** The vendor, sourcing, Free, key, Default and plan badges under the card's title. */
+function LLMModelBadges({ model }: { model: LLMModel }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-2">
+      {routeBadges(model).vendor && (
+        <Badge variant="outline" className="text-[10px] border-border/60 text-muted-foreground">
+          by {routeBadges(model).vendor}
+        </Badge>
+      )}
+      {sourcingLabel(model) && (
+        <Badge
+          variant="outline"
+          className={
+            (model.sourcing ?? model.tier) === 'direct'
+              ? 'text-[10px] border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
+              : 'text-[10px] border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
+          }
+        >
+          {sourcingLabel(model)}
+        </Badge>
+      )}
+      {model.is_free && (
+        <Badge variant="outline" className="text-[10px] border-lime-500/40 text-lime-400">
+          Free
+        </Badge>
+      )}
+      {model.key_available === false && (
+        <Badge variant="outline" className="text-[10px] border-warning/40 text-warning">
+          Add a {routeBadges(model).route} key
+        </Badge>
+      )}
+      {model.is_default && (
+        <Badge
+          variant="outline"
+          className="text-[10px] border-[hsl(var(--agent))]/30 text-[hsl(var(--agent))]"
+        >
+          Default
+        </Badge>
+      )}
+      {model.requires_plan && (
+        <Badge
+          variant="outline"
+          className="text-[10px] border-[hsl(var(--primary))]/30 text-[hsl(var(--primary))]"
+        >
+          <Shield className="w-2.5 h-2.5 mr-0.5" />
+          {model.requires_plan}
+        </Badge>
+      )}
+    </div>
+  )
+}
+
+/** Cost per 1M tokens, per ROUTE (PRD-236 W1). */
+function LLMModelCost({ model }: { model: LLMModel }) {
+  if (model.is_free) {
+    return (
+      <span className="text-lime-400 font-medium" title={model.terms_note || undefined}>
+        Free{model.rate_limit_note ? ' · rate-limited' : ''}
+      </span>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[hsl(var(--success))] font-medium">
+        In: {formatCostPer1M(model.input_cost_per_1k)}
+      </span>
+      <span className="text-muted-foreground">/</span>
+      <span className="text-[hsl(var(--primary))] font-medium">
+        Out: {formatCostPer1M(model.output_cost_per_1k)}
+      </span>
+    </div>
+  )
+}
+
+/** Context, max output and cost. Signed out, the public read has no max output or prices: none is shown. */
+function LLMModelStats({ model }: { model: LLMModel }) {
+  const { signedIn } = useMarketplaceAccess()
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-border/40 bg-secondary/20 p-2 text-center">
+          <div className="text-sm font-bold text-foreground">
+            {formatTokenCount(model.context_window)}
+          </div>
+          <div className="text-[10px] text-muted-foreground">Context</div>
+        </div>
+        {signedIn && (
+          <div className="rounded-md border border-border/40 bg-secondary/20 p-2 text-center">
+            <div className="text-sm font-bold text-foreground">
+              {formatTokenCount(model.max_output_tokens)}
+            </div>
+            <div className="text-[10px] text-muted-foreground">Max Output</div>
+          </div>
+        )}
+      </div>
+      {(signedIn || model.is_free) && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">Cost / 1M tokens</span>
+          <LLMModelCost model={model} />
+        </div>
+      )}
+    </>
+  )
+}
+
+/** The top three capability bars. */
+function LLMModelCapabilityBars({ model }: { model: LLMModel }) {
+  const capEntries = Object.entries(model.capabilities || {}).slice(0, 3)
+  if (capEntries.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {capEntries.map(([capName, rating]) => {
+        const r = CAPABILITY_RATING[rating] || CAPABILITY_RATING.moderate
+        return (
+          <div key={capName} className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground w-16 truncate capitalize">
+              {capName}
+            </span>
+            <div className="flex-1 h-1.5 rounded-full bg-secondary/50">
+              <div className={`h-full rounded-full ${r.color} ${r.width}`} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The Functions, Vision and Streaming badges, and the first "recommended for" tags. */
+function LLMModelFeatures({ model }: { model: LLMModel }) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {model.supports_functions && (
+          <Badge variant="outline" className="text-[10px] border-[hsl(var(--info))]/20 text-[hsl(var(--info))]">
+            <Braces className="w-2.5 h-2.5 mr-0.5" />
+            Functions
+          </Badge>
+        )}
+        {model.supports_vision && (
+          <Badge variant="outline" className="text-[10px] border-[hsl(var(--agent))]/20 text-[hsl(var(--agent))]">
+            <Eye className="w-2.5 h-2.5 mr-0.5" />
+            Vision
+          </Badge>
+        )}
+        {model.supports_streaming && (
+          <Badge variant="outline" className="text-[10px] border-[hsl(var(--success))]/20 text-[hsl(var(--success))]">
+            <Radio className="w-2.5 h-2.5 mr-0.5" />
+            Streaming
+          </Badge>
+        )}
+      </div>
+      {model.recommended_for && model.recommended_for.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {model.recommended_for.slice(0, 3).map((rec) => (
+            <Badge
+              key={rec}
+              variant="outline"
+              className="text-[10px] border-border text-muted-foreground"
+            >
+              {rec}
+            </Badge>
+          ))}
+          {model.recommended_for.length > 3 && (
+            <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
+              +{model.recommended_for.length - 3}
+            </Badge>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+interface LLMModelFooterProps extends InstallToggleProps {
+  isComparing: boolean
+  onCompare?: (e: React.MouseEvent) => void
+}
+
+/** Install count, compare and the install button. Signed out, the public read has no install count. */
+function LLMModelFooter({ model, installing, onToggle, isComparing, onCompare }: LLMModelFooterProps) {
+  const { signedIn } = useMarketplaceAccess()
+  return (
+    <div className="pt-3 mt-auto border-t border-border/40 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-3">
+        {signedIn && (
+          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+            <Download className="w-3 h-3" />
+            {formatInstallCount(model.install_count)}
+          </span>
+        )}
+        {onCompare && (
+          <button
+            onClick={onCompare}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowRightLeft className="w-3 h-3" />
+            {isComparing ? 'Comparing' : 'Compare'}
+          </button>
+        )}
+      </div>
+
+      {model.is_installed ? (
+        <Button size="sm" variant="secondary"
+          className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10"
+          disabled={installing}
+          onClick={onToggle}
+        >
+          {installing ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <>
+              <CheckCircle className="w-3 h-3 mr-1" />
+              Added
+            </>
+          )}
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline"
+          className="h-7 text-xs"
+          disabled={installing}
+          onClick={onToggle}
+        >
+          {installing ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            'Add to Workspace'
+          )}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+export function LLMModelCard({
+  model,
+  onInstall,
+  onCompareToggle,
+  isComparing = false,
+  onClick,
+  viewMode = 'grid',
+}: LLMModelCardProps) {
+  const { installing, toggle } = useRouteInstallToggle(model, onInstall)
 
   const handleCompare = (e: React.MouseEvent) => {
     e.stopPropagation()
     onCompareToggle?.(model.model_id)
   }
 
-  // Top 3 capabilities to show on card
-  const capEntries = Object.entries(model.capabilities || {}).slice(0, 3)
-
   if (viewMode === 'list') {
-    return (
-      <Card
-        className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
-        onClick={onClick}
-      >
-        <CardContent className="p-3">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm truncate">{model.display_name}</span>
-                <Badge
-                  variant="outline"
-                  className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(routeBadges(model).routeKey)}`}
-                >
-                  {routeBadges(model).route}
-                </Badge>
-                {routeBadges(model).vendor && (
-                  <span className="text-[10px] text-muted-foreground shrink-0">{routeBadges(model).vendor}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                <span>{formatTokenCount(model.context_window)} ctx</span>
-                <span>&middot;</span>
-                <span>{model.is_free ? 'Free' : `In: ${formatCostPer1M(model.input_cost_per_1k)}/1M`}</span>
-                {model.key_available === false && (
-                  <span className="text-[10px] text-warning">· add a {routeBadges(model).route} key</span>
-                )}
-              </div>
-            </div>
-            {model.is_installed ? (
-              <Button size="sm" variant="secondary"
-                className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10 shrink-0"
-                disabled={installing}
-                onClick={handleInstallToggle}
-              >
-                {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
-              </Button>
-            ) : (
-              <Button size="sm" variant="outline"
-                className="h-7 text-xs shrink-0"
-                disabled={installing}
-                onClick={handleInstallToggle}
-              >
-                {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    )
+    return <LLMModelListRow model={model} installing={installing} onToggle={toggle} onClick={onClick} />
   }
 
   return (
@@ -283,52 +547,7 @@ export function LLMModelCard({
         </div>
 
         {/* Tier + Default + Plan badges */}
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {routeBadges(model).vendor && (
-            <Badge variant="outline" className="text-[10px] border-border/60 text-muted-foreground">
-              by {routeBadges(model).vendor}
-            </Badge>
-          )}
-          {sourcingLabel(model) && (
-            <Badge
-              variant="outline"
-              className={
-                (model.sourcing ?? model.tier) === 'direct'
-                  ? 'text-[10px] border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
-                  : 'text-[10px] border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
-              }
-            >
-              {sourcingLabel(model)}
-            </Badge>
-          )}
-          {model.is_free && (
-            <Badge variant="outline" className="text-[10px] border-lime-500/40 text-lime-400">
-              Free
-            </Badge>
-          )}
-          {model.key_available === false && (
-            <Badge variant="outline" className="text-[10px] border-warning/40 text-warning">
-              Add a {routeBadges(model).route} key
-            </Badge>
-          )}
-          {model.is_default && (
-            <Badge
-              variant="outline"
-              className="text-[10px] border-[hsl(var(--agent))]/30 text-[hsl(var(--agent))]"
-            >
-              Default
-            </Badge>
-          )}
-          {model.requires_plan && (
-            <Badge
-              variant="outline"
-              className="text-[10px] border-[hsl(var(--primary))]/30 text-[hsl(var(--primary))]"
-            >
-              <Shield className="w-2.5 h-2.5 mr-0.5" />
-              {model.requires_plan}
-            </Badge>
-          )}
-        </div>
+        <LLMModelBadges model={model} />
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col space-y-3 pt-0">
@@ -338,151 +557,16 @@ export function LLMModelCard({
             {model.description}
           </p>
         )}
-
-        {/* Context & Output */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-md border border-border/40 bg-secondary/20 p-2 text-center">
-            <div className="text-sm font-bold text-foreground">
-              {formatTokenCount(model.context_window)}
-            </div>
-            <div className="text-[10px] text-muted-foreground">Context</div>
-          </div>
-          <div className="rounded-md border border-border/40 bg-secondary/20 p-2 text-center">
-            <div className="text-sm font-bold text-foreground">
-              {formatTokenCount(model.max_output_tokens)}
-            </div>
-            <div className="text-[10px] text-muted-foreground">Max Output</div>
-          </div>
-        </div>
-
-        {/* Cost per 1M tokens — per ROUTE (PRD-236 W1) */}
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">Cost / 1M tokens</span>
-          {model.is_free ? (
-            <span className="text-lime-400 font-medium" title={model.terms_note || undefined}>
-              Free{model.rate_limit_note ? ' · rate-limited' : ''}
-            </span>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-[hsl(var(--success))] font-medium">
-                In: {formatCostPer1M(model.input_cost_per_1k)}
-              </span>
-              <span className="text-muted-foreground">/</span>
-              <span className="text-[hsl(var(--primary))] font-medium">
-                Out: {formatCostPer1M(model.output_cost_per_1k)}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Capability bars */}
-        {capEntries.length > 0 && (
-          <div className="space-y-2">
-            {capEntries.map(([capName, rating]) => {
-              const r = CAPABILITY_RATING[rating] || CAPABILITY_RATING.moderate
-              return (
-                <div key={capName} className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground w-16 truncate capitalize">
-                    {capName}
-                  </span>
-                  <div className="flex-1 h-1.5 rounded-full bg-secondary/50">
-                    <div className={`h-full rounded-full ${r.color} ${r.width}`} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Feature badges */}
-        <div className="flex flex-wrap gap-1.5">
-          {model.supports_functions && (
-            <Badge variant="outline" className="text-[10px] border-[hsl(var(--info))]/20 text-[hsl(var(--info))]">
-              <Braces className="w-2.5 h-2.5 mr-0.5" />
-              Functions
-            </Badge>
-          )}
-          {model.supports_vision && (
-            <Badge variant="outline" className="text-[10px] border-[hsl(var(--agent))]/20 text-[hsl(var(--agent))]">
-              <Eye className="w-2.5 h-2.5 mr-0.5" />
-              Vision
-            </Badge>
-          )}
-          {model.supports_streaming && (
-            <Badge variant="outline" className="text-[10px] border-[hsl(var(--success))]/20 text-[hsl(var(--success))]">
-              <Radio className="w-2.5 h-2.5 mr-0.5" />
-              Streaming
-            </Badge>
-          )}
-        </div>
-
-        {/* Recommended for tags */}
-        {model.recommended_for && model.recommended_for.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {model.recommended_for.slice(0, 3).map((rec) => (
-              <Badge
-                key={rec}
-                variant="outline"
-                className="text-[10px] border-border text-muted-foreground"
-              >
-                {rec}
-              </Badge>
-            ))}
-            {model.recommended_for.length > 3 && (
-              <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
-                +{model.recommended_for.length - 3}
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* Footer: install count, compare, install button */}
-        <div className="pt-3 mt-auto border-t border-border/40 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-              <Download className="w-3 h-3" />
-              {formatInstallCount(model.install_count)}
-            </span>
-            {onCompareToggle && (
-              <button
-                onClick={handleCompare}
-                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ArrowRightLeft className="w-3 h-3" />
-                {isComparing ? 'Comparing' : 'Compare'}
-              </button>
-            )}
-          </div>
-
-          {model.is_installed ? (
-            <Button size="sm" variant="secondary"
-              className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10"
-              disabled={installing}
-              onClick={handleInstallToggle}
-            >
-              {installing ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <>
-                  <CheckCircle className="w-3 h-3 mr-1" />
-                  Added
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button size="sm" variant="outline"
-              className="h-7 text-xs"
-              disabled={installing}
-              onClick={handleInstallToggle}
-            >
-              {installing ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                'Add to Workspace'
-              )}
-            </Button>
-          )}
-        </div>
+        <LLMModelStats model={model} />
+        <LLMModelCapabilityBars model={model} />
+        <LLMModelFeatures model={model} />
+        <LLMModelFooter
+          model={model}
+          installing={installing}
+          onToggle={toggle}
+          isComparing={isComparing}
+          onCompare={onCompareToggle ? handleCompare : undefined}
+        />
       </CardContent>
     </Card>
   )

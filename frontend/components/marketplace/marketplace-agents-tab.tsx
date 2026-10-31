@@ -11,6 +11,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AGENT_CATEGORIES as UNIFIED_CATEGORIES } from '@/lib/agent-constants'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { useSystemRole } from '@/contexts/role-context'
+import { useMarketplaceAccess } from './access/marketplace-access'
 import {
   AgentGridCard,
   AgentListRow,
@@ -61,11 +62,15 @@ function CategoryFilter({ selected, onSelect, iconMappings }: {
   )
 }
 
+const AGENTS_TAB = 'agents'
+
 function useAgentInstallState(): AgentInstallState {
   const installMutation = useInstallMarketplaceItem()
+  const { requireSignIn } = useMarketplaceAccess()
   const [installingId, setInstallingId] = useState<number | null>(null)
   const [installedIds, setInstalledIds] = useState<Set<number>>(new Set())
   const install = (agentId: number) => {
+    if (requireSignIn(AGENTS_TAB, agentId)) return // signed out: sign-in, back on this agent (PRD-270 §5.7)
     setInstallingId(agentId)
     installMutation.mutate(agentId, {
       onSuccess: () => setInstalledIds(prev => new Set([...prev, agentId])),
@@ -84,6 +89,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   // same gate the admin routes enforce. The local operator is super_admin, so a
   // fresh local install sees Import from GitHub; a Clerk email domain never did.
   const { isAdmin } = useSystemRole()
+  const { signedIn } = useMarketplaceAccess()
 
   // Fetch all marketplace agents (filter client-side by unified category)
   const { data: rawAgents = [], isLoading, refetch } = useMarketplaceItems({
@@ -95,7 +101,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
     selectedCategory === 'all' || normalizeCategory(a.category) === selectedCategory
   )
 
-  const { data: iconMappings = {} } = useSystemIcons()
+  const { data: iconMappings = {} } = useSystemIcons(signedIn)
   const admin = useAgentAdminActions(() => refetch())
   const installState = useAgentInstallState()
   const openAgent = (agent: MarketplaceAgent) => setSelectedAgentId(agent.id)

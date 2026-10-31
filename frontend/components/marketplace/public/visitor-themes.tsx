@@ -9,13 +9,15 @@
  * its Add goes to sign-in (visitor-add.tsx), and "Make your own" offers the Design Kit but no
  * submit. Nothing workspace-scoped is drawn: no installed list, no "In this workspace" or update
  * badge (a catalogue listing has no install), no Publish form, no theme settings read. A shared
- * link's `item` is shown in the hero once the catalogue lists it.
+ * link's `item` is shown in the hero once the catalogue lists it. The one Marketplace page renders it
+ * in the Themes tab's place for a signed-out visitor (marketplace-tab-set.ts).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { usePublicThemeDetail, usePublicThemes } from '@/hooks/use-public-marketplace'
 import type { ThemeListing } from '@/lib/api-client'
 
+import type { MarketplaceLink } from '../deep-link/deep-link-params'
 import { DetailDialog } from '../themes/detail-dialog'
 import { filterListings } from '../themes/listing-format'
 import { ListingSourceProvider } from '../themes/listing-source'
@@ -42,7 +44,15 @@ function useLinkedListing(all: readonly ThemeListing[], item: string | null, sel
   }, [all, item, select])
 }
 
-export function VisitorThemesTab({ searchQuery, item }: { searchQuery: string; item: string | null }) {
+interface VisitorThemesTabProps {
+  readonly searchQuery?: string
+  /** The address's Themes link (`?tab=themes&item=`), if it carries one: shown in the hero. */
+  readonly link?: MarketplaceLink | null
+}
+
+/** The Themes tab for a signed-out visitor, in the member tab's place (same props). */
+export function VisitorThemesTab({ searchQuery = '', link = null }: VisitorThemesTabProps) {
+  const item = link?.item ?? null
   const listings = usePublicThemes()
   const all = listings.data ?? NONE_LISTED
   const shown = useMemo(() => filterListings(all, searchQuery), [all, searchQuery])

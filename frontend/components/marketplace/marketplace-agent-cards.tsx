@@ -17,6 +17,7 @@ import { ToolLogo } from '@/components/ui/tool-logo'
 import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { useMarketplaceAccess } from './access/marketplace-access'
 
 const TOOL_PREVIEW_COUNT = 5
 
@@ -142,6 +143,8 @@ export function AgentListRow({ agent, iconMappings, isAdmin, onOpen }: {
   onOpen: (agent: MarketplaceAgent) => void
 }) {
   const catDef = UNIFIED_CATEGORIES.find(c => c.id === normalizeCategory(agent.category))
+  // Signed out, the public read has no install counts: none is shown (PRD-270 §5.7).
+  const { signedIn } = useMarketplaceAccess()
   return (
     <Card className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer" onClick={() => onOpen(agent)}>
       <CardContent className="p-3">
@@ -154,8 +157,8 @@ export function AgentListRow({ agent, iconMappings, isAdmin, onOpen }: {
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
               <span>{catDef?.name || agent.category}</span>
-              <span>&middot;</span>
-              <span>{formatInstallCount(agent.install_count)} installs</span>
+              {signedIn && <span>&middot;</span>}
+              {signedIn && <span>{formatInstallCount(agent.install_count)} installs</span>}
             </div>
           </div>
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
@@ -255,6 +258,7 @@ export function AgentGridCard({ agent, iconMappings, isAdmin, admin, installStat
   onOpen: (agent: MarketplaceAgent) => void
 }) {
   const categoryName = UNIFIED_CATEGORIES.find(c => c.id === normalizeCategory(agent.category))?.name || agent.category
+  const { signedIn } = useMarketplaceAccess()
   return (
     <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer" onClick={() => onOpen(agent)}>
       <CardHeader className="pb-3">
@@ -285,7 +289,7 @@ export function AgentGridCard({ agent, iconMappings, isAdmin, admin, installStat
           )}
         </div>
         <AgentToolsPreview agent={agent} />
-        <div className="text-xs text-muted-foreground pb-2">{formatInstallCount(agent.install_count)} installs</div>
+        {signedIn && <div className="text-xs text-muted-foreground pb-2">{formatInstallCount(agent.install_count)} installs</div>}
       </CardContent>
       <Separator />
       <AgentCardFooter agent={agent} installState={installState} onOpen={onOpen} />

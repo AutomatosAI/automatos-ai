@@ -5,16 +5,36 @@
  * publisher, description, category, tags, the apps it needs, its own plain facts, a package's
  * members or an LLM's capabilities) and Add to my workspace, which goes to sign-in. Text only:
  * nothing here is the item's configuration, prompt or steps (the public read has none of them).
+ *
+ * The one Marketplace page opens it signed out for a package, an application, an LLM, a plugin or a
+ * skill (public-item-detail.tsx): their member dialogs read member routes or install from inside.
+ * An icon is drawn only as an `https` logo (the app's img-src decides where from) or a short text
+ * such as an emoji, else the tab's own icon.
  */
 import type { LucideIcon } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ToolLogo } from '@/components/ui/tool-logo'
+import { HTTPS_PREFIX } from '@/lib/marketplace/public-items'
 import type { PublicItem } from '@/lib/marketplace/public-items'
 
 import { CAPABILITIES, IN_THIS_PACKAGE, REQUIRED_APPS, TAGS, byPublisher } from './copy'
 import { VisitorAdd } from './visitor-add'
-import { ItemIcon } from './visitor-item-card'
+
+const ICON_SIZE = 40
+
+function ItemIcon({ item, fallback: Fallback }: { item: PublicItem; fallback: LucideIcon }) {
+  if (item.icon?.startsWith(HTTPS_PREFIX)) return <ToolLogo logo={item.icon} name={item.name} size={ICON_SIZE} />
+  if (item.icon) {
+    return (
+      <span className="flex h-10 w-10 items-center justify-center text-2xl" aria-hidden>
+        {item.icon}
+      </span>
+    )
+  }
+  return <Fallback className="h-10 w-10 shrink-0 text-primary" aria-hidden />
+}
 
 interface VisitorItemDetailProps {
   /** The item shown; null closes the dialog. */

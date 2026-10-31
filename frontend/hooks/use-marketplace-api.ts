@@ -8,6 +8,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { useMarketplaceAccess } from '@/components/marketplace/access/marketplace-access'
 
 // Query keys for React Query
 export const marketplaceQueryKeys = {
@@ -101,9 +102,10 @@ export function useMarketplaceItems(filters?: {
   limit?: number
   offset?: number
 }) {
+  const { source } = useMarketplaceAccess() // signed out on SaaS: the public reads (PRD-270 §5.7)
   return useQuery({
-    queryKey: marketplaceQueryKeys.items(filters),
-    queryFn: () => apiClient.getMarketplaceItems(filters),
+    queryKey: [...marketplaceQueryKeys.items(filters), source.kind],
+    queryFn: () => source.items(filters),
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 }
@@ -112,9 +114,10 @@ export function useMarketplaceItems(filters?: {
  * Hook to get featured marketplace items
  */
 export function useFeaturedItems(limit: number = 8) {
+  const { source } = useMarketplaceAccess()
   return useQuery({
-    queryKey: marketplaceQueryKeys.featured,
-    queryFn: () => apiClient.getFeaturedMarketplaceItems(limit),
+    queryKey: [...marketplaceQueryKeys.featured, source.kind],
+    queryFn: () => source.featured(limit),
     staleTime: 1000 * 60 * 10, // 10 minutes
   })
 }

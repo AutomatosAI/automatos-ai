@@ -12,6 +12,7 @@ import { apiClient } from '@/lib/api-client'
 import { toast as sonnerToast } from 'sonner'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
+import { useMarketplaceAccess } from './access/marketplace-access'
 
 /** 'recipe' is the marketplace API's value for a playbook. */
 export const isPlaybookType = (itemType: string) => itemType === 'recipe'
@@ -21,12 +22,13 @@ export function useMarketplaceItemDetail(itemId: number, itemType: string) {
   const [item, setItem] = useState<MarketplaceItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { source } = useMarketplaceAccess() // signed out on SaaS: the public reads (PRD-270 §5.7)
 
   useEffect(() => {
     let cancelled = false
     setError(null)
-    apiClient.get(`/api/marketplace/items/${itemId}?type=${encodeURIComponent(itemType)}`)
-      .then((data: MarketplaceItem) => { if (!cancelled) setItem(data) })
+    source.item(itemId, itemType)
+      .then((data) => { if (!cancelled) setItem(data as MarketplaceItem) })
       .catch((err: any) => {
         if (cancelled) return
         const message = err?.message || 'Failed to load item details'
@@ -35,7 +37,7 @@ export function useMarketplaceItemDetail(itemId: number, itemType: string) {
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [itemId, itemType])
+  }, [itemId, itemType, source])
 
   return { item, loading, error }
 }
@@ -73,6 +75,7 @@ export function ItemModalHeader({ item, installing, onInstall }: {
   installing: boolean
   onInstall: () => void
 }) {
+  const { signedIn } = useMarketplaceAccess() // the public read has no install counts
   return (
     <DialogHeader className="border-b border-border/30 pb-4">
       <div className="flex items-start justify-between gap-4">
@@ -86,11 +89,13 @@ export function ItemModalHeader({ item, installing, onInstall }: {
               <Badge variant="outline" className="text-xs border-primary/30 text-primary">
                 {item.category}
               </Badge>
-              <span>•</span>
-              <div className="flex items-center gap-1">
-                <Download className="w-3 h-3" />
-                <span>{item.install_count} installs</span>
-              </div>
+              {signedIn && <span>•</span>}
+              {signedIn && (
+                <div className="flex items-center gap-1">
+                  <Download className="w-3 h-3" />
+                  <span>{item.install_count} installs</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

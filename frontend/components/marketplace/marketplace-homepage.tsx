@@ -13,18 +13,16 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PageHeader, SearchInput } from '@/components/shared'
-import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
-import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
-import { MarketplacePluginsTab } from './marketplace-plugins-tab'
-import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { MarketplacePackagesTab } from './marketplace-packages-tab'
-import { MarketplaceThemesTab, THEMES_TAB_VALUE } from './themes/tab'
+import { THEMES_TAB_VALUE } from './themes/tab'
 import { CATEGORY_TABS, TAB_ICONS, openedMarketplaceTab } from './category-tabs'
 import { marketplaceLink } from './deep-link/deep-link-params'
-import { MarketplaceDeepLink } from './deep-link/marketplace-deep-link'
 import { SyncButton } from './cloud/sync-button'
+import { useMarketplaceAccess } from './access/marketplace-access'
+import { useMarketplaceTabs } from './marketplace-tab-set'
+import { POPULAR_TITLE, VISITOR_EYEBROW, VISITOR_LEDE } from './public/copy'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -62,6 +60,7 @@ interface CapabilitiesTabProps {
 
 function CapabilitiesTab({ searchQuery, workspaceId, initialSubTab }: CapabilitiesTabProps) {
   const [subTab, setSubTab] = useState(initialSubTab)
+  const tabs = useMarketplaceTabs() // signed out on SaaS: the visitor's (PRD-270 §5.7)
 
   return (
     <div className="space-y-4">
@@ -72,11 +71,11 @@ function CapabilitiesTab({ searchQuery, workspaceId, initialSubTab }: Capabiliti
         </TabsList>
 
         <TabsContent value="plugins" className="mt-4">
-          <MarketplacePluginsTab searchQuery={searchQuery} workspaceId={workspaceId} />
+          <tabs.Plugins searchQuery={searchQuery} workspaceId={workspaceId} />
         </TabsContent>
 
         <TabsContent value="skills" className="mt-4">
-          <MarketplaceSkillsTab searchQuery={searchQuery} workspaceId={workspaceId} />
+          <tabs.Skills searchQuery={searchQuery} workspaceId={workspaceId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -87,6 +86,7 @@ function CapabilitiesTab({ searchQuery, workspaceId, initialSubTab }: Capabiliti
 
 function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceItem[]; isAdmin: boolean; onItemClick: (item: MarketplaceItemRef) => void }) {
   const toggleFeatured = useToggleFeatured()
+  const { signedIn } = useMarketplaceAccess() // a visitor features nothing: no "feature more" prompt
 
   if (!items || items.length === 0) return null
 
@@ -149,7 +149,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
               </CardContent>
             </Card>
           ))}
-          {rail.length === 0 && (
+          {rail.length === 0 && signedIn && (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground p-4">
               Feature more items to fill this section
             </div>
@@ -162,7 +162,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
 
 // ── Recommendations Rail ────────────────────────────────────────────
 
-function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[]; onItemClick: (item: MarketplaceItemRef) => void }) {
+function RecommendationsRail({ items, title, onItemClick }: { items: MarketplaceItem[]; title: string; onItemClick: (item: MarketplaceItemRef) => void }) {
   if (!items || items.length === 0) return null
 
   const formatInstalls = (n: number) => {
@@ -178,7 +178,7 @@ function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[];
     >
       <div className="flex items-center gap-2 mb-3">
         <Sparkles className="h-5 w-5 text-[hsl(var(--warning))]" />
-        <h2 className="text-lg font-semibold">Recommended for You</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
@@ -220,6 +220,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
   const [opened] = useState(() => openedMarketplaceTab(searchParams?.get('tab')))
   const [selectedTab, setSelectedTab] = useState(opened.tab)
   const link = marketplaceLink(searchParams)
+  const tabs = useMarketplaceTabs()
 
   return (
     <motion.div
@@ -241,7 +242,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
         </TabsList>
 
         <TabsContent value={THEMES_TAB_VALUE} className="mt-0">
-          <MarketplaceThemesTab searchQuery={searchQuery} link={link?.tab === THEMES_TAB_VALUE ? link : null} />
+          <tabs.Themes searchQuery={searchQuery} link={link?.tab === THEMES_TAB_VALUE ? link : null} />
         </TabsContent>
 
         <TabsContent value="packages" className="mt-0">
@@ -249,7 +250,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
         </TabsContent>
 
         <TabsContent value="tools" className="mt-0">
-          <MarketplaceToolsTab searchQuery={searchQuery} />
+          <tabs.Tools searchQuery={searchQuery} />
         </TabsContent>
 
         <TabsContent value="agents" className="mt-0">
@@ -261,7 +262,7 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
         </TabsContent>
 
         <TabsContent value="llms" className="mt-0">
-          <MarketplaceLlmsTab searchQuery={searchQuery} />
+          <tabs.Llms searchQuery={searchQuery} />
         </TabsContent>
 
         <TabsContent value="capabilities" className="mt-0">
@@ -275,6 +276,9 @@ function MarketplaceCategoryTabs({ searchQuery, workspaceId }: { searchQuery: st
 export function MarketplaceHomepage() {
   const { workspaceId } = useWorkspace()
   const { isAdmin } = useSystemRole()
+  // Signed out on SaaS: the public reads, the visitor's tabs and words (PRD-270 §5.7, one page).
+  const { signedIn, source } = useMarketplaceAccess()
+  const tabs = useMarketplaceTabs()
   const [searchQuery, setSearchQuery] = useState('')
   const [stats, setStats] = useState({ totalItems: 0, totalInstalls: 0 })
   const { data: featuredItems, isLoading: featuredLoading } = useFeaturedItems(5)
@@ -298,15 +302,10 @@ export function MarketplaceHomepage() {
   // Lightweight stats for pills (no StatsBar)
   useEffect(() => {
     apiClient.setCurrentPage('marketplace')
-    apiClient.get('/api/marketplace/items?limit=100')
-      .then((items: MarketplaceItem[]) => {
-        setStats({
-          totalItems: items.length,
-          totalInstalls: items.reduce((sum, i) => sum + i.install_count, 0),
-        })
-      })
-      .catch(() => {})
-  }, [])
+    source.counts()
+      .then(setStats)
+      .catch((error) => console.warn('[marketplace] the counts could not be read', error))
+  }, [source])
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -329,19 +328,13 @@ export function MarketplaceHomepage() {
     }
   }, [router, searchParams])
 
+  // "Recommended for You" signed in; signed out, Popular (the most installed besides the featured)
   const [recItems, setRecItems] = useState<MarketplaceItem[]>([])
   useEffect(() => {
-    apiClient.get('/api/marketplace/items?limit=20')
-      .then((items: MarketplaceItem[]) => {
-        const featuredKeys = new Set(((featuredItems as MarketplaceItem[] | undefined) || []).map(marketplaceItemKey))
-        const recs = items
-          .filter((i: MarketplaceItem) => !featuredKeys.has(marketplaceItemKey(i)))
-          .sort((a: MarketplaceItem, b: MarketplaceItem) => b.install_count - a.install_count)
-          .slice(0, 6)
-        setRecItems(recs)
-      })
-      .catch(() => {})
-  }, [featuredItems])
+    source.popular((featuredItems as MarketplaceItem[] | undefined) || [])
+      .then(setRecItems)
+      .catch((error) => console.warn('[marketplace] the recommendations could not be read', error))
+  }, [featuredItems, source])
 
   return (
     <div className="space-y-6">
@@ -349,8 +342,8 @@ export function MarketplaceHomepage() {
       <PageHeader
         title="Community"
         titleAccent="Marketplace"
-        eyebrow="Workspace · what to install"
-        lede="Tools, agents, skills, and playbooks shared by the community. Install with one click; everything is sandboxed and reversible."
+        eyebrow={signedIn ? 'Workspace · what to install' : VISITOR_EYEBROW}
+        lede={signedIn ? 'Tools, agents, skills, and playbooks shared by the community. Install with one click; everything is sandboxed and reversible.' : VISITOR_LEDE}
         actions={
           <>
             <SyncButton />
@@ -384,13 +377,13 @@ export function MarketplaceHomepage() {
       ) : null}
 
       {/* ── Recommendations Rail ────────────────────────────── */}
-      <RecommendationsRail items={recItems} onItemClick={setSelectedItem} />
+      <RecommendationsRail items={recItems} title={signedIn ? 'Recommended for You' : POPULAR_TITLE} onItemClick={setSelectedItem} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
       <MarketplaceCategoryTabs searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
 
       {/* A ?tab=&item=&add=1 link's detail modal, for every tab but Themes (PRD-270 K22) */}
-      <MarketplaceDeepLink workspaceId={effectiveWorkspaceId} onSearch={setSearchQuery} />
+      <tabs.DeepLink workspaceId={effectiveWorkspaceId} onSearch={setSearchQuery} />
 
       {/* Item detail modal for featured/recommended clicks */}
       {selectedItem !== null && (
