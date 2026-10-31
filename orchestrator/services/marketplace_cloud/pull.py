@@ -23,7 +23,8 @@ version the catalogue no longer lists stays, and a revoked one is the revocation
 ``marketplace_cloud_sync`` row records the attempt, the success, the catalogue's ``generatedAt`` and the
 counts. Any failure (the setting, the fetch, a refused catalogue, a keys file that won't load, a database
 error, anything unexpected) rolls every row back and records only ``last_attempt_at`` and ``last_error``:
-the last good Sync stays. Synchronous; it commits.
+the last good Sync stays. Synchronous; it ends the caller's reads before the fetch, so no transaction is
+open while Automatos Cloud answers, and it commits.
 """
 from __future__ import annotations
 
@@ -245,6 +246,7 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
     attempted_at = datetime.now(timezone.utc)
     try:
         origin = checked_origin(configured_url())
+        db.rollback()  # the route's reads end (nothing is written before here): none is open while Cloud answers
         data = fetch_bytes(catalog_url(origin), feed_max_bytes(), ACCEPT_JSON, client_factory)
         counts = apply_catalog(db, parse_catalog(data, db), attempted_at)
         db.commit()
@@ -264,7 +266,11 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
 
 
 def sync_catalog(db: Session, client_factory: Optional[ClientFactory] = None) -> SyncOutcome:
-    """Fetch, check and write the catalogue in one transaction; any failure writes no listing."""
+    """Fetch, check and write the catalogue in one transaction; any failure writes no listing.
+
+    The Sync owns ``db``'s transaction: whatever the caller left in it is rolled back before the fetch, as on any
+    failure, so the caller hands over a session that has only read.
+    """
     if not sync_enabled():
         return SyncOutcome(ok=False, error=SYNC_OFF, off=True)
     if not _SYNC_LOCK.acquire(blocking=False):

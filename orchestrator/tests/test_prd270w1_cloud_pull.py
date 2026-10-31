@@ -26,7 +26,9 @@ Each test's themes are under its own publisher and swept on teardown, with the o
   recorded when it names a path, credentials or plain http to another host; a second Sync while one runs
   is answered "already running" and records nothing;
 * the request carries exactly Accept, ``Accept-Encoding: identity`` and the User-Agent, and no
-  Authorization, Cookie or X-Workspace-ID; ``urls`` derives the catalogue and file URLs from the origin.
+  Authorization, Cookie or X-Workspace-ID; ``urls`` derives the catalogue and file URLs from the origin;
+* a Sync run through the route ends the reads its gate made on the route's session before it asks Automatos
+  Cloud: no transaction is open while the catalogue is fetched (RVW-3).
 """
 from __future__ import annotations
 
@@ -41,10 +43,17 @@ import httpx
 import pytest
 import sqlalchemy as sa
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
+import api.marketplace_cloud_sync as sync_api
+import core.auth.workspace_permission as permission_mod
 import core.models  # noqa: F401  (registers every table the foreign keys name)
 from config import config
+from core.auth.dependencies import RequestContext, UserContext
+from core.auth.hybrid import get_request_context_hybrid
+from core.database.database import get_db
 from core.models.marketplace_cloud import MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
 from core.models.themes import THEME_REVOCATION_SYNC_ROW_ID, ThemePackage, ThemeReviewEvent, ThemeRevocationSync
 from services.marketplace_cloud import feed, fetch, pull, urls
@@ -640,6 +649,41 @@ def test_one_sync_at_a_time_a_second_is_answered_already_running(cloud):
     assert outcome.busy and not outcome.ok and outcome.error == pull.ALREADY_RUNNING
     assert cloud.mock.requests == [] and _cloud_rows(cloud) == [] and _status_row(cloud) is None
     assert _sync(cloud).ok and len(cloud.mock.requests) == 1
+
+
+def _member():
+    """A signed-in member, so the ``workspace:manage`` gate reads the caller's role through the route's session."""
+    user = UserContext(id="clerk-rvw3", clerk_user_id="clerk-rvw3", system_role="user",
+                       raw_claims={"sub": "clerk-rvw3"})
+    return RequestContext(workspace_id=uuid.uuid4(), user=user, auth_type="clerk")
+
+
+def test_no_transaction_is_open_while_automatos_cloud_answers_a_sync_run_through_the_route(cloud, monkeypatch):
+    session, opened, seen = cloud.new(), [], []
+    real_role = permission_mod.resolve_workspace_role
+
+    def owner_after_its_reads(db, ctx):
+        real_role(db, ctx)  # the gate's own reads, on the route's session
+        opened.append(db.in_transaction())
+        return "owner"
+
+    def watching():
+        def handler(request):
+            seen.append(session.in_transaction())
+            return cloud.mock.handler(request)
+        return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+    monkeypatch.setattr(permission_mod, "resolve_workspace_role", owner_after_its_reads)
+    app = FastAPI()
+    app.include_router(sync_api.router)
+    app.dependency_overrides[get_request_context_hybrid] = _member
+    app.dependency_overrides[get_db] = lambda: session
+    app.dependency_overrides[sync_api.get_cloud_client_factory] = lambda: watching
+    cloud.mock.body = _catalog(_item(_pkg(cloud.theme("arcade"))))
+    answer = TestClient(app).post("/api/marketplace/cloud-sync")
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["counts"]["new"] == 1
+    assert opened == [True] and seen == [False]  # the gate's read was open; the Sync ended it before the fetch
 
 
 def test_the_status_says_stale_after_a_week_without_a_success():
