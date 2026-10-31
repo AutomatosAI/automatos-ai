@@ -32,6 +32,8 @@ export interface ListingDetailRead {
 export interface AddControlProps {
   readonly listing: ThemeListing
   readonly canManage: boolean
+  /** Take focus once shown: the add dialog a `?item=&add=1` link opens (US-270-09b). */
+  readonly autoFocus?: boolean
 }
 
 export interface ListingSource {

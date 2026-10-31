@@ -7,7 +7,7 @@
  * strip, not their content.
  */
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const nav = vi.hoisted(() => ({ params: new URLSearchParams() }))
@@ -120,5 +120,25 @@ describe('the Marketplace’s Themes tab', () => {
     render(<MarketplaceHomepage />)
 
     expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('data-state', 'active')
+  })
+
+  // PRD-270 US-270-09b: the visitor's Add links name a Capabilities sub-tab (K21).
+  it.each([
+    ['plugins', 'Plugins'],
+    ['skills', 'Skills'],
+  ])('a ?tab=%s link opens Capabilities on %s', (param, name) => {
+    nav.params = new URLSearchParams({ tab: param })
+    render(<MarketplaceHomepage />)
+
+    expect(screen.getByRole('tab', { name: 'Capabilities' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('tab', { name })).toHaveAttribute('data-state', 'active')
+  })
+
+  it('a skill’s ?item= link opens Capabilities › Skills with the search set to its name', async () => {
+    nav.params = new URLSearchParams({ tab: 'skills', item: 'pdf-tools', add: '1' })
+    render(<MarketplaceHomepage />)
+
+    expect(screen.getByRole('tab', { name: 'Skills' })).toHaveAttribute('data-state', 'active')
+    await waitFor(() => expect(screen.getByLabelText('Search the marketplace')).toHaveValue('pdf-tools'))
   })
 })

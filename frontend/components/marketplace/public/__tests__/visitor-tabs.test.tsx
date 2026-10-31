@@ -67,7 +67,8 @@ import {
   SUBMIT_PACKAGE,
 } from '../../themes/storefront/copy'
 import { NO_ITEM_MATCHES, SHOW_MORE, itemDetails } from '../copy'
-import { VisitorTabs, visitorTab } from '../visitor-tabs'
+import { openedMarketplaceTab } from '../../category-tabs'
+import { VisitorTabs } from '../visitor-tabs'
 
 /** The visitor's Add link: sign-in, then back on the item (US-270-09a). */
 const signInToAdd = (tab: string, item: string) => signInUrl(marketplaceItemPath(tab, item))
@@ -287,9 +288,9 @@ describe('the read-only tabs, from the public reads', () => {
 
     expect(screen.getByRole('tab', { name: 'Capabilities' })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByTestId('visitor-item-pdf')).toBeInTheDocument()
-    expect(visitorTab('plugins')).toEqual({ tab: 'capabilities', capability: 'plugins' })
-    expect(visitorTab('Playbooks')).toEqual({ tab: 'recipes', capability: 'plugins' })
-    expect(visitorTab(null)).toEqual({ tab: 'themes', capability: 'plugins' })
+    expect(openedMarketplaceTab('plugins')).toEqual({ tab: 'capabilities', capability: 'plugins' })
+    expect(openedMarketplaceTab('Playbooks')).toEqual({ tab: 'recipes', capability: 'plugins' })
+    expect(openedMarketplaceTab(null)).toEqual({ tab: 'themes', capability: 'plugins' })
   })
 
   it('the search filters on the client, with no new request', async () => {

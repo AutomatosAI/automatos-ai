@@ -30,12 +30,36 @@ export const CATEGORY_TABS = [
   { value: 'capabilities', label: 'Capabilities' },
 ]
 
+export const CAPABILITIES_TAB_VALUE = 'capabilities'
+export const PLUGINS_SUB_TAB = 'plugins'
+export const SKILLS_SUB_TAB = 'skills'
+/** The Capabilities tab's sub-tabs, in order; a `?tab=` link may name one (PRD-270 K21, K22). */
+export const CAPABILITY_SUB_TABS = [PLUGINS_SUB_TAB, SKILLS_SUB_TAB] as const
+
+/** The tab a `?tab=` link opens, and the Capabilities sub-tab that tab opens on. */
+export interface OpenedMarketplaceTab {
+  readonly tab: string
+  readonly capability: string
+}
+
 /**
  * The tab a `?tab=` link names, by its value or its label (`?tab=tools`, `?tab=playbooks`, as the
  * Tools dashboard and the Playbooks grid link here), else Themes, the tab the Marketplace opens on.
  */
-export function initialMarketplaceTab(param: string | null | undefined): string {
+function initialMarketplaceTab(param: string | null | undefined): string {
   const wanted = param?.trim().toLowerCase()
   const named = CATEGORY_TABS.find((tab) => tab.value === wanted || tab.label.toLowerCase() === wanted)
   return named?.value ?? THEMES_TAB_VALUE
+}
+
+/**
+ * The tab, and the Capabilities sub-tab, a `?tab=` link opens: a Plugins or Skills link
+ * (`?tab=plugins`, `?tab=skills`, as the visitor's Add links name them) opens Capabilities on it;
+ * any other opens the tab it names on Plugins. The member page and the visitor's read it alike.
+ */
+export function openedMarketplaceTab(param: string | null | undefined): OpenedMarketplaceTab {
+  const wanted = param?.trim().toLowerCase()
+  const capability = CAPABILITY_SUB_TABS.find((value) => value === wanted)
+  if (capability) return { tab: CAPABILITIES_TAB_VALUE, capability }
+  return { tab: initialMarketplaceTab(param), capability: CAPABILITY_SUB_TABS[0] }
 }

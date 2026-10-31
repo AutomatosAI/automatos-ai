@@ -18,7 +18,15 @@ import { useSearchParams } from 'next/navigation'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { PublicMarketplaceType } from '@/lib/marketplace/public-items'
 
-import { CATEGORY_TABS, TAB_ICONS, initialMarketplaceTab } from '../category-tabs'
+import {
+  CAPABILITIES_TAB_VALUE,
+  CATEGORY_TABS,
+  PLUGINS_SUB_TAB,
+  SKILLS_SUB_TAB,
+  TAB_ICONS,
+  openedMarketplaceTab,
+} from '../category-tabs'
+import type { OpenedMarketplaceTab } from '../category-tabs'
 import { THEMES_TAB_VALUE } from '../themes/listing-format'
 import { CAPABILITY_TABS_LABEL, VISITOR_TABS_LABEL } from './copy'
 import { VisitorItemsTab } from './visitor-items'
@@ -38,24 +46,10 @@ const ITEM_TABS: readonly ItemTab[] = [
   { tab: 'recipes', type: 'playbooks' },
   { tab: 'llms', type: 'llms' },
 ]
-const CAPABILITIES_TAB = 'capabilities'
 const CAPABILITY_TABS: readonly (ItemTab & { readonly label: string })[] = [
-  { tab: 'plugins', type: 'plugins', label: 'Plugins' },
-  { tab: 'skills', type: 'skills', label: 'Skills' },
+  { tab: PLUGINS_SUB_TAB, type: 'plugins', label: 'Plugins' },
+  { tab: SKILLS_SUB_TAB, type: 'skills', label: 'Skills' },
 ]
-
-interface Opened {
-  readonly tab: string
-  readonly capability: string
-}
-
-/** The tab (and Capabilities sub-tab) a `?tab=` link opens. */
-export function visitorTab(param: string | null | undefined): Opened {
-  const wanted = param?.trim().toLowerCase()
-  const capability = CAPABILITY_TABS.find((entry) => entry.tab === wanted)
-  if (capability) return { tab: CAPABILITIES_TAB, capability: capability.tab }
-  return { tab: initialMarketplaceTab(param), capability: CAPABILITY_TABS[0].tab }
-}
 
 interface Linked {
   /** The tab, or the Capabilities sub-tab, the link names. */
@@ -63,9 +57,9 @@ interface Linked {
   readonly item: string
 }
 
-function linkOf(opened: Opened, item: string | null | undefined): Linked | null {
+function linkOf(opened: OpenedMarketplaceTab, item: string | null | undefined): Linked | null {
   if (!item) return null
-  return { tab: opened.tab === CAPABILITIES_TAB ? opened.capability : opened.tab, item }
+  return { tab: opened.tab === CAPABILITIES_TAB_VALUE ? opened.capability : opened.tab, item }
 }
 
 interface TabProps {
@@ -100,7 +94,7 @@ function CapabilitiesTabs({ initial, searchQuery, itemFor, onSwitch }: Capabilit
           <VisitorItemsTab
             type={entry.type}
             tab={entry.tab}
-            icon={TAB_ICONS[CAPABILITIES_TAB]}
+            icon={TAB_ICONS[CAPABILITIES_TAB_VALUE]}
             searchQuery={searchQuery}
             item={itemFor(entry.tab)}
           />
@@ -112,7 +106,7 @@ function CapabilitiesTabs({ initial, searchQuery, itemFor, onSwitch }: Capabilit
 
 export function VisitorTabs({ searchQuery }: { searchQuery: string }) {
   const searchParams = useSearchParams()
-  const [opened] = useState(() => visitorTab(searchParams?.get('tab')))
+  const [opened] = useState(() => openedMarketplaceTab(searchParams?.get('tab')))
   const [tab, setTab] = useState(opened.tab)
   const [link, setLink] = useState<Linked | null>(() => linkOf(opened, searchParams?.get('item')))
   const itemFor = (value: string) => (link?.tab === value ? link.item : null)
@@ -149,7 +143,7 @@ export function VisitorTabs({ searchQuery }: { searchQuery: string }) {
           />
         </TabsContent>
       ))}
-      <TabsContent value={CAPABILITIES_TAB} className="mt-0">
+      <TabsContent value={CAPABILITIES_TAB_VALUE} className="mt-0">
         <CapabilitiesTabs initial={opened.capability} searchQuery={searchQuery} itemFor={itemFor} onSwitch={forgetLink} />
       </TabsContent>
     </Tabs>

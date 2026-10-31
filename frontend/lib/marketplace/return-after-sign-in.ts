@@ -25,12 +25,14 @@ export const RETURN_PATH_STORAGE_KEY = 'automatos-marketplace-return'
 /** How long a remembered path waits for the sign-in or sign-up: 30 minutes. */
 export const RETURN_PATH_TTL_MS = 30 * 60 * 1000
 
+export const TAB_PARAM = 'tab'
+export const ITEM_PARAM = 'item'
+export const ADD_PARAM = 'add'
 /** `add` opens the item's add dialog only with this value (US-270-09b). */
-const ADD_READY = '1'
-const ADD_PARAM = 'add'
-const KEPT_PARAMS = ['tab', 'item', ADD_PARAM] as const
+export const ADD_READY = '1'
+const KEPT_PARAMS = [TAB_PARAM, ITEM_PARAM, ADD_PARAM] as const
 /** A tab or item longer than this is dropped: no tab value, listing id or item key comes close. */
-const MAX_PARAM_LENGTH = 256
+export const MAX_PARAM_LENGTH = 256
 const REDIRECT_PARAM = 'redirect_url'
 const LOG_PREFIX = '[marketplace]'
 
