@@ -6,6 +6,7 @@
 The following files were used as context for generating this page:
 
 - [orchestrator/core/models/proactive.py](../../../orchestrator/core/models/proactive.py)
+- [orchestrator/services/proactive/retention.py](../../../orchestrator/services/proactive/retention.py)
 - [orchestrator/alembic/versions/prd268_w1_proactive.py](../../../orchestrator/alembic/versions/prd268_w1_proactive.py)
 - [orchestrator/alembic/versions/prd268_w2_delivery.py](../../../orchestrator/alembic/versions/prd268_w2_delivery.py)
 - [orchestrator/alembic/versions/prd268_w3_follow_ups.py](../../../orchestrator/alembic/versions/prd268_w3_follow_ups.py)
@@ -58,7 +59,9 @@ One row per check-in run or refusal, and per follow-up firing: `id`, `workspace_
 `suggestions` (count), `model`, `tokens`, `cost_usd`, `error_class`, `created_at`. The outcome CHECK
 (`ck_proactive_runs_outcome`) admits `silent`, `suggested`, `error`, `skipped_quiet`, `skipped_cap`,
 `skipped_credits`, `skipped_paused`, `skipped_off` and `posted`. Index `ix_proactive_runs_workspace_agent_created`.
-No job prunes it.
+Rows are kept `PROACTIVE_RUNS_RETENTION_DAYS` (90): once a day at 04:45 UTC the leader deletes older ones in
+batches of 5,000 (`services/proactive/retention.py`). Nothing else is deleted with them; a suggestion's `run_id`
+is a plain value.
 
 ### `proactive_person_settings`
 

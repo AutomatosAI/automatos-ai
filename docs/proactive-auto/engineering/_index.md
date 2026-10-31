@@ -123,7 +123,6 @@ Three facts the theme-host pages don't spell out:
 | Always allow; buttons Allow once / Always allow / Refuse | Not built. `answers` is only `refuse` and `allow_once`. The buttons keep "Approve & run" / "Deny" (tool) and "Approve & run" / "Reject" (Mission); key 2 does nothing. |
 | Follow-up caps under a lock per (workspace, person, agent) | One `pg_advisory_xact_lock` per workspace (W3 K9), so the workspace's 100 a day can be bounded. |
 | Chips stored as `reply_chips` in the message's `source` | They are a message part, `{type: 'reply_chips@1', replies}` (W3 K12). |
-| `proactive_runs` kept 90 days | No job prunes it. |
 | Hide learning, field-memory writes from Hide reasons, Telegram and Slack, Mission and Playbook proposals | Not built (the PRD's W4). |
 | The agent page shows the heartbeat mode | The mode is in the heartbeat config API (`mode` on `GET`/`PUT /api/heartbeat/agents/{agent_id}/config`); no web control sets it. |
 | Workspace and person switches in Settings | API only: `PUT /api/proactive/settings` and `PUT /api/proactive/me`. No web UI. |

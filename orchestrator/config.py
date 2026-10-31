@@ -2327,6 +2327,9 @@ class Config:
     # midnight (services/proactive/delivery.py counts them; no column holds it). 0 rings none.
     PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY: int = max(
         0, int(os.getenv("PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY", "2")))
+    # §6.2: proactive_runs, the check-in audit, keeps this many days; older rows are deleted
+    # once a day (services/proactive/retention.py). At least 1, here and where it is read.
+    PROACTIVE_RUNS_RETENTION_DAYS: int = max(1, int(os.getenv("PROACTIVE_RUNS_RETENTION_DAYS", "90")))
     # K9: the fourth push type, suggestion, ships OFF. While off no suggestion push is sent
     # (services/push/fanout.py); the bell row is still written. Discovery's suggestion_push
     # follows it (US-C09b). The owner turns it on after §12-Q27 and the app's category (US-G02).

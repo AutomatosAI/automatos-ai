@@ -71,6 +71,7 @@ config's. A looser value is 422 `caps_looser` on write and held to config's on r
 | `PROACTIVE_MAX_SUGGESTION_PUSHES_PER_DAY` | 2 | `suggestion_ready` bell rows per person per workspace since their local midnight. 0 rings none. The push follows the bell. |
 | `BRIEF_CLAIM_STALE_SECONDS` | 600 (minimum 60) | A brief claim older than this with no brief posted is taken over by the next open or tick |
 | `READINESS_PROBE_TIMEOUT_SECONDS` | 3 (minimum 0.1) | How long each readiness probe has before it reads `not_checked` |
+| `PROACTIVE_RUNS_RETENTION_DAYS` | 90 (minimum 1) | How long `proactive_runs` rows are kept; older ones are deleted once a day at 04:45 UTC |
 
 ### Follow-ups (W3)
 
