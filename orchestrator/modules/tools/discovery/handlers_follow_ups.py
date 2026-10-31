@@ -24,8 +24,8 @@ any cap (``follow_up_cap``, with the cap's name and value). The check-in lane ne
 these tools (``check_in_lane.CHAT_ONLY_ACTIONS``), so no check-in and no follow-up's own
 turn schedules another (§12-Q9).
 
-Scheduling and cancelling run on a session of their own, on a worker thread: the
-workspace's lock may wait, and neither commits the chat turn's session.
+Every tool runs on a session of its own, on a worker thread: their reads are synchronous,
+the workspace's lock may wait, and none commits the chat turn's session.
 """
 from __future__ import annotations
 
@@ -257,7 +257,7 @@ async def list_follow_ups(db: Session, workspace_id: Any, params: Dict[str, Any]
     params = params or {}
     if _caller(params) is None:
         return _refused(locale_of(params.get(FOLLOW_UP_PARAM)), NO_PERSON)
-    return _listed(db, UUID(str(workspace_id)), params)
+    return await asyncio.to_thread(_on_own_session, db, _listed, UUID(str(workspace_id)), params)
 
 
 def _follow_up_id(value: Any) -> Optional[int]:

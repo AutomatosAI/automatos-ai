@@ -81,6 +81,9 @@ ACTOR_AGENT, ACTOR_PERSON = "agent", "user"
 _LOCK = text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:workspace_id))")
 _AUTO = text("SELECT id FROM agents WHERE workspace_id = CAST(:ws AS uuid) AND is_system_agent IS TRUE "
              "AND slug LIKE :pattern ORDER BY id LIMIT 1")
+# Bounded by what the three counts read (a pending row, or one of the last 24 hours), so the
+# rows read under the lock are never the workspace's whole history: its fired and cancelled
+# rows, and its missed ones (they stay 'active' for ever), age out after a day.
 _COUNTS = text("""
     SELECT
         count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND status = 'active'
@@ -89,6 +92,7 @@ _COUNTS = text("""
         count(*) FILTER (WHERE created_at > :since)
     FROM agent_scheduled_tasks
     WHERE workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up'
+      AND ((status = 'active' AND (next_run_at IS NULL OR next_run_at >= :due_floor)) OR created_at > :since)
 """)
 _INSERT = text("""
     INSERT INTO agent_scheduled_tasks

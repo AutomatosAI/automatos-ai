@@ -11,8 +11,11 @@ keep Auto's "I'll check again at 15:10". Proven here:
   or off, and while the person is paused, each call is refused and nothing is written;
 * a follow-up about a Mission, a playbook run or a ticket, or whose reason names a ticket
   by its board number, is told to use a watch;
-* the list shows only the caller's own; cancelling another person's is not found; schedule
-  and cancel each write one audit row, which never carries the reason;
+* the list shows only the caller's own, read on a session of its own on a worker thread (never
+  the chat turn's session, nor the event loop); cancelling another person's is not found;
+  schedule and cancel each write one audit row, which never carries the reason;
+* the caps' count under the lock reads only pending rows and the last 24 hours' (an old fired,
+  cancelled or missed row is never read), and gives the three numbers the unbounded count gave;
 * the CHECK_IN surface offers none of the four chat-only tools, and the lane refuses them.
 
 ``agent_scheduled_tasks`` has no model, so CI's create_all database has none: the module
@@ -507,6 +510,71 @@ def test_list_and_cancel_are_refused_for_nobody_and_for_another_agent(team, acti
 
     assert _refused(nobody, "no_person") and _refused(other, "not_auto")
     assert [row.status for row in _rows(team)] == ["active"]
+
+
+def test_the_list_reads_on_a_session_of_its_own_on_a_worker_thread(team, monkeypatch):
+    from modules.tools.discovery import handlers_follow_ups
+
+    mine, seen, listed = _seed(team, team.ana, team.chat), [], handlers_follow_ups._listed
+    monkeypatch.setattr(handlers_follow_ups, "_listed",
+                        lambda db, *args: seen.append((db, threading.get_ident())) or listed(db, *args))
+    turn = team.new_session()
+
+    reply = asyncio.run(handlers_follow_ups.list_follow_ups(turn, team.ws, _for(team, LIST)))
+
+    ((session, thread),) = seen
+    assert session is not turn and thread != threading.get_ident()  # never the turn's session, nor the loop
+    assert reply["success"] is True and [item["id"] for item in reply["follow_ups"]] == [mine]
+
+
+# --------------------------------------------------------------------------- the caps' count, bounded
+
+# _COUNTS before its scan was bounded: the bound must not change any of its three numbers.
+UNBOUNDED_COUNTS = """
+    SELECT
+        count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND status = 'active'
+                         AND (next_run_at IS NULL OR next_run_at >= :due_floor)),
+        count(*) FILTER (WHERE for_user_id = :user AND created_by_agent_id = :agent AND created_at > :since),
+        count(*) FILTER (WHERE created_at > :since)
+    FROM agent_scheduled_tasks
+    WHERE workspace_id = CAST(:ws AS uuid) AND deliver_as = 'follow_up'
+"""
+
+
+def _aged(team, user, status, created_hours, due_minutes):
+    """A follow-up row of ``user``'s made ``created_hours`` ago and due ``due_minutes`` from now."""
+    now = datetime.now(timezone.utc)
+    at, s = now + timedelta(minutes=due_minutes), team.new_session()
+    s.execute(text(
+        "INSERT INTO agent_scheduled_tasks (workspace_id, created_by_agent_id, target_agent_id, task_type, "
+        "description, schedule, next_run_at, origin_chat_id, deliver_as, for_user_id, status, created_at) VALUES "
+        "(CAST(:w AS uuid), :a, :a, 'one_shot', 'aged', :at_text, :at, CAST(:c AS uuid), 'follow_up', :u, :s, :made)"),
+        {"w": team.ws, "a": team.auto, "at_text": at.isoformat(), "at": at, "c": team.chat, "u": user,
+         "s": status, "made": now - timedelta(hours=created_hours)})
+    s.commit()
+
+
+def test_the_caps_count_reads_pending_rows_and_the_last_day_only_and_counts_as_before(team):
+    from services.proactive import follow_ups
+
+    bound = "AND ((status = 'active' AND (next_run_at IS NULL OR next_run_at >= :due_floor)) OR created_at > :since)"
+    assert bound in " ".join(str(follow_ups._COUNTS).split())
+    for status, hours, due in (("completed", 48, -2880), ("failed", 30, -1800), ("cancelled", 72, 60),
+                               ("completed", 2, -100), ("cancelled", 1, 60), ("active", 50, 60),
+                               ("active", 26, -1500), ("active", 3, 30)):  # the 26-hour-old active one is missed
+        _aged(team, team.ana, status, hours, due)
+    _aged(team, team.ben, "completed", 4, -200)
+    _aged(team, team.ben, "completed", 40, -2300)
+    now = datetime.now(timezone.utc)
+    request = follow_ups.FollowUpRequest(workspace_id=UUID(team.ws), user_id=team.ana, chat_id=UUID(team.chat),
+                                         agent_id=team.auto, at=now + timedelta(hours=1), reason=REASON)
+    before = team.new_session().execute(text(UNBOUNDED_COUNTS), {
+        "ws": team.ws, "user": team.ana, "agent": team.auto, "since": now - follow_ups.DAY,
+        "due_floor": follow_ups._due_floor(now)}).one()
+
+    counts = follow_ups._counts(team.new_session(), request, now)
+
+    assert (counts.pending, counts.today, counts.workspace_today) == tuple(before) == (2, 3, 4)
 
 
 # --------------------------------------------------------------------------- the audit rows

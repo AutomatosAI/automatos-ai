@@ -366,6 +366,16 @@ def recorded_person(db: Session, user_id: int) -> Optional[str]:
     return (row.clerk_user_id or "").strip() or (row.email or "").strip() or None
 
 
+def recorded_self(db: Session, user_id: Optional[int]) -> Optional[str]:
+    """``recorded_person`` only when ``resolve_recorded_person`` finds this very person from it;
+    None otherwise. The messenger's owner check and its Auto-thread fallback act for whoever it
+    finds, so a post for one person is never handed a value that finds another."""
+    from core.auth.actor import resolve_recorded_person
+
+    person = recorded_person(db, user_id) if user_id is not None else None
+    return person if person is not None and resolve_recorded_person(db, person) == user_id else None
+
+
 def _may_answer(db: Session, person: DuePerson) -> bool:
     """PRD-266 D16: the person's role in the workspace answers questions (the badge's rule)."""
     return person.user_id in recipients(db, person.workspace_id, NEEDS_ANSWER, person.user_id)
@@ -617,6 +627,7 @@ __all__ = [
     "post_now",
     "prune",
     "recorded_person",
+    "recorded_self",
     "register",
     "release",
     "run_digests",

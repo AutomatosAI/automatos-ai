@@ -221,21 +221,14 @@ async def _converse(db: Session, follow_up: _FollowUp, plan: _Plan) -> LoopResul
         return await run_loop(db, plan.llm, spec)
 
 
-def _recorded(db: Session, user_id: Optional[int]) -> Optional[str]:
-    """The person as the messenger finds them (a Clerk id, else an email), only when that finds
-    this very person: otherwise None, and the messenger is handed no chat to honour."""
-    from core.auth.actor import resolve_recorded_person
-    from services.mobile.digest import recorded_person
-
-    person = recorded_person(db, user_id) if user_id is not None else None
-    return person if person is not None and resolve_recorded_person(db, person) == user_id else None
-
-
 def _post(db: Session, follow_up: _FollowUp, said: str) -> bool:
-    """Post the one message: in the origin chat while it is the person's, else their Auto thread."""
+    """Post the one message: in the origin chat while it is the person's, else their Auto thread.
+    The messenger is handed the person only when it finds this very person (``recorded_self``);
+    otherwise none, and no chat to honour."""
     from services.chat_messenger import deliver_background_message
+    from services.mobile.digest import recorded_self
 
-    person = _recorded(db, follow_up.user_id)
+    person = recorded_self(db, follow_up.user_id)
     message = deliver_background_message(
         db, workspace_id=follow_up.workspace_id, text=posted_text(said),
         source={"origin": ORIGIN, "follow_up_id": follow_up.id},

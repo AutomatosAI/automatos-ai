@@ -16,7 +16,8 @@ model and the memory service are fakes (``tests/helpers_calibration_fakes.py``).
 * once only: a second POST, either answer, is 409 ``already_offered`` with the record, also
   under two concurrent POSTs (one model call, one message);
 * a failed build (the model's error, an answer with no JSON) or a post that does not land is
-  503 and leaves no claim, so the next POST tries again;
+  503 and leaves no claim, so the next POST tries again; so is a person whose record the
+  messenger would read as another member, or as nobody, with nothing posted anywhere;
 * a claim whose claimant died before its post is taken over once stale (never while fresh), and
   one whose message did land is recorded, not posted again; a claimant whose claim was taken
   over keeps nothing and posts nothing;
@@ -86,7 +87,7 @@ from services.calibration import build as build_mod  # noqa: E402
 from services.calibration import claim, memory, offer  # noqa: E402
 from services.calibration.strings import STRINGS  # noqa: E402
 from services.calibration.switch import calibration_enabled  # noqa: E402
-from services.mobile import discovery  # noqa: E402
+from services.mobile import digest, discovery  # noqa: E402
 from services.notification_events import auto_message  # noqa: E402
 from tests.helpers_calibration_fakes import LINE, FakeMemory, FakeModel  # noqa: E402
 
@@ -492,6 +493,21 @@ def test_a_post_that_does_not_land_gives_the_claim_back(world, switched, model, 
 
     assert len(fake.calls) == 1 and _records(world) == [] and _messages(world) == []
     assert _read(world, world.pia).json()["offer"] is True
+
+
+@pytest.mark.parametrize("found", ["oto", None])
+def test_a_person_whose_record_finds_another_or_nobody_is_never_posted_for(world, switched, model, monkeypatch,
+                                                                           found):
+    model()
+    recorded = getattr(world, found).clerk if found else None  # Oto's Clerk id finds Oto, not Pia
+    monkeypatch.setattr(digest, "recorded_person", lambda db, user_id: recorded)
+
+    _refusal(_consent(world, world.pia, chat=world.pia_chat), 503, "calibration_unavailable")
+
+    assert _records(world) == [] and _messages(world) == []  # no claim; nothing in Pia's chat or Oto's Auto thread
+    with world.new_session() as s:
+        assert s.execute(text("SELECT count(*) FROM chats WHERE user_id = :u AND kind = 'auto'"),
+                         {"u": world.oto.pk}).scalar() == 0
 
 
 def test_a_claim_whose_claimant_died_is_taken_over_once_stale(world, switched, model):

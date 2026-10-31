@@ -14,8 +14,9 @@ takes the claim, committed, before anything is read:
   {origin ``calibration``, calibration_id}, and it is never announced (it answers the person's
   own click). The record keeps the chat and the message, and consent is audited after the commit.
 * A build or a post that fails (the model's refusal or error, an answer it could not read, a
-  message that did not land) gives the claim back and raises ``OfferFailed``: the person is
-  offered again, and the cause stays in the server log.
+  message that did not land, a person the messenger would find as someone else:
+  ``recorded_self``) gives the claim back and raises ``OfferFailed``: the person is offered
+  again, and the cause stays in the server log.
 * Offered already (consented, declined or answered; also when two calls race): ``AlreadyOffered``,
   carrying the record as it is. The one exception is a claim whose claimant died before its post
   (``claim.take_over``, once it is stale): the next consent takes it over and offers again,
@@ -40,7 +41,7 @@ from services.calibration.build import build_calibration
 from services.calibration.model import PART_TYPE, Calibration
 from services.calibration.strings import calibration_language, calibration_text
 from services.chat_messenger import deliver_background_message
-from services.mobile.digest import recorded_person
+from services.mobile.digest import recorded_self
 
 __all__ = ["AlreadyOffered", "ORIGIN", "OfferFailed", "Offered", "consent", "decline", "own_chat"]
 
@@ -148,14 +149,19 @@ def _taken_over(db: Session, workspace_id: Any, user_id: int, now: datetime) -> 
 
 def _post(db: Session, workspace_id: Any, user_id: int, built: Calibration, saved: Dict[str, Any], said: str,
           chat_id: Any) -> Message:
-    """Post the calibration as one Auto message; raises ``_NotPosted`` when it did not land."""
+    """Post the calibration as one Auto message; raises ``_NotPosted`` when it did not land, or
+    before posting when the messenger would find someone else from the person's record (its owner
+    check and Auto-thread fallback would act for them)."""
+    person = recorded_self(db, user_id)
+    if person is None:
+        raise _NotPosted("the messenger would not find this person")
     message = deliver_background_message(
         db,
         workspace_id=workspace_id,
         text=calibration_text(said, built),
         source={"origin": ORIGIN, "calibration_id": built.id},
         chat_id=own_chat(db, workspace_id, user_id, chat_id),
-        clerk_user_id=recorded_person(db, user_id),
+        clerk_user_id=person,
         parts=[{"type": PART_TYPE, "calibration": saved}],
     )
     if message is None:
