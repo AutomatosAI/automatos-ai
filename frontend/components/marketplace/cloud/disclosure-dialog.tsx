@@ -12,8 +12,9 @@
  * the install `onAdd` returns is pending, and Close (or the dialog's own close) calls `onClose`. With no
  * `onAdd` it is a review only, with Close and no Add (an updated plugin's notice, US-270-14e). While it
  * reads, a loading line; a failed read, or an answer it can't show whole (another kind's, or one missing
- * what a section shows), says so and offers no Add. The layer (cloud-items-layer.tsx, US-270-14d) owns what
- * Add and Close do.
+ * what a section shows), says so and offers no Add. Close is one button in every state, so a press on it
+ * (or the focus on it) is never lost when the read ends and the disclosure replaces the loading line. The
+ * layer (cloud-items-layer.tsx, US-270-14d) owns what Add and Close do.
  */
 import { useState } from 'react'
 import { Download } from 'lucide-react'
@@ -45,6 +46,8 @@ interface CloudDisclosureDialogProps {
 
 type StateProps = Omit<CloudDisclosureDialogProps, 'open'>
 
+const DIVIDED_FOOTER = 'gap-2 border-t border-border/30 pt-4 sm:gap-0'
+
 function CloseButton({ onClose }: { onClose: () => void }) {
   return (
     <Button variant="outline" onClick={onClose} data-testid="cloud-disclosure-close">
@@ -53,18 +56,15 @@ function CloseButton({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** The loading line, or the failed read's sentence: Close only, never Add. */
-function DisclosureMessage({ kind, failed, onClose }: { kind: CloudItemKind; failed: boolean; onClose: () => void }) {
+/** The loading line, or the failed read's sentence (its footer has Close only, never Add). */
+function DisclosureMessage({ kind, failed }: { kind: CloudItemKind; failed: boolean }) {
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{failed ? CLOUD_ITEM_TITLE : READING_DISCLOSURE}</DialogTitle>
-        <DialogDescription className={failed ? 'text-destructive' : undefined}>
-          {failed ? DISCLOSURE_UNREADABLE : DISCLOSURE_LEDE[kind]}
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter><CloseButton onClose={onClose} /></DialogFooter>
-    </>
+    <DialogHeader>
+      <DialogTitle>{failed ? CLOUD_ITEM_TITLE : READING_DISCLOSURE}</DialogTitle>
+      <DialogDescription className={failed ? 'text-destructive' : undefined}>
+        {failed ? DISCLOSURE_UNREADABLE : DISCLOSURE_LEDE[kind]}
+      </DialogDescription>
+    </DialogHeader>
   )
 }
 
@@ -98,30 +98,38 @@ function AddButton({ onAdd }: { onAdd: () => void | Promise<unknown> }) {
   )
 }
 
-function DisclosureBody({ disclosure, onAdd, onClose }: { disclosure: CloudDisclosure } & Omit<StateProps, 'kind' | 'id'>) {
+function DisclosureBody({ disclosure }: { disclosure: CloudDisclosure }) {
   return (
     <>
       <DisclosureHead disclosure={disclosure} />
       <DisclosureSections disclosure={disclosure} />
-      <DialogFooter className="gap-2 border-t border-border/30 pt-4 sm:gap-0">
-        <CloseButton onClose={onClose} />
-        {onAdd && <AddButton onAdd={onAdd} />}
-      </DialogFooter>
     </>
+  )
+}
+
+/** Close, then Add when there is a disclosure to add; divided from the sections above it when they show. */
+function DisclosureFooter({ divided, onAdd, onClose }: { divided: boolean } & Omit<StateProps, 'kind' | 'id'>) {
+  return (
+    <DialogFooter className={divided ? DIVIDED_FOOTER : undefined}>
+      <CloseButton onClose={onClose} />
+      {onAdd && <AddButton onAdd={onAdd} />}
+    </DialogFooter>
   )
 }
 
 function DisclosureState({ kind, id, onAdd, onClose }: StateProps) {
   const disclosure = useCloudDisclosure(kind, id)
   // A read that never starts (the hosted edition) is not loading: it ends as a failed one.
-  if (disclosure.isInitialLoading) {
-    return <DisclosureMessage kind={kind} failed={false} onClose={onClose} />
-  }
+  const loading = disclosure.isInitialLoading
   // The read refuses an answer for another kind, or one it can't show whole (cloudDisclosureOf).
-  if (disclosure.isError || !disclosure.data) {
-    return <DisclosureMessage kind={kind} failed onClose={onClose} />
-  }
-  return <DisclosureBody disclosure={disclosure.data} onAdd={onAdd} onClose={onClose} />
+  const shown = loading || disclosure.isError ? undefined : disclosure.data
+  // One footer in every state, in the same place: the Close being pressed is still the Close once the read ends.
+  return (
+    <>
+      {shown ? <DisclosureBody disclosure={shown} /> : <DisclosureMessage kind={kind} failed={!loading} />}
+      <DisclosureFooter divided={!!shown} onAdd={shown ? onAdd : undefined} onClose={onClose} />
+    </>
+  )
 }
 
 export function CloudDisclosureDialog({ kind, id, open, onAdd, onClose }: CloudDisclosureDialogProps) {

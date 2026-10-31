@@ -5,8 +5,9 @@
  * - each kind's sections from a mocked disclosure answer (agent, Playbook, package, plugin), with what
  *   didn't resolve as "Needs …" lines;
  * - a prompt holding markup renders as text: no element is made from it;
- * - Add calls onAdd once per press (and stays pressed while its install is pending), Close calls onClose;
- *   a loading read, a failed one, an answer it can't show whole and the hosted edition offer no Add;
+ * - Add calls onAdd once per press (and stays pressed while its install is pending), Close calls onClose and
+ *   is the same button while it reads and once the disclosure shows (a press on it is never lost); a loading
+ *   read, a failed one, an answer it can't show whole and the hosted edition offer no Add;
  * - the Studio rules over the dialog's files: tokens only (no hex), no rounded-3xl, no orange-*, no
  *   innerHTML, no markdown renderer, and one primary in the view.
  */
@@ -261,6 +262,21 @@ describe('Add and Close', () => {
 
     fireEvent.click(screen.getByTestId('cloud-disclosure-close'))
 
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('Close is the same button while it reads and once the disclosure shows, so a press on it is never lost', async () => {
+    let answer: (value: CloudDisclosure) => void = () => {}
+    api.get.mockReturnValue(new Promise<CloudDisclosure>((resolve) => { answer = resolve }))
+    const { onAdd, onClose } = open('agent', 7)
+    const reading = screen.getByTestId('cloud-disclosure-close')
+
+    await act(async () => answer(AGENT))
+
+    expect(await screen.findByTestId('cloud-disclosure-sections')).toBeInTheDocument()
+    expect(screen.getByTestId('cloud-disclosure-close')).toBe(reading)
+    fireEvent.click(reading)
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onAdd).not.toHaveBeenCalled()
   })
