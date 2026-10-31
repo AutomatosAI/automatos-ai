@@ -165,6 +165,9 @@ Read beside the diff:
   - every path to an install or enable of a Cloud item from the web without Add, or from Auto's chat without its approval;
   - the gate on SaaS.
 - **database-reviewer** agent, in the foreground, on `orchestrator/alembic/versions/prd270_w2_cloud_bundles.py`, the model, the item pass's one transaction (`import_items.py`, `import_agents.py`, `import_playbooks.py`, `import_packages.py`) and the plugin pass's commits (`plugin_import.py`).
+- **Integration seams.** W1's review fixes met W2 code at the merge 3a41ff8e0, in files that merged with no conflict. Check both, and add a test where one is missing:
+  1. **The catalogue build.** W1's ce215a1c0 makes `build_catalog` do every database read first, end its read transaction, then read each theme.json from storage. W2 wraps it as `with_items(build_catalog(db), db)`, so the agent, Playbook, package and plugin exports read the database afterwards, in a new transaction. Confirm that no pool connection is held over a storage read. Also check whether W2's Postgres catalogue test exercises the path that releases: its seeded rows are flushed, so its transaction is kept.
+  2. **The Sync's item passes.** W1's RVW-3 rule: no database transaction stays open while Automatos Cloud answers (`ensure_stored` takes the Cloud row's columns; `_run_sync` rolls back before the fetch). Check `services/marketplace_bundles/sync_items.py`, and the bundle and plugin fetches it makes, against that rule.
 - Run `bash scripts/ralph/acceptance-prd270w2.sh` yourself. It waits for the wave's one CI run and the browser lane on the tested commit, and reads the PR body and its base.
 - Spot-check five marked acceptance criteria at random against the code and the tests. Always include one from US-270-11b, one from US-270-15a, one from US-270-14g and one from US-270-14d.
 - **Nothing runs on the owner's machine.** Never end your turn with anything running in the background.
