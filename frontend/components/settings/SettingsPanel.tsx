@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic, Cloud } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -17,6 +17,7 @@ import { WorkspaceVoiceLiveCard } from './WorkspaceVoiceLiveCard'
 import { AppearanceTab } from './themes/appearance-tab'
 import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { BillingTab } from './billing/billing-tab'
+import { AutomatosCloudPanel, useHasAutomatosCloudTab } from './automatos-cloud-panel'
 import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
@@ -49,6 +50,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  *
  * Billing (PRD-265 US-011) is hosted-only — the local edition never meters — so it is not in
  * this list. The open tab is read from and written to `?tab=` (./use-settings-tab.ts).
+ *
+ * Automatos Cloud (PRD-270 US-270-05b) is local-only too, and only for owners and admins while the
+ * Sync is on (./automatos-cloud-panel.tsx).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -63,10 +67,12 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
   'appearance',  // PRD-261 A-07d — Themes: install, opt in, choose
   'phones-devices',  // PRD-266 US-005c — the device list; pairing in paired mode
+  'automatos-cloud',  // PRD-270 US-270-05b — Sync with Automatos Cloud (owners and admins)
 ])
 
 export function SettingsPanel() {
   const { isAdmin } = useSystemRole()
+  const hasCloudTab = useHasAutomatosCloudTab()
 
   const allTabs = [
     ...(isLocal ? [{ value: 'profile', label: 'Profile', icon: UserCircle }] : []),
@@ -83,6 +89,7 @@ export function SettingsPanel() {
     { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
+    ...(hasCloudTab ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
@@ -195,6 +202,13 @@ export function SettingsPanel() {
         <TabsContent value="appearance">
           <AppearanceTab />
         </TabsContent>
+
+        {/* PRD-270 US-270-05b: Automatos Cloud — the URL in use, the last Sync, Sync now (local, owners and admins) */}
+        {hasCloudTab && (
+          <TabsContent value="automatos-cloud">
+            <AutomatosCloudPanel />
+          </TabsContent>
+        )}
 
         {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}
         <TabsContent value="widget-sdk">

@@ -1,6 +1,7 @@
 /**
  * PRD-270 §5.5 — the words of Sync with Automatos Cloud: the button, its status line and the toast
- * after a Sync. The badge on a synced listing is the Themes tab's (listing-format.ts `CLOUD_BADGE`).
+ * after a Sync, and Settings › Automatos Cloud. The badge on a synced listing is the Themes tab's
+ * (listing-format.ts `CLOUD_BADGE`).
  */
 import type { CloudSyncCounts, CloudSyncStatus } from '@/lib/marketplace/cloud-sync'
 import { formatRelative } from '@/lib/format-relative'
@@ -9,6 +10,19 @@ export const SYNC_WITH_CLOUD = 'Sync with Automatos Cloud'
 export const SYNCING = 'Syncing with Automatos Cloud…'
 export const NOTHING_NEW = 'Nothing new from Automatos Cloud'
 export const NOT_SYNCED_YET = 'Not synced yet'
+
+export const CLOUD_TITLE = 'Automatos Cloud'
+export const CLOUD_LEDE =
+  'Where this install syncs Marketplace themes from. A Sync runs only when someone presses it, and lists only versions an Automatos key signed.'
+export const SYNC_NOW = 'Sync now'
+export const READING_STATUS = 'Reading Sync with Automatos Cloud…'
+export const SYNC_OFF = 'Sync with Automatos Cloud is off on this install: AUTOMATOS_CLOUD_URL is empty.'
+export const TURN_OFF = 'To turn it off, set AUTOMATOS_CLOUD_URL= (empty) in envs/api.local and restart.'
+
+/** The last successful Sync's counts, for Settings: "2 new, 1 updated, 5 unchanged, 0 refused". */
+export function countsLine(counts: CloudSyncCounts): string {
+  return `${counts.new} new, ${counts.updated} updated, ${counts.unchanged} unchanged, ${counts.refused} refused`
+}
 
 function themes(count: number): string {
   return count === 1 ? '1 theme' : `${count} themes`
