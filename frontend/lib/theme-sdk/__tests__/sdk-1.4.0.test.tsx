@@ -166,7 +166,9 @@ describe('SDK 1.4.0 — useRateBrief’s rating, shared with cards.BriefCard', (
     await act(async () => {
       await result.current.runAsync({ state_hash: STATE_HASH, rating: 'up' })
     })
-    expect(result.current.rating).toBe('up')
+    // The cache holds it once runAsync resolves; react-query tells its readers on the next tick.
+    expect(client.getQueryData(digestFeedbackQueryKeys.rating(STATE_HASH))).toEqual({ state_hash: STATE_HASH, rating: 1 })
+    await waitFor(() => expect(result.current.rating).toBe('up'))
   })
 
   it('shares one cache entry with BriefCard’s thumbs: a press in either shows in both', async () => {
@@ -190,7 +192,7 @@ describe('SDK 1.4.0 — useRateBrief’s rating, shared with cards.BriefCard', (
     await act(async () => {
       await seen.current?.runAsync({ state_hash: STATE_HASH, rating: 'up' })
     })
-    expect(screen.getByRole('button', { name: 'Helpful' })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Helpful' })).toHaveAttribute('aria-pressed', 'true'))
     expect(screen.getByRole('button', { name: 'Not helpful' })).toBeDisabled()
   })
 
