@@ -30,6 +30,10 @@ route's (``api/themes_files.py``), made public:
 * ``Cache-Control: public, max-age=<THEME_FILE_CACHE_SECONDS>, immutable`` and a strong ETag, the file's
   sha256 (the package's: its digest), with 304: a stored file never changes. The ETag is known from the
   row, so a 304 reads nothing from storage and never rebuilds the package;
+* the served row is detached and the read transaction ended before storage is read, so no pool connection
+  waits on storage or a rebuild; a package is rebuilt in one of the process's
+  ``catalog_files.CATALOG_PACKAGE_REBUILDS`` slots, and none free within the short wait is 503 with
+  ``Retry-After`` (logged as a warning), storage never read;
 * 404 in the local edition (checked first, so it never counts against the limit), and for anything the
   catalogue doesn't serve, a package that can't be rebuilt included (logged); 503 when storage or the keys
   file fails; its own per-IP bucket (429 with ``Retry-After``).
@@ -42,7 +46,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Dict, Iterator
+from typing import Dict, Iterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
@@ -54,9 +58,11 @@ from api.themes_files import (
 )
 from config import config
 from core.database.database import get_db
+from core.models.themes import ThemePackage
 from services.marketplace_cloud.catalog import CatalogSnapshot, CatalogUnavailable, catalog_max_bytes, catalog_snapshot
 from services.marketplace_cloud.catalog_files import (
-    CatalogFileMissing, CatalogFilesUnavailable, listed_sha256, read_catalog_file, served_version,
+    REBUILD_RETRY_SECONDS, CatalogFileMissing, CatalogFilesBusy, CatalogFilesUnavailable, listed_sha256,
+    read_catalog_file, served_version,
 )
 from services.marketplace_cloud.urls import CATALOG_FILES_ROUTE, CATALOG_ROUTE
 from services.themes.revocation_feed import etag_matches
@@ -81,6 +87,7 @@ CATALOG_DOWN = "The Automatos Cloud catalogue can't be built right now. Try agai
 CATALOG_TOO_LARGE = "The Automatos Cloud catalogue is too large to serve right now. Try again later."
 FILE_NOT_SERVED = "That file isn't in the Automatos Cloud catalogue."
 FILES_DOWN = "Automatos Cloud catalogue files can't be read right now. Try again in a moment."
+FILES_BUSY = "Automatos Cloud is busy preparing other packages. Try again in a moment."
 
 
 def require_hosted_edition() -> None:
@@ -136,17 +143,22 @@ def get_catalog(
     return Response(content=snapshot.body, media_type=CATALOG_MEDIA_TYPE, headers=headers)
 
 
-def _file_refusal(status_code: int, detail: str) -> HTTPException:
-    return HTTPException(status_code=status_code, detail=detail, headers={**FILE_REFUSAL_HEADERS})
+def _file_refusal(status_code: int, detail: str, retry_after: Optional[int] = None) -> HTTPException:
+    retry = {} if retry_after is None else {"Retry-After": str(retry_after)}
+    return HTTPException(status_code=status_code, detail=detail, headers={**FILE_REFUSAL_HEADERS, **retry})
 
 
 @contextmanager
 def _file_refusals(digest: str, path: str) -> Iterator[None]:
-    """The files route's refusals: 404 for nothing to serve, 503 (logged) when storage or the keys file fails."""
+    """The files route's refusals: 404 for nothing to serve, 503 (logged) when storage or the keys file fails or
+    every rebuild slot stays taken (with ``Retry-After``)."""
     try:
         yield
     except CatalogFileMissing as missing:
         raise _file_refusal(NOT_FOUND, FILE_NOT_SERVED) from missing
+    except CatalogFilesBusy as busy:  # only after the digest and path passed the allowlist
+        logger.warning("marketplace catalogue files: no package rebuild slot came free for %s", digest)
+        raise _file_refusal(SERVICE_UNAVAILABLE, FILES_BUSY, REBUILD_RETRY_SECONDS) from busy
     except SigningKeysError as broken:
         logger.error("marketplace catalogue files: the signing keys file did not load: %s", broken)
         raise _file_refusal(SERVICE_UNAVAILABLE, FILES_DOWN) from broken
@@ -162,6 +174,16 @@ def _file_headers(sha256: str) -> Dict[str, str]:
     }
 
 
+def _served_detached(db: Session, digest: str, path: str) -> ThemePackage:
+    """The served version (``served_version``), detached from ``db`` with its columns loaded, and ``db``'s read
+    transaction ended (it only read), so its pool connection is back before storage is read."""
+    with _file_refusals(digest, path):
+        package = served_version(db, digest, path)
+    db.expunge(package)
+    db.rollback()
+    return package
+
+
 @router.get(CATALOG_FILES_ROUTE + "/{digest}/{path:path}")
 def get_catalog_file(
     digest: str,
@@ -173,12 +195,11 @@ def get_catalog_file(
     reader: FileReader = Depends(get_theme_file_reader),
 ) -> Response:
     """A listed version's package or listed screenshot (200), or 304 when ``If-None-Match`` names its ETag; 403
-    for a service worker; 404 in the local edition and for anything else; 503 when storage fails; 429 over the
-    per-IP limit."""
+    for a service worker; 404 in the local edition and for anything else; 503 when storage fails or no rebuild
+    slot comes free; 429 over the per-IP limit."""
     if request.headers.get(SERVICE_WORKER_HEADER, "").strip().lower() == SERVICE_WORKER_SCRIPT:
         raise _file_refusal(FORBIDDEN, NO_SERVICE_WORKER)
-    with _file_refusals(digest, path):
-        package = served_version(db, digest, path)
+    package = _served_detached(db, digest, path)
     known = listed_sha256(package, path)
     if known is not None and etag_matches(request.headers.get("if-none-match"), f'"{known}"'):
         return Response(status_code=NOT_MODIFIED, headers=_file_headers(known))
