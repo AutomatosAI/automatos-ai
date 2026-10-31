@@ -5,7 +5,7 @@ The wave's one revision does exactly two things: a guarded DO block (``_ADD_SOUR
 own) and its CHECK (``'cloud'`` only on a Marketplace row), and ``marketplace_cloud_sync``, the
 Sync's one status row. Proven here:
 
-* the revision chains onto the base's head (``prd268_w1_proactive``) and sits under the one head;
+* the revision chains onto the base's head (``prd268_w2_delivery``) and sits under the one head;
 * its upgrade is those two statements and nothing else, and its downgrade drops the table, the
   CHECK and the column and deletes no row;
 * the model (``ThemePackage.source`` and ``ck_theme_packages_source``;
@@ -45,7 +45,7 @@ ORCH = Path(__file__).resolve().parents[1]
 VERSIONS = ORCH / "alembic" / "versions"
 MIGRATION = VERSIONS / "prd270_w1_cloud_sync.py"
 REVISION = "prd270_w1_cloud_sync"
-BASE_HEAD = "prd268_w1_proactive"
+BASE_HEAD = "prd268_w2_delivery"
 # The revisions that built theme_packages before this one, in chain order.
 EARLIER = (VERSIONS / "prd261_themes.py", VERSIONS / "prd261_revocation_feed.py")
 SOURCE_CHECK = "ck_theme_packages_source"
