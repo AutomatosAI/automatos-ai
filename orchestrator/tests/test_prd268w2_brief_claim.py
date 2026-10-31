@@ -12,7 +12,8 @@ in ``mobile_digest_posts``. Proven here, on Postgres with committing sessions:
 * the scheduled digest's message is ``[text(Auto's Read), brief@1]`` in the person's Auto
   thread, in their phone's language, with source {origin daily_digest, local_date, via
   schedule}; ``post_now`` posts the same brief with no claim and no via, as today;
-* a brief posted on open raises no ``auto_message``; the scheduled one still does;
+* a brief posted on open raises no ``auto_message``; the scheduled one still does, and it and
+  ``post_now``'s each name their message's id (US-G03: the push opens the thread at the brief);
 * ``todays_brief_message`` is the newest of the day's messages in the person's own Auto thread
   in the workspace; ``post_brief`` refuses a via that is neither; ``claim_brief`` is the
   digest's claim; ``due_people`` carries the phone's zone and language without comparing them;
@@ -410,6 +411,19 @@ def test_the_scheduled_brief_still_raises_auto_message(cafe, held, new_session):
     (brief,) = _briefs(new_session, cafe.ws)
     assert [(notice.chat_id, notice.origin, notice.excerpt) for notice in _told(held, cafe.ws)] == [
         (brief.chat_id, "daily_digest", PROSE)]
+
+
+def test_the_scheduled_brief_and_post_now_announce_their_message_ids(cafe, held, new_session):
+    """PRD-268 US-G03: each announced brief names its message, so its push opens the thread at it."""
+    _phone(new_session, cafe.ws, cafe.ana)
+
+    _run(new_session, T_LISBON_8)
+    assert asyncio.run(digest.post_now(UUID(cafe.ws), cafe.ana, now=T_LISBON_8, session_factory=new_session)) is True
+
+    scheduled, asked = _briefs(new_session, cafe.ws)
+    assert (scheduled.source["via"], "via" in asked.source) == (VIA_SCHEDULE, False)
+    assert [(notice.chat_id, notice.message_id) for notice in _told(held, cafe.ws)] == [
+        (scheduled.chat_id, scheduled.id), (asked.chat_id, asked.id)]
 
 
 # --------------------------------------------------------------------------- the day's message, the claim

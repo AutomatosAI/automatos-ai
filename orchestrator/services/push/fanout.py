@@ -23,8 +23,9 @@ those write.
 3. One signed message per phone (``payload.build_payload`` / ``to_message``): a question's
    grant loaded in this workspace only (while it still waits), a review's ticket number,
    redaction from ``workspace.settings``, and a suggestion's title only when the workspace
-   shows titles (PRD-268 K9; the person's own open suggestion in this workspace). The reads then
-   end, so no transaction or connection is held while Expo answers.
+   shows titles (PRD-268 K9; the person's own open suggestion in this workspace). A daily
+   brief's event carries its posted message's id, which rides in the data unsigned (PRD-268
+   US-G03). The reads then end, so no transaction or connection is held while Expo answers.
 4. The sender (``ExpoPushSender`` unless one is given): every accepted ticket is kept in
    ``mobile_push_tickets`` for the receipts job; a DeviceNotRegistered ticket turns that
    phone's push off with the reason and a ``push_failed`` event, and keeps its token (K15),
@@ -115,7 +116,8 @@ class PushEvent:
     """What the dispatcher knows about one notification that may push (plain values only).
 
     ``notification_id`` is the in-app row's id; ``user_id`` (``users.id``) names the one person
-    the event is for, or None for everyone the push type reaches.
+    the event is for, or None for everyone the push type reaches. ``message_id`` is the posted
+    message the push opens the linked chat at (a daily brief's, PRD-268 US-G03), else None.
     """
 
     workspace_id: Any
@@ -126,6 +128,7 @@ class PushEvent:
     user_id: Optional[int] = None
     agent_name: Optional[str] = None
     severity: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +282,7 @@ def _message(device: MobileDevice, event: PushEvent, context: _Context, now: dat
         notification_id=event.notification_id,
         link_type=event.link_type,
         link_id=event.link_id,
+        message_id=event.message_id,
         grant=context.grant,
         ticket_number=context.ticket_number,
         redact=context.redact,

@@ -10,6 +10,9 @@ the same person twice for one event. :func:`announce`
 copies plain values and hands :func:`dispatch_auto_message` to ``send_soon``, which runs it on a
 session of its own: it finds the chat's owner in its workspace and raises ``auto_message`` for
 that person only (in-app by default; one of the three push types, FR-7), linked to the chat.
+The day's brief (the daily digest's post holding a ``brief@1`` part, PRD-268 K11) also names its
+message's id, which rides the push only, so the phone opens the thread at the brief (US-G03);
+every other notice names none.
 
 Scheduled tasks can post several lines, so one chat is told at most once every
 ``AUTO_MESSAGE_COALESCE_SECONDS``; the daily digest is never held back (its notice counts toward
@@ -32,6 +35,7 @@ from sqlalchemy.orm import InstanceState
 
 from core.models.core import Chat, Message
 from core.services.notification_columns import clamp
+from services.brief.model import PART_TYPE as BRIEF_PART
 from services.brief.model import VIA_OPEN
 from services.notification_events.soon import send_soon
 from services.push.payload import AUTO_MESSAGE_LINE
@@ -65,12 +69,16 @@ _TOLD_LATELY_SQL = text(
 
 @dataclass(frozen=True)
 class AutoMessage:
-    """What a notice needs from a saved message: plain values, read before the post's session moves on."""
+    """What a notice needs from a saved message: plain values, read before the post's session moves on.
+
+    ``message_id`` is the message's id when it is the day's brief (``_brief_id``), else None.
+    """
 
     workspace_id: str
     chat_id: str
     excerpt: str
     origin: str
+    message_id: Optional[str] = None
 
 
 def announce(message: Any, source: Optional[Mapping[str, Any]]) -> None:
@@ -98,6 +106,7 @@ def _notice_of(message: Any, source: Optional[Mapping[str, Any]]) -> Optional[Au
         chat_id=str(message.chat_id),
         excerpt=_excerpt(message.parts),
         origin=str(origin),
+        message_id=_brief_id(message, origin),
     )
 
 
@@ -107,6 +116,15 @@ def _saved(message: Any) -> bool:
         return False
     state = sa_inspect(message, raiseerr=False)
     return isinstance(state, InstanceState) and bool(state.has_identity)
+
+
+def _brief_id(message: Any, origin: Any) -> Optional[str]:
+    """The message's id when it is the day's brief: the daily digest's post holding a ``brief@1``
+    part (PRD-268 K11). None for any other post: a digest without a brief has nothing to open at."""
+    holds_brief = any(
+        isinstance(part, Mapping) and part.get("type") == BRIEF_PART for part in (message.parts or [])
+    )
+    return str(message.id) if origin == DAILY_DIGEST and holds_brief else None
 
 
 def _excerpt(parts: Any) -> str:
@@ -161,6 +179,7 @@ async def _tell_owner(db: Any, notice: AutoMessage) -> None:
         link_id=notice.chat_id,
         agent_name=AGENT_NAME,
         user_id=owner,
+        message_id=notice.message_id,
     )
 
 
