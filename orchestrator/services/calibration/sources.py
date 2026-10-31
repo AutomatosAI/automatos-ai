@@ -20,8 +20,8 @@ Four reads, each scoped to the caller's workspace, newest first (ties by id, so 
 
 No read selects a body, a summary, a description, a chunk, a file path or a file: the
 statements name each column they read, and none of those (``tests/test_prd268w3_calibration_build.py``
-spies on them). No document or Deliverable read (``DeliverableService.get_deliverable``, the
-documents' content routes) is called. Every title is the person's data: the prompt quotes it,
+spies on them). No call reads a Deliverable's or a document's contents (the Deliverable service's
+content read, the documents' content routes). Every title is the person's data: the prompt quotes it,
 never follows it (``services.calibration.prompt``).
 """
 from __future__ import annotations

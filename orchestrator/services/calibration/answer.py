@@ -7,7 +7,7 @@ title it was given may have been written to steer it:
   it cites at least one ref, every ref it cites is one it was given (provenance: a line citing a
   source it was not given is dropped whole, never trimmed to the refs that hold), and at least
   one of them is the person's work (a skill alone says what Auto can do, not what they work on).
-  A line carrying a percentage or a confidence number ("85%", "9/10", "nine out of ten",
+  A line carrying a percentage or a confidence number (a percent sign, "9/10", "nine out of ten",
   "confidence 0.8") is dropped (§12-Q26: those are numbers the model makes up, shown as if
   measured), and so is one carrying a link, a web address, an email address or a phone number
   (Auto's words on the card and in the chat point nowhere). The first ``MAX_LINES`` distinct
