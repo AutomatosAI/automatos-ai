@@ -194,6 +194,25 @@ def test_a_prune_with_nothing_old_deletes_nothing(db_session, ws, ninety_days):
 # --------------------------------------------------------------------------- only proactive_runs
 
 
+# ``agent_scheduled_tasks`` is made by migrations only (no model), so the CI database, which
+# ``create_all`` builds, lacks it: the test makes it as a temporary table in the shape prd77 +
+# calendar_scheduled_board_tasks + prd205_auto_speaks + prd268_w3_follow_ups leave (as
+# tests/test_prd268w3_follow_ups_kept_private.py does), rolled back with the rest. A temporary
+# table may not reference a permanent one, so no foreign keys.
+SCHEDULED_TASKS = """
+    CREATE TEMP TABLE agent_scheduled_tasks (
+        id SERIAL PRIMARY KEY, workspace_id UUID NOT NULL, created_by_agent_id INTEGER,
+        target_agent_id INTEGER, task_type VARCHAR(20) NOT NULL DEFAULT 'one_shot',
+        description TEXT NOT NULL, schedule VARCHAR(100) NOT NULL, max_runs INTEGER,
+        run_count INTEGER NOT NULL DEFAULT 0, status VARCHAR(20) NOT NULL DEFAULT 'active',
+        last_run_at TIMESTAMPTZ, next_run_at TIMESTAMPTZ, last_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by_user_id VARCHAR(255), deliver_as VARCHAR(20) NOT NULL DEFAULT 'chat', payload JSONB,
+        origin_chat_id UUID, for_user_id INTEGER,
+        CONSTRAINT ck_scheduled_task_deliver_as CHECK (deliver_as IN ('chat', 'board_task', 'follow_up')))
+"""
+
+
 def _user(db) -> int:
     name = f"prd268rr_{uuid4().hex[:10]}"
     return int(db.execute(text(
@@ -220,6 +239,7 @@ def _old_suggestion(db, ws: UUID, user: int, run_id: UUID) -> None:
 
 def _old_follow_up(db, ws: UUID, user: int) -> None:
     auto = _agent(db, ws)
+    db.execute(text(SCHEDULED_TASKS))
     db.execute(text(
         "INSERT INTO agent_scheduled_tasks (workspace_id, created_by_agent_id, target_agent_id, task_type, "
         "description, schedule, next_run_at, deliver_as, for_user_id, status, created_at) VALUES "
