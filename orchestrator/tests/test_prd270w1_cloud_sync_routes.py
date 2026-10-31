@@ -210,7 +210,7 @@ def test_a_good_sync_answers_its_counts_and_the_status(env):
     answer = env.client.post(SYNC)
     assert answer.status_code == 200
     body = answer.json()
-    assert set(body) == {"counts", "updatesApplied", "updatesFailed", "status"}
+    assert set(body) == {"counts", "items", "plugins", "updatesApplied", "updatesFailed", "status"}
     assert body["counts"] == {**EMPTY, "new": 2}
     assert (body["updatesApplied"], body["updatesFailed"]) == (0, 0)  # nothing installed: nothing to move
     status = body["status"]

@@ -38,7 +38,10 @@ class EntityManager:
             "created_at": row.created_at,
         }
 
-    def get_or_create_entity(self, workspace_id: UUID) -> Dict[str, Any]:
+    def get_or_create_entity(self, workspace_id: UUID, *, commit: bool = True) -> Dict[str, Any]:
+        """The workspace's Composio entity, created when it has none. A new one is committed, unless ``commit``
+        is False: then it is only flushed, for a caller inside a transaction of its own (an install, whose
+        savepoint a commit here would end), which commits it with the rest of its work."""
         existing = (
             self.db.query(ComposioEntity)
             .filter(ComposioEntity.workspace_id == workspace_id)
@@ -59,8 +62,11 @@ class EntityManager:
             composio_entity_id=str(workspace_id),
         )
         self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
+        if commit:
+            self.db.commit()
+            self.db.refresh(row)
+        else:
+            self.db.flush()
         return {
             "id": row.id,
             "workspace_id": row.workspace_id,

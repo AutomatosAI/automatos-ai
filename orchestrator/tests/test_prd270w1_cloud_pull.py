@@ -397,7 +397,7 @@ def test_a_key_the_revocation_feed_revoked_is_refused(cloud):
 
 def test_other_types_are_skipped_and_an_item_with_no_type_is_refused(cloud):
     arcade = _item(_pkg(cloud.theme("arcade")))
-    others = [{"type": "agent", "id": "agent-x", "name": "X"}, {"type": "plugin", "id": "plugin-y"}]
+    others = [{"type": "widget", "id": "widget-x", "name": "X"}, {"type": "voice", "id": "voice-y"}]
     outcome = _sync(cloud, _catalog(arcade, *others))
     assert outcome.ok and outcome.counts.skipped == 2
     assert outcome.counts.view() == {"new": 1, "updated": 0, "unchanged": 0, "refused": 0}

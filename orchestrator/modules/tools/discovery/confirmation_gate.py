@@ -16,6 +16,10 @@ bound and no question, and the click deleted the first agent whose name containe
 a name two agents carry, or none, refused before any grant); on every lane, a call that
 names its agent by name alone skips the grant consult (``names_the_agent_alone``) and its
 plain card binds the agent's id, so the click runs on that id.
+
+PRD-270 US-270-14g: the call this gate cleared then passes ``cloud_install_asks``, so Auto's
+install of an Automatos Cloud item runs only on its own card's yes, the card showing what the
+item will use, whatever the dial or the owner's turn.
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ import logging
 from typing import Any, Callable, Dict, NamedTuple, Optional
 
 from modules.tools.discovery.agent_binding import bound_to_the_agent, names_the_agent_alone
+from modules.tools.discovery.cloud_install_asks import cloud_install_asks
 from modules.tools.discovery.owner_only import human_driven, is_owner_only, platform_ask
 
 logger = logging.getLogger(__name__)
@@ -52,7 +57,8 @@ def asks_at_the_confirmation_gate(clear: Callable[..., Any]) -> Callable[..., An
             return cleared
         call = _Call(self.db, self.workspace_id, action_name, params, caller_context)
         try:
-            return _the_gate(call, cleared, card_subject) if _the_gate_asks(cleared) else cleared
+            passed = _the_gate(call, cleared, card_subject) if _the_gate_asks(cleared) else cleared
+            return cloud_install_asks(call, passed)  # PRD-270 US-270-14g: a Cloud item's install asks first
         except Exception:
             logger.exception("[PlatformExecutor] confirmation gate failed for %s — requiring confirmation",
                              action_name)

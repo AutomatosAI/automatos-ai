@@ -44,43 +44,12 @@ import { apiClient } from '@/lib/api-client'
 import { useSystemRole } from '@/contexts/role-context'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 import { GitHubImportModal } from './github-import-modal'
+import { CloudItemBadges } from './cloud/cloud-item-badges'
+import type { PluginCategory, PluginSummary } from './plugin-types'
 
 // ===================================================================
 // Types
 // ===================================================================
-
-interface PluginSummary {
-  id: string
-  slug: string
-  name: string
-  version: string
-  description: string | null
-  category_id: string | null
-  category_name: string | null
-  tags: string[]
-  skills_count: number
-  commands_count: number
-  agents_count: number
-  hooks_count: number
-  token_estimate: number
-  enable_count: number
-  is_featured: boolean
-  security_status: string | null
-  approval_status: string | null
-  original_author: string | null
-  license: string | null
-  created_at: string | null
-}
-
-interface PluginCategory {
-  id: string
-  slug: string
-  name: string
-  description: string | null
-  icon: string | null
-  sort_order: number
-  parent_id: string | null
-}
 
 interface MarketplacePluginsTabProps {
   searchQuery: string
@@ -679,6 +648,7 @@ function FeaturedPluginCard({
                 </StatusBadge>
               </div>
               <p className="text-xs text-muted-foreground">v{plugin.version}</p>
+              <CloudItemBadges kind="plugin" id={plugin.id} className="mt-1" />
             </div>
           </div>
           <DropdownMenu>
@@ -815,6 +785,7 @@ function PluginCard({
                     <> &middot; {plugin.original_author}</>
                   )}
                 </p>
+                <CloudItemBadges kind="plugin" id={plugin.id} className="mt-1" />
               </div>
             </div>
             {plugin.security_status === 'safe' && (

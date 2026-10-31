@@ -1,5 +1,5 @@
 {
-  "route_count": 1009,
+  "route_count": 1014,
   "routes": [
     {
       "method": "GET",
@@ -1719,7 +1719,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/catalog/bundles/{revision}"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/catalog/files/{digest}/{path:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/catalog/plugins/{slug}/{version}/package.zip"
     },
     {
       "method": "POST",
@@ -1727,7 +1735,19 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/cloud-sync/items"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/items/{kind}/{key}/disclosure"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/cloud-sync/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/cloud-sync/updates"
     },
     {
       "method": "GET",

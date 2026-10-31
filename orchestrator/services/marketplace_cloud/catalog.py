@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.database.read_release import release_if_read_only
 from core.models.themes import ThemePackage
+from services.marketplace_bundles.catalog_items import with_items
 from services.marketplace_cloud.urls import catalog_file_path, package_path
 from services.themes import signature_verify
 from services.themes.bounded_cache import BoundedCache
@@ -144,7 +145,7 @@ def catalog_snapshot(db: Session) -> CatalogSnapshot:
         held = _fresh_snapshot()
         if held is not None:
             return held
-        catalog = build_catalog(db)
+        catalog = with_items(build_catalog(db), db)
         snapshot = CatalogSnapshot(catalog, feed_bytes(catalog), feed_etag(catalog), time.monotonic())
         _snapshots.put(SNAPSHOT_KEY, snapshot)
         return snapshot
