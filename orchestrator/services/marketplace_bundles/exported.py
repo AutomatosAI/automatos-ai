@@ -104,13 +104,19 @@ def tags_of(value: Any) -> List[str]:
 def publisher_name(names: Mapping[int, str], user_id: Optional[int]) -> str:
     """W1's public display name of the row's original creator (publishers.py: never an email, else
     'Automatos'), cut to the format's length."""
-    name = publisher_of(names, user_id)[:PUBLISHER_NAME_MAX].rstrip()
-    return name or DEFAULT_PUBLISHER
+    return fitted_publisher(publisher_of(names, user_id))
+
+
+def fitted_publisher(name: str) -> str:
+    """A publisher's display name (W1's rule already applied) cut to the format's length; 'Automatos'
+    when nothing is left."""
+    return name[:PUBLISHER_NAME_MAX].rstrip() or DEFAULT_PUBLISHER
 
 
 def envelope(item_type: str, lineage: Lineage, publisher: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    """The bundle of the lineage's newest row (an agent's or a Playbook's columns), its type's
-    ``body`` under the type's name."""
+    """The bundle of the lineage's newest row, its type's ``body`` under the type's name. The row has an
+    agent's or a Playbook's display columns (version, name, description, marketplace_category,
+    marketplace_icon, tags); a plugin's and a package's export give theirs those names."""
     row = lineage.newest
     return {
         "bundle": BUNDLE_SCHEMA,
@@ -155,6 +161,6 @@ def items_by_row(items: Iterable[ExportedItem], item_type: str) -> Dict[Any, str
 
 
 __all__ = [
-    "MARKETPLACE_OWNER", "ExportedItem", "ItemEntry", "Lineage", "envelope", "exported_item", "icon_of",
-    "items_by_row", "newest_per_lineage", "publisher_name", "tags_of",
+    "MARKETPLACE_OWNER", "ExportedItem", "ItemEntry", "Lineage", "envelope", "exported_item", "fitted_publisher",
+    "icon_of", "items_by_row", "newest_per_lineage", "publisher_name", "tags_of",
 ]

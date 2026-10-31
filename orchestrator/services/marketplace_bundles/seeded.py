@@ -5,8 +5,12 @@
   while a community agent never has one (``api/marketplace.py`` ``submit_item`` sets none). A
   Playbook's step on a seeded agent names it by that slug, which a local install resolves to its own.
 * A Playbook is seeded when its template id is one of ``SOCIALS_PLAYBOOKS``' (seed_socials_package.py),
-  the only marketplace Playbooks a seeder writes. The seed module is read lazily, on the first export,
-  never when this module is imported: the bundle format stays importable on its own.
+  the only marketplace Playbooks a seeder writes.
+* A package is seeded when its slug is one of ``PACKAGES``' (seed_packages.py); a package has no submit
+  route, so every other package row is one an admin made on Automatos Cloud.
+
+The seed modules are read lazily, on the first export, never when this module is imported: the bundle
+format stays importable on its own.
 """
 from __future__ import annotations
 
@@ -27,4 +31,12 @@ def seeded_template_ids() -> FrozenSet[str]:
     return frozenset(spec["template_id"] for spec in SOCIALS_PLAYBOOKS)
 
 
-__all__ = ["is_seeded_agent", "seeded_template_ids"]
+@lru_cache(maxsize=1)
+def seeded_package_slugs() -> FrozenSet[str]:
+    """The slugs of the packages every local edition seeds (seed_packages.PACKAGES')."""
+    from core.seeds.seed_packages import PACKAGES
+
+    return frozenset(spec["slug"] for spec in PACKAGES)
+
+
+__all__ = ["is_seeded_agent", "seeded_package_slugs", "seeded_template_ids"]
