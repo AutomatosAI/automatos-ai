@@ -18,8 +18,10 @@ Each test's themes are under its own publisher and swept on teardown, with the o
 * a theme id a local-origin listing holds is left whole and counted refused; a private upload with the
   same digest is untouched; a version held with other files is refused, in the database or earlier in
   the same catalogue; a second Sync is unchanged and a newer version is updated; a row a unique index
-  refuses (written meanwhile) refuses only its item;
-* a database error mid-write, a refused catalogue, a keys file that won't load, an unexpected error and
+  refuses (written meanwhile) refuses only its item, and a second copy of it in the catalogue is refused
+  too, never unchanged (RVW-4);
+* a row a CHECK refuses (a bug in the row the Sync builds, never counted as written meanwhile), a database
+  error mid-write, a refused catalogue, a keys file that won't load, an unexpected error and
   every fetch failure (redirect, oversize declared or streamed, encoded, timeout, 404, unreachable) write
   nothing and record only the attempt and the error: the previous success stays;
 * off (no request, no status write) when ``AUTOMATOS_CLOUD_URL`` is empty and on SaaS; refused and
@@ -494,6 +496,39 @@ def test_a_row_written_meanwhile_refuses_only_its_item(cloud, monkeypatch):
     assert session.query(ThemeReviewEvent).filter(ThemeReviewEvent.package_id == ink.id).count() == 1
     session.close()
     assert _status_row(cloud).refused_count == 1
+
+
+def test_an_item_a_unique_index_refused_is_refused_again_when_the_catalogue_lists_it_twice(cloud, monkeypatch):
+    held = _row(_pkg(cloud.theme("arcade")), source="cloud")
+    _add(cloud, held)
+    before = _columns(_cloud_rows(cloud)[0])
+    empty = pull.Held(frozenset(), frozenset(), frozenset(), frozenset())
+    monkeypatch.setattr(pull, "held_state", lambda db, items: empty)  # as if another Sync wrote it after the read
+    rival = _item(_pkg(cloud.theme("arcade"), source=b"export default { rival: true }\n"))
+    outcome = _sync(cloud, _catalog(rival, rival))
+    assert outcome.ok and outcome.counts.view() == {"new": 0, "updated": 0, "unchanged": 0, "refused": 2}
+    rows = _cloud_rows(cloud)
+    assert len(rows) == 1 and _columns(rows[0]) == before
+    assert _status_row(cloud).refused_count == 2
+
+
+def test_a_row_a_check_refuses_fails_the_sync_and_writes_nothing(cloud, monkeypatch):
+    real, built = pull._cloud_row, []
+
+    def bogus_status(item):
+        row = real(item)  # a fresh row the Sync builds; its status breaks ck_theme_packages_status: a bug, not a race
+        if item.theme_id == cloud.theme("ink"):
+            row.status = "bogus"
+        built.append(row.id)
+        return row
+
+    monkeypatch.setattr(pull, "_cloud_row", bogus_status)
+    outcome = _sync(cloud, _catalog(_item(_pkg(cloud.theme("arcade"))), _item(_pkg(cloud.theme("ink")))))
+    _assert_failed_and_nothing_written(cloud, outcome, pull.NOT_SAVED)
+    assert len(built) == 2  # the first item's savepoint was written, and rolled back with the Sync
+    session = cloud.new()
+    assert session.query(ThemeReviewEvent).filter(ThemeReviewEvent.package_id.in_(built)).count() == 0
+    session.close()
 
 
 def test_an_unexpected_error_rolls_back_and_is_recorded(cloud, monkeypatch):
