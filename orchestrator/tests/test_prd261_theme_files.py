@@ -614,8 +614,9 @@ class _Objects:
         self.asked.append((Bucket, Key))
         if Key.endswith("/dist/entry.js"):
             return {"Body": SimpleNamespace(read=lambda: b"export {}")}
-        code = "NoSuchKey" if Key.endswith("/gone.js") else "InternalError"
-        raise _ClientError(code)
+        if Key.endswith("/gone.js"):
+            raise _ClientError("NoSuchKey")
+        raise _ClientError("NoSuchBucket" if Key.endswith("/no-bucket.js") else "InternalError")
 
 
 class _ClientError(Exception):
@@ -633,5 +634,17 @@ def test_read_stored_file_reads_the_marketplace_bucket_and_tells_missing_from_do
     assert serve.read_stored_file(prefix, "dist/gone.js") is None
     with pytest.raises(serve.ThemeStorageUnavailable):
         serve.read_stored_file(prefix, "dist/other.js")
+
+
+def test_read_stored_file_reads_a_bucket_not_made_yet_as_a_missing_file(monkeypatch):
+    """A fresh install has no Marketplace bucket until its first theme is stored: that is "missing", not "down".
+
+    Before, NoSuchBucket raised ThemeStorageUnavailable, so the first Cloud install on a fresh install
+    answered 503 at its "is it already stored?" read and never reached the download that makes the bucket.
+    """
+    objects = _Objects()
+    monkeypatch.setattr(serve, "get_s3_client", lambda: objects)
+    assert "NoSuchBucket" in serve.MISSING_OBJECT_CODES
+    assert serve.read_stored_file("themes/_workspace/ws/acme/ink/1.0.0/", "dist/no-bucket.js") is None
     with pytest.raises(serve.ThemeStorageUnavailable):
         serve.read_stored_file("skins/acme/", "dist/entry.js")
