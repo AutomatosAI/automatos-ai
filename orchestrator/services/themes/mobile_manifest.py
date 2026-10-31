@@ -20,7 +20,9 @@ block holds exactly one source of colours and, optionally, fonts and a mascot mo
   ``MISSING_FILE``);
 * ``mascot`` is one of ``MOBILE_MASCOT_MODES`` (absent means ``none``); ``clips`` and ``stills`` need
   the top-level ``mascot`` with its ``states``;
-* ``engines.automatos`` admits no host below ``MOBILE_MIN_HOST``: an older host refuses the field.
+* ``engines.automatos`` admits no host below ``MOBILE_MIN_HOST``: an older host refuses the field;
+* PRD-271 (host 1.2.0): ``layout`` and ``slots``, one of the phone's layouts and its contract's slots, are
+  ``mobile_layout.layout_errors``'s, and a block with ``layout`` admits no host below ``LAYOUT_MIN_HOST``.
 
 Each refusal is ``BAD_MOBILE`` naming the field, or ``UNKNOWN_FIELD`` for a key outside the block.
 The TypeScript twin is ``frontend/lib/theme-host/mobile-manifest.ts``; the shared corpus
@@ -33,14 +35,16 @@ import re
 from typing import Any, List, Mapping, Tuple
 
 from services.themes.contract import (
-    MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES, MOBILE_MIN_HOST, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, ThemeError,
-    echo, theme_error,
+    LAYOUT_MIN_HOST, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES, MOBILE_MIN_HOST, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES,
+    ThemeError, echo, theme_error,
 )
+from services.themes.layout_paint import LAYOUT_FIELD, LAYOUT_FIELDS
+from services.themes.mobile_layout import layout_errors
 from services.themes.mobile_tokens import parse_colour
 
 MOBILE_CODE = "BAD_MOBILE"
 MOBILE_FIELD = "mobile"
-MOBILE_FIELDS: Tuple[str, ...] = ("tokens", "fromLooks", "fonts", "mascot")
+MOBILE_FIELDS: Tuple[str, ...] = ("tokens", "fromLooks", "fonts", "mascot", *LAYOUT_FIELDS)
 MOBILE_SCHEMES: Tuple[str, ...] = ("light", "dark")
 MOBILE_REQUIRED_SCHEME = "light"
 MASCOT_NONE = "none"
@@ -49,7 +53,6 @@ FONT_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 MOBILE_FONT_PATTERN = re.compile(rf"assets/fonts/mobile/{FONT_NAME}\.(?:ttf|otf)")
 # An engines range (manifest.py RANGE_PATTERN): the lowest host it admits is its own version.
 HOST_RANGE_PATTERN = re.compile(r"\^?([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})")
-MIN_HOST_PARTS: Tuple[int, ...] = tuple(int(part) for part in MOBILE_MIN_HOST.split("."))
 
 
 def _bad(path: str, message: str) -> List[ThemeError]:
@@ -147,15 +150,17 @@ def _mascot_errors(block: Mapping[str, Any], mascot: Any) -> List[ThemeError]:
     return _bad("mobile.mascot", f'"mobile.mascot" "{mode}" needs the top-level "mascot" with its "states".')
 
 
-def _engines_errors(engines: Any) -> List[ThemeError]:
-    """The block is host 1.1.0's: a range that admits an older host is refused (BAD_ENGINES covers a malformed one)."""
+def _engines_errors(engines: Any, block: Mapping[str, Any]) -> List[ThemeError]:
+    """The block is host 1.1.0's, and 1.2.0's with ``layout``: a range that admits an older host is refused
+    (BAD_ENGINES covers a malformed one)."""
+    minimum, needs = (LAYOUT_MIN_HOST, '"mobile.layout"') if LAYOUT_FIELD in block else (MOBILE_MIN_HOST, '"mobile"')
     host = engines.get("automatos") if isinstance(engines, dict) else None
     match = HOST_RANGE_PATTERN.fullmatch(host) if isinstance(host, str) else None
-    if match is None or tuple(int(part) for part in match.groups()) >= MIN_HOST_PARTS:
+    if match is None or tuple(int(part) for part in match.groups()) >= tuple(int(part) for part in minimum.split(".")):
         return []
     return _bad("engines.automatos", (
-        f'A theme with "mobile" needs host {MOBILE_MIN_HOST} or later: "engines.automatos" must not admit an earlier one '
-        f'(use ^{MOBILE_MIN_HOST}).'
+        f'A theme with {needs} needs host {minimum} or later: "engines.automatos" must not admit an earlier one '
+        f'(use ^{minimum}).'
     ))
 
 
@@ -165,8 +170,8 @@ def mobile_errors(document: Mapping[str, Any]) -> List[ThemeError]:
     if not isinstance(block, dict):
         return _bad(MOBILE_FIELD, '"mobile" must be an object with "tokens" or "fromLooks".')
     return (
-        _unknown_errors(block) + _source_errors(block) + _font_errors(block)
-        + _mascot_errors(block, document.get("mascot")) + _engines_errors(document.get("engines"))
+        _unknown_errors(block) + _source_errors(block) + _font_errors(block) + _mascot_errors(block, document.get("mascot"))
+        + layout_errors(block) + _engines_errors(document.get("engines"), block)
     )
 
 

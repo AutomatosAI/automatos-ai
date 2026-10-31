@@ -25,12 +25,17 @@
  * the longest value equal css_value.py's and contract.py's. The firstPaint section's cases give
  * first_paint.py's verdicts and sentences through first-paint.ts, which asks the browser's own
  * sanitizePrepaint and lookSpecOf what a theme's table and looks keep.
+ *
+ * PRD-271 C02 (host 1.2.0): the manifests section carries the mobile block's `layout` and `slots` (mobile-layout.ts,
+ * mobile_layout.py), and a manifest case with `messages` pins the exact sentences both languages give. The contracts
+ * table the browser reads is byte for byte the host's, each contract's example is a block both accept, and
+ * LAYOUT_MIN_HOST equals contract.py's.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX } from '../boot-sanitize'
+import { BOOT_PRESET_MAX_BYTES, BOOT_PRESETS_MAX, CSS_VAR_NAME_PATTERN } from '../boot-sanitize'
 import { HTML_CLASS_PATTERN } from '../constants'
 import {
   BOOT_VALUE_FUNCTIONS, bootValueProblem, cssValueProblem, PREPAINT_ERROR_CODES, PREPAINT_VALUE_MAX, prepaintDropErrors,
@@ -38,9 +43,10 @@ import {
 } from '../css-value'
 import { FIRST_PAINT_ERROR_CODES, firstPaintErrors } from '../first-paint'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
+import { contractOf, homeLayouts, LAYOUT_PATTERN, layoutNames, LOOK_VARIABLE_PATTERN } from '../mobile-layout'
 import {
-  MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES, MOBILE_MIN_HOST,
-  MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES,
+  LAYOUT_MIN_HOST, MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES,
+  MOBILE_MIN_HOST, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, mobileErrors,
 } from '../mobile-manifest'
 import {
   HOST_OWNED_ROUTES, KNOWN_SLOTS, MANIFEST_ERROR_CODES, PAGE_SCOPE, PAGE_SOURCES, REQUIRED_SLOTS,
@@ -52,13 +58,21 @@ import sharedModules from '../shared-modules.json'
 const REPO_ROOT = path.resolve(__dirname, '../../../..')
 const THEMES_DIR = path.join(REPO_ROOT, 'orchestrator/services/themes')
 const CORPUS_PATH = path.join(REPO_ROOT, 'orchestrator/tests/fixtures/themes/cases.json')
+/** PRD-271 D-2: the host's contracts table, and the browser's copy of it. */
+const HOST_LAYOUTS_PATH = path.join(THEMES_DIR, 'data/phone-layouts.json')
+const BROWSER_LAYOUTS_PATH = path.join(__dirname, '../phone-layouts.json')
 // PB-3: the host contract's version W-E3 ships; a later bump edits this with contract.py and shared-modules.json.
-const CONTRACT_VERSION = '1.1.0'
+// PRD-271 C02: 1.2.0, for the mobile block's layout and slots.
+const CONTRACT_VERSION = '1.2.0'
 // Theme voice (C5): the SDK moved to 1.2.0 for its voice area; PRD-268 (K12) to 1.3.0 for its proactive area. The host
 // contract stayed at CONTRACT_VERSION.
 const SDK_CONTRACT_VERSION = '1.3.0'
 // PB-32: the mobile block joined host 1.1.0, so a theme with one admits no older host (a later bump keeps this).
 const MOBILE_BLOCK_HOST = '1.1.0'
+// PRD-271 C02: a block that names a layout admits no host below 1.2.0.
+const LAYOUT_BLOCK_HOST = '1.2.0'
+const LAYOUT_ENGINES = { automatos: '^1.2.0', sdk: '^1.0.0' }
+const SKIN = { tokens: { light: { '--background': '0 0% 100%', '--foreground': '#14181c' } } }
 // A-20 (QB-11): the <html> classes the host keeps, and the one it no longer reserves for any id.
 const HOST_HTML_CLASSES: readonly string[] = ['studio', 'classic', 'dark', 'light', 'system']
 const FREED_HTML_CLASS = 'play'
@@ -97,6 +111,7 @@ const PYTHON = {
   manifest: readFileSync(path.join(THEMES_DIR, 'manifest.py'), 'utf8'),
   lookSchema: readFileSync(path.join(THEMES_DIR, 'look_schema.py'), 'utf8'),
   cssValue: readFileSync(path.join(THEMES_DIR, 'css_value.py'), 'utf8'),
+  layoutContracts: readFileSync(path.join(THEMES_DIR, 'layout_contracts.py'), 'utf8'),
 }
 const OPENERS = '([{'
 const CLOSERS = ')]}'
@@ -178,6 +193,7 @@ describe('PRD-261 A-06b — the TypeScript validators give the corpus verdicts',
     const result = validateManifest(patched(CORPUS.manifests.base, testCase))
     expectVerdict(result.errors, testCase.code, MANIFEST_ERROR_CODES)
     expect(result.manifest === null).toBe(testCase.code !== null)
+    if (testCase.messages !== undefined) expect(result.errors.map((error) => error.message)).toEqual(testCase.messages)
   })
 
   it.each([...CORPUS.lookSchemas.cases])('look schema: $name', (testCase) => {
@@ -286,7 +302,7 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect(sharedModules.sdkVersion).toBe(SDK_VERSION)
   })
 
-  it('is at host 1.1.0 (the boot tone rule, PB-3) and SDK 1.3.0 (the proactive area, PRD-268 K12)', () => {
+  it('is at host 1.2.0 (the layout contracts, PRD-271 C02) and SDK 1.3.0 (the proactive area, PRD-268 K12)', () => {
     expect(THEME_HOST_VERSION).toBe(CONTRACT_VERSION)
     expect(SDK_VERSION).toBe(SDK_CONTRACT_VERSION)
   })
@@ -339,6 +355,28 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     expect([MOBILE_AA_TEXT, MOBILE_AA_UI]).toEqual([4.5, 3])
     expect(strings('MOBILE_MIN_HOST')).toEqual([MOBILE_MIN_HOST])
     expect(MOBILE_MIN_HOST).toBe(MOBILE_BLOCK_HOST)
+  })
+
+  it('has the same lowest host for a block with a layout (PRD-271 C02)', () => {
+    expect(strings('LAYOUT_MIN_HOST')).toEqual([LAYOUT_MIN_HOST])
+    expect(LAYOUT_MIN_HOST).toBe(LAYOUT_BLOCK_HOST)
+  })
+
+  it("reads the host's contracts table byte for byte, and names a variable as the first paint does (PRD-271 D-2)", () => {
+    expect(readFileSync(BROWSER_LAYOUTS_PATH)).toEqual(readFileSync(HOST_LAYOUTS_PATH))
+    expect(layoutNames()).toEqual(['play@1', 'hud@1', 'arcade@1', 'candy@1'])
+    expect(homeLayouts()).toEqual({
+      'automatos/play': 'play', 'automatos/hud': 'hud', 'automatos/arcade': 'arcade', 'automatos/candy': 'candy',
+    })
+    expect(LOOK_VARIABLE_PATTERN.source).toBe(CSS_VAR_NAME_PATTERN.source)
+    expect(strings('LAYOUT_PATTERN', PYTHON.layoutContracts)).toEqual([LAYOUT_PATTERN.source.replace(/^\^|\$$/g, '')])
+  })
+
+  it.each(['play@1', 'hud@1', 'arcade@1', 'candy@1'])("accepts %s's example as a theme's slots (PRD-271 C01)", (layout) => {
+    const contract = contractOf(layout)
+    expect(contract?.layout).toBe(layout)
+    const block = { ...SKIN, layout, slots: contract?.example }
+    expect(mobileErrors({ engines: LAYOUT_ENGINES, mobile: block })).toEqual([])
   })
 
   it('runs a mobile case of every verdict the block has (M-01)', () => {

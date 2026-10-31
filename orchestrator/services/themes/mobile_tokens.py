@@ -31,6 +31,10 @@ way the web's first paint paints it: ``frontend/lib/theme-host/boot-sanitize.ts`
   then every pair table's, a later one overwriting (:165-:166); a numeric rule's variable painted last
   with ``rgba()`` (:167), no phone colour, so not painted for the phone. Kept: the ``MOBILE_TOKEN_NAMES``
   whose final value ``is_studio_triplet``, as the table writes them (a ``#rrggbb`` is not painted).
+* :func:`paint_vars` (PRD-271 C03) walks the same table in the same order for the same look and keeps the named
+  variables whatever their form (``#rrggbb``, a triplet, ``rgba()``): a layout's slots from the look. A numeric
+  rule's variable is not one (the boot paints it with the look's number), and :func:`painted_look` is the look
+  both walks paint (the look when it fits, else the defaults), whose knobs a layout's number and choice slots read.
 * :func:`missing_tokens` names the ``MOBILE_REQUIRED_TOKENS`` a painting or scheme lacks: the one rule
   the reader (M-02), the review (M-03) and the answer (M-04) share.
 * :func:`look_tone`: theme.json's fixed ``light`` or ``dark`` wins (the boot's tone value is the
@@ -46,7 +50,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, NamedTuple, Optional, Tuple
 
 from services.themes.contract import (
     MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, TONE_RULE_KEY, TONE_RULE_TONES, is_finite_number, js_number,
@@ -323,17 +327,23 @@ def _painted(table: Any, look: Any) -> Tuple[Optional[BootTable], Mapping[str, A
     return kept, (look if look_fits(kept, look) else kept.defaults)
 
 
-def _phone_tokens(table: BootTable, look: Mapping[str, Any]) -> Dict[str, str]:
-    """boot.ts :165-:167 for a look that fits, mobile tokens only (module docstring)."""
+def _walk(table: BootTable, look: Mapping[str, Any]) -> Dict[str, str]:
+    """boot.ts :165-:166 for a look that fits: every knob table's entry, then every pair table's, a later one
+    overwriting; a numeric rule's variable left out (:167 paints it last, with the look's number)."""
     painted: Dict[str, str] = {}
     for knob, options in table.knobs.items():
         painted = {**painted, **options[look[knob]]}
     for pair in table.pairs:
         painted = {**painted, **pair.table[look[pair.a]][look[pair.b]]}
     glows = {rule.var for rule in table.numeric}
+    return {name: value for name, value in painted.items() if name not in glows}
+
+
+def _phone_tokens(table: BootTable, look: Mapping[str, Any]) -> Dict[str, str]:
+    """boot.ts :165-:167 for a look that fits, mobile tokens only (module docstring)."""
     return {
-        name: value for name, value in painted.items()
-        if name in MOBILE_TOKEN_NAMES and name not in glows and is_studio_triplet(value)
+        name: value for name, value in _walk(table, look).items()
+        if name in MOBILE_TOKEN_NAMES and is_studio_triplet(value)
     }
 
 
@@ -344,6 +354,22 @@ def paint_look(table: Any, look: Any) -> Dict[str, str]:
     """
     kept, painted_look = _painted(table, look)
     return {} if kept is None else _phone_tokens(kept, painted_look)
+
+
+def paint_vars(table: Any, look: Any, names: Iterable[str]) -> Dict[str, str]:
+    """The ``names`` the web paints for ``look`` through the prepaint ``table``, as written (module docstring).
+
+    ``look`` None (or any look that doesn't fit) paints the defaults; a table the web drops paints nothing.
+    """
+    kept, painted_look = _painted(table, look)
+    wanted = frozenset(names)
+    return {} if kept is None else {name: value for name, value in _walk(kept, painted_look).items() if name in wanted}
+
+
+def painted_look(table: Any, look: Any) -> Optional[Mapping[str, Any]]:
+    """The look the web paints through ``table``: ``look`` when it fits, else the defaults; None when it drops the table."""
+    kept, painted = _painted(table, look)
+    return None if kept is None else painted
 
 
 def missing_tokens(tokens: Any) -> List[str]:

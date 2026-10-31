@@ -13,7 +13,8 @@ import { parseHex, toHex } from '@/lib/look-kit/contrast'
 import { tripletToHex } from '@/lib/look-kit/hsl'
 import { STUDIO_STATUS_TOKEN_NAMES, lookToStudioTokens } from '@/lib/look-kit/studio-tokens'
 import type { LookCatalogue } from '@/lib/look-kit/types'
-import { MOBILE_CONTRAST_PAIRS, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, isMobileColour } from '../mobile-manifest'
+import { isMobileColour } from '../mobile-colour'
+import { MOBILE_CONTRAST_PAIRS, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES } from '../mobile-manifest'
 
 const ZINC: LookCatalogue = {
   prefix: 'zinc',

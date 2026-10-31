@@ -31,7 +31,8 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 # both sides (tests/test_prd261_theme_package.py, validator-parity.test.ts) hold them together.
 # Theme voice (C5): the SDK is 1.2.0 for its voice area; the host contract stays 1.1.0.
 # PRD-268 US-C21e (K12): the SDK is 1.3.0 for its proactive area and default components; the host contract stays 1.1.0.
-THEME_HOST_VERSION = "1.1.0"
+# PRD-271 C02: the host contract is 1.2.0 for the mobile block's layout and slots (LAYOUT_MIN_HOST).
+THEME_HOST_VERSION = "1.2.0"
 SDK_VERSION = "1.3.0"
 
 # PRD-261 M-01 (host 1.1.0, plan §2.2.11): theme.json's optional "mobile" block, the data a phone draws a
@@ -61,6 +62,10 @@ MOBILE_CONTRAST_PAIRS: Tuple[Tuple[str, str, str], ...] = (
 MOBILE_AA_TEXT = 4.5
 MOBILE_AA_UI = 3.0
 MOBILE_MIN_HOST = "1.1.0"
+# PRD-271 C02 (D-1): a mobile block may name one of the phone's layouts and fill its contract's slots
+# (services/themes/mobile_layout.py; the contracts are data/phone-layouts.json). A block with "layout" must not
+# admit a host below LAYOUT_MIN_HOST: an older host refuses the field as UNKNOWN_FIELD.
+LAYOUT_MIN_HOST = "1.2.0"
 
 MANIFEST_SCHEMA = "automatos-theme/v1"
 LOOK_SCHEMA_SCHEMA = "automatos-look-schema/v1"

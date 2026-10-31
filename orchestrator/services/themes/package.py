@@ -29,7 +29,10 @@ with a code, the path and a plain sentence:
   since the web reads them as ``hsl(var(--x))``), gives no ``--background`` or ``--foreground``
   (``MOBILE_CANNOT_PAINT``; defaults that don't fit the table are ``first_paint.py``'s
   ``PREPAINT_DEFAULTS_UNFIT``, whatever the block); a ``clips`` or ``stills``
-  mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``).
+  mascot missing a state's ``assets/mascot/<state>.mp4`` or ``.png`` (``MISSING_FILE``);
+* PRD-271 C02 (host 1.2.0): a ``layout`` slot taken from the look that the package's prepaint table can't
+  fill: no table, a variable it never writes, a knob its looks lack, or defaults that paint nothing of the
+  slot's kind (``mobile_layout.layout_package_errors``, ``MOBILE_CANNOT_PAINT`` naming the slot).
 
 The result carries every file with its checked type, the file manifest
 ``{path: {type, size, sha256}}`` and the package digest (``digest.py``). Nothing here touches
@@ -58,6 +61,7 @@ from services.themes.first_paint import (
 )
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
+from services.themes.mobile_layout import layout_package_errors
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
 from services.themes.mobile_tokens import boot_table, missing_tokens, paint_look
 
@@ -494,7 +498,8 @@ def _mobile_link_errors(manifest: Mapping[str, Any], files: Mapping[str, ThemeFi
     block = manifest.get(MOBILE_FIELD)
     if not isinstance(block, dict):
         return []
-    return _paint_errors(block, files) + _mascot_file_errors(manifest, block, files)
+    prepaint = files[PREPAINT_PATH].data if PREPAINT_PATH in files else None
+    return _paint_errors(block, files) + layout_package_errors(block, prepaint) + _mascot_file_errors(manifest, block, files)
 
 
 def _content_errors(files: Mapping[str, ThemeFile]) -> Tuple[Optional[Dict[str, Any]], List[ThemeError]]:

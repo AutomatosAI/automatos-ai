@@ -135,6 +135,8 @@ def test_every_manifest_case_gives_its_code(case):
     result = validate_manifest(_patched(CASES["manifests"]["base"], case))
     _assert_verdict(result.errors, case["code"])
     assert (result.manifest is None) == (case["code"] is not None)
+    if "messages" in case:  # PRD-271: the layout's sentences, the same in both languages
+        assert [error["message"] for error in result.errors] == case["messages"]
 
 
 @pytest.mark.parametrize("case", CASES["lookSchemas"]["cases"], ids=_ids(CASES["lookSchemas"]))
@@ -407,8 +409,10 @@ def test_an_encrypted_member_is_refused():
 
 def test_the_contract_pins_the_versions_and_the_reserved_names():
     # PB-3 (D7, QB-3): host 1.1.0 for the boot tone rule and looks presets. Theme voice (C5): SDK 1.2.0 for its
-    # voice area; PRD-268 (K12): SDK 1.3.0 for its proactive area. The host contract is unchanged.
-    assert contract.THEME_HOST_VERSION == "1.1.0"
+    # voice area; PRD-268 (K12): SDK 1.3.0 for its proactive area. PRD-271 C02: host 1.2.0 for the mobile block's
+    # layout and slots, which a theme may use only on a 1.2.0 host (LAYOUT_MIN_HOST).
+    assert contract.THEME_HOST_VERSION == "1.2.0"
+    assert (contract.MOBILE_MIN_HOST, contract.LAYOUT_MIN_HOST) == ("1.1.0", "1.2.0")
     assert contract.SDK_VERSION == "1.3.0"
     assert contract.RESERVED_PUBLISHERS == ("automatos",)
     assert contract.RESERVED_HTML_CLASSES == HOST_HTML_CLASSES

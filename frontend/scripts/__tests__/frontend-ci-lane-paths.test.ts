@@ -36,6 +36,7 @@ const OTHER_SERVER_FILES = [
   'orchestrator/reports/route-manifest.json', // scripts/check-route-contract.js, the api-client route tests
   'orchestrator/contracts/page-manifest.json', // lib/__tests__/page-manifest-contract.test.ts
   'orchestrator/tests/fixtures/themes/cases.json', // validator-parity.test.ts, contrast-parity.test.ts
+  'orchestrator/services/themes/data/phone-layouts.json', // validator-parity.test.ts (PRD-271: the browser's copy)
   'orchestrator/tests/fixtures/themes/look-storage.json', // lib/theme-host/looks/__tests__/hello-looks.ts
   'orchestrator/core/auth/step_up.py', // lib/theme-host/__tests__/api-hint.test.ts
   'orchestrator/core/cli_presets.py', // lib/__tests__/session-clis.test.ts
