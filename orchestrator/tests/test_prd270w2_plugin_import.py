@@ -3,448 +3,61 @@
 Automatos Cloud is an ``httpx.MockTransport`` answering by URL and recording every request (W1's client-factory
 seam, as ``test_prd270w2_items_feed.py``), the object store a fake S3 client monkeypatched into
 ``core.services.marketplace_s3`` (the ``test_prd261_theme_files.py:632`` pattern), and ``run_async`` is
-``asyncio.run``, recording each coroutine it runs. The LLM scan and ``PluginScanService.scan_plugin`` are
-patched to fail any test that reaches them. Proven:
+``asyncio.run``, recording each coroutine it runs (``tests/helpers_prd270w2_plugins.py``). The LLM scan and
+``PluginScanService.scan_plugin`` are patched to fail any test that reaches them. The zip rules, the local scan
+and the pass's seams without a database are ``tests/test_prd270w2_plugin_import_checks.py``'s. Proven here, on
+Postgres:
 
-* the zip rules are the upload's own (the constants pinned against ``plugin_upload_service.py``'s lines), and
-  ``package_files`` refuses 501 files, an unsafe path, a file or a total over its cap, a ratio over 100, a name
-  twice and a zip it can't read, with a reason that echoes nothing the package held; the local static scan
-  reads in chunks, keeps each finding's line in the file, and refuses a critical finding, a line over its cap
-  and too many findings;
-* on Postgres, a good plugin is stored under ``plugins/<slug>/<version>/``, approved and active, its scan row
-  holding Automatos Cloud's report and this install's static result, its mapping and its 'cloud-sync' history
-  written, its SKILL.md a global skill with package_slug the slug; only the derived URLs are requested, the
-  static scan, the store and the materialiser each ran through ``run_async``, and no transaction was open
-  during a fetch, a storage write or after the pass;
+* a good plugin is stored under ``plugins/<slug>/<version>/``, approved and active, its scan row holding
+  Automatos Cloud's report and this install's static result, its mapping and its 'cloud-sync' history written,
+  its SKILL.md a global skill with package_slug the slug; only the derived URLs are requested, the static scan,
+  the store and the materialiser each ran through ``run_async``, and no transaction was open during a fetch, a
+  storage write or after the pass;
 * a package over the cap, with 501 files, a '..' path, a ratio over 100, another manifest slug or version, or
   a critical static finding stores nothing and writes no row; so does a storage failure after a partial write,
   a database failure removes the files it stored, and files left under the prefix before refuse the import and
   are removed (the next Sync imports it); a writer that committed the same slug meanwhile keeps its files;
 * a slug a row without a mapping holds is refused before its package is fetched, and that row and its files
   stay as they were; a changed revision at the same plugin version is refused; the same revision is unchanged
-  and fetches nothing; the sixth plugin by name waits and is never fetched;
+  and fetches nothing; the sixth plugin by name waits and is never fetched; rows that change while a plugin is
+  checked refuse it before anything is stored;
 * a newer version moves the same row and keeps its enablements, its old files removed; a failed update keeps
-  the row and its files at the old version; an update keeps a local deactivation and makes no skill; a mapped
-  item whose bundle names another slug is refused;
-* the module never names the LLM scan or the upload flow.
+  the row and its files at the old version; an update whose row moved meanwhile is refused; an update keeps a
+  local deactivation and makes no skill; a mapped item whose bundle names another slug is refused; a
+  materialiser failure leaves the plugin committed and no transaction open.
 """
 from __future__ import annotations
 
-import ast
-import asyncio
-import hashlib
-import io
-import json
 import logging
-import random
 import uuid
-import warnings
 import zipfile
-from pathlib import Path
 
-import httpx
 import pytest
 import sqlalchemy as sa
 
 import core.models  # noqa: F401  (registers every table the foreign keys name)
 from config import config
-from core.services import marketplace_s3, plugin_security_scanner
-from services.marketplace_bundles import items_feed, plugin_import
-from services.marketplace_bundles.canonical import canonical_bytes
-from services.marketplace_bundles.catalog_items import entry_of
-from services.marketplace_bundles.catalog_paths import plugin_package_path
-from services.marketplace_bundles.exported import ExportedItem, ItemEntry
-from services.marketplace_bundles.plugin_import import PluginRefused
+from services.marketplace_bundles import plugin_import
 from services.marketplace_cloud.fetch import ACCEPT_PACKAGE, USER_AGENT
-
-ORCH = Path(__file__).resolve().parents[1]
-FIXTURES = ORCH / "tests" / "fixtures" / "marketplace_bundles"
-MODULE = ORCH / "services" / "marketplace_bundles" / "plugin_import.py"
-UPLOAD_SERVICE = ORCH / "core" / "services" / "plugin_upload_service.py"
-S3_SERVICE = ORCH / "core" / "services" / "marketplace_s3.py"
-CLOUD = "https://cloud.example.test"
-BUNDLES = CLOUD + "/api/marketplace/catalog/bundles/"
-MARK = "SECRET-MARK-7f3a"
-BINARY = bytes(range(256))
-APPEND_LINE = "    open(notes_path, 'a')"  # a medium static finding (file_write), never critical
-SENT_HEADERS = {"host", "accept", "accept-encoding", "user-agent", "connection"}
-
-
-# --------------------------------------------------------------------------- the plugin, its bundle and package
-
-
-def _external_id(slug):
-    return hashlib.sha256(slug.encode()).hexdigest()[:32]
-
-
-def _bundle(slug, version="1.0.0", name="Test Research Kit", **changes):
-    base = json.loads((FIXTURES / "plugin.json").read_text(encoding="utf-8"))
-    plugin = {**base["plugin"], "slug": slug}
-    return {**base, "externalId": _external_id(slug), "version": version, "name": name, "plugin": plugin, **changes}
-
-
-def _skill_md(skill, body="Summarise the sources."):
-    return f"---\nname: {skill}\ndescription: A test skill.\n---\n\n# Summarise\n\n{body}\n".encode()
-
-
-def _files(slug, version, skill=None, manifest=None, extra=None, body="Summarise the sources."):
-    """A plugin's files: its manifest (``manifest`` overriding its keys), a SKILL.md (its skill named after the
-    slug unless ``skill`` names it), a command with a medium static finding and a binary file."""
-    named = {"slug": slug, "name": "Test Research Kit", "version": version, **(manifest or {})}
-    skill = skill or f"{slug}-skill"
-    return {
-        "manifest.json": json.dumps(named).encode(),
-        f"skills/{skill}/SKILL.md": _skill_md(skill, body),
-        "commands/save-notes.md": f"Save the notes:\n\n{APPEND_LINE}\n".encode(),
-        "assets/logo.png": BINARY,
-        **(extra or {}),
-    }
-
-
-def _zip(files, compression=zipfile.ZIP_DEFLATED, folders=()):
-    buffer = io.BytesIO()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)  # zipfile warns on a name written twice
-        with zipfile.ZipFile(buffer, "w", compression=compression) as archive:
-            for folder in folders:
-                archive.writestr(folder, b"")
-            for path, data in (files.items() if isinstance(files, dict) else files):
-                archive.writestr(path, data)
-    return buffer.getvalue()
-
-
-def _incompressible(size, seed=0):
-    return random.Random(seed).randbytes(size)
-
-
-def _package_url(slug, version):
-    return CLOUD + plugin_package_path(slug, version)
-
-
-class Cloud:
-    """Automatos Cloud as a mock transport: a responder per URL (404 for any other), each request recorded."""
-
-    def __init__(self):
-        self.requests = []
-        self.answers = {}
-        self.on_request = None  # called on every request (the open-transaction check)
-
-    def answer(self, url, body):
-        self.answers[url] = body
-
-    def serve(self, bundle, package):
-        """``bundle`` at its derived URL and ``package`` at its plugin's; the parsed catalogue entry."""
-        data = canonical_bytes(bundle)
-        revision = hashlib.sha256(data).hexdigest()
-        self.answer(BUNDLES + revision, data)
-        self.answer(_package_url(bundle["plugin"]["slug"], bundle["version"]), package)
-        item = ExportedItem(ItemEntry("plugin", bundle["externalId"], bundle["version"], frozenset()), bundle, revision)
-        return items_feed.parse_item_entry(entry_of(item))
-
-    def handler(self, request):
-        self.requests.append(request)
-        if self.on_request is not None:
-            self.on_request()
-        body = self.answers.get(str(request.url))
-        return httpx.Response(404) if body is None else httpx.Response(200, content=body)
-
-    def factory(self):
-        return httpx.Client(transport=httpx.MockTransport(self.handler), follow_redirects=True)
-
-    def urls(self):
-        return [str(request.url) for request in self.requests]
-
-
-class _Body:
-    def __init__(self, data):
-        self.data = data
-
-    def read(self, amt=None):
-        return self.data if amt is None else self.data[:amt]
-
-
-class Bucket:
-    """The four S3 calls MarketplaceS3Service makes, on a dict of (bucket, key) -> bytes."""
-
-    def __init__(self):
-        self.objects = {}
-        self.puts = 0
-        self.fail_put_at = None  # the put (1-based) that raises
-        self.on_write = None  # called on every put and delete (the open-transaction check)
-
-    def put_object(self, Bucket, Key, Body, **_):  # noqa: N803 — boto3's argument names
-        if self.on_write is not None:
-            self.on_write()
-        self.puts += 1
-        if self.fail_put_at is not None and self.puts >= self.fail_put_at:
-            raise OSError("storage went away")
-        self.objects[(Bucket, Key)] = bytes(Body)
-
-    def list_objects_v2(self, Bucket, Prefix, **_):  # noqa: N803
-        keys = sorted(key for bucket, key in self.objects if bucket == Bucket and key.startswith(Prefix))
-        return {"Contents": [{"Key": key} for key in keys], "IsTruncated": False}
-
-    def get_object(self, Bucket, Key):  # noqa: N803
-        return {"Body": _Body(self.objects[(Bucket, Key)])}
-
-    def delete_objects(self, Bucket, Delete):  # noqa: N803
-        if self.on_write is not None:
-            self.on_write()
-        for item in Delete["Objects"]:
-            self.objects.pop((Bucket, item["Key"]), None)
-        return {"Deleted": Delete["Objects"]}
-
-    def keys(self, prefix=""):
-        return sorted(key for _, key in self.objects if key.startswith(prefix))
-
-
-class Runner:
-    """``run_async``: ``asyncio.run``, recording the name of every coroutine it runs."""
-
-    def __init__(self):
-        self.ran = []
-
-    def __call__(self, coroutine):
-        self.ran.append(coroutine.__name__)
-        return asyncio.run(coroutine)
-
-    def kinds(self):
-        """The coroutines it ran, each name once, in the order first run."""
-        return list(dict.fromkeys(self.ran))
-
-
-def _no_model(*_args, **_kwargs):
-    raise AssertionError("a Sync never calls a model")
+from tests.helpers_prd270w2_plugins import (
+    BUNDLES, CLOUD, SENT_HEADERS, Runner, bundle_of, cloud_settings, external_id, fake_bucket, files_of,
+    incompressible, package_url, refuse_models, skill_md, zip_of,
+)
 
 
 @pytest.fixture(autouse=True)
 def no_model(monkeypatch):
-    monkeypatch.setattr(plugin_security_scanner, "llm_security_scan", _no_model)
-    monkeypatch.setattr(plugin_security_scanner.PluginScanService, "scan_plugin", _no_model)
+    refuse_models(monkeypatch)
 
 
 @pytest.fixture
 def cloud(monkeypatch):
-    monkeypatch.setattr(config, "AUTH_EDITION", "local")
-    monkeypatch.setattr(config, "AUTOMATOS_CLOUD_URL", CLOUD)
-    monkeypatch.setattr(config, "AUTOMATOS_CLOUD_BUNDLE_MAX_KB", 256)
-    monkeypatch.setattr(config, "AUTOMATOS_CLOUD_TIMEOUT_SECONDS", 15)
-    monkeypatch.setattr(config, "AUTOMATOS_CLOUD_PLUGINS_PER_SYNC", 5)
-    monkeypatch.setattr(config, "PLUGIN_MAX_UPLOAD_SIZE_MB", 10)
-    return Cloud()
+    return cloud_settings(monkeypatch)
 
 
 @pytest.fixture
 def bucket(monkeypatch):
-    fake = Bucket()
-    monkeypatch.setattr(marketplace_s3, "get_s3_client", lambda *_args, **_kwargs: fake)
-    monkeypatch.setattr(marketplace_s3, "ensure_bucket", lambda *_args, **_kwargs: True)
-    return fake
-
-
-# --------------------------------------------------------------------------- the zip rules (no database)
-
-
-def test_the_zip_rules_are_the_upload_s_own():
-    upload = {line.strip() for line in UPLOAD_SERVICE.read_text(encoding="utf-8").splitlines()}
-    pinned = {
-        "MAX_FILE_COUNT = 500": plugin_import.MAX_FILE_COUNT == 500,
-        "MAX_FILE_UNCOMPRESSED_SIZE = 10 * 1024 * 1024  # 10 MB per file":
-            plugin_import.MAX_FILE_UNCOMPRESSED_SIZE == 10 * 1024 * 1024,
-        "MAX_TOTAL_UNCOMPRESSED_SIZE = 50 * 1024 * 1024  # 50 MB total":
-            plugin_import.MAX_TOTAL_UNCOMPRESSED_SIZE == 50 * 1024 * 1024,
-        "MAX_COMPRESSION_RATIO = 100  # reject suspiciously high ratios (zip bomb)":
-            plugin_import.MAX_COMPRESSION_RATIO == 100,
-    }
-    for line, same in pinned.items():
-        assert line in upload and same, line
-    extract = S3_SERVICE.read_text(encoding="utf-8")
-    assert 'if member_path.is_absolute() or ".." in member_path.parts:' in extract
-
-
-def test_package_files_reads_a_good_package_and_leaves_folders_out():
-    files = _files("test-kit", "1.0.0", "test-skill")
-    assert plugin_import.package_files(_zip(files, folders=("skills/", "assets/"))) == files
-
-
-def _many_files():
-    return {**_files("test-kit", "1.0.0"), **{f"notes/n{index}.md": b"x" for index in range(497)}}
-
-
-def _twice():
-    return [("manifest.json", b"{}"), ("a.md", b"one"), ("a.md", b"two")]
-
-
-def _bad_crc():
-    data = bytearray(_zip({"a.md": b"plain text that is stored"}, compression=zipfile.ZIP_STORED))
-    at = data.index(b"plain text")
-    data[at] ^= 0x01
-    return bytes(data)
-
-
-@pytest.mark.parametrize(("package", "reason"), [
-    (lambda: _zip(_many_files()), plugin_import.TOO_MANY_FILES.format(count=500)),
-    (lambda: _zip({f"../{MARK}.md": b"x"}), plugin_import.UNSAFE_PATH),
-    (lambda: _zip({f"/{MARK}.md": b"x"}), plugin_import.UNSAFE_PATH),
-    (lambda: _zip({f"skills\\{MARK}.md": b"x"}), plugin_import.UNSAFE_PATH),
-    (lambda: _zip({f"./{MARK}.md": b"x"}), plugin_import.UNSAFE_PATH),
-    (lambda: _zip({".": b"x"}), plugin_import.UNSAFE_PATH),
-    (lambda: _zip({f"{MARK}.bin": _incompressible(10 * 1024 * 1024 + 1)}, compression=zipfile.ZIP_STORED),
-     plugin_import.FILE_TOO_LARGE.format(mb=10)),
-    (lambda: _zip({f"{MARK}.txt": b"\0" * (1024 * 1024)}), plugin_import.RATIO_TOO_HIGH.format(ratio=100)),
-    (lambda: _zip({"a.bin": _incompressible(6 * 1024 * 1024), "b.bin": _incompressible(5 * 1024 * 1024, 1)},
-                  compression=zipfile.ZIP_STORED), plugin_import.FILES_TOO_LARGE.format(mb=10)),
-    (lambda: _zip(_twice()), plugin_import.NAMED_TWICE),
-    (lambda: f"not a zip {MARK}".encode(), plugin_import.NOT_A_ZIP),
-    (_bad_crc, plugin_import.NOT_A_ZIP),
-])
-def test_package_files_refuses_what_the_upload_refuses_echoing_nothing(cloud, package, reason):
-    with pytest.raises(PluginRefused) as refused:
-        plugin_import.package_files(package())
-    assert str(refused.value) == reason
-    assert MARK not in str(refused.value)
-
-
-def test_the_total_cap_is_the_smaller_of_the_upload_s_and_the_s3_cap(cloud, monkeypatch):
-    monkeypatch.setattr(config, "PLUGIN_MAX_UPLOAD_SIZE_MB", 1)
-    package = _zip({"a.bin": _incompressible(700 * 1024), "b.bin": _incompressible(400 * 1024, 1)},
-                   compression=zipfile.ZIP_STORED)
-    with pytest.raises(PluginRefused, match="larger than 1 MB in all"):
-        plugin_import.package_files(package)
-
-
-def test_the_local_scan_reads_in_chunks_and_keeps_each_finding_s_line():
-    lines = ["Plain text."] * 450
-    lines[419] = APPEND_LINE  # line 420: past two chunks of SCAN_CHUNK_LINES
-    runner = Runner()
-    result = plugin_import.local_scan({"commands/notes.md": "\n".join(lines), "README.md": "Plain."}, runner)
-    assert (result.status, [(f.file, f.line, f.severity) for f in result.findings]) == (
-        "flagged", [("commands/notes.md", 420, "medium")],
-    )
-    assert runner.ran == ["static_scan"] * 4  # README.md, then notes.md in three chunks
-    assert plugin_import.local_scan({"a.md": "Plain."}, Runner()).status == "passed"
-
-
-@pytest.mark.parametrize(("texts", "reason"), [
-    ({"a.md": "x" * 8193}, plugin_import.LINE_TOO_LONG.format(count=8192)),
-    ({"a.md": "    os.makedirs(here)\n" * 201}, plugin_import.TOO_MANY_FINDINGS.format(count=200)),
-    # Plain text the scan reads, never run: `eval(` is one of its critical patterns.
-    ({"a.md": "Plain.\n" * 300 + "    eval(text)\n"}, plugin_import.CRITICAL_FINDING),
-])
-def test_the_local_scan_refuses_a_long_line_too_many_findings_and_a_critical_one(texts, reason):
-    with pytest.raises(PluginRefused) as refused:
-        plugin_import.local_scan(texts, Runner())
-    assert str(refused.value) == reason
-
-
-def test_the_first_plugins_by_name_are_chosen_and_the_rest_wait():
-    names = ["Test Plugin F", "test plugin b", "Test Plugin A", "Test Plugin E", "Test Plugin C", "Test Plugin D"]
-    entries = [items_feed.CatalogEntry("plugin", f"{index:032x}", "1.0.0", "a" * 64, name)
-               for index, name in enumerate(names)]
-    chosen, waiting = plugin_import.chosen_entries(entries, 5)
-    assert [entry.name for entry in chosen] == [
-        "Test Plugin A", "test plugin b", "Test Plugin C", "Test Plugin D", "Test Plugin E",
-    ]
-    assert [entry.name for entry in waiting] == ["Test Plugin F"]
-    assert plugin_import.chosen_entries(entries, 0) == ((), tuple(sorted(entries, key=lambda e: e.name.casefold())))
-
-
-class _NoRows:
-    """A session for the passes that read no row: ``changed_entries`` is patched, and rollback does nothing."""
-
-    def rollback(self):
-        return None
-
-
-def test_other_types_are_left_to_the_item_pass_and_nothing_is_fetched(cloud, bucket):
-    agent = items_feed.CatalogEntry("agent", "0" * 32, "1.0.0", "a" * 64, "Test Agent")
-    imported = plugin_import.import_plugins(_NoRows(), [agent], cloud.factory, Runner())
-    assert imported.counts.view() == {"new": 0, "updated": 0, "unchanged": 0, "refused": 0}
-    assert imported.waiting == 0 and cloud.requests == [] and bucket.puts == 0
-
-
-def test_a_setting_that_isnt_an_origin_refuses_every_chosen_plugin_before_any_request(cloud, bucket, monkeypatch):
-    monkeypatch.setattr(plugin_import, "changed_entries", lambda _db, entries: tuple(entries))
-    monkeypatch.setattr(config, "AUTOMATOS_CLOUD_URL", "")
-    entry = cloud.serve(_bundle("test-kit"), _zip(_files("test-kit", "1.0.0")))
-    imported = plugin_import.import_plugins(_NoRows(), [entry], cloud.factory, Runner())
-    assert imported.counts.refused == 1 and cloud.requests == [] and bucket.puts == 0
-
-
-class _Rows:
-    """A session stand-in: its one query answers ``found`` (or fails), and it counts its rollbacks."""
-
-    def __init__(self, found=None, fails=False):
-        self.found, self.fails, self.rollbacks = found, fails, 0
-
-    def query(self, *_columns):
-        if self.fails:
-            raise sa.exc.OperationalError("SELECT", {}, Exception("the database went away"))
-        return self
-
-    def filter(self, *_criteria):
-        return self
-
-    def first(self):
-        return self.found
-
-    def rollback(self):
-        self.rollbacks += 1
-
-
-class _Store:
-    """The storage seam's delete, recorded."""
-
-    def __init__(self):
-        self.deleted = []
-
-    async def delete_plugin(self, slug, version):
-        self.deleted.append((slug, version))
-        return 0
-
-
-def _seams(store=None):
-    return plugin_import.Seams(CLOUD, None, Runner(), store or _Store())
-
-
-def test_a_failed_read_of_the_rows_refuses_the_plugin_and_ends_the_read():
-    entry = items_feed.CatalogEntry("plugin", "0" * 32, "1.0.0", "a" * 64, "Test Kit")
-    rows = _Rows(fails=True)
-    with pytest.raises(PluginRefused) as refused:
-        plugin_import.held_target(rows, entry, "test-kit", "1.0.0")
-    assert str(refused.value) == plugin_import.NOT_READ and rows.rollbacks == 1
-
-
-def test_anything_unforeseen_in_the_checks_refuses_that_plugin_only(monkeypatch):
-    def broken(_db, _fetched, _seams):
-        raise RuntimeError("the scanner broke")
-
-    monkeypatch.setattr(plugin_import, "checked_plugin", broken)
-    entry = items_feed.CatalogEntry("plugin", "0" * 32, "1.0.0", "a" * 64, "Test Kit")
-    rows = _Rows()
-    verdict = plugin_import.import_plugin(rows, items_feed.FetchedBundle(entry, _bundle("test-kit")), _seams())
-    assert verdict == "refused" and rows.rollbacks == 1
-
-
-def test_files_a_row_names_or_may_name_are_kept_and_others_removed():
-    store = _Store()
-    plugin_import._discard(_Rows(found=("a-row",)), _seams(store), "test-kit", "1.0.0")
-    plugin_import._discard(_Rows(fails=True), _seams(store), "test-kit", "1.0.0")  # unsure: kept
-    assert store.deleted == []
-    plugin_import._discard(_Rows(found=None), _seams(store), "test-kit", "1.0.0")
-    assert store.deleted == [("test-kit", "1.0.0")]
-
-
-def test_plugin_import_never_names_the_llm_scan_or_the_upload_flow():
-    tree = ast.parse(MODULE.read_text(encoding="utf-8"))
-    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-    names |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) for alias in node.names}
-    banned = {"llm_security_scan", "PluginScanService", "scan_plugin", "PluginUploadService", "upload_plugin"}
-    assert not (names | imported) & banned
-    upload_imports = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
-                      and node.module == "core.services.plugin_upload_service" for alias in node.names}
-    assert upload_imports == {"_auto_categorise"}
+    return fake_bucket(monkeypatch)
 
 
 # --------------------------------------------------------------------------- the import (Postgres)
@@ -516,7 +129,7 @@ def _rows(new_session, slug):
     }
     found["marketplace_cloud_items"] = session.execute(sa.text(
         "SELECT count(*) FROM marketplace_cloud_items WHERE item_type = 'plugin' AND external_id = :id"
-    ), {"id": _external_id(slug)}).scalar()
+    ), {"id": external_id(slug)}).scalar()
     session.rollback()
     return found
 
@@ -544,14 +157,14 @@ def _scalar(new_session, statement, **params):
 
 def test_a_good_plugin_is_stored_approved_and_its_skill_becomes_a_global_skill(cloud, bucket, made, new_session):
     slug, skill = made.slug(), f"t270pi-skill-{uuid.uuid4().hex[:8]}"
-    bundle = _bundle(slug)
-    entry = cloud.serve(bundle, _zip(_files(slug, "1.0.0", skill)))
+    bundle = bundle_of(slug)
+    entry = cloud.serve(bundle, zip_of(files_of(slug, "1.0.0", skill)))
     runner, session, open_during_fetch, open_during_store = Runner(), new_session(), [], []
     cloud.on_request = lambda: open_during_fetch.append(session.in_transaction())
     bucket.on_write = lambda: open_during_store.append(session.in_transaction())
     imported = plugin_import.import_plugins(session, [entry], cloud.factory, runner)
     assert imported.counts.view() == {"new": 1, "updated": 0, "unchanged": 0, "refused": 0} and imported.waiting == 0
-    assert cloud.urls() == [BUNDLES + entry.revision, _package_url(slug, "1.0.0")]
+    assert cloud.urls() == [BUNDLES + entry.revision, package_url(slug, "1.0.0")]
     # No transaction is held across a network read or a storage write, nor left open after the pass.
     assert open_during_fetch == [False, False]
     assert open_during_store and not any(open_during_store) and not session.in_transaction()
@@ -560,7 +173,7 @@ def test_a_good_plugin_is_stored_approved_and_its_skill_becomes_a_global_skill(c
     assert package_request.headers["accept"] == ACCEPT_PACKAGE and package_request.headers["user-agent"] == USER_AGENT
     assert runner.kinds() == ["static_scan", "extract_plugin", "list_plugin_files", "materialize_plugin"]
     prefix = f"plugins/{slug}/1.0.0/"
-    assert bucket.keys(prefix) == sorted(prefix + path for path in _files(slug, "1.0.0", skill))
+    assert bucket.keys(prefix) == sorted(prefix + path for path in files_of(slug, "1.0.0", skill))
     row = _plugin(new_session, slug)
     assert (row["approval_status"], row["approved_by"], row["is_active"]) == ("approved", "automatos-cloud", True)
     assert row["approved_at"] is not None and row["security_status"] == "safe"
@@ -589,27 +202,27 @@ def test_a_good_plugin_is_stored_approved_and_its_skill_becomes_a_global_skill(c
 
 
 def _over_the_cap(slug):
-    return _zip({**_files(slug, "1.0.0"), "big.bin": _incompressible(1100 * 1024)}, compression=zipfile.ZIP_STORED)
+    return zip_of({**files_of(slug, "1.0.0"), "big.bin": incompressible(1100 * 1024)}, compression=zipfile.ZIP_STORED)
 
 
 def _critical(slug):
     # Plain text the static scan reads, never run: `eval(` is one of its critical patterns.
-    return _zip(_files(slug, "1.0.0", extra={"commands/run.md": b"Then run:\n\n    eval(user_text)\n"}))
+    return zip_of(files_of(slug, "1.0.0", extra={"commands/run.md": b"Then run:\n\n    eval(user_text)\n"}))
 
 
 @pytest.mark.parametrize(("package", "reason"), [
     pytest.param(_over_the_cap, "Its package couldn't be fetched: Automatos Cloud's answer is larger than 1024 KB.",
                  id="over-the-cap"),
-    pytest.param(lambda slug: _zip({**_files(slug, "1.0.0"), **{f"n/{i}.md": b"x" for i in range(497)}}),
+    pytest.param(lambda slug: zip_of({**files_of(slug, "1.0.0"), **{f"n/{i}.md": b"x" for i in range(497)}}),
                  plugin_import.TOO_MANY_FILES.format(count=500), id="501-files"),
-    pytest.param(lambda slug: _zip(_files(slug, "1.0.0", extra={"../escape.md": b"x"})), plugin_import.UNSAFE_PATH,
+    pytest.param(lambda slug: zip_of(files_of(slug, "1.0.0", extra={"../escape.md": b"x"})), plugin_import.UNSAFE_PATH,
                  id="dotdot-path"),
-    pytest.param(lambda slug: _zip(_files(slug, "1.0.0", extra={"zeros.txt": b"\0" * (1024 * 1024)})),
+    pytest.param(lambda slug: zip_of(files_of(slug, "1.0.0", extra={"zeros.txt": b"\0" * (1024 * 1024)})),
                  plugin_import.RATIO_TOO_HIGH.format(ratio=100), id="ratio-over-100"),
-    pytest.param(lambda slug: _zip(_files(slug, "1.0.0", manifest={"slug": "another-plugin"})),
+    pytest.param(lambda slug: zip_of(files_of(slug, "1.0.0", manifest={"slug": "another-plugin"})),
                  "Its package isn't the bundle's plugin: its manifest.json names another slug or version",
                  id="another-manifest-slug"),
-    pytest.param(lambda slug: _zip(_files(slug, "1.0.0", manifest={"version": "1.0.1"})),
+    pytest.param(lambda slug: zip_of(files_of(slug, "1.0.0", manifest={"version": "1.0.1"})),
                  "Its package isn't the bundle's plugin: its manifest.json names another slug or version",
                  id="another-manifest-version"),
     pytest.param(_critical, plugin_import.CRITICAL_FINDING, id="critical-static-finding"),
@@ -620,9 +233,9 @@ def test_a_package_that_fails_a_check_stores_nothing_and_writes_no_row(
     monkeypatch.setattr(config, "PLUGIN_MAX_UPLOAD_SIZE_MB", 1)
     slug = made.slug()
     with caplog.at_level(logging.WARNING, logger=plugin_import.__name__):
-        imported = _import(new_session, cloud, cloud.serve(_bundle(slug), package(slug)))
+        imported = _import(new_session, cloud, cloud.serve(bundle_of(slug), package(slug)))
     assert imported.counts.view() == {"new": 0, "updated": 0, "unchanged": 0, "refused": 1}
-    assert f"plugin {_external_id(slug)} refused: {reason}" in caplog.text
+    assert f"plugin {external_id(slug)} refused: {reason}" in caplog.text
     assert bucket.puts == 0 and bucket.keys() == []
     assert _rows(new_session, slug) == NO_ROWS
 
@@ -630,7 +243,7 @@ def test_a_package_that_fails_a_check_stores_nothing_and_writes_no_row(
 def test_a_storage_failure_after_a_partial_write_leaves_no_object_and_no_row(cloud, bucket, made, new_session):
     slug = made.slug()
     bucket.fail_put_at = 2
-    imported = _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0"))))
+    imported = _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0"))))
     assert imported.counts.refused == 1 and imported.counts.new == 0
     assert bucket.puts >= 2 and bucket.keys() == []
     assert _rows(new_session, slug) == NO_ROWS
@@ -640,7 +253,7 @@ def test_a_database_failure_removes_the_stored_files_and_writes_no_row(cloud, bu
     slug = made.slug()
     real = plugin_import.scan_row
     monkeypatch.setattr(plugin_import, "scan_row", lambda checked: _without_version(real(checked)))
-    imported = _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0"))))
+    imported = _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0"))))
     assert imported.counts.refused == 1
     assert bucket.puts > 0 and bucket.keys() == []
     assert _rows(new_session, slug) == NO_ROWS
@@ -663,7 +276,7 @@ def test_a_slug_held_by_a_row_without_a_mapping_is_refused_and_that_row_and_its_
     session.commit()
     bucket.objects[(config.MARKETPLACE_S3_BUCKET, f"plugins/{slug}/0.9.0/manifest.json")] = b"{}"
     before = dict(_scalar_row(new_session, slug))
-    entry = cloud.serve(_bundle(slug, version="0.9.0"), _zip(_files(slug, "0.9.0")))
+    entry = cloud.serve(bundle_of(slug, version="0.9.0"), zip_of(files_of(slug, "0.9.0")))
     imported = _import(new_session, cloud, entry)
     assert imported.counts.refused == 1
     assert cloud.urls() == [BUNDLES + entry.revision]  # refused before its package is fetched
@@ -683,7 +296,7 @@ def test_the_sixth_plugin_by_name_waits_and_is_never_fetched(cloud, bucket, made
     served = {}
     for letter in "FBDACE":
         slug = made.slug()
-        served[letter] = (slug, cloud.serve(_bundle(slug, name=f"Test Plugin {letter}"), _zip(_files(slug, "1.0.0"))))
+        served[letter] = (slug, cloud.serve(bundle_of(slug, name=f"Test Plugin {letter}"), zip_of(files_of(slug, "1.0.0"))))
     imported = _import(new_session, cloud, *(entry for _, entry in served.values()))
     assert imported.counts.view() == {"new": 5, "updated": 0, "unchanged": 0, "refused": 0} and imported.waiting == 1
     waiting_slug, waiting_entry = served["F"]
@@ -694,7 +307,7 @@ def test_the_sixth_plugin_by_name_waits_and_is_never_fetched(cloud, bucket, made
 
 def test_the_same_revision_again_is_unchanged_and_fetches_nothing(cloud, bucket, made, new_session):
     slug = made.slug()
-    entry = cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))
+    entry = cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))
     assert _import(new_session, cloud, entry).counts.new == 1
     cloud.requests.clear()
     again = _import(new_session, cloud, entry)
@@ -704,9 +317,9 @@ def test_the_same_revision_again_is_unchanged_and_fetches_nothing(cloud, bucket,
 
 def test_a_changed_revision_at_the_same_version_is_refused_and_the_row_kept(cloud, bucket, made, new_session):
     slug = made.slug()
-    assert _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))).counts.new == 1
+    assert _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))).counts.new == 1
     before = dict(_scalar_row(new_session, slug))
-    changed = cloud.serve(_bundle(slug, description="A newer description."), _zip(_files(slug, "1.0.0")))
+    changed = cloud.serve(bundle_of(slug, description="A newer description."), zip_of(files_of(slug, "1.0.0")))
     cloud.requests.clear()
     imported = _import(new_session, cloud, changed)
     assert imported.counts.refused == 1
@@ -717,7 +330,7 @@ def test_a_changed_revision_at_the_same_version_is_refused_and_the_row_kept(clou
 
 def test_a_newer_version_moves_the_row_and_keeps_its_enablements(cloud, bucket, made, new_session):
     slug, skill = made.slug(), f"t270pi-skill-{uuid.uuid4().hex[:8]}"
-    first = cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0", skill)))
+    first = cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0", skill)))
     assert _import(new_session, cloud, first).counts.new == 1
     old = dict(_scalar_row(new_session, slug))
     workspace = str(uuid.uuid4())
@@ -729,7 +342,7 @@ def test_a_newer_version_moves_the_row_and_keeps_its_enablements(cloud, bucket, 
         "INSERT INTO workspace_enabled_plugins (workspace_id, plugin_id) VALUES (CAST(:ws AS uuid), CAST(:plugin AS uuid))"
     ), {"ws": workspace, "plugin": str(old["id"])})
     session.commit()
-    newer = cloud.serve(_bundle(slug, version="1.1.0"), _zip(_files(slug, "1.1.0", skill, body="Summarise, then cite.")))
+    newer = cloud.serve(bundle_of(slug, version="1.1.0"), zip_of(files_of(slug, "1.1.0", skill, body="Summarise, then cite.")))
     imported = _import(new_session, cloud, newer)
     assert imported.counts.view() == {"new": 0, "updated": 1, "unchanged": 0, "refused": 0}
     moved = dict(_scalar_row(new_session, slug))
@@ -759,8 +372,8 @@ def test_files_left_under_the_prefix_refuse_the_import_and_are_removed_for_the_n
 ):
     slug = made.slug()
     stale = f"plugins/{slug}/1.0.0/skills/stale-skill/SKILL.md"
-    bucket.objects[(config.MARKETPLACE_S3_BUCKET, stale)] = _skill_md("stale-skill")
-    entry = cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))
+    bucket.objects[(config.MARKETPLACE_S3_BUCKET, stale)] = skill_md("stale-skill")
+    entry = cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))
     assert _import(new_session, cloud, entry).counts.refused == 1
     assert bucket.keys() == [] and _rows(new_session, slug) == NO_ROWS
     assert _import(new_session, cloud, entry).counts.new == 1
@@ -784,9 +397,9 @@ def test_a_writer_that_committed_the_slug_meanwhile_keeps_its_files(cloud, bucke
         return real(checked)
 
     monkeypatch.setattr(plugin_import, "scan_row", after_another_writer)
-    imported = _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0"))))
+    imported = _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0"))))
     assert imported.counts.refused == 1  # the unique slug refused this import's row
-    assert bucket.keys(prefix) == sorted(prefix + path for path in _files(slug, "1.0.0"))
+    assert bucket.keys(prefix) == sorted(prefix + path for path in files_of(slug, "1.0.0"))
     assert _rows(new_session, slug) == {**NO_ROWS, "marketplace_plugins": 1}
     assert _scalar(new_session, "SELECT name FROM marketplace_plugins WHERE slug = :slug", slug=slug) == (
         "Uploaded Meanwhile"
@@ -795,27 +408,27 @@ def test_a_writer_that_committed_the_slug_meanwhile_keeps_its_files(cloud, bucke
 
 def test_a_failed_update_keeps_the_row_and_its_files_at_the_old_version(cloud, bucket, made, new_session):
     slug = made.slug()
-    assert _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))).counts.new == 1
+    assert _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))).counts.new == 1
     before, old_keys = dict(_scalar_row(new_session, slug)), bucket.keys(f"plugins/{slug}/1.0.0/")
     bucket.fail_put_at = bucket.puts + 2
-    newer = cloud.serve(_bundle(slug, version="1.1.0"), _zip(_files(slug, "1.1.0")))
+    newer = cloud.serve(bundle_of(slug, version="1.1.0"), zip_of(files_of(slug, "1.1.0")))
     assert _import(new_session, cloud, newer).counts.refused == 1
     assert dict(_scalar_row(new_session, slug)) == before
     assert bucket.keys(f"plugins/{slug}/1.0.0/") == old_keys and bucket.keys(f"plugins/{slug}/1.1.0/") == []
     assert _scalar(new_session, "SELECT version FROM marketplace_cloud_items WHERE external_id = :id",
-                   id=_external_id(slug)) == "1.0.0"
+                   id=external_id(slug)) == "1.0.0"
 
 
 def test_an_update_keeps_a_local_deactivation_and_makes_no_skill(cloud, bucket, made, new_session):
     slug = made.slug()
-    assert _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))).counts.new == 1
+    assert _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))).counts.new == 1
     session = new_session()
     session.execute(sa.text(
         "UPDATE marketplace_plugins SET is_active = false, approval_status = 'rejected' WHERE slug = :slug"
     ), {"slug": slug})
     session.commit()
     runner = Runner()
-    newer = cloud.serve(_bundle(slug, version="1.1.0"), _zip(_files(slug, "1.1.0", body="A changed body.")))
+    newer = cloud.serve(bundle_of(slug, version="1.1.0"), zip_of(files_of(slug, "1.1.0", body="A changed body.")))
     assert _import(new_session, cloud, newer, runner=runner).counts.updated == 1
     row = dict(_scalar_row(new_session, slug))
     assert (row["version"], row["is_active"], row["approval_status"]) == ("1.1.0", False, "rejected")
@@ -826,9 +439,9 @@ def test_an_update_keeps_a_local_deactivation_and_makes_no_skill(cloud, bucket, 
 
 def test_a_mapped_item_whose_bundle_names_another_slug_is_refused(cloud, bucket, made, new_session):
     first, other = made.slug(), made.slug()
-    assert _import(new_session, cloud, cloud.serve(_bundle(first), _zip(_files(first, "1.0.0")))).counts.new == 1
+    assert _import(new_session, cloud, cloud.serve(bundle_of(first), zip_of(files_of(first, "1.0.0")))).counts.new == 1
     before = dict(_scalar_row(new_session, first))
-    renamed = cloud.serve(_bundle(other, version="2.0.0", externalId=_external_id(first)), _zip(_files(other, "2.0.0")))
+    renamed = cloud.serve(bundle_of(other, version="2.0.0", externalId=external_id(first)), zip_of(files_of(other, "2.0.0")))
     cloud.requests.clear()
     assert _import(new_session, cloud, renamed).counts.refused == 1
     assert cloud.urls() == [BUNDLES + renamed.revision]
@@ -847,7 +460,7 @@ def test_rows_that_change_while_a_plugin_is_checked_refuse_it_before_anything_is
         return target if len(reads) == 1 else target._replace(verdict="updated")
 
     monkeypatch.setattr(plugin_import, "held_target", moving)
-    imported = _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0"))))
+    imported = _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0"))))
     assert imported.counts.refused == 1 and len(reads) == 2
     assert bucket.puts == 0 and _rows(new_session, slug) == NO_ROWS
 
@@ -856,7 +469,7 @@ def test_an_update_whose_row_moved_meanwhile_is_refused_and_leaves_that_row(
     cloud, bucket, made, new_session, monkeypatch,
 ):
     slug = made.slug()
-    assert _import(new_session, cloud, cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))).counts.new == 1
+    assert _import(new_session, cloud, cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))).counts.new == 1
     real = plugin_import.scan_row
 
     def after_another_move(checked):
@@ -866,7 +479,7 @@ def test_an_update_whose_row_moved_meanwhile_is_refused_and_leaves_that_row(
         return real(checked)
 
     monkeypatch.setattr(plugin_import, "scan_row", after_another_move)
-    newer = cloud.serve(_bundle(slug, version="1.1.0"), _zip(_files(slug, "1.1.0")))
+    newer = cloud.serve(bundle_of(slug, version="1.1.0"), zip_of(files_of(slug, "1.1.0")))
     assert _import(new_session, cloud, newer).counts.refused == 1
     assert _scalar(new_session, "SELECT version FROM marketplace_plugins WHERE slug = :slug", slug=slug) == "1.0.5"
     assert bucket.keys(f"plugins/{slug}/1.1.0/") == [] and bucket.keys(f"plugins/{slug}/1.0.0/") != []
@@ -885,7 +498,7 @@ def test_a_materialiser_failure_leaves_the_plugin_committed_and_no_transaction_o
 
     monkeypatch.setattr(plugin_import, "SkillMaterializer", Broken)
     slug, session = made.slug(), new_session()
-    entry = cloud.serve(_bundle(slug), _zip(_files(slug, "1.0.0")))
+    entry = cloud.serve(bundle_of(slug), zip_of(files_of(slug, "1.0.0")))
     assert plugin_import.import_plugins(session, [entry], cloud.factory, Runner()).counts.new == 1
     assert not session.in_transaction()
     assert _rows(new_session, slug) == {
