@@ -42,7 +42,7 @@ ARG MEDIA_ASSETS=fetch
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
-FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
+FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS node
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
@@ -58,7 +58,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # uv from its own image, in a named stage for the same reason (as the worker's, US-044).
-FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
 # The media assets, fetched, at the paths the media assets image carries them
 # (scripts/ci/media_assets.py): /kokoro/<release>/<file> and /music/<id>.<ext>.
