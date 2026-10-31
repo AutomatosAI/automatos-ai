@@ -5,10 +5,12 @@ listed in ``reports/route-manifest.json``):
 
 ===========================================  =====================================================
 ``GET  /api/marketplace/cloud-sync/status``   ``{enabled, cloudUrl, lastAttemptAt, lastSuccessAt,
-                                              lastError, generatedAt, counts, themes, stale}``
-``POST /api/marketplace/cloud-sync``          one Sync now (``pull.sync_catalog``), then the
+                                              lastError, generatedAt, counts, themes, items, stale}``
+``POST /api/marketplace/cloud-sync``          one Sync now (``pull.sync_catalog``), W2's plugin and
+                                              item passes (``sync_items.run_item_passes``), then the
                                               auto-update (``updates.apply_cloud_updates``): 200
-                                              ``{counts, updatesApplied, updatesFailed, status}``,
+                                              ``{counts, items, plugins, updatesApplied,
+                                              updatesFailed, status}``,
                                               502 with the plain error the Sync recorded, 409 while
                                               ``AUTOMATOS_CLOUD_URL`` is empty or another Sync is
                                               running
@@ -25,6 +27,7 @@ synchronous session (AGENTS.md).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -35,6 +38,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from services.marketplace_bundles.sync_items import run_item_passes
 from services.marketplace_cloud import pull, updates
 from services.marketplace_cloud.fetch import CLOUD_OFF, ClientFactory
 from services.marketplace_cloud.urls import configured_url
@@ -83,17 +87,18 @@ def run_cloud_sync(
     db: Session = Depends(get_db),
     client_factory: Optional[ClientFactory] = Depends(get_cloud_client_factory),
 ) -> Dict[str, Any]:
-    """Sync now: pull the catalogue once, move the unpinned installs to the newest Cloud versions, and answer the
-    counts, the installs moved, the themes whose update failed and the status; or why the Sync didn't run."""
+    """Sync now: pull the catalogue once, bring its plugins and items, move the unpinned installs to the newest
+    Cloud versions, and answer the counts (the whole Sync's), each item type's, the plugins waiting, the installs
+    moved, the themes whose update failed and the status; or why the Sync didn't run."""
     if not configured_url():
         raise HTTPException(status_code=CONFLICT, detail=CLOUD_OFF)
     outcome = pull.sync_catalog(db, client_factory)
     if not outcome.ok:
         raise _refusal(outcome)
     logger.info("Sync with Automatos Cloud run on demand by user %s", getattr(ctx.user, "id", None))
+    passes = run_item_passes(db, outcome, client_factory, asyncio.run)
     moved = updates.apply_cloud_updates(db, client_factory)
-    return {"counts": outcome.counts.view(), "updatesApplied": moved.applied, "updatesFailed": moved.failed,
-            "status": pull.sync_status(db)}
+    return {**passes, "updatesApplied": moved.applied, "updatesFailed": moved.failed, "status": pull.sync_status(db)}
 
 
 __all__ = ["get_cloud_client_factory", "require_local_edition", "router"]
