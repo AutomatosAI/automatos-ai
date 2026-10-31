@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 
 import { syncedMessage, updatesFailedMessage } from '@/components/marketplace/cloud/copy'
 import { useWorkspace } from '@/components/workspace-provider'
+import { cloudItemsKeys } from '@/hooks/use-cloud-items'
 import { themeQueryKeys } from '@/hooks/use-installed-themes'
 import { getCloudSyncStatus, runCloudSync } from '@/lib/marketplace/cloud-sync'
 import type { CloudSyncResult, CloudSyncStatus } from '@/lib/marketplace/cloud-sync'
@@ -52,6 +53,7 @@ export function useCloudSync() {
       toast.success(syncedMessage(result.counts))
       if (result.updatesFailed > 0) toast.error(updatesFailedMessage(result.updatesFailed))
       void refreshThemes()
+      void client.invalidateQueries({ queryKey: cloudItemsKeys.all })
     },
     onError: async (error) => {
       toast.error(themeErrorMessage(error))

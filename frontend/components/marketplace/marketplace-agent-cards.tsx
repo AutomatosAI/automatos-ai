@@ -17,6 +17,7 @@ import { ToolLogo } from '@/components/ui/tool-logo'
 import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { CloudItemBadges } from './cloud/cloud-item-badges'
 
 const TOOL_PREVIEW_COUNT = 5
 
@@ -157,6 +158,7 @@ export function AgentListRow({ agent, iconMappings, isAdmin, onOpen }: {
               <span>&middot;</span>
               <span>{formatInstallCount(agent.install_count)} installs</span>
             </div>
+            <CloudItemBadges kind="agent" id={agent.id} className="mt-1" />
           </div>
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
             onClick={(e) => { e.stopPropagation(); onOpen(agent) }}>
@@ -277,6 +279,7 @@ export function AgentGridCard({ agent, iconMappings, isAdmin, admin, installStat
         <p className="text-sm text-muted-foreground line-clamp-2">{agent.description}</p>
         <div className="flex flex-col gap-2">
           <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">{categoryName}</Badge>
+          <CloudItemBadges kind="agent" id={agent.id} />
           {agent.metadata.model_id && (
             <Badge className="text-xs bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/30 w-fit">
               <Zap className="w-3 h-3 mr-1" />
