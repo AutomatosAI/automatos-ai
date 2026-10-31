@@ -30,7 +30,9 @@ another Cloud agent of the same name refuses it too (the reviews of US-270-13b),
 first one written keeps the name. So does a marketplace agent whose SLUG is that name (the security review of
 US-270-14g): an install by reference (``package_installer._find_marketplace_agent``, a seeded package's members)
 reads a slug or a name, ``.first()`` of either, so a Cloud agent named after a seeded one's slug could be
-installed in its place, without its disclosure. Refusals are this module's own sentences, logged with the externalId
+installed in its place, without its disclosure. And so does a package or a marketplace Playbook without a mapping
+that names an agent so (a member's ref, a recommended agent), even while no agent here has that name: installing
+it would add the Cloud agent. Refusals are this module's own sentences, logged with the externalId
 (it passed its pattern), never a value of the bundle.
 """
 from __future__ import annotations
@@ -59,6 +61,27 @@ ITEM_TYPE = AGENT_ITEM
 ACTIVE = "active"  # Agent.status of a row an install may clone
 
 NAME_HELD = "A marketplace agent this install holds already has its name, or has it as its slug."
+NAMED_BY_AN_ITEM = "A Marketplace package or Playbook this install holds names an agent by its name."
+
+# An agent member of a package no mapping points at (install_package reads its ref, else its id or slug), or an
+# agent a marketplace Playbook no mapping points at recommends (cascade_installer._recommended_agent_names: its
+# recommended_agents, else its template definition's), named ``name`` case-insensitively.
+_NAMED_BY_AN_ITEM = text(
+    "SELECT 1 FROM marketplace_packages p CROSS JOIN LATERAL jsonb_array_elements("
+    "CASE WHEN jsonb_typeof(p.members) = 'array' THEN p.members ELSE '[]'::jsonb END) AS m(member) "
+    "WHERE m.member ->> 'type' = 'agent' "
+    "AND lower(coalesce(m.member ->> 'ref', nullif(m.member ->> 'id', ''), nullif(m.member ->> 'slug', ''))) "
+    "IN (lower(:name), :lowered) "
+    "AND NOT EXISTS (SELECT 1 FROM marketplace_cloud_items c WHERE c.package_id = p.id) "
+    "UNION ALL "
+    "SELECT 1 FROM workflow_recipes r CROSS JOIN LATERAL (VALUES (r.recommended_agents), "
+    "(r.template_definition -> 'suggested_agents'), (r.template_definition -> 'recommended_agents')) AS lists(names) "
+    "CROSS JOIN LATERAL jsonb_array_elements_text("
+    "CASE WHEN jsonb_typeof(lists.names) = 'array' THEN lists.names ELSE '[]'::jsonb END) AS a(agent) "
+    "WHERE r.owner_type = 'marketplace' AND lower(a.agent) IN (lower(:name), :lowered) "
+    "AND NOT EXISTS (SELECT 1 FROM marketplace_cloud_items c WHERE c.recipe_id = r.id) "
+    "LIMIT 1"
+)
 NOT_A_MARKETPLACE_ROW = "The agent this install held for it is gone or is no longer a marketplace agent."
 BAD_VERSION = "Its version can't be recorded here."
 
@@ -125,12 +148,14 @@ def _mapping(db: Session, external_id: str) -> Optional[MarketplaceCloudItem]:
 def _refusal(
     db: Session, bundle: Mapping[str, Any], mapping: Optional[MarketplaceCloudItem], row: Optional[Agent],
 ) -> Optional[str]:
-    """Why the bundle can't be written, or None: its mapped row isn't a marketplace agent any more, or
-    its name is held by a marketplace agent without a mapping."""
+    """Why the bundle can't be written, or None: its mapped row isn't a marketplace agent any more, its
+    name is held by another marketplace agent, or a package or Playbook without a mapping names its agent so."""
     if mapping is not None and not _is_marketplace_row(row):
         return NOT_A_MARKETPLACE_ROW
     if name_held(db, bundle["name"], row.id if row is not None else None):
         return NAME_HELD
+    if named_by_an_item(db, bundle["name"]):
+        return NAMED_BY_AN_ITEM
     return None
 
 
@@ -150,6 +175,13 @@ def name_held(db: Session, name: str, own_id: Optional[int] = None) -> bool:
     if own_id is not None:
         query = query.filter(Agent.id != own_id)
     return query.first() is not None
+
+
+def named_by_an_item(db: Session, name: str) -> bool:
+    """Whether a Marketplace package or Playbook no mapping points at (seeded or operator-made) names one of its
+    agents ``name``: installing it would find this Cloud agent by that name, and add it without its disclosure,
+    even while no agent here has the name (the security review of US-270-14g)."""
+    return db.execute(_NAMED_BY_AN_ITEM, {"name": name, "lowered": name.lower()}).first() is not None
 
 
 def resolved_parts(db: Session, body: Mapping[str, Any]) -> AgentParts:
@@ -272,4 +304,6 @@ def _map(
     mapping.unresolved = list(missing)
 
 
-__all__ = ["AgentParts", "agent_fields", "model_config", "name_held", "resolved_parts", "upsert_agent"]
+__all__ = [
+    "AgentParts", "agent_fields", "model_config", "name_held", "named_by_an_item", "resolved_parts", "upsert_agent",
+]

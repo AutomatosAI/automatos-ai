@@ -46,7 +46,7 @@ import services.click_memory as click_memory  # noqa: E402
 from config import config  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.models.approval_grants import ApprovalGrant, GrantStatus  # noqa: E402
-from core.models.core import Agent, Chat  # noqa: E402
+from core.models.core import Agent, Chat, WorkflowTemplate  # noqa: E402
 from core.models.marketplace_packages import MarketplacePackage  # noqa: E402
 from core.models.marketplace_plugins import MarketplacePlugin, WorkspaceEnabledPlugin  # noqa: E402
 from core.services.approval_grants import grant_grant  # noqa: E402
@@ -268,18 +268,33 @@ def test_auto_s_own_run_with_the_dial_down_asks_too(cafe):
     assert _copies(cafe, cafe.cloud.helper.id) == 0
 
 
-def test_a_cloud_agent_named_after_a_marketplace_agents_slug_is_refused_by_the_sync(cafe):
-    """The security review of US-270-14g: an install by reference reads a slug or a name (``.first()`` of either),
-    so a Cloud agent named after a seeded agent's slug could be installed in its place, without its card."""
+@pytest.mark.parametrize("claims", ["a_seeded_agents_slug", "a_seeded_packages_member", "a_seeded_playbooks_helper"])
+def test_a_cloud_agent_named_as_a_local_item_finds_its_agent_is_refused_by_the_sync(cafe, claims):
+    """The security reviews of US-270-14g: an install by reference reads a slug or a name (``.first()`` of either),
+    and a seeded package or Playbook installs the agent it names, so a Cloud agent named after a seeded agent's
+    slug, or after an agent a seeded item names that isn't here, would be installed without its card."""
     seeded, tag = cafe.cloud.held.seeded, cafe.cloud.tag
-    squatter = {**_made("agent", tag, "Test Squatter", {}), "name": seeded.slug.upper()}
-    validate_bundle(squatter)
+    absent = f"t270ci-absent-{tag}"   # no agent here has it
+    if claims == "a_seeded_packages_member":
+        cafe.db.add(MarketplacePackage(slug=f"t270ci-refs-{tag}", name="A seeded pack",
+                                       members=[{"type": "agent", "ref": absent, "name": "The absent one"}]))
+    if claims == "a_seeded_playbooks_helper":
+        cafe.db.add(WorkflowTemplate(template_id=f"t270ci-refs-{tag}", name="A seeded Playbook", description="Seeded.",
+                                     owner_type="marketplace", owner_id="marketplace", is_approved=True,
+                                     is_public=True, template_definition={"suggested_agents": [absent]}, steps=[],
+                                     created_by="seed"))
+    cafe.db.flush()
+    claimed = seeded.slug if claims == "a_seeded_agents_slug" else absent
+    squatter = {**_made("agent", tag, "Test Squatter", {}), "name": claimed.upper()}
+    free = {**_made("agent", tag, "Test Free Agent", {}), "name": f"Test Free Agent {tag}"}
+    for bundle in (squatter, free):
+        validate_bundle(bundle)
 
-    written = import_items(cafe.db, [_fetched(squatter)])
+    written = import_items(cafe.db, [_fetched(squatter), _fetched(free)])
 
-    assert written.ok and written.view()["agent"]["refused"] == 1, written
-    assert cafe.db.query(MarketplaceCloudItem).filter(
-        MarketplaceCloudItem.external_id == squatter["externalId"]).first() is None
+    assert written.ok and written.view()["agent"]["refused"] == 1 and written.view()["agent"]["new"] == 1, written
+    mapped = {row.external_id for row in cafe.db.query(MarketplaceCloudItem.external_id)}
+    assert squatter["externalId"] not in mapped and free["externalId"] in mapped
 
 
 def test_a_seeded_agent_a_seeded_package_and_an_unmapped_plugin_install_as_today(cafe):
