@@ -8,7 +8,11 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => ({ mutate: vi.fn() }) }))
+vi.mock('@/hooks/use-digest-api', () => ({
+  useSubmitDigestFeedback: () => ({ mutate: vi.fn() }),
+  // SDK 1.4.0 (#1383): the card's thumbs read the person's remembered rating; none here.
+  useDigestRating: () => ({ data: undefined }),
+}))
 
 import { BriefCard } from '@/components/proactive/brief-card'
 import { checkedBrief } from '@/lib/theme-sdk/host-cards/proactive-props'
