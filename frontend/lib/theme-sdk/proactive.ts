@@ -21,6 +21,10 @@
  *   id that isn't a suggestion's, or a reason Hide doesn't know, throws a TypeError before anything is sent.
  * - useCalibration, useAnswerCalibration: inert until the server offers calibration (its routes are US-C22's):
  *   `available` is false, nothing is asked, and an answer is refused without a request.
+ *
+ * SDK 1.4.0: useRateBrief (internal/rate-brief.ts), the brief's thumbs up or down through the existing digest feedback
+ * route (POST /api/activity/digest/feedback), the one the host's brief card posts, and the person's own rating of the
+ * brief it is given (the cache entry the card's thumbs read).
  */
 import { useMemo, useState } from 'react'
 
@@ -266,3 +270,6 @@ export function useAnswerCalibration(): CalibrationAction {
     })
   }, [answering, error])
 }
+
+export { useRateBrief } from './internal/rate-brief'
+export type { BriefRated, BriefRating, RateBriefAction, RateBriefInput } from './internal/rate-brief'
