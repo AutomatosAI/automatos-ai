@@ -2,14 +2,12 @@
  * PRD-270 US-270-08b (§5.7, K20) — what a signed-out visitor's Marketplace reads, and the pure
  * mapping that turns the hosted catalogue into the Themes storefront's own shapes.
  *
- * Two public routes of the hosted edition, read through apiClient's generic `get`, which sends no
- * bearer when there is none (api-client.ts doesn't grow, K3):
- *
- * - `GET /api/marketplace/catalog` (US-270-01): `{schema: 1, generatedAt, items}`, one item per
- *   listed, signed theme version, newest first per theme, every URL in it a path on the catalogue
- *   files route (orchestrator/services/marketplace_cloud/catalog.py);
- * - `GET /api/public/marketplace/{type}` (US-270-07a/b): one page of a tab's display fields,
- *   mapped by public-items.ts.
+ * The hosted edition's public catalogue route, read through apiClient's generic `get`, which sends
+ * no bearer when there is none (api-client.ts doesn't grow, K3): `GET /api/marketplace/catalog`
+ * (US-270-01), `{schema: 1, generatedAt, items}`, one item per listed, signed theme version, newest
+ * first per theme, every URL in it a path on the catalogue files route
+ * (orchestrator/services/marketplace_cloud/catalog.py). The other tabs' public reads,
+ * `GET /api/public/marketplace/{type}`, are read by lib/marketplace/source/public-reads.ts.
  *
  * `catalogListings` gives one ThemeListingDetail per theme: its newest version, with every listed
  * version in `versions`. Everything in the answer is data: an item that isn't one a theme version
@@ -30,8 +28,7 @@ import type {
 import { CLOUD_FILES_PATH } from '@/lib/marketplace/cloud-files'
 import { THEME_DIGEST_PATTERN } from '@/lib/theme-host/constants'
 
-import { CATALOG_ENDPOINT, publicPage, publicPagePath } from './public-items'
-import type { PublicMarketplaceType, PublicPage } from './public-items'
+import { CATALOG_ENDPOINT } from './public-items'
 
 const CATALOG_SCHEMA = 1
 const THEME_TYPE = 'theme'
@@ -202,10 +199,4 @@ export function catalogListings(catalog: unknown, base: string): ThemeListingDet
 export async function getPublicThemes(): Promise<ThemeListingDetail[]> {
   const catalog = await apiClient.get<unknown>(CATALOG_ENDPOINT)
   return catalogListings(catalog, apiClient.getBaseUrl())
-}
-
-/** One page of a public Marketplace read from `offset`. */
-export async function getPublicPage(type: PublicMarketplaceType, offset: number): Promise<PublicPage> {
-  const answer = await apiClient.get<unknown>(publicPagePath(type, offset))
-  return publicPage(answer, type, offset)
 }

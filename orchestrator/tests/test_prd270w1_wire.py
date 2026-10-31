@@ -5,7 +5,8 @@ Pins:
 * the three W1 routers (the hosted catalogue and its files, the public reads, the Sync with Automatos
   Cloud routes) are ``RouterSpec`` entries in ``router_manifest.py``, and ``main.py`` names none of
   them: it is unchanged by the wave;
-* together they declare exactly the five W1 routes, each in ``reports/route-manifest.json``, and
+* together they declare exactly the five W1 routes and the one-page Marketplace's two public reads
+  (Featured and counts, on the public reads' router), each in ``reports/route-manifest.json``, and
   ``route_count == len(routes)``;
 * the live app (a probe in a clean subprocess with an unreachable Postgres, the
   ``test_prd261_c3_wire.py`` precedent) serves each W1 route once, each answered by its own handler,
@@ -54,9 +55,13 @@ W1_MODULES = {
 CATALOG = "/api/marketplace/catalog"
 FILES = CATALOG + "/files/{digest}/{path:path}"
 PUBLIC_READS = "/api/public/marketplace/{type}"
+PUBLIC_FEATURED = "/api/public/marketplace/featured"
+PUBLIC_COUNTS = "/api/public/marketplace/counts"
 SYNC = "/api/marketplace/cloud-sync"
 SYNC_STATUS = SYNC + "/status"
-PUBLIC_ROUTES = {("GET", CATALOG), ("GET", FILES), ("GET", PUBLIC_READS)}
+PUBLIC_ROUTES = {
+    ("GET", CATALOG), ("GET", FILES), ("GET", PUBLIC_READS), ("GET", PUBLIC_FEATURED), ("GET", PUBLIC_COUNTS),
+}
 SYNC_ROUTES = {("GET", SYNC_STATUS), ("POST", SYNC)}
 W1_ROUTES = PUBLIC_ROUTES | SYNC_ROUTES
 SAMPLE_DIGEST = "ab" * 32
@@ -64,6 +69,8 @@ SAMPLES = {
     ("GET", CATALOG): CATALOG,
     ("GET", FILES): f"{CATALOG}/files/{SAMPLE_DIGEST}/package.autotheme",
     ("GET", PUBLIC_READS): "/api/public/marketplace/agents",
+    ("GET", PUBLIC_FEATURED): PUBLIC_FEATURED,
+    ("GET", PUBLIC_COUNTS): PUBLIC_COUNTS,
     ("GET", SYNC_STATUS): SYNC_STATUS,
     ("POST", SYNC): SYNC,
 }

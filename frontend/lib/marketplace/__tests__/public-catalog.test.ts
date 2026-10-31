@@ -22,10 +22,9 @@ import {
   catalogFileUrl,
   catalogListings,
   catalogVersion,
-  getPublicPage,
   getPublicThemes,
 } from '../public-catalog'
-import { CATALOG_ENDPOINT, PUBLIC_MARKETPLACE_ENDPOINT, filterPublicItems, publicItem, publicPage } from '../public-items'
+import { CATALOG_ENDPOINT, filterPublicItems, publicItem, publicPage } from '../public-items'
 import type { PublicItem } from '../public-items'
 import {
   ARCADE_DIGEST,
@@ -278,17 +277,6 @@ describe('the reads go through apiClient.get on the public routes', () => {
     expect(api.get).toHaveBeenCalledWith(CATALOG_ENDPOINT)
     expect(CATALOG_ENDPOINT).toBe('/api/marketplace/catalog')
     expect(arcade.cover).toBe(`${ARCADE_FILES}/assets/previews/default.png`)
-  })
-
-  it('getPublicPage reads one page of the type from its offset', async () => {
-    api.get.mockResolvedValue(publicAnswer('skills', [publicEntry({ key: 'pdf', name: 'PDF', version: '1.0.0' })], false, 100))
-
-    const page = await getPublicPage('skills', 100)
-
-    expect(api.get).toHaveBeenCalledWith(`${PUBLIC_MARKETPLACE_ENDPOINT}/skills?limit=100&offset=100`)
-    expect(PUBLIC_MARKETPLACE_ENDPOINT).toBe('/api/public/marketplace')
-    expect(page.items.map((item) => item.key)).toEqual(['pdf'])
-    expect(page.items[0].facts).toEqual([{ label: 'Version', value: '1.0.0' }])
   })
 
   it('lets a refusal through, so the tab shows the server’s sentence', async () => {

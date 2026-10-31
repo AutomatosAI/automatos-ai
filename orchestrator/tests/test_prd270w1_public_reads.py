@@ -432,15 +432,22 @@ def test_a_field_off_the_allowlist_is_refused_before_it_is_answered():
         fields.allowed_item(fields.PACKAGE_MEMBER_FIELDS, type="agent", name="Store Ops", ref="store-ops")
 
 
+# The router's routes in declaration order: the one-page Marketplace's Featured and counts reads come first,
+# so neither name is ever read as a ``{type}`` (tests/test_marketplace_one_page_public_reads.py).
+ROUTER_PATHS = [
+    "/api/public/marketplace/featured", "/api/public/marketplace/counts", "/api/public/marketplace/{type}",
+]
+
+
 def test_the_route_is_public_a_plain_def_in_the_manifest_and_mounted_by_router_spec():
     routes = [r for r in public_api.router.routes if isinstance(r, APIRoute)]
-    assert [(r.path, r.methods) for r in routes] == [("/api/public/marketplace/{type}", {"GET"})]
-    route = routes[0]
-    assert not inspect.iscoroutinefunction(route.endpoint)
-    calls = _calls(route.dependant)
-    assert get_request_context_hybrid not in calls
-    assert calls[:2] == [public_api.require_hosted_edition, public_api.limit_public_reads] and get_db in calls
-    assert not any("permission" in getattr(call, "__qualname__", "") for call in calls)
+    assert [(r.path, r.methods) for r in routes] == [(path, {"GET"}) for path in ROUTER_PATHS]
     manifest = json.loads((ORCH / "reports" / "route-manifest.json").read_text(encoding="utf-8"))
-    assert {"method": "GET", "path": "/api/public/marketplace/{type}"} in manifest["routes"]
+    for route in routes:
+        assert not inspect.iscoroutinefunction(route.endpoint), route.path
+        calls = _calls(route.dependant)
+        assert get_request_context_hybrid not in calls, route.path
+        assert calls[:2] == [public_api.require_hosted_edition, public_api.limit_public_reads] and get_db in calls
+        assert not any("permission" in getattr(call, "__qualname__", "") for call in calls), route.path
+        assert {"method": "GET", "path": route.path} in manifest["routes"], route.path
     assert RouterSpec("api.public_marketplace") in MANIFEST_ROUTERS

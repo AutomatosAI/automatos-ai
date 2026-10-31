@@ -1,12 +1,15 @@
 'use client'
 
 /**
- * PRD-270 US-270-08a (K19) — the Marketplace page's client switch.
+ * PRD-270 (§5.7, one Marketplace page for everyone) — the /marketplace page. It is the same page,
+ * MarketplaceHomepage, for everyone; what changes is the frame around it and who may add:
  *
- *   local            → today's page (MainLayout + MarketplaceHomepage); no Clerk hook runs.
- *   SaaS, signed in  → today's page, exactly.
- *   SaaS, signed out → the visitor's read-only storefront: no app shell, nothing workspace-scoped.
- *   SaaS, loading    → a quiet line, never the member page.
+ *   local            → MainLayout + MarketplaceHomepage; no Clerk hook runs.
+ *   SaaS, signed in  → the same, exactly.
+ *   SaaS, signed out → the slim visitor header (logo and Studio, Sign in, Start free) over the same
+ *                      homepage, with the visitor's access (VisitorAccessProvider): it reads the
+ *                      public routes, draws nothing workspace-scoped, and every add goes to sign-in.
+ *   SaaS, loading    → a quiet line, never the page.
  *
  * isSaaS is a build-time constant, so the branch never changes which hooks a render calls.
  */
@@ -15,7 +18,9 @@ import { MarketplaceHomepage } from '@/components/marketplace/marketplace-homepa
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useAuth } from '@/lib/auth-hooks'
 import { isSaaS } from '@/lib/auth-edition'
-import { VisitorMarketplace } from './visitor-marketplace'
+
+import { VisitorAccessProvider } from '../access/visitor-access'
+import { VisitorHeader } from './visitor-header'
 
 export const MARKETPLACE_LOADING = 'Loading the Marketplace…'
 
@@ -24,6 +29,19 @@ function MemberMarketplace() {
     <MainLayout>
       <MarketplaceHomepage />
     </MainLayout>
+  )
+}
+
+function SignedOutMarketplace() {
+  return (
+    <VisitorAccessProvider>
+      <div className="min-h-screen bg-background text-foreground">
+        <VisitorHeader />
+        <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">
+          <MarketplaceHomepage />
+        </main>
+      </div>
+    </VisitorAccessProvider>
   )
 }
 
@@ -36,10 +54,10 @@ function SaasMarketplace() {
       </p>
     )
   }
-  return isSignedIn ? <MemberMarketplace /> : <VisitorMarketplace />
+  return isSignedIn ? <MemberMarketplace /> : <SignedOutMarketplace />
 }
 
-/** The /marketplace page: today's page for members and the local edition, the visitor view signed out on SaaS. */
+/** The /marketplace page: the one homepage, in the app shell or under the visitor header. */
 export function MarketplacePage() {
   usePageAPI('marketplace')
   return isSaaS ? <SaasMarketplace /> : <MemberMarketplace />
