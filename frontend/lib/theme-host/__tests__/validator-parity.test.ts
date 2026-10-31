@@ -43,7 +43,9 @@ import {
 } from '../css-value'
 import { FIRST_PAINT_ERROR_CODES, firstPaintErrors } from '../first-paint'
 import { LOOK_ERROR_CODES, validateLook, validateLookSchema, type LookSchema } from '../look-schema'
-import { contractOf, homeLayouts, LAYOUT_PATTERN, layoutNames, LOOK_VARIABLE_PATTERN } from '../mobile-layout'
+import {
+  contractOf, homeLayouts, isTint, LAYOUT_PATTERN, layoutNames, LOOK_VARIABLE_PATTERN, RGBA_PATTERN,
+} from '../mobile-layout'
 import {
   LAYOUT_MIN_HOST, MOBILE_AA_TEXT, MOBILE_AA_UI, MOBILE_CONTRAST_PAIRS, MOBILE_FONT_ROLES, MOBILE_MASCOT_MODES,
   MOBILE_MIN_HOST, MOBILE_REQUIRED_TOKENS, MOBILE_TOKEN_NAMES, mobileErrors,
@@ -112,6 +114,7 @@ const PYTHON = {
   lookSchema: readFileSync(path.join(THEMES_DIR, 'look_schema.py'), 'utf8'),
   cssValue: readFileSync(path.join(THEMES_DIR, 'css_value.py'), 'utf8'),
   layoutContracts: readFileSync(path.join(THEMES_DIR, 'layout_contracts.py'), 'utf8'),
+  layoutSlots: readFileSync(path.join(THEMES_DIR, 'layout_slots.py'), 'utf8'),
 }
 const OPENERS = '([{'
 const CLOSERS = ')]}'
@@ -370,6 +373,14 @@ describe('PRD-261 A-06b — the host contract equals contract.py', () => {
     })
     expect(LOOK_VARIABLE_PATTERN.source).toBe(CSS_VAR_NAME_PATTERN.source)
     expect(strings('LAYOUT_PATTERN', PYTHON.layoutContracts)).toEqual([LAYOUT_PATTERN.source.replace(/^\^|\$$/g, '')])
+  })
+
+  it("reads a tint as layout_slots.py does: the same rgba() grammar, and transparent (PRD-271 C02)", () => {
+    expect(strings('RGBA_PATTERN', PYTHON.layoutSlots)).toEqual([RGBA_PATTERN.source.replace(/^\^|\$$/g, '')])
+    const tints = ['rgba(3,5,7,.9)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,1.0)', 'transparent', '#030507']
+    const refused = ['rgba(0, 0, 0, .5)', 'rgba(256,0,0,.5)', 'rgba(0,0,0,1.5)', 'rgba(0,0,0,.12345)', 'Transparent']
+    tints.forEach((value) => expect(isTint(value), value).toBe(true))
+    refused.forEach((value) => expect(isTint(value), value).toBe(false))
   })
 
   it.each(['play@1', 'hud@1', 'arcade@1', 'candy@1'])("accepts %s's example as a theme's slots (PRD-271 C01)", (layout) => {

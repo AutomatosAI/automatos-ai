@@ -39,10 +39,9 @@ from services.themes.contract import (
     ThemeError, echo, theme_error,
 )
 from services.themes.layout_paint import LAYOUT_FIELD, LAYOUT_FIELDS
-from services.themes.mobile_layout import layout_errors
+from services.themes.mobile_layout import MOBILE_CODE, layout_errors
 from services.themes.mobile_tokens import parse_colour
 
-MOBILE_CODE = "BAD_MOBILE"
 MOBILE_FIELD = "mobile"
 MOBILE_FIELDS: Tuple[str, ...] = ("tokens", "fromLooks", "fonts", "mascot", *LAYOUT_FIELDS)
 MOBILE_SCHEMES: Tuple[str, ...] = ("light", "dark")

@@ -1101,7 +1101,8 @@ export interface MobileThemeBlock {
   mascot: { mode: 'clips' | 'stills' | 'none'; states: MobileThemeMascotState[] }
   /**
    * Null when the theme names no layout, or its slots can't be filled (the phone draws the skin above). An app
-   * that doesn't implement the contract draws the skin too. An older server lacks the field (D-9).
+   * that doesn't implement the contract draws the skin too. This host always sends it; a server from before
+   * PRD-271 lacks it, which is how a phone tells the two apart (D-9).
    */
   layout: MobileThemeLayout | null
 }

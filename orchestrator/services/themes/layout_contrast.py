@@ -8,7 +8,8 @@ exactly as ``GET /api/themes/mobile/{id}`` resolves them (``layout_paint.resolve
 * a block that takes slots from the look is measured for the prepaint table's defaults (what every member
   with no readable stored look gets: kind ``defaults``, id ``boot/prepaint.json#defaults``) and then each
   preset in ``looks/presets/`` (kind ``preset``), each resolved as the answer resolves it: a preset that
-  can't fill a slot is measured as the defaults the phone would get instead.
+  can't fill a slot is measured as the defaults the phone would get instead (``fromDefaults``, and said in the
+  reason, so the creator knows members on that preset see the defaults on the phone).
 
 A text pair is held to ``MOBILE_AA_TEXT`` (4.5:1), a ``ui`` pair to ``MOBILE_AA_UI`` (3:1), by
 ``mobile_contrast.measure_pair``. A subject whose slots can't be filled fails, naming them (the reader
@@ -17,6 +18,7 @@ skin's (``mobile_contrast.measure_mobile``, still measured: an app without the l
 
     {..., "layout": {"contract": "candy@1", "status": "pass" | "fail" | "not_measured",
                      "subjects": [{"id", "kind": "slots" | "defaults" | "preset", "status", "unresolved": [...],
+                                   "fromDefaults": bool,
                                    "pairs": [{"foreground", "background", "kind", "minimum", "status", "ratio"}]}]}}
 
 The check's ``status`` is then the outcome over both, its ``problems`` both lists and its ``reason`` both
@@ -48,6 +50,9 @@ LAYOUT_REASONS: Dict[str, str] = {
     OUTCOME_NOT_MEASURED: "No pair of {layout}'s slots was measured.",
 }
 UNFILLED_REASON = " {unfilled} of {layout}'s slot sets can't be filled."
+FELL_BACK_REASON = (
+    " {fell_back} preset(s) can't fill every slot of {layout}, so a phone draws them in the defaults (measured as such)."
+)
 
 
 class LayoutSubject(NamedTuple):
@@ -96,7 +101,10 @@ def _measure(contract: LayoutContract, subject: LayoutSubject) -> Tuple[Dict[str
     problems = [unfilled] if unresolved else []
     problems += [_failure(subject.label, pair) for pair in pairs if pair["status"] == OUTCOME_FAIL]
     status = OUTCOME_FAIL if unresolved else outcome_of(pair["status"] for pair in pairs)
-    entry = {"id": subject.subject_id, "kind": subject.kind, "status": status, "unresolved": unresolved, "pairs": pairs}
+    entry = {
+        "id": subject.subject_id, "kind": subject.kind, "status": status, "unresolved": unresolved,
+        "fromDefaults": subject.resolved.from_defaults, "pairs": pairs,
+    }
     return entry, problems
 
 
@@ -114,6 +122,8 @@ def measure_layout(block: Mapping[str, Any], files: Mapping[str, bytes]) -> Opti
     unfilled = sum(1 for entry in measured if entry["unresolved"])
     reason = LAYOUT_REASONS[status].format(failed=failed, layout=contract.layout) if status != OUTCOME_FAIL or failed else ""
     reason += UNFILLED_REASON.format(unfilled=unfilled, layout=contract.layout) if unfilled else ""
+    fell_back = sum(1 for entry in measured if entry["fromDefaults"])
+    reason += FELL_BACK_REASON.format(fell_back=fell_back, layout=contract.layout) if fell_back else ""
     return {"contract": contract.layout, "status": status, "subjects": measured}, problems, reason.strip()
 
 

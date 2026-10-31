@@ -41,6 +41,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.themes import ThemeInstallation, ThemeLook, ThemeOptIn, ThemePackage, ThemeRevocation  # noqa: E402
+from services.themes import serve  # noqa: E402
 from services.themes.digest import digest_of_manifest, file_manifest  # noqa: E402
 from services.themes.manifest import validate_manifest  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
@@ -234,6 +235,18 @@ def test_a_table_refused_on_read_answers_layout_null_under_a_tokens_skin(world, 
     mobile = _answer(world, _person(ALICE, "alice"), install)["mobile"]
     assert (mobile["source"], mobile["layout"]) == ("tokens", None)
     assert "slots come from looks it can't paint" in caplog.text
+
+
+def test_storage_failing_under_a_tokens_skin_costs_the_layout_never_the_skin(world, caplog):
+    _row, install = _package(world, {**TOKENS, "layout": "hud@1", "slots": FROM_LOOK})
+
+    def broken(_prefix, _path):
+        raise serve.ThemeStorageUnavailable("down")
+
+    world.reader = broken
+    mobile = _answer(world, _person(ALICE, "alice"), install)["mobile"]
+    assert (mobile["source"], mobile["tokens"]["light"], mobile["layout"]) == ("tokens", TOKENS["tokens"]["light"], None)
+    assert "can't be read from storage: the phone gets its skin, no layout" in caplog.text
 
 
 def test_revoked_or_not_opted_in_answers_mobile_null_layout_and_all(world):

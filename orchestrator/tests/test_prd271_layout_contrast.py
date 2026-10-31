@@ -97,6 +97,15 @@ def test_slots_from_the_look_are_measured_for_the_defaults_and_each_preset():
     assert (report["verdict"], contrast["problems"]) == ("blocked", [NIGHT_INK])
 
 
+def test_a_preset_that_cant_fill_a_slot_is_measured_as_the_defaults_the_phone_draws_and_said_so():
+    # green's ink is a length here: members on the night preset get the whole default look on the phone.
+    accents = {**TABLE["knobs"]["accent"], "green": {"--hello-accent": "#1E7F3C", "--hello-on-accent": "12px"}}
+    contrast = _review(LOOKS, table={**TABLE, "knobs": {**TABLE["knobs"], "accent": accents}})["checks"]["contrast"]
+    subjects = [(subject["id"], subject["status"], subject["fromDefaults"]) for subject in contrast["layout"]["subjects"]]
+    assert subjects == [("boot/prepaint.json#defaults", "pass", False), ("default", "pass", False), ("night", "pass", True)]
+    assert contrast["status"] == "pass" and "1 preset(s) can't fill every slot of hud@1" in contrast["reason"]
+
+
 def test_a_skin_under_aa_still_blocks_when_the_layout_passes():
     skin = {"tokens": {"light": {"--background": "0 0% 100%", "--foreground": "0 0% 58%"}}}
     contrast = _review(HUD, skin=skin)["checks"]["contrast"]

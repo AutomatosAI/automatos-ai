@@ -39,6 +39,7 @@ from services.themes.layout_paint import LAYOUT_FIELD, SLOTS_FIELD, block_contra
 from services.themes.layout_slots import is_look_source, look_ref, slot_value, takes_variable
 from services.themes.mobile_tokens import BootTable, boot_table
 
+# The block's refusal (mobile_manifest.py's too) and the reader's (package.py's too): defined here, which both import.
 MOBILE_CODE = "BAD_MOBILE"
 CANNOT_PAINT = "MOBILE_CANNOT_PAINT"
 LOOK_VARIABLE = '{"look": "--variable"}'

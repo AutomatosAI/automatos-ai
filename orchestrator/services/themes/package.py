@@ -61,7 +61,7 @@ from services.themes.first_paint import (
 )
 from services.themes.look_schema import look_file_errors, preset_ids
 from services.themes.manifest import referenced_files, validate_manifest
-from services.themes.mobile_layout import layout_package_errors
+from services.themes.mobile_layout import CANNOT_PAINT as MOBILE_CANNOT_PAINT, layout_package_errors
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD
 from services.themes.mobile_tokens import boot_table, missing_tokens, paint_look
 
@@ -73,7 +73,6 @@ PACKAGE_ERROR_CODES: Tuple[str, ...] = (
     "NO_PRESET", "PRESET_ID_MISMATCH", "UNKNOWN_DEFAULT_LOOK", "MOBILE_CANNOT_PAINT", KNOB_NOT_PAINTED,
     KNOB_NOT_IN_SCHEMA, PREPAINT_DEFAULTS_UNFIT,
 )
-MOBILE_CANNOT_PAINT = "MOBILE_CANNOT_PAINT"
 ENTRY_PATH = "dist/entry.js"
 
 # The plugin upload's limits (core/services/plugin_upload_service.py) hold for themes too.

@@ -52,14 +52,16 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from core.models.themes import ThemePackage
 from services.themes.contract import MOBILE_FONT_ROLES
 from services.themes.css_value import PREPAINT_PATH
-from services.themes.layout_paint import block_contract, layout_answer, look_slots, resolve_slots
+from services.themes.layout_paint import LAYOUT_FIELD, block_contract, layout_answer, look_slots, resolve_slots
 from services.themes.look_schema import SCHEMA_PATH as LOOK_SCHEMA_PATH
 from services.themes.looks import LooksError, read_looks, resolve_look_source
 from services.themes.membership import Membership
 from services.themes.mobile_manifest import MASCOT_NONE, MOBILE_FIELD, MOBILE_SCHEMES
 from services.themes.mobile_tokens import look_tone, missing_tokens, paint_look
 from services.themes.revocations import is_disabled
-from services.themes.serve import BootTarget, FileReader, ThemeFileMissing, may_run, module_url, theme_prepaint
+from services.themes.serve import (
+    BootTarget, FileReader, ThemeFileMissing, ThemeStorageUnavailable, may_run, module_url, theme_prepaint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +152,21 @@ def _phone_look(table: Mapping[str, Any], stored: Optional[Dict[str, Any]], targ
     return None
 
 
-def _read_table(target: BootTarget, reader: FileReader) -> Any:
-    """The package's prepaint table, None when it has none, ``UNREADABLE`` when it is refused on read (logged)."""
+def _read_table(target: BootTarget, reader: FileReader, block: Mapping[str, Any]) -> Any:
+    """The package's prepaint table, None when it has none, ``UNREADABLE`` when it is refused on read (logged).
+
+    Under a ``tokens`` skin only the layout's look slots need the table, so storage failing there costs the
+    layout (null, logged), never the skin; under ``fromLooks`` it is the route's 503, as before.
+    """
     try:
         return theme_prepaint(target.package, reader)
     except ThemeFileMissing:
         return UNREADABLE  # verified_file or theme_prepaint logged why
+    except ThemeStorageUnavailable:
+        if block.get(SOURCE_LOOKS) is True:
+            raise
+        logger.error("Package %s's %s can't be read from storage: the phone gets its skin, no layout", target.package.id, PREPAINT_PATH)
+        return UNREADABLE
 
 
 def _readable(table: Any) -> bool:
@@ -198,6 +209,8 @@ def _layout(block: Mapping[str, Any], table: Any, look: Any, target: BootTarget)
     """The answer's ``layout`` (module docstring): None without one, or when its slots can't be filled (logged)."""
     contract = block_contract(block)
     if contract is None:
+        if LAYOUT_FIELD in block:  # a major the host has since retired (PRD-271 §4.2)
+            logger.error("Package %s names a layout this host doesn't have: the phone draws the skin", target.package.id)
         return None
     if look_slots(block) and not _readable(table):
         logger.error(
@@ -223,7 +236,7 @@ def _mobile_block(db: Any, membership: Membership, target: BootTarget, reader: F
     if not may_run(db, membership, target.install, package) or is_disabled(db, package):
         return None
     paints_looks = block.get(SOURCE_LOOKS) is True or bool(look_slots(block))
-    table = _read_table(target, reader) if paints_looks else None
+    table = _read_table(target, reader, block) if paints_looks else None
     stored = _stored_active_look(db, membership, target) if _readable(table) else None
     colours, look = _colours(block, table, stored, target)
     if colours is None:

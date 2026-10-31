@@ -37,10 +37,12 @@ LAYOUT_FIELDS: Tuple[str, ...] = (LAYOUT_FIELD, SLOTS_FIELD)
 
 
 class Resolved(NamedTuple):
-    """A look's slots: every slot's value, and the slots it couldn't fill (empty when the phone can draw it)."""
+    """A look's slots: every slot's value, the slots it couldn't fill (empty when the phone can draw it), and whether
+    the look couldn't fill one so the defaults were resolved instead."""
 
     slots: Dict[str, Any]
     unresolved: Tuple[str, ...]
+    from_defaults: bool = False
 
 
 def _object(value: Any) -> Mapping[str, Any]:
@@ -95,7 +97,7 @@ def resolve_slots(contract: LayoutContract, block: Mapping[str, Any], table: Any
     resolved = _resolve_once(contract, given, _painted(contract, refs, table, look))
     if not resolved.unresolved or look is None or not refs:
         return resolved
-    return _resolve_once(contract, given, _painted(contract, refs, table, None))
+    return _resolve_once(contract, given, _painted(contract, refs, table, None))._replace(from_defaults=True)
 
 
 def layout_tone(contract: LayoutContract, slots: Mapping[str, Any]) -> str:
