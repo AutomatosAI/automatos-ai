@@ -101,21 +101,21 @@ Done on 2026-10-26: both files hold Automatos's theme-signing key, `ed25519:e138
 stay for a new key. A keys file with no active key verifies nothing: nothing is Official, no signed upload installs,
 and a pasted signature is refused. The private key never goes near the orchestrator.
 
-1. **In the Design Kit repository, set up the `theme-signing` environment** (Settings › Environments): deployment
-   branches `main` only, and the named signers as required reviewers. The kit's
+1. **In the Design Kit repository, set up the `theme-publish` environment** (Settings › Environments): deployment
+   branches `main` only. The kit's
    [OFFICIAL-LISTING.md](https://github.com/AutomatosAI/automatos-design-kit/blob/main/docs/OFFICIAL-LISTING.md)
-   says how.
+   says how; the same environment holds the publish key ([The publish endpoint](publish-endpoint.md)).
 2. **Create one Ed25519 key** and store it, as a PKCS#8 PEM, only as that environment's secret `THEME_SIGNING_KEY`.
-   Keep an offline backup: losing the key means signing every official version again with a new one.
+   Only the Sign step of `theme-publish.yml`'s publish job reads it. Keep an offline backup: losing the key means
+   signing every official version again with a new one.
 3. **Write its public half** as one entry of the keys file:
 
    ```json
    {"schema": 1, "keys": [{"keyId": "ed25519:<16 hex>", "spki": "<base64>", "status": "active", "added": "YYYY-MM-DD"}]}
    ```
 
-   `spki` is the public key's SubjectPublicKeyInfo DER in base64. A **Theme sign** run prints both values in its
-   summary (`Public key (SPKI, base64)` and `Key id`). To check a key id against its `spki` the way the server does
-   (`signature_verify.key_id_of`):
+   `spki` is the public key's SubjectPublicKeyInfo DER in base64. To check a key id against its `spki` the way the
+   server does (`signature_verify.key_id_of`):
 
    ```sh
    python3 -c 'import base64,hashlib,sys; print("ed25519:" + hashlib.sha256(base64.b64decode(sys.argv[1])).hexdigest()[:16])' '<spki>'
@@ -123,17 +123,15 @@ and a pasted signature is refused. The private key never goes near the orchestra
 
 4. **Put the same bytes in both repositories**: the kit's `keys/theme-signing.json` and this repository's
    `orchestrator/services/themes/data/signing-keys.json`. Merge both, and deploy the core release that carries it.
-   Until the kit's file holds an active key, the kit's Theme release workflow attaches no signature. In the same
-   change, update the docs that name the shipped key: [Themes](../themes/_index.md#who-vouches-for-a-theme),
+   The kit's publish job verifies every envelope against its own file before it sends it, so it fails until the
+   kit's file holds the key. In the same change, update the docs that name the shipped key: [Themes](../themes/_index.md#who-vouches-for-a-theme),
    [the signature file](../themes/installing-and-choosing.md#the-signature-file),
    [Marketplace › Themes](../community-marketplace/themes-tab.md),
    [Signatures and revocations](_index.md#11-signatures-and-revocations) and [Signatures](security-model.md#signatures).
-5. **Check it loads.** A keys file that breaks a rule doesn't load, and then a signature paste and a signed upload
-   answer 503, and on the hosted edition `GET /api/themes/revocations` answers 503 too. A first pasted signature that
-   stores (`signatureVerified: true` and the key id in the report) proves the key end to end.
-
-A signature made before the key was deployed can still be pasted afterwards: the approval's signature request stays
-open, and a paste no active key verifies stores nothing (400).
+5. **Check it loads.** A keys file that breaks a rule doesn't load, and then a publish, a signature paste and a
+   signed upload answer 503, and on the hosted edition `GET /api/themes/revocations` and
+   `GET /api/marketplace/catalog` answer 503 too. A publish run that answers `published` (the version's report shows
+   `signatureVerified: true` and the key id) proves the key end to end.
 
 ### Retire or revoke a key
 
@@ -146,16 +144,25 @@ Change the key's `status` in both files and deploy:
 - `revoked`: versions it signed stop running (read as `disable`) until they are signed again. The hosted feed lists
   the key in `revokedKeys`, so each local edition distrusts it on its next pull, before its own keys file changes.
 
-To sign a version again, run Theme sign with the version's open signature request (the one **Approve** opened, shown
-in its report) and paste the new signature: the admin queue takes a new signature for a version whose stored one no
-longer verifies.
+To sign a version again, run the kit's `theme-publish.yml` on `main` with the version's release tag (a backfill,
+`gh workflow run theme-publish.yml --ref main -f tag=<slug>-v<version>`). The kit rebuilds the tag's package, which
+must be the release's own bytes, and signs it with the active key; the publish endpoint signs an approved version
+whose stored signature no longer verifies (it answers `published`). The admin queue's **Save signature** still takes
+a pasted signature an active key verifies, for a version whose stored one no longer does.
 
 ## List an official theme
 
 A theme is **Official** when its publisher is the reserved `automatos` publisher and the version shown carries a
-signature an active key verifies. The Design Kit's
+signature an active key verifies.
+
+**The normal way is a merge.** A Design Kit pull request that raises the theme's version merges to `main`, and the
+kit's publish job builds, reviews, signs and sends it to [the publish endpoint](publish-endpoint.md), which lists,
+approves and signs it in one step; unpinned installs of an older version move to it
+([Updates and rollback](updates-and-rollback.md)). Nothing is done on `/admin/themes`. The kit's
 [OFFICIAL-LISTING.md](https://github.com/AutomatosAI/automatos-design-kit/blob/main/docs/OFFICIAL-LISTING.md) is the
-whole run, from the kit's release to the release's `.sig.json`. The server's side of it:
+whole run, the failures that block it and the backfill of a version released by hand.
+
+**By hand**, as a platform admin, the server's side is:
 
 1. **Before you start**, the signing key is deployed (above), and this server's host and SDK versions meet the
    version's `engines`. Otherwise the listing shows it as needing a newer Automatos, and it can't be installed.
@@ -174,17 +181,14 @@ whole run, from the kit's release to the release's `.sig.json`. The server's sid
    workspaces running an older Marketplace version of the theme are offered the update. Each of those installs that is
    not pinned moves to it at once (`updatesApplied` in the answer); one the move refuses keeps the offer, and the
    server logs why.
-5. **Sign.** Copy the whole request and run the kit's **Theme sign** workflow on `main` with it as its `request`
-   input. A required reviewer of `theme-signing` approves the run. Its summary prints the request id, the signature,
-   the key id and the envelope.
-6. **Paste the signature** and **Save signature** (`POST …/signature`, `{requestId, signature}`). It is stored only
-   when an active key verifies it. The report then shows a verified signature by `ed25519:…`, and the listing turns
-   Official.
-7. **Check from another workspace.** Marketplace › Themes shows the theme with the **Official** badge. Add it and use
+5. **Sign.** The kit has no workflow that signs a request by hand. Run its publish backfill with the release's tag
+   (`gh workflow run theme-publish.yml --ref main -f tag=<slug>-v<version>`): for bytes already approved here, the
+   publish endpoint only adds the signature. Or, holding a signature an active key made over the request's
+   `canonical` text, paste it and **Save signature** (`POST …/signature`, `{requestId, signature}`); it is stored only
+   when an active key verifies it. Either way the report then shows a verified signature by `ed25519:…`, and the
+   listing turns Official.
+6. **Check from another workspace.** Marketplace › Themes shows the theme with the **Official** badge. Add it and use
    it there.
-
-The Design Kit can do steps 2 to 6 on its own when a version bump merges: see
-[The publish endpoint](publish-endpoint.md).
 
 To take a listed version down later, use **Deactivate** (next section).
 

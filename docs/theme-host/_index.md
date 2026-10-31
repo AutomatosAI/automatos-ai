@@ -81,7 +81,9 @@ server. For what members and workspace admins see, read [Themes](../themes/_inde
 | [API reference](api-reference.md) | Every `/api/themes*` route and every admin theme route: who may call it, what it takes and answers, its errors |
 | [Security model](security-model.md) | Why private code needs an opt-in, the CSS scope, the SDK boundary, the files proxy, step-up, signatures, revocations, safe mode |
 | [Operations](operations.md) | Runbooks: the signing key, an official listing, revoking, the revocation feed, the upload switches, reading a scan report |
-| [The publish endpoint](publish-endpoint.md) | `POST /api/marketplace/themes/publish`: how the Design Kit lists, approves and signs a version with its key; the settings, rotating and revoking the key |
+| [The publish endpoint](publish-endpoint.md) | `POST /api/marketplace/themes/publish`: from a kit merge to the installs; how the Design Kit lists, approves and signs a version with its key; held bytes, refusals, the settings, rotating and revoking the key |
+| [Updates and rollback](updates-and-rollback.md) | How an install moves between versions: the install row, update, roll back and move back, offers, auto-update on approval (an admin's, a publish, a Sync), rollback on deactivation, the log lines when a move is refused |
+| [Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md) | The local edition's catalogue pull and Cloud installs, and the hosted edition's catalogue, its files and the public reads |
 | [CSS layer model](css-layer-model.md) | Why theme CSS is unlayered, the scope check, how the approval cards and the AI label hold |
 | [Placement slots](placement-reach.md) | The three placement slots and which core pages reach them |
 | [SDK surface map](sdk-surface-map.md) | Every name of `@automatos/theme-sdk`, mapped to the core module it replaces |
@@ -207,7 +209,9 @@ twin over the browser's own `sanitizePrepaint` and `lookSpecOf`):
 The boot read (`serve.theme_prepaint`) re-checks the table with the grammar only, so a package imported before these
 checks still boots and paints what the browser keeps.
 
-A refusal is a 400 with one `{code, path, message}` per problem (a 413 when the package is over its cap).
+A refusal is a 400 with one `{code, path, message}` per problem (a 413 when the package is over its cap). The same
+reader runs for an upload, a submission and a publish, and the Design Kit's `automatos-theme pack` and `check` refuse
+the same first-paint problems, with the same codes and sentences, before anything is uploaded.
 
 ## 2. The review stage
 
@@ -250,7 +254,7 @@ The tables (`core/models/themes.py`):
 
 | Table | Holds |
 |---|---|
-| `theme_packages` | One row per version: `owner_type` (`marketplace` or `workspace`), the manifest, the file manifest, the digest, the storage prefix, `status`, `reviewed`, the scan report and verdict, the signature |
+| `theme_packages` | One row per version: `owner_type` (`marketplace` or `workspace`), the manifest, the file manifest, the digest, the storage prefix, `status`, `reviewed`, the scan report and verdict, the signature, and `source` (`cloud` for a row a Sync with Automatos Cloud wrote, else `NULL`) |
 | `theme_publishers` | Who owns a publisher name |
 | `theme_installations` | A workspace's install, by reference to a package, with its previous, pending and pinned versions and `is_default` |
 | `theme_choices` | A member's choice in a workspace |
@@ -259,16 +263,24 @@ The tables (`core/models/themes.py`):
 | `theme_workspace_settings` | The workspace's theme settings |
 | `theme_revocations` | Revocations, `local` or pulled from the `feed` |
 | `theme_revocation_sync` | The local edition's feed pull status (one row) |
-| `theme_review_events` | A package's review history and signature requests |
+| `theme_review_events` | A package's review history and signature requests; an `approved` event's detail counts `updatesOffered` and `updatesApplied`, a `deactivated` one's `installsRolledBack` |
+| `marketplace_cloud_sync` | The local edition's last Sync with Automatos Cloud: attempt, success, error, the catalogue's `generatedAt` and the counts (one row) |
 
 A **private upload** (`POST /api/themes/import`) writes a `workspace` package with `reviewed` false and installs it
 in that workspace. A higher version of a theme already installed becomes the install's pending update; the install
 never switches by itself. A private upload installs whatever its verdict.
 
 A **Marketplace submission** (`POST /api/marketplace/themes/submit`) writes a `marketplace` package with `status`
-`pending`. It must ship `source/`. Nothing is listed until a person approves it in the admin queue. A workspace then
+`pending`. It must ship `source/`. Nothing is listed until a person approves it in the admin queue, or until the
+Design Kit's publish job approves it with its key ([The publish endpoint](publish-endpoint.md)). A workspace then
 installs it by reference (`POST /api/marketplace/themes/{listingId}/install`): every workspace that installs a version
-shares its one package row.
+shares its one package row. In the local edition a **Sync with Automatos Cloud** writes `marketplace` rows too, with
+`source` `cloud`, approved, signed and with no stored file until an install fetches it
+([Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md)).
+
+An unpinned Marketplace install moves to each newer version once it is listed, and back to the previous listed
+version when the one it runs is deactivated; a pinned one keeps its version. See
+[Updates and rollback](updates-and-rollback.md).
 
 ## 4. Opt-in
 
@@ -409,9 +421,10 @@ Two checks run on every serve, through one rule (`services/themes/revocations.py
 
 The keys come from `services/themes/data/signing-keys.json` (`signature_verify.py`). In this release it holds one
 key, Automatos's theme-signing key: `ed25519:e138b6d0fa7aaaf3`, `active`, added 2026-10-26. Only a signature that key
-made verifies. No version is signed yet, so nothing is Official until the first signature from the Design Kit's Theme
-sign workflow is pasted. [Operations](operations.md#add-the-production-signing-key) says how a key is added, retired
-or revoked.
+made verifies. The Design Kit's publish job signs each version it publishes with it and sends the envelope to
+`POST /api/marketplace/themes/publish`, which stores it with the approval; the kit's release carries the same
+envelope as `<version>.sig.json`, which `POST /api/themes/import` takes as its `signature` part.
+[Operations](operations.md#add-the-production-signing-key) says how a key is added, retired or revoked.
 
 The hosted edition publishes its Marketplace revocations at `GET /api/themes/revocations`; each local edition pulls
 that feed every `THEME_REVOCATIONS_PULL_MINUTES` (60) while the server's scheduler runs. See [Security model](security-model.md#signatures) and
@@ -420,12 +433,14 @@ that feed every `THEME_REVOCATIONS_PULL_MINUTES` (60) while the server's schedul
 ## 12. The admin review queue and the Marketplace
 
 `/admin/themes` (`frontend/app/admin/themes/page.tsx`) is the review queue, for platform admins. A reviewer reads the
-scan report, records the kit job's summary, approves or rejects, then hands the signature request to the kit's
-signing workflow and pastes the signature back (`services/themes/review.py`, `signing.py`). An approved version is
-listed on **Marketplace › Themes** (`services/themes/listings.py`), with its web and phone screenshots per look. It
-is **Official** only when its publisher is
-reserved and its signature verifies with an active key. Taking a version down writes a `disable` revocation of its
-digest.
+scan report, records the kit job's summary, approves or rejects, and can paste a signature for the approval's
+signature request (`services/themes/review.py`, `signing.py`). A version the Design Kit publishes skips the queue:
+the publish endpoint records the kit review's summary, approves and signs it in one transaction. An approved version
+is listed on **Marketplace › Themes** (`services/themes/listings.py`), the Marketplace's first tab, as a storefront
+with its web and phone screenshots per look. It is **Official** only when its publisher is reserved and its signature
+verifies with an active key. Approval moves the unpinned installs of an older version to it. Taking a version down
+(**Deactivate**) writes a `disable` revocation of its digest and moves the unpinned installs on it back to the
+previous listed version ([Updates and rollback](updates-and-rollback.md)).
 
 ## Local edition and hosted edition
 
@@ -438,6 +453,9 @@ digest.
 | Revocation feed | Pulled from `THEME_REVOCATIONS_URL`; the feed route answers 404 | Served at `GET /api/themes/revocations`; the sync routes answer 404 |
 | Keys revoked by the feed | Read from the last pull | Not used: the keys file says which keys are revoked |
 | Files proxy credential | The paired browser's device token, or none | The Clerk session's token |
+| Marketplace themes from elsewhere | **Sync with Automatos Cloud** pulls the hosted catalogue's signed versions when an owner or admin presses it; the catalogue routes answer 404 | Serves the catalogue (`GET /api/marketplace/catalog`) and its files; the Sync routes answer 404 |
+| `/marketplace` signed out | No sign-in exists | Public and read-only, from the catalogue and `GET /api/public/marketplace/{type}` |
+| Auto-update of Marketplace installs | On an admin's approval, and after each Sync | On an admin's approval, and on each publish |
 
 Related:
 

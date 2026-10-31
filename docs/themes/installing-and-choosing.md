@@ -93,8 +93,9 @@ Adding a theme from the Marketplace needs no upload switch: see
 
 ## Install a theme from a file
 
-A theme comes as one `.autotheme` file. A signed release carries a small `.sig.json` signature file next to it. No
-release is signed yet: see [The signature file](#the-signature-file).
+A theme comes as one `.autotheme` file. A signed release carries a small signature file next to it, named
+`<version>.sig.json`. The Design Kit's releases of its official themes carry one: see
+[The signature file](#the-signature-file).
 
 1. Open **Settings › Appearance › Themes**.
 2. If you have the theme's signature file, click **Add its signature file** first and pick the `.sig.json`. The page
@@ -141,13 +142,18 @@ The size limits, by default (the server's administrator can change them):
 
 A signature file tells the server that Automatos vouches for exactly these files.
 
-**No release carries a signature file yet.** This release ships Automatos's theme-signing key
-(`ed25519:e138b6d0fa7aaaf3`), and a signature file that key made verifies. The Design Kit's releases carry no
-`.sig.json` yet: the first signatures will come from the kit's Theme sign workflow. A signature file any other key
-made is refused with "No Automatos signing key verifies this signature for these files, so nothing was installed."
-(For server operators: [the signing key](../theme-host/operations.md#add-the-production-signing-key).)
+**Where it comes from.** Each version the Design Kit publishes is signed with Automatos's theme-signing key
+(`ed25519:e138b6d0fa7aaaf3`), which this release ships, and its release on the kit's
+[releases](https://github.com/AutomatosAI/automatos-design-kit/releases) page carries the signature file beside the
+`.autotheme`: for example `1.4.0.sig.json` next to `automatos.play-1.4.0.autotheme`. Some early releases have none.
+The same signature is stored with the version on the hosted Marketplace, so a version added from there is signed
+without any file. A signature file any other key made is refused with "No Automatos signing key verifies this
+signature for these files, so nothing was installed." (For server operators:
+[the signing key](../theme-host/operations.md#add-the-production-signing-key).)
 
 - It is at most 4 KB. The server checks it against the package's own files before it stores anything.
+- It doesn't turn uploads on: a signed upload still needs **Private theme uploads**
+  ([Who can add a theme](#who-can-add-a-theme)).
 - When it is taken, the theme shows **Signed by Automatos** in place of **Private · not reviewed**, in Settings, the
   Appearance menu and ⌘K. A signed upload counts as reviewed: members don't opt in to it, it can be the workspace
   default, and it may carry an `automatos/…` id.
@@ -190,6 +196,7 @@ run**. A check that did not run is never shown as passed: its row gives the serv
 | **Looks** | That every preset fits the theme's look rules. The row lists the presets. |
 | **Contrast (AA)** | For a theme with a phone block: each text colour on its own fill (eight pairs) at 4.5:1, and the primary and focus-ring colours on the ground at 3:1. An Error names the pair under its minimum. A theme with no phone block is **Not measured**: it doesn't say which of its colours is text on which ground, so the server has nothing to measure. |
 | **SDK areas** | The parts of the theme SDK the code uses, against the areas `theme.json` declares. An Error means the code asks for a name this Automatos doesn't have, so the theme can never load. A Warning means an area is used but not declared, a declared area doesn't exist, or the imports couldn't be checked one by one. |
+| **Microphone and speech** | That the theme's own code never opens the microphone, listens or speaks by itself. A theme talks to Auto by voice only through the host's voice button, which shows the AI voice notice and a stop control. A theme whose code names the browser's microphone or speech functions gets an Error. |
 | **Cloned core pages** | Each page the theme copied from one of Automatos's own pages, against this release's version of that page. A Warning means the page changed since the copy was made, so the copy may miss fixes. |
 | **Automated review** | Only on uploads stored before the automated checks existed: **Not run**. |
 
@@ -226,8 +233,18 @@ The safeguard for private code is the opt-in: it runs for a member only once tha
 
 ## Add a theme from the Marketplace
 
-**Marketplace › Themes** lists themes a person at Automatos reviewed. Open a card and click **Add to my workspace**
-(owners and admins). It adds the newest version your Automatos can run. Members don't opt in to a Marketplace theme.
+**Marketplace › Themes** lists reviewed themes. Open a card and click **Add to my workspace** (owners and admins). It
+adds the newest version your Automatos can run. Members don't opt in to a Marketplace theme, and it can be the
+workspace default.
+
+- **It updates itself.** When a newer version is listed, the install moves to it, unless you pin a version. See
+  [Managing themes](managing-themes.md#updates).
+- **Official themes are signed.** A version of an official theme shows **Signed by Automatos** in Settings and
+  **Official** on its Marketplace card.
+- **On the local edition**, Marketplace › Themes lists the themes approved on your own server, plus the ones an owner
+  or admin brings in with **Sync with Automatos Cloud** in the Marketplace header. See
+  [The open Marketplace](../community-marketplace/open-marketplace.md).
+
 See [Marketplace › Themes](../community-marketplace/themes-tab.md).
 
 ---
@@ -300,9 +317,8 @@ you.
 Members see the default when they haven't chosen a theme, when the theme they chose was uninstalled, and always while
 members may not choose.
 
-**Only a theme that isn't private can be the default**: a Marketplace theme or a signed upload (no release is
-signed yet, so today that means a Marketplace theme). A default runs for
-members who never said yes to its code. On a private upload, **Make default** is greyed, with this beside it: "A theme
+**Only a theme that isn't private can be the default**: a Marketplace theme, or an upload with its signature file.
+A default runs for members who never said yes to its code. On a private upload, **Make default** is greyed, with this beside it: "A theme
 that was not reviewed can’t be the workspace default." The server holds the same rule: "An unreviewed theme can't be
 the workspace default: members would run its code without saying yes."
 

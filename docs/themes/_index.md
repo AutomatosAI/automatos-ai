@@ -94,15 +94,16 @@ whether it can be the workspace default.
 |---|---|---|---|---|
 | **Private upload** | An owner or admin uploads a `.autotheme` file with **Install theme**. Nobody at Automatos reviewed it. | **Private · not reviewed**. The Appearance menu and ⌘K note **Private · opt in first** until you opt in. | Yes, once per version | No |
 | **Signed upload** | An uploaded `.autotheme` with its signature file (`.sig.json`), verified by an active Automatos signing key. | **Signed by Automatos**, in Settings, the Appearance menu and ⌘K | No | Yes |
-| **Marketplace theme** | Added from **Marketplace › Themes**. A person at Automatos reviewed every version listed there. | None, or **Signed by Automatos** when its version is signed | No | Yes |
+| **Marketplace theme** | Added from **Marketplace › Themes**. Every version listed there was reviewed: by a person at Automatos, or, for an official theme, by the Design Kit's publish run, after its own review passed and the server's automated checks didn't block it. It updates itself unless pinned. | None, or **Signed by Automatos** when its version is signed | No | Yes |
 | **Official** | A Marketplace theme from the reserved `automatos` publisher whose listed version carries a signature an active Automatos key verifies. A reserved name alone is never Official. | **Official** on the Marketplace card, **Signed by Automatos** in Settings | No | Yes |
 
-**No theme is signed yet.** This release ships Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`). An
-official version is one Automatos reviewed and signed with that key, and the first signatures will come from the
-Design Kit's Theme sign workflow. Until then nothing shows **Signed by Automatos**, no theme is **Official**, every
-theme you upload is a private upload, and every theme from **Marketplace › Themes** is a Marketplace theme. A
-signature file that key didn't make is refused ("No Automatos signing key verifies this signature for these files, so
-nothing was installed."). For server operators: [the signing key](../theme-host/operations.md#add-the-production-signing-key).
+**The signing key.** This release ships Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`). Each version
+the Design Kit publishes is signed with it: the hosted Marketplace stores the signature with the version, and the
+kit's release carries it as a `<version>.sig.json` file. So an official theme added from the Marketplace shows
+**Signed by Automatos**, and the same release uploaded with its signature file is a signed upload. An upload without
+its signature file is a private upload. A signature file that key didn't make is refused ("No Automatos signing key
+verifies this signature for these files, so nothing was installed."). For server operators:
+[the signing key](../theme-host/operations.md#add-the-production-signing-key).
 
 Why the opt-in: a theme's code runs in your browser with your session. The opt-in dialog says it in the server's own
 words: "This theme was not reviewed. Its code runs with your access to all your workspaces." See
@@ -120,7 +121,9 @@ top of the app, next to the notifications bell. A theme's own frame shows the sa
 | Switch by name | ⌘K (Ctrl+K), then the **Themes** group. Type "theme", "style" or "appearance" to list them all. |
 | See the installed themes, opt in and choose one | **Settings › Appearance › Themes** (`/settings?tab=appearance`) |
 | Install, update, roll back, uninstall, set the default, change theme settings | **Settings › Appearance › Themes**, as an owner or admin |
-| Browse the reviewed themes and add one | **Marketplace › Themes** |
+| Browse the reviewed themes and add one | **Marketplace › Themes** (on the hosted edition, `/marketplace` also opens signed out) |
+| Bring Automatos Cloud's themes into a local install | **Sync with Automatos Cloud**, in the Marketplace header (owners and admins) |
+| Hold a Marketplace theme on its version | **Settings › Appearance › Themes › Pinned versions** |
 | Edit your look | **Appearance › Customise look…**, which opens **Make it yours** (`/looks`) |
 | See the theme's style sheet | `/looks/style` |
 | Get back in when a theme breaks the app | `/safe-mode`, or add `?safe_mode=themes` to any address |
@@ -139,6 +142,8 @@ Play (from 1.2.0) and HUD (from 1.0.1) draw from 360 pixels, so a phone's browse
 | Private uploads | On by default. | On by default only in a workspace of one person. An owner or admin can switch them on, unless the platform has turned them off. See [the workspace's theme settings](managing-themes.md#the-workspaces-theme-settings). |
 | "Confirm it's you" | Never asked. | Sensitive theme actions ask you to confirm your sign-in when you last signed in more than 10 minutes ago (the server's default). |
 | Withdrawn themes | The server checks Automatos's public list of withdrawn theme versions every hour by default. | Automatos keeps the list. |
+| Marketplace › Themes | The themes approved on your own server, plus the official themes **Sync with Automatos Cloud** brings in when an owner or admin presses it. | Automatos's reviewed themes. Anyone can browse `/marketplace` signed out; adding one asks you to sign in. |
+| Marketplace theme updates | When a newer version is listed: after a Sync brings one, or when your server approves one. A pinned install stays. | When a newer version is listed. A pinned install stays. |
 
 The actions that ask you to confirm it's you: installing a theme (from a file or the Marketplace), opting in, making or
 clearing the default, applying an update, rolling back, changing the theme settings and publishing a theme. Choosing
@@ -151,12 +156,14 @@ a theme and uninstalling one never ask.
 - [Looks](looks.md): presets, Make it yours, saving, resetting, deleting and sharing a look, where looks are kept,
   reduced motion.
 - [On your phone](on-your-phone.md): a theme's phone layout in a phone's browser, and its phone skin in Automatos Go.
-- [Managing themes](managing-themes.md): updates, pins, roll back, uninstall, "Needs update", withdrawn themes, safe
-  mode and the workspace's theme settings.
+- [Managing themes](managing-themes.md): updates (a Marketplace theme updates itself), pins, roll back, uninstall,
+  "Needs update", withdrawn themes, safe mode and the workspace's theme settings.
 - [FAQ](faq.md): the questions people ask first.
 
 Related:
 
 - [Marketplace › Themes](../community-marketplace/themes-tab.md)
+- [The open Marketplace](../community-marketplace/open-marketplace.md): browsing signed out, and Sync with Automatos
+  Cloud on a local install
 - [The phone's theme: the `mobile` block](../theme-host/mobile.md) (technical)
 - [Theme host](../theme-host/_index.md) (technical: the architecture, the API, the security model and operations)

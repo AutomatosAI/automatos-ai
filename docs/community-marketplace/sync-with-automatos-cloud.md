@@ -31,10 +31,13 @@ The following files were used as context for generating this page:
 only: the install reads Automatos Cloud's public theme catalogue and lists the versions an Automatos key signed. It
 never publishes anything, and it runs only when someone presses the button.
 
-This page covers the local edition's side (the button, what leaves your install, the checks, the updates and the
-settings) and then the hosted edition's side: the catalogue it serves and the public Marketplace at `/marketplace`.
+This is the technical page. It covers the local edition's side (the button, what leaves your install, the checks,
+the updates and the settings) and then the hosted edition's side: the catalogue it serves, its files, the public
+reads and their rate limit, and the public Marketplace at `/marketplace`. For what a person can do and where, see
+[The open Marketplace](open-marketplace.md).
 
-Themes are the only type that syncs today. Agents, Playbooks, packages and plugins are still planned.
+Themes are the only type that syncs. An item of any other type in the catalogue is skipped, neither listed nor a
+reason to fail the Sync.
 
 ---
 
@@ -159,6 +162,13 @@ A download that fails changes no install. The toast says how many themes could n
 as they were; the next Sync tries again."), and the next Sync does try again: the update follows what is listed, not
 what one Sync brought. A theme your own install lists never moves from here.
 
+This is `services/marketplace_cloud/updates.py` `apply_cloud_updates`, run by `POST /api/marketplace/cloud-sync`
+after the pull commits. It calls the two functions an approval calls, `listing_updates.offer_listed_update` and
+`auto_update.apply_listed_update`, but never `review.approve`, so a Cloud row gets no signature request and no event
+row. Each theme is committed on its own, one pass runs at a time per process, and nothing is fetched for a theme whose
+older installs are all pinned. See [Updates and rollback](../theme-host/updates-and-rollback.md) for the moves
+themselves.
+
 ## Settings
 
 All three are backend settings, read from the environment only (`envs/api.defaults`, overridden in
@@ -220,10 +230,41 @@ Both are public by design:
 
 - cached (`Cache-Control: public, max-age=300` with an ETag for the catalogue; a file never changes, so a file is
   cached as immutable);
-- rate-limited per client IP and per route: `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` reads a minute on each (120 by
-  default), over it 429;
+- rate-limited per client IP and per route (`api/public_rate_limit.py`): `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` reads
+  a minute on each (120 by default), over it 429 (see [The rate limit](#the-rate-limit));
 - the catalogue is capped at `MARKETPLACE_CATALOG_FEED_MAX_KB` (1024 by default). A larger one is a logged 503,
-  because served, it would fail every Sync.
+  because served, it would fail every Sync;
+- built at most once every 30 seconds for every caller (`catalog.catalog_snapshot`). While one caller builds, the
+  others get the last catalogue this process holds; with none held, a caller waits up to 2 seconds, then gets 503
+  with `Retry-After: 5`. A package is rebuilt from its stored files in one of two slots per process; none free within
+  a second is 503 with `Retry-After: 5`.
+
+### The public reads
+
+`GET /api/public/marketplace/{type}` (`api/public_marketplace.py`, `services/marketplace_public/`) answers what a
+visitor sees of every tab but Themes. `type` is one of `agents`, `playbooks`, `packages`, `applications`, `plugins`,
+`skills` and `llms`; another is 404. `?limit` is 1 to 100 (50 by default) and `?offset` 0 or more (else 422). The
+answer is `{type, items, limit, offset, more}`: each type's approved Marketplace rows mapped through that type's
+field allowlist (`services/marketplace_public/fields.py`), with nothing from a workspace, a person or an install. It is
+cached like the catalogue (`Cache-Control: public, max-age=300`, a weak ETag, 304). A database that fails the read is
+a logged 503.
+
+### The rate limit
+
+The three public routes, the catalogue, its files and the public reads, each have their own bucket per client
+address: `marketplace-catalog:ip`, `marketplace-catalog-files:ip` and `marketplace-public:ip`.
+
+- A bucket is one IPv4 address or one IPv6 /64 (`core/security/ip_bucket.py`), counted in the widget API's Redis
+  sliding window over 60 seconds (`api/widgets/rate_limit.py` `RateLimitStore`).
+- Over the limit is 429 "Too many requests from this address. Try again in a minute.", with `Retry-After` and
+  `Cache-Control: no-store`, so no cache keeps the refusal for everyone.
+- With Redis unreachable the request goes through, and the store logs an error naming the limiter.
+- The edition is checked first: a local install answers 404 before the limit counts anything.
+
+| Setting (hosted edition) | Default | What it does |
+|---|---|---|
+| `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` | `120` | Reads a minute per client address on each public route. At least 1. |
+| `MARKETPLACE_CATALOG_FEED_MAX_KB` | `1024` | The largest catalogue the hosted edition serves. Keep it at or under every install's `AUTOMATOS_CLOUD_FEED_MAX_KB`. |
 
 ### The public Marketplace
 

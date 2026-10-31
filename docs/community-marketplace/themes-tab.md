@@ -47,7 +47,9 @@ For what a theme is, and how members choose one, see [Themes](../themes/_index.m
 
 ## What is listed
 
-- Only versions a person approved after review. A version waiting for review, rejected or taken off is never listed.
+- Only approved versions: a person at Automatos approved it after review, or, for an official theme, the Automatos
+  Design Kit published it after its own review passed and the server's automated checks didn't block it. A version waiting for
+  review, rejected or taken off is never listed.
 - A version that was withdrawn and turned off is not listed. One withdrawn with a warning is listed, with the reason.
 - A workspace's own uploads are never listed.
 - On a local install, the versions a [Sync with Automatos Cloud](sync-with-automatos-cloud.md) brought: reviewed and
@@ -73,7 +75,7 @@ The badges, on the hero and the cards:
 
 | Badge | Meaning |
 |---|---|
-| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. No card shows it yet: this release ships Automatos's theme-signing key, but no version is signed with it yet. |
+| **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. Each version the Automatos Design Kit publishes is signed with Automatos's theme-signing key, which this release ships, so its official themes show it. |
 | **From Automatos Cloud** | A local install listed this version through **Sync with Automatos Cloud**. Its screenshots load from Automatos Cloud, and its files are fetched and checked when you add it. See [Sync with Automatos Cloud](sync-with-automatos-cloud.md). |
 | **In this workspace** | The workspace has this theme installed. |
 | **Update available** | The workspace runs an older Marketplace version of it. |
@@ -155,6 +157,14 @@ The server's rules for a submission:
 
 To build and pack a theme, use the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit) and
 its [guides](https://github.com/AutomatosAI/automatos-design-kit/tree/main/guides).
+
+## Signed out, on the hosted edition
+
+On the hosted edition, `/marketplace` opens for anyone, signed in or not. A visitor sees the same storefront, with
+every web and phone screenshot, and each theme's **Details**: no installed list, no **In this workspace** or update
+badge, and **Make your own** offers the Design Kit with "Sign in to submit it for review" instead of the form. **Add
+to my workspace** opens sign-in; once signed in, the Marketplace opens that theme's details with **Add to my
+workspace** ready. Nothing installs until they click it. See [The open Marketplace](open-marketplace.md).
 
 ## When the theme Marketplace is off
 
