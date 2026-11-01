@@ -143,6 +143,19 @@ def _failed(span: Any, exc: BaseException) -> None:
     span.set_status(Status(StatusCode.ERROR, type(exc).__qualname__))
 
 
+def _answered(span: Any, status: int) -> None:
+    """The answer's status on the span; a 5xx marks it failed, as OpenTelemetry's HTTP
+    conventions read a server span, with the status code as its ``error.type`` (#1310).
+    The canvas routes return their failures as a 500 rather than raising. No message
+    text, so #1107's type-only rule holds; a 4xx is the caller's and stays unset."""
+    from opentelemetry.trace import Status, StatusCode
+
+    span.set_attribute("http.status_code", status)
+    if status >= 500:
+        span.set_attribute("error.type", str(status))
+        span.set_status(Status(StatusCode.ERROR, f"HTTP {status}"))
+
+
 class _StatusRecorder:
     """The ASGI ``send`` of a request, passed on, keeping the response's status."""
 
@@ -174,7 +187,7 @@ async def _traced(app: Any, scope: Any, receive: Any, send: Any) -> None:
             _failed(span, exc)
             raise
         if recorder.status is not None:   # None: the client left before an answer started
-            span.set_attribute("http.status_code", recorder.status)
+            _answered(span, recorder.status)
 
 
 class TracingMiddleware:
@@ -182,7 +195,8 @@ class TracingMiddleware:
 
     A 404 or 405 is an answer, not a failure: the router's own HTTPException becomes
     its response inside the app, so the span records the status. A handler that raises
-    marks the span failed with the error's type, and the error goes on to the 500."""
+    marks the span failed with the error's type, and the error goes on to the 500; one
+    that returns a 5xx marks it failed with the status code (#1310)."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
