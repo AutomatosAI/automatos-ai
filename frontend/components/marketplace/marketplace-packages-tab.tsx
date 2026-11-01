@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react'
 import { Package, Sparkles, Bot, BookOpen, Brain, Wrench, Puzzle, Cpu } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { apiClient } from '@/lib/api-client'
 import {
   MarketplacePackage,
   MEMBER_TYPE_ORDER,
   MEMBER_TYPE_LABELS,
 } from './package-types'
 import { PackageDetailModal } from './package-detail-modal'
+import { useMarketplaceAccess } from './access/marketplace-access'
+import { PublicItemDetail } from './public/public-item-detail'
 
 interface MarketplacePackagesTabProps {
   searchQuery?: string
@@ -122,6 +123,7 @@ export function MarketplacePackagesTab({ searchQuery, packages }: MarketplacePac
   const [items, setItems] = useState<MarketplacePackage[]>(packages || [])
   const [loading, setLoading] = useState(!packages)
   const [selected, setSelected] = useState<MarketplacePackage | null>(null)
+  const { signedIn, source } = useMarketplaceAccess() // signed out on SaaS: the public reads (PRD-270 §5.7)
 
   useEffect(() => {
     if (packages) {
@@ -131,8 +133,8 @@ export function MarketplacePackagesTab({ searchQuery, packages }: MarketplacePac
     }
     let active = true
     setLoading(true)
-    apiClient
-      .get('/api/marketplace/packages')
+    source
+      .packages()
       .then((data: MarketplacePackage[]) => {
         if (active) setItems(Array.isArray(data) ? data : [])
       })
@@ -145,7 +147,7 @@ export function MarketplacePackagesTab({ searchQuery, packages }: MarketplacePac
     return () => {
       active = false
     }
-  }, [packages])
+  }, [packages, source])
 
   const q = (searchQuery || '').trim().toLowerCase()
   const filtered = q
@@ -208,8 +210,10 @@ export function MarketplacePackagesTab({ searchQuery, packages }: MarketplacePac
         </div>
       </div>
 
-      {selected && (
-        <PackageDetailModal pkg={selected} onClose={() => setSelected(null)} />
+      {selected && signedIn && <PackageDetailModal pkg={selected} onClose={() => setSelected(null)} />}
+      {/* Signed out: what the public read says of it, and Add goes to sign-in */}
+      {selected && !signedIn && (
+        <PublicItemDetail type="packages" tab="packages" itemKey={selected.slug} onClose={() => setSelected(null)} />
       )}
     </div>
   )

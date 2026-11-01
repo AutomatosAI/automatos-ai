@@ -44,12 +44,12 @@ import { apiClient } from '@/lib/api-client'
 import { useSystemRole } from '@/contexts/role-context'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 import { GitHubImportModal } from './github-import-modal'
+import { useMarketplaceAccess } from './access/marketplace-access'
 
 // ===================================================================
 // Types
 // ===================================================================
-
-interface PluginSummary {
+export interface PluginSummary {
   id: string
   slug: string
   name: string
@@ -763,7 +763,7 @@ interface PluginCardProps {
   globalIcon?: string | null
 }
 
-function PluginCard({
+export function PluginCard({
   plugin,
   index,
   isEnabled,
@@ -780,7 +780,7 @@ function PluginCard({
   globalIcon,
 }: PluginCardProps) {
   const isPending = plugin.approval_status === 'pending'
-
+  const { signedIn } = useMarketplaceAccess() // signed out, the public read has no enable counts
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -864,10 +864,10 @@ function PluginCard({
                 <span>{plugin.agents_count}</span>
               </div>
             )}
-            <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
+            {signedIn && <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
               <Download className="w-3 h-3" />
               <span>{plugin.enable_count}</span>
-            </div>
+            </div>}
           </div>
 
         </CardContent>
