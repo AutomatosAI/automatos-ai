@@ -211,7 +211,7 @@ def test_a_returned_5xx_marks_the_span_failed_and_a_4xx_does_not(traced_worker):
     spans = {s.attributes["http.status_code"]: s for s in _server_spans(exporter)}
     for status in (500, 503):
         assert spans[status].status.status_code == StatusCode.ERROR
-        assert spans[status].status.description == f"HTTP {status}"
+        assert spans[status].status.description == str(status)   # its error.type, as the API keeps it
         assert spans[status].attributes["error.type"] == str(status) and spans[status].events == ()
     for status in (404, 409):
         assert spans[status].status.status_code == StatusCode.UNSET

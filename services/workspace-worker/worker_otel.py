@@ -151,9 +151,9 @@ def _answered(span: Any, status: int) -> None:
     from opentelemetry.trace import Status, StatusCode
 
     span.set_attribute("http.status_code", status)
-    if status >= 500:
+    if status >= 500:   # the description is the error.type, as _failed's and the API's rule keep it
         span.set_attribute("error.type", str(status))
-        span.set_status(Status(StatusCode.ERROR, f"HTTP {status}"))
+        span.set_status(Status(StatusCode.ERROR, str(status)))
 
 
 class _StatusRecorder:
