@@ -20,6 +20,7 @@ Redis are **external**: use managed services, or anything you run yourself.
 | Deployment `<release>-frontend` | The web app. |
 | Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. Its entrypoint starts as root with four capabilities (`CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID`) to fix the volume's ownership, then drops to uid 1000 with no capabilities; nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). |
 | PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. |
+| PVC `<release>-api-data` | The API's files at `/app/data`: uploads, brand files and generated documents. Kept on `helm uninstall`. With `ReadWriteOnce`, the default, the API pod is replaced with `Recreate`, so an upgrade has a short outage. |
 | Ingress (off by default) | `/api` and `/ws` to the API, everything else to the web app. Useful once the web app reads its API address at runtime. |
 
 ## Install
@@ -44,6 +45,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    | `CREDENTIAL_ENCRYPTION_KEY` | A Fernet key. **Keep it and back it up**: credentials saved in the app are encrypted with it, and every pod must share it. |
    | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. |
    | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | Optional. For the worker's Code Canvas agent. |
+   | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Optional. Object storage credentials, for S3 or for MinIO with `S3_ENDPOINT_URL` in `config`. |
 
 2. Install:
 
@@ -76,6 +78,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
 | `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
+| `api.data.enabled`, `api.data.size`, `api.data.storageClass`, `api.data.accessModes` | on, `10Gi`, cluster default, `ReadWriteOnce` | The API's files. Off, they're lost on every restart. |
 | `ingress.*` | off | |
 | `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API, the worker and the web app's server side, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |

@@ -84,6 +84,83 @@ tests:
             name: workspaces
             mountPath: /workspaces
             readOnly: true
+  - it: keeps the API's files on a volume, and points the document settings at it
+    release:
+      name: demo
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /app/data
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: demo-automatos-api-data
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_UPLOAD_DIR
+            value: /app/data/uploads
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /app/data/documents
+  - it: stops the old pod first when the volume attaches to one node at a time
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+  - it: rolls as usual on ReadWriteMany storage
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteMany
+    asserts:
+      - notExists:
+          path: spec.strategy
+  - it: leaves the volume, the settings and the strategy out when data is off
+    set:
+      api:
+        data:
+          enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /app/data
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /app/data/documents
+      - notExists:
+          path: spec.strategy
+  - it: takes the object storage credentials from the Secret, as optional keys
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: AWS_ACCESS_KEY_ID
+                optional: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: AWS_SECRET_ACCESS_KEY
+                optional: true
   - it: passes extra config through as env
     set:
       config:

@@ -82,6 +82,10 @@ IfNotPresent
 {{- printf "%s-workspaces" (include "automatos.fullname" .) }}
 {{- end }}
 
+{{- define "automatos.apiDataClaim" -}}
+{{- printf "%s-api-data" (include "automatos.fullname" .) }}
+{{- end }}
+
 {{/*
 The API's environment, shared by the API pods and the migration Job. Rendered
 inline rather than through a ConfigMap: the Job is a pre-install hook, so it runs
@@ -127,12 +131,14 @@ before any of the release's ordinary resources exist.
       name: {{ $secret }}
       key: {{ $key }}
 {{- end }}
-- name: WORKER_INTERNAL_TOKEN
+{{- range $key := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+- name: {{ $key }}
   valueFrom:
     secretKeyRef:
       name: {{ $secret }}
-      key: WORKER_INTERNAL_TOKEN
+      key: {{ $key }}
       optional: true
+{{- end }}
 {{- end }}
 
 {{/*

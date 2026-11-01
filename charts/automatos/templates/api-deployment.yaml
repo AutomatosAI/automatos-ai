@@ -7,6 +7,11 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.api.replicas }}
+  {{- if and .Values.api.data.enabled (has "ReadWriteOnce" .Values.api.data.accessModes) }}
+  # The new pod can't attach the volume on another node until the old one has let go.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "api") | nindent 6 }}
@@ -40,6 +45,13 @@ spec:
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
             {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-api") | nindent 12 }}
+            {{- if .Values.api.data.enabled }}
+            # The API pods only: the migration Job writes no files here.
+            - name: DOCUMENT_UPLOAD_DIR
+              value: /app/data/uploads
+            - name: DOCUMENT_STORAGE_DIR
+              value: /app/data/documents
+            {{- end }}
             # Last, so a `config` entry of the same name cannot turn it off.
             - name: AUTOMATOS_SKIP_MIGRATIONS
               value: "true"
@@ -68,6 +80,10 @@ spec:
             - name: workspaces
               mountPath: /workspaces
               readOnly: true
+            {{- if .Values.api.data.enabled }}
+            - name: data
+              mountPath: /app/data
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -78,6 +94,11 @@ spec:
         - name: workspaces
           persistentVolumeClaim:
             claimName: {{ include "automatos.workspacesClaim" . }}
+        {{- if .Values.api.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "automatos.apiDataClaim" . }}
+        {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
