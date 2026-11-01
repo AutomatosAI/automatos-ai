@@ -11,7 +11,7 @@ so forward both and open http://localhost:3000:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "automatos.fullname" . }}-frontend 3000:3000
 {{- end }}
 {{- if eq .Values.edition.authEdition "local" }}
-{{- $remoteAccess := index .Values.config "LOCAL_REMOTE_ACCESS" | default "off" | toString | trim | lower }}
+{{- $remoteAccess := index (.Values.config | default dict) "LOCAL_REMOTE_ACCESS" | default "off" | toString | trim | lower }}
 {{- if eq $remoteAccess "paired" }}
 
 Local edition, paired mode: every browser and phone pairs once with a one-time code.

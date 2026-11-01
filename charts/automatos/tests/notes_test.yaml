@@ -22,6 +22,19 @@ tests:
           pattern: every browser and phone pairs once
       - matchRegexRaw:
           pattern: kubectl -n apps exec deploy/demo-automatos-api -- python -m scripts\.mint_pairing_code
+  - it: reads the mode the way the API does, ignoring case and spaces
+    set:
+      config:
+        LOCAL_REMOTE_ACCESS: " PAIRED "
+    asserts:
+      - matchRegexRaw:
+          pattern: every browser and phone pairs once
+  - it: treats an empty config as off
+    set:
+      config: null
+    asserts:
+      - matchRegexRaw:
+          pattern: there is no login
   - it: warns in open mode that whoever reaches the install is its operator
     set:
       config:

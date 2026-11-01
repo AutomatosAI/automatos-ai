@@ -7,10 +7,15 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.api.replicas }}
-  {{- if and .Values.api.data.enabled (has "ReadWriteOnce" .Values.api.data.accessModes) }}
-  # The new pod can't attach the volume on another node until the old one has let go.
+  {{- if include "automatos.apiDataSingleAttach" . }}
+  # Stop the old pod first: the new one can't attach the volume until the old one has let
+  # go. Not type: Recreate, which Helm 4's server-side apply can't change a live Deployment
+  # to: the defaulted rollingUpdate block stays, and the API server refuses the pair.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   {{- end }}
   selector:
     matchLabels:

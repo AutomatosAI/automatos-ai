@@ -32,6 +32,16 @@ tests:
       - equal:
           path: spec.storageClassName
           value: fast
+  - it: takes the access modes from values
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.accessModes
+          value: ["ReadWriteMany"]
   - it: creates no claim when data is off
     set:
       api:

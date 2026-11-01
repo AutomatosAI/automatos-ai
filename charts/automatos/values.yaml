@@ -30,7 +30,10 @@ edition:
   localOperatorEmail: local@automatos.local
 
 # Extra non-secret settings for the API and the migration Job: any name config.py
-# reads. The chart already sets the edition, the worker URL and the workspace path.
+# reads. The chart already sets the edition, the worker URL and the workspace path, and
+# rendering fails on AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY here (they go in the
+# Secret), and on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on.
+# Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
   LOG_LEVEL: INFO
@@ -64,8 +67,10 @@ api:
   uvicornWorkers: 1
   # The API's own files at /app/data: uploads, brand files and generated documents.
   # With this off they're on the container's disk and lost on every restart. Kept on
-  # `helm uninstall`. With ReadWriteOnce the pod is replaced by stopping the old one
-  # first, so an upgrade has a short outage; several replicas need ReadWriteMany.
+  # `helm uninstall`. With ReadWriteOnce or ReadWriteOncePod every rollout stops the old
+  # pod first, so the API is down until the new pod is ready; ReadWriteMany avoids that
+  # and is needed for more than one replica. accessModes can't change once the claim
+  # exists. The storage must honour the pod's fsGroup, or uid 1000 can't write here.
   data:
     enabled: true
     size: 10Gi
