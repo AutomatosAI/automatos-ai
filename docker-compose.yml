@@ -117,7 +117,7 @@ services:
   # Redis Cache & Session Store
   # ===========================================================================
   redis:
-    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     container_name: automatos_redis
     restart: unless-stopped
     # PRD-70 FIX-05: Disable dangerous Redis commands to prevent data wipe if exposed.
@@ -166,7 +166,7 @@ services:
   # $$ is a literal $ to compose, which would otherwise read $owner as a variable.
   # ===========================================================================
   minio-volume-owner:
-    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     container_name: automatos_minio_volume_owner
     restart: "no"
     user: "0:0"
@@ -207,7 +207,7 @@ services:
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
     # maintained build; its free tier offers only `latest`, so the digest pins it
     # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
-    image: cgr.dev/chainguard/minio:latest@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
+    image: cgr.dev/chainguard/minio:latest@sha256:0a01100085e30fb08d2f39e39c9f5c9d83a95707f220b007d813b690cd41622d
     container_name: automatos_minio
     restart: unless-stopped
     # No user: key. MinIO runs as the image's own user, uid 65532, never root
@@ -249,7 +249,7 @@ services:
   # Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
   # ===========================================================================
   qdrant:
-    image: qdrant/qdrant:latest@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    image: qdrant/qdrant:latest@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     container_name: automatos_qdrant
     restart: unless-stopped
     profiles: ["memory"]
@@ -717,7 +717,7 @@ services:
   # ===========================================================================
   
   adminer:
-    image: adminer:latest@sha256:49a7d30e71de97fb18933ffe7d46cc2b343c49fd7a63a7791c8be2548eb65115
+    image: adminer:latest@sha256:400af848ac3f57938abde4867677df1b195674d232c8896a27d111d04b9c088c
     container_name: automatos_adminer
     restart: unless-stopped
     profiles: ["all"]
