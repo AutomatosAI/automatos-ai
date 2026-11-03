@@ -82,12 +82,50 @@ IfNotPresent
 {{- printf "%s-workspaces" (include "automatos.fullname" .) }}
 {{- end }}
 
+{{- define "automatos.apiDataClaim" -}}
+{{- printf "%s-api-data" (include "automatos.fullname" .) }}
+{{- end }}
+
+{{/*
+"true" when the API's data volume can attach to only one node (or pod) at a time.
+*/}}
+{{- define "automatos.apiDataSingleAttach" -}}
+{{- if and .Values.api.data.enabled (or (has "ReadWriteOnce" .Values.api.data.accessModes) (has "ReadWriteOncePod" .Values.api.data.accessModes)) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Stops a release at render time, before any hook runs, on values that can't work. A name
+in `config` that the chart also sets would be rendered twice, and an upgrade then fails
+partway through. A second replica on a single-attach volume would hang waiting for it.
+*/}}
+{{- define "automatos.validateApi" -}}
+{{- $config := .Values.config | default dict -}}
+{{- range $key := list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+{{- if hasKey $config $key }}
+{{- fail (printf "config.%s: move it to the Secret named by existingSecret, under the same key, so it isn't plain text in the pod spec" $key) }}
+{{- end }}
+{{- end }}
+{{- if .Values.api.data.enabled }}
+{{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
+{{- if hasKey $config $key }}
+{{- fail (printf "config.%s: api.data sets this. Remove it from config, or set api.data.enabled=false to manage the API's files yourself" $key) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (include "automatos.apiDataSingleAttach" .) (gt (int .Values.api.replicas) 1) }}
+{{- fail "api.replicas above 1 needs api.data.accessModes without ReadWriteOnce or ReadWriteOncePod. A claim's access modes can't change after it's created, so set this at install" }}
+{{- end }}
+{{- end }}
+
 {{/*
 The API's environment, shared by the API pods and the migration Job. Rendered
 inline rather than through a ConfigMap: the Job is a pre-install hook, so it runs
 before any of the release's ordinary resources exist.
 */}}
 {{- define "automatos.apiEnv" -}}
+{{- include "automatos.validateApi" . -}}
 {{- $secret := include "automatos.secretName" . -}}
 - name: AUTH_EDITION
   value: {{ .Values.edition.authEdition | quote }}
@@ -127,12 +165,14 @@ before any of the release's ordinary resources exist.
       name: {{ $secret }}
       key: {{ $key }}
 {{- end }}
-- name: WORKER_INTERNAL_TOKEN
+{{- range $key := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+- name: {{ $key }}
   valueFrom:
     secretKeyRef:
       name: {{ $secret }}
-      key: WORKER_INTERNAL_TOKEN
+      key: {{ $key }}
       optional: true
+{{- end }}
 {{- end }}
 
 {{/*
