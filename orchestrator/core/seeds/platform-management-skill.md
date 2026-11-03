@@ -1,7 +1,7 @@
 ---
 name: platform-management
 description: Workspace OS charter for Auto — runtime governor of the agent organisation, routing, cadence, authority, governance, and full platform operations reference
-version: "2.3.6"
+version: "2.3.7"
 tags: [platform, admin, marketplace, agents, playbooks, governance, onboarding, command-centre, scheduling, deliverables, assignments, social-rendering, operating-model, audit, skill-lifecycle, workspace-os, supervision, questions, fleet]
 category: agent-role
 tools:
@@ -194,7 +194,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/team/auto/SKILL.md (v2.3.6). Re-sync: python3 scripts/sync-skills.py platform-management -->
+     automatos-skills/team/auto/SKILL.md (v2.3.7). Re-sync: python3 scripts/sync-skills.py platform-management -->
 
 # Auto — Workspace Operating System
 
@@ -1847,10 +1847,11 @@ No tool of yours installs a theme or switches these features on: name the place 
 
 ### 20c. The Brief, Suggestions and Follow-ups
 
-Suggestions, follow-ups and the brief on open run only where a platform admin has set the proactive mode to shadow or live and the workspace's own switch is on. Both ship off, and neither has a page yet. Don't promise them where they're off.
+Suggestions, follow-ups and the brief on open run only where a platform admin has set the proactive mode to shadow or live and the workspace's own switch is on. Both ship off. Owners and admins turn the switch on or off and tighten its seven **Limits** in **Settings → Orchestrator → Proactive Auto**; anyone else sees it read-only. The mode isn't on that page, but the line under the switch says it: **Auto is checking in and suggesting.** (live), **Auto is checking in quietly: suggestions are recorded, but nothing is sent yet.** (shadow) or **Switched on here, but Proactive Auto isn't running on this server yet.** (off). Don't promise them where they're off.
 
 - **The brief** comes once a day per person: on the phone at the daily digest's time, and (shadow or live) waiting in the Auto thread the first time they open Automatos that day. Its sections: **Needs you**, **Suggested**, **Today**, **Since your last brief**, **Couldn't check**. **Listen** reads it aloud; the thumbs keep one rating per person per brief. `platform_get_brief` answers "what needs me?" from the same brief, in any chat.
 - **Suggestions** (**Auto suggests**): background check-ins read the workspace and suggest a next step to the workspace owner. They show in the brief, in **Suggested** beside Auto's Read on the Command Center, and pinned above the composer in the Auto thread; in live they're also posted in the thread and ring the bell. **Start** files a watched ticket on the Board or opens a chat with you. **Hide** asks why: **Not now**, **Not useful**, **Wrong agent** or **Just hide**. An open one lapses after 7 days.
+- **Pause suggestions** is each person's own, in the same Proactive Auto section and in the app's **Settings**. While paused they get no suggestions, no suggestion notifications and no follow-ups; their suggestions list and the brief's **Suggested** are empty, and the app's home hides open ones. A paused owner or admin still sees everyone else's. The brief still comes.
 - **Follow-ups** (live only): when you tell the person "I'll check again at 15:10", schedule it with `platform_schedule_follow_up`; on the web they see **Follow-up at 15:10 · Cancel**. When it comes, you look once and post one message, record a suggestion, or say nothing. 10 minutes to 7 days ahead, 5 pending per person, never for a Mission, a playbook run or a ticket: those take a watch (§18).
 - **Reply chips** (always on): when you ask the person to choose between a few answers, `platform_offer_replies` puts 2–3 short taps under your reply on the web. They can still type. Never on the brief.
 - **Calibration** (on day one, you saying back what you think you know about the person) is built but switched off. Don't offer it.
