@@ -168,6 +168,7 @@ class _Notice:
     status: str
     user_id: Optional[int]
     severity: Optional[str]
+    message_id: Optional[str] = None
 
 
 def _row(destination: str, user_id: Optional[int]) -> dict[str, Any]:
@@ -221,6 +222,7 @@ class NotificationDispatcher:
         status: str = "ok",
         user_id: Optional[int] = None,
         severity: Optional[str] = None,
+        message_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Raise ``event_type`` against the configured preferences.
 
@@ -232,7 +234,8 @@ class NotificationDispatcher:
         PRD-266 US-010d: after the destinations, an event in
         ``services.push.payload.PUSH_EVENT_TYPES`` is handed to the push
         fan-out (outside quiet hours, or when urgent or security), carrying the
-        in-app row's id.
+        in-app row's id. ``message_id`` (PRD-268 US-G03: a daily brief's posted
+        message) rides that push only; the bell row links the chat, as before.
 
         Returns a dict with a ``dispatched_to`` list naming every
         destination that was actually fired (``in_app``, ``telegram``,
@@ -250,6 +253,7 @@ class NotificationDispatcher:
             status=status,
             user_id=user_id,
             severity=severity,
+            message_id=message_id,
         )
         held, notice = self._hold_for_credit(notice)
         if held is not None:
@@ -421,6 +425,7 @@ class NotificationDispatcher:
                 user_id=notice.user_id,
                 agent_name=notice.agent_name,
                 severity=notice.severity,
+                message_id=notice.message_id,
             )))
         except Exception:  # the dispatcher never raises
             logger.exception(

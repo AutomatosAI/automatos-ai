@@ -308,7 +308,8 @@ def test_the_vector_file_is_k9s():
                                  "max_future_seconds": PUSH_SIG_MAX_FUTURE_SECONDS}
     assert (PUSH_SIG_MAX_AGE_SECONDS, PUSH_SIG_MAX_FUTURE_SECONDS) == (604800, 300)
     assert [case["name"] for case in vectors["cases"]] == [
-        "question-with-options", "redacted-question", "review", "auto-message", "unicode-question", "suggestion"]
+        "question-with-options", "redacted-question", "review", "auto-message", "unicode-question", "suggestion",
+        "daily-brief"]
     assert len(vectors["tampered"]) == 4
 
 
@@ -336,6 +337,9 @@ def _case_inputs(name: str) -> dict:
                                                          ["Sim", "Não"], 7)),
         "suggestion": dict(event_type="suggestion_ready", notification_id=1006, link_type="suggestion",
                            link_id=uuid.UUID("8a4e1f2b-6c3d-4e5f-9a1b-2c3d4e5f6a7b")),
+        "daily-brief": dict(event_type="auto_message", notification_id=1007, link_type="chat",
+                            link_id=uuid.UUID("0d9f2c51-7a43-4b8e-9c61-2e5f7a1b3c4d"),
+                            message_id=uuid.UUID("3c1e5b7a-9d2f-4a6b-8c0e-1f3a5b7c9d2e")),
     }[name]
 
 
