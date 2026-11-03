@@ -60,6 +60,7 @@ vi.mock('../phones-devices/phones-devices-tab', () => ({ PhonesDevicesTab: () =>
 vi.mock('../billing/billing-tab', () => ({ BillingTab: () => null }))
 vi.mock('../automatos-cloud-panel', () => ({ AutomatosCloudPanel: () => null, useHasAutomatosCloudTab: () => false }))
 vi.mock('../what-auto-depends-on', () => ({ WhatAutoDependsOn: () => null }))  // PRD-268 US-W05
+vi.mock('../proactive-auto/proactive-auto-section', () => ({ ProactiveAutoSection: () => null }))  // PRD-268 §6.9
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({

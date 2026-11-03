@@ -28,7 +28,7 @@ import { BASELINE_SKILLS_REPO_LABEL, BASELINE_SKILLS_REPO_URL } from '@/lib/base
 // Types
 // ===================================================================
 
-interface Skill {
+export interface Skill {
   id: number
   name: string
   description: string | null
@@ -360,7 +360,7 @@ interface SkillListCardProps {
   iconName?: string | null
 }
 
-function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, onDisable, iconName }: SkillListCardProps) {
+export function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, onDisable, iconName }: SkillListCardProps) {
   const name = skill.name
   const tokens = skill.estimated_tokens
 
@@ -435,7 +435,7 @@ interface SkillGridCardProps {
   iconName?: string | null
 }
 
-function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable, onDetails, iconName }: SkillGridCardProps) {
+export function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable, onDetails, iconName }: SkillGridCardProps) {
   const name = skill.name
   const tokens = skill.estimated_tokens
   const version = skill.skill_version

@@ -1,11 +1,11 @@
 'use client'
 
 /**
- * PRD-270 US-270-05b (§5.5, K18) — Settings › Automatos Cloud: where this install syncs Marketplace
- * themes from (the URL in use, read-only), the last Sync (its success, check, error and counts), the
- * themes held from Automatos Cloud, Sync now (the Marketplace header's mutation and toast,
- * hooks/use-cloud-sync.ts) and how to turn it off. It mirrors the revocation sync panel
- * (components/admin/themes/revocation-sync-status.tsx).
+ * PRD-270 US-270-05b (§5.5, K18) — Settings › Automatos Cloud: where this install syncs from (the URL
+ * in use, read-only), the last Sync (its success, check, error and counts), the themes and the agents,
+ * Playbooks, packages and plugins held from Automatos Cloud (P270W2-RVW-6), Sync now (the Marketplace
+ * header's mutation and toast, hooks/use-cloud-sync.ts) and how to turn it off. It mirrors the
+ * revocation sync panel (components/admin/themes/revocation-sync-status.tsx).
  *
  * The tab is the local edition's only (by edition, never by role: lib/auth-edition.ts), for a
  * workspace owner or admin (`canManageThemes`, the routes' `workspace:manage`), while the status says
@@ -25,6 +25,7 @@ import {
   SYNC_OFF,
   TURN_OFF,
   countsLine,
+  itemsHeldLine,
 } from '@/components/marketplace/cloud/copy'
 import { canManageThemes } from '@/components/settings/themes/theme-labels'
 import { Button } from '@/components/ui/button'
@@ -71,6 +72,7 @@ function CloudFacts({ status }: { status: CloudSyncStatus }) {
         testId="automatos-cloud-counts"
       />
       <Fact label="Themes held here" value={String(status.themes)} testId="automatos-cloud-themes" />
+      <Fact label="Items held here" value={itemsHeldLine(status.items)} testId="automatos-cloud-items" />
     </dl>
   )
 }

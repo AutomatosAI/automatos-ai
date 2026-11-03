@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { refreshCloudUpdates } from '@/hooks/use-cloud-items'
 
 // Query key factory
 export const playbookKeys = {
@@ -159,6 +160,8 @@ export function useInstallPlaybookFromMarketplace() {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
+      // PRD-270 US-270-14e: a new copy of an Automatos Cloud Playbook may clear its update notice
+      void refreshCloudUpdates(queryClient)
     },
   })
 }

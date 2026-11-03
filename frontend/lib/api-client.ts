@@ -36,6 +36,7 @@ import type {
   SocialVoiceExample,
 } from './socials-results-types'
 import { reportUnauthorized } from './api-unauthorized'
+import { cloudInstallGate } from './marketplace/cloud-install-gate'
 
 interface ApiResponse<T = any> {
   data: T
@@ -1513,10 +1514,9 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
 
-    // Get Clerk token if available (with timeout to prevent hanging)
+    await cloudInstallGate(endpoint, options, this)
     const token = await this.clerkTokenOrNull()
 
-    // Auto-stringify body if it's an object and not FormData
     let body = options.body
     if (body && typeof body === 'object' && !(body instanceof FormData)) {
       body = JSON.stringify(body)

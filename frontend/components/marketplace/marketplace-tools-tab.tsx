@@ -561,7 +561,7 @@ interface ToolCardProps {
     onDetails: () => void
 }
 
-function ToolCard({
+export function ToolCard({
     app,
     index,
     isConnected,

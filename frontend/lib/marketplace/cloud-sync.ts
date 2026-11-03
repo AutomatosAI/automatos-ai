@@ -9,6 +9,8 @@
  */
 import { apiClient } from '@/lib/api-client'
 
+import type { CloudItemKind } from './cloud-item-rows'
+
 export const CLOUD_SYNC_ENDPOINT = '/api/marketplace/cloud-sync'
 export const CLOUD_SYNC_STATUS_ENDPOINT = `${CLOUD_SYNC_ENDPOINT}/status`
 
@@ -32,6 +34,8 @@ export interface CloudSyncStatus {
   counts: CloudSyncCounts
   /** How many themes this install holds from Automatos Cloud. */
   themes: number
+  /** How many agents, Playbooks, packages and plugins this install holds from Automatos Cloud (held_items.items_held). */
+  items: Readonly<Record<CloudItemKind, number>>
   /** No Sync succeeded in the last 7 days, or none ever did. */
   stale: boolean
 }

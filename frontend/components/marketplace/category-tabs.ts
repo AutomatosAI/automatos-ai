@@ -1,8 +1,8 @@
 /**
- * The Marketplace's tabs, in order, with their icons, and the tab a `?tab=` link opens: the member
- * page (marketplace-homepage.tsx) and the signed-out visitor's (public/visitor-tabs.tsx, PRD-270
- * K20) draw the same strip from here, so the visitor's page never imports the member tabs. Which
- * public read each tab draws is here too, for the visitor's tabs and a link's share card (US-270-10).
+ * The Marketplace's tabs, in order, with their icons, and the tab a `?tab=` link opens: the one
+ * Marketplace page (marketplace-homepage.tsx, PRD-270 §5.7) draws its strip from here, for a member
+ * and a signed-out visitor alike. Which public read each tab draws is here too, for the visitor's
+ * item detail and shared links (public/public-deep-link.tsx) and a link's share card (US-270-10).
  */
 import { BookOpen, Bot, Cpu, Package, Palette, Puzzle, Store } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -46,8 +46,8 @@ export interface PublicItemTab {
 }
 
 /**
- * The tabs of CATEGORY_TABS but Themes and Capabilities, and the public read each draws: the
- * visitor's tabs (public/visitor-tabs.tsx) and a link's share card (lib/marketplace/share-card-read.ts).
+ * The tabs of CATEGORY_TABS but Themes and Capabilities, and the public read each draws: a visitor's
+ * shared link (public/public-deep-link.tsx) and a link's share card (lib/marketplace/share-card-read.ts).
  */
 export const PUBLIC_ITEM_TABS: readonly PublicItemTab[] = [
   { tab: 'packages', type: 'packages' },

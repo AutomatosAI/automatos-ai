@@ -25,7 +25,8 @@ _ENABLED_TOOLS = text(
 ).bindparams(bindparam("ids", expanding=True))
 
 
-def _apps_by_agent(db: Session, agent_ids: Sequence[int]) -> Dict[int, List[str]]:
+def apps_by_agent(db: Session, agent_ids: Sequence[int]) -> Dict[int, List[str]]:
+    """Each listed agent's enabled tool assignments, in tool order (featured.py reads them too)."""
     found: Dict[int, List[str]] = {}
     for agent_id, tool_id in db.execute(_ENABLED_TOOLS, {"ids": list(agent_ids)}):
         found.setdefault(agent_id, []).append(tool_id)
@@ -47,7 +48,7 @@ def read_agents(db: Session, limit: int, offset: int) -> List[Dict[str, Any]]:
     )
     if not rows:
         return []
-    apps = _apps_by_agent(db, [row.id for row in rows])
+    apps = apps_by_agent(db, [row.id for row in rows])
     names = publisher_names(db, (row.original_creator_id for row in rows))
     return [
         display_item(
@@ -59,4 +60,4 @@ def read_agents(db: Session, limit: int, offset: int) -> List[Dict[str, Any]]:
     ]
 
 
-__all__ = ["read_agents"]
+__all__ = ["apps_by_agent", "read_agents"]

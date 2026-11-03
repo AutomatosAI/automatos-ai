@@ -6,12 +6,16 @@ the real-Postgres schema check is CI's job.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 from services.marketplace_packages import PackageMatch, match_by_signals
 
 REPO = Path(__file__).resolve().parents[1]
+# The statement that creates the table, not any migration that names it beside a CREATE TABLE of its own
+# (PRD-270 W2's marketplace_cloud_items references marketplace_packages(id)).
+CREATES_PACKAGES = re.compile(r"CREATE TABLE (IF NOT EXISTS )?marketplace_packages\b")
 
 
 def _pkg(slug, *, platforms=None, url_patterns=None, vocabulary=None,
@@ -155,7 +159,7 @@ def test_exactly_one_new_migration_creates_the_table():
     versions = REPO / "alembic" / "versions"
     creators = [
         f for f in versions.glob("*.py")
-        if "marketplace_packages" in f.read_text() and "CREATE TABLE" in f.read_text()
+        if CREATES_PACKAGES.search(f.read_text())
     ]
     assert len(creators) == 1, f"expected exactly one creating migration, got {creators}"
     src = creators[0].read_text()

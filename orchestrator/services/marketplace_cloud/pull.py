@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.models.marketplace_cloud import MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
 from core.models.themes import THEME_SOURCE_CLOUD, ThemePackage, ThemeReviewEvent
+from services.marketplace_bundles.held_items import items_held
 from services.marketplace_cloud.feed import Catalog, CatalogError, CheckedItem, feed_max_bytes, parse_catalog
 from services.marketplace_cloud.fetch import (
     ACCEPT_JSON, ClientFactory, CloudFetchFailed, checked_origin, fetch_bytes,
@@ -95,14 +96,16 @@ class SyncCounts:
 
 @dataclass(frozen=True)
 class SyncOutcome:
-    """One Sync: ``ok`` with its counts, else its plain ``error``: ``off`` when it can't run here and ``busy``
-    while another runs (neither records anything), else the error it recorded."""
+    """One Sync: ``ok`` with its counts and the parsed ``catalog`` (the item passes read its entries, so it is
+    fetched once), else its plain ``error``: ``off`` when it can't run here and ``busy`` while another runs
+    (neither records anything), else the error it recorded."""
 
     ok: bool
     counts: SyncCounts = field(default_factory=SyncCounts)
     error: Optional[str] = None
     off: bool = False
     busy: bool = False
+    catalog: Optional[Catalog] = None
 
 
 class Held(NamedTuple):
@@ -264,7 +267,8 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
         origin = checked_origin(configured_url())
         db.rollback()  # the route's reads end (nothing is written before here): none is open while Cloud answers
         data = fetch_bytes(catalog_url(origin), feed_max_bytes(), ACCEPT_JSON, client_factory)
-        counts = apply_catalog(db, parse_catalog(data, db), attempted_at)
+        catalog = parse_catalog(data, db)
+        counts = apply_catalog(db, catalog, attempted_at)
         db.commit()
     except (CloudFetchFailed, CatalogError) as refused:
         return _failed(db, attempted_at, str(refused))
@@ -278,7 +282,7 @@ def _run_sync(db: Session, client_factory: Optional[ClientFactory]) -> SyncOutco
         logger.exception("Sync with Automatos Cloud failed unexpectedly")
         return _failed(db, attempted_at, UNEXPECTED)
     logger.info("Sync with Automatos Cloud: %s", counts.view())
-    return SyncOutcome(ok=True, counts=counts)
+    return SyncOutcome(ok=True, counts=counts, catalog=catalog)
 
 
 def sync_catalog(db: Session, client_factory: Optional[ClientFactory] = None) -> SyncOutcome:
@@ -314,7 +318,8 @@ def _stored_counts(row: Optional[MarketplaceCloudSync]) -> SyncCounts:
 
 def sync_status(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
     """What the Sync's status shows: on or off, the origin in use, the last attempt, success and error, the counts,
-    how many themes this install holds from Automatos Cloud, and whether the last success is over a week old."""
+    how many themes this install holds from Automatos Cloud, and of each item type (``items``), and whether the
+    last success is over a week old."""
     row = db.get(MarketplaceCloudSync, MARKETPLACE_CLOUD_SYNC_ROW_ID)
     themes = (
         db.query(func.count(distinct(ThemePackage.theme_id)))
@@ -331,6 +336,7 @@ def sync_status(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
         "generatedAt": None if row is None else iso_time(row.feed_generated_at),
         "counts": _stored_counts(row).view(),
         "themes": int(themes or 0),
+        "items": items_held(db),
         "stale": is_stale(last_success_at, now or datetime.now(timezone.utc)),
     }
 

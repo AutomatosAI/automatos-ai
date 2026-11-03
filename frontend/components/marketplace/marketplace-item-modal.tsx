@@ -12,6 +12,11 @@ import {
   useMarketplaceItemDetail,
 } from './marketplace-item-sections'
 import { ItemSessionGapsSection } from './marketplace-session-gaps'
+import { useMarketplaceAccess } from './access/marketplace-access'
+import { PLAYBOOK_TYPE } from './access/public-shapes'
+
+/** The `?tab=` an item's link names: Playbooks for a Playbook, else Agents. */
+const tabOf = (itemType: string) => (itemType === PLAYBOOK_TYPE ? 'recipes' : 'agents')
 
 interface MarketplaceItemModalProps {
   itemId: number
@@ -31,6 +36,7 @@ function ModalMessage({ onClose, children }: { onClose: () => void; children: Re
 export function MarketplaceItemModal({ itemId, itemType, onClose }: MarketplaceItemModalProps) {
   const { item, loading, error } = useMarketplaceItemDetail(itemId, itemType)
   const { installing, install } = useInstallMarketplaceDetailItem(itemType, onClose)
+  const { signedIn, requireSignIn } = useMarketplaceAccess()
 
   if (error) {
     return (
@@ -61,7 +67,11 @@ export function MarketplaceItemModal({ itemId, itemType, onClose }: MarketplaceI
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden glass-card card-glow border-border/50">
-        <ItemModalHeader item={item} installing={installing} onInstall={() => install(item)} />
+        <ItemModalHeader
+          item={item}
+          installing={installing}
+          onInstall={() => { if (!requireSignIn(tabOf(itemType), item.id)) void install(item) }}
+        />
         <div className="overflow-y-auto max-h-[calc(90vh-180px)] p-6 space-y-6">
           <div>
             <p className="text-muted-foreground leading-relaxed">
@@ -69,7 +79,8 @@ export function MarketplaceItemModal({ itemId, itemType, onClose }: MarketplaceI
             </p>
           </div>
           <Separator />
-          <ItemModelSection item={item} />
+          {/* Signed out, the public read carries no model; the platform default is a member read. */}
+          {signedIn && <ItemModelSection item={item} />}
           <ItemSkillsSection skills={skills} />
           <ItemToolsSection item={item} />
           <ItemSessionGapsSection item={item} />

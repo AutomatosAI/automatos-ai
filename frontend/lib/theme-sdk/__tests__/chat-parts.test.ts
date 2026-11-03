@@ -9,10 +9,13 @@
  *   chip parts count on Auto's messages only.
  * - Everything handed back is frozen, down to the brief's rows and the chips.
  * - The host's message copies (internal/chat-view.ts hostMessages) carry them, never the raw parts.
+ * - A reply's chips are read as the web chat reads them (lib/chat/turn-parts.ts replyChipsOfMessage), so a reply being
+ *   streamed has its reply_chips@1 as soon as its turn_parts frame lands, not only once reloaded.
  */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatConversationView } from '@/lib/chat-controller/view-model'
+import { liveTurnPartsFromToolData, withTurnPartsOnTheReply } from '@/lib/chat/turn-parts'
 import type { ChatMessage } from '@/types'
 
 import type { HostBriefPart, HostMessagePart, HostReplyChipsPart } from '../chat'
@@ -46,6 +49,19 @@ function briefOf(parts: readonly HostMessagePart[]) {
 function chipsOf(parts: readonly HostMessagePart[]) {
   return parts.find((part): part is HostReplyChipsPart => part.type === 'reply_chips@1')?.replies ?? null
 }
+
+/** What the SDK's copies read off the host's chat controller; `streaming` while the last reply is being written. */
+function reading(messages: ChatMessage[], streaming = false): ControllerReading {
+  const approvals = { of: () => [], loose: [], answered: vi.fn(), closed: vi.fn(), waiting: false }
+  return {
+    messages,
+    streaming,
+    isStopped: () => false,
+    deliverablesOf: () => [],
+    approvals,
+  } as unknown as ControllerReading
+}
+const VIEW = { key: 'c1', chatId: 'c1', title: null } as unknown as ChatConversationView
 
 describe('SDK 1.4.0 — knownParts: the known types, typed', () => {
   it('hands a theme the text, brief@1, suggestion@1 and reply_chips@1 parts, in the message’s order', () => {
@@ -151,18 +167,6 @@ describe('SDK 1.4.0 — the brief found by its part', () => {
 })
 
 describe('SDK 1.4.0 — the host’s message copies carry knownParts', () => {
-  function reading(messages: ChatMessage[]): ControllerReading {
-    const approvals = { of: () => [], loose: [], answered: vi.fn(), closed: vi.fn(), waiting: false }
-    return {
-      messages,
-      streaming: false,
-      isStopped: () => false,
-      deliverablesOf: () => [],
-      approvals,
-    } as unknown as ControllerReading
-  }
-  const VIEW = { key: 'c1', chatId: 'c1', title: null } as unknown as ChatConversationView
-
   it('puts each message’s known parts on its copy, frozen, and never its raw parts', () => {
     const raw = [{ type: 'text', text: PROSE }, { type: 'brief@1', brief: BRIEF }, { type: 'weather@1' }]
     const ask = message('user', [{ type: 'text', text: 'Brief me' }])
@@ -173,5 +177,45 @@ describe('SDK 1.4.0 — the host’s message copies carry knownParts', () => {
     expect(Object.isFrozen(list[1].knownParts)).toBe(true)
     expect(list[1].knownParts).not.toBe(raw)
     expect(Object.keys(list[1])).not.toContain('parts')
+  })
+})
+
+describe('PRD-268 — a live reply’s chips reach knownParts at once, read as the web chat reads them', () => {
+  const ASK = 'Window or aisle?'
+  const ASKED = { type: 'text', text: ASK }
+  const FOLLOW_UP = { type: 'follow_up@1', follow_up_id: 41, at: '2026-10-31T15:10:00+00:00' }
+  const OFFERED = { type: 'reply_chips@1', replies: ['Window', 'Aisle'] }
+
+  /** The conversation as useChatWithReceipts holds it mid-turn: the reply's streamed parts, and its turn_parts frame on it. */
+  function streamed(replyParts: readonly unknown[], frame: readonly unknown[]): ChatMessage[] {
+    const live = liveTurnPartsFromToolData({ type: 'tool-data', data: { turn_parts: frame } })
+    if (!live) throw new Error('the frame carries no turn parts')
+    return withTurnPartsOnTheReply([message('user', [{ type: 'text', text: 'Book my seat' }]), assistant(replyParts)], live)
+  }
+
+  it('shows a streamed reply’s reply_chips@1 in its knownParts before any reload', () => {
+    const messages = streamed([ASKED], [CHIPS, FOLLOW_UP])
+    expect(messages[1].parts).toEqual([ASKED])
+    const { list } = hostMessages(reading(messages, true), VIEW)
+    expect(list[1].writing).toBe(true)
+    expect(list[1].knownParts).toEqual([ASKED, OFFERED])
+    expect(Object.isFrozen(list[1].knownParts)).toBe(true)
+    expect(Object.isFrozen(chipsOf(list[1].knownParts))).toBe(true)
+    expect(list[0].knownParts).toEqual([{ type: 'text', text: 'Book my seat' }])
+  })
+
+  it('leaves a stored message’s chips as they were: the same part, in its place, once, and the live reply matches it', () => {
+    const saved = assistant([ASKED, CHIPS, FOLLOW_UP])
+    expect(hostParts(saved)).toEqual([ASKED, OFFERED])
+    expect(hostParts(assistant([CHIPS, ASKED]))).toEqual([OFFERED, ASKED])
+    expect(hostParts(assistant([{ type: 'reply_chips@1', replies: ['Window', 3] }, ASKED, CHIPS]))).toEqual([ASKED, OFFERED])
+    expect(hostParts({ ...saved, replyChips: ['Window', 'Aisle'] })).toEqual([ASKED, OFFERED])
+    expect(hostParts(streamed([ASKED], [CHIPS, FOLLOW_UP])[1])).toEqual(hostParts(saved))
+  })
+
+  it('still drops an unknown part on a live reply, keeping its text and its chips', () => {
+    const weather = { type: 'weather@1', forecast: 'rain' }
+    const messages = streamed([weather, ASKED, { type: 'tool-invocation', toolInvocation: {} }, FOLLOW_UP], [CHIPS])
+    expect(hostParts(messages[1])).toEqual([ASKED, OFFERED])
   })
 })
