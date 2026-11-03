@@ -7,7 +7,8 @@ It assembles each part, every read scoped to the caller's workspace:
   cache answers or a caller passes the Read it already made (``digest``: the scheduled digest
   makes it once per workspace). Every section is deterministic;
 * the five sections, one reader each (``services.brief.needs``, ``suggested``, ``today``,
-  ``since``, ``unchecked``), each folded at 5 and never at 6, with the counts exact;
+  ``since``, ``unchecked``), each folded at 5 and never at 6, with the counts exact; a person
+  who paused suggestions (§6.9) gets no Suggested rows, and the rest as ever;
 * ``greeting`` for the person's local hour in ``zone``, by their first name when it is known;
   ``labels`` (the section labels, "Show N more" per folded section, the empty sentence when
   every section is empty); ``copy`` (US-C23: the same words whatever the rows, "Show {n} more"
