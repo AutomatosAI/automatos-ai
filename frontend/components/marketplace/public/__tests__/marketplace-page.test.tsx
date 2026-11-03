@@ -93,7 +93,8 @@ describe('MarketplacePage (PRD-270 §5.7, one page for everyone)', () => {
 
     expect(screen.getByRole('img', { name: 'Automatos logo' })).toHaveAttribute('src', '/brand/automatos-mark-hi.png')
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in?redirect_url=%2Fmarketplace')
-    expect(screen.getByRole('link', { name: 'Start free' })).toHaveAttribute('href', '/sign-up?redirect_url=%2Fmarketplace')
+    expect(screen.getByRole('link', { name: 'Join the waitlist' })).toHaveAttribute('href', 'https://studio.automatos.app/#waitlist')
+    expect(screen.queryByRole('link', { name: 'Start free' })).not.toBeInTheDocument()
     const homepage = screen.getByTestId('marketplace-homepage')
     expect(homepage).toHaveAttribute('data-signed-in', 'false')
     expect(homepage).toHaveAttribute('data-source', 'public')
@@ -120,7 +121,7 @@ describe('MarketplacePage (PRD-270 §5.7, one page for everyone)', () => {
     expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId('marketplace-homepage'))
     expect(screen.getByTestId('marketplace-homepage')).toHaveAttribute('data-signed-in', 'true')
     expect(screen.getByTestId('marketplace-homepage')).toHaveAttribute('data-source', 'member')
-    expect(screen.queryByRole('link', { name: 'Start free' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Join the waitlist' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Studio' })).not.toBeInTheDocument()
     expect(usePageAPI).toHaveBeenCalledWith('marketplace')
   })
@@ -132,7 +133,7 @@ describe('MarketplacePage (PRD-270 §5.7, one page for everyone)', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent(MARKETPLACE_LOADING)
     expect(screen.queryByTestId('main-layout')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Start free' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Join the waitlist' })).not.toBeInTheDocument()
   })
 
   it("local: today's page, with no Clerk call", async () => {

@@ -3,9 +3,10 @@
  *
  * - Add to my workspace goes to `/sign-in?redirect_url=<the item's Marketplace link>` and remembers
  *   that link (`/marketplace?tab=<tab>&item=<key>&add=1`), for a theme and for any other tab;
- * - the header's Sign in goes to sign-in, and Start free to `/sign-up?redirect_url=<encoded>`, each
- *   carrying and remembering the Marketplace page the visitor is on; an unsafe page rides as
- *   '/marketplace';
+ * - the header's Sign in goes to `/sign-in?redirect_url=<encoded>`, carrying and remembering the
+ *   Marketplace page the visitor is on; an unsafe page rides as '/marketplace';
+ * - until the hosted beta opens, the header's primary is Join the waitlist: it goes to the Studio
+ *   site's waitlist and remembers nothing, and no visitor link goes to sign-up;
  * - no install request, and no request at all: every click only remembers and navigates.
  *
  * Navigation itself is the browser's: a click's default is cancelled at the document, after the
@@ -29,11 +30,11 @@ vi.mock('next/link', () => ({
 }))
 
 import type { ThemeListing } from '@/lib/api-client'
-import { RETURN_PATH_STORAGE_KEY, take } from '@/lib/marketplace/return-after-sign-in'
+import { RETURN_PATH_STORAGE_KEY, STUDIO_WAITLIST_URL, take } from '@/lib/marketplace/return-after-sign-in'
 
 import { ADD_TO_WORKSPACE } from '../../themes/listing-format'
 import { VisitorAdd, VisitorThemeAdd } from '../visitor-add'
-import { VISITOR_SIGN_IN, VISITOR_START_FREE, VisitorHeader } from '../visitor-header'
+import { VISITOR_JOIN_WAITLIST, VISITOR_SIGN_IN, VisitorHeader } from '../visitor-header'
 
 const ARCADE = '/marketplace?tab=themes&item=automatos.arcade&add=1'
 const WRITER = '/marketplace?tab=agents&item=writer&add=1'
@@ -96,30 +97,32 @@ describe('the visitor header (PRD-270 US-270-09a)', () => {
     expect(take()).toBe(page)
   })
 
-  it('Start free goes to sign-up carrying the Marketplace page, and remembers it', () => {
+  it('Join the waitlist goes to the Studio waitlist, never to sign-up, and remembers nothing', () => {
     nav.params = new URLSearchParams({ tab: 'themes', item: 'automatos.arcade', add: '1' })
-    render(<VisitorHeader />)
-    const startFree = screen.getByRole('link', { name: VISITOR_START_FREE })
+    const { container } = render(<VisitorHeader />)
+    const waitlist = screen.getByRole('link', { name: VISITOR_JOIN_WAITLIST })
 
-    expect(startFree).toHaveAttribute('href', `/sign-up?redirect_url=${encoded(ARCADE)}`)
-    fireEvent.click(startFree)
-    expect(take()).toBe(ARCADE)
+    expect(STUDIO_WAITLIST_URL).toBe('https://studio.automatos.app/#waitlist')
+    expect(waitlist).toHaveAttribute('href', STUDIO_WAITLIST_URL)
+    fireEvent.click(waitlist)
+    expect(take()).toBeNull()
+    expect(screen.queryByRole('link', { name: /start free/i })).not.toBeInTheDocument()
+    expect(container.querySelector('a[href^="/sign-up"]')).toBeNull()
   })
 
-  it('the bare Marketplace: both carry /marketplace', () => {
+  it('the bare Marketplace: Sign in carries /marketplace', () => {
     render(<VisitorHeader />)
 
     expect(screen.getByRole('link', { name: VISITOR_SIGN_IN })).toHaveAttribute('href', '/sign-in?redirect_url=%2Fmarketplace')
-    expect(screen.getByRole('link', { name: VISITOR_START_FREE })).toHaveAttribute('href', '/sign-up?redirect_url=%2Fmarketplace')
   })
 
   it('only the tab, item and add ride along; anything else is dropped', () => {
     nav.params = new URLSearchParams({ tab: 'agents', next: 'https://evil.example', redirect_url: '//evil.example' })
     render(<VisitorHeader />)
-    const startFree = screen.getByRole('link', { name: VISITOR_START_FREE })
+    const signIn = screen.getByRole('link', { name: VISITOR_SIGN_IN })
 
-    expect(startFree).toHaveAttribute('href', `/sign-up?redirect_url=${encoded('/marketplace?tab=agents')}`)
-    fireEvent.click(startFree)
+    expect(signIn).toHaveAttribute('href', `/sign-in?redirect_url=${encoded('/marketplace?tab=agents')}`)
+    fireEvent.click(signIn)
     expect(take()).toBe('/marketplace?tab=agents')
   })
 
