@@ -29,6 +29,9 @@ can't be read, or isn't one the code knows, is off.
 
 `effective_mode(db, workspace_id)` (`services/proactive/switches.py`) is the platform mode where the workspace switch
 is on, else `off`. Every gate, the bridge, delivery, the brief on open and follow-ups read it.
+`GET /api/proactive/settings` and `GET /api/proactive/me` answer it as `effective_mode` (read-only, `off` when either
+switch can't be read), and Settings → Orchestrator → Proactive Auto draws its one line from it. No route answers the
+platform setting's own value.
 
 Per heartbeat, `agents.configuration.heartbeat.mode` (`check_in` or `act`; unset is `act` when `auto_act` is set,
 else `check_in`) and, for the orchestrator, `proactive_level` decide whether that heartbeat converts.

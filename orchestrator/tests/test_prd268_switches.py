@@ -24,7 +24,9 @@ commit inside it, by SAVEPOINT). Proven here:
   is back at its default; a cap looser than the platform's, or caps that do not fit, are 422
   and nothing is saved; each change is audited once committed; any member reads and changes
   their own pause (a stranger 403, no person behind the caller 403), upserted and audited;
-  plain ``def``s, in the route manifest, the cap settings in the config surface.
+  both reads answer the workspace's ``effective_mode``, off whenever the platform mode or the
+  workspace switch cannot be read, and never the platform setting itself; the writes take no
+  mode; plain ``def``s, in the route manifest, the cap settings in the config surface.
 """
 from __future__ import annotations
 
@@ -58,6 +60,8 @@ DEFAULT_CAPS = {"max_model_runs_per_day": 48, "max_suggestions_per_run": 3, "max
 DEFAULTS = {"enabled": True, "caps": DEFAULT_CAPS, "platform_caps": DEFAULT_CAPS}
 CONFIG_NAMES = {name: f"PROACTIVE_{name.upper()}" for name in DEFAULT_CAPS}
 NO_QUIET_HOURS = {"quiet_start": None, "quiet_end": None, "timezone": None}
+# A read's effective mode with no platform row: PROACTIVE_MODE_DEFAULT, 'off'.
+MODE_OFF = {"effective_mode": "off"}
 
 
 @pytest.fixture
@@ -557,7 +561,7 @@ def _as(team, person, system_role: str = "user") -> TestClient:
 def test_owners_and_admins_read_the_settings_each_cap_at_its_default(team, saas):
     for person in (team.owner, team.admin):
         reply = _as(team, person).get(SETTINGS)
-        assert reply.status_code == 200 and reply.json() == DEFAULTS
+        assert reply.status_code == 200 and reply.json() == {**DEFAULTS, **MODE_OFF}
 
 
 def test_the_local_operator_reads_and_changes_the_settings_and_its_own_pause(team, monkeypatch):
@@ -569,7 +573,7 @@ def test_the_local_operator_reads_and_changes_the_settings_and_its_own_pause(tea
                            raw_claims={"source": "local_operator", "user_id": team.owner.pk})
     client = _client(team.db, RequestContext(workspace_id=team.ws, user=operator, auth_type="anonymous"))
 
-    assert client.get(SETTINGS).json() == DEFAULTS
+    assert client.get(SETTINGS).json() == {**DEFAULTS, **MODE_OFF}
     assert client.put(SETTINGS, json={"caps": {"max_open_per_agent": 2}}).json()["caps"]["max_open_per_agent"] == 2
     assert client.put(ME, json={"paused": True}).json() == {"paused": True, **NO_QUIET_HOURS}
     assert [(action, user_id) for action, user_id, _ in _audit(team, "workspace")] == [
@@ -657,9 +661,9 @@ def test_any_member_pauses_and_resumes_their_own_suggestions(team, saas, role):
     person = getattr(team, role)
     client = _as(team, person)
 
-    assert client.get(ME).json() == {"paused": False, **NO_QUIET_HOURS}
+    assert client.get(ME).json() == {"paused": False, **NO_QUIET_HOURS, **MODE_OFF}
     assert client.put(ME, json={"paused": True}).json() == {"paused": True, **NO_QUIET_HOURS}
-    assert client.get(ME).json() == {"paused": True, **NO_QUIET_HOURS}
+    assert client.get(ME).json() == {"paused": True, **NO_QUIET_HOURS, **MODE_OFF}
     assert client.put(ME, json={"paused": False}).json() == {"paused": False, **NO_QUIET_HOURS}
 
     rows = team.db.execute(text("SELECT user_id, paused FROM proactive_person_settings "
@@ -680,6 +684,66 @@ def test_a_stranger_or_a_caller_with_no_person_cannot_pause(team, saas):
     assert _as(team, team.owner).put(ME, json={"paused": "yes"}).status_code == 422
     assert team.db.execute(text("SELECT count(*) FROM proactive_person_settings "
                                 "WHERE workspace_id = CAST(:w AS uuid)"), {"w": str(team.ws)}).scalar() == 0
+
+
+@pytest.fixture
+def platform_mode(monkeypatch) -> NS:
+    """The platform mode the routes read (system_settings ``proactive.mode``): ``mode`` is the
+    stored value, None for no row, RuntimeError for a read that cannot complete."""
+    from core.llm import manager
+
+    rig = NS(mode=None)
+
+    def setting(category, key):
+        if rig.mode is RuntimeError:
+            raise RuntimeError("system_settings unreadable")
+        return rig.mode if (category, key) == ("proactive", "mode") else None
+
+    monkeypatch.setattr(manager, "read_system_setting", setting)
+    return rig
+
+
+@pytest.mark.parametrize("stored,enabled,mode", [
+    ("live", True, "live"), ("shadow", True, "shadow"), ("off", True, "off"), ("live", False, "off"),
+    (None, True, "off"), ("sideways", True, "off"),
+])
+def test_both_reads_answer_the_workspaces_effective_mode(team, saas, platform_mode, stored, enabled, mode):
+    platform_mode.mode = stored
+    _set_settings(team, {"proactive": {"enabled": enabled}})
+
+    settings = _as(team, team.owner).get(SETTINGS)
+    assert settings.status_code == 200 and settings.json()["effective_mode"] == mode
+    assert set(settings.json()) == {"enabled", "caps", "platform_caps", "effective_mode"}
+    for person in (team.owner, team.admin, team.editor, team.viewer):
+        mine = _as(team, person).get(ME)
+        assert mine.status_code == 200 and mine.json() == {"paused": False, **NO_QUIET_HOURS, "effective_mode": mode}
+
+
+def test_an_unreadable_mode_or_switch_reads_off_on_both_reads(team, saas, platform_mode, monkeypatch):
+    from core.models.workspaces import Workspace
+
+    platform_mode.mode = RuntimeError
+    assert _as(team, team.owner).get(SETTINGS).json() == {**DEFAULTS, **MODE_OFF}
+    assert _as(team, team.viewer).get(ME).json() == {"paused": False, **NO_QUIET_HOURS, **MODE_OFF}
+
+    platform_mode.mode = "live"
+    with monkeypatch.context() as patched:
+        _failing_reads(team.db, patched, Workspace.settings)  # the workspace switch's read
+        settings = _as(team, team.owner).get(SETTINGS)
+        mine = _as(team, team.viewer).get(ME)
+    assert settings.status_code == 200 and settings.json() == {**DEFAULTS, **MODE_OFF}
+    assert mine.status_code == 200 and mine.json()["effective_mode"] == "off"
+    assert _as(team, team.viewer).get(ME).json()["effective_mode"] == "live"
+
+
+def test_the_writes_take_no_mode_and_answer_none(team, saas, platform_mode):
+    platform_mode.mode = "live"
+
+    assert _as(team, team.owner).put(SETTINGS, json={"effective_mode": "off"}).status_code == 422
+    assert _as(team, team.owner).put(ME, json={"effective_mode": "off"}).status_code == 422
+    assert _stored(team)["proactive"] == {"enabled": True} and _audit(team, "workspace") == []
+    assert "effective_mode" not in _as(team, team.owner).put(SETTINGS, json={"enabled": True}).json()
+    assert "effective_mode" not in _as(team, team.viewer).put(ME, json={"paused": True}).json()
 
 
 def test_the_routes_are_plain_defs_mounted_and_in_the_manifest():

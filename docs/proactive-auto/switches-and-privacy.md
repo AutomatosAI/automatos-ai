@@ -35,8 +35,16 @@ editions differ, and exactly what a check-in can and can't do with your data.
 A workspace runs Proactive Auto only when **both** the platform mode is shadow or live **and** the workspace has
 switched it on. Either one off means off. If Automatos can't read a switch, it treats it as off.
 
-Today there is no switch for the workspace or the person in Settings: an owner or admin turns the workspace on
-through the API (see [the engineering routes](engineering/data-and-routes.md#routes)).
+Owners and admins switch the workspace on or off in **Settings → Orchestrator → Proactive Auto**, and tighten its
+limits there. Everyone else sees the switch there, read-only. Under the switch, one line says what Auto is doing in the
+workspace:
+
+- "Auto is checking in and suggesting." when the platform mode is live;
+- "Auto is checking in quietly: suggestions are recorded, but nothing is sent yet." when it is shadow;
+- "Switched on here, but Proactive Auto isn't running on this server yet." when the workspace is on but the platform
+  mode is off.
+
+The same switch is in the API (see [the engineering routes](engineering/data-and-routes.md#routes)).
 
 ### The suggestion push
 
@@ -72,8 +80,8 @@ A line that names something secret is never stored, and the card says so.
 | **Hide** | Puts a suggestion away for 14 days, with an optional reason. |
 | **Cancel** on a follow-up | Stops it. |
 
-Pause and quiet hours are set through the API today (`PUT /api/proactive/me`); there is no switch for them in
-Settings yet.
+**Pause suggestions** is in **Settings → Orchestrator → Proactive Auto**, for every member. Quiet hours are set
+through the API (`PUT /api/proactive/me`); there is no control for them in Settings yet.
 
 ## Local edition and hosted edition
 
