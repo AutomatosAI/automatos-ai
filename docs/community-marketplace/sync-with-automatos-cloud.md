@@ -547,8 +547,9 @@ the same page under a slim header, reading only the public routes (`components/m
   each type's approved Marketplace rows with display fields only. Nothing a workspace holds is shown: no installed
   marks, no update badges, no Publish form, no admin approve or reject, no GitHub import.
 - **The header:** the Automatos logo and **Studio** (both back to the Studio product site), **Sign in** and
-  **Start free**.
-- **Add to my workspace, signed out:** goes to sign-in (or sign-up) and remembers the item for 30 minutes, in that
+  **Join the waitlist** (`STUDIO_WAITLIST_URL`, the Studio site's waitlist; sign-up is waitlist-gated until the
+  hosted beta opens, so no visitor link goes to `/sign-up`).
+- **Add to my workspace, signed out:** goes to sign-in and remembers the item for 30 minutes, in that
   browser tab only. Back signed in, the Marketplace opens on that item with its Add ready. **Nothing installs until
   the person clicks Add**, and the install is the normal one, with its permission and confirmation rules. The only
   page it ever returns to is `/marketplace`.

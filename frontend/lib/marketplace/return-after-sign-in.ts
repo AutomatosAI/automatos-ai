@@ -1,10 +1,9 @@
 /**
- * PRD-270 US-270-09a (§5.7, §8-Q8, K21) — the way back to a Marketplace item after sign-in or
- * sign-up.
+ * PRD-270 US-270-09a (§5.7, §8-Q8, K21) — the way back to a Marketplace item after sign-in.
  *
  * Nothing in the app honours a return path: Clerk's sign-in, the sign-up form and the SSO
- * callback all land on '/' (their pages stay untouched). So a signed-out visitor's Add, Sign in
- * and Start free remember where they were, in this tab's sessionStorage for 30 minutes, and
+ * callback all land on '/' (their pages stay untouched). So a signed-out visitor's Add and Sign in
+ * remember where they were, in this tab's sessionStorage for 30 minutes, and
  * ResumeAfterSignIn (components/auth/resume-after-sign-in.tsx) takes it once the person is signed
  * in with a workspace. The same path rides `redirect_url`, the PRD's URL contract, for Clerk's own
  * flows.
@@ -18,12 +17,16 @@
 
 export const MARKETPLACE_PATH = '/marketplace'
 export const SIGN_IN_PATH = '/sign-in'
-export const SIGN_UP_PATH = '/sign-up'
 /**
  * The Studio product site, where visitors come to the public Marketplace from: the visitor header's
  * logo and its Studio link go back there (components/marketplace/public/visitor-header.tsx).
  */
 export const STUDIO_SITE_URL = 'https://studio.automatos.app'
+/**
+ * The hosted beta's waitlist on the Studio product site. Until the beta opens, sign-up is
+ * waitlist-gated, so the visitor header's primary goes here, never to sign-up.
+ */
+export const STUDIO_WAITLIST_URL = `${STUDIO_SITE_URL}/#waitlist`
 
 /** This tab's sessionStorage key: the remembered path and when it expires. */
 export const RETURN_PATH_STORAGE_KEY = 'automatos-marketplace-return'
@@ -99,10 +102,6 @@ export function signInUrl(returnPath: string): string {
   return withRedirect(SIGN_IN_PATH, returnPath)
 }
 
-/** `/sign-up?redirect_url=<the encoded return path>`. */
-export function signUpUrl(returnPath: string): string {
-  return withRedirect(SIGN_UP_PATH, returnPath)
-}
 
 /** Remembers `path` for 30 minutes, in this tab; an unsafe path is not remembered. */
 export function remember(

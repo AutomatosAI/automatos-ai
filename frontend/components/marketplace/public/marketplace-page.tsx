@@ -6,7 +6,7 @@
  *
  *   local            → MainLayout + MarketplaceHomepage; no Clerk hook runs.
  *   SaaS, signed in  → the same, exactly.
- *   SaaS, signed out → the slim visitor header (logo and Studio, Sign in, Start free) over the same
+ *   SaaS, signed out → the slim visitor header (logo and Studio, Sign in, Join the waitlist) over the same
  *                      homepage, with the visitor's access (VisitorAccessProvider): it reads the
  *                      public routes, draws nothing workspace-scoped, and every add goes to sign-in.
  *   SaaS, loading    → a quiet line, never the page.

@@ -7,7 +7,7 @@
 
 export const VISITOR_EYEBROW = 'Automatos AI · Marketplace'
 export const VISITOR_LEDE =
-  'Themes, agents, Playbooks, packages and tools for Automatos. Browse all of it here. To add any of it to a workspace, sign in, or choose Start free to make one.'
+  'Themes, agents, Playbooks, packages and tools for Automatos. Browse all of it here. To add any of it to a workspace, sign in. Hosted beta opens November 2026 · Join the waitlist.'
 /** Signed out, the strip after Featured: the most installed items besides the featured ones. */
 export const POPULAR_TITLE = 'Popular'
 

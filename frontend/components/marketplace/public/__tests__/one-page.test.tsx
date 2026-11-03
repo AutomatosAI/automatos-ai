@@ -140,7 +140,7 @@ describe('the page signed out (one page for everyone)', () => {
 
     expect(screen.queryByTestId('main-layout')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Start free' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Join the waitlist' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Studio' })).toHaveAttribute('href', STUDIO_SITE_URL)
     expect(screen.getByText(VISITOR_LEDE)).toBeInTheDocument()
 

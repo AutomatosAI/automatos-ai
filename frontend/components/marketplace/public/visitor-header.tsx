@@ -2,13 +2,15 @@
 
 /**
  * PRD-270 US-270-08a, US-270-09a (§5.7, K21) — the visitor's slim header over the one Marketplace
- * page: the Automatos logo, the way back to Studio, Sign in and Start free.
+ * page: the Automatos logo, the way back to Studio, Sign in and Join the waitlist.
  *
  * Visitors come here from the Studio product site, so the logo and a quiet "Studio" link both go back
  * to it (STUDIO_SITE_URL). Nothing workspace-scoped: no workspace card, notifications, credits or
- * profile. Start free is the view's one ink primary; Studio and Sign in are ghost. Sign in and Start
- * free remember the Marketplace page the visitor is on and carry it as `redirect_url`, so the person
- * comes back to it after sign-in or sign-up (lib/marketplace/return-after-sign-in.ts).
+ * profile. Join the waitlist is the view's one ink primary; Studio and Sign in are ghost. Until the
+ * hosted beta opens, sign-up is waitlist-gated, so the primary goes to the waitlist on the Studio
+ * product site (STUDIO_WAITLIST_URL), never to sign-up. Sign in remembers the Marketplace page the
+ * visitor is on and carries it as `redirect_url`, so the person comes back to it after sign-in
+ * (lib/marketplace/return-after-sign-in.ts).
  */
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
@@ -18,14 +20,14 @@ import { Button } from '@/components/ui/button'
 import {
   MARKETPLACE_PATH,
   STUDIO_SITE_URL,
+  STUDIO_WAITLIST_URL,
   remember,
   safeReturnPath,
   signInUrl,
-  signUpUrl,
 } from '@/lib/marketplace/return-after-sign-in'
 
 export const VISITOR_SIGN_IN = 'Sign in'
-export const VISITOR_START_FREE = 'Start free'
+export const VISITOR_JOIN_WAITLIST = 'Join the waitlist'
 export const VISITOR_STUDIO = 'Studio'
 export const VISITOR_LOGO_LABEL = 'Automatos Studio'
 
@@ -59,9 +61,7 @@ export function VisitorHeader() {
             </Link>
           </Button>
           <Button asChild size="sm">
-            <Link href={signUpUrl(returnPath)} onClick={rememberReturn}>
-              {VISITOR_START_FREE}
-            </Link>
+            <a href={STUDIO_WAITLIST_URL}>{VISITOR_JOIN_WAITLIST}</a>
           </Button>
         </nav>
       </div>

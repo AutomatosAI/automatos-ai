@@ -46,9 +46,12 @@ This page says what you can do and where. For how it works (the routes, the chec
 ## On the hosted edition: browse signed out
 
 Open `/marketplace` on the hosted app. Signed out, you get the same Marketplace page members see, under a slim
-header: the Automatos logo and **Studio** (both take you back to the Studio site), **Sign in** and **Start free**. It
-reads: "Themes, agents, Playbooks, packages and tools for Automatos. Browse all of it here. To add any of it to a
-workspace, sign in, or choose Start free to make one."
+header: the Automatos logo and **Studio** (both take you back to the Studio site), **Sign in** and **Join the
+waitlist**. It reads: "Themes, agents, Playbooks, packages and tools for Automatos. Browse all of it here. To add any
+of it to a workspace, sign in. Hosted beta opens November 2026 · Join the waitlist."
+
+Until the hosted beta opens, new accounts are by waitlist: **Join the waitlist** goes to the waitlist on the Studio
+site, and nothing on the page offers sign-up.
 
 **What you can see:**
 
@@ -70,7 +73,7 @@ Signed in, `/marketplace` is the same page inside the app, with your workspace's
 
 1. Click **Add to my workspace** on a theme, or the add button on any other item (**Add to Workspace**, **Install**,
    **Enable for Workspace**). It opens sign-in.
-2. Sign in, or create an account (**Start free**). A new account gets its first workspace as usual.
+2. Sign in. Until the hosted beta opens, there is no sign-up here: join the waitlist instead.
 3. Once you are in, the app opens the Marketplace on that item, with its add dialog ready.
 4. Click it. **Nothing is installed until you do.** The add is the normal one: only workspace owners and admins add
    items, and you may be asked to confirm it's you.

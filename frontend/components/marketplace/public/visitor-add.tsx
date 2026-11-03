@@ -6,7 +6,7 @@
  * (lib/marketplace/return-after-sign-in.ts) and goes to sign-in carrying the same link as
  * `redirect_url` (`/sign-in?redirect_url=/marketplace?tab=<tab>&item=<key>&add=1`, the PRD's URL
  * contract), so the person comes back to that item. A secondary button: the visitor header's
- * Start free is the view's one ink primary (K29).
+ * Join the waitlist is the view's one ink primary (K29).
  */
 import Link from 'next/link'
 import { Download } from 'lucide-react'
