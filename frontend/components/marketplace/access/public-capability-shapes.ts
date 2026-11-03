@@ -16,7 +16,7 @@ import { countOf, isJson } from '@/lib/marketplace/source/public-reads'
 import type { Json, PublicEntry } from '@/lib/marketplace/source/public-reads'
 
 import type { LLMModel } from '../llm-model-card'
-import type { PluginSummary } from '../marketplace-plugins-tab'
+import type { PluginSummary } from '../plugin-types'
 import type { Skill } from '../marketplace-skills-tab'
 
 /** An LLM route's key, `<serving provider>:<model id>` (api/llm_marketplace.py route_key). */

@@ -24,7 +24,7 @@ import { AgentGridCard } from '../marketplace-agent-cards'
 import type { MarketplaceAgent } from '../marketplace-agent-cards'
 import { PlaybookGridCard } from '../marketplace-playbook-cards'
 import { PluginCard } from '../marketplace-plugins-tab'
-import type { PluginSummary } from '../marketplace-plugins-tab'
+import type { PluginSummary } from '../plugin-types'
 
 const requireSignIn = vi.fn(() => true)
 const VISITOR: MarketplaceAccess = { signedIn: false, requireSignIn, source: MEMBER_SOURCE }
