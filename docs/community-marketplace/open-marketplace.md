@@ -79,8 +79,8 @@ Signed in, `/marketplace` is the same page inside the app, with your workspace's
    items, and you may be asked to confirm it's you.
 
 The way back is kept in that browser tab for 30 minutes. If you sign in in another tab, or later than that, you land
-where sign-in normally takes you: open the Marketplace again and add the item from there. **Sign in** and **Start
-free** in the header remember the page you were on the same way.
+where sign-in normally takes you: open the Marketplace again and add the item from there. **Sign in** in the header
+remembers the page you were on the same way. **Join the waitlist** leaves for the Studio site and remembers nothing.
 
 ### Share an item
 
