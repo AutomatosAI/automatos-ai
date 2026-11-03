@@ -31,6 +31,9 @@ The following files were used as context for generating this page:
 - [orchestrator/services/themes/settings.py](../../orchestrator/services/themes/settings.py)
 - [orchestrator/services/themes/defaults.py](../../orchestrator/services/themes/defaults.py)
 - [orchestrator/services/themes/choices.py](../../orchestrator/services/themes/choices.py)
+- [orchestrator/services/themes/auto_update.py](../../orchestrator/services/themes/auto_update.py)
+- [orchestrator/services/marketplace_cloud/updates.py](../../orchestrator/services/marketplace_cloud/updates.py)
+- [frontend/components/settings/themes/theme-pins.tsx](../../frontend/components/settings/themes/theme-pins.tsx)
 - [orchestrator/services/themes/drift.py](../../orchestrator/services/themes/drift.py)
 - [orchestrator/services/themes/review_stage.py](../../orchestrator/services/themes/review_stage.py)
 - [orchestrator/services/themes/revocations.py](../../orchestrator/services/themes/revocations.py)
@@ -61,6 +64,15 @@ Who can do what:
 to that version, keeping its looks, its members' choices and its place as the default. Its row shows **Updates itself;
 pin to hold**. To keep the version you have, [pin it](#pin-a-version). If the version it runs is taken off the
 Marketplace, the install goes back to the newest listed version below it (see [Withdrawn themes](#withdrawn-themes)).
+
+- Nobody needs to be signed in for it: the server moves the install when the new version is listed. Members see the
+  new version on their next page load.
+- On the local edition, a theme that came from Automatos Cloud moves after a **Sync with Automatos Cloud** that brings
+  a newer version. Nothing syncs on a schedule: an owner or admin presses the button
+  ([The open Marketplace](../community-marketplace/open-marketplace.md#on-a-local-install-sync-with-automatos-cloud)).
+  If the new version's files can't be downloaded, the install stays where it is and the next Sync tries again.
+- A version your Automatos can't run yet is not offered: the install stays on the newest version it can run.
+- If the server refuses a move, the install stays where it was, with **Update available**.
 
 Everything else waits as an update until an owner or admin applies it:
 

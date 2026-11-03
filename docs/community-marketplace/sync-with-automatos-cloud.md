@@ -25,6 +25,9 @@ The following files were used as context for generating this page:
 - [orchestrator/services/marketplace_bundles/updates.py](../../orchestrator/services/marketplace_bundles/updates.py)
 - [orchestrator/modules/tools/discovery/cloud_install_asks.py](../../orchestrator/modules/tools/discovery/cloud_install_asks.py)
 - [orchestrator/api/public_marketplace.py](../../orchestrator/api/public_marketplace.py)
+- [orchestrator/api/public_rate_limit.py](../../orchestrator/api/public_rate_limit.py)
+- [orchestrator/services/marketplace_public/featured.py](../../orchestrator/services/marketplace_public/featured.py)
+- [orchestrator/services/marketplace_public/counts.py](../../orchestrator/services/marketplace_public/counts.py)
 - [orchestrator/config.py](../../orchestrator/config.py)
 - [envs/api.defaults](../../envs/api.defaults)
 - [frontend/components/marketplace/cloud/sync-button.tsx](../../frontend/components/marketplace/cloud/sync-button.tsx)
@@ -36,6 +39,7 @@ The following files were used as context for generating this page:
 - [frontend/lib/marketplace/cloud-files.ts](../../frontend/lib/marketplace/cloud-files.ts)
 - [frontend/csp-sources.js](../../frontend/csp-sources.js)
 - [frontend/components/marketplace/public/marketplace-page.tsx](../../frontend/components/marketplace/public/marketplace-page.tsx)
+- [frontend/components/marketplace/access/marketplace-access.tsx](../../frontend/components/marketplace/access/marketplace-access.tsx)
 - [frontend/lib/marketplace/return-after-sign-in.ts](../../frontend/lib/marketplace/return-after-sign-in.ts)
 - [frontend/app/robots.ts](../../frontend/app/robots.ts)
 
@@ -46,9 +50,10 @@ the agents, Playbooks, packages and plugins its review approved. It is pull only
 Cloud's public catalogue, lists the theme versions an Automatos key signed, and lists the other items as **Reviewed
 on Automatos Cloud**. It never publishes anything, and it runs only when someone presses the button.
 
-This page covers the local edition's side (the button, what leaves your install, the checks, the updates, the
-agents, Playbooks, packages and plugins, and the settings) and then the hosted edition's side: the catalogue it
-serves and the public Marketplace at `/marketplace`.
+This is the technical page. It covers the local edition's side (the button, what leaves your install, the checks,
+the updates, the agents, Playbooks, packages and plugins, and the settings) and then the hosted edition's side: the
+catalogue it serves, its files, bundles and plugin packages, the public reads and their rate limit, and the public
+Marketplace at `/marketplace`. For what a person can do and where, see [The open Marketplace](open-marketplace.md).
 
 ---
 
@@ -182,6 +187,14 @@ When its newest version this Automatos can run came from Automatos Cloud and an 
 A download that fails changes no install. The toast says how many themes could not be updated ("Their installs stay
 as they were; the next Sync tries again."), and the next Sync does try again: the update follows what is listed, not
 what one Sync brought. A theme your own install lists never moves from here.
+
+This is `services/marketplace_cloud/updates.py` `apply_cloud_updates`, run by `POST /api/marketplace/cloud-sync`
+after the pull commits. It calls the two functions an approval calls, `listing_updates.offer_listed_update` and
+`auto_update.apply_listed_update`, but never `review.approve`, so a Cloud row gets no signature request and no event
+row. Each theme is committed on its own, one pass runs at a time per process, and nothing is fetched for a theme whose
+older installs are all pinned. See [Updates and rollback](../theme-host/updates-and-rollback.md) for the moves
+themselves. This pass moves theme installs only; for the other types, see [Plugins](#plugins) and
+[Update notices](#update-notices).
 
 ## Agents, Playbooks, packages and plugins
 
@@ -464,30 +477,77 @@ that version (the same files always make the same zip), and nothing else: a pend
 another version, is 404.
 
 All four are public by design. An approved agent's prompt and model, a Playbook's steps and prompts, and a plugin's
-files can be read without an account; a bundle carries no email address, id, credential or connection.
+files can be read without an account; a bundle carries no email address, id, credential or connection. How they are
+served:
 
 - cached (`Cache-Control: public, max-age=300` with an ETag for the catalogue; a file, a bundle or a plugin package
   never changes under its address, so each is cached as immutable, with an ETag);
 - a plugin's zip is built once per version, export and scan, and kept, so a repeat request reads nothing from
   storage (a zip that can't be served is tried again after a minute). One request builds a version at a time,
   each server process runs two builds at a time, and a request whose build doesn't start within a second is 503
-  with `Retry-After`;
-- rate-limited per client IP and per route: `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` reads a minute on each (120 by
-  default), over it 429;
+  with `Retry-After: 5`;
+- rate-limited per client IP and per route (`api/public_rate_limit.py`): `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` reads
+  a minute on each (120 by default), over it 429 (see [The rate limit](#the-rate-limit));
 - the catalogue is capped at `MARKETPLACE_CATALOG_FEED_MAX_KB` (1024 by default). A larger one is a logged 503,
-  because served, it would fail every Sync.
+  because served, it would fail every Sync;
+- the catalogue, its themes and its items together, is built at most once every 30 seconds for every caller
+  (`catalog.catalog_snapshot`). While one caller builds, the others get the last catalogue this process holds; with
+  none held, a caller waits up to 2 seconds, then gets 503 with `Retry-After: 5`. A theme package is rebuilt from its
+  stored files in one of two slots per process; none free within a second is 503 with `Retry-After: 5`.
+
+### The public reads
+
+`GET /api/public/marketplace/{type}` (`api/public_marketplace.py`, `services/marketplace_public/`) answers what a
+visitor sees of every tab but Themes. `type` is one of `agents`, `playbooks`, `packages`, `applications`, `plugins`,
+`skills` and `llms`; another is 404. `?limit` is 1 to 100 (50 by default) and `?offset` 0 or more (else 422). The
+answer is `{type, items, limit, offset, more}`: each type's approved Marketplace rows mapped through that type's
+field allowlist (`services/marketplace_public/fields.py`), with nothing from a workspace, a person or an install. It is
+cached like the catalogue (`Cache-Control: public, max-age=300`, a weak ETag, 304). A database that fails the read is
+a logged 503.
+
+Two more reads draw the signed-out page's header and its Featured hero and rail, with the same guards:
+
+- `GET /api/public/marketplace/featured` (`services/marketplace_public/featured.py`) answers `{featured, popular}`:
+  the approved Marketplace agents marked featured (at most 5, most installed first), and the Popular strip that
+  replaces the signed-in "Recommended for You" (the most installed approved agents and Playbooks besides the
+  featured ones, at most 6). Each item carries its display fields, `type`, `version` and `installCount`.
+- `GET /api/public/marketplace/counts` (`services/marketplace_public/counts.py`) answers `{items, installs}`: how many
+  approved Marketplace agents and Playbooks there are, and their install counts added up. Nothing is read from a
+  workspace, a person or an install record.
+
+### The rate limit
+
+Each public route has its own bucket per client address: `marketplace-catalog:ip` (the catalogue),
+`marketplace-catalog-files:ip` (its files), `marketplace-catalog-bundles:ip` (the bundles),
+`marketplace-catalog-plugins:ip` (the plugin packages) and `marketplace-public:ip` (the public reads, Featured and
+counts included, which share it).
+
+- A bucket is one IPv4 address or one IPv6 /64 (`core/security/ip_bucket.py`), counted in the widget API's Redis
+  sliding window over 60 seconds (`api/widgets/rate_limit.py` `RateLimitStore`).
+- Over the limit is 429 "Too many requests from this address. Try again in a minute.", with `Retry-After` and
+  `Cache-Control: no-store`, so no cache keeps the refusal for everyone.
+- With Redis unreachable the request goes through, and the store logs an error naming the limiter.
+- The edition is checked first: a local install answers 404 before the limit counts anything.
+
+| Setting (hosted edition) | Default | What it does |
+|---|---|---|
+| `MARKETPLACE_PUBLIC_RATE_PER_MINUTE` | `120` | Reads a minute per client address on each public route. At least 1. |
+| `MARKETPLACE_CATALOG_FEED_MAX_KB` | `1024` | The largest catalogue the hosted edition serves. Keep it at or under every install's `AUTOMATOS_CLOUD_FEED_MAX_KB`. |
 
 ### The public Marketplace
 
-On the hosted edition, `/marketplace` is public: anyone can browse it signed out. A signed-in member sees the same
-page as before.
+On the hosted edition, `/marketplace` is public: anyone can browse it signed out. It is one page for everyone
+(`MarketplaceHomepage`, `public/marketplace-page.tsx`): a signed-in member sees it inside the app, and a visitor sees
+the same page under a slim header, reading only the public routes (`components/marketplace/access/`).
 
-- **What a visitor sees:** every tab, read-only. The Themes storefront from the catalogue, with its web and phone
-  screenshots, and the other tabs (Packages, Applications, Agents, Playbooks, LLMs, and Capabilities' plugins and
-  skills) from `GET /api/public/marketplace/<type>`, which answers each type's approved Marketplace rows with
-  display fields only.
-  Nothing a workspace holds is shown: no installed list, no update badges, no Publish form.
-- **The header:** the Automatos logo, **Sign in** and **Start free**.
+- **What a visitor sees:** the same page, read-only. The item and install counts (`/counts`), the Featured hero and
+  rail and a **Popular** strip in place of the personal "Recommended for You" (`/featured`), the Themes storefront
+  from the catalogue, with its web and phone screenshots, and the other tabs (Packages, Applications, Agents,
+  Playbooks, LLMs, and Capabilities' plugins and skills) from `GET /api/public/marketplace/<type>`, which answers
+  each type's approved Marketplace rows with display fields only. Nothing a workspace holds is shown: no installed
+  marks, no update badges, no Publish form, no admin approve or reject, no GitHub import.
+- **The header:** the Automatos logo and **Studio** (both back to the Studio product site), **Sign in** and
+  **Start free**.
 - **Add to my workspace, signed out:** goes to sign-in (or sign-up) and remembers the item for 30 minutes, in that
   browser tab only. Back signed in, the Marketplace opens on that item with its Add ready. **Nothing installs until
   the person clicks Add**, and the install is the normal one, with its permission and confirmation rules. The only

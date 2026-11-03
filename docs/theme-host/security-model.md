@@ -139,8 +139,11 @@ letter, and never one of the classes core owns on `<html>`: `studio`, `classic`,
 again on every boot read (`css_value.py`, `serve.theme_prepaint`). The browser applies the boot only after
 `sanitizeThemeBoot` drops any class, custom property name or value outside its own grammar: no `url()`, no `;`, `{`,
 `}`, quotes, `<`, `!` or `@` (`frontend/lib/theme-host/boot-sanitize.ts`, over `css-value.ts` `isBootValue`). The
-import also refuses a knob or pair cell's value that grammar would drop (`first_paint.py`), so what passes the import
-is what the browser paints. The boot script uses `classList` and `style.setProperty` only.
+package reader also refuses what the browser's gate and look runtime would silently drop (`first_paint.py`:
+`BAD_CSS_VALUE`, `BAD_PREPAINT`, `PREPAINT_DEFAULTS_UNFIT`, `KNOB_NOT_PAINTED`, `KNOB_NOT_IN_SCHEMA`; see
+[Theme host](_index.md#1-the-package)), on every route that reads a package (an upload, a submission, a publish), so
+what passes is what the browser paints. The Design Kit's `pack` and `check` refuse the same, with the same codes,
+before anything is uploaded. The boot script uses `classList` and `style.setProperty` only.
 
 **Reserved publishers.** A theme id is `publisher/slug`. The publisher `automatos` is reserved
 (`contract.RESERVED_PUBLISHERS`). For Marketplace submissions and the Official badge, a `theme_publishers` row marked
@@ -301,9 +304,11 @@ A signature vouches for one theme version. It is an Ed25519 signature, by an Aut
 text of `{id, version, digest, files}`: the theme id, the version, the package digest and each file's sha256, as JSON
 with sorted keys, no spaces and ASCII only (`signing.canonical_text`).
 
-The orchestrator never holds a signing key. The private key is a secret of the Design Kit's `theme-signing`
-environment, read only by its **Theme sign** workflow; a person hands it each signature request and pastes the
-signature back ([Operations](operations.md#list-an-official-theme)).
+The orchestrator never holds a signing key. The private key is the secret `THEME_SIGNING_KEY` of the Design Kit's
+`theme-publish` environment, read only by the Sign step of `theme-publish.yml`'s publish job, on `main`. That job
+signs only the bytes it built from `main` and sends the envelope to
+[the publish endpoint](publish-endpoint.md), which verifies it before it stores it. The kit has no other signing
+workflow: the merge of a version bump is the approval.
 
 **The keys file.** `orchestrator/services/themes/data/signing-keys.json` holds the public keys, the same bytes as the
 kit's `keys/theme-signing.json`:
@@ -314,8 +319,8 @@ kit's `keys/theme-signing.json`:
 
 `keyId` is `ed25519:` and the first 16 hex characters of the sha256 of the SPKI DER. `status` is `active`,
 `retired` or `revoked`. A file that breaks any rule, or names a key twice, doesn't load. The file ships one key,
-Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`, `active`, added 2026-10-26); no version is signed with it
-yet.
+Automatos's theme-signing key (`ed25519:e138b6d0fa7aaaf3`, `active`, added 2026-10-26). Every version the kit's
+publish job lists is signed with it.
 
 **Verdicts** (`signature_verify.verify`): `verified` when an active key verifies the signature; `invalid` when no key
 does, or only a retired or revoked one does (that key's id is kept); `unsigned` when there is none. In the local
@@ -337,8 +342,12 @@ Where signatures are checked:
 
 | Where | Check |
 |---|---|
+| `POST /api/marketplace/themes/publish` | The envelope must name the package's id, version and digest and verify under an active key (422 otherwise); it is stored through the approval's signature request, in the publish transaction |
 | `POST /api/admin/themes/{packageId}/signature` | Stored only when an active key verifies it (400 otherwise) |
 | `POST /api/themes/import` with a `signature` part | The `.sig.json` envelope must name the upload's id, version and digest, and the key it names must be the active key that verifies it |
+| `GET /api/marketplace/catalog` (hosted) | Lists only this edition's own versions whose signature an active key verifies (`marketplace_cloud/catalog.py`) |
+| A Sync with Automatos Cloud (local) | Each catalogue item's envelope is checked as an upload's is, over its file list and digest, with this install's keys and the feed's revoked keys; an item that fails is refused, never listed (`marketplace_cloud/feed.py`) |
+| Adding or updating to a Cloud version (local) | The downloaded package must be the row's digest and file list, and the row's stored signature must verify again over the downloaded files (`marketplace_cloud/package.py`) |
 | Every serve (`revocations.revocation_of`) | A signature that fails disables its version |
 | The listings, the installed list, the admin report | `{state, keyId}` shown |
 
