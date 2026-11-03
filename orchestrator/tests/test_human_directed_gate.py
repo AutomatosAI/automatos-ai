@@ -42,7 +42,7 @@ import modules.tools.discovery.platform_executor as pe
 from modules.tools.discovery import confirmation_gate
 from modules.tools.execution.telemetry import _build_router_decision
 
-_WS = "28a228aa-dd63-46c7-baac-d29a0eb67283"
+_WS = "00000000-0000-0000-0000-0000000000a1"
 _CHAT_CTX = {"conversation_id": "conv-1", "user_id": "user_3CzR92xxx"}
 
 
