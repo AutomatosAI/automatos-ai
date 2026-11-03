@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { CardTitle, CardDescription } from '@/components/ui/card'
 import Link from 'next/link'
 import Image from 'next/image'
+import { PRIVACY_POLICY_URL, TERMS_URL } from '@/lib/legal-links'
 
 export type OAuthSignUpStrategy = 'oauth_google' | 'oauth_github'
 
@@ -72,6 +73,19 @@ export function WaitlistJoined() {
                 </Button>
             </Link>
         </>
+    )
+}
+
+const LEGAL_LINK_CLASS = 'hover:text-foreground hover:underline transition-colors'
+
+/** Privacy and Terms on the company site, under every step of the card. */
+export function LegalLinks() {
+    return (
+        <p className="text-xs text-muted-foreground">
+            <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer" className={LEGAL_LINK_CLASS}>Privacy</a>
+            {' · '}
+            <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className={LEGAL_LINK_CLASS}>Terms</a>
+        </p>
     )
 }
 
