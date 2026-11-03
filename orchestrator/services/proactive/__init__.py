@@ -32,4 +32,6 @@ decide on.
   stands, its next step from :mod:`~services.proactive.strings` in the person's language,
   and what Try again does; the needs-you rows, the Missions list and the board's ticket
   reads carry them.
+- :mod:`services.proactive.retention`: the run rows (``proactive_runs``) kept
+  ``PROACTIVE_RUNS_RETENTION_DAYS`` (90), the older ones deleted once a day on the leader (§6.2).
 """
