@@ -8,6 +8,7 @@ type Brief = {
   sections: { needs_you: BriefRow[]; suggestions: BriefRow[]; today: BriefRow[]; since: BriefRow[]; unchecked: BriefRow[] }
   counts: { needs_you: number; suggestions: number; today: number; since: number }  // exact, even when rows fold
   labels: { sections: Record<Section, string>; more: Partial<Record<Section, string>>; empty?: string }
+  copy: { section_labels: Record<Section, string>; empty_sentence: string; show_more_template: string }
   state_hash: string; generated_at: string
 }
 type BriefRow = {
@@ -22,16 +23,21 @@ Every id is a string (a number given for one is read as its string), and a field
 doesn't know is ignored. ``labels`` carries the server's copy for the card (K16: clients
 never compose the section labels, "Show N more" or the empty sentence): each section's label,
 "Show N more" for each section that folded, and the empty sentence when nothing is in any
-section.
+section. ``copy`` (W3, US-C23) carries the same words whatever the rows: every section's label,
+the empty sentence and "Show {n} more" unformatted, so a client that folds its rows its own way
+(a phone) or draws an empty section still composes none. The number a client fills in is what
+its own fold hides plus what the server's did (``labels.more``): ``counts.needs_you`` is the
+badge's total, and a viewer's fold counts only the rows they may see. Its Python name is
+``copy_`` (``copy`` is a ``BaseModel`` method); it is read and written as ``copy``.
 """
 from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
-    "ACTION_VERBS", "Brief", "BriefAction", "BriefCounts", "BriefLabels", "BriefOpens", "BriefRow",
+    "ACTION_VERBS", "Brief", "BriefAction", "BriefCopy", "BriefCounts", "BriefLabels", "BriefOpens", "BriefRow",
     "BriefSections", "COUNTED_SECTIONS", "NEEDS_YOU", "OPENS_TYPES", "PART_TYPE", "SECTIONS", "SINCE",
     "SUGGESTIONS", "TODAY", "UNCHECKED", "VERSION", "VIAS", "VIA_OPEN", "VIA_SCHEDULE",
 ]
@@ -126,8 +132,21 @@ class BriefLabels(_Shape):
     empty: Optional[str] = None
 
 
+class BriefCopy(_Shape):
+    """The card's words in the person's language, whatever its rows: each section's label, the
+    empty sentence, and "Show {n} more" with ``{n}`` for the client to fill."""
+
+    section_labels: Dict[str, str]
+    empty_sentence: str
+    show_more_template: str
+
+
 class Brief(_Shape):
-    """``Brief@1``: one person's brief for one local date."""
+    """``Brief@1``: one person's brief for one local date. ``copy`` is read and written by that
+    name (``copy_`` here); a brief saved before it had none, so it may be missing."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, coerce_numbers_to_str=True,
+                              serialize_by_alias=True, validate_by_name=True, validate_by_alias=True)
 
     v: Literal[1]
     date: str
@@ -137,5 +156,6 @@ class Brief(_Shape):
     sections: BriefSections
     counts: BriefCounts
     labels: BriefLabels
+    copy_: Optional[BriefCopy] = Field(default=None, alias="copy")
     state_hash: str
     generated_at: str

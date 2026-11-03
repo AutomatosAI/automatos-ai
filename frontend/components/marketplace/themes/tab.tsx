@@ -22,7 +22,9 @@
  * The role decides which controls show (`canManageThemes`); the server enforces every gate and
  * step-up itself. Both editions: in the local edition the operator is the workspace owner.
  * Radix mounts a tab's content only while it is selected; Themes is the tab the Marketplace opens
- * on, so its listings are asked for as the Marketplace opens.
+ * on, so its listings are asked for as the Marketplace opens. A `?tab=themes&item=&add=1` link,
+ * handed over by the tab strip (PRD-270 US-270-09b), picks its listing in the hero and opens its
+ * detail with Add ready (add-link.tsx); nothing installs until the click.
  */
 import { useMemo, useRef, useState } from 'react'
 
@@ -32,6 +34,8 @@ import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { useThemeSettings } from '@/hooks/use-installed-themes'
 import type { ThemeListing } from '@/lib/api-client'
 
+import type { MarketplaceLink } from '../deep-link/deep-link-params'
+import { ThemeAddLink } from './add-link'
 import { DetailDialog } from './detail-dialog'
 import { LOADING_LISTINGS, MARKETPLACE_OFF_NOTE, MARKETPLACE_SWITCH_OFF, filterListings } from './listing-format'
 import { useThemeListings } from './listing-hooks'
@@ -43,7 +47,13 @@ export { THEMES_TAB_LABEL, THEMES_TAB_VALUE } from './listing-format'
 
 const NONE_LISTED: readonly ThemeListing[] = []
 
-export function MarketplaceThemesTab({ searchQuery = '' }: { searchQuery?: string }) {
+interface MarketplaceThemesTabProps {
+  readonly searchQuery?: string
+  /** The address's Themes link (`?tab=themes&item=&add=1`), if it carries one. */
+  readonly link?: MarketplaceLink | null
+}
+
+export function MarketplaceThemesTab({ searchQuery = '', link = null }: MarketplaceThemesTabProps) {
   const { workspace } = useWorkspace()
   const canManage = canManageThemes(workspace?.role)
   const settings = useThemeSettings()
@@ -84,6 +94,9 @@ export function MarketplaceThemesTab({ searchQuery = '' }: { searchQuery?: strin
       <StorefrontInstalled canManage={canManage} settings={settings.data} listings={all} onView={viewInHero} />
       {!marketplaceOff && (
         <DetailDialog listingId={openListing} canManage={canManage} onClose={() => setOpenListing(null)} />
+      )}
+      {listed && link && (
+        <ThemeAddLink key={link.item} link={link} listings={listings.data} canManage={canManage} onSelect={viewInHero} />
       )}
     </div>
   )

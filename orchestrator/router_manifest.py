@@ -118,12 +118,34 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-268 US-C10b (§6.4) -- the brief on open, once per person per local date
     # (POST /api/proactive/brief/open).
     RouterSpec("api.proactive_brief"),
+    # PRD-268 US-C11e (§6.3) -- the person's own follow-ups: list and cancel
+    # (/api/proactive/follow-ups*).
+    RouterSpec("api.proactive_follow_ups"),
     # PRD-268 US-C18 (§6.11.3) -- readiness: what Auto depends on, and Check again
     # (/api/readiness, /api/readiness/check).
     RouterSpec("api.readiness"),
     # PRD-268 US-C20a (§6.11.4) -- an approval grant's ApprovalView@1
     # (GET /api/v1/approval-grants/{grant_id}/view).
     RouterSpec("api.approval_views"),
+    # PRD-268 US-C22b (§6.11.5) -- calibration on day one: consent, the posted card, reject
+    # and accept (/api/auto/calibration*). Ships off (CALIBRATION_ENABLED, K15).
+    RouterSpec("api.auto_calibration"),
+    # PRD-270 US-270-01 -- the hosted catalogue a local install's Sync with Automatos Cloud
+    # reads (GET /api/marketplace/catalog): public, rate-limited per IP, 404 in the local edition.
+    RouterSpec("api.marketplace_catalog"),
+    # PRD-270 US-270-07a -- the public Marketplace reads a visitor browses
+    # (GET /api/public/marketplace/{type}): display fields only, rate-limited per IP, 404 locally.
+    RouterSpec("api.public_marketplace"),
+    # PRD-270 US-270-03b -- Sync with Automatos Cloud (POST /api/marketplace/cloud-sync) and its
+    # status (GET .../status): local edition only (404 hosted), workspace owners and admins.
+    RouterSpec("api.marketplace_cloud_sync"),
+    # PRD-270 US-270-12c -- the bundles the hosted catalogue lists
+    # (GET /api/marketplace/catalog/bundles/{revision}): public, rate-limited per IP, 404 in the local edition.
+    RouterSpec("api.marketplace_catalog_items"),
+    # PRD-270 US-270-14a -- the local reads the web shows Cloud items with
+    # (GET /api/marketplace/cloud-sync/items, .../items/{kind}/{key}/disclosure, .../updates): local edition only
+    # (404 hosted), any member, the caller's workspace's copies only.
+    RouterSpec("api.marketplace_cloud_items"),
 )
 
 

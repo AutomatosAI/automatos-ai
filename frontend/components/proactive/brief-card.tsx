@@ -9,13 +9,14 @@
  * why rows, row actions as text, "Show N more" and the empty sentence; the tiny "Auto is an AI"
  * caption once; Listen, the host's BriefVoice (US-C21d), in its slot; and thumbs up and down, which
  * post the existing digest feedback route (POST /api/activity/digest/feedback) with the brief's
- * state_hash. Auto's words (the greeting, the prose, the rows) are marked data-ai-generated and the
- * controls sit outside them. Nothing here plays or navigates by itself: the surface passes what a
- * row's action and its chevron do.
+ * state_hash and show the person's remembered rating (GET, the one cache entry useRateBrief shares),
+ * unless the surface draws its own (`thumbs={false}`). Auto's words (the greeting, the prose, the
+ * rows) are marked data-ai-generated and the controls sit outside them. Nothing here plays or
+ * navigates by itself: the surface passes what a row's action and its chevron do.
  */
 import { useState, type ReactNode } from 'react'
 import { ThumbsDown, ThumbsUp } from 'lucide-react'
-import { useSubmitDigestFeedback } from '@/hooks/use-digest-api'
+import { useDigestRating, useSubmitDigestFeedback } from '@/hooks/use-digest-api'
 import type { Brief } from '@/lib/proactive/types'
 import { cn } from '@/lib/utils'
 import { AiCaption, CARD_CLASS, ENTRANCE_CLASS, Eyebrow } from './card-parts'
@@ -32,6 +33,8 @@ export interface BriefCardProps extends Omit<BriefSectionsProps, 'brief'> {
   readonly brief: Brief
   /** Listen: the host's BriefVoice. It never plays until pressed. */
   readonly listen?: ReactNode
+  /** The card's thumbs; default true. False when the surface draws its own (the SDK's useRateBrief). */
+  readonly thumbs?: boolean
   readonly className?: string
 }
 
@@ -44,14 +47,19 @@ export function briefDateLabel(date: string): string {
   return day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
 }
 
-/** Thumbs up and down on the brief, keyed by its state_hash; one rating per card, kept unless the post fails. */
+/**
+ * Thumbs up and down on the brief, keyed by its state_hash: the person's remembered rating, or the one pressed here
+ * (kept unless the post fails). One rating per person: once there is one, the thumbs are done.
+ */
 function BriefThumbs({ stateHash }: { readonly stateHash: string }) {
   const submit = useSubmitDigestFeedback()
-  const [rated, setRated] = useState<Rating | null>(null)
+  const remembered = useDigestRating(stateHash).data?.rating ?? null
+  const [pressed, setPressed] = useState<Rating | null>(null)
+  const rated = pressed ?? remembered
   const rate = (rating: Rating) => {
     if (rated !== null || !stateHash) return
-    setRated(rating)
-    submit.mutate({ state_hash: stateHash, rating }, { onError: () => setRated(null) })
+    setPressed(rating)
+    submit.mutate({ state_hash: stateHash, rating }, { onError: () => setPressed(null) })
   }
   const thumb = (rating: Rating, label: string, icon: ReactNode) => (
     <button
@@ -74,7 +82,7 @@ function BriefThumbs({ stateHash }: { readonly stateHash: string }) {
 }
 
 /** The day's brief: date, greeting, Auto's Read, the sections, Listen and thumbs. */
-export function BriefCard({ brief, listen, className, ...sections }: BriefCardProps) {
+export function BriefCard({ brief, listen, thumbs = true, className, ...sections }: BriefCardProps) {
   return (
     <article
       aria-label={brief.greeting}
@@ -99,7 +107,7 @@ export function BriefCard({ brief, listen, className, ...sections }: BriefCardPr
         <AiCaption />
         <div className="flex items-center gap-2">
           {listen ? <div data-brief-listen="">{listen}</div> : null}
-          <BriefThumbs stateHash={brief.state_hash} />
+          {thumbs ? <BriefThumbs key={brief.state_hash} stateHash={brief.state_hash} /> : null}
         </div>
       </footer>
     </article>

@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from services.schedule_util import is_valid_cron, next_run
+from services.scheduled_task_steps import DELIVER_FOLLOW_UP
 
 ITEM_TYPE = "task"
 ACTIVE = "active"
@@ -29,7 +30,8 @@ DEFAULT_DELIVERY = "chat"
 ONE_OFF = "One-off"
 TASK_TIMEZONE = "UTC"
 
-# Active and paused rows only: a cancelled task is gone from the calendar.
+# Active and paused rows only: a cancelled task is gone from the calendar. PRD-268 K8: a
+# follow-up is its person's own, never on the workspace's calendar.
 _TASKS_SQL = text(
     """
     SELECT t.id, t.task_type, t.description, t.schedule, t.next_run_at, t.status,
@@ -38,6 +40,7 @@ _TASKS_SQL = text(
     FROM agent_scheduled_tasks t
     LEFT JOIN agents ta ON ta.id = t.target_agent_id
     WHERE t.workspace_id = :ws AND t.status IN (:active, :paused)
+      AND t.deliver_as <> :follow_up
     """
 )
 
@@ -79,7 +82,9 @@ def _item(row: Any, cron: Optional[str], slot: datetime) -> Dict[str, Any]:
 def scheduled_task_items(db: Session, workspace_id: UUID, now: datetime, horizon: datetime) -> List[Dict[str, Any]]:
     """The workspace's active and paused scheduled tasks whose next slot is no later
     than ``horizon``, as a new list of calendar items (one ``execute()``)."""
-    rows = db.execute(_TASKS_SQL, {"ws": str(workspace_id), "active": ACTIVE, "paused": PAUSED}).fetchall()
+    rows = db.execute(
+        _TASKS_SQL, {"ws": str(workspace_id), "active": ACTIVE, "paused": PAUSED, "follow_up": DELIVER_FOLLOW_UP},
+    ).fetchall()
     items: List[Dict[str, Any]] = []
     for row in rows:
         cron = row.schedule if is_valid_cron(row.schedule) else None

@@ -9,14 +9,16 @@
  * Install is C-04b's `AddToWorkspace`, reused as it is: owners and admins add (behind "who
  * installs" and step-up), every member then gets "Use this theme", and a member who can't add
  * reads MANAGERS_ADD. It is keyed by listing, so the result of adding one listing never carries
- * over to the next. "Details" opens C-04b's detail dialog (facts, versions, documents).
+ * over to the next. "Details" opens C-04b's detail dialog (facts, versions, documents). The Add
+ * control comes from the listing source (../listing-source.tsx, PRD-270 K20): `AddToWorkspace` by
+ * default, sign-in on the signed-out visitor's page.
  */
 import { Button } from '@/components/ui/button'
 import type { ThemeListing } from '@/lib/api-client'
 
-import { AddToWorkspace } from '../install-listing'
 import { ListingBadges } from '../listing-badges'
 import { listingName } from '../listing-format'
+import { useListingSource } from '../listing-source'
 import { DETAILS, UPDATES_NOTE, featuredPosition } from './copy'
 import { LooksChips } from './looks-chips'
 import type { StorefrontView } from './storefront-views'
@@ -34,10 +36,11 @@ interface HeroTextProps {
 }
 
 function HeroActions({ listing, canManage, onDetails }: Pick<HeroTextProps, 'listing' | 'canManage' | 'onDetails'>) {
+  const { AddControl } = useListingSource()
   return (
     <div className="space-y-3 pt-1">
       <div className="flex flex-wrap items-start gap-3">
-        <AddToWorkspace key={listing.listingId} listing={listing} canManage={canManage} />
+        <AddControl key={listing.listingId} listing={listing} canManage={canManage} />
         <Button variant="outline" onClick={() => onDetails(listing.listingId)}>
           {DETAILS}
         </Button>

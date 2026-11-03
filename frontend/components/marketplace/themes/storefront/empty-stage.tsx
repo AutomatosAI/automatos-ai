@@ -3,15 +3,18 @@
 /**
  * PRD-261 — the storefront with nothing listed yet: the hero's stage, empty of devices, saying so
  * and inviting the person to make the first theme ("Make your own": the Design Kit and Submit a
- * theme package). Nothing is drawn that the server did not list.
+ * theme package). Nothing is drawn that the server did not list. A signed-out visitor's storefront
+ * offers no submit (the listing source's `canPublish`, PRD-270 K20), so it says to sign in for it.
  */
 import { Palette } from 'lucide-react'
 
 import { NO_LISTINGS } from '../listing-format'
-import { EMPTY_BODY, EMPTY_TITLE } from './copy'
+import { useListingSource } from '../listing-source'
+import { EMPTY_BODY, EMPTY_TITLE, MAKE_YOUR_OWN_VISITOR_BODY } from './copy'
 import { MakeYourOwnActions } from './make-your-own'
 
 export function EmptyStage() {
+  const { canPublish } = useListingSource()
   return (
     <section
       aria-label={NO_LISTINGS}
@@ -23,7 +26,9 @@ export function EmptyStage() {
         <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-4">
           <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{NO_LISTINGS}</p>
           <h3 className="text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">{EMPTY_TITLE}</h3>
-          <p className="max-w-lg text-base leading-relaxed text-muted-foreground">{EMPTY_BODY}</p>
+          <p className="max-w-lg text-base leading-relaxed text-muted-foreground">
+            {canPublish ? EMPTY_BODY : MAKE_YOUR_OWN_VISITOR_BODY}
+          </p>
           <div className="max-w-xs">
             <MakeYourOwnActions />
           </div>

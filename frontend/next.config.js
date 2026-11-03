@@ -6,6 +6,7 @@ const {
   CLERK_PROTECT_SOURCE,
   CLERK_PROTECT_CONNECT_SOURCE,
   stripeCspFor,
+  cloudImageSources,
 } = require('./csp-sources')
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
@@ -66,6 +67,8 @@ const SECURITY_HEADERS_RULE = {
     // connect-src includes api.automatos.app (cross-origin API) and Clerk auth endpoints.
     // PRD-265 W2: Stripe's sources (stripeCsp, csp-sources.js; none in the local edition) for the payment forms inside
     // Settings → Billing: Stripe.js, its card fields' frames, the 3-D Secure frame and Link.
+    // PRD-270 K15: img-src names the catalogue files route on Automatos Cloud and on the API origin (cloudImageSources,
+    // csp-sources.js): a Cloud listing's screenshots load from there.
     {
       key: 'Content-Security-Policy',
       value: [
@@ -80,6 +83,7 @@ const SECURITY_HEADERS_RULE = {
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
         directive(
           "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
+          cloudImageSources(apiOrigin),
           stripeCsp.img,
           mediaSources,
         ),

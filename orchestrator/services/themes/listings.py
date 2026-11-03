@@ -21,6 +21,11 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
   preset's ``phonePreviews``, ``otherPhonePreviews`` and the card's ``phoneCover``; a package without
   them answers ``[]`` and ``null`` there. Every URL is the files route (``serve.module_url``), which
   serves an approved listing's files to any caller (A-08a).
+* **Cloud rows** (PRD-270 K15): a version a Sync with Automatos Cloud wrote (``source`` 'cloud') is listed
+  as any other, and the card says so (``source``). This install may not hold its bytes yet, so its
+  screenshots load from Automatos Cloud (``urls.cloud_file_url``: none while ``AUTOMATOS_CLOUD_URL`` is
+  off), and its readme and changelog are null: the catalogue's files route serves listed screenshots and
+  the package only. ``_file_url`` is that one choice.
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
 * **Official** (QB-21): ``publisher.official`` is true only for a reserved publisher
   (``automatos``, or a ``theme_publishers`` row marked reserved) whose shown version carries a
@@ -45,10 +50,11 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from config import config
-from core.models.themes import ThemeInstallation, ThemePackage, ThemePublisher
+from core.models.themes import THEME_SOURCE_CLOUD, ThemeInstallation, ThemePackage, ThemePublisher
+from services.marketplace_cloud.urls import cloud_file_url
 from services.themes import signature_verify
 from services.themes.choices import (
     CONFLICT,
@@ -127,7 +133,8 @@ def is_compatible(package: ThemePackage) -> bool:
     )
 
 
-def _approved_query(db: Session):
+def approved_query(db: Session) -> Query:
+    """Every approved, reviewed Marketplace version (a ``disable`` is the caller's to check)."""
     return db.query(ThemePackage).filter(
         ThemePackage.owner_type == MARKETPLACE_OWNER,
         ThemePackage.status == APPROVED,
@@ -141,14 +148,14 @@ def _newest_first(rows: Sequence[ThemePackage]) -> List[ThemePackage]:
 
 def listed_versions(db: Session, theme_id: str) -> List[ThemePackage]:
     """The theme's approved versions that no ``disable`` revocation covers, newest first."""
-    rows = _approved_query(db).filter(ThemePackage.theme_id == theme_id).all()
+    rows = approved_query(db).filter(ThemePackage.theme_id == theme_id).all()
     return _newest_first([row for row in rows if not is_disabled(db, row)])
 
 
 def all_listings(db: Session) -> Dict[str, List[ThemePackage]]:
     """``{theme_id: listed versions, newest first}`` over the whole Marketplace, by theme id."""
     grouped: Dict[str, List[ThemePackage]] = {}
-    for row in _approved_query(db).order_by(ThemePackage.theme_id).all():
+    for row in approved_query(db).order_by(ThemePackage.theme_id).all():
         if not is_disabled(db, row):
             grouped.setdefault(row.theme_id, []).append(row)
     return {theme_id: _newest_first(rows) for theme_id, rows in grouped.items()}
@@ -172,7 +179,7 @@ def newer_compatible(versions: Sequence[ThemePackage], package: ThemePackage) ->
 # ---------------------------------------------------------------------------
 
 
-def _publisher(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
+def publisher_view(db: Session, theme_id: str, verdict: signature_verify.Verdict) -> Dict[str, Any]:
     """The id's publisher; ``official`` only when it is reserved and the shown version's signature verifies."""
     name = publisher_of(theme_id)
     row = db.query(ThemePublisher).filter(ThemePublisher.publisher == name).first()
@@ -181,8 +188,17 @@ def _publisher(db: Session, theme_id: str, verdict: signature_verify.Verdict) ->
 
 
 def _file_url(package: ThemePackage, path: str) -> Optional[str]:
+    """Where the browser loads ``path`` of the version, by the row's source; None when it doesn't hold it.
+
+    This install's own row: its files route. A Cloud row: Automatos Cloud's files route for a screenshot
+    theme.json lists (None while the setting is off), and None for anything else (K15).
+    """
     listed = package.file_manifest if isinstance(package.file_manifest, dict) else {}
-    return module_url(package.digest, path) if path in listed else None
+    if path not in listed:
+        return None
+    if package.source != THEME_SOURCE_CLOUD:
+        return module_url(package.digest, path)
+    return cloud_file_url(package.digest, path) if _is_screenshot(package, path) else None
 
 
 class PreviewKind(NamedTuple):
@@ -199,10 +215,16 @@ PHONE_PREVIEWS = PreviewKind("phonePreviews", "assets/previews/phone/", "otherPh
 PREVIEW_KINDS: Tuple[PreviewKind, ...] = (WEB_PREVIEWS, PHONE_PREVIEWS)
 
 
-def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
+def _is_screenshot(package: ThemePackage, path: str) -> bool:
+    """True when theme.json lists ``path`` under one of the ``PREVIEW_KINDS``."""
+    manifest = package.manifest or {}
+    return any(isinstance(manifest.get(kind.field), list) and path in manifest[kind.field] for kind in PREVIEW_KINDS)
+
+
+def preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     """The screenshots theme.json lists under ``kind`` that the package holds, in theme.json's order.
 
-    The first one is the cover (``_cover``). The theme picks its order (Play lists ``ember.png`` first,
+    The first one is the cover (``cover_url``). The theme picks its order (Play lists ``ember.png`` first,
     its default look's chat), so it is never re-sorted by name. ``manifest.validate_manifest`` refuses a
     list that names a file twice.
     """
@@ -210,10 +232,10 @@ def _preview_paths(package: ThemePackage, kind: PreviewKind) -> List[str]:
     return [path for path in named if isinstance(path, str) and _file_url(package, path) is not None]
 
 
-def _cover(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
-    """The files URL of the first screenshot of ``kind`` the package holds, or None."""
-    paths = _preview_paths(package, kind)
-    return module_url(package.digest, paths[0]) if paths else None
+def cover_url(package: ThemePackage, kind: PreviewKind) -> Optional[str]:
+    """The URL of the first screenshot of ``kind`` the package holds (``_file_url``), or None."""
+    paths = preview_paths(package, kind)
+    return _file_url(package, paths[0]) if paths else None
 
 
 def _stem(path: str, kind: PreviewKind) -> str:
@@ -236,8 +258,8 @@ def _claimed(
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
     """``({preset: [{screen, url}]}, [unclaimed url])`` for one list of screenshots, in theme.json's order."""
     owned = [
-        (_owner_preset(_stem(path, kind), presets), module_url(package.digest, path))
-        for path in _preview_paths(package, kind)
+        (_owner_preset(_stem(path, kind), presets), _file_url(package, path))
+        for path in preview_paths(package, kind)
     ]
     claimed = {
         preset: [{"screen": screen, "url": url} for (owner, screen), url in owned if owner == preset]
@@ -262,7 +284,7 @@ def previews_by_preset(package: ThemePackage) -> Dict[str, Any]:
     }
 
 
-def _signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
+def signature_verdict(package: ThemePackage) -> signature_verify.Verdict:
     """The version's signature verdict for a listing. A keys file that does not load fails closed: the
     signature reads ``invalid`` (never Official) and the listings still answer; the paste route keeps
     refusing loudly (C-05b)."""
@@ -279,7 +301,7 @@ def _version_entry(db: Session, package: ThemePackage) -> Dict[str, Any]:
         "engines": (package.manifest or {}).get("engines"),
         "compatible": is_compatible(package),
         "revoked": revocation_body(revocation_of(db, package)),
-        "signature": _signature_verdict(package).view(),
+        "signature": signature_verdict(package).view(),
         "createdAt": None if package.created_at is None else package.created_at.isoformat(),
     }
 
@@ -308,23 +330,24 @@ def listing_summary(db: Session, workspace_id: UUID, versions: Sequence[ThemePac
     latest = newest_compatible(versions)
     shown = latest or versions[0]
     manifest = shown.manifest or {}
-    verdict = _signature_verdict(shown)
+    verdict = signature_verdict(shown)
     return {
         "listingId": listing_id_of(shown.theme_id),
         "themeId": shown.theme_id,
         "name": manifest.get("name"),
         "description": manifest.get("description"),
-        "publisher": _publisher(db, shown.theme_id, verdict),
+        "publisher": publisher_view(db, shown.theme_id, verdict),
         "signature": verdict.view(),
         "version": shown.version,
         "packageId": str(shown.id),
         "compatible": latest is not None,
         "uses": list(manifest.get("uses") or []),
         "pricing": manifest.get("pricing") or FREE_LABEL,
-        "cover": _cover(shown, WEB_PREVIEWS),
-        "phoneCover": _cover(shown, PHONE_PREVIEWS),
+        "cover": cover_url(shown, WEB_PREVIEWS),
+        "phoneCover": cover_url(shown, PHONE_PREVIEWS),
         "revoked": revocation_body(revocation_of(db, shown)),
         "installed": installed_state(db, workspace_id, shown.theme_id, latest),
+        "source": shown.source,
     }
 
 
@@ -384,6 +407,11 @@ def _install_target(versions: Sequence[ThemePackage], package_id: Optional[UUID]
             "Choose a version marked compatible."
         ))
     return target
+
+
+def install_target(db: Session, listing_id: str, package_id: Optional[UUID]) -> ThemePackage:
+    """The version ``install_listing`` installs for the listing, refused (404 or 409) as it would refuse it."""
+    return _install_target(_versions_or_404(db, listing_id), package_id)
 
 
 def _installed_refusal(db: Session, install: ThemeInstallation) -> ThemeInstallError:

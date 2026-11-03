@@ -34,12 +34,12 @@ The questions people ask first, with short answers and a link to the full story.
 
 ---
 
-### How do I get Play or HUD?
+### How do I get Play, HUD, Arcade or Candy?
 
 On the local edition, download the theme's `.autotheme` from the Design Kit's
 [releases](https://github.com/AutomatosAI/automatos-design-kit/releases), install it with **Settings › Appearance ›
 Themes › Install theme**, then opt in to it. On the hosted edition, add it from **Marketplace › Themes** when it is
-listed there. See [Get Play or HUD](installing-and-choosing.md#get-play-or-hud).
+listed there. See [Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy).
 
 ### I chose a theme, but I see Studio. Why?
 
@@ -66,7 +66,7 @@ for the workspace or the whole server. See [Who can add a theme](installing-and-
 `automatos/…` ids are reserved for platform admins. On the local edition, upload it as the local edition's operator,
 who is one. On the hosted edition, add it from **Marketplace › Themes** when it is listed there. A signature file
 would also let the upload through, but no release is signed yet. See
-[Get Play or HUD](installing-and-choosing.md#get-play-or-hud).
+[Get Play, HUD, Arcade or Candy](installing-and-choosing.md#get-play-hud-arcade-or-candy).
 
 ### Why does my theme say "Private · not reviewed"?
 

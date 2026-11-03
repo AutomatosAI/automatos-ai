@@ -211,17 +211,18 @@ permissions:
 # HUD 1.1.0), which holds #18 and every kit commit between them; then kit #37's merge (Automatos's theme-signing
 # key in keys/theme-signing.json, the same bytes as orchestrator/services/themes/data/signing-keys.json); then
 # kit #40's merge (HUD 1.1.1 and Play 1.2.1 polish: Play's hello on an empty chat only, a made-up product in its look
-# preview, HUD's transcript fade).
-# Play's own files there are automatos/play 1.2.1 (released at the kit's tag play-v1.2.1 once it is
-# tagged; 1.1.0 is play-v1.1.0). Move it with the kit, in the same pull request as the kit change it brings, and only
+# preview, HUD's transcript fade); then kit #58's merge (Theme SDK 1.3.0's proactive area vendored by #52; Play 1.3.0
+# by #57 with the brief, the pinned suggestion line and approvals; HUD 1.2.0; the first-paint checks of #56).
+# Play's own files there are automatos/play 1.3.0 (released at the kit's tag play-v1.3.0 by theme-publish.yml;
+# 1.1.0 is play-v1.1.0). Move it with the kit, in the same pull request as the kit change it brings, and only
 # forward in kit history (PB-17; Play's own rules are in the kit's themes/play/README.md). npm is
 # pinned to the kit's own version (its kit.yml).
 env:
   KIT_REPOSITORY: AutomatosAI/automatos-design-kit
-  KIT_REF: a90e5bc7eb7db61747dba07fe93c36b6717eda12
+  KIT_REF: 3d6268e26a137d2fe42a85103262794968c6b791
   KIT_NPM_VERSION: 11.21.1
   KIT_PLAY_WORKSPACE: themes/play
-  PLAY_PACKAGE: automatos.play-1.2.1.autotheme
+  PLAY_PACKAGE: automatos.play-1.3.0.autotheme
   KIT_PACKAGE_ARTIFACT: kit-theme-package
   # The package job's name (jobs.package.name, below), which the lane waits on, and how long it
   # waits: the package job's own 15-minute timeout and a few minutes to be picked up.

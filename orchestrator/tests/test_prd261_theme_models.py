@@ -1,10 +1,10 @@
-"""PRD-261 A-05 and C-05f — the ten theme tables: the models and the two migrations, held together.
+"""PRD-261 A-05, C-05f and PRD-270 W1 — the ten theme tables: the models and the migrations, held together.
 
 Two writers build these tables: the model layer (``create_all``: the fresh path and
 the unit tests) and the migrations (existing databases): ``prd261_themes`` (A-05, the
-nine tables) and ``prd261_revocation_feed`` (C-05f: ``theme_revocations.origin`` and
-``theme_revocation_sync``). A table that differs between them is how a column goes
-missing on one path, so this file pins:
+nine tables), ``prd261_revocation_feed`` (C-05f: ``theme_revocations.origin`` and
+``theme_revocation_sync``) and ``prd270_w1_cloud_sync`` (``theme_packages.source``). A table
+that differs between them is how a column goes missing on one path, so this file pins:
 
 * each migration chains onto the head pinned before its wave and sits under the one
   Alembic head (which revision IS the head stays with the two pins AGENTS.md names);
@@ -25,12 +25,11 @@ missing on one path, so this file pins:
 * on real Postgres (``@integration``, inside a rolled-back transaction; skipped when no
   Postgres is reachable, run by test.yml): on a ``create_all`` database the migrations
   change nothing; in an empty schema they build exactly the model's schema (columns,
-  defaults, constraints, index definitions) and a second run changes nothing; a row
-  from before C-05f reads ``local`` and the feed's downgrade restores the schema before
-  it; and the partial uniques (the live-local one included) hold there. ``prd261_themes``'
-  downgrade is pinned by reading it, not run, so the test never takes an exclusive lock on
-  ``workspaces`` or ``users``; the feed's downgrade runs in the empty schema and locks only
-  its tables.
+  defaults, constraints, index definitions) and a second run changes nothing; a row from
+  before C-05f reads ``local`` and the later downgrades (PRD-270's, then the feed's) restore
+  the schema before it; and the partial uniques (the live-local one included) hold there.
+  ``prd261_themes``' downgrade is pinned by reading it, not run, so no exclusive lock is taken
+  on ``workspaces`` or ``users``; the later downgrades run in the empty schema, on its tables.
 """
 from __future__ import annotations
 
@@ -82,7 +81,7 @@ from core.models.themes import (  # noqa: E402
 VERSIONS = _ORCH / "alembic" / "versions"
 MIGRATION = VERSIONS / "prd261_themes.py"
 FEED_MIGRATION = VERSIONS / "prd261_revocation_feed.py"
-MIGRATIONS = (MIGRATION, FEED_MIGRATION)  # in chain order
+MIGRATIONS = (MIGRATION, FEED_MIGRATION, VERSIONS / "prd270_w1_cloud_sync.py")  # in chain order
 # The single head on the base this wave was cut from (origin/main 0d9f0ac59).
 HEAD_BEFORE_WAVE = "prd258_voice_timings"
 # The single head on main when W-C3 last merged it (origin/main 2e5a668fc); W-C3 was cut from
@@ -157,7 +156,7 @@ def _create_sql() -> dict:
 
 
 def _feed_alters() -> str:
-    return _migration_constants(FEED_MIGRATION)["_ADD_ORIGIN"]
+    return "".join(_migration_constants(p).get(n, "") for p in MIGRATIONS for n in ("_ADD_ORIGIN", "_ADD_SOURCE"))
 
 
 def _added_columns(table_name: str) -> dict:
@@ -739,15 +738,16 @@ def test_the_feed_migration_reads_old_rows_local_and_its_downgrade_restores_the_
     before = _pg_schema(pg_conn)
     old = str(uuid.uuid4())
     pg_conn.execute(_INSERT_REVOCATION, {"id": old, "digest": DIGEST, "reason": "before C-05f"})
-    _run_migration(pg_conn, "upgrade", FEED_MIGRATION)
+    _upgrade_chain(pg_conn)  # the feed, then PRD-270's column (prd261_themes again changes nothing)
     assert _tables_in(pg_conn, empty) == PLANNED_TABLES
     assert _pg_schema(pg_conn) == model_schema
     assert _pg_origin(pg_conn, old) == "local"
+    _run_migration(pg_conn, "downgrade", MIGRATIONS[2])  # prd270_w1_cloud_sync first, as alembic would
     _run_migration(pg_conn, "downgrade", FEED_MIGRATION)
     assert _tables_in(pg_conn, empty) == PHASE_A_TABLES
     assert _pg_schema(pg_conn) == before
     assert pg_conn.execute(sa.text("SELECT count(*) FROM theme_revocations")).scalar() == 1  # no row deleted
-    _run_migration(pg_conn, "upgrade", FEED_MIGRATION)
+    _upgrade_chain(pg_conn)
     assert _pg_schema(pg_conn) == model_schema
 
 

@@ -12,6 +12,7 @@ import { isDisplayState } from './display-state'
 import { BRIEF_PART, BRIEF_SECTIONS } from './types'
 import type {
   Brief,
+  BriefCopy,
   BriefMessageRef,
   BriefOpened,
   BriefCountedSection,
@@ -154,6 +155,17 @@ function wordsOf(value: unknown): Partial<Record<BriefSection, string>> {
   return Object.fromEntries(kept.map((section) => [section, fields?.[section]])) as Partial<Record<BriefSection, string>>
 }
 
+/** The brief's copy (US-C23), or undefined when it carries none: only a known section's label and text are kept. */
+function copyOf(value: unknown): BriefCopy | undefined {
+  const fields = recordOf(value)
+  if (fields === null) return undefined
+  return {
+    section_labels: wordsOf(fields.section_labels),
+    empty_sentence: textOf(fields.empty_sentence),
+    show_more_template: textOf(fields.show_more_template),
+  }
+}
+
 /** A `brief@1` part's Brief@1, or null when it isn't one. A row without its id, title and why is left out. */
 export function briefOf(value: unknown): Brief | null {
   const fields = recordOf(value)
@@ -167,6 +179,7 @@ export function briefOf(value: unknown): Brief | null {
     sections: sectionsOf(fields.sections),
     counts: countsOf(fields.counts),
     labels: { sections: wordsOf(labels?.sections), more: wordsOf(labels?.more), empty: textOf(labels?.empty) },
+    copy: copyOf(fields.copy),
     state_hash: textOf(fields.state_hash) ?? '',
     generated_at: textOf(fields.generated_at) ?? '',
   }

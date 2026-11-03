@@ -5,7 +5,10 @@ Read only: a suggestion past its ``expires_at`` is left out here, though nothing
 so building a brief writes nothing. The count is every open suggestion addressed to the
 person; the rows are the first ``SUGGESTION_ROWS``, those due today first, then the newest.
 Each row opens its suggestion and carries Start (Hide is the card's own control). A
-suggestion's title and detail are a model's words: quoted, never followed.
+suggestion's title and detail are a model's words: quoted, never followed. While the person
+has paused suggestions (§6.9, ``services.proactive.switches.person_paused``: a pause that
+cannot be read is a pause) the section lists none and counts 0; the rest of the brief still
+comes.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 from core.models.proactive import SUGGESTION_OPEN, ProactiveSuggestion
 from services.brief.model import BriefRow
 from services.brief.rows import WHY_CHARS, action, cut, iso, opens, title_of
+from services.proactive.switches import person_paused
 
 __all__ = ["SUGGESTION_ROWS", "suggestion_rows"]
 
@@ -38,7 +42,10 @@ def _open_for(workspace_id: Any, user_id: int, now: datetime) -> tuple:
 def suggestion_rows(
     db: Session, workspace_id: Any, user_id: int, language: str, now: datetime,
 ) -> Tuple[int, List[BriefRow]]:
-    """How many open suggestions the person has, and the first ``SUGGESTION_ROWS`` as brief rows."""
+    """How many open suggestions the person has, and the first ``SUGGESTION_ROWS`` as brief rows:
+    none, counted 0, while they have paused suggestions (§6.9)."""
+    if person_paused(db, workspace_id, user_id):
+        return 0, []
     where = _open_for(workspace_id, user_id, now)
     count = db.query(func.count(ProactiveSuggestion.id)).filter(*where).scalar() or 0
     due_today_first = case((ProactiveSuggestion.severity == SEVERITY_TODAY, 0), else_=1)

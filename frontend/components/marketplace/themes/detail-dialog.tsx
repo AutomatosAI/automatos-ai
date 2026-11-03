@@ -7,26 +7,36 @@
  * name, version and publisher, a warning revocation's reason, "Add to my workspace" (or "Use this
  * theme" once it is here), previews per preset, what it changes, the versions map and its docs.
  * The body is keyed by listing, so a result of "Add to my workspace" never carries over to the
- * next listing opened.
+ * next listing opened. The detail and the Add control come from the listing source
+ * (listing-source.tsx, PRD-270 K20): the member's route and AddToWorkspace by default, the public
+ * catalogue and sign-in on the signed-out visitor's page. Opened from a `?item=&add=1` link
+ * (add-link.tsx, US-270-09b), Add takes focus once the listing loads.
  */
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { ThemeListingDetail } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
 import { DetailDocs, DetailFacts, DetailPreviews, DetailVersions } from './detail-sections'
-import { AddToWorkspace } from './install-listing'
 import { ListingBadges } from './listing-badges'
 import { LOADING_LISTING, listingName } from './listing-format'
-import { useThemeListing } from './listing-hooks'
+import { useListingSource } from './listing-source'
 
 interface DetailDialogProps {
   /** The listing shown; null closes the dialog. */
   readonly listingId: string | null
   readonly canManage: boolean
+  /** Focus "Add to my workspace" once the listing loads. */
+  readonly focusAdd?: boolean
   readonly onClose: () => void
 }
 
-function DetailBody({ detail, canManage }: { detail: ThemeListingDetail; canManage: boolean }) {
+interface DetailStateProps {
+  readonly canManage: boolean
+  readonly focusAdd: boolean
+}
+
+function DetailBody({ detail, canManage, focusAdd }: DetailStateProps & { detail: ThemeListingDetail }) {
+  const { AddControl } = useListingSource()
   return (
     <div className="space-y-5">
       <DialogHeader>
@@ -38,7 +48,7 @@ function DetailBody({ detail, canManage }: { detail: ThemeListingDetail; canMana
       </DialogHeader>
       <ListingBadges listing={detail} />
       {detail.revoked && <p className="text-sm text-warning">{detail.revoked.reason}</p>}
-      <AddToWorkspace listing={detail} canManage={canManage} />
+      <AddControl listing={detail} canManage={canManage} autoFocus={focusAdd} />
       <DetailPreviews detail={detail} />
       <DetailFacts detail={detail} />
       <DetailVersions detail={detail} />
@@ -47,8 +57,9 @@ function DetailBody({ detail, canManage }: { detail: ThemeListingDetail; canMana
   )
 }
 
-function DetailState({ listingId, canManage }: { listingId: string; canManage: boolean }) {
-  const detail = useThemeListing(listingId)
+function DetailState({ listingId, canManage, focusAdd }: DetailStateProps & { listingId: string }) {
+  const { useDetail } = useListingSource()
+  const detail = useDetail(listingId)
   if (detail.isLoading) {
     return (
       <DialogHeader>
@@ -64,14 +75,16 @@ function DetailState({ listingId, canManage }: { listingId: string; canManage: b
       </DialogHeader>
     )
   }
-  return <DetailBody detail={detail.data} canManage={canManage} />
+  return <DetailBody detail={detail.data} canManage={canManage} focusAdd={focusAdd} />
 }
 
-export function DetailDialog({ listingId, canManage, onClose }: DetailDialogProps) {
+export function DetailDialog({ listingId, canManage, focusAdd = false, onClose }: DetailDialogProps) {
   return (
     <Dialog open={listingId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto" data-testid="theme-listing-detail">
-        {listingId !== null && <DetailState key={listingId} listingId={listingId} canManage={canManage} />}
+        {listingId !== null && (
+          <DetailState key={listingId} listingId={listingId} canManage={canManage} focusAdd={focusAdd} />
+        )}
       </DialogContent>
     </Dialog>
   )

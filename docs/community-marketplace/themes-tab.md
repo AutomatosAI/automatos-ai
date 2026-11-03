@@ -50,6 +50,8 @@ For what a theme is, and how members choose one, see [Themes](../themes/_index.m
 - Only versions a person approved after review. A version waiting for review, rejected or taken off is never listed.
 - A version that was withdrawn and turned off is not listed. One withdrawn with a warning is listed, with the reason.
 - A workspace's own uploads are never listed.
+- On a local install, the versions a [Sync with Automatos Cloud](sync-with-automatos-cloud.md) brought: reviewed and
+  signed on Automatos Cloud, and checked against this install's Automatos keys before they are listed.
 
 ## The storefront
 
@@ -72,6 +74,7 @@ The badges, on the hero and the cards:
 | Badge | Meaning |
 |---|---|
 | **Official** | The publisher is the reserved `automatos` publisher **and** the version shown carries a signature an active Automatos key verifies. A reserved name alone is never Official. No card shows it yet: this release ships Automatos's theme-signing key, but no version is signed with it yet. |
+| **From Automatos Cloud** | A local install listed this version through **Sync with Automatos Cloud**. Its screenshots load from Automatos Cloud, and its files are fetched and checked when you add it. See [Sync with Automatos Cloud](sync-with-automatos-cloud.md). |
 | **In this workspace** | The workspace has this theme installed. |
 | **Update available** | The workspace runs an older Marketplace version of it. |
 | **Needs a newer Automatos** | No version of this theme runs on this Automatos yet. |

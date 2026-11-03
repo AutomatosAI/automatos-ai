@@ -9,6 +9,8 @@
  * listing only, when it is shown: its presets give the looks (storefront-views.ts). Until it
  * answers, the hero shows the card's own cover, name and badges, and a failed detail leaves it
  * there. Once it answers, the detail's fresher state (installed, revoked) is what the hero shows.
+ * The detail is read through the listing source (../listing-source.tsx, PRD-270 K20): the member's
+ * route by default, the public catalogue on the signed-out visitor's page.
  */
 import { useMemo } from 'react'
 import type { RefObject } from 'react'
@@ -16,7 +18,7 @@ import type { RefObject } from 'react'
 import type { ThemeListing } from '@/lib/api-client'
 
 import { listingName } from '../listing-format'
-import { useThemeListing } from '../listing-hooks'
+import { useListingSource } from '../listing-source'
 import { FEATURED_THEME } from './copy'
 import { HeroDevices } from './hero-devices'
 import { HeroNav } from './hero-nav'
@@ -53,7 +55,8 @@ function Backdrop({ src }: { src: string | null }) {
 }
 
 export function Hero({ listing, shown, selection, canManage, onDetails, stageRef }: HeroProps) {
-  const detail = useThemeListing(listing.listingId)
+  const { useDetail } = useListingSource()
+  const detail = useDetail(listing.listingId)
   const current = detail.data ?? listing
   const views = useMemo(() => storefrontViews(current), [current])
   const look = clampLook(views, selection.look)

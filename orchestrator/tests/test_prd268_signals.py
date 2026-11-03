@@ -55,7 +55,8 @@ MIGRATION_ONLY = {
             id SERIAL PRIMARY KEY, workspace_id UUID NOT NULL, created_by_agent_id INTEGER NOT NULL,
             target_agent_id INTEGER NOT NULL, task_type VARCHAR(20) NOT NULL DEFAULT 'one_shot',
             description TEXT NOT NULL, schedule VARCHAR(100) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'active',
-            last_run_at TIMESTAMPTZ, next_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())
+            last_run_at TIMESTAMPTZ, next_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deliver_as VARCHAR(20) NOT NULL DEFAULT 'chat')
     """,
     "heartbeat_results": """
         CREATE TEMP TABLE heartbeat_results (

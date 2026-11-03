@@ -1,7 +1,8 @@
 /**
  * PRD-261 A-11b — the SDK chat area's copies (lib/theme-sdk/chat.ts): the host's chat controller
  * (lib/chat-controller) read into the frozen, theme-neutral shapes chat.ts declares. Pure, apart
- * from the bound answered/closed callbacks of an approval card.
+ * from the bound answered/closed callbacks of an approval card. A message's raw parts never reach a
+ * theme: `knownParts` (SDK 1.4.0) is their checked copy, the types a theme can read only (message-parts.ts).
  *
  * A conversation handed to a theme carries the controller's own view and the `adopt` callback under
  * a module-private symbol, so only a conversation the SDK handed out opens a stream: a theme can
@@ -23,6 +24,7 @@ import { receiptsOf } from '@/lib/chat/receipts'
 import type { Chat, ChatMessage, ToolCall } from '@/types'
 
 import type { HostChatApproval, HostChatConversation, HostChatMessage, HostChatSummary, HostToolCall } from '../chat'
+import { hostParts } from './message-parts'
 
 /** What the SDK keeps on a conversation it handed out. */
 export interface OpenedConversation {
@@ -130,6 +132,7 @@ function hostMessage(message: ChatMessage, core: ControllerReading, chatId: stri
     id,
     role: message.role,
     text: messageText(message),
+    knownParts: hostParts(message),
     activity: Object.freeze(activityLines(message)),
     error: hostError(message),
     writing: id === writingId,

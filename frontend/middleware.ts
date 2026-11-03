@@ -33,6 +33,8 @@ const isPublicRoute = createRouteMatcher([
   // PRD-266 US-018d: where a pairing QR opens in a phone's browser. It calls nothing and never pairs.
   // The exact path, like /verify: /go, /go/pairing and /gopher stay protected.
   "/go/pair",
+  // PRD-270 US-270-08a: the Marketplace's shop window, browsed signed out. The exact path: /marketplace/publish and the rest stay protected.
+  "/marketplace",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {

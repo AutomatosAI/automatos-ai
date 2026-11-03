@@ -30,6 +30,11 @@ HOSTED_PUBLIC_API_HOST = "api.automatos.app"
 # An unset publish address is this machine only, as compose's own default (PRD-266 §4.3).
 DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
 
+# Default for CLERK_AUTHORIZED_PARTIES: the production frontend and saas-mode local
+# development. The Studio site (studio.automatos.app) is left out on purpose: it
+# only joins the waitlist and never calls this API with a session token.
+CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:3000"
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -571,6 +576,14 @@ class Config:
     CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
     CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
     CLERK_AUDIENCE: str = os.getenv("CLERK_AUDIENCE", "")
+    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk
+    # session tokens the API accepts, comma-separated. FRONTEND_URL's origin is
+    # always added. A token whose azp names any other origin gets a 401.
+    CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
+    # A token with no azp at all (Clerk omits it when the minting request had no
+    # Origin: native apps, tokens minted through the Backend API). false = log a
+    # warning and accept it; true = 401.
+    CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -1624,6 +1637,34 @@ class Config:
     THEME_REVOCATIONS_PULL_MINUTES: int = int(os.getenv("THEME_REVOCATIONS_PULL_MINUTES", "60"))
     THEME_REVOCATIONS_LIFTED_DAYS: int = int(os.getenv("THEME_REVOCATIONS_LIFTED_DAYS", "365"))
     THEME_REVOCATIONS_FEED_MAX_KB: int = int(os.getenv("THEME_REVOCATIONS_FEED_MAX_KB", "1024"))
+    # PRD-270 Sync with Automatos Cloud (§5.1-5.4; §8-Q6: on by default in the local edition).
+    # The Automatos Cloud a local install syncs Marketplace themes from and downloads their
+    # packages from: an ORIGIN only (https, or http to a loopback host; no user name or password,
+    # no path, query or fragment: services/marketplace_cloud/fetch.py checks it). Empty turns the
+    # Sync off: the pull refuses, its status answers enabled false and the web hides the button.
+    # A deploy-time trust boundary, as THEME_REVOCATIONS_URL is: only the environment sets it.
+    AUTOMATOS_CLOUD_URL: str = (
+        os.getenv("AUTOMATOS_CLOUD_URL", "https://api.automatos.app") or ""
+    ).strip()
+    # The largest Automatos Cloud catalogue a local install reads (bigger fails the Sync).
+    AUTOMATOS_CLOUD_FEED_MAX_KB: int = int(os.getenv("AUTOMATOS_CLOUD_FEED_MAX_KB", "1024"))
+    # Seconds each read from Automatos Cloud may take: the catalogue, or one theme's package.
+    AUTOMATOS_CLOUD_TIMEOUT_SECONDS: int = int(os.getenv("AUTOMATOS_CLOUD_TIMEOUT_SECONDS", "15"))
+    # PRD-270 W2 (§5.6): the largest item bundle (an agent, Playbook, package or plugin) a local
+    # install reads from Automatos Cloud; a bigger one is refused and counted.
+    AUTOMATOS_CLOUD_BUNDLE_MAX_KB: int = int(os.getenv("AUTOMATOS_CLOUD_BUNDLE_MAX_KB", "256"))
+    # The new or changed plugins one Sync downloads; the rest wait for the next Sync and are
+    # counted 'waiting'. 0 downloads none (a negative value reads as 0).
+    AUTOMATOS_CLOUD_PLUGINS_PER_SYNC: int = max(0, int(os.getenv("AUTOMATOS_CLOUD_PLUGINS_PER_SYNC", "5")))
+    # The hosted side (§5.2): the largest catalogue GET /api/marketplace/catalog serves (a bigger
+    # one is a logged 503: served, it would fail every Sync).
+    MARKETPLACE_CATALOG_FEED_MAX_KB: int = int(os.getenv("MARKETPLACE_CATALOG_FEED_MAX_KB", "1024"))
+    # PRD-270 W2: the largest item bundle the hosted catalogue lists; a bigger one is left out of
+    # the catalogue and logged as a warning.
+    MARKETPLACE_CATALOG_BUNDLE_MAX_KB: int = int(os.getenv("MARKETPLACE_CATALOG_BUNDLE_MAX_KB", "256"))
+    # The public Marketplace routes (§5.7) take no account, so each client IP gets this many reads
+    # a minute on each of them, each route with its own bucket (at least one).
+    MARKETPLACE_PUBLIC_RATE_PER_MINUTE: int = max(1, int(os.getenv("MARKETPLACE_PUBLIC_RATE_PER_MINUTE", "120")))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
     # The theme publish key (POST /api/marketplace/themes/publish, services/themes/publish_key.py): the
     # Design Kit's publish job lists, approves and signs a version with it. Core holds only the key's
@@ -2302,6 +2343,28 @@ class Config:
     # §6.11.3: each readiness probe (services/readiness/) answers within this many seconds, or
     # its item reads not_checked. At least a tenth of a second.
     READINESS_PROBE_TIMEOUT_SECONDS: float = max(0.1, float(os.getenv("READINESS_PROBE_TIMEOUT_SECONDS", "3")))
+    # §6.3, K9 (W3): the follow-up caps (modules/proactive/follow_up_caps.py). A follow-up is at
+    # least MIN_MINUTES and at most MAX_DAYS away; pending and per day count one person's
+    # follow-ups from Auto, per workspace per day the workspace's; a day is the last 24 hours.
+    PROACTIVE_FOLLOW_UP_MIN_MINUTES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MIN_MINUTES", "10"))
+    PROACTIVE_FOLLOW_UP_MAX_DAYS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_DAYS", "7"))
+    PROACTIVE_FOLLOW_UP_MAX_PENDING: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PENDING", "5"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_DAY: int = int(os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_DAY", "20"))
+    PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY: int = int(
+        os.getenv("PROACTIVE_FOLLOW_UP_MAX_PER_WORKSPACE_PER_DAY", "100"))
+    # A firing quotes the origin chat's last this-many messages; a reason is at most this long.
+    PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES: int = int(os.getenv("PROACTIVE_FOLLOW_UP_CONTEXT_MESSAGES", "5"))
+    PROACTIVE_FOLLOW_UP_REASON_CHARS: int = int(os.getenv("PROACTIVE_FOLLOW_UP_REASON_CHARS", "500"))
+    # §6.7, K14 (W3): the proactive evals (orchestrator/evals/proactive/), run by hand by the
+    # owner, never by CI. GOLD_DIR is a folder OUTSIDE the repository holding one <eval>.jsonl per
+    # eval (public repo: gold sets are never committed); empty, missing or inside the repository is
+    # refused. WORKSPACE_ID names the workspace whose model settings and credentials the runners use.
+    PROACTIVE_EVAL_GOLD_DIR: str = os.getenv("PROACTIVE_EVAL_GOLD_DIR", "").strip()
+    PROACTIVE_EVAL_WORKSPACE_ID: str = os.getenv("PROACTIVE_EVAL_WORKSPACE_ID", "").strip()
+    # §6.11.5, K15 (W3): calibration on day one (api/auto_calibration.py) ships OFF until §12-Q22
+    # (consent to read the titles of a person's work) is answered. While off, GET answers
+    # available false, every POST is 404 and discovery does not list calibration.
+    CALIBRATION_ENABLED: bool = os.getenv("CALIBRATION_ENABLED", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
     # PRD-251 Socials

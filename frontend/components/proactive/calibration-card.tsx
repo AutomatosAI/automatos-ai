@@ -11,7 +11,9 @@
  * "I'll forget that" once its Reject is answered, and Sounds right turns into "✓ Sounds right" once
  * accepted; a refused answer gets one line (the server's sentence, else the card's own) and the
  * card stays as it was; a new calibration (another id) starts with none of those answers. With
- * nothing to read yet it says so and shows the offers as starters. No
+ * nothing to read yet it says so and shows the offers as starters. US-W06: the surface may pass what
+ * was answered already (`answered`, the server's record), so a reload, another tab or the phone
+ * shows the same lines struck through and the same "✓ Sounds right". No
  * percentage anywhere: a line shows where it came from as a count. The lines and the offers are
  * Auto's words (data-ai-generated); the tiny "Auto is an AI" caption shows once, outside them.
  */
@@ -37,7 +39,15 @@ export interface CalibrationCardProps {
   readonly onAnswer?: (answer: CalibrationAnswer) => Promise<void> | void
   /** Something's off: the surface asks the person what is wrong; without it the button is disabled. */
   readonly onSomethingOff?: () => void
+  /** What was answered already, wherever it was (the server's record); this card's own answers add to it. */
+  readonly answered?: CalibrationAnswered
   readonly className?: string
+}
+
+/** The lines rejected and whether Sounds right was answered, as the server holds them. */
+export interface CalibrationAnswered {
+  readonly rejectedLines: readonly string[]
+  readonly accepted: boolean
 }
 
 /** The answers given on this card: the lines rejected, whether it was accepted, and a refusal's line. */
@@ -100,16 +110,18 @@ export function CalibrationCard(props: CalibrationCardProps) {
   return <CalibrationBody key={props.calibration.id} {...props} />
 }
 
-function CalibrationBody({ calibration, onAnswer, onSomethingOff, className }: CalibrationCardProps) {
+function CalibrationBody({ calibration, onAnswer, onSomethingOff, answered, className }: CalibrationCardProps) {
   const answers = useCalibrationAnswers(calibration, onAnswer)
   const lines = calibration.lines.slice(0, CALIBRATION_MAX)
   const empty = calibration.empty || lines.length === 0
-  const canReject = onAnswer !== undefined && !answers.accepted
+  const accepted = answers.accepted || answered?.accepted === true
+  const isRejected = (line: CalibrationLine) => answers.rejected.has(line.id) || (answered?.rejectedLines.includes(line.id) ?? false)
+  const canReject = onAnswer !== undefined && !accepted
   return (
     <article
       aria-label={CALIBRATION_TITLE}
       data-calibration-id={calibration.id}
-      data-state={empty ? 'empty' : answers.accepted ? 'accepted' : 'open'}
+      data-state={empty ? 'empty' : accepted ? 'accepted' : 'open'}
       className={cn(CARD_CLASS, ENTRANCE_CLASS, 'space-y-3', className)}
     >
       <Eyebrow>{CALIBRATION_TITLE}</Eyebrow>
@@ -121,7 +133,7 @@ function CalibrationBody({ calibration, onAnswer, onSomethingOff, className }: C
             <CalibrationLineItem
               key={line.id}
               line={line}
-              rejected={answers.rejected.has(line.id)}
+              rejected={isRejected(line)}
               onReject={canReject ? answers.reject : undefined}
               busy={answers.busy}
             />
@@ -138,7 +150,7 @@ function CalibrationBody({ calibration, onAnswer, onSomethingOff, className }: C
         <AiCaption />
         {empty ? null : (
           <CalibrationAnswers
-            accepted={answers.accepted}
+            accepted={accepted}
             busy={answers.busy}
             onAccept={onAnswer ? answers.accept : undefined}
             onSomethingOff={onSomethingOff}

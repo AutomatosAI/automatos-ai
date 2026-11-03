@@ -8,8 +8,9 @@ reach it:
   workspace and ``platform_suggest_next_step`` (``ToolsSection._load_read_only``);
 * every call goes through ``PlatformActionExecutor.execute`` with ``caller_context``
   ``{'lane': 'check_in', 'run_id', 'check_in_reads'}`` (and ``check_in_agent_id`` for an
-  agent's check-in), so the lane refuses anything else, and the suggestion tool gets the
-  run and its reads server-side (``check_in_lane``);
+  agent's check-in, ``check_in_user_id`` for a follow-up's person, PRD-268 W3), so the lane
+  refuses anything else, and the suggestion tool gets the run and its reads server-side
+  (``check_in_lane``);
 * ``check_in_reads`` is the run's log of successful reads so far, as the model was shown
   them (``services.proactive.reads``): a suggestion may cite only those;
 * at most ``MAX_ITERATIONS`` model calls (4), each asking for at most 800 output tokens
@@ -18,6 +19,8 @@ reach it:
   run stops and records ``error`` (``cost_ceiling``), that turn's calls unrun;
 * a turn whose calls are all suggestions, each recorded, ends the run: nothing is left to
   read. A refused suggestion is answered, and the model may correct it.
+* a model response with no call ends the run; its text is the result's ``final_text``
+  (a follow-up posts it, ``services.proactive.follow_up_fire``; a check-in ignores it).
 
 Anything that fails after the first model call ends the run as an ``error`` named by its
 class (``services.proactive.failures``: a provider's refusal is ``http_<status>``), keeping
@@ -43,6 +46,7 @@ from modules.tools.discovery.check_in_lane import (
     READS_KEY,
     RUN_ID_KEY,
     SUGGEST_NEXT_STEP,
+    USER_KEY,
 )
 from services.proactive.failures import failure_class
 from services.proactive.reads import read_succeeded, refs_of_read, with_reads
@@ -73,7 +77,8 @@ NOT_RUN = f"Not run: a check-in runs at most {MAX_CALLS_PER_TURN} calls a turn."
 
 @dataclass(frozen=True)
 class LoopSpec:
-    """What one check-in's loop runs: its run, its prompt, its tools and the reads it starts with."""
+    """What one check-in's loop runs: its run, its prompt, its tools, the reads it starts with,
+    and, for a follow-up, its person (``user_id``)."""
 
     run_id: UUID
     workspace_id: UUID
@@ -82,17 +87,20 @@ class LoopSpec:
     start_message: str
     tools: Tuple[Dict[str, Any], ...]
     reads: Tuple[Dict[str, str], ...] = ()
+    user_id: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class LoopResult:
-    """How the loop ended: the model, the tokens and cost it spent, and what stopped it, if
-    anything did (``error_class``)."""
+    """How the loop ended: the model, the tokens and cost it spent, what stopped it, if
+    anything did (``error_class``), and the last response's text when it made no call
+    (``final_text``; None when the loop ended any other way)."""
 
     model: Optional[str]
     tokens: int
     cost_usd: float
     error_class: Optional[str] = None
+    final_text: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -172,7 +180,9 @@ def _shown(result: Any) -> str:
 def _caller_context(spec: LoopSpec, reads: Tuple[Dict[str, str], ...]) -> Dict[str, Any]:
     """The server-built context every call of this check-in carries (``check_in_lane``)."""
     context = {LANE_KEY: CHECK_IN_LANE, RUN_ID_KEY: str(spec.run_id), READS_KEY: [dict(ref) for ref in reads]}
-    return {**context, AGENT_KEY: spec.agent_id} if spec.agent_id is not None else context
+    agent = {AGENT_KEY: spec.agent_id} if spec.agent_id is not None else {}
+    person = {USER_KEY: spec.user_id} if spec.user_id is not None else {}
+    return {**context, **agent, **person}
 
 
 async def _execute(db: Session, executor: Any, spec: LoopSpec, call: _Call,
@@ -207,9 +217,11 @@ async def _run_calls(db: Session, executor: Any, spec: LoopSpec, calls: Tuple[_C
     return _Turn(messages=tuple(messages), reads=log, all_suggested=all_suggested)
 
 
-def _result(llm: Any, spend: _Spend, error_class: Optional[str] = None) -> LoopResult:
+def _result(llm: Any, spend: _Spend, error_class: Optional[str] = None,
+            final_text: Optional[str] = None) -> LoopResult:
     model = getattr(getattr(llm, "config", None), "model", None)
-    return LoopResult(model=model, tokens=spend.tokens, cost_usd=spend.cost_usd, error_class=error_class)
+    return LoopResult(model=model, tokens=spend.tokens, cost_usd=spend.cost_usd, error_class=error_class,
+                      final_text=final_text)
 
 
 async def _ask(db: Session, llm: Any, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Any:
@@ -238,7 +250,7 @@ async def run_loop(db: Session, llm: Any, spec: LoopSpec) -> LoopResult:
                 return _result(llm, spend, COST_CEILING)
             calls = _calls(response)
             if not calls:
-                break
+                return _result(llm, spend, final_text=str(getattr(response, "content", "") or ""))
             turn = await _run_calls(db, executor, spec, calls, reads)
         except Exception as exc:  # noqa: BLE001 — the run ends as an error named by its class, its spend kept
             logger.exception("[proactive] run %s failed", spec.run_id)

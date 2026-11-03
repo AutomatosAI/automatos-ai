@@ -216,6 +216,20 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   /** PRD-256 US-002: the lines the platform puts above the reply (a refused write, work not done),
    * live from the same frame; a reloaded message has them at the top of its text. */
   receiptsAbove?: string[]
+  /** PRD-268 US-W03a: the replies the turn offered as taps, live from its `turn_parts` frame (saved as a
+   * `reply_chips@1` part); drawn under the message while it is the chat's newest (lib/chat/turn-parts.ts). */
+  replyChips?: string[]
+  /** PRD-268 US-W03a: the follow-ups the turn scheduled, live from the same frame (saved as `follow_up@1` parts). */
+  followUps?: TurnFollowUp[]
+}
+
+/**
+ * PRD-268 US-W03a: a follow-up a chat turn scheduled, as its `follow_up@1` part names it: the row's id and the
+ * time it fires (UTC ISO). Never its reason: that stays on the server.
+ */
+export interface TurnFollowUp {
+  followUpId: number
+  at: string
 }
 
 /**

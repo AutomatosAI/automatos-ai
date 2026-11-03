@@ -54,7 +54,6 @@ def test_migration_chains_on_single_head():
 def test_feedback_endpoint_rejects_bad_rating():
     """The handler raises 422 for rating outside {-1, 1} BEFORE any DB write,
     and persists a row for a valid rating."""
-    import asyncio
     from unittest.mock import MagicMock
 
     from fastapi import HTTPException
@@ -65,16 +64,16 @@ def test_feedback_endpoint_rejects_bad_rating():
     # bad rating → 422, no DB write
     db_bad = MagicMock()
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(submit_digest_feedback(
-            DigestFeedbackRequest(state_hash="h", rating=0), db=db_bad, ctx=ctx))
+        submit_digest_feedback(
+            DigestFeedbackRequest(state_hash="h", rating=0), db=db_bad, ctx=ctx)
     assert ei.value.status_code == 422
     db_bad.add.assert_not_called()
     db_bad.commit.assert_not_called()
 
     # valid rating → persists exactly one row
     db_ok = MagicMock()
-    result = asyncio.run(submit_digest_feedback(
-        DigestFeedbackRequest(state_hash="h", rating=1), db=db_ok, ctx=ctx))
+    result = submit_digest_feedback(
+        DigestFeedbackRequest(state_hash="h", rating=1), db=db_ok, ctx=ctx)
     assert result["ok"] is True
     db_ok.add.assert_called_once()
     db_ok.commit.assert_called_once()

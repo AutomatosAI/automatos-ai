@@ -5,6 +5,10 @@ This is the reference for running the platform on your own machine with
 page is the long one — what runs, where the dials are, what the local edition
 does and does not include, and how to update, reset and debug it.
 
+Running it on a server you rent, reached from your own computer? The
+[server runbook](../runbooks/self-host-server.md) adds who runs what there, the
+tunnel, updates that never build, backups, and the problems met doing it.
+
 Everything here is read from the committed sources: `docker-compose.yml`,
 `envs/api.defaults`, `envs/frontend.defaults`, `.env.example`,
 `docker-entrypoint.sh`, `orchestrator/config.py` and
@@ -1027,7 +1031,7 @@ hidden locally by an explicit list (`frontend/lib/auth-edition.ts`,
 | Accounts, sign-in/up, password reset, SSO | No identity provider. `AUTH_EDITION=local` — one operator, one workspace. |
 | Team, invitations, Workspace Admin, plan/trial pills, plugin moderation | Multi-tenant and commercial machinery of the hosted edition. |
 | Settings → Webhooks, Channels, Widget SDK | Inbound webhooks and channel callbacks need a public URL; the widget embed needs the hosted loader. |
-| The community hub | **Planned, not shipped.** The seeded catalogue is local and offline. The hub — sharing and pulling other people's agents, packages and Playbooks — is a network service: pulling will need no account and nothing will be paywalled; publishing will need a free account and pass moderation. |
+| The community hub | **Themes, agents, Playbooks, packages and plugins shipped.** Marketplace → **Sync with Automatos Cloud** pulls what Automatos Cloud lists, only when an owner or admin presses the button: themes only in versions an Automatos key signed, agents, Playbooks, packages and plugins as **Reviewed on Automatos Cloud** (never Official), each shown with what it will use before it is added. It is pull only and sends no account, workspace or install id, and `AUTOMATOS_CLOUD_URL=` (empty) turns it off ([Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md)). On the hosted edition the Marketplace is public at `/marketplace`, browsable signed out. The seeded catalogue is local and offline. Pulling needs no account and nothing is paywalled; publishing happens on the hosted edition, with a free account, and passes review. |
 | Durable memory and field memory (Qdrant) | Off by default: `QDRANT_URL` is empty in `envs/api.defaults`, so the backend attempts no writes and schedules no probe (PRD-238 S10). Switch it on with `docker compose --profile memory up -d` and `QDRANT_URL=http://qdrant:6333` in `envs/api.local`, or point that variable at your own Qdrant. |
 | S3 Vectors RAG | Hosted-only; local RAG runs on pgvector (`S3_VECTORS_ENABLED=false`). Never enable it against MinIO. |
 | Auto Live voice (Retell) | The switch and the Retell credentials live in the hosted edition's system settings; nothing in the local stack configures them. |
@@ -1083,6 +1087,13 @@ Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
 
+**On a server, update only to a published commit.** `make up` builds any image it
+can't download, which on a server takes long. CI publishes a merge's images a few
+minutes after it lands; a merge whose message carries `[skip ci]` gets none. Keep the
+`NEXT_PUBLIC_*` values at their defaults too, so the web app is downloaded, never
+built. The [server runbook](../runbooks/self-host-server.md#5-updating) has the check,
+and an updater that refuses an unpublished commit and rolls back an unhealthy one.
+
 ### The first update of an install that built its own images
 
 Before `make up` pulled the published images, it built the three app images from
@@ -1132,6 +1143,22 @@ docker compose down -v       # stop and delete every named volume
 agents' files gone too. Removing `backend_data` alone, while keeping the
 database, makes every API key stored through the UI undecryptable; keep the
 two together.
+
+## 11a. Backing up
+
+An install's state is in five places, and a backup needs all five:
+
+- **the database** (`pg_dump`, consistent while the stack runs);
+- **`backend_data`**: the credential-encryption key (`.credential_key`) and the
+  stored brand files;
+- **MinIO**: documents, brand logos, generated media;
+- **`.env`**: the database opens only with its `POSTGRES_PASSWORD`;
+- **your deliverables folder** (`AUTOMATOS_WORKSPACE_DIR`), a bind mount that is in
+  no volume.
+
+The commands, and how to prove a dump restores without touching the live
+database, are in the [server runbook](../runbooks/self-host-server.md#6-backups);
+a full restore is in [DR-postgres.md](../runbooks/DR-postgres.md).
 
 ## 12. Troubleshooting
 

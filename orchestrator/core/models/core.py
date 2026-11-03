@@ -1842,8 +1842,8 @@ class DigestFeedback(Base):
     """PRD-221 S10 — thumbs up/down on an Auto's Read digest.
 
     Keyed by the digest's ``state_hash`` (not a digest row — the digest is
-    cache-only), so feedback attaches to the workspace state the read
-    described. One row per rating event; the endpoint validates rating ∈ {-1, 1}.
+    cache-only). One row per (workspace, person, state_hash): a second press
+    updates it (services/digest_feedback.py). ``user_id`` is the users.id text.
     """
 
     __tablename__ = "digest_feedback"

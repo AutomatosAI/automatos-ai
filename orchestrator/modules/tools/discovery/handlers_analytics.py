@@ -332,14 +332,17 @@ def _recently_finished(db: Session, workspace_id: UUID) -> List[Dict[str, Any]]:
 
 
 def _scheduled(db: Session, workspace_id: UUID) -> List[Dict[str, Any]]:
+    """What is scheduled. PRD-268 K8: a person's follow-up is theirs alone, never listed here."""
     from sqlalchemy import text as sa_text
+
+    from services.scheduled_task_steps import DELIVER_FOLLOW_UP
 
     sched = db.execute(sa_text("""
         SELECT id, description, schedule, next_run_at
         FROM agent_scheduled_tasks
-        WHERE workspace_id = :ws AND status = 'active'
+        WHERE workspace_id = :ws AND status = 'active' AND deliver_as <> :follow_up
         ORDER BY next_run_at NULLS LAST LIMIT :n
-    """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
+    """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT, "follow_up": DELIVER_FOLLOW_UP}).fetchall()
     return [{
         "id": r.id, "what": (r.description or "")[:100], "schedule": r.schedule,
         "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,

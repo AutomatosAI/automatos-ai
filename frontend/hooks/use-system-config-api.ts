@@ -112,9 +112,11 @@ export function useIconStyle() {
   })
 }
 
-// Get system icon mappings specifically
-export function useSystemIcons() {
+// Get system icon mappings specifically. `enabled` false asks nothing: a signed-out Marketplace
+// visitor can't read the system config, and its cards fall back to their own icons (PRD-270 §5.7).
+export function useSystemIcons(enabled: boolean = true) {
   return useQuery({
+    enabled,
     queryKey: systemConfigQueryKeys.configKey('system_icon_mappings'),
     queryFn: async () => {
       try {

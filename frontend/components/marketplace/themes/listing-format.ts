@@ -5,6 +5,7 @@
  * pricing are not part of the minimal C-04 (plan §2.6 C-04b), so nothing here shows them.
  */
 import type { ThemeListing } from '@/lib/api-client'
+import { isCloudFileUrl } from '@/lib/marketplace/cloud-files'
 import { THEME_FILES_PATH } from '@/lib/theme-host/constants'
 
 export const THEMES_TAB_VALUE = 'themes'
@@ -18,6 +19,9 @@ export const ADDING = 'Adding…'
 export const ADDED_TO_WORKSPACE = 'Added to this workspace. Each member chooses it for themselves.'
 export const ALREADY_IN_WORKSPACE = 'This version is already in this workspace.'
 export const OFFICIAL_BADGE = 'Official'
+/** PRD-270 §5.5: a listing a Sync with Automatos Cloud wrote (`ThemeListing.source`). */
+export const CLOUD_BADGE = 'From Automatos Cloud'
+export const CLOUD_SOURCE = 'cloud'
 export const INSTALLED_BADGE = 'In this workspace'
 export const UPDATE_BADGE = 'Update available'
 export const NOT_COMPATIBLE = 'Needs a newer Automatos'
@@ -47,11 +51,13 @@ export function listingName(listing: Pick<ThemeListing, 'name' | 'themeId'>): st
 
 /**
  * A preview or document URL from the server, only when it is the app's own files route
- * (`serve.module_url`, reached through the A-08b same-origin proxy). Anything else is dropped,
- * so a listing can never point an image or a link at another origin.
+ * (`serve.module_url`, reached through the A-08b same-origin proxy) or, for a Cloud listing
+ * (PRD-270 K15), Automatos Cloud's catalogue files route, `<origin>/api/marketplace/catalog/files/<digest>/…`
+ * on Automatos Cloud's or this build's API origin (lib/marketplace/cloud-files.ts). Anything else is
+ * dropped, so a listing can never point an image or a link at any other origin.
  */
 export function themeFileUrl(url: string | null | undefined): string | null {
-  if (typeof url !== 'string' || !url.startsWith(THEME_FILES_PATH)) return null
+  if (typeof url !== 'string' || !(url.startsWith(THEME_FILES_PATH) || isCloudFileUrl(url))) return null
   return url.includes('..') || url.includes('\\') ? null : url
 }
 

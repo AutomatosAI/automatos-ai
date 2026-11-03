@@ -5,12 +5,23 @@
  * row's "✓ {done_label}" in place, chevrons only where a row opens something, thumbs posting the
  * digest feedback with the brief's state_hash, the Listen slot, and data-ai-generated on Auto's words
  * and not on the controls.
+ *
+ * SDK 1.4.0 (PRD-268 §6.4): the thumbs show the person's remembered rating of the brief (useDigestRating,
+ * the server's one rating per person) from the first draw, so a remounted card can't be rated again; and
+ * `thumbs={false}` draws none, for a surface that draws its own.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const feedback = vi.hoisted(() => ({ mutate: vi.fn() }))
-vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => feedback }))
+const remembered = vi.hoisted(() => ({ rating: null as 1 | -1 | null, asked: [] as unknown[] }))
+vi.mock('@/hooks/use-digest-api', () => ({
+  useSubmitDigestFeedback: () => feedback,
+  useDigestRating: (stateHash: unknown) => {
+    remembered.asked.push(stateHash)
+    return { data: remembered.rating === null ? undefined : { state_hash: stateHash, rating: remembered.rating } }
+  },
+}))
 
 import { BriefCard, briefDateLabel } from '@/components/proactive/brief-card'
 import { BRIEF_SECTIONS, type Brief, type BriefRow } from '@/lib/proactive/types'
@@ -62,6 +73,8 @@ const rowOf = (container: HTMLElement, id: string) => container.querySelector(`l
 
 beforeEach(() => {
   feedback.mutate.mockReset()
+  remembered.rating = null
+  remembered.asked.length = 0
 })
 
 describe('BriefCard parts', () => {
@@ -205,6 +218,24 @@ describe('BriefCard thumbs', () => {
     const options = feedback.mutate.mock.calls[0][1] as { onError: () => void }
     act(() => options.onError())
     expect(screen.getByRole('button', { name: 'Helpful' })).toBeEnabled()
+  })
+
+  it("shows the person's remembered rating from the first draw, and posts nothing again", () => {
+    remembered.rating = -1
+    render(<BriefCard brief={brief()} />)
+    expect(remembered.asked).toContain('hash-7')
+    expect(screen.getByRole('button', { name: 'Not helpful' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Helpful' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Helpful' }))
+    expect(feedback.mutate).not.toHaveBeenCalled()
+  })
+
+  it('draws no thumbs with thumbs={false}, for a surface that draws its own', () => {
+    render(<BriefCard brief={brief()} thumbs={false} />)
+    expect(screen.queryByRole('group', { name: 'Rate this brief' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Helpful' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Not helpful' })).toBeNull()
+    expect(remembered.asked).toEqual([])
   })
 })
 

@@ -40,6 +40,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from services.marketplace_cloud.package import ensure_stored
 from services.themes import listings
 from services.themes.choices import NOT_FOUND, ThemeInstallError
 from services.themes.settings import require_install_role
@@ -118,6 +119,7 @@ def install_theme_listing(
     workspace_id, user_pk = _workspace_of(ctx), resolve_user_pk(db, ctx)
     package_id = None if body is None else body.packageId
     try:
+        ensure_stored(db, listings.install_target(db, listing_id, package_id))
         install, created = listings.install_listing(db, workspace_id, user_pk, listing_id, package_id)
         if created:
             db.commit()

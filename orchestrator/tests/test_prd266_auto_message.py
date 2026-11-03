@@ -365,5 +365,5 @@ def test_auto_message_is_a_valid_event_and_a_push_type_with_k11s_origins_and_win
     from services.push.payload import PUSH_TYPE_EVENTS
 
     assert "auto_message" in VALID_EVENT_TYPES and PUSH_TYPE_EVENTS["auto_message"] == ("auto_message",)
-    assert ANNOUNCED_ORIGINS == {"scheduled_task", "daily_digest"}
+    assert ANNOUNCED_ORIGINS == {"scheduled_task", "daily_digest", "follow_up"}
     assert AUTO_MESSAGE_COALESCE_SECONDS == 600

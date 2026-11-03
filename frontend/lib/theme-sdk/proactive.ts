@@ -6,18 +6,25 @@
  *
  * Each hook wraps the core hook the host's own surfaces read (hooks/use-brief.ts, use-readiness.ts,
  * use-suggestions.ts, use-calibration.ts), so a theme asks the same endpoints, through the same backend client, with
- * the same cache keys, polling and refresh events as the host; no core hook is added or changed. A read comes back as
- * `{ data, isLoading, isFetching, error, refetch }` and a write as `{ run, runAsync, isRunning, error, result, reset }`
- * (internal/query-view.ts): frozen copies, an error as its message, never react-query's own result. The hooks need the
- * host's providers above them, as every theme page the host draws has.
+ * the same cache keys, polling and refresh events as the host. useSuggestions also reads who is signed in
+ * (hooks/use-profile.ts, GET /api/profile): the one core hook added since, a host fix under the 1.3.0 contract. A read
+ * comes back as `{ data, isLoading, isFetching, error, refetch }` and a write as `{ run, runAsync, isRunning, error,
+ * result, reset }` (internal/query-view.ts): frozen copies, an error as its message, never react-query's own result.
+ * The hooks need the host's providers above them, as every theme page the host draws has.
  *
  * - useBrief: the day's brief once the host has opened it (the Auto thread opens it); reading it never builds one.
  * - useReadiness, useCheckReadiness: Readiness@1, and Check again (the server limits how often a workspace checks).
- * - useSuggestions, useStartSuggestion, useHideSuggestion: the one list behind every surface; Start and Hide post the
- *   host's routes only. A theme is outside code, so an id that isn't a suggestion's, or a reason Hide doesn't know,
- *   throws a TypeError before anything is sent.
+ * - useSuggestions: the signed-in person's own open suggestions. The host's list (the one behind every surface) gives
+ *   an owner or admin the whole workspace's, so only the rows addressed to the signed-in person (`user_id`) reach a
+ *   theme, as the host's pinned line narrows to the thread's owner; until the person is known, none do.
+ * - useStartSuggestion, useHideSuggestion: Start and Hide post the host's routes only. A theme is outside code, so an
+ *   id that isn't a suggestion's, or a reason Hide doesn't know, throws a TypeError before anything is sent.
  * - useCalibration, useAnswerCalibration: inert until the server offers calibration (its routes are US-C22's):
  *   `available` is false, nothing is asked, and an answer is refused without a request.
+ *
+ * SDK 1.4.0: useRateBrief (internal/rate-brief.ts), the brief's thumbs up or down through the existing digest feedback
+ * route (POST /api/activity/digest/feedback), the one the host's brief card posts, and the person's own rating of the
+ * brief it is given (the cache entry the card's thumbs read).
  */
 import { useMemo, useState } from 'react'
 
@@ -26,6 +33,7 @@ import {
   useAnswerCalibration as useCoreAnswerCalibration,
   useCalibration as useCoreCalibration,
 } from '@/hooks/use-calibration'
+import { useProfile } from '@/hooks/use-profile'
 import { useCheckReadiness as useCoreCheckReadiness, useReadiness as useCoreReadiness } from '@/hooks/use-readiness'
 import {
   useHideSuggestion as useCoreHideSuggestion,
@@ -125,6 +133,8 @@ const NOT_A_HIDE_REASON = `useHideSuggestion needs reason to be one of ${HIDE_RE
 const NOT_AN_ANSWER = 'useAnswerCalibration needs a calibration_id with an accept, or a reject and its line_id.'
 /** Check again sends nothing; calibration has nothing to refetch. */
 const NO_OP = (): void => undefined
+/** What a person the server has no users row for is handed: no suggestion is addressed to them. */
+const NONE_ADDRESSED: readonly Suggestion[] = Object.freeze([])
 
 function checkedStart(input: StartSuggestionInput): StartSuggestionVars {
   return isProactiveId(input?.id) ? { id: input.id } : refuse(`useStartSuggestion ${NOT_A_SUGGESTION_ID}`)
@@ -169,9 +179,43 @@ export function useCheckReadiness(): ProactiveAction<void, Readiness> {
   return useActionView<void, void, Readiness>(useCoreCheckReadiness(), NO_OP)
 }
 
-/** The open suggestions, newest first, polled and refreshed as the host's list is. */
+/** The signed-in person's users.id from GET /api/profile's answer; null when it names no one (or not as an integer). */
+function viewerIdOf(profile: { readonly id?: unknown } | undefined): number | null {
+  const id = profile?.id
+  return typeof id === 'number' && Number.isInteger(id) ? id : null
+}
+
+/** The rows addressed to `viewer` (users.id), as a new frozen list of the already frozen rows. */
+function addressedTo(rows: readonly Suggestion[], viewer: number | null): readonly Suggestion[] {
+  if (viewer === null) return NONE_ADDRESSED
+  return Object.freeze(rows.filter((row) => row.user_id === viewer))
+}
+
+/**
+ * The signed-in person's own open suggestions, newest first, polled and refreshed as the host's list is. No data
+ * until both the list and the person (GET /api/profile) have answered; a failed read of the person is the error.
+ */
 export function useSuggestions(): ProactiveQuery<readonly Suggestion[]> {
-  return useQueryView<readonly Suggestion[]>(useCoreSuggestions())
+  const view = useQueryView<readonly Suggestion[]>(useCoreSuggestions())
+  const person = useProfile()
+  const known = person.data !== undefined
+  const viewer = viewerIdOf(person.data)
+  // isLoading (not isInitialLoading): no answer yet, also while the session loads and the read waits.
+  const { isLoading: personLoading, isFetching, isError, error, refetch } = person
+  return useMemo(
+    () =>
+      Object.freeze({
+        data: view.data === null || !known ? null : addressedTo(view.data, viewer),
+        isLoading: view.isLoading || personLoading,
+        isFetching: view.isFetching || isFetching,
+        error: view.error ?? (known ? null : messageOf(error)),
+        refetch: () => {
+          view.refetch()
+          if (!known && isError) void refetch()
+        },
+      }),
+    [view, known, viewer, personLoading, isFetching, isError, error, refetch],
+  )
 }
 
 /** Start a suggestion: `{suggestion, opens}`, the ticket it filed or the chat to open. */
@@ -226,3 +270,6 @@ export function useAnswerCalibration(): CalibrationAction {
     })
   }, [answering, error])
 }
+
+export { useRateBrief } from './internal/rate-brief'
+export type { BriefRated, BriefRating, RateBriefAction, RateBriefInput } from './internal/rate-brief'

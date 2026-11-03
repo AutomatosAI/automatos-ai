@@ -6,7 +6,9 @@
   package's file list; it has a plain index, never a global unique, because two
   workspaces may upload the same bytes and a private package may later be
   submitted to the Marketplace. The partial unique indexes keep a version and a
-  digest unique within one workspace, and within the Marketplace.
+  digest unique within one workspace, and within the Marketplace. ``source`` is NULL
+  for a row this install made and ``'cloud'`` for a Marketplace row a Sync with
+  Automatos Cloud wrote (PRD-270; a CHECK allows nothing else).
 * ``theme_publishers``: who owns a publisher name (``automatos`` is reserved).
 * ``theme_installations``: a workspace's installs, by reference to a package.
   ``previous_package_id`` is where a rollback goes, ``pending_package_id`` an
@@ -30,7 +32,8 @@
 JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns the
 portable ``Uuid``, so the tables also build under SQLite in the unit tests. The
 ``prd261_themes`` migration creates the first nine, ``prd261_revocation_feed`` adds
-``theme_revocations.origin``, its live-local unique index and ``theme_revocation_sync``, and
+``theme_revocations.origin``, its live-local unique index and ``theme_revocation_sync``,
+``prd270_w1_cloud_sync`` adds ``theme_packages.source`` and its CHECK, and
 ``tests/test_prd261_theme_models.py`` holds the migrations and the models together.
 """
 
@@ -84,6 +87,7 @@ __all__ = [
     "THEME_REVOCATION_ORIGINS",
     "THEME_REVOCATION_SYNC_ROW_ID",
     "THEME_REVIEW_EVENTS",
+    "THEME_SOURCE_CLOUD",
 ]
 
 THEME_OWNER_TYPES = ("marketplace", "workspace")
@@ -103,6 +107,9 @@ THEME_REVOCATION_ORIGINS = (THEME_REVOCATION_ORIGIN_LOCAL, THEME_REVOCATION_ORIG
 THEME_REVOCATION_SYNC_ROW_ID = 1
 # The events C-01..C-03 write. Not a CHECK: a later review stage adds one without a migration.
 THEME_REVIEW_EVENTS = ("submitted", "scanned", "approved", "rejected", "deactivated")
+# theme_packages.source of a Marketplace row a Sync with Automatos Cloud wrote (PRD-270);
+# NULL is this install's own row.
+THEME_SOURCE_CLOUD = "cloud"
 
 THEME_ID_LENGTH = 128  # "publisher/slug"
 THEME_VERSION_LENGTH = 64
@@ -133,6 +140,7 @@ REVOCATION_TARGET = (
     "OR (digest IS NULL AND theme_id IS NOT NULL)"
 )
 SYNC_SINGLE_ROW = f"id = {THEME_REVOCATION_SYNC_ROW_ID}"
+SOURCE_IS_CLOUD_MARKETPLACE = f"source IS NULL OR (source = '{THEME_SOURCE_CLOUD}' AND {MARKETPLACE_OWNED})"
 
 
 def _in_list(column: str, values: tuple) -> str:
@@ -184,6 +192,7 @@ class ThemePackage(Base):
         CheckConstraint(OWNER_MATCHES_WORKSPACE, name="ck_theme_packages_owner_workspace"),
         CheckConstraint(_in_list("status", THEME_PACKAGE_STATUSES), name="ck_theme_packages_status"),
         CheckConstraint(_in_list("scan_verdict", THEME_SCAN_VERDICTS), name="ck_theme_packages_scan_verdict"),
+        CheckConstraint(SOURCE_IS_CLOUD_MARKETPLACE, name="ck_theme_packages_source"),
         Index("ix_theme_packages_workspace_id", "workspace_id"),
         Index("ix_theme_packages_theme_id", "theme_id"),
         Index("ix_theme_packages_digest", "digest"),
@@ -221,6 +230,8 @@ class ThemePackage(Base):
     submitted_by = _user_column("SET NULL")
     created_at = _created_at()
     updated_at = _updated_at()
+    # NULL: this install's own row; THEME_SOURCE_CLOUD: a Marketplace row a Sync wrote.
+    source = Column(String(THEME_STATUS_LENGTH))
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"<ThemePackage {self.theme_id}@{self.version} owner={self.owner_type!r}>"

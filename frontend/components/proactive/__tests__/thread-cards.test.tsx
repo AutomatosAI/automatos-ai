@@ -31,7 +31,10 @@ vi.mock('@/hooks/use-suggestions', () => ({
   useStartSuggestion: () => state.start,
   useHideSuggestion: () => state.hide,
 }))
-vi.mock('@/hooks/use-digest-api', () => ({ useSubmitDigestFeedback: () => state.feedback }))
+vi.mock('@/hooks/use-digest-api', () => ({
+  useSubmitDigestFeedback: () => state.feedback,
+  useDigestRating: () => ({ data: undefined }),
+}))
 // Listen's voice: the server-speech fakes, so a press is heard and a mount is seen to ask nothing.
 const speech = vi.hoisted(() => ({ make: null as unknown as () => SynthesisPort }))
 vi.mock('@/lib/voice/quick-ask/deps', async (importOriginal) => ({

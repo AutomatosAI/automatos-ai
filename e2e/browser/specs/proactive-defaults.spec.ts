@@ -16,7 +16,8 @@ import { watchPage } from '../support/watch'
 // the second load) and answers that message with the fixture's brief. The proactive and readiness
 // routes, the brief's feedback and the server voice are answered here and recorded, never by the
 // backend: no default makes the call a press makes (Start, Hide, Check again, the thumbs, Listen) on
-// render, and nothing plays.
+// render, and nothing plays. The one read the brief card makes, the person's remembered rating (GET
+// /api/activity/digest/feedback, SDK 1.4.0), is answered as not rated yet.
 //
 // Classic is not rendered here: the host runs every installed theme on Studio (lib/ui-style.ts
 // rendersStudio; lib/theme-host/manifest.ts accepts only base "studio"), and under Classic it serves
@@ -61,6 +62,9 @@ const BRIEF_MESSAGES = [
 /** The proactive routes, the readiness routes, the brief's feedback and the server voice: answered here, never by the backend. */
 const PROACTIVE_ROUTES = /\/api\/(proactive|readiness|voice\/speech|activity\/digest\/feedback)(\/|\?|$)/
 const PROACTIVE_REFUSAL = { code: 'e2e_not_expected', detail: 'Rendering a default calls no route.' }
+/** The brief card's one read on render: the person's remembered rating of the brief, none yet. */
+const RATING_READ = /^GET \/api\/activity\/digest\/feedback$/
+const NOT_RATED = { state_hash: HELD_BRIEF.state_hash, rating: null }
 /** What a default calls once pressed (Start, Hide, Check again, the thumbs, Listen): none is called on render. */
 const PRESS_CALLS = /^POST \/api\/(proactive\/suggestions\/[^/]+\/(start|hide)|readiness\/check|activity\/digest\/feedback|voice\/speech)$/
 const CONFLICT = 409
@@ -112,13 +116,18 @@ const PLACED: readonly Placed[] = [
   { name: 'reply-chips', testId: 'hello-proactive-chips', aiWords: ['Yes, book it', 'Not this week', 'Show me options'], captions: 0 },
 ]
 
-/** Answers every proactive route with a refusal, and records each call (preflights aside) as `METHOD /path`. */
+/**
+ * Answers every proactive route with a refusal (the brief's rating read as not rated yet), and records each call
+ * (preflights aside) as `METHOD /path`.
+ */
 async function recordProactiveCalls(page: Page): Promise<string[]> {
   const called: string[] = []
   await page.route(PROACTIVE_ROUTES, async (route) => {
     const request = route.request()
-    if (request.method() !== 'OPTIONS') called.push(`${request.method()} ${new URL(request.url()).pathname}`)
-    await fulfillBackendJson(route, CONFLICT, PROACTIVE_REFUSAL)
+    const call = `${request.method()} ${new URL(request.url()).pathname}`
+    if (request.method() !== 'OPTIONS') called.push(call)
+    if (RATING_READ.test(call)) await fulfillBackendJson(route, OK, NOT_RATED)
+    else await fulfillBackendJson(route, CONFLICT, PROACTIVE_REFUSAL)
   })
   return called
 }

@@ -118,6 +118,10 @@ ALLOW_LIST: Set[str] = {
     # PRD-268 US-C03b: writes only a proactive_suggestions row, in the check-in lane (the
     # handler refuses any call that is not a check-in's); no agent, ticket or member to scope.
     "platform_suggest_next_step",
+    # PRD-268 US-C11c: Auto in a person's own chat turn; each writes only the caller's own
+    # follow-up row (the person and the chat are server-side); no agent, ticket or member to scope.
+    "platform_schedule_follow_up",         # writes only the caller's own follow-up row
+    "platform_cancel_follow_up",           # writes only the caller's own follow-up row
     # F151: the workspace's own watches.
     "platform_create_watch",
     "platform_cancel_watch",

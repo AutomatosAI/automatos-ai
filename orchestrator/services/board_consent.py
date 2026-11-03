@@ -33,6 +33,19 @@ WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"
 LOCAL_EDITION = "local"
 SKIPPED = "skipped"
 
+# PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
+# driving human so the local edition can record consent before dispatch.
+# platform_schedule_task joins them (calendar): a scheduled board ticket is
+# filed at fire time, and the operator who scheduled it is that consent.
+# (Moved from platform_executor.py, which imports it: PRD-268 W3 K3.)
+OPERATOR_CONSENT_ACTIONS = (
+    "platform_create_task",
+    "platform_assign_task",
+    "platform_update_task",
+    "platform_update_task_status",
+    "platform_schedule_task",
+)
+
 
 def actor_ref(ctx: Any) -> str:
     """``user:<id>`` — the same shape the approvals API records.

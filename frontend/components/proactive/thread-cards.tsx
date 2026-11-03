@@ -16,14 +16,26 @@
  * US-W02: the brief card has Listen, the host's BriefVoice reading this brief's own `spoken` words (the server voice,
  * the browser's speech on a refusal code; it never plays until pressed), beside its thumbs (the digest feedback route,
  * the brief's state_hash).
+ *
+ * PRD-268 US-W03a: a message that offers reply chips has them last, while it is the chat's newest message
+ * (thread-reply-chips.tsx); a tap sends one as the person's message.
+ *
+ * PRD-268 US-W03b: a message whose turn scheduled follow-ups has a line for each, above its chips
+ * (follow-up-line.tsx): "Follow-up at 15:10 · Cancel" while pending, from the caller's own list.
+ *
+ * PRD-268 US-W06: a message that carries the person's calibration (`calibration@1`) has its card, with Reject, Sounds
+ * right and Something's off, and its live state from the server (thread-calibration.tsx).
  */
 import type { ReactNode } from 'react'
 import { BriefVoice } from '@/components/voice/brief-voice'
 import { useSuggestions } from '@/hooks/use-suggestions'
 import type { Brief, Suggestion } from '@/lib/proactive/types'
 import { BriefCard } from './brief-card'
+import { FollowUpLines, type FollowUpLinesProps } from './follow-up-line'
 import { usePinnedSuggestionIds } from './mission-suggestion-presence'
 import { SuggestionCard } from './suggestion-card'
+import { ThreadCalibration, type ThreadCalibrationProps } from './thread-calibration'
+import { ThreadReplyChips, type ThreadReplyChipsProps } from './thread-reply-chips'
 import { useKeptStarted, withKept } from './use-suggested-list'
 
 /** The avatar's width and gap (w-8 + space-x-3), so a card lines up with the message's bubble. */
@@ -33,6 +45,12 @@ const NO_SUGGESTIONS: readonly Suggestion[] = Object.freeze([])
 export interface ThreadCardsProps {
   readonly brief: Brief | null
   readonly suggestionIds: readonly string[]
+  /** US-W03a: the reply chips the message offers, with its chat and its id; none on a read-only chat. */
+  readonly replyChips?: ThreadReplyChipsProps
+  /** US-W03b: the follow-ups the message's turn scheduled, with its chat; none when it scheduled none. */
+  readonly followUps?: FollowUpLinesProps
+  /** US-W06: the calibration the message carries, with its chat; none when it carries none. */
+  readonly calibration?: ThreadCalibrationProps
 }
 
 function Aligned({ children }: { readonly children: ReactNode }) {
@@ -73,12 +91,25 @@ function WithSuggestions({ brief, ids }: { readonly brief: Brief | null; readonl
 }
 
 /** A message's brief and suggestion cards, lined up with its bubble; nothing when it carries neither. */
-export function ThreadCards({ brief, suggestionIds }: ThreadCardsProps) {
+function Cards({ brief, suggestionIds }: Pick<ThreadCardsProps, 'brief' | 'suggestionIds'>) {
   if (suggestionIds.length > 0) return <WithSuggestions brief={brief} ids={suggestionIds} />
   if (brief === null) return null
   return (
     <Aligned>
       <ThreadBrief brief={brief} />
     </Aligned>
+  )
+}
+
+/** A message's cards, its calibration, its follow-up lines, then its reply chips while it is the chat's newest;
+ * nothing when it carries none. */
+export function ThreadCards({ brief, suggestionIds, replyChips, followUps, calibration }: ThreadCardsProps) {
+  return (
+    <>
+      <Cards brief={brief} suggestionIds={suggestionIds} />
+      {calibration ? <ThreadCalibration {...calibration} /> : null}
+      {followUps ? <FollowUpLines {...followUps} /> : null}
+      {replyChips ? <ThreadReplyChips {...replyChips} /> : null}
+    </>
   )
 }

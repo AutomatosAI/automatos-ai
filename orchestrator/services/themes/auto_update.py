@@ -7,8 +7,9 @@
   install it refuses keeps the offer, exactly as before this module.
 * **Deactivation** (``review.deactivate``): every listing install that runs the version taken
   down, and is not pinned, moves back through ``updates.move_back`` to the newest listed version
-  below it that this host runs. With none, it stays where it is and the ``disable`` revocation
-  sends its members to its base on the next load, as before.
+  below it that this host runs and whose files this install holds (a Sync lists every Cloud version
+  but stores none: an install fetches its own, PRD-270 US-270-04a). With none, it stays where it is
+  and the ``disable`` revocation sends its members to its base on the next load, as before.
 
 A pinned install never moves: pinning is how a workspace holds a version (it keeps the offer). An
 install keeps its id (Automatos Go keys the theme it paints on it), its looks and its members'
@@ -25,15 +26,16 @@ others or the approval. Nothing here commits.
 from __future__ import annotations
 
 import logging
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from core.models.themes import ThemeInstallation, ThemePackage
-from services.themes import updates
+from core.models.themes import THEME_SOURCE_CLOUD, ThemeInstallation, ThemePackage
+from services.themes import serve, updates
 from services.themes.choices import MARKETPLACE_OWNER, ThemeInstallError
+from services.themes.contract import MANIFEST_PATH
 from services.themes.listing_updates import is_listed
 from services.themes.listings import is_compatible, listed_versions
 from services.themes.records import version_key
@@ -41,6 +43,8 @@ from services.themes.records import version_key
 logger = logging.getLogger(__name__)
 
 UPDATE, ROLL_BACK = "update", "roll back"
+NOT_HELD = "theme.json is not stored here or does not match its file list"
+STORAGE_DOWN = "storage could not be read"
 
 Move = Callable[[Session, UUID, UUID, UUID], ThemeInstallation]
 
@@ -96,15 +100,49 @@ def apply_listed_update(db: Session, package: ThemePackage) -> int:
     return sum(_moved(db, install, package, UPDATE, updates.apply_update) for install in offered)
 
 
-def previous_listed(db: Session, package: ThemePackage) -> Optional[ThemePackage]:
-    """The newest listed version of ``package``'s theme below it that this host runs, or None.
+def _unheld_reason(package: ThemePackage) -> Optional[str]:
+    """None when this install holds the Cloud row's files (its theme.json stored, hashing to its file list),
+    else why not. theme.json is the last file an install's download writes (K15)."""
+    try:
+        serve.verified_file(package, MANIFEST_PATH, serve.read_stored_file)
+    except serve.ThemeFileMissing:
+        return NOT_HELD
+    except serve.ThemeStorageUnavailable:
+        return STORAGE_DOWN
+    return None
 
-    Listed means approved, reviewed and under no ``disable`` (``listings.listed_versions``).
+
+def _first_held(candidates: Iterable[ThemePackage]) -> Optional[ThemePackage]:
+    """The first candidate whose files this install holds: a local-origin row as it is (never read), a
+    Cloud row once its theme.json checks out. A Sync writes every catalogue version with no stored byte,
+    so an install moved onto one never fetched would load nothing. Each skip is logged with why. After
+    one storage failure the later Cloud rows are skipped unread: an outage costs one storage read under
+    ``review.deactivate``'s row lock, not one per version, and the deactivation stands."""
+    storage_down = False
+    for row in candidates:
+        if row.source != THEME_SOURCE_CLOUD:
+            return row
+        reason = STORAGE_DOWN if storage_down else _unheld_reason(row)
+        if reason is None:
+            return row
+        storage_down = reason == STORAGE_DOWN
+        logger.warning(
+            "[Themes] roll-back skips %s %s (package %s, from Automatos Cloud): %s",
+            row.theme_id, row.version, row.id, reason,
+        )
+    return None
+
+
+def previous_listed(db: Session, package: ThemePackage) -> Optional[ThemePackage]:
+    """The newest listed version of ``package``'s theme below it that this host runs and holds, or None.
+
+    Listed means approved, reviewed and under no ``disable`` (``listings.listed_versions``); held
+    means a Cloud row's files are stored here (``_first_held``).
     """
     floor = version_key(package.version)
     below = (row for row in listed_versions(db, package.theme_id)
-             if row.id != package.id and version_key(row.version) < floor)
-    return next((row for row in below if is_compatible(row)), None)
+             if row.id != package.id and version_key(row.version) < floor and is_compatible(row))
+    return _first_held(below)
 
 
 def roll_back_installs(db: Session, package: ThemePackage) -> int:
@@ -117,7 +155,8 @@ def roll_back_installs(db: Session, package: ThemePackage) -> int:
     target = previous_listed(db, package)
     if target is None:
         logger.info(
-            "[Themes] %s %s was taken down with no listed version below it: %d install(s) stay on it, disabled",
+            "[Themes] %s %s was taken down with no listed version below it to move to: %d install(s) stay on it, "
+            "disabled",
             package.theme_id, package.version, len(running),
         )
         return 0

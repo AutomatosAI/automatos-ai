@@ -25,6 +25,7 @@ This page provides a high-level overview of installing, configuring, and launchi
 Automatos AI operates as an agentic operating system combining multi-agent orchestration, intelligent message routing, layered memory, and autonomous workspace capabilities [docker-compose.yml:1-24](../../docker-compose.yml#L1-L24).
 
 For detailed instructions, see the child pages:
+- **[Self-hosting](self-hosting.md)** — the local edition on your own machine with `docker compose`: every service and setting, updating, backing up, session mode and connecting a phone. On a server you rent: the [server runbook](../runbooks/self-host-server.md).
 - **[Installation & Setup](installation-setup.md)** — Docker Compose configuration, multi-stage container builds, environment variables, and dependency initialization [docker-compose.yml:1-159](../../docker-compose.yml#L1-L159), [orchestrator/Dockerfile:1-120](../../orchestrator/Dockerfile#L1-L120), [frontend/Dockerfile:1-50](../../frontend/Dockerfile#L1-L50).
 - **[Configuration Guide](configuration-guide.md)** — Configuring LLM providers, Redis, PostgreSQL, MinIO/S3, and core service parameters via `orchestrator/config.py` and environment seeds [infrastructure/.env.example:1-174](../../infrastructure/.env.example#L1-L174).
 - **[Quick Start Tutorial](quick-start-tutorial.md)** — Step-by-step workflows for creating agents, connecting tools, executing chats, and running Playbooks.

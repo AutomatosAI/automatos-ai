@@ -23,14 +23,15 @@ never from the raw params, so the view shows nothing the card does not. The rule
 policies from ``core.services``, which the formatter's own import must not load. Always allow is
 not built: ``answers`` cannot hold it.
 
-A Mission plan has no grant row: its view's ``grant_id`` is the Mission's id. A card's view is
-in English (the formatter knows no language); the route's is in the caller's.
+A Mission plan has no grant row: its view's ``grant_id`` is the Mission's id, and the same route
+resolves it by that id (``services/approval_views.view_of``). A card's view is in English (the
+formatter knows no language); the route's is in the caller's.
 """
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Callable, Dict, Literal, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Literal, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ANSWERS", "ApprovalView", "ViewParts", "build_view", "carries_the_approval_view", "mission_card_view",
-    "ViewTarget", "one_line", "shown", "target_of", "tool_card_view", "verb_for",
+    "mission_plan_parts", "ViewTarget", "one_line", "shown", "target_of", "tool_card_view", "verb_for",
 ]
 
 VIEW = "approval_view"
@@ -199,22 +200,29 @@ def tool_card_view(card: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, An
                                 rule_id=confirm_rule(risk)))
 
 
-def mission_card_view(card: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
-    """The view of a Mission plan's card: the goal, its number, its steps and the policy that held it."""
+def mission_plan_parts(mission_id: Any, goal: Any, steps: Iterable[Any], number: Optional[str],
+                       policy: Optional[str], answers: Tuple[str, ...] = ANSWERS) -> ViewParts:
+    """What a Mission plan's view is made of: its goal, its number, its steps and the policy that held it.
+    The view's ``grant_id`` is the Mission's id (a plan has no grant row)."""
     from modules.policy.rule_sentences import FALLBACK, approval_policy_rule
 
-    created = result if result.get("mission_id") else (result.get("raw_result") or {})
-    steps = [step.get("title") for step in card.get("tasks") or [] if isinstance(step, dict)]
     body = "\n".join(_STEP.format(n=n, title=shown(title))
                      for n, title in enumerate(steps, start=1) if title)
-    number = created.get("number")
-    policy = created.get("approval_policy")
-    return build_view(ViewParts(
-        grant_id=card.get("mission_id"), agent_name=None, verb=RUN, summary=str(card.get("goal") or ""),
+    return ViewParts(
+        grant_id=mission_id, agent_name=None, verb=RUN, summary=str(goal or ""),
         digest={}, rule_id=approval_policy_rule(policy) if policy else FALLBACK,
         target=ViewTarget(label=shown(number)) if number else None,
         preview=ViewPreview(kind="text", body=body) if body else None,
-    ))
+        answers=answers,
+    )
+
+
+def mission_card_view(card: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    """The view of a Mission plan's card: the goal, its number, its steps and the policy that held it."""
+    created = result if result.get("mission_id") else (result.get("raw_result") or {})
+    steps = [step.get("title") for step in card.get("tasks") or [] if isinstance(step, dict)]
+    return build_view(mission_plan_parts(card.get("mission_id"), card.get("goal"), steps,
+                                         created.get("number"), created.get("approval_policy")))
 
 
 def _with_view(data: Dict[str, Any], key: str, build: Callable[..., Dict[str, Any]],

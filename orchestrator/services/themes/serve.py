@@ -108,7 +108,9 @@ MODULE_TYPE = "text/javascript"
 REFUSED_SUFFIXES = (".svg", ".svgz")
 REFUSED_TYPES = frozenset({"image/svg+xml"})
 INTEGRITY_PREFIX = "sha256-"
-MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
+# A bucket that doesn't exist yet holds no file: a fresh install has none until its first theme is stored
+# (write_theme_files creates it), so a Cloud install's "already stored?" read must see "missing", not "down".
+MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "404", "NotFound"})
 
 STUDIO_BASE = "studio"
 STUDIO_HTML_CLASS = "studio"

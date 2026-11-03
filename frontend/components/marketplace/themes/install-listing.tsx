@@ -34,6 +34,8 @@ import { useInstallThemeListing } from './listing-hooks'
 interface AddToWorkspaceProps {
   readonly listing: ThemeListing
   readonly canManage: boolean
+  /** Focus "Add to my workspace" as it shows (a `?item=&add=1` link's dialog, PRD-270 US-270-09b). */
+  readonly autoFocus?: boolean
 }
 
 function InstalledState({ listing, installId }: { listing: ThemeListing; installId: string }) {
@@ -53,7 +55,7 @@ function InstalledState({ listing, installId }: { listing: ThemeListing; install
   )
 }
 
-export function AddToWorkspace({ listing, canManage }: AddToWorkspaceProps) {
+export function AddToWorkspace({ listing, canManage, autoFocus = false }: AddToWorkspaceProps) {
   const install = useInstallThemeListing()
   const refusal = installRoleRefusal(useThemeSettings().data)
   const installId = listing.installed?.installId ?? install.data?.install.installId ?? null
@@ -71,6 +73,7 @@ export function AddToWorkspace({ listing, canManage }: AddToWorkspaceProps) {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button
+        autoFocus={autoFocus}
         disabled={!listing.compatible || install.isLoading}
         title={listing.compatible ? undefined : NOT_COMPATIBLE_HINT}
         onClick={() => install.mutate({ listingId: listing.listingId })}

@@ -3,6 +3,11 @@ Clerk JWT Verification for FastAPI
 PRD-37: SaaS Foundation
 
 Verifies Clerk JWTs using JWKS and extracts user/org claims.
+
+Automatos Go signs in with a token from the ``mobile`` JWT template, not a session
+token, so every claim read here must also come from that template or be listed as
+left out of it (``core/auth/clerk_mobile_template.py``, PRD-266 US-020).
+``tests/test_clerk_azp_check.py`` fails when the two drift apart.
 """
 
 from typing import Optional, Dict, Any
@@ -13,6 +18,7 @@ from functools import lru_cache
 import httpx
 
 from config import config
+from core.auth.clerk_azp import azp_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,9 @@ class ClerkAuth:
                 }
             )
 
+            # Refuse a token minted for another origin (azp); rules in core/auth/clerk_azp.py.
+            if not azp_allowed(payload):
+                return None
             return payload
             
         except jwt.ExpiredSignatureError:

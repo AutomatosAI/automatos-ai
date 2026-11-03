@@ -23,6 +23,9 @@
  * Theme voice: the voice session's words in progress in this conversation end its `messages`
  * (./live-voice-turns), so Studio's chat and every theme's chat show them; useChat's own state and
  * Try again never hold them.
+ *
+ * PRD-268 US-W03a: the turn's parts (its reply chips and the follow-ups it scheduled) come on a `tool-data` frame
+ * too, under `turn_parts` (./turn-parts), and go on the last assistant message as the receipts do.
  */
 import { useCallback, useRef } from 'react'
 import { usePublishAnsweringAgent } from '@/lib/ai-label/store'
@@ -30,6 +33,7 @@ import { useChat } from '@/lib/chat/hooks'
 import { useLiveVoiceMessages } from '@/lib/chat/live-voice-turns'
 import { liveReceiptsFromToolData, withReceiptsOnTheReply } from '@/lib/chat/receipts'
 import { lastTurn } from '@/lib/chat/retry'
+import { liveTurnPartsFromToolData, withTurnPartsOnTheReply } from '@/lib/chat/turn-parts'
 import { waitingToolCallId, withWaitingToolCall } from '@/lib/chat/tool-calls'
 
 type ChatOptions = Parameters<typeof useChat>[0]
@@ -61,6 +65,8 @@ export function useChatWithReceipts(options: ChatOptions): ChatWithReceipts {
     onData: (part: unknown) => {
       const live = liveReceiptsFromToolData(part)
       if (live) setMessagesRef.current?.((prev) => withReceiptsOnTheReply(prev, live))
+      const turnParts = liveTurnPartsFromToolData(part)
+      if (turnParts) setMessagesRef.current?.((prev) => withTurnPartsOnTheReply(prev, turnParts))
       const waiting = waitingToolCallId(part)
       if (waiting) setMessagesRef.current?.((prev) => withWaitingToolCall(prev, waiting))
       onData?.(part)
