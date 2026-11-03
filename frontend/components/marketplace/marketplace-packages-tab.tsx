@@ -10,6 +10,7 @@ import {
   MEMBER_TYPE_LABELS,
 } from './package-types'
 import { PackageDetailModal } from './package-detail-modal'
+import { CloudItemBadges } from './cloud/cloud-item-badges'
 import { useMarketplaceAccess } from './access/marketplace-access'
 import { PublicItemDetail } from './public/public-item-detail'
 
@@ -80,6 +81,7 @@ function PackageCard({
                 </Badge>
               )}
             </div>
+            <CloudItemBadges kind="package" id={pkg.slug} className="mt-1" />
             <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
               {pkg.description || 'No description available'}
             </p>

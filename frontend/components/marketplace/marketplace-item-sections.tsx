@@ -12,6 +12,7 @@ import { apiClient } from '@/lib/api-client'
 import { toast as sonnerToast } from 'sonner'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
+import { CloudItemBadges } from './cloud/cloud-item-badges'
 import { useMarketplaceAccess } from './access/marketplace-access'
 
 /** 'recipe' is the marketplace API's value for a playbook. */
@@ -97,6 +98,7 @@ export function ItemModalHeader({ item, installing, onInstall }: {
                 </div>
               )}
             </div>
+            <CloudItemBadges kind={isPlaybookType(item.type) ? 'playbook' : 'agent'} id={item.id} className="mt-2" />
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

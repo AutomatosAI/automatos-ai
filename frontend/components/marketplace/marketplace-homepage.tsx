@@ -20,6 +20,7 @@ import { THEMES_TAB_VALUE } from './themes/tab'
 import { CATEGORY_TABS, TAB_ICONS, openedMarketplaceTab } from './category-tabs'
 import { marketplaceLink } from './deep-link/deep-link-params'
 import { SyncButton } from './cloud/sync-button'
+import { CloudItemsLayer } from './cloud/cloud-items-layer'
 import { useMarketplaceAccess } from './access/marketplace-access'
 import { useMarketplaceTabs } from './marketplace-tab-set'
 import { POPULAR_TITLE, VISITOR_EYEBROW, VISITOR_LEDE } from './public/copy'
@@ -380,6 +381,7 @@ export function MarketplaceHomepage() {
       <RecommendationsRail items={recItems} title={signedIn ? 'Recommended for You' : POPULAR_TITLE} onItemClick={setSelectedItem} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
+      <CloudItemsLayer />
       <MarketplaceCategoryTabs searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
 
       {/* A ?tab=&item=&add=1 link's detail modal, for every tab but Themes (PRD-270 K22) */}

@@ -8,6 +8,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { refreshCloudUpdates } from '@/hooks/use-cloud-items'
 import { useMarketplaceAccess } from '@/components/marketplace/access/marketplace-access'
 
 // Query keys for React Query
@@ -138,6 +139,8 @@ export function useInstallMarketplaceItem() {
       // Cascade installs tools + models to workspace — refresh caches so agent config sees them
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
+      // PRD-270 US-270-14e: a new copy of an Automatos Cloud agent may clear its update notice
+      void refreshCloudUpdates(queryClient)
 
       toast.success('Agent installed successfully!', {
         description: data.message || 'The agent has been added to your workspace.'
