@@ -333,13 +333,20 @@ reviewed, scanVerdict, scanReport}, duplicate}`, the report without the AI code 
 
 | Method and path | Edition | Who | Answer |
 |---|---|---|---|
-| `GET /api/marketplace/cloud-sync/status` | local (hosted: 404) | manage | The Sync's status |
-| `POST /api/marketplace/cloud-sync` | local (hosted: 404) | manage | One Sync, then the updates: `{counts, updatesApplied, updatesFailed, status}` |
-| `GET /api/marketplace/catalog` | hosted (local: 404) | anyone | The signed theme catalogue, schema 1 |
+| `GET /api/marketplace/cloud-sync/status` | local (hosted: 404) | manage | The Sync's status, with the themes and the agents, Playbooks, packages and plugins held from Automatos Cloud |
+| `POST /api/marketplace/cloud-sync` | local (hosted: 404) | manage | One Sync (themes, plugins, then agents, Playbooks and packages), then the theme updates: `{counts, items, plugins, updatesApplied, updatesFailed, status}` |
+| `GET /api/marketplace/cloud-sync/items` | local (hosted: 404) | member | The Cloud agents, Playbooks, packages and plugins held here |
+| `GET /api/marketplace/cloud-sync/items/{kind}/{key}/disclosure` | local (hosted: 404) | member | One Cloud item's review: what it will use, read before it is added |
+| `GET /api/marketplace/cloud-sync/updates` | local (hosted: 404) | member | The caller's workspace's update notices for Cloud agents, Playbooks and plugins |
+| `GET /api/marketplace/catalog` | hosted (local: 404) | anyone | The catalogue, schema 1: the signed themes, then the reviewed agents, Playbooks, packages and plugins |
 | `GET /api/marketplace/catalog/files/{digest}/{path}` | hosted (local: 404) | anyone | A listed version's `package.autotheme` or one of its screenshots |
+| `GET /api/marketplace/catalog/bundles/{revision}` | hosted (local: 404) | anyone | A listed item's bundle, its canonical bytes |
+| `GET /api/marketplace/catalog/plugins/{slug}/{version}/package.zip` | hosted (local: 404) | anyone | A listed plugin's files at that version, as a zip |
 | `GET /api/public/marketplace/{type}` | hosted (local: 404) | anyone | One page of a type's approved Marketplace items, display fields only |
+| `GET /api/public/marketplace/featured` | hosted (local: 404) | anyone | The signed-out page's Featured and Popular items: `{featured, popular}` |
+| `GET /api/public/marketplace/counts` | hosted (local: 404) | anyone | The signed-out page's item and install counts: `{items, installs}` |
 
-The three public routes are rate-limited per client address (`MARKETPLACE_PUBLIC_RATE_PER_MINUTE`). Their rules,
+The hosted routes are public and rate-limited per client address (`MARKETPLACE_PUBLIC_RATE_PER_MINUTE`). Their rules,
 answers and errors are in [Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md): the
 local routes under [The routes](../community-marketplace/sync-with-automatos-cloud.md#the-routes), the hosted ones
 under [On the hosted edition](../community-marketplace/sync-with-automatos-cloud.md#on-the-hosted-edition-the-catalogue-and-the-public-marketplace).

@@ -83,7 +83,7 @@ server. For what members and workspace admins see, read [Themes](../themes/_inde
 | [Operations](operations.md) | Runbooks: the signing key, an official listing, revoking, the revocation feed, the upload switches, reading a scan report |
 | [The publish endpoint](publish-endpoint.md) | `POST /api/marketplace/themes/publish`: from a kit merge to the installs; how the Design Kit lists, approves and signs a version with its key; held bytes, refusals, the settings, rotating and revoking the key |
 | [Updates and rollback](updates-and-rollback.md) | How an install moves between versions: the install row, update, roll back and move back, offers, auto-update on approval (an admin's, a publish, a Sync), rollback on deactivation, the log lines when a move is refused |
-| [Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md) | The local edition's catalogue pull and Cloud installs, and the hosted edition's catalogue, its files and the public reads |
+| [Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md) | The local edition's catalogue pull (signed themes, and reviewed agents, Playbooks, packages and plugins) and Cloud installs, and the hosted edition's catalogue, its files and the public reads |
 | [CSS layer model](css-layer-model.md) | Why theme CSS is unlayered, the scope check, how the approval cards and the AI label hold |
 | [Placement slots](placement-reach.md) | The three placement slots and which core pages reach them |
 | [SDK surface map](sdk-surface-map.md) | Every name of `@automatos/theme-sdk`, mapped to the core module it replaces |
@@ -454,7 +454,7 @@ previous listed version ([Updates and rollback](updates-and-rollback.md)).
 | Keys revoked by the feed | Read from the last pull | Not used: the keys file says which keys are revoked |
 | Files proxy credential | The paired browser's device token, or none | The Clerk session's token |
 | Marketplace themes from elsewhere | **Sync with Automatos Cloud** pulls the hosted catalogue's signed versions when an owner or admin presses it; the catalogue routes answer 404 | Serves the catalogue (`GET /api/marketplace/catalog`) and its files; the Sync routes answer 404 |
-| `/marketplace` signed out | No sign-in exists | Public and read-only, from the catalogue and `GET /api/public/marketplace/{type}` |
+| `/marketplace` signed out | No sign-in exists | The same page as signed in, read-only, from the catalogue and the public reads (`GET /api/public/marketplace/{type}`, `/featured`, `/counts`) |
 | Auto-update of Marketplace installs | On an admin's approval, and after each Sync | On an admin's approval, and on each publish |
 
 Related:
