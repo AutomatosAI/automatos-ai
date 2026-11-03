@@ -15,6 +15,10 @@
 /** The hosted edition's public routes a visitor reads: the catalogue (US-270-01) and a tab's public read. */
 export const CATALOG_ENDPOINT = '/api/marketplace/catalog'
 export const PUBLIC_MARKETPLACE_ENDPOINT = '/api/public/marketplace'
+/** The page header's Featured hero and rail, and Popular in place of "Recommended for You". */
+export const PUBLIC_FEATURED_ENDPOINT = `${PUBLIC_MARKETPLACE_ENDPOINT}/featured`
+/** The page header's counts: "100 items · 113 installs". */
+export const PUBLIC_COUNTS_ENDPOINT = `${PUBLIC_MARKETPLACE_ENDPOINT}/counts`
 export const PUBLIC_PAGE_LIMIT = 100
 
 export const PUBLIC_MARKETPLACE_TYPES = [
@@ -172,15 +176,6 @@ function searchText(item: PublicItem): string {
     .filter((part): part is string => typeof part === 'string')
     .join(' ')
     .toLowerCase()
-}
-
-/** The items of every page read so far, the first of each key only (a page can repeat one as the list moves). */
-export function pagedItems(pages: readonly PublicPage[]): PublicItem[] {
-  const byKey = new Map<string, PublicItem>()
-  for (const item of pages.flatMap((page) => page.items)) {
-    if (!byKey.has(item.key)) byKey.set(item.key, item)
-  }
-  return Array.from(byKey.values())
 }
 
 /** The items whose name, description, category, publisher, tags or apps hold every word of the search. */

@@ -1,5 +1,5 @@
 {
-  "route_count": 1014,
+  "route_count": 1016,
   "routes": [
     {
       "method": "GET",
@@ -2188,6 +2188,14 @@
     {
       "method": "PUT",
       "path": "/api/profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/marketplace/counts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/marketplace/featured"
     },
     {
       "method": "GET",

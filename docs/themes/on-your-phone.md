@@ -50,13 +50,17 @@ A theme reaches your phone in two ways:
 
 ## In Automatos Go
 
-Automatos Go has three styles of its own: Studio, Play and HUD. In the app, **Settings › Style and look** chooses
-how it looks: one of those styles, a theme installed in your workspace, or **Same as Studio**, the default, which
-follows the theme you use on the web. The app reads your theme when it opens and each time it comes back to the
-front, and paints the theme's phone skin (below). If that theme is uninstalled, the app goes back to Studio and says
-so once.
+Automatos Go has five styles of its own: Studio, Play, HUD, Arcade and Candy. In the app, **Settings › Style and
+look** chooses how it looks: one of those styles, a theme installed in your workspace, or **Same as Studio**, the
+default, which follows the theme you use on the web. With **Same as Studio**, Play, HUD, Arcade or Candy as your theme
+on the web switches the phone to that style; any other theme paints its phone skin (below) on Studio. The app reads
+your theme when it opens and each time it comes back to the front. If that theme is uninstalled, the app goes back to
+Studio and says so once.
 
-Your looks for Play and HUD stay in step with the web while the theme is installed in the workspace.
+Your looks for Play, HUD, Arcade and Candy stay in step with the web while the theme is installed in the workspace;
+where it isn't, they stay on the phone. An app version from before a style (Arcade and Candy came in updates) paints
+that theme's phone skin on Studio instead. What the [Arcade](arcade.md) and [Candy](candy.md) styles show on the phone
+is on their pages.
 
 <table>
   <tr>

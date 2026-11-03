@@ -5,6 +5,10 @@ This is the reference for running the platform on your own machine with
 page is the long one — what runs, where the dials are, what the local edition
 does and does not include, and how to update, reset and debug it.
 
+Running it on a server you rent, reached from your own computer? The
+[server runbook](../runbooks/self-host-server.md) adds who runs what there, the
+tunnel, updates that never build, backups, and the problems met doing it.
+
 Everything here is read from the committed sources: `docker-compose.yml`,
 `envs/api.defaults`, `envs/frontend.defaults`, `.env.example`,
 `docker-entrypoint.sh`, `orchestrator/config.py` and
@@ -1083,6 +1087,13 @@ Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
 
+**On a server, update only to a published commit.** `make up` builds any image it
+can't download, which on a server takes long. CI publishes a merge's images a few
+minutes after it lands; a merge whose message carries `[skip ci]` gets none. Keep the
+`NEXT_PUBLIC_*` values at their defaults too, so the web app is downloaded, never
+built. The [server runbook](../runbooks/self-host-server.md#5-updating) has the check,
+and an updater that refuses an unpublished commit and rolls back an unhealthy one.
+
 ### The first update of an install that built its own images
 
 Before `make up` pulled the published images, it built the three app images from
@@ -1132,6 +1143,22 @@ docker compose down -v       # stop and delete every named volume
 agents' files gone too. Removing `backend_data` alone, while keeping the
 database, makes every API key stored through the UI undecryptable; keep the
 two together.
+
+## 11a. Backing up
+
+An install's state is in five places, and a backup needs all five:
+
+- **the database** (`pg_dump`, consistent while the stack runs);
+- **`backend_data`**: the credential-encryption key (`.credential_key`) and the
+  stored brand files;
+- **MinIO**: documents, brand logos, generated media;
+- **`.env`**: the database opens only with its `POSTGRES_PASSWORD`;
+- **your deliverables folder** (`AUTOMATOS_WORKSPACE_DIR`), a bind mount that is in
+  no volume.
+
+The commands, and how to prove a dump restores without touching the live
+database, are in the [server runbook](../runbooks/self-host-server.md#6-backups);
+a full restore is in [DR-postgres.md](../runbooks/DR-postgres.md).
 
 ## 12. Troubleshooting
 

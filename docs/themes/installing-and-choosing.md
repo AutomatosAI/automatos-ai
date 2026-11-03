@@ -47,14 +47,17 @@ in the order you meet them.
 
 ---
 
-## Get Play or HUD
+<a id="get-play-or-hud"></a>
 
-Play and HUD are themes from the [Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit). Neither
-is built into the app, and nothing adds them for you: a workspace has them only once someone installs them.
+## Get Play, HUD, Arcade or Candy
+
+Play, HUD, [Arcade](arcade.md) and [Candy](candy.md) are themes from the
+[Automatos Design Kit](https://github.com/AutomatosAI/automatos-design-kit). None of them is built into the app, and
+nothing adds them for you: a workspace has them only once someone installs them.
 
 **On the local edition:**
 
-1. Download the newest `automatos.play-<version>.autotheme` or `automatos.hud-<version>.autotheme` from the Design
+1. Download the newest `automatos.<name>-<version>.autotheme` (`play`, `hud`, `arcade` or `candy`) from the Design
    Kit's [releases](https://github.com/AutomatosAI/automatos-design-kit/releases). A `.sha256` file next to it holds
    its checksum.
 2. Open **Settings › Appearance › Themes** and click **Install theme**, then pick the file. Leave **Add its
@@ -122,7 +125,7 @@ Nothing is stored when an upload is refused. The common sentences:
 | This theme can't be installed. (then a list of problems, each with its code) | The package failed a check: the file itself, a size limit, `theme.json`, the style sheet or the looks. Fix the theme and pack it again with the [Design Kit](https://github.com/AutomatosAI/automatos-design-kit). |
 | This workspace already has … with different files. Raise the version in theme.json and upload it again. | Two different files can't share one version number. |
 | This workspace has … installed. Upload a higher version to offer it as an update. | An upload must be newer than the installed version. To go back a version, use **Roll back** ([Managing themes](managing-themes.md#roll-back)). |
-| Only an Automatos admin can upload a theme under the "automatos" publisher. | `automatos/…` ids, such as Play's and HUD's, are reserved for platform admins (the local edition's operator is one). Add the theme from **Marketplace › Themes** if it is listed there. See [Get Play or HUD](#get-play-or-hud). |
+| Only an Automatos admin can upload a theme under the "automatos" publisher. | `automatos/…` ids, such as Play's and HUD's, are reserved for platform admins (the local edition's operator is one). Add the theme from **Marketplace › Themes** if it is listed there. See [Get Play, HUD, Arcade or Candy](#get-play-hud-arcade-or-candy). |
 | This workspace has uploaded 20 themes in the last 24 hours, the most allowed. Try again tomorrow. | 20 is the server's default; its administrator can change it. |
 | Theme reviews are busy right now. Try again in a minute. | Too many automated checks are running on the server at once. |
 | This theme is being uploaded already. Try again in a moment. | The same file is still going up, from another tab or a double click. |

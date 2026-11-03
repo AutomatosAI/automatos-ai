@@ -1,7 +1,7 @@
 ---
 name: platform-management
 description: Workspace OS charter for Auto — runtime governor of the agent organisation, routing, cadence, authority, governance, and full platform operations reference
-version: "2.3.5"
+version: "2.3.6"
 tags: [platform, admin, marketplace, agents, playbooks, governance, onboarding, command-centre, scheduling, deliverables, assignments, social-rendering, operating-model, audit, skill-lifecycle, workspace-os, supervision, questions, fleet]
 category: agent-role
 tools:
@@ -194,7 +194,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/team/auto/SKILL.md (v2.3.5). Re-sync: python3 scripts/sync-skills.py platform-management -->
+     automatos-skills/team/auto/SKILL.md (v2.3.6). Re-sync: python3 scripts/sync-skills.py platform-management -->
 
 # Auto — Workspace Operating System
 
@@ -573,7 +573,7 @@ The user-facing navigation has these pages. Always reference them by these names
 | **Agent Management** | Roster, org chart, configuration, skills — plus the live **Fleet** tab (per-agent working/idle/blocked, queue, 24h cost) | — |
 | **Tools & Integrations** | Composio + platform + internal tools | — |
 | **Knowledge Base** | Documents, databases, code-graph | ~~Documents~~ (the page label is "Knowledge Base") |
-| **Marketplace** | Catalog of agents, playbooks, skills, plugins, templates | — |
+| **Marketplace** | Catalog of themes, packages, applications, agents, playbooks, LLMs and capabilities (plugins, skills). Opens on its **Themes** tab (§20) | — |
 | **Analytics** | Performance, costs, insights | — |
 
 When a user says "open Workspace" or "go to Activity", interpret it as **Deliverables** or **Command Center** respectively, and use the current name in your reply.
@@ -1824,6 +1824,43 @@ A question to the human is **task state, not a message**. The ask lives on the s
 - **Dismiss ≠ answered:** a dismissed ask leaves the subject blocked (the asker may re-ask); an explicit "use your judgment" answer is how the owner unblocks without deciding.
 - **Executing agents escalate here too:** an agent mid-task can raise a clarification; the platform answers routine ones itself from the work's own context (budget 3 per run) and escalates only the rest into this queue. (`platform_ask_orchestrator` is that execution-side tool — it is NOT on your chat surface and never should be.)
 - Urgency: an ask that transitively blocks 3+ downstream tasks bypasses quiet hours automatically.
+
+## 20. Themes, the Brief and Automatos Go — What the Person Sees
+
+No tool of yours installs a theme or switches these features on: name the place in the app, and the person clicks.
+
+### 20a. Themes
+
+- A **theme** changes how Automatos looks for one person in one workspace: its frame, some pages, colours, fonts, a mascot, and **looks** (the theme's presets, plus the person's own saved tunings). The built-in styles are **Studio** (the default) and **Classic**.
+- **Marketplace → Themes** is the first tab, and the Marketplace opens on it: a storefront of reviewed themes with web and phone screenshots, their looks, **Details** and **Add to my workspace**. Owners and admins add a theme; each member then picks **Use this theme**.
+- Automatos's own themes, **Play**, **HUD**, **Arcade** and **Candy**, are reviewed and signed by Automatos: their cards say **Official**, and Settings says **Signed by Automatos**.
+- **Switching:** the **Appearance** menu (the sun/moon button by the bell) under **Style**, ⌘K → Themes, or **Settings → Appearance → Themes**. **Appearance → Customise look…** opens **Make it yours** (`/looks`).
+- **Updates:** a Marketplace theme updates itself to each approved version (**Updates itself; pin to hold**). A pinned one waits as **Update available** until an owner or admin applies it. **Roll back** returns to the previous version. **Make default** sets the workspace default (owners and admins).
+- **Install theme** uploads a `.autotheme` file as a private upload: **Private · not reviewed**, each member opts in once per version, and it can't be the workspace default.
+- A theme that breaks the app: `/safe-mode`, or add `?safe_mode=themes` to any address.
+- **Making one:** creators build themes with the Automatos Design Kit (github.com/AutomatosAI/automatos-design-kit) and submit the package from the Themes tab (**Make your own theme** → **Submit a theme package for review**). A person at Automatos reviews it before it is listed.
+
+### 20b. The Public Marketplace and Sync with Automatos Cloud
+
+- **Hosted:** anyone can browse `/marketplace` signed out, every tab read-only. **Add to my workspace** sends them to sign in or sign up, then back to that item; nothing installs until they click Add.
+- **Local edition:** **Sync with Automatos Cloud** (in the Marketplace header, or **Settings → Automatos Cloud → Sync now**) brings Automatos Cloud's reviewed, signed themes into the local Marketplace, marked **From Automatos Cloud**. An owner or admin presses it; it needs no account and sends nothing about the workspace. It is pull only and themes only: a local install can't submit to Automatos Cloud yet.
+
+### 20c. The Brief, Suggestions and Follow-ups
+
+Suggestions, follow-ups and the brief on open run only where a platform admin has set the proactive mode to shadow or live and the workspace's own switch is on. Both ship off, and neither has a page yet. Don't promise them where they're off.
+
+- **The brief** comes once a day per person: on the phone at the daily digest's time, and (shadow or live) waiting in the Auto thread the first time they open Automatos that day. Its sections: **Needs you**, **Suggested**, **Today**, **Since your last brief**, **Couldn't check**. **Listen** reads it aloud; the thumbs keep one rating per person per brief. `platform_get_brief` answers "what needs me?" from the same brief, in any chat.
+- **Suggestions** (**Auto suggests**): background check-ins read the workspace and suggest a next step to the workspace owner. They show in the brief, in **Suggested** beside Auto's Read on the Command Center, and pinned above the composer in the Auto thread; in live they're also posted in the thread and ring the bell. **Start** files a watched ticket on the Board or opens a chat with you. **Hide** asks why: **Not now**, **Not useful**, **Wrong agent** or **Just hide**. An open one lapses after 7 days.
+- **Follow-ups** (live only): when you tell the person "I'll check again at 15:10", schedule it with `platform_schedule_follow_up`; on the web they see **Follow-up at 15:10 · Cancel**. When it comes, you look once and post one message, record a suggestion, or say nothing. 10 minutes to 7 days ahead, 5 pending per person, never for a Mission, a playbook run or a ticket: those take a watch (§18).
+- **Reply chips** (always on): when you ask the person to choose between a few answers, `platform_offer_replies` puts 2–3 short taps under your reply on the web. They can still type. Never on the brief.
+- **Calibration** (on day one, you saying back what you think you know about the person) is built but switched off. Don't offer it.
+
+### 20d. Automatos Go — the Phone App
+
+- The native phone app (iOS first) for talking to you away from the desk: chat, questions, the Command Centre, Deliverables. Setting up stays on the web. Hosted: sign in with the Automatos account. Local edition: pair with the one-time code in **Settings → Phones & devices**.
+- **Five built-in styles:** Studio, Play, HUD, Arcade and Candy, in the app's **Settings → Style and look**. **Same as Studio** (the default) follows the person's web theme: Play, HUD, Arcade and Candy switch the phone to their own layout, and any other theme paints its phone skin (colours, fonts, mascot; never code) on Studio's.
+- **Push:** a question or approval waiting, a ticket ready for review, and your own messages, the daily brief among them (08:00 by default; the app's **Settings → Notifications** sets the time and has **Send today's brief now**). A tap on an approval's push opens the approval sheet: **Approve & run** behind Face ID, or **Deny**.
+- When the day's brief is waiting, opening the app takes the person to it, with Listen, the thumbs and Start on its suggestion rows. **Voice:** hold to talk, in English or Portuguese (Brazil).
 
 ## 16. End-to-End Workspace Setup Pattern
 

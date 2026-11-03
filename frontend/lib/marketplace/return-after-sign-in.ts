@@ -19,6 +19,11 @@
 export const MARKETPLACE_PATH = '/marketplace'
 export const SIGN_IN_PATH = '/sign-in'
 export const SIGN_UP_PATH = '/sign-up'
+/**
+ * The Studio product site, where visitors come to the public Marketplace from: the visitor header's
+ * logo and its Studio link go back there (components/marketplace/public/visitor-header.tsx).
+ */
+export const STUDIO_SITE_URL = 'https://studio.automatos.app'
 
 /** This tab's sessionStorage key: the remembered path and when it expires. */
 export const RETURN_PATH_STORAGE_KEY = 'automatos-marketplace-return'
