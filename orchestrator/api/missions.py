@@ -651,8 +651,136 @@ def list_missions(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_mission_stats_summary(db: Session, base_filter: list):
+    """Headline numbers: totals, success rate, average duration/tokens/tasks."""
+    # Total missions
+    total_missions = (
+        db.query(func.count(OrchestrationRun.id))
+        .filter(*base_filter)
+        .scalar()
+    ) or 0
+
+    # Success rate
+    completed_count = (
+        db.query(func.count(OrchestrationRun.id))
+        .filter(*base_filter, OrchestrationRun.state == RunState.COMPLETED.value)
+        .scalar()
+    ) or 0
+
+    terminal_count = (
+        db.query(func.count(OrchestrationRun.id))
+        .filter(
+            *base_filter,
+            OrchestrationRun.state.in_(
+                [s.value for s in TERMINAL_RUN_STATES]
+            ),
+        )
+        .scalar()
+    ) or 0
+
+    success_rate = round(completed_count / terminal_count, 4) if terminal_count > 0 else 0.0
+
+    # Average duration (completed missions only)
+    avg_duration_row = (
+        db.query(
+            func.avg(
+                func.extract("epoch", OrchestrationRun.completed_at)
+                - func.extract("epoch", OrchestrationRun.started_at)
+            )
+        )
+        .filter(
+            *base_filter,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.started_at.isnot(None),
+            OrchestrationRun.completed_at.isnot(None),
+        )
+        .scalar()
+    )
+    avg_duration_minutes = round(float(avg_duration_row) / 60.0, 2) if avg_duration_row else None
+
+    # Average tokens used
+    avg_tokens = (
+        db.query(func.avg(OrchestrationRun.tokens_used))
+        .filter(*base_filter)
+        .scalar()
+    )
+    avg_tokens_used = round(float(avg_tokens), 2) if avg_tokens else 0.0
+
+    # Average tasks per mission
+    task_counts = (
+        db.query(func.count(OrchestrationTask.id))
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .filter(*base_filter)
+        .scalar()
+    ) or 0
+    avg_tasks_per_mission = round(task_counts / total_missions, 2) if total_missions > 0 else 0.0
+    return (
+        total_missions,
+        success_rate,
+        avg_duration_minutes,
+        avg_tokens_used,
+        avg_tasks_per_mission,
+    )
+
+
+def _get_mission_stats_top_agents(db: Session, task_filter: list) -> list:
+    """Top agents by tasks completed in verified state."""
+    top_agent_rows = (
+        db.query(
+            OrchestrationTask.assigned_agent_id,
+            Agent.name,
+            func.count(OrchestrationTask.id).label("tasks_completed"),
+            func.avg(OrchestrationTask.tokens_used).label("avg_tokens"),
+        )
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .join(Agent, OrchestrationTask.assigned_agent_id == Agent.id)
+        .filter(
+            *task_filter,
+            OrchestrationTask.state == TaskState.VERIFIED.value,
+            OrchestrationTask.assigned_agent_id.isnot(None),
+        )
+        .group_by(OrchestrationTask.assigned_agent_id, Agent.name)
+        .order_by(func.count(OrchestrationTask.id).desc())
+        .limit(5)
+        .all()
+    )
+
+    top_agents = [
+        TopAgentStats(
+            agent_id=row[0],
+            agent_name=row[1],
+            tasks_completed=row[2],
+            avg_tokens_per_task=round(float(row[3] or 0), 2),
+        )
+        for row in top_agent_rows
+    ]
+    return top_agents
+
+
+def _get_mission_stats_failures(db: Session, task_filter: list) -> dict:
+    """Common failure reasons across tasks."""
+    failure_rows = (
+        db.query(
+            OrchestrationTask.failure_reason_code,
+            func.count(OrchestrationTask.id),
+        )
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .filter(
+            *task_filter,
+            OrchestrationTask.state == TaskState.FAILED.value,
+            OrchestrationTask.failure_reason_code.isnot(None),
+        )
+        .group_by(OrchestrationTask.failure_reason_code)
+        .order_by(func.count(OrchestrationTask.id).desc())
+        .limit(10)
+        .all()
+    )
+    common_failure_reasons = {row[0]: row[1] for row in failure_rows}
+    return common_failure_reasons
+
+
 @router.get("/stats")
-async def get_mission_stats(
+def get_mission_stats(
     period: str = Query("30d", pattern="^(7d|30d|90d|all)$", description="Stats period"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -668,121 +796,23 @@ async def get_mission_stats(
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             base_filter.append(OrchestrationRun.created_at >= cutoff)
 
-        # Total missions
-        total_missions = (
-            db.query(func.count(OrchestrationRun.id))
-            .filter(*base_filter)
-            .scalar()
-        ) or 0
-
-        # Success rate
-        completed_count = (
-            db.query(func.count(OrchestrationRun.id))
-            .filter(*base_filter, OrchestrationRun.state == RunState.COMPLETED.value)
-            .scalar()
-        ) or 0
-
-        terminal_count = (
-            db.query(func.count(OrchestrationRun.id))
-            .filter(
-                *base_filter,
-                OrchestrationRun.state.in_(
-                    [s.value for s in TERMINAL_RUN_STATES]
-                ),
-            )
-            .scalar()
-        ) or 0
-
-        success_rate = round(completed_count / terminal_count, 4) if terminal_count > 0 else 0.0
-
-        # Average duration (completed missions only)
-        avg_duration_row = (
-            db.query(
-                func.avg(
-                    func.extract("epoch", OrchestrationRun.completed_at)
-                    - func.extract("epoch", OrchestrationRun.started_at)
-                )
-            )
-            .filter(
-                *base_filter,
-                OrchestrationRun.state == RunState.COMPLETED.value,
-                OrchestrationRun.started_at.isnot(None),
-                OrchestrationRun.completed_at.isnot(None),
-            )
-            .scalar()
-        )
-        avg_duration_minutes = round(float(avg_duration_row) / 60.0, 2) if avg_duration_row else None
-
-        # Average tokens used
-        avg_tokens = (
-            db.query(func.avg(OrchestrationRun.tokens_used))
-            .filter(*base_filter)
-            .scalar()
-        )
-        avg_tokens_used = round(float(avg_tokens), 2) if avg_tokens else 0.0
-
-        # Average tasks per mission
-        task_counts = (
-            db.query(func.count(OrchestrationTask.id))
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .filter(*base_filter)
-            .scalar()
-        ) or 0
-        avg_tasks_per_mission = round(task_counts / total_missions, 2) if total_missions > 0 else 0.0
+        (
+            total_missions,
+            success_rate,
+            avg_duration_minutes,
+            avg_tokens_used,
+            avg_tasks_per_mission,
+        ) = _get_mission_stats_summary(db, base_filter)
 
         # Top agents (by tasks completed in verified state)
         task_filter = [OrchestrationRun.workspace_id == ctx.workspace_id]
         if days is not None:
             task_filter.append(OrchestrationTask.created_at >= cutoff)
 
-        top_agent_rows = (
-            db.query(
-                OrchestrationTask.assigned_agent_id,
-                Agent.name,
-                func.count(OrchestrationTask.id).label("tasks_completed"),
-                func.avg(OrchestrationTask.tokens_used).label("avg_tokens"),
-            )
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .join(Agent, OrchestrationTask.assigned_agent_id == Agent.id)
-            .filter(
-                *task_filter,
-                OrchestrationTask.state == TaskState.VERIFIED.value,
-                OrchestrationTask.assigned_agent_id.isnot(None),
-            )
-            .group_by(OrchestrationTask.assigned_agent_id, Agent.name)
-            .order_by(func.count(OrchestrationTask.id).desc())
-            .limit(5)
-            .all()
-        )
-
-        top_agents = [
-            TopAgentStats(
-                agent_id=row[0],
-                agent_name=row[1],
-                tasks_completed=row[2],
-                avg_tokens_per_task=round(float(row[3] or 0), 2),
-            )
-            for row in top_agent_rows
-        ]
+        top_agents = _get_mission_stats_top_agents(db, task_filter)
 
         # Common failure reasons
-        failure_rows = (
-            db.query(
-                OrchestrationTask.failure_reason_code,
-                func.count(OrchestrationTask.id),
-            )
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .filter(
-                *task_filter,
-                OrchestrationTask.state == TaskState.FAILED.value,
-                OrchestrationTask.failure_reason_code.isnot(None),
-            )
-            .group_by(OrchestrationTask.failure_reason_code)
-            .order_by(func.count(OrchestrationTask.id).desc())
-            .limit(10)
-            .all()
-        )
-        common_failure_reasons = {row[0]: row[1] for row in failure_rows}
+        common_failure_reasons = _get_mission_stats_failures(db, task_filter)
 
         return MissionStatsResponse(
             total_missions=total_missions,
@@ -802,8 +832,28 @@ async def get_mission_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _list_archived_missions_item(a: OrchestrationArchive) -> dict:
+    """Summary row for one archived mission."""
+    return {
+        "id": str(a.id),
+        "original_run_id": str(a.original_run_id),
+        "goal": a.goal,
+        "state": a.state,
+        "created_by": a.created_by,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+        "archived_at": a.archived_at.isoformat() if a.archived_at else None,
+        "task_count": len(a.archive_data.get("tasks", [])) if a.archive_data else 0,
+        "tokens_used": (
+            a.archive_data.get("run", {}).get("tokens_used", 0)
+            if a.archive_data
+            else 0
+        ),
+    }
+
+
 @router.get("/archive")
-async def list_archived_missions(
+def list_archived_missions(
     search: Optional[str] = Query(None, description="Search archived missions by goal text"),
     state: Optional[str] = Query(None, description="Filter by terminal state"),
     limit: int = Query(20, ge=1, le=100),
@@ -843,25 +893,7 @@ async def list_archived_missions(
         )
 
         return {
-            "archives": [
-                {
-                    "id": str(a.id),
-                    "original_run_id": str(a.original_run_id),
-                    "goal": a.goal,
-                    "state": a.state,
-                    "created_by": a.created_by,
-                    "created_at": a.created_at.isoformat() if a.created_at else None,
-                    "completed_at": a.completed_at.isoformat() if a.completed_at else None,
-                    "archived_at": a.archived_at.isoformat() if a.archived_at else None,
-                    "task_count": len(a.archive_data.get("tasks", [])) if a.archive_data else 0,
-                    "tokens_used": (
-                        a.archive_data.get("run", {}).get("tokens_used", 0)
-                        if a.archive_data
-                        else 0
-                    ),
-                }
-                for a in archives
-            ],
+            "archives": [_list_archived_missions_item(a) for a in archives],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -993,8 +1025,23 @@ async def upload_mission_file(
 # ---------------------------------------------------------------------------
 
 
+def _get_mission_dependency_map(db: Session, tasks: list) -> Dict[str, List[str]]:
+    """PRD-163 S5: real dependency edges for the DAG canvas."""
+    _deps_map: Dict[str, List[str]] = {}
+    if tasks:
+        from core.models.orchestration import OrchestrationTaskDependency
+        _dep_rows = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id.in_([t.id for t in tasks]))
+            .all()
+        )
+        for d in _dep_rows:
+            _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
+    return _deps_map
+
+
 @router.get("/{mission_id}")
-async def get_mission(
+def get_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1030,17 +1077,7 @@ async def get_mission(
             if e.event_type == "permission_denied"
         ]
 
-        # PRD-163 S5: real dependency edges for the DAG canvas.
-        _deps_map: Dict[str, List[str]] = {}
-        if tasks:
-            from core.models.orchestration import OrchestrationTaskDependency
-            _dep_rows = (
-                db.query(OrchestrationTaskDependency)
-                .filter(OrchestrationTaskDependency.task_id.in_([t.id for t in tasks]))
-                .all()
-            )
-            for d in _dep_rows:
-                _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
+        _deps_map = _get_mission_dependency_map(db, tasks)
 
         result = _run_to_response(run)
         # The ledger, not the counter (night 1, finding 22): the page showed
@@ -1626,8 +1663,71 @@ def _extract_routine_template(
     }
 
 
+def _save_as_routine_unique_slug(db: Session, name: str) -> str:
+    """Unique template_id slug for the new routine (suffix on collision)."""
+    # Generate a unique template_id slug
+    base_slug = f"mission-{_slugify(name)}"
+    template_id_slug = base_slug
+
+    # Check for collisions and append suffix if needed
+    existing = (
+        db.query(WorkflowTemplate.template_id)
+        .filter(WorkflowTemplate.template_id.like(f"{base_slug}%"))
+        .all()
+    )
+    existing_ids = {row[0] for row in existing}
+    if template_id_slug in existing_ids:
+        counter = 2
+        while f"{base_slug}-{counter}" in existing_ids:
+            counter += 1
+        template_id_slug = f"{base_slug}-{counter}"
+    return template_id_slug
+
+
+def _save_as_routine_build_recipe(
+    db: Session, ctx: RequestContext, body: SaveAsRoutineRequest, run, template_def: dict, template_id_slug: str
+) -> WorkflowTemplate:
+    """Build (not persist) the WorkflowTemplate record for the routine."""
+    # Build description from user input or generate from goal
+    description = body.description or f"Routine created from mission: {run.goal[:200]}"
+
+    # Create WorkflowTemplate record
+    from core.auth.principal import resolve_user_pk
+
+    recipe = WorkflowTemplate(
+        template_id=template_id_slug,
+        name=body.name,
+        description=description,
+        workspace_id=ctx.workspace_id,
+        owner_type="workspace",
+        owner_id=str(ctx.workspace_id),
+        # F133: the person who saved it; its later edits are checked against them.
+        created_by_user_id=resolve_user_pk(db, ctx),
+        tags=body.tags or [],
+        template_definition=template_def,
+        steps=[
+            {
+                "step_id": tt["temp_id"],
+                "order": tt["sequence"],
+                "agent_id": None,  # Agent role, not a specific agent
+                "agent_role": tt["agent_role"],
+                "prompt_template": tt["description_pattern"],
+                "dependencies": tt["dependencies"],
+            }
+            for tt in template_def["task_templates"]
+        ],
+        inputs={"goal": {"type": "string", "required": True}},
+        outputs={"report": {"type": "string"}},
+        execution_config={"mode": "sequential", "max_retries": 3},
+        created_by=ctx.user.id or "unknown",
+        is_public=False,
+        is_system=False,
+    )
+    return recipe
+
+
 @router.post("/{mission_id}/save-as-routine", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
-async def save_as_routine(
+def save_as_routine(
     mission_id: UUID,
     body: SaveAsRoutineRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1671,59 +1771,11 @@ async def save_as_routine(
         template_def = _extract_routine_template(tasks, dependencies, run.goal)
 
         # Generate a unique template_id slug
-        base_slug = f"mission-{_slugify(body.name)}"
-        template_id_slug = base_slug
-
-        # Check for collisions and append suffix if needed
-        existing = (
-            db.query(WorkflowTemplate.template_id)
-            .filter(WorkflowTemplate.template_id.like(f"{base_slug}%"))
-            .all()
-        )
-        existing_ids = {row[0] for row in existing}
-        if template_id_slug in existing_ids:
-            counter = 2
-            while f"{base_slug}-{counter}" in existing_ids:
-                counter += 1
-            template_id_slug = f"{base_slug}-{counter}"
+        template_id_slug = _save_as_routine_unique_slug(db, body.name)
 
         template_def["id"] = template_id_slug
 
-        # Build description from user input or generate from goal
-        description = body.description or f"Routine created from mission: {run.goal[:200]}"
-
-        # Create WorkflowTemplate record
-        from core.auth.principal import resolve_user_pk
-
-        recipe = WorkflowTemplate(
-            template_id=template_id_slug,
-            name=body.name,
-            description=description,
-            workspace_id=ctx.workspace_id,
-            owner_type="workspace",
-            owner_id=str(ctx.workspace_id),
-            # F133: the person who saved it; its later edits are checked against them.
-            created_by_user_id=resolve_user_pk(db, ctx),
-            tags=body.tags or [],
-            template_definition=template_def,
-            steps=[
-                {
-                    "step_id": tt["temp_id"],
-                    "order": tt["sequence"],
-                    "agent_id": None,  # Agent role, not a specific agent
-                    "agent_role": tt["agent_role"],
-                    "prompt_template": tt["description_pattern"],
-                    "dependencies": tt["dependencies"],
-                }
-                for tt in template_def["task_templates"]
-            ],
-            inputs={"goal": {"type": "string", "required": True}},
-            outputs={"report": {"type": "string"}},
-            execution_config={"mode": "sequential", "max_retries": 3},
-            created_by=ctx.user.id or "unknown",
-            is_public=False,
-            is_system=False,
-        )
+        recipe = _save_as_routine_build_recipe(db, ctx, body, run, template_def, template_id_slug)
 
         db.add(recipe)
         db.flush()
@@ -1943,8 +1995,96 @@ def delete_mission(
 agent_telemetry_router = APIRouter(prefix="/api/agents", tags=["agent-telemetry"])
 
 
+def _get_agent_mission_history_stats(db: Session, ctx: RequestContext, agent_id: int):
+    """Returns (tasks_completed, avg_tokens_per_task, failure_rate) for the agent."""
+    # All tasks assigned to this agent in this workspace
+    base_query = (
+        db.query(OrchestrationTask)
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationTask.assigned_agent_id == agent_id,
+        )
+    )
+
+    # Tasks completed (verified state)
+    tasks_completed = (
+        base_query
+        .filter(OrchestrationTask.state == TaskState.VERIFIED.value)
+        .count()
+    )
+
+    # Average tokens per task (verified tasks only)
+    avg_tokens = (
+        db.query(func.avg(OrchestrationTask.tokens_used))
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationTask.assigned_agent_id == agent_id,
+            OrchestrationTask.state == TaskState.VERIFIED.value,
+        )
+        .scalar()
+    )
+    avg_tokens_per_task = round(float(avg_tokens), 2) if avg_tokens else 0.0
+
+    # Failure rate
+    total_terminal = (
+        base_query
+        .filter(
+            OrchestrationTask.state.in_(
+                [TaskState.VERIFIED.value, TaskState.FAILED.value]
+            )
+        )
+        .count()
+    )
+    failed_count = (
+        base_query
+        .filter(OrchestrationTask.state == TaskState.FAILED.value)
+        .count()
+    )
+    failure_rate = round(failed_count / total_terminal, 4) if total_terminal > 0 else 0.0
+    return tasks_completed, avg_tokens_per_task, failure_rate
+
+
+def _get_agent_mission_history_recent(db: Session, ctx: RequestContext, agent_id: int) -> list:
+    """Recent missions (last 10 distinct runs) the agent worked on."""
+    recent_tasks = (
+        db.query(
+            OrchestrationRun.id,
+            OrchestrationRun.goal,
+            OrchestrationRun.state,
+            OrchestrationTask.title,
+            OrchestrationTask.state.label("task_state"),
+            OrchestrationTask.tokens_used,
+            OrchestrationTask.completed_at,
+        )
+        .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationTask.assigned_agent_id == agent_id,
+        )
+        .order_by(OrchestrationTask.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    recent_missions = [
+        {
+            "mission_id": str(row[0]),
+            "goal": (row[1][:100] if row[1] else None),
+            "mission_state": row[2],
+            "task_title": row[3],
+            "task_state": row[4],
+            "tokens_used": row[5] or 0,
+            "completed_at": row[6].isoformat() if row[6] else None,
+        }
+        for row in recent_tasks
+    ]
+    return recent_missions
+
+
 @agent_telemetry_router.get("/{agent_id}/mission-history")
-async def get_agent_mission_history(
+def get_agent_mission_history(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1963,86 +2103,12 @@ async def get_agent_mission_history(
         if agent is None:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-        # All tasks assigned to this agent in this workspace
-        base_query = (
-            db.query(OrchestrationTask)
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationTask.assigned_agent_id == agent_id,
-            )
+        tasks_completed, avg_tokens_per_task, failure_rate = _get_agent_mission_history_stats(
+            db, ctx, agent_id
         )
-
-        # Tasks completed (verified state)
-        tasks_completed = (
-            base_query
-            .filter(OrchestrationTask.state == TaskState.VERIFIED.value)
-            .count()
-        )
-
-        # Average tokens per task (verified tasks only)
-        avg_tokens = (
-            db.query(func.avg(OrchestrationTask.tokens_used))
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationTask.assigned_agent_id == agent_id,
-                OrchestrationTask.state == TaskState.VERIFIED.value,
-            )
-            .scalar()
-        )
-        avg_tokens_per_task = round(float(avg_tokens), 2) if avg_tokens else 0.0
-
-        # Failure rate
-        total_terminal = (
-            base_query
-            .filter(
-                OrchestrationTask.state.in_(
-                    [TaskState.VERIFIED.value, TaskState.FAILED.value]
-                )
-            )
-            .count()
-        )
-        failed_count = (
-            base_query
-            .filter(OrchestrationTask.state == TaskState.FAILED.value)
-            .count()
-        )
-        failure_rate = round(failed_count / total_terminal, 4) if total_terminal > 0 else 0.0
 
         # Recent missions (last 10 distinct runs)
-        recent_tasks = (
-            db.query(
-                OrchestrationRun.id,
-                OrchestrationRun.goal,
-                OrchestrationRun.state,
-                OrchestrationTask.title,
-                OrchestrationTask.state.label("task_state"),
-                OrchestrationTask.tokens_used,
-                OrchestrationTask.completed_at,
-            )
-            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationTask.assigned_agent_id == agent_id,
-            )
-            .order_by(OrchestrationTask.created_at.desc())
-            .limit(10)
-            .all()
-        )
-
-        recent_missions = [
-            {
-                "mission_id": str(row[0]),
-                "goal": (row[1][:100] if row[1] else None),
-                "mission_state": row[2],
-                "task_title": row[3],
-                "task_state": row[4],
-                "tokens_used": row[5] or 0,
-                "completed_at": row[6].isoformat() if row[6] else None,
-            }
-            for row in recent_tasks
-        ]
+        recent_missions = _get_agent_mission_history_recent(db, ctx, agent_id)
 
         return AgentMissionHistoryResponse(
             agent_id=agent_id,
