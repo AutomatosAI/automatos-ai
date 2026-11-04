@@ -232,7 +232,7 @@ def _query_llm_usage(db: Session, workspace_id: Any, query_lower: str) -> List[D
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/generate", response_model=ChartGenerateResponse)
-async def generate_chart(
+def generate_chart(
     body: ChartGenerateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

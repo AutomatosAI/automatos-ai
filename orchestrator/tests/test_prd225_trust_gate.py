@@ -329,11 +329,11 @@ async def test_save_integrations_sets_the_legacy_opt_out(monkeypatch):
 
     ctx = SimpleNamespace(workspace_id=workspace.id)
 
-    await wsmod.save_integrations({"telegram_trigger_mode": "allow_all"}, ctx, _DB())
+    wsmod.save_integrations({"telegram_trigger_mode": "allow_all"}, ctx, _DB())
     assert workspace.settings["integrations"]["telegram_trigger_mode"] == "allow_all"
 
     # Garbage is not stored — the gate falls back to the strict default.
-    await wsmod.save_integrations({"telegram_trigger_mode": "bogus"}, ctx, _DB())
+    wsmod.save_integrations({"telegram_trigger_mode": "bogus"}, ctx, _DB())
     assert "telegram_trigger_mode" not in workspace.settings["integrations"]
 
 

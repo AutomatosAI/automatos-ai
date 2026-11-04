@@ -97,9 +97,9 @@ def test_a_new_playbook_with_schedule_type_none_is_refused_the_same_way(workspac
 
     template_id = f"f271-{uuid.uuid4().hex[:8]}"
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(create_workflow_recipe(ctx=_owner(workspace), db=new_session(), recipe_data={
+        create_workflow_recipe(ctx=_owner(workspace), db=new_session(), recipe_data={
             "template_id": template_id, "name": "Weekly Instagram posts", "description": "f271",
-            "template_definition": {"steps": []}, "steps": [], "schedule_config": {"type": "none"}}))
+            "template_definition": {"steps": []}, "steps": [], "schedule_config": {"type": "none"}})
 
     assert (refused.value.status_code, refused.value.detail) == (422, REFUSAL)
     made = new_session().execute(

@@ -106,7 +106,7 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 
 
 @router.get("")
-async def list_grants(
+def list_grants(
     status: Optional[str] = None,
     kind: Optional[str] = None,
     ctx: RequestContext = Depends(require_workspace_answerer),
@@ -323,7 +323,7 @@ async def deny_approval(
 
 
 @router.post("/{grant_id}/revoke")
-async def revoke_approval(
+def revoke_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),

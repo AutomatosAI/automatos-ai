@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -108,8 +108,137 @@ class PauseBody(BaseModel):
 # Endpoints
 # ===================================================================
 
+class _WorkspaceCounts(NamedTuple):
+    """Per-workspace figures for the admin list, keyed by workspace id (owners by user id)."""
+    agents_by_ws: dict
+    docs_count_by_ws: dict
+    storage_by_ws: dict
+    chats_by_ws: dict
+    members_by_ws: dict
+    member_seen_by_ws: dict
+    owner_by_id: dict
+
+
+def _list_workspaces_query(db: Session, include_deleted: bool, include_paused: bool, plan: Optional[str], search: Optional[str]):
+    """Workspace query with the include/plan/search filters applied."""
+    q = db.query(Workspace)
+
+    if not include_deleted:
+        q = q.filter(Workspace.deleted_at.is_(None))
+    if not include_paused:
+        q = q.filter(Workspace.paused_at.is_(None))
+    if plan:
+        q = q.filter(Workspace.plan == plan)
+    if search:
+        needle = f"%{search.lower()}%"
+        q = q.filter(
+            (func.lower(Workspace.name).like(needle))
+            | (func.lower(Workspace.slug).like(needle))
+        )
+    return q
+
+
+def _list_workspaces_counts(db: Session, workspaces: list, workspace_ids: list) -> _WorkspaceCounts:
+    """Batched agent, document, chat, member and owner lookups for the page of workspaces."""
+    # Batched count queries (one per metric, not N+1)
+    agents_by_ws = dict(
+        db.query(Agent.workspace_id, func.count(Agent.id))
+        .filter(Agent.workspace_id.in_(workspace_ids))
+        .group_by(Agent.workspace_id)
+        .all()
+    ) if workspace_ids else {}
+
+    docs_agg = (
+        db.query(
+            Document.workspace_id,
+            func.count(Document.id),
+            func.coalesce(func.sum(Document.file_size), 0),
+        )
+        .filter(Document.workspace_id.in_(workspace_ids))
+        .group_by(Document.workspace_id)
+        .all()
+    ) if workspace_ids else []
+    docs_count_by_ws = {ws_id: cnt for ws_id, cnt, _ in docs_agg}
+    storage_by_ws = {ws_id: int(size) for ws_id, _, size in docs_agg}
+
+    chats_by_ws = dict(
+        db.query(Chat.workspace_id, func.count(Chat.id))
+        .filter(Chat.workspace_id.in_(workspace_ids))
+        .group_by(Chat.workspace_id)
+        .all()
+    ) if workspace_ids else {}
+
+    # Active members + last-seen, batched the same way (never N+1). The seat
+    # cap in core/workspaces/invitations.py counts exactly these rows
+    # (is_active members), so members_count is directly comparable to a
+    # tier's seats — that is what the console's downgrade warning reads.
+    member_agg = (
+        db.query(
+            WorkspaceMember.workspace_id,
+            func.count(WorkspaceMember.id),
+            func.max(User.last_sign_in),
+        )
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.workspace_id.in_(workspace_ids))
+        .filter(WorkspaceMember.is_active.is_(True))
+        .group_by(WorkspaceMember.workspace_id)
+        .all()
+    ) if workspace_ids else []
+    members_by_ws = {ws_id: cnt for ws_id, cnt, _ in member_agg}
+    member_seen_by_ws = {ws_id: seen for ws_id, _, seen in member_agg}
+
+    # Owner lookup (bulk)
+    owner_ids = {w.owner_id for w in workspaces if w.owner_id is not None}
+    owners = (
+        db.query(User).filter(User.id.in_(owner_ids)).all() if owner_ids else []
+    )
+    owner_by_id = {u.id: u for u in owners}
+    return _WorkspaceCounts(
+        agents_by_ws, docs_count_by_ws, storage_by_ws, chats_by_ws,
+        members_by_ws, member_seen_by_ws, owner_by_id,
+    )
+
+
+def _list_workspaces_items(workspaces: list, counts: _WorkspaceCounts) -> List[WorkspaceListItem]:
+    """List rows for the page of workspaces."""
+    (agents_by_ws, docs_count_by_ws, storage_by_ws, chats_by_ws,
+     members_by_ws, member_seen_by_ws, owner_by_id) = counts
+    items: List[WorkspaceListItem] = []
+    for w in workspaces:
+        owner = owner_by_id.get(w.owner_id) if w.owner_id else None
+        # The owner is counted even when no membership row exists for them —
+        # a solo workspace is otherwise reported as never active.
+        seen_candidates = [
+            t for t in (member_seen_by_ws.get(w.id), getattr(owner, "last_sign_in", None))
+            if t is not None
+        ]
+        last_active = max(seen_candidates) if seen_candidates else None
+        items.append(WorkspaceListItem(
+            id=str(w.id),
+            name=w.name,
+            slug=w.slug,
+            plan=w.plan,
+            is_personal=bool(w.is_personal),
+            is_active=bool(w.is_active),
+            owner_email=owner.email if owner else None,
+            owner_name=owner.name if owner else None,
+            agents_count=agents_by_ws.get(w.id, 0),
+            documents_count=docs_count_by_ws.get(w.id, 0),
+            storage_bytes=storage_by_ws.get(w.id, 0),
+            chats_count=chats_by_ws.get(w.id, 0),
+            members_count=members_by_ws.get(w.id, 0),
+            last_active_at=_utc_iso(last_active),
+            plan_limits=dict(w.plan_limits or {}),
+            created_at=w.created_at.isoformat() if w.created_at else None,
+            paused_at=w.paused_at.isoformat() if w.paused_at else None,
+            paused_reason=w.paused_reason,
+            deleted_at=w.deleted_at.isoformat() if w.deleted_at else None,
+        ))
+    return items
+
+
 @router.get("")
-async def list_workspaces(
+def list_workspaces(
     include_deleted: bool = Query(False),
     include_paused: bool = Query(True),
     plan: Optional[str] = Query(None),
@@ -125,20 +254,7 @@ async def list_workspaces(
     _assert_admin(ctx)
 
     try:
-        q = db.query(Workspace)
-
-        if not include_deleted:
-            q = q.filter(Workspace.deleted_at.is_(None))
-        if not include_paused:
-            q = q.filter(Workspace.paused_at.is_(None))
-        if plan:
-            q = q.filter(Workspace.plan == plan)
-        if search:
-            needle = f"%{search.lower()}%"
-            q = q.filter(
-                (func.lower(Workspace.name).like(needle))
-                | (func.lower(Workspace.slug).like(needle))
-            )
+        q = _list_workspaces_query(db, include_deleted, include_paused, plan, search)
 
         total = q.count()
 
@@ -152,91 +268,9 @@ async def list_workspaces(
         workspaces = q.offset((page - 1) * limit).limit(limit).all()
         workspace_ids = [w.id for w in workspaces]
 
-        # Batched count queries (one per metric, not N+1)
-        agents_by_ws = dict(
-            db.query(Agent.workspace_id, func.count(Agent.id))
-            .filter(Agent.workspace_id.in_(workspace_ids))
-            .group_by(Agent.workspace_id)
-            .all()
-        ) if workspace_ids else {}
+        counts = _list_workspaces_counts(db, workspaces, workspace_ids)
 
-        docs_agg = (
-            db.query(
-                Document.workspace_id,
-                func.count(Document.id),
-                func.coalesce(func.sum(Document.file_size), 0),
-            )
-            .filter(Document.workspace_id.in_(workspace_ids))
-            .group_by(Document.workspace_id)
-            .all()
-        ) if workspace_ids else []
-        docs_count_by_ws = {ws_id: cnt for ws_id, cnt, _ in docs_agg}
-        storage_by_ws = {ws_id: int(size) for ws_id, _, size in docs_agg}
-
-        chats_by_ws = dict(
-            db.query(Chat.workspace_id, func.count(Chat.id))
-            .filter(Chat.workspace_id.in_(workspace_ids))
-            .group_by(Chat.workspace_id)
-            .all()
-        ) if workspace_ids else {}
-
-        # Active members + last-seen, batched the same way (never N+1). The seat
-        # cap in core/workspaces/invitations.py counts exactly these rows
-        # (is_active members), so members_count is directly comparable to a
-        # tier's seats — that is what the console's downgrade warning reads.
-        member_agg = (
-            db.query(
-                WorkspaceMember.workspace_id,
-                func.count(WorkspaceMember.id),
-                func.max(User.last_sign_in),
-            )
-            .join(User, User.id == WorkspaceMember.user_id)
-            .filter(WorkspaceMember.workspace_id.in_(workspace_ids))
-            .filter(WorkspaceMember.is_active.is_(True))
-            .group_by(WorkspaceMember.workspace_id)
-            .all()
-        ) if workspace_ids else []
-        members_by_ws = {ws_id: cnt for ws_id, cnt, _ in member_agg}
-        member_seen_by_ws = {ws_id: seen for ws_id, _, seen in member_agg}
-
-        # Owner lookup (bulk)
-        owner_ids = {w.owner_id for w in workspaces if w.owner_id is not None}
-        owners = (
-            db.query(User).filter(User.id.in_(owner_ids)).all() if owner_ids else []
-        )
-        owner_by_id = {u.id: u for u in owners}
-
-        items: List[WorkspaceListItem] = []
-        for w in workspaces:
-            owner = owner_by_id.get(w.owner_id) if w.owner_id else None
-            # The owner is counted even when no membership row exists for them —
-            # a solo workspace is otherwise reported as never active.
-            seen_candidates = [
-                t for t in (member_seen_by_ws.get(w.id), getattr(owner, "last_sign_in", None))
-                if t is not None
-            ]
-            last_active = max(seen_candidates) if seen_candidates else None
-            items.append(WorkspaceListItem(
-                id=str(w.id),
-                name=w.name,
-                slug=w.slug,
-                plan=w.plan,
-                is_personal=bool(w.is_personal),
-                is_active=bool(w.is_active),
-                owner_email=owner.email if owner else None,
-                owner_name=owner.name if owner else None,
-                agents_count=agents_by_ws.get(w.id, 0),
-                documents_count=docs_count_by_ws.get(w.id, 0),
-                storage_bytes=storage_by_ws.get(w.id, 0),
-                chats_count=chats_by_ws.get(w.id, 0),
-                members_count=members_by_ws.get(w.id, 0),
-                last_active_at=_utc_iso(last_active),
-                plan_limits=dict(w.plan_limits or {}),
-                created_at=w.created_at.isoformat() if w.created_at else None,
-                paused_at=w.paused_at.isoformat() if w.paused_at else None,
-                paused_reason=w.paused_reason,
-                deleted_at=w.deleted_at.isoformat() if w.deleted_at else None,
-            ))
+        items = _list_workspaces_items(workspaces, counts)
 
         # Optional client-side sorts (storage/agents) — applied post count join
         if sort in ("storage_bytes", "agents_count"):
@@ -322,8 +356,59 @@ async def list_plan_tiers(
     return {"tiers": tiers}
 
 
+def _change_workspace_plan_members(db: Session, workspace: Workspace):
+    """Active member count and the downgrade warnings for the workspace's new tier."""
+    members_count = (
+        db.query(func.count(WorkspaceMember.id))
+        .filter(WorkspaceMember.workspace_id == workspace.id)
+        .filter(WorkspaceMember.is_active.is_(True))
+        .scalar()
+    ) or 0
+
+    warnings: List[str] = []
+    seats = (get_tier(workspace.plan) or {}).get("seats")
+    # Mirror the enforcement exactly (core/workspaces/invitations.py): -1 is the
+    # only "unlimited" sentinel there, so a tier tuned to seats=0 via
+    # AUTOMATOS_PLAN_TIERS_JSON blocks EVERY invite and must still warn. Do not
+    # borrow the 0-means-unlimited convention that plan_tiers documents for
+    # max_agents / watcher_limit — that is a different key with a different rule.
+    if isinstance(seats, int) and seats != -1 and seats < members_count:
+        warnings.append(
+            f"{workspace.name} has {members_count} active members but "
+            f"{workspace.plan} allows {seats}. No one was removed — the cap "
+            f"applies to the next invitation."
+        )
+    return members_count, warnings
+
+
+def _change_workspace_plan_audit(
+    db: Session, ctx: RequestContext, workspace: Workspace, previous_plan, limits_changed: dict, warnings: List[str]
+) -> None:
+    """Audit-log and log the plan change."""
+    AuditService(db).log(
+        workspace_id=str(workspace.id),
+        user_id=resolve_internal_user_id(db, ctx),
+        action="workspace.plan_changed",
+        resource_type="workspace",
+        resource_id=str(workspace.id),
+        resource_name=workspace.name,
+        details={
+            "from_plan": previous_plan,
+            "to_plan": workspace.plan,
+            "limits_changed": limits_changed,
+            "budget_applied": False,
+            "actor_email": getattr(ctx.user, "email", None),
+            "warnings": warnings,
+        },
+    )
+    logger.info(
+        "[admin] workspace %s plan %s -> %s by %s",
+        workspace.id, previous_plan, workspace.plan, getattr(ctx.user, "email", "?"),
+    )
+
+
 @router.patch("/{workspace_id}/plan")
-async def change_workspace_plan(
+def change_workspace_plan(
     workspace_id: UUID,
     body: PlanChangeBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -381,47 +466,9 @@ async def change_workspace_plan(
         if previous_limits.get(key) != new_limits.get(key)
     }
 
-    members_count = (
-        db.query(func.count(WorkspaceMember.id))
-        .filter(WorkspaceMember.workspace_id == workspace.id)
-        .filter(WorkspaceMember.is_active.is_(True))
-        .scalar()
-    ) or 0
+    members_count, warnings = _change_workspace_plan_members(db, workspace)
 
-    warnings: List[str] = []
-    seats = (get_tier(workspace.plan) or {}).get("seats")
-    # Mirror the enforcement exactly (core/workspaces/invitations.py): -1 is the
-    # only "unlimited" sentinel there, so a tier tuned to seats=0 via
-    # AUTOMATOS_PLAN_TIERS_JSON blocks EVERY invite and must still warn. Do not
-    # borrow the 0-means-unlimited convention that plan_tiers documents for
-    # max_agents / watcher_limit — that is a different key with a different rule.
-    if isinstance(seats, int) and seats != -1 and seats < members_count:
-        warnings.append(
-            f"{workspace.name} has {members_count} active members but "
-            f"{workspace.plan} allows {seats}. No one was removed — the cap "
-            f"applies to the next invitation."
-        )
-
-    AuditService(db).log(
-        workspace_id=str(workspace.id),
-        user_id=resolve_internal_user_id(db, ctx),
-        action="workspace.plan_changed",
-        resource_type="workspace",
-        resource_id=str(workspace.id),
-        resource_name=workspace.name,
-        details={
-            "from_plan": previous_plan,
-            "to_plan": workspace.plan,
-            "limits_changed": limits_changed,
-            "budget_applied": False,
-            "actor_email": getattr(ctx.user, "email", None),
-            "warnings": warnings,
-        },
-    )
-    logger.info(
-        "[admin] workspace %s plan %s -> %s by %s",
-        workspace.id, previous_plan, workspace.plan, getattr(ctx.user, "email", "?"),
-    )
+    _change_workspace_plan_audit(db, ctx, workspace, previous_plan, limits_changed, warnings)
 
     return {
         "id": str(workspace.id),
@@ -434,8 +481,51 @@ async def change_workspace_plan(
     }
 
 
+def _get_workspace_counts(db: Session, workspace_id: UUID):
+    """Returns (agents, documents, storage_bytes, chats, messages) counts for the workspace."""
+    agents_count = db.query(func.count(Agent.id)).filter(
+        Agent.workspace_id == workspace_id
+    ).scalar() or 0
+
+    docs_count = db.query(func.count(Document.id)).filter(
+        Document.workspace_id == workspace_id
+    ).scalar() or 0
+
+    storage_bytes = db.query(
+        func.coalesce(func.sum(Document.file_size), 0)
+    ).filter(Document.workspace_id == workspace_id).scalar() or 0
+
+    chats_count = db.query(func.count(Chat.id)).filter(
+        Chat.workspace_id == workspace_id
+    ).scalar() or 0
+
+    messages_count = db.query(func.count(Message.id)).filter(
+        Message.workspace_id == workspace_id
+    ).scalar() or 0
+    return agents_count, docs_count, storage_bytes, chats_count, messages_count
+
+
+def _get_workspace_members_and_activity(db: Session, workspace_id: UUID, owner):
+    """Returns (members_count, last_active) -- last sign-in of a member or the owner."""
+    # Same shape as the list route — the detail view inherits these fields,
+    # so leaving them at their defaults would report 0 members and no limits
+    # for a workspace that has both.
+    members_count, member_seen = (
+        db.query(func.count(WorkspaceMember.id), func.max(User.last_sign_in))
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.workspace_id == workspace_id)
+        .filter(WorkspaceMember.is_active.is_(True))
+        .one()
+    )
+    seen_candidates = [
+        t for t in (member_seen, getattr(owner, "last_sign_in", None)) if t is not None
+    ]
+    last_active = max(seen_candidates) if seen_candidates else None
+    return members_count, last_active
+
+
 @router.get("/{workspace_id}", response_model=WorkspaceDetail)
-async def get_workspace(
+def get_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -453,40 +543,11 @@ async def get_workspace(
             if w.owner_id else None
         )
 
-        agents_count = db.query(func.count(Agent.id)).filter(
-            Agent.workspace_id == workspace_id
-        ).scalar() or 0
-
-        docs_count = db.query(func.count(Document.id)).filter(
-            Document.workspace_id == workspace_id
-        ).scalar() or 0
-
-        storage_bytes = db.query(
-            func.coalesce(func.sum(Document.file_size), 0)
-        ).filter(Document.workspace_id == workspace_id).scalar() or 0
-
-        chats_count = db.query(func.count(Chat.id)).filter(
-            Chat.workspace_id == workspace_id
-        ).scalar() or 0
-
-        messages_count = db.query(func.count(Message.id)).filter(
-            Message.workspace_id == workspace_id
-        ).scalar() or 0
-
-        # Same shape as the list route — the detail view inherits these fields,
-        # so leaving them at their defaults would report 0 members and no limits
-        # for a workspace that has both.
-        members_count, member_seen = (
-            db.query(func.count(WorkspaceMember.id), func.max(User.last_sign_in))
-            .join(User, User.id == WorkspaceMember.user_id)
-            .filter(WorkspaceMember.workspace_id == workspace_id)
-            .filter(WorkspaceMember.is_active.is_(True))
-            .one()
+        agents_count, docs_count, storage_bytes, chats_count, messages_count = (
+            _get_workspace_counts(db, workspace_id)
         )
-        seen_candidates = [
-            t for t in (member_seen, getattr(owner, "last_sign_in", None)) if t is not None
-        ]
-        last_active = max(seen_candidates) if seen_candidates else None
+
+        members_count, last_active = _get_workspace_members_and_activity(db, workspace_id, owner)
 
         return WorkspaceDetail(
             id=str(w.id),
@@ -521,7 +582,7 @@ async def get_workspace(
 
 
 @router.post("/{workspace_id}/pause")
-async def pause_workspace(
+def pause_workspace(
     workspace_id: UUID,
     body: PauseBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -558,7 +619,7 @@ async def pause_workspace(
 
 
 @router.post("/{workspace_id}/resume")
-async def resume_workspace(
+def resume_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -588,7 +649,7 @@ async def resume_workspace(
 
 
 @router.delete("/{workspace_id}")
-async def delete_workspace(
+def delete_workspace(
     workspace_id: UUID,
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -632,7 +693,7 @@ async def delete_workspace(
 
 
 @router.post("/{workspace_id}/purge")
-async def purge_workspace(
+def purge_workspace(
     workspace_id: UUID,
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -665,7 +726,7 @@ async def purge_workspace(
 
 
 @router.post("/{workspace_id}/restore")
-async def restore_workspace(
+def restore_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

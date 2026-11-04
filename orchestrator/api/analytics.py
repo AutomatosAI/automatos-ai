@@ -32,8 +32,119 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
+def _get_dashboard_summary_counts(db: Session, ws, since_date: datetime):
+    """Returns (wf_total, wf_completed, wf_failed, m_total, m_completed, m_failed)."""
+    from core.models import WorkflowExecution, ExecutionStatus
+    from sqlalchemy import and_, func
+
+    # --- Legacy workflow executions ---
+    wf_total = db.query(func.count(WorkflowExecution.id)).filter(
+        WorkflowExecution.workspace_id == ws,
+        WorkflowExecution.started_at >= since_date
+    ).scalar() or 0
+    wf_completed = db.query(func.count(WorkflowExecution.id)).filter(and_(
+        WorkflowExecution.workspace_id == ws,
+        WorkflowExecution.started_at >= since_date,
+        WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+    )).scalar() or 0
+    wf_failed = db.query(func.count(WorkflowExecution.id)).filter(and_(
+        WorkflowExecution.workspace_id == ws,
+        WorkflowExecution.started_at >= since_date,
+        WorkflowExecution.status == ExecutionStatus.FAILED.value
+    )).scalar() or 0
+
+    # --- PRD-125 Phase 2: Mission runs ---
+    m_total = db.query(func.count(OrchestrationRun.id)).filter(
+        OrchestrationRun.workspace_id == ws,
+        OrchestrationRun.created_at >= since_date
+    ).scalar() or 0
+    m_completed = db.query(func.count(OrchestrationRun.id)).filter(and_(
+        OrchestrationRun.workspace_id == ws,
+        OrchestrationRun.created_at >= since_date,
+        OrchestrationRun.state == RunState.COMPLETED.value
+    )).scalar() or 0
+    m_failed = db.query(func.count(OrchestrationRun.id)).filter(and_(
+        OrchestrationRun.workspace_id == ws,
+        OrchestrationRun.created_at >= since_date,
+        OrchestrationRun.state == RunState.FAILED.value
+    )).scalar() or 0
+    return wf_total, wf_completed, wf_failed, m_total, m_completed, m_failed
+
+
+def _get_dashboard_summary_cost(db: Session, ws, since_date: datetime):
+    """Returns (total_cost, total_tokens, total_duration) over completed workflow and mission runs."""
+    from core.models import WorkflowExecution, ExecutionStatus
+    from sqlalchemy import and_, func
+
+    # Cost from legacy workflow metadata
+    recent_wf_executions = db.query(WorkflowExecution).filter(and_(
+        WorkflowExecution.workspace_id == ws,
+        WorkflowExecution.started_at >= since_date,
+        WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+    )).all()
+
+    total_cost = 0
+    total_tokens = 0
+    total_duration = 0
+
+    for exec_row in recent_wf_executions:
+        analytics_data = exec_row.metadata.get("analytics", {}) if exec_row.metadata else {}
+        total_cost += analytics_data.get("total_cost", 0)
+        total_tokens += analytics_data.get("total_tokens_used", 0)
+        total_duration += analytics_data.get("duration_seconds", 0)
+
+    # Add mission token usage
+    m_tokens = db.query(func.sum(OrchestrationRun.tokens_used)).filter(and_(
+        OrchestrationRun.workspace_id == ws,
+        OrchestrationRun.created_at >= since_date,
+        OrchestrationRun.state == RunState.COMPLETED.value,
+    )).scalar() or 0
+    total_tokens += m_tokens
+    return total_cost, total_tokens, total_duration
+
+
+def _get_dashboard_summary_response(
+    days: int, wf_total: int, m_total: int, m_completed: int, m_failed: int,
+    total_executions: int, completed_executions: int, failed_executions: int,
+    success_rate: float, active_agents: int, total_workflows: int,
+    avg_duration: float, avg_tokens: float, avg_cost: float, total_cost: float,
+) -> Dict[str, Any]:
+    """The dashboard summary response body."""
+    return {
+        "success": True,
+        "data": {
+            "period_days": days,
+            "timestamp": datetime.now().isoformat(),
+            "executions": {
+                "total": total_executions,
+                "completed": completed_executions,
+                "failed": failed_executions,
+                "success_rate": success_rate,
+                "sources": {"workflows": wf_total, "missions": m_total},
+            },
+            "agents": {
+                "active": active_agents
+            },
+            "workflows": {
+                "active": total_workflows
+            },
+            "missions": {
+                "total": m_total,
+                "completed": m_completed,
+                "failed": m_failed,
+            },
+            "performance": {
+                "avg_duration_seconds": avg_duration,
+                "avg_tokens": avg_tokens,
+                "avg_cost": avg_cost,
+                "total_cost": total_cost
+            }
+        }
+    }
+
+
 @router.get("/dashboard/summary")
-async def get_dashboard_summary(
+def get_dashboard_summary(
     days: int = Query(7, ge=1, le=90, description="Number of days for summary"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -41,43 +152,15 @@ async def get_dashboard_summary(
     """Get summary statistics for dashboard"""
 
     try:
-        from core.models import WorkflowExecution, Agent, Workflow, ExecutionStatus
-        from sqlalchemy import and_, func
+        from core.models import Agent, Workflow
+        from sqlalchemy import func
 
         ws = ctx.workspace_id
         since_date = datetime.now() - timedelta(days=days)
 
-        # --- Legacy workflow executions ---
-        wf_total = db.query(func.count(WorkflowExecution.id)).filter(
-            WorkflowExecution.workspace_id == ws,
-            WorkflowExecution.started_at >= since_date
-        ).scalar() or 0
-        wf_completed = db.query(func.count(WorkflowExecution.id)).filter(and_(
-            WorkflowExecution.workspace_id == ws,
-            WorkflowExecution.started_at >= since_date,
-            WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-        )).scalar() or 0
-        wf_failed = db.query(func.count(WorkflowExecution.id)).filter(and_(
-            WorkflowExecution.workspace_id == ws,
-            WorkflowExecution.started_at >= since_date,
-            WorkflowExecution.status == ExecutionStatus.FAILED.value
-        )).scalar() or 0
-
-        # --- PRD-125 Phase 2: Mission runs ---
-        m_total = db.query(func.count(OrchestrationRun.id)).filter(
-            OrchestrationRun.workspace_id == ws,
-            OrchestrationRun.created_at >= since_date
-        ).scalar() or 0
-        m_completed = db.query(func.count(OrchestrationRun.id)).filter(and_(
-            OrchestrationRun.workspace_id == ws,
-            OrchestrationRun.created_at >= since_date,
-            OrchestrationRun.state == RunState.COMPLETED.value
-        )).scalar() or 0
-        m_failed = db.query(func.count(OrchestrationRun.id)).filter(and_(
-            OrchestrationRun.workspace_id == ws,
-            OrchestrationRun.created_at >= since_date,
-            OrchestrationRun.state == RunState.FAILED.value
-        )).scalar() or 0
+        wf_total, wf_completed, wf_failed, m_total, m_completed, m_failed = (
+            _get_dashboard_summary_counts(db, ws, since_date)
+        )
 
         # Combined
         total_executions = wf_total + m_total
@@ -97,75 +180,70 @@ async def get_dashboard_summary(
         # Success rate
         success_rate = (completed_executions / total_executions * 100) if total_executions > 0 else 0
 
-        # Cost from legacy workflow metadata
-        recent_wf_executions = db.query(WorkflowExecution).filter(and_(
-            WorkflowExecution.workspace_id == ws,
-            WorkflowExecution.started_at >= since_date,
-            WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-        )).all()
-
-        total_cost = 0
-        total_tokens = 0
-        total_duration = 0
-
-        for exec_row in recent_wf_executions:
-            analytics_data = exec_row.metadata.get("analytics", {}) if exec_row.metadata else {}
-            total_cost += analytics_data.get("total_cost", 0)
-            total_tokens += analytics_data.get("total_tokens_used", 0)
-            total_duration += analytics_data.get("duration_seconds", 0)
-
-        # Add mission token usage
-        m_tokens = db.query(func.sum(OrchestrationRun.tokens_used)).filter(and_(
-            OrchestrationRun.workspace_id == ws,
-            OrchestrationRun.created_at >= since_date,
-            OrchestrationRun.state == RunState.COMPLETED.value,
-        )).scalar() or 0
-        total_tokens += m_tokens
+        total_cost, total_tokens, total_duration = _get_dashboard_summary_cost(db, ws, since_date)
 
         all_completed = completed_executions or 1
         avg_cost = total_cost / all_completed
         avg_tokens = total_tokens / all_completed
         avg_duration = total_duration / all_completed
 
-        return {
-            "success": True,
-            "data": {
-                "period_days": days,
-                "timestamp": datetime.now().isoformat(),
-                "executions": {
-                    "total": total_executions,
-                    "completed": completed_executions,
-                    "failed": failed_executions,
-                    "success_rate": success_rate,
-                    "sources": {"workflows": wf_total, "missions": m_total},
-                },
-                "agents": {
-                    "active": active_agents
-                },
-                "workflows": {
-                    "active": total_workflows
-                },
-                "missions": {
-                    "total": m_total,
-                    "completed": m_completed,
-                    "failed": m_failed,
-                },
-                "performance": {
-                    "avg_duration_seconds": avg_duration,
-                    "avg_tokens": avg_tokens,
-                    "avg_cost": avg_cost,
-                    "total_cost": total_cost
-                }
-            }
-        }
+        return _get_dashboard_summary_response(
+            days, wf_total, m_total, m_completed, m_failed, total_executions,
+            completed_executions, failed_executions, success_rate, active_agents,
+            total_workflows, avg_duration, avg_tokens, avg_cost, total_cost,
+        )
 
     except Exception as e:
         logger.error(f"Error getting dashboard summary: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _tally_agent_selection(selection_patterns: Dict[str, Any], assignments: Dict[str, Any]) -> None:
+    """Count, per agent type, how often it was the best match and its scores."""
+    # Analyze selection patterns
+    for subtask_id, matches in assignments.items():
+        if matches:
+            best_match = matches[0]
+            agent_type = best_match.get("agent_type", "unknown")
+
+            if agent_type not in selection_patterns:
+                selection_patterns[agent_type] = {
+                    "agent_type": agent_type,
+                    "selection_count": 0,
+                    "total_match_score": 0,
+                    "total_skill_coverage": 0
+                }
+
+            selection_patterns[agent_type]["selection_count"] += 1
+            selection_patterns[agent_type]["total_match_score"] += best_match.get("match_score", 0)
+            selection_patterns[agent_type]["total_skill_coverage"] += best_match.get("skill_coverage", 0)
+
+
+def _analyze_agent_selection_patterns(executions: list):
+    """Returns (selection_patterns, skill_match_scores, coverage_rates) from the executions' agent_selection data."""
+    # Analyze agent selection patterns
+    selection_patterns = {}
+    skill_match_scores = []
+    coverage_rates = []
+
+    for exec in executions:
+        input_data = exec.input_data or {}
+        agent_selection = input_data.get("agent_selection", {})
+
+        if agent_selection.get("is_real"):
+            summary = agent_selection.get("summary", {})
+            assignments = agent_selection.get("assignments", {})
+
+            # Track coverage and scores
+            coverage_rates.append(summary.get("coverage", 0))
+            skill_match_scores.append(summary.get("avg_match_score", 0))
+
+            _tally_agent_selection(selection_patterns, assignments)
+    return selection_patterns, skill_match_scores, coverage_rates
+
+
 @router.get("/agent-selection/analysis")
-async def analyze_agent_selection(
+def analyze_agent_selection(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -187,40 +265,7 @@ async def analyze_agent_selection(
             )
         ).all()
 
-        # Analyze agent selection patterns
-        selection_patterns = {}
-        skill_match_scores = []
-        coverage_rates = []
-
-        for exec in executions:
-            input_data = exec.input_data or {}
-            agent_selection = input_data.get("agent_selection", {})
-
-            if agent_selection.get("is_real"):
-                summary = agent_selection.get("summary", {})
-                assignments = agent_selection.get("assignments", {})
-
-                # Track coverage and scores
-                coverage_rates.append(summary.get("coverage", 0))
-                skill_match_scores.append(summary.get("avg_match_score", 0))
-
-                # Analyze selection patterns
-                for subtask_id, matches in assignments.items():
-                    if matches:
-                        best_match = matches[0]
-                        agent_type = best_match.get("agent_type", "unknown")
-
-                        if agent_type not in selection_patterns:
-                            selection_patterns[agent_type] = {
-                                "agent_type": agent_type,
-                                "selection_count": 0,
-                                "total_match_score": 0,
-                                "total_skill_coverage": 0
-                            }
-
-                        selection_patterns[agent_type]["selection_count"] += 1
-                        selection_patterns[agent_type]["total_match_score"] += best_match.get("match_score", 0)
-                        selection_patterns[agent_type]["total_skill_coverage"] += best_match.get("skill_coverage", 0)
+        selection_patterns, skill_match_scores, coverage_rates = _analyze_agent_selection_patterns(executions)
 
         # Calculate averages
         for pattern in selection_patterns.values():

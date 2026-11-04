@@ -102,7 +102,7 @@ def test_cancelling_a_run_leaves_no_session_step_running(workspace, new_session)
     s.commit()
 
     ctx = SimpleNamespace(workspace_id=uuid.UUID(workspace), user_id="2")
-    result = asyncio.run(cancel_execution(str(recipe.id), run, ctx=ctx, db=new_session()))
+    result = cancel_execution(str(recipe.id), run, ctx=ctx, db=new_session())
     assert result["status"] == "cancelled"
 
     rows = _tickets(new_session, [reviewed, finished, working, queued, elsewhere])

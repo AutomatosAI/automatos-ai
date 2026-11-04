@@ -101,7 +101,7 @@ def test_the_playbooks_pages_cancel_files_the_card_as_cancelled(workspace, new_s
 
     pb = _running_playbook(new_session, workspace)
 
-    asyncio.run(cancel_execution(str(pb.recipe.id), pb.run, ctx=_owner(workspace), db=new_session()))
+    cancel_execution(str(pb.recipe.id), pb.run, ctx=_owner(workspace), db=new_session())
 
     assert _tickets(new_session, [pb.card])[pb.card].status == "cancelled"   # was filed as failed
     assert _execution_status(new_session, pb.run) == "cancelled" and stopped_here == [pb.run]
